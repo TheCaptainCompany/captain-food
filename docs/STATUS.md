@@ -20,7 +20,8 @@
 > value provenance, but this scan is a SYNTACTIC approximation of the call graph (idents, no type
 > resolution), so it does not discharge a semantic completeness argument — review proved four
 > ordinary counterexamples against the first version. A complete rule needs type resolution (rustc
-> lint / HIR / MIR) and is a proposal-level scope decision, not a test.
+> lint / HIR / MIR) and is a proposal-level scope decision, not a test —
+> [#331](https://github.com/TheCaptainCompany/captain-food/issues/331).
 
 > ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
 > (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:

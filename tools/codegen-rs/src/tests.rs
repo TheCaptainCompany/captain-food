@@ -2425,6 +2425,20 @@ keys:
         refs: std::collections::HashSet<String>,
     }
 
+    /// Every IDENT in a token stream, recursing into groups and skipping literals — a macro's
+    /// arguments are opaque, but its identifiers are still call edges worth following.
+    fn ident_tokens(ts: proc_macro2::TokenStream) -> Vec<String> {
+        let mut out = Vec::new();
+        for t in ts {
+            match t {
+                proc_macro2::TokenTree::Ident(i) => out.push(i.to_string()),
+                proc_macro2::TokenTree::Group(g) => out.extend(ident_tokens(g.stream())),
+                _ => {}
+            }
+        }
+        out
+    }
+
     fn last_seg(p: &syn::Path) -> String {
         p.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
     }
@@ -2461,15 +2475,16 @@ keys:
             syn::visit::visit_expr_method_call(self, n);
         }
         fn visit_macro(&mut self, n: &'ast syn::Macro) {
-            let toks = n.tokens.to_string();
-            if toks.contains(WITNESS) {
+            // LITERALS ARE NOT CODE. Harvesting a macro's whole token text made
+            // `println!("access granted for the caller")` taint its enclosing public fn, and
+            // `println!("MailboxAccess")` read as a mint — with a failure message advising
+            // `pub(crate)`, when the real fix was rewording a log line. Same principle as excluding
+            // doc attributes: prose naming the mint is prose.
+            let idents = ident_tokens(n.tokens.clone());
+            if idents.iter().any(|t| t == WITNESS) {
                 self.opaque_macro = true;
             }
-            for t in toks.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
-                if !t.is_empty() {
-                    self.refs.insert(t.to_string());
-                }
-            }
+            self.refs.extend(idents);
             syn::visit::visit_macro(self, n);
         }
     }
@@ -2572,7 +2587,7 @@ keys:
         }
     }
 
-    /// EVERY PUBLIC MAILBOX DOOR IS DECLARED (#329, closing the #304 residual class).
+    /// EVERY PUBLIC MAILBOX DOOR IS DECLARED (#329, NARROWING the #304 residual class).
     ///
     /// The witness guard asks what a SIGNATURE says. That leaves one class it cannot see, named
     /// openly in ADR-20260803-172654: a public in-crate item that mints internally and hands the
@@ -2580,15 +2595,20 @@ keys:
     /// `pub fn cancel_any(&self, id: Uuid) -> Result<bool>` over a held `Arc<dyn Mailbox>`.
     /// Seven review passes on #304 established that no amount of signature analysis closes it.
     ///
-    /// REACHABILITY does. The argument is short and, for safe Rust inside this crate, complete:
-    /// calling a port method requires a witness; a witness can only come from (a) a mint or
-    /// (b) a parameter. Case (b) names the witness in a signature and is already caught by
-    /// `every_mailbox_port_method_demands_the_access_witness`. So seeding on MINTS and propagating
-    /// through the call graph covers the other half — and the two rules together leave no route.
-    /// (Constructions via a field, a const or a static all reduce to (a) or (b): something had to
-    /// mint or receive the witness to put it there.)
+    /// REACHABILITY narrows it. The provenance argument is sound: calling a port method requires a
+    /// witness, and a witness comes from (a) a construction or (b) a parameter; case (b) names the
+    /// witness in a signature and is caught by `every_mailbox_port_method_demands_the_access_witness`,
+    /// so seeding on CONSTRUCTIONS and propagating through the call graph covers the other half.
+    /// (A field, a const or a static all reduce to (a) or (b): something had to mint or receive the
+    /// witness to put it there.)
     ///
-    /// The payoff is not just the closure: the set of publicly-reachable minting functions IS the
+    /// But this scan is a SYNTACTIC approximation of that call graph — it resolves calls by ident,
+    /// with no type information — so it does NOT discharge the semantic argument, and saying it did
+    /// was the review-corrected overclaim of ADR-20260803-203455. Scope: sound for constructions the
+    /// AST recognises as constructions of the witness, and for call edges resolvable by ident.
+    /// A complete rule needs type resolution (a rustc lint, or HIR/MIR reachability) — see #331.
+    ///
+    /// The payoff is not just the narrowing: the set of publicly-reachable minting functions IS the
     /// door list. Every entry below is a door someone deliberately opened, and adding one is an
     /// edit to this allowlist — which is exactly the ADR-20260802-170059 posture ("the declaration
     /// is the permission") applied to the crate's own surface rather than to the spec.
@@ -2657,8 +2677,11 @@ keys:
         // test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
         assert!(
             fns.iter().any(|f| f.mints && f.name == "granted"),
-            "`MailboxAccess::granted` is no longer detected as a mint — the seed went blind (the \
-             construction was respelled, or the mint moved). Fix the seed; do not delete the test."
+            "no function named `granted` constructs a MailboxAccess any more. If the mint was \
+             RENAMED that is fine — update this assertion to the new name (the AST seed follows \
+             renames, so the guard is still live). If it was REMOVED or its construction moved \
+             behind something the AST scan cannot see, the seed has gone blind: fix the seed, do \
+             not delete the test."
         );
 
         // PROPAGATE to a fixpoint: a function that calls a tainted one is tainted. Matched by
@@ -2680,7 +2703,13 @@ keys:
                 if tainted.contains(&i) {
                     continue;
                 }
-                if names.iter().any(|n| n != &f.name && f.refs.contains(n)) {
+                // NO same-ident exclusion. `names` holds only TAINTED functions, so `n == f.name`
+                // cannot mean self-recursion — it means a DIFFERENT tainted function shares this
+                // one's name, which is exactly the edge "public `Facade::new` calls crate-internal
+                // minting `Held::new`". Excluding it dropped a real, ident-resolvable edge and
+                // reopened the class this guard exists to narrow (`new` is the commonest ident in
+                // Rust). Including it costs nothing: the clean tree stays green.
+                if names.iter().any(|n| f.refs.contains(n)) {
                     grew = true;
                     tainted.insert(i);
                 }
@@ -2699,12 +2728,14 @@ keys:
         assert!(
             undeclared.is_empty(),
             "these PUBLIC functions can reach a MailboxAccess mint but are not declared doors:\n{}\n\n\
-             Fix: make it `pub(crate)`, or — if it really is a new door — add it to this test's \
-             DOORS list WITH the reason it exists. Why: this is the class \
-             `every_mailbox_port_method_demands_the_access_witness` cannot see, because such a \
-             function never names the witness in its signature (`pub fn cancel_any(&self, id)` \
-             over a held `Arc<dyn Mailbox>`). A witness reaches a port method only from a mint or \
-             a parameter; parameters are caught by the signature guard, so this covers the rest.",
+             Fix: make it `pub(crate)`; or UPDATE THE PATH of an existing DOORS entry if the \
+             function merely moved (a file rename or module split is the usual cause); or — if it \
+             really is a new door — add it to DOORS WITH the reason it exists. Why: this is the \
+             class `every_mailbox_port_method_demands_the_access_witness` cannot see, because such \
+             a function never names the witness in its signature (`pub fn cancel_any(&self, id)` \
+             over a held `Arc<dyn Mailbox>`). NOTE this scan resolves calls by IDENT, so a public \
+             fn can also be flagged for merely mentioning a tainted name — check the body before \
+             assuming it is a door.",
             undeclared.join("\n")
         );
 

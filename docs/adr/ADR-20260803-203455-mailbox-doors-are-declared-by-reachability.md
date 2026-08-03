@@ -4,7 +4,9 @@
 - **Date**: 2026-08-03
 - **Refines**: [ADR-20260803-172654](ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md)
   (the `MailboxAccess` witness), which named this class as its stated limit
-- **Realized by**: [#329 "Close the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
+- **Realized by**: [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
+  (issue retitled from "Close" — the outcome is a narrowing, and the title said otherwise)
+- **Defers**: [#331 "Decide whether the mailbox-door rule is worth type resolution (rustc lint / HIR / MIR)"](https://github.com/TheCaptainCompany/captain-food/issues/331)
 
 ## Decision
 
@@ -14,9 +16,12 @@ fixpoint, and requires every publicly-reachable tainted function to appear on an
 list** keyed by `(file, name)` with the reason it exists.
 
 The door list is the whole point, not a side effect: it enumerates the public functions in the
-boundary crate that can reach the mailbox — ten entries, of which the seven non-test ones are the
-release surface (the other three are `test-fixtures`-gated and excluded from the undeclared check
-anyway; they appear so taint stops correctly). Each is a door somebody deliberately opened. Adding an eleventh is an edit to that list, which is the ADR-20260802-170059 posture ("the
+boundary crate that can reach the mailbox — ten entries, of which the **seven non-test ones are the
+release surface and the only load-bearing ones**. The other three (`cancel_reminder`,
+`schedule_reminder`, `for_tests`) are `test-fixtures`-gated, so `!f.test_only` already excludes them
+from the undeclared check AND taint flows straight through them (it stops only at UNGATED doors):
+deleting all three leaves the test green. They are listed as documentation of the test-only surface,
+nothing more. Each of the seven is a door somebody deliberately opened. Adding an eleventh is an edit to that list, which is the ADR-20260802-170059 posture ("the
 declaration is the permission") applied to the crate's own surface rather than to the spec.
 
 ## What it does, and the completeness claim I got wrong
@@ -44,7 +49,9 @@ All four are fixed — the seed and the call graph are read from the AST now, an
 stops at a *gated* door. But the honest scope is: **sound for constructions the AST recognises as
 constructions of the witness, and for call edges resolvable by ident**. A genuinely complete rule
 needs type resolution (a rustc lint, or HIR/MIR reachability), which is a scope decision for a
-proposal rather than a test.
+proposal rather than a test — tracked as
+[#331 "Decide whether the mailbox-door rule is worth type resolution"](https://github.com/TheCaptainCompany/captain-food/issues/331)
+so the deferral is visible in the prioritised backlog rather than living only in this sentence.
 
 ## Consequences
 
@@ -75,6 +82,14 @@ proposal rather than a test.
 - **Name-based call resolution over-approximates** (no type information), which flags too much
   rather than too little — the safe direction, and the same posture the witness guard takes on
   module privacy. The cost is that a genuinely new door must be named; that cost is the feature.
+  It over-approximates ONLY where it is meant to: an earlier version excluded call edges whose
+  callee shares the caller's name, which sounded like self-recursion protection but could not be
+  (the candidate set holds only tainted functions) and silently dropped the ordinary shape "public
+  `Facade::new` calls crate-internal minting `Held::new`" — `new` being the commonest ident in Rust.
+  Removing the exclusion closes that and leaves the tree green, so it protected nothing.
+  String LITERALS inside macros are excluded from the ident harvest, for the same reason doc
+  attributes are: `println!("access granted…")` is prose, and flagging it emitted advice
+  (`pub(crate)`) whose real remedy was rewording a log line.
 - **`unsafe_code = "forbid"` stays load-bearing.** `mem::zeroed::<MailboxAccess>()` would defeat both
   guards identically, so the threat model remains safe Rust.
 - **The anti-blindness assertion names `granted` specifically.** A bare "something is tainted" check
