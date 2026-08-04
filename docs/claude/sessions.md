@@ -28,6 +28,36 @@ regenerated files`. Running `make generate` then changes nothing and the failure
 the fix is to **commit your own change**, not to regenerate. Real drift names files under
 `specs/generated/**` or `crates/**/generated/**`.
 
+**`cargo test --workspace` without `DATABASE_URL` is a green that covers nothing (2026-08-04):** the
+DB-gated suites take their early-return branch and report `ok`. On 2026-08-04 a local run reported
+**86 suites / 847 passed** and still missed the failure CI then hit — with a real database the
+`infrastructure` package alone contributes **29 suites / 87 tests** that had all silently skipped.
+`ci.yml` already warns about this for CI; the part nobody had written down is that you can run them
+**here**: Postgres 16 is installed in this container (there is no Docker), it is simply not started.
+
+```bash
+PGDATA=/var/lib/postgresql/ci-repro                       # initdb REFUSES to run as root --
+mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA"   # do it as the postgres user
+chmod 700 "$PGDATA"
+su postgres -c "/usr/lib/postgresql/16/bin/initdb -D $PGDATA -A trust -U postgres"
+su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -l $PGDATA/server.log start"
+
+# sqlx-cli is NOT installed (CI gets it prebuilt from taiki-e/install-action, and building it
+# here costs minutes). psql applies the migrations, but needs a per-file fallback: some
+# migrations require a transaction (LOCK TABLE) and others forbid one (VACUUM), which is why a
+# plain loop dies partway either way. Try -1 first, retry without it.
+for f in $(ls migrations/*.sql | sort); do
+  PGPASSWORD=postgres psql -q -1 -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" >/dev/null 2>&1 \
+    || PGPASSWORD=postgres psql -q -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+done
+
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
+cargo test -p infrastructure -- --test-threads=1        # --test-threads=1: they share ONE database
+```
+
+Cost that earned it: a CI-only failure on a build-profile PR that could not possibly change
+behaviour, and an hour of diagnosis that a local DB run would have front-loaded.
+
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the
