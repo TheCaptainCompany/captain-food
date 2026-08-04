@@ -20,6 +20,14 @@ slow; on a cold one it rebuilds the whole workspace. Do not reach for it to prov
 CLAUDE.md already permits skipping it for docs-only changes — the point here is that the saving is
 minutes per invocation, so it is worth being deliberate.
 
+**`check-drift` fails on ANY dirty file, and says the wrong thing about it (2026-08-04):** it diffs
+the whole working tree, not just generated paths, so an uncommitted hand edit — a `Cargo.toml`
+tweak, a doc fix — trips it with `generated artifacts drifted -- run 'make generate' and commit the
+regenerated files`. Running `make generate` then changes nothing and the failure repeats. Read the
+`--stat` line it prints directly above: if the listed files are yours rather than generated ones,
+the fix is to **commit your own change**, not to regenerate. Real drift names files under
+`specs/generated/**` or `crates/**/generated/**`.
+
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the
@@ -49,7 +57,17 @@ metadata hashes, so the next build writes a SECOND full set of workspace artifac
 old one — flipping to `0` right after deleting `incremental/` re-exhausted the allowance during
 the very build meant to save space. Pick one mode for the whole session; if you must switch,
 delete the workspace-crate artifacts (`lib{server,web,application,infrastructure,domain,…}-*`
-and the test binaries in `deps/`) in the same breath.
+and the test binaries in `deps/`) in the same breath. **The same applies to changing
+`[profile.dev]`** — it is the identical metadata-hash mechanism. Delete `target/debug` *before* the
+first build on the new profile, never after.
+
+**The numbers above are the pre-2026-08-04 profile.** `[profile.dev] debug = "line-tables-only"` is
+now set in the root `Cargo.toml`, which removed the *cause* rather than the symptom: debug info was
+85% of the largest artifact, and the same `server` binary went 506M → 197M (debug info 381M → 77M).
+A clean build + full `cargo test --workspace` now lands at ~9.4G instead of ~17G. Cleanup is still
+the emergency lever, it is just needed far less often. If you are debugging and want full DWARF,
+override for that command — `CARGO_PROFILE_DEV_DEBUG=true cargo build` — and do not commit it back;
+note that this too rewrites every artifact (see the metadata-hash rule above).
 
 Never tell the user the container is unrecoverable — clean up first; a fresh session is the fallback,
 not the first move.
