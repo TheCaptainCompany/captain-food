@@ -167,7 +167,6 @@ mod tests {
             "type Restaurant {",
             "deliveryJobs: [DeliveryJob!]!",      // FK-derived navigation field
             "input RestaurantsQueryInput {",
-            "phoneCountries: [PhoneCountry!]!",
             "restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]!",
             "operationStatus(input: OperationStatusQueryInput!): Operation\n",
             "paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent\n",

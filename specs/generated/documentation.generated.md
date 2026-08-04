@@ -32,7 +32,6 @@ A visitor browsing Captain.Food without being logged in.
 |  | AddToCartLine | [✏️ `addCartLine`](#mutation-addcartline) |
 |  | RemoveFromCart | [✏️ `removeCartLine`](#mutation-removecartline) |
 |  | ChangeCartLineQuantity | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
-|  | EnterPhone | [🔎 `phoneCountries`](#query-phonecountries) |
 |  | RequestPhoneOtp | [✏️ `requestPhoneVerification`](#mutation-requestphoneverification) |
 |  | VerifyPhone | [✏️ `verifyPhone`](#mutation-verifyphone) |
 
@@ -9988,16 +9987,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(8)_
-
-<a id="query-phonecountries"></a>
-#### 🔎 Query: `phoneCountries`
-
-Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
-
-- **Input**: _(none)_
-- **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
-- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+### 🧰 API operations _(7)_
 
 <a id="query-mailboxlanes"></a>
 #### 🔎 Query: `mailboxLanes`
@@ -10066,7 +10056,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(13)_
+### 🧩 Output types _(12)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -10135,20 +10125,6 @@ A selectable option within an option list.
 | <a id="type-option--default"></a>`default` | `boolean` | ✅ |
 | <a id="type-option--availability"></a>`availability` | [🔤 `CatalogItemAvailability`](#scalar-catalogitemavailability) | ✅ |
 | <a id="type-option--stockstatus"></a>`stockStatus` | [🔤 `StockStatus`](#scalar-stockstatus) | ⬜ |
-
-<a id="type-phonecountry"></a>
-#### 🧩 Type: `PhoneCountry`
-
-A selectable phone country for the dialing-code picker (static reference data).
-
-- **Read model**: [🗄️ `PhoneCountry`](#view-phonecountry)
-
-| Field | Type | Required |
-| --- | --- | --- |
-| <a id="type-phonecountry--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |
-| <a id="type-phonecountry--dialingcode"></a>`dialingCode` | [🔤 `DialingCode`](#scalar-dialingcode) | ✅ |
-| <a id="type-phonecountry--name"></a>`name` | `string` | ✅ |
-| <a id="type-phonecountry--defaultlocale"></a>`defaultLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |
 
 <a id="type-paymentintent"></a>
 #### 🧩 Type: `PaymentIntent`

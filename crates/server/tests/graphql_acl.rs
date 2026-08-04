@@ -144,18 +144,16 @@ async fn unauthorized_execution_is_forbidden() {
 #[tokio::test]
 async fn public_operations_are_open_to_all_roles() {
     let schema = schema();
-    // phoneCountries has roles omitted (open) and is unwired: reaching its `not implemented` stub proves the ACL let
-    // the resolver run (no DB in this test, so wired resolvers can't fully succeed).
+    // `restaurants` has roles omitted (open) and is wired. With no DB in this test it cannot succeed,
+    // so the assertion is the ACL one: whatever error comes back, it is never FORBIDDEN — the resolver
+    // ran. (This used to also exercise `phoneCountries`, the one query with no wired body, whose
+    // `not implemented` stub proved the same thing more directly. It was deleted with #305; every
+    // remaining query is wired, so the stub branch has no subject left.)
     for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Admin] {
-        let resp = execute_as(&schema, role, "{ phoneCountries { dialingCode } }").await;
-        assert_eq!(resp.errors.len(), 1, "expected the stub error for {role:?}: {:?}", resp.errors);
-        assert!(!is_forbidden(&resp.errors[0]), "public op forbidden for {role:?}");
-        assert_eq!(resp.errors[0].message, "not implemented", "resolver did not run for {role:?}");
+        let resp = execute_as(&schema, role, "{ restaurants { slug } }").await;
+        assert!(!resp.errors.is_empty(), "expected a dependency error for {role:?}");
+        assert!(!is_forbidden(&resp.errors[0]), "public op forbidden for {role:?}: {:?}", resp.errors);
     }
-    // restaurants (roles omitted, wired) passes the ACL under PUBLIC: the only failure without deps is the
-    // missing repository, never FORBIDDEN.
-    let resp = execute_as(&schema, RequestRole::Public, "{ restaurants { slug } }").await;
-    assert!(!resp.errors.is_empty() && !is_forbidden(&resp.errors[0]), "restaurants blocked: {:?}", resp.errors);
 }
 
 /// LITERAL roles lists (ADR-20260720-191500, #31): PUBLIC in a `roles:` list is just the anonymous
