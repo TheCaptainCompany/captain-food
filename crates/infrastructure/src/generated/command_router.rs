@@ -228,6 +228,13 @@ pub async fn dispatch_command(
             };
             Some(application::commands::create_catalog(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
         }
+        "ConfigureCatalogSlug" => {
+            let cmd: domain::generated::commands::ConfigureCatalogSlug = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("ConfigureCatalogSlug payload: {e}")))),
+            };
+            Some(application::commands::configure_catalog_slug(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()))
+        }
         "AddProduct" => {
             let cmd: domain::generated::commands::AddProduct = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,

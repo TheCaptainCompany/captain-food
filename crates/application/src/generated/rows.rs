@@ -82,7 +82,7 @@ pub struct CustomerRow {
 pub struct CatalogRow {
     pub catalog_id: CatalogId,
     pub restaurant_id: RestaurantId,
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     pub name: CatalogName,
     pub tree: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,

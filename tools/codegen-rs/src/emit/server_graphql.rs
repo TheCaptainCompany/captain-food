@@ -304,7 +304,7 @@ pub(crate) fn emit_server_types(model: &Model) -> String {
         "\n/// One section of the projected `Catalog.tree` jsonb (camelCase keys, as folded by the\n/// `CatalogProjector` with the derived per-offer `stockStatus`), leniently parsed: an absent key or\n/// an empty tree (a catalog created before any content event) yields an empty list.\npub(crate) fn catalog_tree_section<T: serde::de::DeserializeOwned>(tree: &serde_json::Value, key: &str) -> Vec<T> {\n    tree.get(key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()\n}\n",
     );
     out.push_str(
-        "\n/// Read-model rows → API type: the Catalog row plus the joined Restaurant row (the FK-derived\n/// `restaurant` navigation field is non-null, so the resolver hydrates it from the Restaurant read\n/// model). categories/products/optionLists deserialize out of the projected `tree` jsonb.\nimpl From<(CatalogRow, RestaurantRow)> for Catalog {\n    fn from((row, restaurant): (CatalogRow, RestaurantRow)) -> Self {\n        Self {\n            id: row.catalog_id.into(),\n            restaurant_id: row.restaurant_id.into(),\n            slug: row.slug.into(),\n            name: row.name.into(),\n            categories: catalog_tree_section(&row.tree, \"categories\"),\n            products: catalog_tree_section(&row.tree, \"products\"),\n            option_lists: catalog_tree_section(&row.tree, \"optionLists\"),\n            updated_at: row.updated_at,\n            restaurant: restaurant.into(),\n        }\n    }\n}\n",
+        "\n/// Read-model rows → API type: the Catalog row plus the joined Restaurant row (the FK-derived\n/// `restaurant` navigation field is non-null, so the resolver hydrates it from the Restaurant read\n/// model). categories/products/optionLists deserialize out of the projected `tree` jsonb.\nimpl From<(CatalogRow, RestaurantRow)> for Catalog {\n    fn from((row, restaurant): (CatalogRow, RestaurantRow)) -> Self {\n        Self {\n            id: row.catalog_id.into(),\n            restaurant_id: row.restaurant_id.into(),\n            slug: row.slug.map(Into::into),\n            name: row.name.into(),\n            categories: catalog_tree_section(&row.tree, \"categories\"),\n            products: catalog_tree_section(&row.tree, \"products\"),\n            option_lists: catalog_tree_section(&row.tree, \"optionLists\"),\n            updated_at: row.updated_at,\n            restaurant: restaurant.into(),\n        }\n    }\n}\n",
     );
     // Cart: jsonb columns deserialize into the typed structs (serde camelCase); the non-null
     // `restaurant` navigation field is hydrated by the resolver, as for Prospect.
@@ -1026,6 +1026,9 @@ pub(crate) fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         "recordProspectReply" => ("RecordProspectReply", "record_prospect_reply", Extra::None),
         // Catalog aggregate.
         "createCatalog" => ("CreateCatalog", "create_catalog", Extra::Restaurants),
+        // The per-restaurant slug uniqueness (CatalogSlugAlreadyTaken) is a read-model check, not a
+        // Postgres reservation: a catalog slug is a path inside one storefront, not a global host.
+        "configureCatalogSlug" => ("ConfigureCatalogSlug", "configure_catalog_slug", Extra::Catalogs),
         "addProduct" => ("AddProduct", "add_product", Extra::Restaurants),
         "updateProduct" => ("UpdateProduct", "update_product", Extra::Restaurants),
         "removeProduct" => ("RemoveProduct", "remove_product", Extra::None),

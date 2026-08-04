@@ -5,8 +5,8 @@
 //! (rules.yaml#/CatalogImportReplacesContent), and `OfferStockUpdated` patches one offer's stock in
 //! place. Each offer/option node is enriched with the DERIVED `stockStatus`
 //! (quantity vs lowStockThreshold, scalars.yaml#/StockStatus) so the GraphQL `Offer.stockStatus`
-//! deserializes straight out of the jsonb. `slug` is now carried by `CatalogCreated` and mapped by the
-//! generator (it was a spec hole until then); the per-offer `uberPrice` /
+//! deserializes straight out of the jsonb. `slug` is folded from `CatalogSlugConfigured` -- the
+//! owner's route choice, made after creation, never derived here; the per-offer `uberPrice` /
 //! `uberPriceBasis` (ADR-0022/0024) need the restaurant's cuisine_category + UberEstimationPolicy —
 //! cross-stream + referential state — and stay TODO(runtime) (the GraphQL field is nullable).
 #![allow(unused_variables)]
@@ -241,7 +241,6 @@ mod tests {
             r#ref: None,
             restaurant_id: restaurant_id(),
             name: CatalogName("Main menu".into()),
-            slug: Slug("main-menu".into()),
         })
     }
 

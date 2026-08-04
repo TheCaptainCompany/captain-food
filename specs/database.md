@@ -320,14 +320,14 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `Catalog` · 🛶 V0 · source aggregate `Catalog`
 
-- **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`
+- **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`, `CatalogSlugConfigured`
 - **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `catalog_id` | `CatalogId` | `UUID` | PK |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | index |  |
-| `slug` | `Slug` | `TEXT` | — |  |
+| `slug` | `Slug` | `TEXT` | nullable | Null until the owner configures it (ConfigureCatalogSlug) -- the unset case is first-class, not an empty string, exactly like Restaurant.slug. |
 | `name` | `CatalogName` | `TEXT` | — |  |
 | `tree` | `jsonb` | `JSONB` | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |

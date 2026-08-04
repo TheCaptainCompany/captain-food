@@ -54,6 +54,7 @@ impl sealed::Sealed for domain::generated::commands::ChangeRestaurantListingStat
 impl sealed::Sealed for domain::generated::commands::ChangeRiderStatus {}
 impl sealed::Sealed for domain::generated::commands::ClaimRestaurantListing {}
 impl sealed::Sealed for domain::generated::commands::CompleteDelivery {}
+impl sealed::Sealed for domain::generated::commands::ConfigureCatalogSlug {}
 impl sealed::Sealed for domain::generated::commands::ConfigureGoogleBusinessProfileOrderLink {}
 impl sealed::Sealed for domain::generated::commands::ConfigureRestaurantSlug {}
 impl sealed::Sealed for domain::generated::commands::ConfirmEmailVerification {}
@@ -286,6 +287,10 @@ impl CatalogCommand for domain::generated::commands::AddOptionList {
 
 impl CatalogCommand for domain::generated::commands::AddProduct {
     const MESSAGE_TYPE: &'static str = "AddProduct";
+}
+
+impl CatalogCommand for domain::generated::commands::ConfigureCatalogSlug {
+    const MESSAGE_TYPE: &'static str = "ConfigureCatalogSlug";
 }
 
 impl CatalogCommand for domain::generated::commands::CreateCatalog {

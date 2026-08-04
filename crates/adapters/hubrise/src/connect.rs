@@ -39,9 +39,8 @@ use domain::generated::entities::{Address, TaxRate};
 use domain::generated::scalars::{
     AddressLine, CatalogName, CityName, CountryCode,
     CurrencyCode, ExternalReference, PostalCode, RestaurantDisplayName, RestaurantLegalName,
-    RestaurantListingStatus, Slug, TaxRatePercent, TimeZone,
+    RestaurantListingStatus, TaxRatePercent, TimeZone,
 };
-use domain::shared::text::slugify;
 use domain::shared::errors::DomainError;
 
 use crate::api::TokenResponse;
@@ -524,20 +523,13 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 continue;
             }
 
-            let name = cat.name.clone().unwrap_or_else(|| "Menu".to_string());
-            // The catalog slug addresses the catalog in storefront routes, so it must satisfy the `Slug`
-            // pattern. Derive it from the same name we import; a name that slugifies to nothing (punctuation
-            // only, or a non-Latin script `slugify` folds away) falls back to the HubRise-derived catalog id,
-            // which is stable and always valid.
-            let slug = match slugify(&name) {
-                s if s.is_empty() => format!("catalog-{}", catalog_id.0.simple()),
-                s => s,
-            };
+            // No slug here: the catalog ROUTE is the owner's choice (ConfigureCatalogSlug), never
+            // derived from an imported name. An import that invented one would pin a public path the
+            // merchant never picked, and a HubRise rename would silently not move it.
             let cmd = CreateCatalog {
                 catalog_id,
                 restaurant_id,
-                name: CatalogName(name),
-                slug: Slug(slug),
+                name: CatalogName(cat.name.clone().unwrap_or_else(|| "Menu".to_string())),
                 r#ref: Some(ExternalReference(cat.id.clone())),
             };
             let env = Self::envelope(attempt, "CreateCatalog", &cat.id);

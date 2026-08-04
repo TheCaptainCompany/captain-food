@@ -361,6 +361,7 @@ Catalog:
     - { $ref: 'events.yaml#/OptionListRemoved' }
     - { $ref: 'events.yaml#/OfferStockUpdated' }
     - { $ref: 'events.yaml#/CatalogImported' }
+    - { $ref: 'events.yaml#/CatalogSlugConfigured' }   # the storefront route, once the owner picks it
   rules:
     - "`stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0."
     - "Could be normalized (one row per offer) if per-item querying is needed later."
@@ -375,7 +376,9 @@ Catalog:
       fk: { $ref: '#/Restaurant/columns/restaurant_id' }
     slug:
       type: { $ref: 'scalars.yaml#/Slug' }
-      from: [{ $ref: 'events.yaml#/CatalogCreated/properties/slug' }]
+      from: [{ $ref: 'events.yaml#/CatalogSlugConfigured/properties/slug' }]
+      nullable: true
+      note: "Null until the owner configures it (ConfigureCatalogSlug) -- the unset case is first-class, not an empty string, exactly like Restaurant.slug."
     name:
       from: [{ $ref: 'events.yaml#/CatalogCreated/properties/name' }]
     tree:

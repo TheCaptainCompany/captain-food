@@ -204,7 +204,12 @@ fn fx_prospect_replied() -> DomainEvent {
 
 /// tests.yaml#/fixtures/catalogCreated — events.yaml#/CatalogCreated
 fn fx_catalog_created() -> DomainEvent {
-    DomainEvent::CatalogCreated(evs::CatalogCreated { catalog_id: sc::CatalogId(support::uid("cat-1")), r#ref: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), name: sc::CatalogName("Main".into()), slug: sc::Slug("main".into()) })
+    DomainEvent::CatalogCreated(evs::CatalogCreated { catalog_id: sc::CatalogId(support::uid("cat-1")), r#ref: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), name: sc::CatalogName("Main".into()) })
+}
+
+/// tests.yaml#/fixtures/catalogSlugConfigured — events.yaml#/CatalogSlugConfigured
+fn fx_catalog_slug_configured() -> DomainEvent {
+    DomainEvent::CatalogSlugConfigured(evs::CatalogSlugConfigured { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("midi".into()) })
 }
 
 /// tests.yaml#/fixtures/catalogCategoryAdded — events.yaml#/CatalogCategoryAdded
@@ -1295,7 +1300,7 @@ async fn test_catalog_created() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::CreateCatalog { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), name: sc::CatalogName("Main".into()), slug: sc::Slug("main".into()), r#ref: None };
+    let cmd = cmds::CreateCatalog { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), name: sc::CatalogName("Main".into()), r#ref: None };
     let result = crate::commands::create_catalog(&bed.store, &bed.restaurants, cmd, &support::actor()).await;
     let _ = result.expect("TestCatalogCreated: the spec expects acceptance");
     bed.assert_appended("TestCatalogCreated", &before, &[
@@ -1310,11 +1315,42 @@ async fn test_catalog_create_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::CreateCatalog { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-missing")), name: sc::CatalogName("Main".into()), slug: sc::Slug("main".into()), r#ref: None };
+    let cmd = cmds::CreateCatalog { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-missing")), name: sc::CatalogName("Main".into()), r#ref: None };
     let result = crate::commands::create_catalog(&bed.store, &bed.restaurants, cmd, &support::actor()).await;
     let err = result.expect_err("TestCatalogCreateIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestCatalogCreateIsRejected", &err, &["RestaurantNotFound", "RefNotUnique"]);
     bed.assert_appended("TestCatalogCreateIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCatalogSlugConfigured — "The owner chooses the catalog's route label after creation"
+/// rules: CatalogRouteChosenByOwner
+#[tokio::test]
+async fn test_catalog_slug_configured() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureCatalogSlug { catalog_id: sc::CatalogId(support::uid("cat-1")), slug: sc::Slug("midi".into()) };
+    let result = crate::commands::configure_catalog_slug(&bed.store, &bed.catalogs, cmd, &support::actor()).await;
+    let _ = result.expect("TestCatalogSlugConfigured: the spec expects acceptance");
+    bed.assert_appended("TestCatalogSlugConfigured", &before, &[
+        (format!("Catalog-{}", support::uid("cat-1")), fx_catalog_slug_configured()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestCatalogSlugIsRejected — "Rejects a route label already used by another catalog of the same restaurant, or an unknown catalog"
+/// rules: CatalogRouteChosenByOwner
+#[tokio::test]
+async fn test_catalog_slug_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_catalog_slug_configured()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureCatalogSlug { catalog_id: sc::CatalogId(support::uid("cat-1")), slug: sc::Slug("midi-taken-by-sibling".into()) };
+    let result = crate::commands::configure_catalog_slug(&bed.store, &bed.catalogs, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCatalogSlugIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestCatalogSlugIsRejected", &err, &["CatalogNotFound", "CatalogSlugAlreadyTaken"]);
+    bed.assert_appended("TestCatalogSlugIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestCatalogProductAdded — "Adds a product with one offer to a catalog"

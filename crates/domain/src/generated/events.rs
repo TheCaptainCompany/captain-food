@@ -229,6 +229,14 @@ pub struct CatalogCreated {
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,
     pub name: CatalogName,
+}
+
+/// The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label. Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH inside an already-resolved host, so no previous label has to keep resolving and none is reserved. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSlugConfigured {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
     pub slug: Slug,
 }
 
@@ -1095,6 +1103,7 @@ pub enum DomainEvent {
     ProspectMarkedCold(ProspectMarkedCold),
     ProspectReplied(ProspectReplied),
     CatalogCreated(CatalogCreated),
+    CatalogSlugConfigured(CatalogSlugConfigured),
     CatalogCategoryAdded(CatalogCategoryAdded),
     CatalogCategoryUpdated(CatalogCategoryUpdated),
     CatalogCategoryRemoved(CatalogCategoryRemoved),

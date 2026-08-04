@@ -364,11 +364,19 @@ pub struct CreateCatalogInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "name")]
     pub name: CatalogName,
-    /// URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes.
-    #[graphql(name = "slug")]
-    pub slug: Slug,
     #[graphql(name = "ref")]
     pub r#ref: Option<ExternalReference>,
+}
+
+/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureCatalogSlugInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    /// URL-safe catalog label, unique within its restaurant.
+    #[graphql(name = "slug")]
+    pub slug: Slug,
 }
 
 /// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).

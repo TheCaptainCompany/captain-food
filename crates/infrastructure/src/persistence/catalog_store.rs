@@ -21,7 +21,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<CatalogRow, DomainError> {
     Ok(CatalogRow {
         catalog_id: CatalogId(row.try_get("catalog_id").map_err(db_err)?),
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
-        slug: Slug(row.try_get("slug").map_err(db_err)?),
+        slug: row.try_get::<Option<String>, _>("slug").map_err(db_err)?.map(Slug),
         name: CatalogName(row.try_get("name").map_err(db_err)?),
         tree: row.try_get("tree").map_err(db_err)?,
         created_at: row.try_get("created_at").map_err(db_err)?,
@@ -51,7 +51,7 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CatalogRow) -> Result
     sqlx::query(&sql)
         .bind(row.catalog_id.0)
         .bind(row.restaurant_id.0)
-        .bind(row.slug.0.clone())
+        .bind(row.slug.as_ref().map(|s| s.0.clone()))
         .bind(row.name.0.clone())
         .bind(row.tree.clone())
         .bind(row.created_at)

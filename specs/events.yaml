@@ -463,13 +463,31 @@ CatalogCreated:
       $ref: 'scalars.yaml#/RestaurantId'
     name:
       $ref: 'scalars.yaml#/CatalogName'
-    slug:
-      $ref: 'scalars.yaml#/Slug'
-      description: "URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes."
   required:
     - catalogId
     - restaurantId
     - name
+
+CatalogSlugConfigured:
+  description: >
+    The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the
+    restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label.
+    Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH
+    inside an already-resolved host, so no previous label has to keep resolving and none is reserved.
+    The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at,
+    ADR-0041), never payload.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+      description: "The owning restaurant -- the scope the label is unique within."
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+  required:
+    - catalogId
+    - restaurantId
     - slug
 
 CatalogCategoryAdded:

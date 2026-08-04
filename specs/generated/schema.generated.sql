@@ -400,7 +400,7 @@ CREATE INDEX ON Customer (auth_ref);
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,
-  slug TEXT NOT NULL,
+  slug TEXT,
   name TEXT NOT NULL,
   tree JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,

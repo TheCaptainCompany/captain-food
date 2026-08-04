@@ -200,6 +200,14 @@ pub const CATALOG_NOT_FOUND: ErrorDef = ErrorDef {
     message_fr: "Catalog introuvable.",
 };
 
+/// Another catalog of the SAME restaurant already uses this label. Scoped per restaurant, not global: a catalog slug is a path inside one storefront, so two restaurants may both have a 'midi'. Distinct from SlugAlreadyTaken, which guards the cross-restaurant storefront HOST.
+/// Context: `catalogId`, `slug`.
+pub const CATALOG_SLUG_ALREADY_TAKEN: ErrorDef = ErrorDef {
+    code: "CatalogSlugAlreadyTaken",
+    message_en: "The label '{slug}' is already used by another of your catalogs.",
+    message_fr: "Le libellé '{slug}' est déjà utilisé par un autre de vos catalogues.",
+};
+
 /// A offer price currency differs from the restaurant default currency.
 /// Context: `restaurantName`, `currency`.
 pub const CURRENCY_MISMATCH: ErrorDef = ErrorDef {
@@ -812,6 +820,7 @@ pub const ERRORS: &[ErrorDef] = &[
     PROSPECT_CONTACTED_TOO_RECENTLY,
     PROSPECT_NOT_FOUND,
     CATALOG_NOT_FOUND,
+    CATALOG_SLUG_ALREADY_TAKEN,
     CURRENCY_MISMATCH,
     REF_NOT_UNIQUE,
     CATALOG_CATEGORY_NOT_FOUND,

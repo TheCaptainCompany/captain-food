@@ -473,7 +473,7 @@ pub struct Catalog {
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
     #[graphql(name = "slug")]
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     #[graphql(name = "name")]
     pub name: CatalogName,
     #[graphql(name = "categories")]
@@ -1138,7 +1138,7 @@ impl From<(CatalogRow, RestaurantRow)> for Catalog {
         Self {
             id: row.catalog_id.into(),
             restaurant_id: row.restaurant_id.into(),
-            slug: row.slug.into(),
+            slug: row.slug.map(Into::into),
             name: row.name.into(),
             categories: catalog_tree_section(&row.tree, "categories"),
             products: catalog_tree_section(&row.tree, "products"),

@@ -640,7 +640,7 @@ type Restaurant {
 type Catalog {
   id: CatalogId!
   restaurantId: RestaurantId!
-  slug: Slug!
+  slug: Slug
   name: CatalogName!
   categories: [CatalogCategory!]!
   products: [Product!]!
@@ -1096,8 +1096,12 @@ input CreateCatalogInput {
   catalogId: CatalogId!
   restaurantId: RestaurantId!
   name: CatalogName!
-  slug: Slug!
   ref: ExternalReference
+}
+
+input ConfigureCatalogSlugInput {
+  catalogId: CatalogId!
+  slug: Slug!
 }
 
 input AddProductInput {
@@ -1804,6 +1808,7 @@ type Mutation {
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
   createCatalog(input: CreateCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "CreateCatalog")
+  configureCatalogSlug(input: ConfigureCatalogSlugInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ConfigureCatalogSlug")
   addProduct(input: AddProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddProduct")
   updateProduct(input: UpdateProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateProduct")
   removeProduct(input: RemoveProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveProduct")

@@ -148,7 +148,10 @@ fixtures:
   # --- Catalog ---
   catalogCreated:
     type: { $ref: 'events.yaml#/CatalogCreated' }
-    data: { slug: "main", catalogId: "cat-1", restaurantId: "resto-1", name: "Main" }
+    data: { catalogId: "cat-1", restaurantId: "resto-1", name: "Main" }
+  catalogSlugConfigured:
+    type: { $ref: 'events.yaml#/CatalogSlugConfigured' }
+    data: { catalogId: "cat-1", restaurantId: "resto-1", slug: "midi" }
   catalogCategoryAdded:
     type: { $ref: 'events.yaml#/CatalogCategoryAdded' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", category: { id: "pcat-1", catalogId: "cat-1", name: "Pizzas" } }
@@ -1071,7 +1074,7 @@ tests:
       - { $ref: '#/fixtures/restaurantRegistered' }
     when:
       type: { $ref: 'commands.yaml#/CreateCatalog' }
-      data: { slug: "main", catalogId: "cat-1", restaurantId: "resto-1", name: "Main" }
+      data: { catalogId: "cat-1", restaurantId: "resto-1", name: "Main" }
     then:
       - { $ref: '#/fixtures/catalogCreated' }
 
@@ -1082,10 +1085,36 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/CreateCatalog' }
-      data: { slug: "main", catalogId: "cat-1", restaurantId: "resto-missing", name: "Main" }
+      data: { catalogId: "cat-1", restaurantId: "resto-missing", name: "Main" }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantNotFound' }
       - { $ref: 'errors.yaml#/RefNotUnique' }
+
+  TestCatalogSlugConfigured:
+    name: "The owner chooses the catalog's route label after creation"
+    rules: [{ $ref: 'rules.yaml#/CatalogRouteChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Catalog' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      data: { catalogId: "cat-1", slug: "midi" }
+    then:
+      - { $ref: '#/fixtures/catalogSlugConfigured' }
+
+  TestCatalogSlugIsRejected:
+    name: "Rejects a route label already used by another catalog of the same restaurant, or an unknown catalog"
+    rules: [{ $ref: 'rules.yaml#/CatalogRouteChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Catalog' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/catalogSlugConfigured' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      data: { catalogId: "cat-1", slug: "midi-taken-by-sibling" }
+    thrown:
+      - { $ref: 'errors.yaml#/CatalogNotFound' }
+      - { $ref: 'errors.yaml#/CatalogSlugAlreadyTaken' }
 
   TestCatalogProductAdded:
     name: "Adds a product with one offer to a catalog"

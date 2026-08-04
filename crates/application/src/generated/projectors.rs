@@ -195,7 +195,7 @@ pub fn project_catalog<C: CatalogCompute>(c: &C, state: Option<CatalogRow>, env:
         DomainEvent::CatalogCreated(e) => Some(CatalogRow {
             catalog_id: e.catalog_id.clone(),
             restaurant_id: e.restaurant_id.clone(),
-            slug: e.slug.clone(),
+            slug: None,
             name: e.name.clone(),
             tree: c.tree(state.as_ref(), env),
             created_at: env.occurred_at,
@@ -212,6 +212,7 @@ pub fn project_catalog<C: CatalogCompute>(c: &C, state: Option<CatalogRow>, env:
         DomainEvent::OptionListRemoved(_) => { let mut row = state?; let v = c.tree(Some(&row), env); row.tree = v; Some(row) },
         DomainEvent::OfferStockUpdated(_) => { let mut row = state?; let v = c.tree(Some(&row), env); row.tree = v; Some(row) },
         DomainEvent::CatalogImported(_) => { let mut row = state?; let v = c.tree(Some(&row), env); row.tree = v; Some(row) },
+        DomainEvent::CatalogSlugConfigured(e) => { let mut row = state?; row.slug = Some(e.slug.clone()); Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

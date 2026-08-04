@@ -289,7 +289,10 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         "VerifyGoogleBusinessProfileOrderLink" => {
             format!("crate::commands::{}(&bed.store, &bed.probe, cmd, &support::actor()).await", snake)
         }
-        "AddCartLine" | "ChangeCartLineQuantity" => {
+        // A catalog slug is a PATH inside one storefront, not a global host, so its per-restaurant
+        // uniqueness is a read-model check against the sibling catalogs -- not the write-side
+        // reservation the restaurant HOST needs.
+        "AddCartLine" | "ChangeCartLineQuantity" | "ConfigureCatalogSlug" => {
             format!("crate::commands::{}(&bed.store, &bed.catalogs, cmd, &support::actor()).await", snake)
         }
         "RecordProspectContact" => {

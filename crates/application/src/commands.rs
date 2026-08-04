@@ -25,7 +25,8 @@ use domain::generated::commands::{
     ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct, ChangeLanguage,
     ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus, ClaimRestaurantListing,
     ConfigureGoogleBusinessProfileOrderLink, ConfirmEmailVerification, ConfirmPhoneChange,
-    ConfigureRestaurantSlug, CreateCatalog, DeactivateRestaurant, DeleteRestaurantAccount,
+    ConfigureCatalogSlug, ConfigureRestaurantSlug, CreateCatalog, DeactivateRestaurant,
+    DeleteRestaurantAccount,
     ImportCatalog, MarkProspectCold,
     MarkRestaurantAsFavorite, MarkRestaurantClosed, OptOutRestaurantListing, RecordProspectContact,
     RecordProspectReply, RegisterRestaurant, RegisterRestaurantAccount, RemoveCatalogCategory,
@@ -39,6 +40,7 @@ use domain::generated::commands::{
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
     CatalogCategoryAdded, CatalogCategoryRemoved, CatalogCategoryUpdated, CatalogCreated,
+    CatalogSlugConfigured,
     CatalogImported, CustomerAddressRemoved, CustomerAddressSet, CustomerEmailVerified,
     CustomerIdentified, CustomerInfoUpdated, CustomerLanguageChanged, CustomerPaymentMethodSet,
     CustomerPhoneChanged, CustomerPreferencesSet, CustomerRegistered, DomainEvent, OfferStockUpdated,
@@ -2787,9 +2789,47 @@ pub async fn create_catalog(
         r#ref: cmd.r#ref,
         restaurant_id: cmd.restaurant_id,
         name: cmd.name,
-        slug: cmd.slug,
     });
     create_if_absent(store, &stream_name, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ConfigureCatalogSlug` -> emit `events.yaml#/CatalogSlugConfigured`.
+///
+/// The catalog's ROUTE is the owner's choice, made AFTER creation -- creation never derives one
+/// (a creation that invented a label would pin a public path the merchant never picked). Two
+/// outcomes besides success: an unknown catalog is `CatalogNotFound`, and a label already used by
+/// another catalog of the SAME restaurant is `CatalogSlugAlreadyTaken`.
+///
+/// Re-submitting the CURRENT label appends nothing -- decided from the fold, so an idempotent retry
+/// costs no event and no read. Unlike the restaurant HOST there is no reservation and no released-label
+/// alias: this is a path inside an already-resolved storefront, so no previous label must keep resolving.
+pub async fn configure_catalog_slug(
+    store: &dyn EventStore,
+    catalogs: &dyn CatalogReadRepository,
+    cmd: ConfigureCatalogSlug,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_catalog(store, &cmd.catalog_id).await?;
+
+    // Already our current label -> nothing happened. No event, no error, no read.
+    if state.slug.as_ref() == Some(&cmd.slug) {
+        return Ok(());
+    }
+
+    if catalogs.slug_taken(state.restaurant_id, &cmd.slug, cmd.catalog_id).await? {
+        return Err(reject(
+            "CatalogSlugAlreadyTaken",
+            json!({ "catalogId": cmd.catalog_id, "slug": cmd.slug }),
+        ));
+    }
+
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogSlugConfigured(CatalogSlugConfigured {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: state.restaurant_id,
+        slug: cmd.slug,
+    });
+    Repository::new(store).save(&stream_name, version, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/AddProduct` → emit `events.yaml#/ProductAdded`. Enforces `CatalogNotFound`,

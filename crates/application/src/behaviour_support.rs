@@ -693,6 +693,18 @@ impl CatalogReadRepository for SpecCatalogs {
     ) -> Result<Option<crate::queries::CatalogRow>, DomainError> {
         Ok(None)
     }
+    /// Sentinel (same shape as the other TestBed fakes): a label containing `taken` is reported as
+    /// already used by a SIBLING catalog of the same restaurant. `by_restaurant` returns `None` here,
+    /// so the default derivation could never reach CatalogSlugAlreadyTaken -- the per-restaurant
+    /// uniqueness is a read-model fact, and this is the read model in a spec test.
+    async fn slug_taken(
+        &self,
+        _restaurant_id: RestaurantId,
+        slug: &Slug,
+        _excluding: CatalogId,
+    ) -> Result<bool, DomainError> {
+        Ok(slug.0.contains("taken"))
+    }
     async fn offer_by_id(
         &self,
         restaurant_id: RestaurantId,

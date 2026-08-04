@@ -93,7 +93,7 @@ types:
     properties:
       id: { $ref: 'scalars.yaml#/CatalogId' }
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
-      slug: { $ref: 'scalars.yaml#/Slug' }
+      slug: { $ref: 'scalars.yaml#/Slug', nullable: true }   # null until the owner configures it
       name: { $ref: 'scalars.yaml#/CatalogName' }
       categories: { $ref: '#/types/CatalogCategory', array: true }   # assembled from Catalog.tree
       products: { $ref: '#/types/Product', array: true }
@@ -892,6 +892,10 @@ mutations:
 
   createCatalog:
     command: { $ref: 'commands.yaml#/CreateCatalog' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+  configureCatalogSlug:
+    command: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
     roles: [ADMIN, RESTAURANT_ACCOUNT]
     slice: V0
   addProduct:

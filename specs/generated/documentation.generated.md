@@ -113,6 +113,7 @@ Owns a restaurant ACCOUNT (HubRise restaurant). Manages the account, its locatio
 |  | VerifyGoogleOrderButton | [✏️ `verifyGbpOrderLink`](#mutation-verifygbporderlink) |
 | 🧭 **ManageCatalog** | ViewCatalog | [🔎 `catalog`](#query-catalog) |
 |  | CreateCatalog | [✏️ `createCatalog`](#mutation-createcatalog) |
+|  | ChooseCatalogRoute | [✏️ `configureCatalogSlug`](#mutation-configurecatalogslug) |
 |  | AddProduct | [✏️ `addProduct`](#mutation-addproduct) |
 |  | UpdateProduct | [✏️ `updateProduct`](#mutation-updateproduct) |
 |  | RemoveProduct | [✏️ `removeProduct`](#mutation-removeproduct) |
@@ -2075,7 +2076,7 @@ _criticality: **medium**_
 
 _Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import._
 
-### 🧰 API operations _(14)_
+### 🧰 API operations _(15)_
 
 <a id="query-catalog"></a>
 #### 🔎 Query: `catalog`
@@ -2100,6 +2101,13 @@ The category tree of a restaurant's catalog (for filtering & product discovery).
 #### ✏️ Mutation: `createCatalog`
 
 - **Command**: [📩 `CreateCatalog`](#command-createcatalog) → handled by [🎭 `Catalog`](#actor-catalog)
+- **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-configurecatalogslug"></a>
+#### ✏️ Mutation: `configureCatalogSlug`
+
+- **Command**: [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug) → handled by [🎭 `Catalog`](#actor-catalog)
 - **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
@@ -2193,7 +2201,7 @@ A restaurant's catalog (categories → products → offers + option lists).
 | --- | --- | --- |
 | <a id="type-catalog--id"></a>`id` | [🔤 `CatalogId`](#scalar-catalogid) | ✅ |
 | <a id="type-catalog--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
-| <a id="type-catalog--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |
+| <a id="type-catalog--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ⬜ |
 | <a id="type-catalog--name"></a>`name` | [🔤 `CatalogName`](#scalar-catalogname) | ✅ |
 | <a id="type-catalog--categories"></a>`categories` | [[🧩 `CatalogCategory`](#type-catalogcategory)] | ✅ |
 | <a id="type-catalog--products"></a>`products` | [[🧩 `Product`](#type-product)] | ✅ |
@@ -2226,6 +2234,7 @@ _🧩 aggregate_ — A restaurant catalog: catalog, category tree, products, off
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `CreateCatalog`](#command-createcatalog) | [⚡ `CatalogCreated`](#event-catalogcreated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RefNotUnique`](#error-refnotunique) |
+| [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug) | [⚡ `CatalogSlugConfigured`](#event-catalogslugconfigured) | [⛔ `CatalogNotFound`](#error-catalognotfound), [⛔ `CatalogSlugAlreadyTaken`](#error-catalogslugalreadytaken) |
 | [📩 `AddProduct`](#command-addproduct) | [⚡ `ProductAdded`](#event-productadded) | [⛔ `CatalogNotFound`](#error-catalognotfound), [⛔ `CurrencyMismatch`](#error-currencymismatch), [⛔ `CatalogCategoryRefNotFound`](#error-catalogcategoryrefnotfound), [⛔ `RefNotUnique`](#error-refnotunique) |
 | [📩 `UpdateProduct`](#command-updateproduct) | [⚡ `ProductUpdated`](#event-productupdated) | [⛔ `ProductNotFound`](#error-productnotfound), [⛔ `ProductMustHaveOffer`](#error-productmusthaveoffer), [⛔ `CurrencyMismatch`](#error-currencymismatch) |
 | [📩 `RemoveProduct`](#command-removeproduct) | [⚡ `ProductRemoved`](#event-productremoved) | [⛔ `ProductNotFound`](#error-productnotfound) |
@@ -2246,19 +2255,19 @@ _🧩 aggregate_ — A restaurant catalog: catalog, category tree, products, off
 
 - **Source**: [🎭 `Catalog`](#actor-catalog) · 🛶 V0
 - **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
-- **Fed by**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported)
+- **Fed by**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported), [⚡ `CatalogSlugConfigured`](#event-catalogslugconfigured)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `catalog_id` | [🔤 `CatalogId`](#scalar-catalogid) _(derived)_ | [⚡ `CatalogCreated`.`catalogId`](#event-catalogcreated--catalogid) | PK |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `CatalogCreated`.`restaurantId`](#event-catalogcreated--restaurantid) | index |  |
-| `slug` | [🔤 `Slug`](#scalar-slug) | [⚡ `CatalogCreated`.`slug`](#event-catalogcreated--slug) | — |  |
+| `slug` | [🔤 `Slug`](#scalar-slug) | [⚡ `CatalogSlugConfigured`.`slug`](#event-catalogslugconfigured--slug) | nullable | Null until the owner configures it (ConfigureCatalogSlug) -- the unset case is first-class, not an empty string, exactly like Restaurant.slug. |
 | `name` | [🔤 `CatalogName`](#scalar-catalogname) _(derived)_ | [⚡ `CatalogCreated`.`name`](#event-catalogcreated--name) | — |  |
 | `tree` | `jsonb` | [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported) | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(12)_
+### 📩 Commands _(13)_
 
 <a id="command-createcatalog"></a>
 #### 📩 Command: `CreateCatalog`
@@ -2274,8 +2283,21 @@ Admin creates a catalog for a restaurant.
 | <a id="command-createcatalog--catalogid"></a>`catalogId` | [🔤 `CatalogId`](#scalar-catalogid) | ✅ | Client-generated id for the new catalog. |
 | <a id="command-createcatalog--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-createcatalog--name"></a>`name` | [🔤 `CatalogName`](#scalar-catalogname) | ✅ |  |
-| <a id="command-createcatalog--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes. |
 | <a id="command-createcatalog--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
+
+<a id="command-configurecatalogslug"></a>
+#### 📩 Command: `ConfigureCatalogSlug`
+
+The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
+
+- **Dispatched by**: [✏️ `configureCatalogSlug`](#mutation-configurecatalogslug) · **handled by** [🎭 `Catalog`](#actor-catalog)
+- **Emits**: [⚡ `CatalogSlugConfigured`](#event-catalogslugconfigured)
+- **Throws**: [⛔ `CatalogNotFound`](#error-catalognotfound), [⛔ `CatalogSlugAlreadyTaken`](#error-catalogslugalreadytaken)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-configurecatalogslug--catalogid"></a>`catalogId` | [🔤 `CatalogId`](#scalar-catalogid) | ✅ |  |
+| <a id="command-configurecatalogslug--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | URL-safe catalog label, unique within its restaurant. |
 
 <a id="command-addproduct"></a>
 #### 📩 Command: `AddProduct`
@@ -2455,7 +2477,7 @@ Admin/system imports or re-syncs a full catalog from an external source (HubRise
 | <a id="command-importcatalog--products"></a>`products` | [[📦 `Product`](#entity-product)] | ✅ |  |
 | <a id="command-importcatalog--optionlists"></a>`optionLists` | [[📦 `OptionList`](#entity-optionlist)] | ✅ |  |
 
-### ⚡ Events _(12)_
+### ⚡ Events _(13)_
 
 <a id="event-catalogcreated"></a>
 #### ⚡ Event: `CatalogCreated`
@@ -2472,7 +2494,21 @@ A new catalog has been created for a restaurant.
 | <a id="event-catalogcreated--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-catalogcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-catalogcreated--name"></a>`name` | [🔤 `CatalogName`](#scalar-catalogname) | ✅ |  |
-| <a id="event-catalogcreated--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes. |
+
+<a id="event-catalogslugconfigured"></a>
+#### ⚡ Event: `CatalogSlugConfigured`
+
+The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label. Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH inside an already-resolved host, so no previous label has to keep resolving and none is reserved. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+
+- **Emitted by**: [🎭 `Catalog`](#actor-catalog)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-catalogslugconfigured--catalogid"></a>`catalogId` | [🔤 `CatalogId`](#scalar-catalogid) | ✅ |  |
+| <a id="event-catalogslugconfigured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ | The owning restaurant -- the scope the label is unique within. |
+| <a id="event-catalogslugconfigured--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 
 <a id="event-catalogcategoryadded"></a>
 #### ⚡ Event: `CatalogCategoryAdded`
@@ -2762,11 +2798,12 @@ A purchasable offer of a product (HubRise: SKU).
 | <a id="scalar-catalogitemavailability"></a>🔤 `CatalogItemAvailability` | enum (AVAILABLE \| UNAVAILABLE) |  |
 | <a id="scalar-stockstatus"></a>🔤 `StockStatus` | enum (IN_STOCK \| LOW_STOCK \| OUT_OF_STOCK) |  |
 
-### ⛔ Errors _(17)_
+### ⛔ Errors _(18)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-catalognotfound"></a>⛔ `CatalogNotFound` | No catalog with this id (or it does not belong to the restaurant). | 🇬🇧 Catalog not found. | 🇫🇷 Catalog introuvable. | [📩 `AddProduct`](#command-addproduct), [📩 `AddCatalogCategory`](#command-addcatalogcategory), [📩 `AddOptionList`](#command-addoptionlist), [📩 `ImportCatalog`](#command-importcatalog) |
+| <a id="error-catalognotfound"></a>⛔ `CatalogNotFound` | No catalog with this id (or it does not belong to the restaurant). | 🇬🇧 Catalog not found. | 🇫🇷 Catalog introuvable. | [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug), [📩 `AddProduct`](#command-addproduct), [📩 `AddCatalogCategory`](#command-addcatalogcategory), [📩 `AddOptionList`](#command-addoptionlist), [📩 `ImportCatalog`](#command-importcatalog) |
+| <a id="error-catalogslugalreadytaken"></a>⛔ `CatalogSlugAlreadyTaken` | Another catalog of the SAME restaurant already uses this label. Scoped per restaurant, not global: a catalog slug is a path inside one storefront, so two restaurants may both have a 'midi'. Distinct from SlugAlreadyTaken, which guards the cross-restaurant storefront HOST.  | 🇬🇧 The label '{slug}' is already used by another of your catalogs. | 🇫🇷 Le libellé '{slug}' est déjà utilisé par un autre de vos catalogues. | [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug) |
 | <a id="error-currencymismatch"></a>⛔ `CurrencyMismatch` | A offer price currency differs from the restaurant default currency. | 🇬🇧 Prices must use the currency of '{restaurantName}' ('{currency}'). | 🇫🇷 Les prix doivent utiliser la devise de '{restaurantName}' ('{currency}'). | [📩 `AddProduct`](#command-addproduct), [📩 `UpdateProduct`](#command-updateproduct) |
 | <a id="error-refnotunique"></a>⛔ `RefNotUnique` | The ref is not unique within the catalog. | 🇬🇧 The reference '{ref}' is already used in this catalog. | 🇫🇷 La référence '{ref}' est déjà utilisée dans ce catalog. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `AddProduct`](#command-addproduct), [📩 `AddCatalogCategory`](#command-addcatalogcategory) |
 | <a id="error-catalogcategorynotfound"></a>⛔ `CatalogCategoryNotFound` | No category with this id in the catalog. | 🇬🇧 CatalogCategory not found. | 🇫🇷 Catégorie introuvable. | [📩 `UpdateCatalogCategory`](#command-updatecatalogcategory), [📩 `RemoveCatalogCategory`](#command-removecatalogcategory) |
@@ -2784,7 +2821,7 @@ A purchasable offer of a product (HubRise: SKU).
 | <a id="error-catalogtranslationfailed"></a>⛔ `CatalogTranslationFailed` | The ACL could not map external (HubRise) shapes to domain types on import. | 🇬🇧 The imported catalog could not be processed. | 🇫🇷 Le catalogue importé n'a pas pu être traité. | [📩 `ImportCatalog`](#command-importcatalog) |
 | <a id="error-missingref"></a>⛔ `MissingRef` | An imported entity is missing its ref (idempotency key). | 🇬🇧 Every imported item must have a reference. | 🇫🇷 Chaque élément importé doit avoir une référence. | [📩 `ImportCatalog`](#command-importcatalog) |
 
-### 📐 Business rules _(6)_
+### 📐 Business rules _(7)_
 
 <a id="rule-catalogcreationforrestaurant"></a>
 #### 📐 Rule: `CatalogCreationForRestaurant`
@@ -2792,6 +2829,13 @@ A purchasable offer of a product (HubRise: SKU).
 _A catalog is created for a restaurant; creation is rejected when invalid/duplicate._
 
 - **Verified by**: [🧪 `TestCatalogCreated`](#test-testcatalogcreated), [🧪 `TestCatalogCreateIsRejected`](#test-testcatalogcreateisrejected)
+
+<a id="rule-catalogroutechosenbyowner"></a>
+#### 📐 Rule: `CatalogRouteChosenByOwner`
+
+_A catalog's route label is chosen by its owner after creation, never derived at creation, and is unique within the restaurant; a label already used by another of that restaurant's catalogs is rejected. Re-submitting the current label changes nothing._
+
+- **Verified by**: [🧪 `TestCatalogSlugConfigured`](#test-testcatalogslugconfigured), [🧪 `TestCatalogSlugIsRejected`](#test-testcatalogslugisrejected)
 
 <a id="rule-catalogproductmanagement"></a>
 #### 📐 Rule: `CatalogProductManagement`
@@ -2851,6 +2895,26 @@ _Rejects creating a catalog for a missing restaurant or with a duplicate ref_
 - **When**: [📩 `CreateCatalog`](#command-createcatalog)
 - **Thrown**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RefNotUnique`](#error-refnotunique)
 - **Verifies**: [📐 `CatalogCreationForRestaurant`](#rule-catalogcreationforrestaurant)
+
+<a id="test-testcatalogslugconfigured"></a>
+#### 🧪 Test: `TestCatalogSlugConfigured`
+
+_The owner chooses the catalog's route label after creation_
+
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated)
+- **When**: [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug)
+- **Then**: [⚡ `CatalogSlugConfigured`](#event-catalogslugconfigured)
+- **Verifies**: [📐 `CatalogRouteChosenByOwner`](#rule-catalogroutechosenbyowner)
+
+<a id="test-testcatalogslugisrejected"></a>
+#### 🧪 Test: `TestCatalogSlugIsRejected`
+
+_Rejects a route label already used by another catalog of the same restaurant, or an unknown catalog_
+
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogSlugConfigured`](#event-catalogslugconfigured)
+- **When**: [📩 `ConfigureCatalogSlug`](#command-configurecatalogslug)
+- **Thrown**: [⛔ `CatalogNotFound`](#error-catalognotfound), [⛔ `CatalogSlugAlreadyTaken`](#error-catalogslugalreadytaken)
+- **Verifies**: [📐 `CatalogRouteChosenByOwner`](#rule-catalogroutechosenbyowner)
 
 <a id="test-testcatalogproductadded"></a>
 #### 🧪 Test: `TestCatalogProductAdded`

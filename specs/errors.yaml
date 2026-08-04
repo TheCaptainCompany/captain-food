@@ -233,6 +233,18 @@ CatalogNotFound:
     en: "Catalog not found."
     fr: "Catalog introuvable."
 
+CatalogSlugAlreadyTaken:
+  description: >
+    Another catalog of the SAME restaurant already uses this label. Scoped per restaurant, not global:
+    a catalog slug is a path inside one storefront, so two restaurants may both have a 'midi'.
+    Distinct from SlugAlreadyTaken, which guards the cross-restaurant storefront HOST.
+  context:
+    catalogId: { $ref: 'scalars.yaml#/CatalogId' }
+    slug: { $ref: 'scalars.yaml#/Slug' }
+  messages:
+    en: "The label '{slug}' is already used by another of your catalogs."
+    fr: "Le libellé '{slug}' est déjà utilisé par un autre de vos catalogues."
+
 CurrencyMismatch:
   description: "A offer price currency differs from the restaurant default currency."
   context:
