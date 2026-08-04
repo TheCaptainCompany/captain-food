@@ -251,9 +251,8 @@ fn main() {
         std::process::exit(1);
     }
     for (name, content) in [
-        ("actor_clients.rs", emit_actor_clients(&model)),
         ("addresses.rs", emit_actor_addresses(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod actor_clients;\npub mod addresses;\n".to_string()),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod addresses;\n".to_string()),
     ] {
         let path = client_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -261,6 +260,48 @@ fn main() {
             std::process::exit(1);
         }
         eprintln!("✓ wrote {}", path.display());
+    }
+    // crates/clients/{actor}/: ONE CRATE PER MAILBOX ACTOR (PROP-20260802-130500 phase 2, #306).
+    // Manifest AND code are generated, so "which actors exist" and "which crates exist" cannot
+    // drift. STALE crates are REMOVED here rather than left behind: a client crate for an actor
+    // the spec no longer declares is a door to nothing that still compiles, and `check-drift`
+    // diffs content — it would never notice a directory that simply stopped being regenerated.
+    let clients_root = repo_root(&specs).join("crates/clients");
+    let emitted = emit_client_crates(&model);
+    let keep: std::collections::BTreeSet<String> = emitted
+        .iter()
+        .filter_map(|c| c.dir.rsplit('/').next().map(|s| s.to_string()))
+        .collect();
+    if let Ok(rd) = fs::read_dir(&clients_root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let stale = p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| !keep.contains(n));
+            if stale {
+                if let Err(e) = fs::remove_dir_all(&p) {
+                    eprintln!("✗ remove stale client crate {}: {}", p.display(), e);
+                    std::process::exit(1);
+                }
+                eprintln!("✓ removed stale client crate {}", p.display());
+            }
+        }
+    }
+    for c in &emitted {
+        let dir = repo_root(&specs).join(&c.dir);
+        if let Err(e) = fs::create_dir_all(dir.join("src")) {
+            eprintln!("✗ create {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+        for (name, content) in [("Cargo.toml", &c.manifest), ("src/lib.rs", &c.lib)] {
+            let path = dir.join(name);
+            if let Err(e) = fs::write(&path, content) {
+                eprintln!("✗ write {}: {}", path.display(), e);
+                std::process::exit(1);
+            }
+        }
+        eprintln!("✓ wrote {}", c.dir);
     }
     // crates/infrastructure/src/generated/: the Postgres PM state stores from process_managers.yaml
     // (issue #27) — the adapter side of the application pm_state ports.

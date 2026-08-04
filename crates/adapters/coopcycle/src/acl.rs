@@ -36,7 +36,7 @@ use domain::generated::events::{
 use domain::generated::scalars::{DeliveryJobId, DeliveryStatus, ExternalReference, PhoneNumber};
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use actor_client::generated::actor_clients::DeliveryJobClient;
+use client_delivery_job::DeliveryJobClient;
 use actor_client::EnqueueOutcome;
 use serde::Deserialize;
 use sha2::Sha256;

@@ -16,9 +16,16 @@ members = [
                                # over a MessageHandler, so another product can lift it wholesale
     "crates/actor_client",     # the actor-mailbox BOUNDARY crate (PROP-20260802-130500 D1/D4, #290):
                                # the Mailbox port, the private MailboxEntry, the generated typed
-                               # clients (write door) and the generic ActorClient (read door). The
-                               # ONLY crate that can construct a mailbox row — the compiler enforces
-                               # what the door-guard test used to scan for. No sqlx, no reqwest.
+                               # generic ActorClient (read door) and the opaque ActorDoor the
+                               # per-actor client crates enqueue through. The ONLY crate that can
+                               # construct a mailbox row — the compiler enforces what the door-guard
+                               # test used to scan for. No sqlx, no reqwest.
+    "crates/clients/*",        # ONE CRATE PER MAILBOX ACTOR (PROP-20260802-130500 phase 2, #306):
+                               # `client-restaurant`, `client-cart`, …, one per aggregate AND per
+                               # process manager. GENERATED (manifest included) from actors.yaml —
+                               # never hand-edited. A GLOB on purpose: a new actor's crate joins the
+                               # workspace by being generated, so the members list cannot drift from
+                               # the spec. Depending on one is the permission to address that actor.
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
     "crates/adapters/stripe",  # Stripe partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin

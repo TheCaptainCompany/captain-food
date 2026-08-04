@@ -2,9 +2,9 @@
 # (PROP-20260802-130500 D1, realized under #290 phase 1).
 #
 # THE CRATE IS THE PERMISSION: `MailboxEntry` lives here with pub(crate) fields, its constructors
-# are crate-internal, and the generated typed actor clients (src/generated/actor_clients.rs) are
-# the only code that can assemble a mailbox row. Obtaining a `MailboxEntry` outside this crate
-# DOES NOT COMPILE — the textual door guard (`mailbox_entry_is_constructed_only_behind_the_typed_doors`)
+# are crate-internal, and the only code that can assemble a mailbox row is the `ActorDoor` facade
+# this crate hands the per-actor client crates (crates/clients/*, phase 2 / #306). Obtaining a
+# `MailboxEntry` outside this crate DOES NOT COMPILE — the textual door guard (`mailbox_entry_is_constructed_only_behind_the_typed_doors`)
 # stays as the belt-and-braces tripwire on the boundary itself.
 #
 # Position in the graph (outer -> inner): infrastructure/server/adapters -> actor_client ->
@@ -35,7 +35,10 @@ bulk-door = []
 domain = { path = "../domain" }
 application = { path = "../application" }
 async-trait = { workspace = true }
-serde = { workspace = true }
+# NO `serde` here since phase 2 (#306): the `serde::Serialize` bounds left with the typed clients,
+# and each generated client crate declares serde for itself. This crate only ever handles payloads
+# as already-serialized `serde_json::Value`. Re-adding it without a use is exactly the "unused
+# dependency = unheld capability" hole the D6 cargo-machete step exists to catch.
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
@@ -45,6 +48,18 @@ uuid = { workspace = true, features = ["v5"] }
 # (rt-multi-thread, macros, net, signal, time) into this crate's graph too — the narrowing is
 # documentation of intent, not an enforced capability bound (tokio is not D3-gated).
 tokio = { workspace = true, features = ["sync"] }
+
+# The out-of-crate DRIFT GUARD (tests/drift_guard.rs, #306): phase 2 moved the typed clients into
+# their own crates, so the guard that proves a typed send still builds the reference row has to
+# run from outside. That makes this a DEV-dependency CYCLE (client-restaurant -> actor_client ->
+# [dev] client-restaurant), which Cargo permits precisely for this shape; it never reaches a
+# release graph. The self-dependency is what lights `test-fixtures` for the integration-test
+# target — the entry fixture mirror and the reference implementations it compares against.
+[dev-dependencies]
+actor_client = { path = ".", features = ["test-fixtures"] }
+client-order = { path = "../clients/order" }
+client-payment = { path = "../clients/payment" }
+client-restaurant = { path = "../clients/restaurant" }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is

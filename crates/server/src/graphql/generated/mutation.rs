@@ -53,7 +53,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __client = client_cart::CartClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -126,7 +126,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __client = client_cart::CartClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -199,7 +199,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __client = client_cart::CartClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -272,7 +272,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __client = client_restaurant_account::RestaurantAccountClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -345,7 +345,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __client = client_restaurant_account::RestaurantAccountClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -418,7 +418,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __client = client_restaurant_account::RestaurantAccountClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -491,7 +491,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -565,7 +565,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -638,7 +638,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -711,7 +711,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -784,7 +784,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -857,7 +857,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -930,7 +930,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1003,7 +1003,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1076,7 +1076,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1149,7 +1149,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1222,7 +1222,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1295,7 +1295,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1368,7 +1368,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1441,7 +1441,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __client = client_restaurant::RestaurantClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1514,7 +1514,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __client = client_prospect::ProspectClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1587,7 +1587,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __client = client_prospect::ProspectClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1660,7 +1660,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __client = client_prospect::ProspectClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1733,7 +1733,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1806,7 +1806,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1879,7 +1879,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -1952,7 +1952,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2025,7 +2025,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2098,7 +2098,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2171,7 +2171,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2244,7 +2244,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2317,7 +2317,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2390,7 +2390,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2463,7 +2463,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2536,7 +2536,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __client = client_catalog::CatalogClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2610,7 +2610,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2683,7 +2683,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2756,7 +2756,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2829,7 +2829,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2902,7 +2902,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -2975,7 +2975,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3048,7 +3048,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3121,7 +3121,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3194,7 +3194,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3267,7 +3267,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3340,7 +3340,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3413,7 +3413,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3486,7 +3486,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3559,7 +3559,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3651,7 +3651,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::PlaceOrderProcessClient::new(mailbox, actor_id);
+        let __client = client_place_order_process::PlaceOrderProcessClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3833,7 +3833,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3906,7 +3906,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -3979,7 +3979,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4052,7 +4052,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4125,7 +4125,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4198,7 +4198,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4271,7 +4271,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4344,7 +4344,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4417,7 +4417,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4494,7 +4494,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4567,7 +4567,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __client = client_order::OrderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4659,7 +4659,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RefundProcessClient::new(mailbox, actor_id);
+        let __client = client_refund_process::RefundProcessClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4859,7 +4859,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RefundProcessClient::new(mailbox, actor_id);
+        let __client = client_refund_process::RefundProcessClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5039,7 +5039,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::RiderClient::new(mailbox, actor_id);
+        let __client = client_rider::RiderClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5112,7 +5112,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __client = client_delivery_job::DeliveryJobClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5185,7 +5185,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __client = client_delivery_job::DeliveryJobClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5258,7 +5258,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __client = client_delivery_job::DeliveryJobClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5331,7 +5331,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __client = client_delivery_job::DeliveryJobClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5408,7 +5408,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __client = client_delivery_partner_registration::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5481,7 +5481,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __client = client_delivery_partner_registration::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5554,7 +5554,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __client = client_delivery_partner_registration::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5627,7 +5627,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5700,7 +5700,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5773,7 +5773,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5846,7 +5846,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5919,7 +5919,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5992,7 +5992,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __client = client_conversation::ConversationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6065,7 +6065,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __client = client_reclamation::ReclamationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6138,7 +6138,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __client = client_reclamation::ReclamationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6211,7 +6211,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __client = client_reclamation::ReclamationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6284,7 +6284,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __client = client_reclamation::ReclamationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6357,7 +6357,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __client = client_reclamation::ReclamationClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -6430,7 +6430,7 @@ impl MutationRoot {
         // assembles the mailbox row through the SAME shared constructors the worker-channel
         // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
         // drift from any other door and no resolver builds a mailbox entry inline.
-        let __client = actor_client::generated::actor_clients::MailboxSupervisionClient::new(mailbox, actor_id);
+        let __client = client_mailbox_supervision::MailboxSupervisionClient::new(mailbox, actor_id);
         let __envelope = actor_client::mailbox::Envelope {
             message_id: env.message_id,
             correlation_id: env.correlation_id,

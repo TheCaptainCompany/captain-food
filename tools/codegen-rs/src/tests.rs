@@ -1845,7 +1845,7 @@ keys:
             offenders.is_empty(),
             "`MailboxEntry {{` is constructed outside the sanctioned doors:\n{}\n\n\
              Fix: go through a generated typed actor client \
-             (actor_client::generated::actor_clients — send/record/schedule), or, for \
+             (the per-actor crates under crates/clients/* — send/record/schedule), or, for \
              actor_client-internal machinery, the shared constructors in \
              actor_client::enqueue. If this is genuinely a new sanctioned constructor, \
              add it to this test's allowlist WITH its justification. Why: a hand-assembled row \
@@ -2450,6 +2450,42 @@ keys:
 
         assert!(scan.saw_port_trait, "no `trait Mailbox` found — renamed? move this guard with it");
 
+        // PHASE 2 (#306): the generated per-actor client crates are outside this crate, so the
+        // compiler already makes the witness unmintable there. The scan still refuses to see it
+        // NAMED — a client crate that mentions the witness is one whose emitter started reaching
+        // for the port directly instead of delegating through `ActorDoor`, which is the shape that
+        // would make widening the mint look like the obvious fix. Same textual form (and the same
+        // comment-stripping) as the `/generated/` rule above, for the same reason.
+        let clients_root = root.join("crates/clients");
+        let mut client_files = Vec::new();
+        let mut stack = vec![clients_root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    client_files.push(p);
+                }
+            }
+        }
+        assert!(
+            !client_files.is_empty(),
+            "found no crates/clients sources — the per-actor client walk went blind"
+        );
+        for p in &client_files {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(p).expect("a partially-scanned tree is a silent no-op");
+            if text.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains(WITNESS))
+            {
+                scan.leaks.push(format!(
+                    "  {rel}: a generated client crate must never name the witness — enqueue \
+                     through `actor_client::ActorDoor`"
+                ));
+            }
+        }
+
         // The in-crate mint stays `pub(crate)`. Widening it is how the boundary would slide from
         // level 4 (compiler) to level 3 (manifest allowlist) — see the note below.
         let port = std::fs::read_to_string(root.join(port_rel)).expect("the port module");
@@ -2801,11 +2837,26 @@ keys:
         // (file, name, gated-by-a-cargo-feature, why). `gated` matters for taint: a wrapper does
         // NOT inherit the feature that contains the door it calls.
         const DOORS: &[(&str, &str, bool, &str)] = &[
-            // The generated per-actor clients — the write door (#284 slice 2).
-            ("crates/actor_client/src/generated/actor_clients.rs", "send", false, "typed command door"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "record", false, "typed inbound-fact door"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "schedule", false, "reminder door (reminders-declaring actors)"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "cancel_scheduling", false, "reminder withdrawal (ADR-20260731-150500 §3)"),
+            // The `ActorDoor` facade — what the typed write doors became in phase 2 (#306).
+            // WHERE THE OLD FOUR ENTRIES WENT, and why the scan does not follow them: until
+            // phase 2 the four typed doors (`send`/`record`/`schedule`/`cancel_scheduling`) sat
+            // in ONE file in this crate, `src/generated/actor_clients.rs`, and were declared here
+            // as four entries. #306 moved every `{Actor}Client` into its own `crates/clients/*`
+            // crate, OUT of the tree this scan walks (`crates/actor_client/src`). That is a real
+            // reduction in reach and is recorded rather than papered over — it is sound because
+            // those crates are 100% EMITTED from actors.yaml, so they cannot suffer the accident
+            // this guard exists to catch (ADR-20260803-203455: "the plausible in-crate accident —
+            // a scoped-capability helper written `pub` instead of `pub(crate)`"). A new door there
+            // is an emitter change, reviewed as codegen, and is additionally held by
+            // `client_crates_are_exactly_the_mailbox_actors` +
+            // `actor_door_is_named_only_by_generated_client_crates`. What the client crates can
+            // reach at all is the four methods below, and those ARE scanned.
+            // #331 froze this guard's TECHNIQUE; the ADR calls a moved door maintenance, which is
+            // what this edit is — the scan root is deliberately unchanged.
+            ("crates/actor_client/src/door.rs", "send_command", false, "typed command door (delegate behind every generated `{Actor}Client::send`)"),
+            ("crates/actor_client/src/door.rs", "record_fact", false, "typed inbound-fact door (delegate behind `{Actor}Client::record`)"),
+            ("crates/actor_client/src/door.rs", "schedule_command", false, "reminder door (delegate behind `{Actor}Client::schedule`)"),
+            ("crates/actor_client/src/door.rs", "cancel_scheduling", false, "reminder withdrawal, ADR-20260731-150500 §3 (delegate behind `{Actor}Client::cancel_scheduling`)"),
             // The one generic read door (PROP-20260802-130500 D4).
             ("crates/actor_client/src/client.rs", "get_operation_status", false, "ActorClient: the ONLY read path over inbound_messages status"),
             // The reminder constructor the in-transaction `schedules:` upsert binds from.
@@ -2814,6 +2865,11 @@ keys:
             // `bulk_door_feature_is_granted_only_to_infrastructure` allows only infrastructure to enable.
             ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_facts", true, "the UNTYPED bulk fact door, `bulk-door` feature (#290 review BLOCKING-1a)"),
             // Test-only reference implementations (never in a release graph).
+            // Syntactically `pub` because `door.rs::record_fact` calls it in a RELEASE build, but
+            // `mod enqueue` is private and the re-export in lib.rs is `cfg(any(test,
+            // feature = "test-fixtures"))` — so its external reach is exactly the D5 drift guard,
+            // which #306 moved out of the crate. Gated, hence taint still flows to `record_fact`.
+            ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_fact", true, "single-fact reference impl; private module + `test-fixtures`-gated re-export (#306 out-of-crate drift guard)"),
             ("crates/actor_client/src/enqueue.rs", "cancel_reminder", true, "test-only reference impl behind `test-fixtures`"),
             ("crates/actor_client/src/enqueue.rs", "schedule_reminder", true, "test-only reference impl behind `test-fixtures`"),
             ("crates/actor_client/src/mailbox.rs", "for_tests", true, "the D5 test-only witness mint, cfg-gated"),
@@ -3087,6 +3143,9 @@ keys:
         // someone WILL use (ADR-20260802-170059, mechanically). `server` is NOT here: its 207
         // findings live mostly in the generated GraphQL layer — widening the floor to it is
         // emitter work, tracked as follow-up, not silently claimed by this guard.
+        //
+        // The generated `crates/clients/*` are boundary crates too, but they are matched by prefix
+        // below rather than listed here — see the comment at the match.
         const BOUNDARY: &[&str] = &[
             "crates/actor_client/Cargo.toml",
             "crates/infrastructure/Cargo.toml",
@@ -3167,7 +3226,12 @@ keys:
             let own_forbid = section_has(&src, "[lints.rust]", "unsafe_code = \"forbid\"");
             let own_deny = section_has(&src, "[lints.rust]", "unreachable_pub = \"deny\"");
             let exempt = FFI_EXEMPT.iter().any(|(p, _)| *p == rel);
-            if BOUNDARY.contains(&rel.as_str()) {
+            // Every GENERATED per-actor client crate is a boundary crate by construction (#306):
+            // it exists to BE the door to one actor. Matched by PREFIX rather than enumerated,
+            // because the set is spec-derived — a new actor must not be able to join the workspace
+            // below the floor just because nobody remembered to extend a list here.
+            let boundary = BOUNDARY.contains(&rel.as_str()) || rel.starts_with("crates/clients/");
+            if boundary {
                 if !(own_forbid && own_deny) {
                     offenders.push(format!(
                         "  {rel} is a BOUNDARY crate but its [lints.rust] no longer carries \
@@ -3188,6 +3252,132 @@ keys:
              and `unreachable_pub = deny` on boundary crates makes a dead `pub` item a compile \
              error instead of an open door; a member without the floor re-opens both silently.",
             offenders.join("\n")
+        );
+    }
+
+    /// The PHASE-2 CONTAINMENT guard (#306, PROP-20260802-130500 §6): `actor_client::ActorDoor` is
+    /// the opaque facade the per-actor client crates enqueue through, and it may be named by
+    /// NOTHING ELSE.
+    ///
+    /// WHY THIS GUARD IS PART OF THE CHANGE THAT INTRODUCED THE DOOR. Splitting the clients into
+    /// their own crates needed those crates to build mailbox rows, and the two things row-building
+    /// needs — `MailboxEntry`'s private fields and the `MailboxAccess` mint — are exactly what D1
+    /// and #304 keep inside `actor_client`. The proposal named two exits: widen the constructors to
+    /// `pub` (which slides the port boundary from compiler-enforced to allowlist-enforced) or hand
+    /// out an opaque facade. The facade keeps the entry and the witness at level 4 — but the facade
+    /// ITSELF is a public, string-keyed door: `send_command("Restaurant", 5, id, "…", payload, env)`
+    /// addresses any actor with any message, which the sealed `{Actor}Command` traits make
+    /// impossible on the typed path. That capability did not exist before phase 2 (`command_entry`
+    /// was `pub(crate)`), so it is a real widening and this is what contains it: naming `ActorDoor`
+    /// outside the generated client crates is CI-red — the loud, reviewable act.
+    #[test]
+    fn actor_door_is_named_only_by_generated_client_crates() {
+        const DOOR: &str = "ActorDoor";
+        // (file, WHY) — the door's own definition and the crate root that re-exports it. Both are
+        // asserted to still MENTION it, so a rename cannot leave this guard scanning for nothing.
+        const ALLOWED: &[(&str, &str)] = &[
+            ("crates/actor_client/src/door.rs", "the ActorDoor definition itself"),
+            ("crates/actor_client/src/lib.rs", "the crate-root re-export"),
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        for (rel, why) in ALLOWED {
+            let src = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| {
+                panic!(
+                    "allowlisted file {rel} ({why}) cannot be read ({e}) — if it moved, move this \
+                     allowlist WITH it; do NOT let this guard silently no-op"
+                )
+            });
+            assert!(
+                src.contains(DOOR),
+                "allowlisted file {rel} ({why}) no longer names `{DOOR}` — the door moved or was \
+                 renamed; move this guard with it so it stays real"
+            );
+        }
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        files.sort();
+        assert!(!files.is_empty(), "found no crate sources to scan");
+
+        let mut offenders: Vec<String> = Vec::new();
+        for f in &files {
+            let rel = f.strip_prefix(&root).unwrap_or(f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(f)
+                .unwrap_or_else(|e| panic!("cannot read {rel} ({e}) — a partially-scanned tree is a silent no-op"));
+            // The GENERATED client crates are the sanctioned holders; so are the two allowlisted
+            // files. Comment lines are dropped first, so prose explaining this very rule (and the
+            // generated crates' own header comments) cannot trip it.
+            if rel.starts_with("crates/clients/") || ALLOWED.iter().any(|(a, _)| rel == *a) {
+                continue;
+            }
+            for (idx, line) in src.lines().enumerate() {
+                let t = line.trim_start();
+                if t.starts_with("//") || !line.contains(DOOR) {
+                    continue;
+                }
+                offenders.push(format!("  {rel}:{}: {}", idx + 1, line.trim()));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "`{DOOR}` is named outside the generated per-actor client crates:\n{}\n\n\
+             Fix: address the actor through its typed client crate (`client-<actor>`, adding the \
+             dependency to your Cargo.toml — that manifest line IS the permission). Why: the door \
+             is string-keyed, so anything holding it can send any message to any actor, bypassing \
+             the sealed {{Actor}}Command/{{Actor}}Fact traits that make a non-received message a \
+             compile error. It exists solely so the per-actor crates need neither `MailboxEntry`'s \
+             private fields nor the `MailboxAccess` mint.",
+            offenders.join("\n")
+        );
+    }
+
+    /// The generated client crates must be EXACTLY the mailbox actors — no stale crate for an
+    /// actor the spec dropped, no actor without a door.
+    ///
+    /// The emitter prunes stale directories, so this cannot drift through a normal regeneration;
+    /// the guard exists for the abnormal one — a hand-created directory under `crates/clients/`
+    /// joins the workspace through the members GLOB without any spec ever mentioning it, which is
+    /// precisely a door with no declared owner (ADR-20260802-170059).
+    #[test]
+    fn client_crates_are_exactly_the_mailbox_actors() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let expected: std::collections::BTreeSet<String> =
+            emit_client_crates(&model).iter().map(|c| kebab(&c.actor)).collect();
+        assert!(!expected.is_empty(), "the actor scan went blind — no client crates expected at all");
+
+        let dir = root.join("crates/clients");
+        let mut found: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for e in std::fs::read_dir(&dir).expect("crates/clients is readable").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                found.insert(p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string());
+            }
+        }
+        assert_eq!(
+            found, expected,
+            "the crates/clients/ directories do not match the mailbox actors in actors.yaml.\n\n\
+             Fix: run `make generate` (the emitter creates missing crates and removes stale ones). \
+             Why: the workspace members list is a glob, so a directory here is a workspace crate — \
+             one that no spec declares is a mailbox door with no declared owner."
         );
     }
 
@@ -3852,10 +4042,15 @@ Catalog:
         }
         assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
 
-        let clients = emit_actor_clients(&model);
+        // Since phase 2 (#306) each actor's surface is its OWN crate, so the per-actor unit of
+        // inspection is a generated `lib.rs` rather than a block of one shared file — which makes
+        // the assertion strictly stronger: a method leaking into the wrong actor's crate is now
+        // impossible to miss by mis-parsing a separator.
+        let crates = emit_client_crates(&model);
         let mut seen_blocks = 0usize;
-        for block in clients.split("\n// ─── ").skip(1) {
-            let name = block.split(' ').next().expect("actor name heads the block");
+        for c in &crates {
+            let name = c.actor.as_str();
+            let block = c.lib.as_str();
             seen_blocks += 1;
             let surface = [
                 ("pub async fn send", has_commands.contains(name), "receives >=1 COMMAND"),
@@ -4278,7 +4473,7 @@ Catalog:
         // silently — and the router must keep RE-EXPORTING that one definition (#290 phase 1).
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let clients = emit_actor_clients(&model);
+        let crates = emit_client_crates(&model);
         let addresses = emit_actor_addresses(&model);
         let router = emit_infra_command_router(&model);
         assert!(
@@ -4300,10 +4495,27 @@ Catalog:
             // The CLIENT struct exists for every mailbox actor (it is the lane handle); the
             // marker traits and methods are SPEC-GATED per declaration — asserted bidirectionally
             // by `client_surface_exists_only_with_a_spec_declaration` below.
+            let c = crates
+                .iter()
+                .find(|c| c.actor == *actor)
+                .unwrap_or_else(|| panic!("no generated client crate for mailbox actor `{actor}`"));
             let item = format!("pub struct {actor}Client");
-            assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
+            assert!(c.lib.contains(&item), "{}/src/lib.rs lacks `{item}`", c.dir);
+            // The MANIFEST is generated too, and its package name is what a dependent writes to
+            // earn the permission — if it drifts from the actor, the dependency nobody can spell
+            // is a door nobody can open.
+            let name = format!("name = \"client-{}\"", kebab(actor));
+            assert!(c.manifest.contains(&name), "{}/Cargo.toml lacks `{name}`", c.dir);
+            // The seal must be present in EVERY crate — without the private supertrait module the
+            // compile-time guarantee (no impls outside the generated crate) evaporates for that
+            // actor alone, which is exactly the kind of per-actor hole the split could hide.
+            assert!(c.lib.contains("mod sealed {"), "{}: the privacy seal module is missing", c.dir);
         }
-        // The seal itself must be present — without the private supertrait module the whole
-        // compile-time guarantee (no impls outside the generated file) evaporates.
-        assert!(clients.contains("mod sealed {"), "the privacy seal module is missing");
+        assert_eq!(
+            crates.len(),
+            actors.len(),
+            "one client crate per mailbox actor, no more: {:?} vs {:?}",
+            crates.iter().map(|c| c.actor.as_str()).collect::<Vec<_>>(),
+            actors
+        );
     }

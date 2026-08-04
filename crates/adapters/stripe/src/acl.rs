@@ -49,7 +49,7 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use actor_client::generated::actor_clients::PaymentClient;
+use client_payment::PaymentClient;
 use actor_client::{surrogate_actor_id, EnqueueOutcome};
 use serde::Deserialize;
 use sha2::Sha256;
