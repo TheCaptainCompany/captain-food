@@ -145,7 +145,7 @@ The MCP servers also disconnect and reconnect mid-session (observed four times i
 schemas must be re-fetched via `ToolSearch` after a reconnect; that is normal, not a fault, and it is
 not worth narrating to the user.
 
-## 4. This container cannot read PDFs
+## 4. PDFs: every library is dead, but raw stream extraction WORKS
 
 Confirmed dead ends — do not spend turns rediscovering them:
 
@@ -154,11 +154,44 @@ Confirmed dead ends — do not spend turns rediscovering them:
   then a `pyo3_runtime.PanicException`), so **`pypdf` and `pdfminer.six` both crash on import** even
   after a successful `pip install`.
 - `Read` on a PDF needs `pdftoppm` for page rendering, so it fails too.
-- Hand-rolling zlib stream extraction returns font tables, not readable text.
 
-**Ask the user to paste the relevant passage.** Say plainly that the extraction is unavailable and
-that you are working from what they pasted rather than the full document — never imply you read a
-file you could not open.
+**But do not stop there** — this section previously claimed hand-rolled extraction "returns font
+tables, not readable text", and that is **wrong**. For any normally-generated text PDF (FlateDecode
+streams, no scanning), decompressing the streams and reading the text operators gets you the whole
+document with stdlib only:
+
+```bash
+python3 - <<'EOF' /path/to/file.pdf
+import re, zlib, sys
+data = open(sys.argv[1], 'rb').read()
+for m in re.finditer(rb'stream\r?\n', data):
+    start = m.end()
+    end = data.find(b'endstream', start)
+    try:
+        dec = zlib.decompress(data[start:end])
+    except Exception:
+        continue                                  # not a Flate stream -- skip
+    if b'Tj' not in dec and b'TJ' not in dec:
+        continue                                  # not a content stream
+    out = []
+    for tm in re.finditer(rb'\((?:\\.|[^\\()])*\)|\bTd\b|\bTD\b|\bT\*\b|\bTm\b', dec):
+        s = tm.group(0)
+        if s.startswith(b'('):
+            out.append(re.sub(rb'\\([()\\])', rb'\1', s[1:-1]).decode('latin-1'))
+        else:
+            out.append('\n')                      # positioning op -- treat as a line break
+    print(''.join(out))
+EOF
+```
+
+Two caveats that matter: **accented characters are dropped** (the LWS invoices came out as
+`Dpartement`, `hbergement`), so it is unreliable for French prose and fine for identifiers, specs,
+prices and URLs; and it does nothing for **scanned** PDFs, which stay unreadable here.
+
+Cost that earned the correction: a session nearly asked the product owner to retype two hosting
+invoices whose contents (a shared-hosting product name and its FTP-only access model) decided the
+whole hosting question. State the caveat when you use it — say the accents are lossy — but do not
+claim you cannot open the file.
 
 ## 5. Establish a third-party integration's shape BEFORE naming anything
 
@@ -500,3 +533,32 @@ configuration, never a blanket `allow`.
 
 Corollary for any new crate: `cargo check -p <it>` **before** wiring consumers, or you debug the
 crate's own feature assumptions through the noise of the whole workspace.
+
+## 14. Screen a hosting offer by PERMISSION, not by specs
+
+A hosting comparison that starts from RAM, disk and price picks the wrong product. Captain.Food is a
+long-running compiled binary -- an Axum server with in-process mailbox workers parked on Postgres
+`LISTEN/NOTIFY` (ADR-20260802-200416). Shared hosting sells capacity to serve PHP; a VPS sells the
+right to run your own process. That distinction is invisible in every comparison table.
+
+Ask these three, before looking at a single number:
+
+1. Do I get **root**?
+2. Can I run **my own compiled binary**, permanently, listening on a port?
+3. Can I **install and control PostgreSQL** myself -- not "a database is available"?
+
+Any "no" and it is web hosting, whatever the specs say. Two French offers evaluated on 2026-08-04
+failed on (1) and (2) while advertising far more hardware than the VPS that won: **LWS WordPress
+Performance** (300 GB SSD, 50 MySQL databases, no SSH -- and MySQL only, so no event store) and
+**o2switch Cloud** (12 threads, 48 GB RAM, PostgreSQL and SSH available, but the CGV prohibit
+daemons and any binary the host did not provide).
+
+Cost that earned it: a year of LWS WordPress Performance paid in advance for a product that cannot
+host the app at all. The plan still has a job -- it holds the `captain.food` registration, DNS and
+mail -- but it was bought as a server.
+
+Corollary, same session: **a rejected option can stop being rejected when the shape around it
+changes.** PROP-20260731-061609 D1 rejected OVH VPS because "Public Cloud instances are barely more
+and sit in the same ecosystem as the managed DB". Once the database moved onto the box, the
+load-bearing clause evaporated and the rejected option became the winner at 40% of the price. When
+a decision's premise changes, re-read the rejections it produced -- do not treat them as settled.

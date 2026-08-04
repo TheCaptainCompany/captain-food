@@ -467,6 +467,24 @@
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
 > `messages.yaml` as the third payload catalog.
 
+> 🚨 **2026-08-04 — THE OVH SHAPE IS DECIDED: ONE BOX (ADR-20260804-171030, product-owner decision).**
+> A single **OVH VPS-3** (6 vCore / 12 GB / 100 GB NVMe, unmetered traffic, French region,
+> **€10.40/month HT**) runs app + PostgreSQL + Redis — replacing the ~€160/month managed-HA shape
+> D2 first proposed. **PostgreSQL is installed on the HOST**, app and Redis are containers
+> (*system of record on the host, rebuildable in a container*): the deploy verb is
+> `docker compose up -d` on every release and the event log must sit outside its blast radius.
+> Backups go to a **different provider** — nightly `pg_dump` + WAL archiving to Scaleway Object
+> Storage (Paris), with a **restore rehearsal gating the DNS cut**. French hosting is preserved, so
+> ADR-0042's strengthening needs no amendment. The managed database is **deferred, not abandoned** —
+> staying on OVH keeps that path same-provider.
+> **The 30 Aug 2026 Supabase restriction is the deadline**, and the cutover is its structural fix:
+> colocating app and DB turns every round-trip into loopback traffic, so the ~15 GB/month idle
+> egress baseline that exhausted Render's 5 GB allowance stops existing.
+> Full option space (six providers screened, incl. why shared hosting is structurally impossible):
+> [PROP-20260731-061609](proposals/PROP-20260731-061609-ovh-migration.md).
+> Tracking: [#271](https://github.com/TheCaptainCompany/captain-food/issues/271) — **needs retitling**
+> to the single-box shape.
+
 > 🚨 **2026-07-31 — HOSTING MIGRATES TO OVH (ADR-20260731-061609, product-owner decision).**
 > Render + Supabase limitations are exhausted (bandwidth/build/disk; Disk-IO budget) and the costs
 > do not match the project. **Supabase is kept for IDENTITY ONLY.** The cutover uses the current
