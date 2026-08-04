@@ -197,6 +197,13 @@ not a guard.
 
 ## 8b. A guard over Rust STRUCTURE must parse the AST, not the text
 
+> **First ask whether it should be a guard at all** (ADR-20260803-234035). If the type system can
+> make the mistake unspellable — a capability witness with a `pub(crate)` constructor, a sealed
+> trait, private fields, a newtype — do that instead and write no guard. Everything below is how to
+> build one WHEN THE COMPILER CANNOT, and it is the more expensive branch: the section exists
+> because a scanner over a boundary the compiler already enforced cost seven review rounds and
+> ~191 lines. Read it as a fallback, not as the method.
+
 `str::find` over source cannot enforce a structural rule about Rust, and three independent review
 passes proved it on one guard (#304's `every_mailbox_port_method_demands_the_access_witness`). Each
 pass defeated the previous version, never with anything clever: `pub  fn` with two spaces, a
@@ -240,6 +247,29 @@ Riders, all learned the same way:
   `#[cfg_attr(<cond>, path = "…")]`, and an `include!` ban keyed on `is_ident` that misses
   `std::include!`, are the same mistake: **ban a CLASS, matched on the last path segment, not a
   spelling.**
+- **A ceiling may be the technique's, not the problem's — check before you disclaim.** The class
+  above (a public wrapper that mints internally) is un-checkable *by signatures*, and that is not
+  the same as un-checkable. Capabilities have a small set of SOURCES: for a token type, a value
+  arrives either as a parameter or from a construction. Cover the parameter case with the signature
+  rule you already have, then seed a call-graph taint scan on the CONSTRUCTIONS and propagate to a
+  fixpoint. Seed and resolve calls **from the AST** — a text seed misses a respelling
+  (`T { 0: () }` is the same construction as `T(())`), and an `ident(`-shaped call scan misses every
+  function passed as a VALUE (`let f = T::mint;`, `.map(helper)`), which is a false negative in
+  honest code and not only an attack. Stop taint at declared entry points, or every caller of the
+  public API looks like a new door — but NOT at a *feature-gated* one, since a wrapper does not
+  inherit the gate that contains it. Key the allowlist by `(file, name)`; a bare name pre-authorises
+  any future function that takes it. The allowlist is the real artifact: it enumerates the doors,
+  and opening another is an edit to it.
+- **A syntactic tool does not discharge a semantic claim — and this is the trap that caught me
+  LAST, after six passes of catching it elsewhere.** "A value arrives as a parameter or a
+  construction" is sound provenance. "…therefore my two scans cover every route" does not follow,
+  because the scans approximate the call graph by ident with no type resolution. I wrote "complete
+  rule" into four documents, including an amendment that RETRACTED a correct limit an earlier review
+  had earned; review then produced four ordinary counterexamples. Retracting a real limit is worse
+  than the limit. State the scope in the terms the tool actually works in ("sound for constructions
+  the AST recognises, and call edges resolvable by ident"), and if you want the semantic claim, say
+  what it would cost — type resolution, a rustc lint or HIR/MIR reachability — and leave it to a
+  proposal.
 - **Know where the guard's ceiling is, and write it down.** Some classes are not checkable at all
   by the technique you chose, and finding that out is a result, not a failure. Here: a public
   in-crate wrapper that mints internally and exposes the capability through a signature that never

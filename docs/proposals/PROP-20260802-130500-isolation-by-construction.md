@@ -69,6 +69,13 @@ and costs review nothing once installed):
 Levels 4–5 are the only ones an agent cannot cross *silently*: the crossing itself is a loud,
 reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change).
 
+**START at level 4** (product-owner directive, 2026-08-03, [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)).
+This table ranked the levels but never said where to begin, so "climb one level" got read as an
+achievement instead of a floor — and [#329](https://github.com/TheCaptainCompany/captain-food/issues/329)
+spent seven review rounds hardening a level-3 scanner over a boundary level 4 already held. Before
+writing a gate, ask whether the type system can make the mistake unspellable; write the gate only
+where it cannot.
+
 ## 2. Current state, measured (2026-08-03)
 
 | boundary | today | level |

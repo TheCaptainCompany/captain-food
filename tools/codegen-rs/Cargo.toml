@@ -21,5 +21,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 workspace = true
 
 [dev-dependencies]
+proc-macro2 = "1.0.107"
 quote = "1.0.47"
-syn = { version = "2", features = ["full"] }
+syn = { version = "2", features = ["full", "visit"] }
