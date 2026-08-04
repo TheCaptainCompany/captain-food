@@ -20,7 +20,6 @@ dependencies = [
  "client-payment",
  "client-restaurant",
  "domain",
- "serde",
  "serde_json",
  "tokio",
  "uuid",

@@ -28,6 +28,21 @@ once the build is warm. (This entry previously described `make rust` as includin
 #306 relied on that, and only noticed when a brand-new integration test failed to appear in the
 gate's output. If the wording ever drifts again, read the Makefile, not this table.)
 
+**`make rust` does not run `cargo machete` either**, and CI does. It is not preinstalled in this
+container, but `cargo install cargo-machete` works from crates.io in about a minute — do that and
+run it before pushing any change that MOVES CODE BETWEEN CRATES. Moving code moves the *use* of a
+dependency while leaving the `Cargo.toml` line behind: #306 lifted the typed clients out of
+`actor_client`, which took every `serde::Serialize` bound with them, and the now-unused `serde`
+entry was caught only by CI. The fix for an unused dependency is to DELETE it, not to add a
+`[package.metadata.cargo-machete] ignored` entry — the whole point of the D6 step is that an
+unheld capability someone can silently start using is a hole.
+
+So the honest local pre-push gate for `crates/**` work is three commands, not one:
+
+```bash
+make rust && cargo test --workspace && cargo machete
+```
+
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the

@@ -35,7 +35,10 @@ bulk-door = []
 domain = { path = "../domain" }
 application = { path = "../application" }
 async-trait = { workspace = true }
-serde = { workspace = true }
+# NO `serde` here since phase 2 (#306): the `serde::Serialize` bounds left with the typed clients,
+# and each generated client crate declares serde for itself. This crate only ever handles payloads
+# as already-serialized `serde_json::Value`. Re-adding it without a use is exactly the "unused
+# dependency = unheld capability" hole the D6 cargo-machete step exists to catch.
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
