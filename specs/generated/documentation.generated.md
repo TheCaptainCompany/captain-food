@@ -570,24 +570,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | [📩 `MarkProspectCold`](#command-markprospectcold) | [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 | [📩 `RecordProspectReply`](#command-recordprospectreply) | [⚡ `ProspectReplied`](#event-prospectreplied) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 
-### 🗄️ Views (read models) _(4)_
-
-<a id="view-view_restaurantaccount"></a>
-#### 🗄️ View: `View_RestaurantAccount`
-
-- **Source**: [🎭 `RestaurantAccount`](#actor-restaurantaccount) · 🛶 V0 · 🔒 internal
-- **Note**: Account read model (HubRise restaurant). Holds account-level facts shared by its locations; locations denormalize default_currency from here.
-- **Fed by**: [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered), [⚡ `RestaurantAccountUpdated`](#event-restaurantaccountupdated), [⚡ `RestaurantAccountDeleted`](#event-restaurantaccountdeleted)
-
-| Column | Type | Sourced from | Constraints | Notes |
-| --- | --- | --- | --- | --- |
-| `restaurant_account_id` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`restaurantAccountId`](#event-restaurantaccountregistered--restaurantaccountid) | PK |  |
-| `ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`ref`](#event-restaurantaccountregistered--ref) | nullable |  |
-| `legal_name` | [🔤 `RestaurantLegalName`](#scalar-restaurantlegalname) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`legalName`](#event-restaurantaccountregistered--legalname), [⚡ `RestaurantAccountUpdated`.`legalName`](#event-restaurantaccountupdated--legalname) | — |  |
-| `default_currency` | [🔤 `CurrencyCode`](#scalar-currencycode) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`defaultCurrency`](#event-restaurantaccountregistered--defaultcurrency) | — |  |
-| `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`timezone`](#event-restaurantaccountregistered--timezone), [⚡ `RestaurantAccountUpdated`.`timezone`](#event-restaurantaccountupdated--timezone) | nullable |  |
-| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
-| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+### 🗄️ Views (read models) _(3)_
 
 <a id="view-restaurant"></a>
 #### 🗄️ View: `Restaurant`
@@ -598,7 +581,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | PK |  |
-| `restaurant_account_id` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) _(derived)_ → [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount) | [⚡ `RestaurantRegistered`.`accountId`](#event-restaurantregistered--accountid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid) | index, nullable | NULL for a non-partner public listing; set on claim/conversion. |
+| `restaurant_account_id` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) _(derived)_ | [⚡ `RestaurantRegistered`.`accountId`](#event-restaurantregistered--accountid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid) | index, nullable | NULL for a non-partner public listing; set on claim/conversion. |
 | `listing_status` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | [⚡ `RestaurantRegistered`.`listingStatus`](#event-restaurantregistered--listingstatus), [⚡ `RestaurantListingStatusChanged`.`listingStatus`](#event-restaurantlistingstatuschanged--listingstatus) | index |  |
 | `external_identifiers` | `jsonb` | [⚡ `RestaurantRegistered`.`externalIdentifiers`](#event-restaurantregistered--externalidentifiers) | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
 | `google_place_id` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`googlePlaceId`](#event-restaurantgooglebusinessprofileupdated--googleplaceid) | nullable |  |
@@ -993,7 +976,7 @@ A restaurant account (HubRise: restaurant) was created; it owns one or more loca
 
 - **Emitted by**: [🎭 `RestaurantAccount`](#actor-restaurantaccount)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `Restaurant`](#view-restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1012,7 +995,7 @@ One or more account-level fields changed (legal name, contact, default tax, time
 
 - **Emitted by**: [🎭 `RestaurantAccount`](#actor-restaurantaccount)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount)
+- **Projected into**: _non-projected (saga/transient)_
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1029,7 +1012,7 @@ A restaurant account was closed/deleted.
 
 - **Emitted by**: [🎭 `RestaurantAccount`](#actor-restaurantaccount)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount)
+- **Projected into**: _non-projected (saga/transient)_
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -11605,7 +11588,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | ⚙️ `event-store-adapter` | 📡 yes | Appends to domain_events; span 'event.store.append' with business.event_type/stream_id. | — |
 | ⚙️ `event-publisher` | 📡 yes | Publishes appended events to the bus; span 'event.publish' (PRODUCER). | — |
 | ⚙️ `message-consumers` | 📡 yes | Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER). | — |
-| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Customer`](#view-customer), [🗄️ `Catalog`](#view-catalog), [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob) |
+| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Customer`](#view-customer), [🗄️ `Catalog`](#view-catalog), [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob) |
 | ⚙️ `bam-projector` | 📡 yes | Business Activity Monitoring projection (runs in the bam container); business_metrics only. | — |
 | ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | reads [🗄️ `Restaurant`](#view-restaurant) |
 | ⚙️ `stripe-adapter` | 📡 yes | Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |

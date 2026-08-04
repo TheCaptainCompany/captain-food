@@ -7,15 +7,6 @@ description: >
   are applied by a separate migration/seed script. Column `type` is a scalars.yaml `$ref` or an inline SQL
   primitive, like tables/eventstore.yaml.
 
-PhoneCountry:
-  reference: true
-  description: "Phone-country reference for the dialing-code picker; the picker emits dialing_code ('+33'). Reference data with NO API query today -- the `phoneCountries` query was deleted with #305 as unreached and unimplemented; a surface that needs the list declares a query then."
-  columns:
-    country:        { type: { $ref: 'scalars.yaml#/CountryCode' }, pk: true }
-    dialing_code:   { type: { $ref: 'scalars.yaml#/DialingCode' }, index: true }
-    name:           { type: text }
-    default_locale: { type: { $ref: 'scalars.yaml#/Locale' } }
-
 PricingPolicy:
   reference: true
   description: >

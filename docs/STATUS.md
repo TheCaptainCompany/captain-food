@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-04 — Unread read models deleted
+> ([ADR-20260804-032640](adr/ADR-20260804-032640-delete-unread-read-models.md))**, product-owner
+> directive following the #305 gate. **`View_RestaurantAccount`** (the ONLY `internal: true` exemption in
+> the database spec — no api binding, no component read, zero literal hits in `crates/**`) and
+> **`PhoneCountry`** (a `reference: true` table, which the gate does not check at all — zero references
+> anywhere) are gone. **No `crates/**` file changed** as a result: direct proof nothing read them.
+> **"No declared reader" ≠ "unused"** — the bounded claim biting the other way. A trial deletion of the
+> view raised **3 errors**: `Restaurant.restaurant_account_id` carried an `fk:` into it (read-navigation
+> graph) and `projection-updaters` listed it in `updates[*]`. Both removed; the column stays, still
+> indexed, since `restaurantLocationsByAccount` queries by it.
+> **A known hole, deliberately accepted** (product owner chose this over keeping the view or folding the
+> event first): `RestaurantAccountUpdated` and `RestaurantAccountDeleted` now reach NO read model — an
+> account legal-name/timezone change, and an account deletion, land in the log and propagate nowhere.
+> Account data is correct at creation only, because the `Restaurant` projection folds
+> `RestaurantAccountRegistered` for `default_currency`, and silently stale after. A back-office account
+> surface needs a **projection**, not a query. `nonProjectedEvents`' documented meaning was **widened**
+> to carry two reasons — (a) transient/saga-internal, (b) **recorded but unread** — rather than file
+> these two under (a), which would have been false.
+> **Warning baseline 32 → 31** (`view-fedby-unused` 2 → 1; `event-not-projected` held at 11, no new kind).
+
 > ✅ **2026-08-04 — [#305 "View_* read declarations: no spec says which surface reads which view"](https://github.com/TheCaptainCompany/captain-food/issues/305)
 > ([ADR-20260804-014546](adr/ADR-20260804-014546-read-models-declare-their-readers.md))**: the READ-side
 > equivalent of the #304 hole. `components.*.reads[*]` in `specs/architecture/c4-l3.yaml` — the mirror
@@ -24,7 +44,8 @@
 > managers and the HubRise ACL. C4 now renders `reads` beside `updates` in both doc surfaces.
 > `phoneCountries` **deleted** (product-owner call): the only V0 query reached by no screen and the only
 > one of 32 with no wired resolver body — it advertised a `reads:` binding while returning
-> `Err("not implemented")`; the `PhoneCountry` reference table stays.
+> `Err("not implemented")`; the `PhoneCountry` reference table stays *(reversed hours later — see the
+> 032640 entry above; the table was deleted too)*.
 > **Warning baseline 33 → 32** (`view-no-query ×1` gone, nothing else moved).
 
 > ✅ **2026-08-03 — [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)

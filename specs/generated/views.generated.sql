@@ -3,25 +3,6 @@
 -- from each column's `from` lineage (ADR-0039). Read models whose columns are COMPUTED are materialized
 -- tables in tables/projection_tables.yaml (emitted into schema.generated.sql) instead.
 
-CREATE OR REPLACE VIEW View_RestaurantAccount AS
-SELECT
-  (c.payload->>'restaurantAccountId')::uuid AS restaurant_account_id,
-  c.payload->>'ref' AS ref,
-  (SELECT e.payload->>'legalName' FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated') AND e.payload ? 'legalName'
-     ORDER BY e.position DESC LIMIT 1) AS legal_name,
-  c.payload->>'defaultCurrency' AS default_currency,
-  (SELECT e.payload->>'timezone' FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated') AND e.payload ? 'timezone'
-     ORDER BY e.position DESC LIMIT 1) AS timezone,
-  c.occurred_at AS created_at,
-  (SELECT max(e.occurred_at) FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated', 'RestaurantAccountDeleted')) AS updated_at
-FROM domain_events c
-WHERE c.event_type = 'RestaurantAccountRegistered'
-  AND NOT EXISTS (SELECT 1 FROM domain_events d
-                  WHERE d.stream_name = c.stream_name AND d.event_type = 'RestaurantAccountDeleted');
-
 CREATE OR REPLACE VIEW View_DeliveryJob AS
 SELECT
   (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,

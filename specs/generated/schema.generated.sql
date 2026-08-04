@@ -252,14 +252,6 @@ CREATE TABLE delivery_dispatch_process_manager (
   last_update_utc TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE PhoneCountry (
-  country TEXT PRIMARY KEY,
-  dialing_code TEXT NOT NULL,
-  name TEXT NOT NULL,
-  default_locale TEXT NOT NULL
-);
-CREATE INDEX ON PhoneCountry (dialing_code);
-
 CREATE TABLE PricingPolicy (
   currency TEXT PRIMARY KEY,
   fee_rate NUMERIC NOT NULL,

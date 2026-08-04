@@ -38,41 +38,13 @@ description: >
     - derive    : status-from-event-type — a map `{ event_type: VALUE | { from: payloadProp } }`; the
                   latest matching lifecycle event decides the value (literal or payload-extracted).
 
-View_RestaurantAccount:
-  aggregate: RestaurantAccount
-  slice: V0
-  internal: true   # admin/back-office + consulted by the RegisterRestaurant handler (account must exist); no public query
-  note: "Account read model (HubRise restaurant). Holds account-level facts shared by its locations; locations denormalize default_currency from here."
-  # strategy: fold (default) — the codegen GENERATES the CREATE VIEW from the per-column `from` lineage
-  # (ADR-0035 #2). Set-once fields (ref, default_currency — Registered only) fall out of the per-column
-  # "latest carrying event" rule automatically; updatable fields (legal_name, timezone) take their latest
-  # carrying event; updated_at = max(occurred_at). A Deleted event drops the row (tombstone below). This is
-  # the exemplar of correct-by-construction folds — the #TODO set-once hazard is now impossible by design.
-  tombstone: { $ref: 'events.yaml#/RestaurantAccountDeleted' }
-  fedBy:
-    - { $ref: 'events.yaml#/RestaurantAccountRegistered' }
-    - { $ref: 'events.yaml#/RestaurantAccountUpdated' }
-    - { $ref: 'events.yaml#/RestaurantAccountDeleted' }
-  columns:
-    restaurant_account_id:
-      from: [{ $ref: 'events.yaml#/RestaurantAccountRegistered/properties/restaurantAccountId' }]
-      pk: true
-    ref:
-      from: [{ $ref: 'events.yaml#/RestaurantAccountRegistered/properties/ref' }]
-      nullable: true
-    legal_name:
-      from:
-        - { $ref: 'events.yaml#/RestaurantAccountRegistered/properties/legalName' }
-        - { $ref: 'events.yaml#/RestaurantAccountUpdated/properties/legalName' }
-    default_currency:
-      from: [{ $ref: 'events.yaml#/RestaurantAccountRegistered/properties/defaultCurrency' }]
-    timezone:
-      from:
-        - { $ref: 'events.yaml#/RestaurantAccountRegistered/properties/timezone' }
-        - { $ref: 'events.yaml#/RestaurantAccountUpdated/properties/timezone' }
-      nullable: true
-# Events deliberately NOT projected into any View_* — transient / saga-internal facts whose data is
-# returned synchronously via the mutation payload, never read through a projection.
+# Events deliberately NOT projected into any View_*. Two distinct reasons, both intentional:
+#   (a) TRANSIENT / saga-internal facts whose data is returned synchronously via the mutation payload,
+#       never read through a projection;
+#   (b) RECORDED BUT UNREAD — durable business facts that are appended to the log and have no read model
+#       today because nothing queries them. These are NOT transient: the fact matters and is retained,
+#       but no surface consumes it yet. A reader arriving later adds a projection and removes the entry.
+# The distinction is per-entry below; do not read (b) as "safe to stop emitting".
 nonProjectedEvents:
   - { $ref: 'events.yaml#/PaymentIntentCreated' }   # in-flight checkout; clientSecret returned in PlaceOrderPayload, order materializes on capture
   - { $ref: 'events.yaml#/RefundRequested' }        # saga trigger consumed by RefundProcess; the settled PaymentRefunded fact is what gets projected
@@ -84,6 +56,13 @@ nonProjectedEvents:
   # entry when the first tombstone fold lands so the validator hunts the stragglers.
   - { $ref: 'events.yaml#/OrderExpired' }
   - { $ref: 'events.yaml#/MailboxMessageRequeued' }   # audit-only operator fact (#315); the supervision reads (mailboxLanes/poisonedMailboxMessages) serve from inbound_messages directly, no View_*
+  # (b) RECORDED BUT UNREAD — View_RestaurantAccount was deleted as having no reader (see ADR). The
+  # account's creation fact still reaches a read model: the Restaurant projection folds
+  # RestaurantAccountRegistered for default_currency. These two do not, and that is a KNOWN HOLE, not a
+  # design end-state: an account legal-name/timezone change, and an account deletion, are recorded in the
+  # log and propagate to no read model. A back-office account surface must add a projection, not a query.
+  - { $ref: 'events.yaml#/RestaurantAccountUpdated' }
+  - { $ref: 'events.yaml#/RestaurantAccountDeleted' }
   # CustomerCreditGranted / CustomerCreditConsumed are now PROJECTED into the materialized
   # CustomerCreditBalance table (a SUM read model, tables/projection_tables.yaml; #158 Part B of #207).
 

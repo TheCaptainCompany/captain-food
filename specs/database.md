@@ -119,22 +119,6 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 <!-- GENERATED:views START — source: specs/database/projection_views.yaml; run `make generate`. Do not edit between the markers. -->
 
-### `View_RestaurantAccount` · 🛶 V0 · 🔒 internal · source aggregate `RestaurantAccount`
-
-- **Consumed by**: command handlers / auth resolution (no GraphQL query).
-- **Fed by**: `RestaurantAccountRegistered`, `RestaurantAccountUpdated`, `RestaurantAccountDeleted`
-- **Note**: Account read model (HubRise restaurant). Holds account-level facts shared by its locations; locations denormalize default_currency from here.
-
-| Column | Type | SQL | Constraints | Notes |
-| --- | --- | --- | --- | --- |
-| `restaurant_account_id` | `RestaurantAccountId` | `UUID` | PK |  |
-| `ref` | `ExternalReference` | `TEXT` | nullable |  |
-| `legal_name` | `RestaurantLegalName` | `TEXT` | — |  |
-| `default_currency` | `CurrencyCode` | `TEXT` | — |  |
-| `timezone` | `TimeZone` | `TEXT` | nullable |  |
-| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
-| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
-
 ### `View_DeliveryJob` · 🛶 V0 · source aggregate `DeliveryJob`
 
 - **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`, `DeliveryDispatchFailed`

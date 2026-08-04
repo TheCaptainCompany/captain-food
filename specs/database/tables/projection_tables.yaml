@@ -46,7 +46,9 @@ Restaurant:
         - { $ref: 'events.yaml#/RestaurantListingClaimed/properties/accountId' }
       index: true
       nullable: true
-      fk: { $ref: 'database/projection_views.yaml#/View_RestaurantAccount/columns/restaurant_account_id' }
+      # No `fk:` — View_RestaurantAccount was deleted as unread (ADR below). The account id is still
+      # carried and indexed (restaurantLocationsByAccount queries by it); it just no longer points at a
+      # read model, so there is no read-navigation edge to declare.
       note: "NULL for a non-partner public listing; set on claim/conversion."
     listing_status:
       type: { $ref: 'scalars.yaml#/RestaurantListingStatus' }

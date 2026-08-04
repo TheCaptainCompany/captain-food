@@ -79,7 +79,6 @@ components:
     description: "Update the View_* read models from events; span 'event.consume.projection'."
     instrumented: true
     updates:
-      - { $ref: 'database/projection_views.yaml#/View_RestaurantAccount' }
       - { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
       - { $ref: 'database/tables/projection_tables.yaml#/Customer' }
       - { $ref: 'database/tables/projection_tables.yaml#/Catalog' }
