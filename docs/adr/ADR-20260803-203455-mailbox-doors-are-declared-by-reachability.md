@@ -6,7 +6,12 @@
   (the `MailboxAccess` witness), which named this class as its stated limit
 - **Realized by**: [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
   (issue retitled from "Close" — the outcome is a narrowing, and the title said otherwise)
-- **Defers**: [#331 "Decide whether the mailbox-door rule is worth type resolution (rustc lint / HIR / MIR)"](https://github.com/TheCaptainCompany/captain-food/issues/331)
+- **Deferral RESOLVED** (product-owner, 2026-08-03): [#331](https://github.com/TheCaptainCompany/captain-food/issues/331)
+  decided as **keep as is** — the guard stays, and is FROZEN. `dylint` and `cargo-public-api` were
+  declined as too risky: both need nightly, against `rust-toolchain.toml`'s deliberate stable pin.
+  Deleting it was declined too. So the table below is now a record of what it cost, not an argument
+  for changing it: treat a future bypass of the disclosed shape as maintenance, and do not reopen
+  the technique question without a new reason.
 
 ## Decision
 
@@ -53,8 +58,8 @@ proposal rather than a test — tracked as
 [#331 "Decide whether the mailbox-door rule is worth type resolution"](https://github.com/TheCaptainCompany/captain-food/issues/331)
 so the deferral is visible in the prioritised backlog rather than living only in this sentence.
 
-**How this guard is maintained, stated so nobody mistakes it for a proof.** Six adversarial review
-rounds shaped it, and the honest tally matters because it is the evidence #331 will be decided on:
+**How this guard is maintained, stated so nobody mistakes it for a proof.** Seven adversarial review
+rounds shaped it — the count the table below actually lists; an earlier line said six:
 
 | round | what it found | net functional lines in `tests.rs` |
 |---|---|---|
@@ -83,8 +88,7 @@ and it is why the scope sentence above reads as it does. This check is defence-i
 boundary the COMPILER already enforces against out-of-crate callers (ADR-20260803-172654): it earns
 its place by catching the plausible in-crate accident — a scoped-capability helper written `pub`
 instead of `pub(crate)` — not by being exhaustive. Treat a new bypass of this shape as maintenance;
-if the exhaustive property is genuinely wanted, that is #331, and the table above is the cost side
-of that decision.
+the exhaustive property was weighed on #331 and declined.
 
 ## Consequences
 
