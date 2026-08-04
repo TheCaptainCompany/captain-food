@@ -1,7 +1,31 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-08-04 — [#305 "View_* read declarations: no spec says which surface reads which view"](https://github.com/TheCaptainCompany/captain-food/issues/305)
+> ([ADR-20260804-014546](adr/ADR-20260804-014546-read-models-declare-their-readers.md))**: the READ-side
+> equivalent of the #304 hole. `components.*.reads[*]` in `specs/architecture/c4-l3.yaml` — the mirror
+> of the existing `updates[*]`, one row in `refs.rs` — declares which component consumes which read
+> model, and **`read-model-no-reader` (error) replaces `view-no-query` (warning)**. Three ways to pass,
+> all declarations rather than exemptions: an `api.yaml` output type binds it, a component declares it,
+> or it is `internal: true`. A GraphQL-reached model is declared by its api.yaml type binding and is
+> deliberately NOT re-listed on `graphql-gateway`, so the two cannot drift.
+> **Why a gate and not the compiler** (ADR-20260803-234035): the property is a fact about YAML — rustc
+> cannot read `api.yaml`. Nothing here scans Rust, so it is not #329 repeating. The compiler answer
+> (a generated `ReadPorts` bundle, undeclared pair → `E0609`) needs a declaration to generate FROM,
+> which is what this lands; it is the **prerequisite**, tracked as successor B in the ADR.
+> **Bounded claim, stated in the ADR**: this proves every read model has *a* declared reader, NOT that
+> every actual reader is declared — the Rust side stays undeclared until the port bundle. Do not close
+> that with a source scan; that is #329 verbatim.
+> Satisfied with four declarations: a new **`tenant-host-router`** component (`crates/server/src/hosts.rs`
+> had no C4 representation at all despite being a live entry point) covering `SlugAlias` — the one
+> `view-no-query` warning on `main`, read legitimately by the 301 — plus command handlers, process
+> managers and the HubRise ACL. C4 now renders `reads` beside `updates` in both doc surfaces.
+> `phoneCountries` **deleted** (product-owner call): the only V0 query reached by no screen and the only
+> one of 32 with no wired resolver body — it advertised a `reads:` binding while returning
+> `Err("not implemented")`; the `PhoneCountry` reference table stays.
+> **Warning baseline 33 → 32** (`view-no-query ×1` gone, nothing else moved).
 
 > ✅ **2026-08-03 — [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
 > ([ADR-20260803-203455](adr/ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md))**:
