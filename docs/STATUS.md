@@ -2278,7 +2278,7 @@ Two sessions run in parallel — 🅐 = this (desktop) session, 🅑 = the iPhon
 | 6 | GraphQL **subscriptions** (`SubscriptionRoot` + bus + WS + ACL) | 🅐 | ✅ |
 | 7 | **Structured typed errors** (ADR-20260719-120000) | 🅐 | ✅ |
 | 8 | **Per-field nav-edge ACL** — optional `roles:` on nav fields (default public), same guard/visible as ops; design agreed | 🅐 | 📋 plan mode (after ACL emitter free) |
-| 8b | Delivery/account read queries + catalog `tree` + `me`/favorites | 🅐 | ✅ (read surface complete except `phoneCountries`=client-const, `operation`) |
+| 8b | Delivery/account read queries + catalog `tree` + `me`/favorites | 🅐 | ✅ (read surface complete except `operation`; `phoneCountries` deleted with #305) |
 | 9 | Remove `INTERNAL_TRIGGER_TOKEN`/drain endpoint (use `/ping` warmth) | 🅐 | 🗑️ deferred |
 | 10 | Projection worker robustness (poison-skip) + spin-down mitigation (uptimerobot `/ping`) | 🅐 | ✅ |
 | 10a | **Push-driven drain loops** ([#300](https://github.com/TheCaptainCompany/captain-food/issues/300), ADR-20260802-200416) — `pg_notify` in the append transaction + one `LISTEN` connection wakes the projector AND the saga runner; safety-net drain kept (NOTIFY has no replay) and the fallback reverts to the 1.5 s poll whenever the listener is down; idle head-gate skips per-group queries when the log has not moved | 🅐 | ✅ idle DB round trips ~70,900/h → ~120/h, and sagas react on commit instead of up to 1.5 s later. **Requires a session-mode pooler** (Supabase 5432); `RUN_EVENT_PUSH=false` forces polling |

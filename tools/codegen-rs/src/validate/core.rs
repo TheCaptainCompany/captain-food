@@ -631,9 +631,27 @@ pub(crate) fn validate(model: &Model) -> Report {
             .and_then(|v| v.get("components"))
             .and_then(|v| v.as_mapping())
         {
-            for (_name, comp) in cm {
+            for (name, comp) in cm {
+                let component = name.as_str().unwrap_or("");
                 for r in comp.get("reads").and_then(|v| v.as_sequence()).into_iter().flatten() {
                     if let Some(target) = r.get("$ref").and_then(|x| x.as_str()).and_then(|s| s.rsplit('/').next()) {
+                        // The two declarations must not overlap. A GraphQL-reached read model is
+                        // declared by its api.yaml type `reads:` binding; re-listing it on the gateway
+                        // would let ONE blanket component declaration satisfy the reader gate for every
+                        // model at once, and would drift from api.yaml the moment a binding moves.
+                        if component == "graphql-gateway" {
+                            issues.push(err(
+                                "gateway-declares-reads",
+                                "architecture/c4-l3.yaml/components.graphql-gateway".to_string(),
+                                format!(
+                                    "graphql-gateway must not declare `reads` ('{}') — a read model reached through \
+                                     GraphQL is declared by its api.yaml output type `reads:` binding. `components.*.reads` \
+                                     is for consumers no api.yaml type can speak for.",
+                                    target
+                                ),
+                            ));
+                            continue;
+                        }
                         cov.component_reads_links += 1;
                         component_reads.insert(target.to_string());
                     }

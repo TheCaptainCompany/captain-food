@@ -4002,17 +4002,64 @@ Catalog:
             report
                 .issues
                 .iter()
-                .any(|i| i.rule == "read-model-no-reader" && i.location.ends_with("SlugAlias")),
+                .any(|i| i.rule == "read-model-no-reader"
+                    && i.location.ends_with("SlugAlias")
+                    && i.level == Level::Error),
             "removing the only declared reader of SlugAlias must be an ERROR; got: {:?}",
-            report.issues.iter().filter(|i| i.rule == "read-model-no-reader").map(|i| &i.location).collect::<Vec<_>>()
+            report
+                .issues
+                .iter()
+                .filter(|i| i.rule == "read-model-no-reader")
+                .map(|i| &i.location)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn graphql_reached_read_models_are_not_re_declared_on_the_gateway() {
+        // The whole gate rests on the two declarations NOT overlapping: a read model reached through
+        // GraphQL is declared by its api.yaml type `reads:` binding, so re-listing it on
+        // `graphql-gateway` would let one blanket component declaration satisfy the rule for every
+        // model permanently. c4-l3.yaml says so in prose; this is the executable form, because prose
+        // a spec can violate on its face gets violated (the header said "re-listed HERE" and six
+        // legitimate non-GraphQL declarations contradicted it).
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        assert!(
+            !validate(&model).issues.iter().any(|i| i.rule == "gateway-declares-reads"),
+            "committed specs must not declare reads on graphql-gateway"
+        );
+        let comps = model
+            .defs
+            .get_mut("architecture/c4-l3.yaml")
+            .and_then(|v| v.get_mut("components"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("c4-l3 declares components");
+        comps
+            .get_mut(Value::from("graphql-gateway"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("graphql-gateway is a declared component")
+            .insert(
+                Value::from("reads"),
+                serde_yaml::from_str("[{ $ref: 'database/tables/projection_tables.yaml#/Restaurant' }]").unwrap(),
+            );
+        assert!(
+            validate(&model)
+                .issues
+                .iter()
+                .any(|i| i.rule == "gateway-declares-reads" && i.level == Level::Error),
+            "a read declared on graphql-gateway must be an ERROR"
         );
     }
 
     #[test]
     fn a_component_reading_an_unknown_read_model_is_rejected() {
-        // The `reads` ref site is under the §1b ref-kind contract (refs.rs REF_CONTRACT), so a typo'd
-        // or deleted target is caught as a dangling ref rather than silently satisfying the reader
-        // gate above — otherwise `reads: [#/Ghost]` would "declare" a reader for nothing.
+        // Two independent catches, asserted separately because they come from different places and it
+        // is easy to credit the wrong one. A target that does not exist is `ref-dangling` from §1,
+        // which walks EVERY `$ref` in every file and owes nothing to REF_CONTRACT. A target of the
+        // wrong KIND is `ref-kind`, and that one is the §1b contract row added for this site — so the
+        // second half is what proves the refs.rs row actually engages. Without both, `reads:` could
+        // "declare" a reader for something that is not a read model.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let mut model = load_model(&root.join("specs")).expect("load real specs");
         let router = model
@@ -4026,10 +4073,27 @@ Catalog:
             Value::from("reads"),
             serde_yaml::from_str("[{ $ref: 'database/tables/projection_tables.yaml#/GhostModel' }]").unwrap(),
         );
-        let report = validate(&model);
         assert!(
-            report.issues.iter().any(|i| i.rule == "ref-dangling" && i.message.contains("GhostModel")),
+            validate(&model).issues.iter().any(|i| i.rule == "ref-dangling" && i.message.contains("GhostModel")),
             "a component reading an unknown read model must not resolve"
+        );
+
+        // Wrong KIND: `Order` exists, but as an actor — not something anyone can read. This is the
+        // half that fails if the REF_CONTRACT row for `components.*.reads[*]` is removed.
+        let router = model
+            .defs
+            .get_mut("architecture/c4-l3.yaml")
+            .and_then(|v| v.get_mut("components"))
+            .and_then(|v| v.get_mut("tenant-host-router"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("tenant-host-router is a declared component");
+        router.insert(
+            Value::from("reads"),
+            serde_yaml::from_str("[{ $ref: 'actors.yaml#/Order' }]").unwrap(),
+        );
+        assert!(
+            validate(&model).issues.iter().any(|i| i.rule == "ref-kind" && i.message.contains("Order")),
+            "reads must accept only projection views/tables — an actor is the wrong kind"
         );
     }
 

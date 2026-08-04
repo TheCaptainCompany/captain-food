@@ -151,8 +151,16 @@ async fn public_operations_are_open_to_all_roles() {
     // remaining query is wired, so the stub branch has no subject left.)
     for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Admin] {
         let resp = execute_as(&schema, role, "{ restaurants { slug } }").await;
-        assert!(!resp.errors.is_empty(), "expected a dependency error for {role:?}");
+        assert_eq!(resp.errors.len(), 1, "expected the missing-dependency error for {role:?}: {:?}", resp.errors);
         assert!(!is_forbidden(&resp.errors[0]), "public op forbidden for {role:?}: {:?}", resp.errors);
+        // NAME the expected failure. `!is_forbidden` alone would also pass on `Unknown field
+        // "restaurants"`, so a deleted or renamed query would leave this test green while proving
+        // nothing — asserting the resolver reached its missing repo is what proves the body RAN.
+        assert!(
+            resp.errors[0].message.contains("RestaurantReadRepository"),
+            "resolver body did not run for {role:?}: {:?}",
+            resp.errors[0].message
+        );
     }
 }
 

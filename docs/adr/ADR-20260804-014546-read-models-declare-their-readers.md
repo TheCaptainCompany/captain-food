@@ -22,12 +22,16 @@ vocabulary, no new grammar.
 2. a c4-l3 component declares it in `reads:` — the readers no GraphQL type can speak for; **or**
 3. it is `internal: true` — the existing opt-out, unchanged.
 
-All three are **declarations, not exemptions**. There is no new escape hatch, deliberately: a
-required declaration shows up in a diff, and a warning does not.
+(1) and (2) are **declarations**; (3) is the pre-existing **exemption**, carried forward unchanged and
+used by exactly one model. No NEW escape hatch was added, deliberately: a required declaration shows
+up in a diff, and a warning does not.
 
 **A read model reached from GraphQL is declared by its api.yaml type binding and must NOT be
-re-listed on `graphql-gateway`.** That is the rule that keeps the two declarations from drifting;
-`reads:` exists only for consumers an api.yaml type cannot represent.
+re-listed on `graphql-gateway`** — enforced by `gateway-declares-reads`, not left to prose, because
+otherwise one blanket declaration there would satisfy the reader gate for every model at once. Any
+OTHER component declares what it actually consumes, whether or not GraphQL also reads it: several
+declared models are legitimately api-bound as well, and that is not duplication — a command handler
+reading `Customer` to enforce an invariant is a different consumer from the `CustomerProfile` type.
 
 ## Why this is a validator rule and not the compiler
 
@@ -49,10 +53,18 @@ below, and the pairs this ADR introduces are exactly its input.
 
 ## Bounded claim — what this does NOT prove
 
-**Nothing here proves the declaration complete against the Rust.** A component that reads a model and
-forgets to declare it is invisible to this gate. The rule proves that every read model has *a*
-declared reader; it does not prove that every actual reader is declared. Those are different
-properties, and only the second is closed by the port bundle.
+**Nothing here proves the declaration matches the Rust — in either direction.**
+
+- *False negatives*: a component that reads a model and forgets to declare it is invisible to this
+  gate. The rule proves every read model has *a* declared reader; it does not prove every actual
+  reader is declared.
+- *False positives*: **a declaration may simply be a lie.** Nothing checks that a component named in
+  `reads:` performs that read, so a declaration added to silence the gate satisfies it just as well as
+  a true one. Today's eight declarations were verified call site by call site, and an independent
+  review re-verified them — but that is a fact about this change, not a property of the gate.
+
+Both directions close the same way, and only the same way: the generated port bundle, where the
+declaration *is* the accessor.
 
 The temptation is to close the gap with a source scan that walks `queries.rs` call sites and compares
 them to the spec. **Do not.** That is #329 verbatim — a syntactic approximation of a semantic
@@ -66,11 +78,15 @@ Two further limits, recorded rather than fixed:
   `PhoneCountry`, …) are valid `reads:` *targets* but are not in the `views` population, so no reader
   is required of them. Pre-existing asymmetry, deliberately left: including them would force
   declarations against config paths nobody has audited.
-- **`View_RestaurantAccount`'s `internal: true` comment claims a reader it does not have.** It says
-  the RegisterRestaurant handler consults it, but there is no `RestaurantAccountReadRepository` in
-  `crates/application/src/queries.rs` and no such field on `CommandDeps`. The existence check is not
-  implemented through a read port. Surfaced here rather than silently "corrected", because which of
-  the two is wrong — the comment or the missing port — is a product/design call.
+- **`View_RestaurantAccount` has zero readers, declared or actual, and its comment says otherwise.**
+  `specs/database/projection_views.yaml:44` claims it is "consulted by the RegisterRestaurant
+  handler". It is not: that handler does an **event-store fold** (`store.load("RestaurantAccount-…")`
+  → `domain::restaurant_account::fold`, `crates/application/src/commands.rs:369-375`), never a
+  read-model read — and there is no `RestaurantAccountReadRepository` in
+  `crates/application/src/queries.rs` nor any such field on `CommandDeps`. So this model passes the
+  gate purely by exemption, and the projection is maintained for nobody. Surfaced rather than
+  silently "corrected", because the fix is a design call: delete the projection, or give the
+  existence check a read port instead of a fold.
 
 ## Consequences
 
