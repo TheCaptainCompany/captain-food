@@ -31,16 +31,24 @@ WordPress Performance) had already been bought for a year before that was notice
 
 ## Decision
 
-1. **One OVH VPS-3** (6 vCore, 12 GB RAM, 100 GB NVMe, unmetered traffic, French region) runs
-   everything — €10.40/month HT. VPS-2 (€7.21) is sufficient but leaves no margin on RAM or disk,
-   the two dimensions that have already caused incidents.
+1. **One OVH VPS-2** (4 vCore, 8 GB RAM, 75 GB NVMe, unmetered traffic, French region, Debian 13)
+   runs everything — **€7.21/month HT**, taken on a 12-month term. PostgreSQL **16** from PGDG, not
+   Debian 13's default 17, because `ci.yml` runs `postgres:16-alpine`.
+   The larger VPS-3 was considered and rejected on the upgrade asymmetry: OVH upgrades are in place
+   with data and IP preserved, while downgrades require a full migration — so under-buying costs one
+   click and over-buying costs a migration. Buy the floor, climb on a named signal (disk over 70%,
+   or sustained RAM pressure).
 2. **PostgreSQL is self-hosted on that box and installed on the HOST**, not as a container. The app
    and Redis are containers. The rule is *system of record on the host, rebuildable in a container*:
    the deploy verb is `docker compose up -d` on every release, and the event log must be outside the
    blast radius of that verb and of every `docker volume prune` run under disk pressure.
-3. **Backups go to a different provider**: nightly `pg_dump` plus WAL archiving to Scaleway Object
-   Storage in Paris (~€1/month, S3-compatible, still France). A **restore rehearsal gates the DNS
-   cut** — a backup that has never been restored is not a backup.
+3. **Backups go to a different provider**: nightly `pg_dump` to Scaleway Object Storage in Paris
+   (~€1/month, S3-compatible, still France), giving a 24-hour RPO. A **restore rehearsal gates the
+   DNS cut**, and runs fortnightly thereafter — a backup that has never been restored is not a
+   backup. WAL archiving for point-in-time recovery is **phase 2**: `wal_level = replica` is set from
+   the start so enabling it needs no restart, but `archive_mode` stays off until the shipper and its
+   pruning are proven, because an archive that fills the disk takes the database down. Gate, then
+   stabilize.
 4. **The managed database is deferred, not abandoned.** Staying on OVH — rather than Hetzner, which
    is marginally cheaper — preserves a same-provider path back to managed PostgreSQL when revenue
    justifies it.
@@ -52,12 +60,12 @@ WordPress Performance) had already been bought for a year before that was notice
 - **Managed HA PostgreSQL as originally proposed (~€160/month)** — the right answer post-revenue.
   Rejected now purely on cost. The reasoning that produced it ("the database is the one component
   where self-managing risks the money path") is sound and is answered by decision 3, not dismissed.
-- **Hetzner CX32 (~€8.50)** — better hardware per euro, but Germany-only. It would have traded
+- **Hetzner CX32 (~€8.50)** — comparable hardware, but Germany-only. It would have traded
   ADR-0042's French strengthening for a *negative* saving once OVH VPS was priced properly, and
   Hetzner offers no managed PostgreSQL, so the later escape hatch would mean changing provider
   twice.
 - **Scaleway** — French and with the cheapest object storage, but instance prices exclude block
-  storage at €0.0949/GB/month, landing 4x above VPS-3. Its cheap managed-PostgreSQL tiers have no HA
+  storage at €0.0949/GB/month, landing well above VPS-2. Its cheap managed-PostgreSQL tiers have no HA
   either, so they buy managed operations rather than availability.
 - **Bare metal (Dedibox €25–40 + install fee)** — better €/GB of RAM at scale, but recovery is a
   hardware intervention measured in hours with no snapshot to roll back a bad migration. Revisit when
@@ -71,7 +79,7 @@ WordPress Performance) had already been bought for a year before that was notice
 
 ### Positive
 
-- Monthly hosting drops from a proposed ~€160 to **~€11.50** (VPS-3 plus offsite backups).
+- Monthly hosting drops from a proposed ~€160 to **~€8.50** (VPS-2 plus ~€1 of offsite backups).
 - **The 30 Aug quota problem dissolves structurally**: colocating app and database turns every DB
   round-trip into loopback traffic. The ~15 GB/month idle egress baseline that exhausted Render's
   5 GB allowance simply stops existing.

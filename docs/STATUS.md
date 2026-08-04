@@ -468,9 +468,12 @@
 > `messages.yaml` as the third payload catalog.
 
 > 🚨 **2026-08-04 — THE OVH SHAPE IS DECIDED: ONE BOX (ADR-20260804-171030, product-owner decision).**
-> A single **OVH VPS-3** (6 vCore / 12 GB / 100 GB NVMe, unmetered traffic, French region,
-> **€10.40/month HT**) runs app + PostgreSQL + Redis — replacing the ~€160/month managed-HA shape
-> D2 first proposed. **PostgreSQL is installed on the HOST**, app and Redis are containers
+> A single **OVH VPS-2** (4 vCore / 8 GB / 75 GB NVMe, unmetered traffic, French region, Debian 13,
+> **€7.21/month HT**, ORDERED 2026-08-04 on a 12-month term) runs app + PostgreSQL + Redis —
+> replacing the ~€160/month managed-HA shape D2 first proposed. The smaller tier is deliberate:
+> OVH upgrades are in place (data and IP preserved) while downgrades are a full migration, so the
+> floor is the sound buy and capacity is added on a named signal.
+> **PostgreSQL 16 from PGDG**, not Debian 13's default 17 — `ci.yml` runs `postgres:16-alpine`. **PostgreSQL is installed on the HOST**, app and Redis are containers
 > (*system of record on the host, rebuildable in a container*): the deploy verb is
 > `docker compose up -d` on every release and the event log must sit outside its blast radius.
 > Backups go to a **different provider** — nightly `pg_dump` + WAL archiving to Scaleway Object
@@ -480,6 +483,16 @@
 > **The 30 Aug 2026 Supabase restriction is the deadline**, and the cutover is its structural fix:
 > colocating app and DB turns every round-trip into loopback traffic, so the ~15 GB/month idle
 > egress baseline that exhausted Render's 5 GB allowance stops existing.
+> **The migration kit is committed**: [`deploy/`](../deploy/) (idempotent `provision.sh`, PostgreSQL
+> tuning, compose, Caddyfile, backup + restore-drill scripts, systemd timers) and the step-by-step
+> [docs/runbooks/ovh-cutover.md](runbooks/ovh-cutover.md). `deploy.yml` and `db-migrate.yml` are
+> retargeted from Render's hook to SSH (the deploy now WAITS for the build to serve, closing #281's
+> fire-and-forget window at the source; db-migrate reaches the loopback-bound database through an
+> SSH tunnel rather than exposing 5432).
+> **TLS is phased**: HTTP-01 for the named reserved hosts at cutover (no DNS API needed), wildcard
+> via DNS-01 delegation before tenant onboarding — Let's Encrypt caps issuance at 50 certs per
+> registered domain per week, so per-tenant certs are not a workaround. `captain.food`, `www` and
+> `join` stay on marketing and are untouched by the cutover: **exactly one DNS record changes.**
 > Full option space (six providers screened, incl. why shared hosting is structurally impossible):
 > [PROP-20260731-061609](proposals/PROP-20260731-061609-ovh-migration.md).
 > Tracking: [#271](https://github.com/TheCaptainCompany/captain-food/issues/271) — **needs retitling**

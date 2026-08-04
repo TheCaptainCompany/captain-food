@@ -1,0 +1,11 @@
+[Unit]
+Description=Fortnightly Captain.Food restore drill
+
+[Timer]
+# Sundays at 04:00 UTC, every other week in practice via Persistent + the script's own age check.
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

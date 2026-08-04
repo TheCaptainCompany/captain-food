@@ -1,0 +1,57 @@
+# Caddy: TLS termination and reverse proxy for the OVH VPS-2 box.
+# Installed to /etc/captain-food/Caddyfile, mounted read-only into the caddy container.
+#
+# PHASE 1 -- explicitly named hosts, certificates over HTTP-01.
+#   No DNS API, no plugin, no custom Caddy build. Certificates issue the moment DNS points here.
+#
+# PHASE 2 -- wildcard `*.captain.food` for restaurant tenants. That REQUIRES DNS-01 (Let's Encrypt
+#   will not issue a wildcard over HTTP-01), which needs an automatable zone. It must be in place
+#   BEFORE real tenant onboarding: Let's Encrypt caps issuance at 50 certificates per registered
+#   domain per week, so per-tenant certificates stop working at 50 new restaurants in a week.
+#   See docs/runbooks/ovh-cutover.md, "Before tenant onboarding".
+#
+# NOT SERVED HERE, deliberately: `captain.food` (apex), `www` and `join` are the MARKETING site
+# (apex 301-forwards to join, which is on GitHub Pages -- ADR-0036 amendment 2026-07-18). Adding
+# them here would hijack acquisition traffic to the app.
+
+{
+	email ops@captain.food
+	# Uncomment to rehearse against the staging CA -- untrusted certs, but no rate limits burned.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# The reserved subdomains (ADR-0036). `hosts.rs` dispatches by Host header, so every name below
+# reaches the SAME upstream and the app decides what to serve.
+api.captain.food,
+live.captain.food,
+restos.captain.food,
+riders.captain.food,
+system.captain.food {
+	encode zstd gzip
+
+	# Trust Caddy's forwarded headers so the app sees the real client scheme/host/IP.
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		# /health can answer 503 `schema_behind` legitimately during a rollout, so Caddy must not
+		# treat that as an unhealthy upstream and pull the only instance out of rotation.
+		health_uri /health
+		health_status 2xx
+		health_interval 30s
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20mb
+			roll_keep 3
+		}
+		format json
+	}
+}

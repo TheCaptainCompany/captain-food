@@ -1,10 +1,13 @@
-# Deploy a previously-built image to Render — MANUAL, and the ONLY workflow that touches Render
-# (ADR-20260730-051500; splits the old build-image.yml build-and-deploy job).
+# Deploy a previously-built image to the OVH VPS — MANUAL, and the ONLY workflow that touches
+# production (ADR-20260730-051500 for the shape; ADR-20260804-171030 retargeted it from Render).
 #
-# WHY manual: Render can be unable to receive a deploy (workspace paused, outbound bandwidth
-# exhausted, spend cap). When that happens nothing should auto-run against production — neither the
-# deploy nor the schema migration that follows it. Publishing images stays automatic (build-image.yml);
-# RUNNING one is a deliberate human dispatch of this workflow.
+# WHY manual: production can be unable to receive a deploy. On Render that was a paused workspace or
+# exhausted bandwidth; on our own box it is a full disk or a wedged container. Either way nothing
+# should auto-run against production — neither the deploy nor the schema migration that follows it.
+# Publishing images stays automatic (build-image.yml); RUNNING one is a deliberate human dispatch.
+#
+# Requires repo secrets: VPS_HOST, VPS_SSH_KEY (the `deploy` user's private key), VPS_KNOWN_HOSTS.
+# The `deploy` user is not in sudo — it drives containers and nothing else (deploy/provision.sh).
 #
 # Ordering (deploy → migrate): db-migrate.yml triggers on this workflow's completion, so the schema
 # is never converted for a binary that cannot arrive. The app's /health schema-version gate holds the
@@ -66,18 +69,68 @@ jobs:
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "resolved ${IMAGE}:${TAG} → ${DIGEST}"
 
-      - name: Trigger Render to deploy the pinned image (by immutable digest)
+      # --- OVH VPS (ADR-20260804-171030). Replaces the Render deploy hook. -------------------
+      - name: Set up the deploy SSH key
         env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-          DIGEST: ${{ steps.resolve.outputs.digest }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
-          if [ -z "$HOOK" ]; then
-            echo "::error::repo secret RENDER_DEPLOY_HOOK_URL is not set — Render was not told to deploy"
+          if [ -z "$KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::repo secrets VPS_SSH_KEY and VPS_KNOWN_HOSTS must both be set"
             exit 1
           fi
-          # Deploy by DIGEST — the `imgURL` query param tells the Render image-backed deploy hook the
-          # EXACT image to run (Render docs: "Deploy hooks for image-backed services").
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pinned host key, NOT StrictHostKeyChecking=no. Accepting any key would let anyone who can
+          # answer on that address receive a deploy — and the deploy carries no secrets, but the SSH
+          # session does.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy the pinned image to the VPS
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          set -euo pipefail
           REF="${IMAGE}@${DIGEST}"
-          curl -fsS -X POST "${HOOK}&imgURL=${REF}" >/dev/null
-          echo "✓ triggered Render deploy of ${REF} (${{ steps.resolve.outputs.tag }})"
-          echo "db-migrate follows automatically on this workflow's completion."
+          echo "deploying ${REF} to ${HOST}"
+          # APP_IMAGE is written to the compose env file, so `docker compose up` on the box is always
+          # digest-pinned and a re-run without this workflow cannot silently drift to :latest.
+          ssh -o BatchMode=yes "deploy@${HOST}" bash -seu <<EOF
+            cd /opt/captain-food
+            echo "APP_IMAGE=${REF}" > .env
+            docker pull "${REF}"
+            docker compose up -d --remove-orphans
+            docker image prune -f --filter "until=168h"
+          EOF
+
+      # The old Render deploy was fire-and-forget (#281): the job returned in ~20s while the rollout
+      # took minutes, so db-migrate could convert the schema under the OLD binary. Deploying over SSH
+      # lets us actually wait, which closes that window at the source rather than in db-migrate.
+      - name: Wait for the new build to be serving
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          expected="${EXPECTED_SHA:0:7}"   # /health reports the SHORT sha (ADR-20260721-175411)
+          echo "waiting for the container to report version=${expected}"
+          deadline=$(( $(date +%s) + 300 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            # ANY status is acceptable: a new instance answers 503 `schema_behind` until db-migrate
+            # runs, and that body still carries the version we are waiting for.
+            body=$(ssh -o BatchMode=yes "deploy@${HOST}" \
+              'curl -sS -m 10 http://127.0.0.1:8080/health || true' 2>/dev/null || true)
+            case "$body" in
+              *"$expected"*)
+                echo "✓ ${expected} is serving — ${body}"
+                echo "db-migrate follows automatically on this workflow's completion."
+                exit 0 ;;
+            esac
+            echo "  not yet: ${body:-<no response>}"
+            sleep 10
+          done
+          echo "::error::the container never reported version=${expected} — deploy failed, NOT migrating"
+          exit 1

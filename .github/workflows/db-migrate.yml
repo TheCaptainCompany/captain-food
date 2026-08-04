@@ -96,7 +96,34 @@ jobs:
       - uses: taiki-e/install-action@v2 # Node 24; installs a prebuilt sqlx-cli in seconds (no toolchain/cargo-install)
         with:
           tool: sqlx-cli
+
+      # --- OVH VPS (ADR-20260804-171030) ------------------------------------------------------
+      # PostgreSQL is on the box and bound to 127.0.0.1 -- the firewall never opens 5432 and there is
+      # no public database endpoint to reach. So the runner tunnels: DATABASE_URL is the SAME loopback
+      # URL the app uses, and the SSH forward makes 127.0.0.1:5432 on this runner mean 127.0.0.1:5432
+      # on the box. Exposing PostgreSQL publicly to avoid this would trade a 4-line step for a
+      # permanently internet-reachable event log.
+      - name: Open an SSH tunnel to the database
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o ExitOnForwardFailure=yes \
+              -f -N -L 5432:127.0.0.1:5432 "deploy@${HOST}"
+          for _ in $(seq 30); do
+            (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && { echo "tunnel up"; exit 0; }
+            sleep 1
+          done
+          echo "::error::the SSH tunnel to ${HOST} never opened -- NOT migrating"
+          exit 1
+
       - name: Apply migrations
         env:
+          # The loopback URL from /etc/captain-food/db.env, reaching the box through the tunnel above.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: sqlx migrate run --source migrations

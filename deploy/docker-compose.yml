@@ -1,0 +1,79 @@
+# Captain.Food runtime on the OVH VPS-2 box.
+#
+#   app    -- the Axum/Leptos server, pinned BY DIGEST (never by tag)
+#   redis  -- projection/cache target (#267). Rebuildable from the event log, so no persistence
+#   caddy  -- TLS termination and reverse proxy
+#
+# PostgreSQL is deliberately NOT here: it runs on the host (ADR-20260804-171030). `docker compose
+# down -v` is a normal thing to type, and it must not be able to reach the event log.
+#
+# Deployed to /opt/captain-food/docker-compose.yml by .github/workflows/deploy.yml, which sets
+# APP_IMAGE to an immutable digest reference. A tag can be repointed; a digest cannot.
+
+name: captain-food
+
+services:
+  app:
+    # Set by the deploy workflow: ghcr.io/thecaptaincompany/captain-food@sha256:...
+    image: ${APP_IMAGE:?APP_IMAGE must be a digest-pinned reference -- refusing to start}
+    restart: unless-stopped
+    # Host networking so the app reaches the HOST PostgreSQL on 127.0.0.1:5432 with no NAT hop and
+    # no published port. PostgreSQL stays bound to loopback and the firewall never opens 5432.
+    network_mode: host
+    env_file:
+      - /etc/captain-food/app.env
+      - /etc/captain-food/db.env
+    environment:
+      PORT: 8080
+    healthcheck:
+      # /health is the readiness gate (ADR-0043): 200 only when the DB is reachable AND the schema
+      # version matches. A new instance answers 503 `schema_behind` until db-migrate lands -- that is
+      # expected during a rollout, which is why start_period is generous.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Published on loopback only. Not host networking: Redis has no reason to see the host's stack.
+    ports:
+      - "127.0.0.1:6379:6379"
+    # No persistence ON PURPOSE. Redis is a projection target -- losing it costs a rebuild from
+    # domain_events, not data. Persisting it would create a second, staler source of truth.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "2" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Host networking so Caddy binds 80/443 directly and proxies to the app on 127.0.0.1:8080.
+    network_mode: host
+    volumes:
+      - /etc/captain-food/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # ACME account + issued certificates -- LOSING THIS RE-ISSUES CERTS
+      - caddy_config:/config
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+volumes:
+  # Named, not bind-mounted, but note the warning above: `docker compose down -v` destroys these and
+  # forces re-issuance against Let's Encrypt's rate limits. The database is unaffected -- it is on
+  # the host, which is the entire point of that split.
+  caddy_data:
+  caddy_config:

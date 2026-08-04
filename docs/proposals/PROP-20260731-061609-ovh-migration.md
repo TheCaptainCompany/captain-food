@@ -45,15 +45,37 @@ workers parked on Postgres `LISTEN/NOTIFY` (ADR-20260802-200416).
 
 | Option | Monthly (HT) | Pros | Cons |
 |---|---|---|---|
-| **OVH VPS-3 — 6 vCore, 12 GB, 100 GB NVMe, unmetered traffic, France** ✅ recommended | **€10.40** | Cheapest credible option that is ALSO French, so ADR-0042's French strengthening survives untouched, unmetered egress (no allowance to exhaust — the exact Render failure mode), root + Docker, daily automated snapshot included, 12 GB and 100 GB give headroom on the two dimensions that have already bitten us (RAM for Postgres plus Redis, disk after #264) | Shared vCores, so no noisy-neighbour guarantee (immaterial at V0 volume), host OS is ours to patch |
-| OVH VPS-2 — 4 vCore, 8 GB, 75 GB NVMe | €7.21 | €3.19 cheaper, sufficient for V0 | 75 GB and 8 GB leave no margin on the dimensions that already caused an incident — €3.19/month is the cheapest insurance available against repeating #264 |
-| OVH Public Cloud `b3-8` + 100 GB volume | ~€26 | Same ecosystem as OVH managed databases if we later split the DB out | 2.5x the price for 2 vCores and less RAM than VPS-3, buying an upgrade path we have decided not to take yet |
-| Hetzner CX32 — 4 vCore, 8 GB, 80 GB | ~€8.50 | Excellent hardware per euro, 20 TB traffic included | **Germany/Finland only** — walks back ADR-0042's French strengthening for ~nothing, since VPS-3 is cheaper still. Also no managed-PostgreSQL path at Hetzner at all, so the later escape hatch would mean changing provider again |
-| Scaleway DEV1-L + 100 GB block | ~€41 | French (Paris), cheap Object Storage, DEV-tier managed PG available | Instance prices exclude storage and block is €0.0949/GB/month — the disk alone adds ~€9.50. Loses on price to VPS-3 by 4x |
+| **OVH VPS-2 — 4 vCore, 8 GB, 75 GB NVMe, unmetered traffic, France** ✅ **CHOSEN** (product owner, 2026-08-04, 12-month term) | **€7.21** | Cheapest credible option that is ALSO French, so ADR-0042's French strengthening survives untouched, unmetered egress (no allowance to exhaust — the exact Render failure mode), root + Docker, daily automated snapshot included. 8 GB comfortably holds Postgres + Redis + the app at V0 volume | 75 GB and 8 GB leave less margin than VPS-3 on the two dimensions that have already bitten us (RAM, and disk after #264). Mitigated by the upgrade path below, not by hoping |
+| OVH VPS-3 — 6 vCore, 12 GB, 100 GB NVMe | €10.40 | More headroom on exactly those two dimensions | €3.19/month for capacity that can be bought later, in place, at the moment it is actually needed. Pre-paying it is the one move that is hard to undo |
+| OVH Public Cloud `b3-8` + 100 GB volume | ~€26 | Same ecosystem as OVH managed databases if we later split the DB out | 3.6x the price for 2 vCores and no more RAM than VPS-2, buying an upgrade path we have decided not to take yet |
+| Hetzner CX32 — 4 vCore, 8 GB, 80 GB | ~€8.50 | Excellent hardware per euro, 20 TB traffic included | **Germany/Finland only** — walks back ADR-0042's French strengthening for a NEGATIVE saving, since VPS-2 is cheaper still. Also no managed-PostgreSQL path at Hetzner at all, so the later escape hatch would mean changing provider again |
+| Scaleway DEV1-L + 100 GB block | ~€41 | French (Paris), cheap Object Storage, DEV-tier managed PG available | Instance prices exclude storage and block is €0.0949/GB/month — the disk alone adds ~€9.50. Loses on price to VPS-2 by more than 5x |
 | Bare metal — Scaleway Dedibox Start-2-L / Start-9-M | €25–40 + one month install fee | No noisy neighbours, dramatically better €/GB of RAM at scale | Recovery is a *hardware intervention* (hours, and the rebuild is ours) where a VPS reboots elsewhere in minutes. No snapshots to roll back a bad migration. Solves a capacity problem we do not have. **Revisit when RAM is the binding constraint, not price** |
 | Shared hosting — LWS WordPress Performance (already paid), o2switch Cloud | €7–16 | Cheapest on paper, huge advertised RAM | **Structurally impossible**: no root, no Docker, no systemd, and o2switch's CGV explicitly prohibit running daemons or any binary the host did not provide. LWS gives MySQL only. See §7 for the screening rule this earned |
 
 **Region**: Gravelines (GRA) or Strasbourg (SBG) — French, per ADR-0042 as strengthened.
+**OS**: Debian 13 (trixie), plain image. PostgreSQL **16** installed explicitly from PGDG — Debian 13's
+default is 17, and `ci.yml` runs `postgres:16-alpine`, so taking the default would validate migrations
+against a version production does not run.
+
+**Why the smaller tier is the sound buy — the upgrade path is asymmetric.** OVH VPS upgrades happen
+in place from the Control Panel: data preserved, **IP unchanged** (which matters, since DNS, TLS and
+the deploy target are all pinned to it), effective immediately. Downgrading is *not* in place — it
+means a new plan, a data transfer and a cancellation. So under-buying costs one click to fix and
+over-buying costs a migration. Buy the floor, climb on signal:
+
+| Signal | Action |
+|---|---|
+| Disk above **70%** of 75 GB | Upgrade before the partition work becomes urgent — a disk upgrade needs the filesystem expanded manually, which is a planned-window job, not an incident job |
+| Sustained RAM pressure (swap in use, cache-hit ratio falling) | Upgrade vCores/RAM — friction-free, no partition work |
+
+After any RAM upgrade, **raise `shared_buffers` / `effective_cache_size` and restart**: they are
+static configuration, so PostgreSQL will otherwise ignore memory you are paying for.
+
+Two constraints on that ladder: available upgrades depend on the range and model, and OVH does not
+offer in-place moves **across generations** (a VPS 2026 service cannot become a VPS 2027 one). When a
+generation retires, moving is the same procedure as a downgrade — which is another reason D6's restore
+drill earns its keep: the backup story *is* the migration story.
 
 ### D2 — The domain database
 
@@ -111,13 +133,31 @@ acceptable rather than reckless.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Nightly `pg_dump` + WAL archiving to Scaleway Object Storage (Paris), retained offsite** ✅ recommended | **Different provider from the compute**, so an OVH account/region problem does not take the backups with it, while the data stays in France. €0.008/GB/month one-zone and 750 GB free for 90 days — call it ~€1/month. S3-compatible, so it works from any box | One more credential set to declare in `specs/configuration.yaml`. Restore is manual |
+| **Nightly `pg_dump` to Scaleway Object Storage (Paris), retained offsite. WAL archiving for PITR is PHASE 2** ✅ recommended | **Different provider from the compute**, so an OVH account/region problem does not take the backups with it, while the data stays in France. €0.008/GB/month one-zone and 750 GB free for 90 days — call it ~€1/month. S3-compatible, so it works from any box | One more credential set to declare in `specs/configuration.yaml`. Restore is manual |
 | OVH Object Storage | One provider, one invoice | Backups in the same failure domain as the machine they protect. Strictly weaker for the same money |
 | The VPS's included daily snapshot only | Free, already there | A VM snapshot of a running Postgres is crash-consistent at best and offers **no PITR**. It protects against losing the machine, not against a migration we regret or a table we truncate. **Not a database backup** — it complements D6, it does not replace it |
 
 **The rehearsal is part of the decision, not a follow-up**: a backup that has never been restored is
 not a backup. Runbook step [3b] restores the dump into a scratch database and diffs row counts
 before the DNS cut is allowed to proceed.
+
+### D7 — TLS and DNS (resolves the "does DNS move?" question)
+
+Render terminated TLS and ran ACME via a `_acme-challenge.captain.food` CNAME to its own verifier.
+On our own box both jobs become ours. The realized zone (ADR-0036 amendment 2026-07-18) carries the
+**marketing site** as well — apex 301-forwards to `join`, which is on GitHub Pages — so the zone is
+not ours to churn casually.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Phase 1: HTTP-01 for the named reserved hosts, Caddy, no DNS API at all** ✅ recommended | Certificates issue the moment DNS points at the box. Zero dependency on any DNS provider's API, so the cutover window carries no ACME risk. Stock `caddy:2-alpine`, no custom build | Does not cover `{slug}.captain.food` tenants — fine while none are live, and a hard blocker before onboarding |
+| **Phase 2: wildcard `*.captain.food` via DNS-01, by DELEGATING `_acme-challenge` to an automatable zone** ✅ recommended, before tenant onboarding | Leaves the zone (and therefore marketing) exactly where it is — one CNAME is the entire blast radius. One certificate covers every tenant | Needs a Caddy build carrying `caddy-dns/ovh`, and a **separate** OVH API credential: consumer keys are bound to authorised routes and the SMS keys have no `/domain/zone/*` rights (ADR-20260730-032306) |
+| Move the whole zone to OVH | One provider | Re-implements the apex 301 forward, which is a *registrar* feature and not a DNS record — rebuilding the marketing entry point during a migration window, for no gain over delegation |
+| Per-tenant certificates on demand | No wildcard needed | Let's Encrypt caps issuance at **50 certificates per registered domain per week**, globally across accounts. The ceiling arrives at 50 new restaurants in a week — precisely when onboarding is succeeding |
+
+Cutover consequence: `_acme-challenge.captain.food` must be **deleted** at step [7]. Left in place it
+delegates validation to Render's verifier and our own issuance fails for a reason whose error message
+points nowhere useful.
 
 ## 3. What supersedes what
 
@@ -138,7 +178,7 @@ before the DNS cut is allowed to proceed.
 
 ## 4. Sequence diagram — the cutover
 
-<a href="https://mermaid.live/view#pako:eNp1Ve9vGkcU_Fee-ATqXU2I2yaosmSXCJRaBkGUqFKkaNl9d7flbnezP-KgKP97Zzmwke36AwZu37yZefOWHwNpFQ-mNAj8NbGRPNOi9qL7bAh_IkVrUrdl3392wkcttRMm0mpJItDKW5VkJHtvXjo0X-RDcx0XaUvXMmprwp9bf3E13CbdKkpGNsLUrApS7Fq7J89R-Jojq9FzuM1NhtskJ7YiMA2DTV4yzW7oF9KKTdRx_0LZx9Um1y0_LvLb8nXPoLEBKvBSew4AEM6RMIrWrHQgaU0UGqLCC4DLm_cHIlK0fC_2tNz-yzBhE60XNffwK-EB8zlNxq8uyVZV0JFpK-QuuZcgZ3cHjvnfUAqXe_9aWatA7B5OSeGzIX3dnQWU_cYehhRQNCWHMRDazZaf7k49Y8MoNcre5yei9SzUnqzjI8pqWV5dnaq_6YDZ9PYUtJrP5o_W4PuMlf0qqNIektuWJpOLN-OLy8vXZ2ibmykOGNGSq7-o1DmMSDbcCahQIopRQR50pE0mZsvxTO5C6gLGLq1XrJ5SQ3-YypTBCoJkXe1P9XlYjwidiLI5K8eMMhmPIZ_cPzBKiJl46IRTJQ6vlo-tPDcsfIAIbaIlQUH6jJ1jdrT2TITSVZXjO1-_e3fXY84XJ_ZqW3Ya64TeSFerYeb17S1hBEqbmoaM5Sojf48UOMKPjhF9RUFjEUenZr0GUP6aAFQinDvy6XyI8wVa6eAOLI97NFS6hqDSaWMAqTsEkypvO9D7az16yjSE5tTPJUy3ry6gsnMWq5bgPmxpY0N1ljPEflS6pkrotqxEPno9W5eT8eT38R-Tt-X41fi38fhZm5zTMnR2B0NqRBzCcrQOC6oUJpANRRZiCwXOc4l9GD0P_fRh22l5d_tPr6thDO-oYflhVSARtZbUarMLBb3_9Dc2Cxda88VzRSF6TCA8XkCjMz_RdEoyRfqfRSTE4ki7oA-3G-xXSDkEC6xI6W2Kebpgf1CqniwIdw68c31eif4ic7nwkG4tRb4lH6ZvLFnvwBFDlAkJRUbKXIjRuP1TazKjA_s1IobPWHzD-QGsTR0gzu8G63fIDO7PfN21mDIUGBsRuO-sBgUN0KoTWuHn4ccAFd3hh0JxJVIbBz9__geUBBB7" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+<a href="https://mermaid.live/view#pako:eNp1Ve9vGkcU_Fee-ATqXUyom6aosmSXCJRagCBKVClStOy-u9tyt7vZH3FQlP-9s5yxke36AwZu37yZefOWHwNpFQ-mNAj8NbGRPNOi9qL7bAh_IkVrUrdj3392wkcttRMm0npFItDaW5VkJHtnXjo0X-RDcx0XaUfXMmprwp87f3E13CXdKkpGNsLUrApS7Fp7IM9R-Jojq9FzuO1NhtsmJ3YiMA2DTV4yzW7oF9KKTdTx8ELZx_U2160-LvLbctIzaGyACrzUngMAhHMkjKINKx1IWhOFhqjwAuDq5v2RiBQt34kDrXb_MkzYRutFzT38WnjAfE6T8etLslUVdGTaCblP7iXI2fLIMf8bSuFy71eVtQrE7uCUFD4b0tctLaDsN_YwpICiKTmMgdButvq0PPWMDaPUKHuXn4jWs1AHso7vUdar8urqVP1NB8ymt6eg9Xw2f7QG32es7FdBlfaQ3LY0mVy8HV9cXv56hra9meKAES25-otKncOIZMOdgAolohgV5EFH2mRithzP5D6kLmDs0nrF6ik19IepTBmsIEjW1eFUn4f1iNCJKJuzcswok_EY8sn9I6OEmImHTjhV4vB69djKc8PCB4jQJloSFKTP2Dlm99aeiVC6qnJ855t375Y95nxxYq92ZaexTuiNdLUaZl7f3hJGoLSpachYrjLy90iBI_zoGNFXFDQWcXRq1msA5a8JQCXCuSefzoc4X6CVDu7I8n6PhkrXEFQ6bQwgdYdgUuVtB3p_bUZPmYbQnPq5hOn21QVUds5i1RLchy1tbKjOcobYj0rXVAndlpXIR69nm3IynrwZ_z75oxy_Hv82Hj9rk3Nahs7uYUiNiENYjtZxQZXCBLKhyEJsocB5LrEPo-ehnz5sO62Wt__0uhrG8O41rD6sCySi1pJabfahoPef_sZm4UJrvniuKESPCYTHC2h05ieaTkmmSP-ziIRY3NMu6MPtFvsVUg7BAitSeptini7YH5WqJwvCnQPvXJ9Xor_IXC48pltLkW_Jh-kbS9Y7cMQQZUJCkZEyF2I07vDUmszoyH6DiOEzFt9wfgBrUweI87vB-j0yg_szX3ctpgwFxkYE7jurQUEDtOqEVvh5-DFARXf8oVBcidTGwc-f_wGKkxB5" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ```mermaid
 sequenceDiagram
@@ -146,12 +186,12 @@ sequenceDiagram
     participant PO as Product owner
     participant GH as GitHub Actions<br/>(build unchanged, deploy retargeted)
     participant SB as Supabase (source DB + identity)
-    participant VPS as OVH VPS-3<br/>(host Postgres + app and Redis containers)
+    participant VPS as OVH VPS-2<br/>(host Postgres + app and Redis containers)
     participant OBJ as Scaleway Object Storage<br/>(Paris — offsite backups)
     participant DNS as DNS (captain.food + wildcard)
 
     Note over SB,VPS: prod is DOWN — the window is already open
-    PO->>VPS: provision VPS-3, PGDG Postgres on the host, firewall 22/80/443
+    PO->>VPS: provision VPS-2, PGDG Postgres on the host, firewall 22/80/443
     PO->>SB: final pg_dump (schema + data), row counts + checksums recorded
     PO->>VPS: restore dump, verify counts and checksums match
     PO->>OBJ: first offsite dump uploaded
@@ -168,13 +208,17 @@ sequenceDiagram
 
 ## 5. Mockups
 
+> The executable form of this section is **[docs/runbooks/ovh-cutover.md](../runbooks/ovh-cutover.md)**,
+> and the host configuration it drives is **[`deploy/`](../../deploy/)**. The mockups below fix the
+> shape; the runbook is what the operator actually follows.
+
 ### 5.1 The cutover runbook as the operator sees it
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ OVH cutover — runbook state                        (STATUS.md) │
 │────────────────────────────────────────────────────────────────│
-│ [1]  provision VPS-3, host Postgres, firewall        ⏳        │
+│ [1]  provision VPS-2, host Postgres, firewall        ⏳        │
 │ [2]  final Supabase dump + checksums                 ⏳        │
 │ [3]  restore on the VPS, counts/checksums verified    ⏳        │
 │ [3b] offsite dump + RESTORE REHEARSAL green          ⏳ (gates [7]) │
@@ -260,6 +304,8 @@ outright — while advertising 300 GB SSD and 48 GB RAM respectively. Recorded o
   by this proposal.
 - **Redis at cutover or deferred?** Nothing reads it until #267's projection targets land. Deferring
   keeps the cutover smaller.
-- **Does DNS stay at LWS or move to OVH?** The domain is registered at LWS and its shared plan is
-  paid through 2026-12. Keeping DNS there is one less thing to move during the window.
+- ~~**Does DNS stay at LWS or move to OVH?**~~ **RESOLVED (D7)**: the zone does not move. Only
+  `_acme-challenge` is delegated, when phase-2 wildcard TLS is needed. Open sub-question: the zone's
+  actual authority is disputed in the record — ADR-0036 says Dynadot, the LWS invoice implies LWS.
+  `dig NS captain.food` before the window settles it.
 - **Retention policy for the dumps** — 30 dailies is the placeholder in §5.2, not a decision.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Captain.Food database backup
+
+[Timer]
+# 02:30 UTC -- well clear of the Friday/Saturday 19:00-21:30 peak in local time.
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

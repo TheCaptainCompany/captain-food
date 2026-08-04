@@ -1,0 +1,22 @@
+[Unit]
+Description=Captain.Food nightly PostgreSQL backup to off-site object storage
+Documentation=file:///opt/captain-food/deploy/README.md
+After=postgresql.service network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/local/bin/captain-food-pg-backup
+# A dump of a large database is slow but must not run forever -- an overlapping run next night
+# would contend for the same staging disk.
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle
+# Hardening: this unit reads the database and writes two directories. Nothing else.
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/backups/captain-food /var/lib/postgresql

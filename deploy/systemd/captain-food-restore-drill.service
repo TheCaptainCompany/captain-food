@@ -1,0 +1,19 @@
+[Unit]
+Description=Captain.Food restore drill -- proves the off-site backup is restorable
+Documentation=file:///opt/captain-food/deploy/README.md
+After=postgresql.service network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/local/bin/captain-food-restore-drill
+TimeoutStartSec=3600
+Nice=15
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/backups/captain-food /var/lib/postgresql
