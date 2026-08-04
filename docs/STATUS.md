@@ -3,6 +3,25 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-04 — Two dead read-model columns populated; refund facts carry their payment identity
+> ([ADR-20260804-041227](adr/ADR-20260804-041227-populate-the-two-dead-columns-and-address-refund-facts.md))**.
+> An audit of the 31 standing warnings found **none of them were lint noise** — each is an unbuilt
+> feature, a tracked deferral, or a real hole. Five were actionable and are fixed:
+> `Restaurant.description` and `Catalog.slug` now have event lineage (`RestaurantUpdated` gains a
+> nullable `description` on a new dedicated `RestaurantDescription` scalar; `CatalogCreated` gains a
+> REQUIRED `slug` — safe because only `CreateCatalog` emits it, the HubRise path emits `CatalogImported`).
+> `Catalog.slug` had been a **non-null GraphQL field over a column the projector could only fill with the
+> empty string**. The three refund events (`RefundOpened`/`Approved`/`Denied`) now carry
+> `paymentIntentId` — they are delivered as messages to the `Payment` aggregate, whose identity that is.
+> **Two hand-written projector shims deleted** (`CatalogCompute::slug`, `RestaurantCompute::description`)
+> and **one runtime gate deleted because the compiler subsumes it**: tightening
+> `refund_process_manager.payment_intent_id` to NOT NULL (a run cannot exist without a captured payment)
+> made the `RefundNotPending` unwrap-guard unspellable. `slugify` moved to **`domain::shared::text`** —
+> it had no callers outside its own tests and the HubRise catalog import is its second consumer.
+> **Warning baseline 31 → 26**, no new kind. The remainder: unbuilt delivery/rider ×18, credit/cart ×6,
+> [#341](https://github.com/TheCaptainCompany/captain-food/issues/341) (listing opt-out does nothing —
+> the `view-fedby-unused` symptom), and one correct-as-is `identity-property-not-on-command`.
+
 > ✅ **2026-08-04 — Unread read models deleted
 > ([ADR-20260804-032640](adr/ADR-20260804-032640-delete-unread-read-models.md))**, product-owner
 > directive following the #305 gate. **`View_RestaurantAccount`** (the ONLY `internal: true` exemption in

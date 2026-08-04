@@ -87,6 +87,7 @@ pub struct RestaurantSlugReconfigured {
 pub struct RestaurantUpdated {
     pub restaurant_id: RestaurantId,
     pub display_name: Option<RestaurantDisplayName>,
+    pub description: Option<RestaurantDescription>,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
     #[serde(default)]
@@ -228,6 +229,7 @@ pub struct CatalogCreated {
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,
     pub name: CatalogName,
+    pub slug: Slug,
 }
 
 /// A category has been added to a catalog.
@@ -885,6 +887,7 @@ pub struct RiderStatusChanged {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundOpened {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
     pub amount: Money,
@@ -895,6 +898,7 @@ pub struct RefundOpened {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundApproved {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub amount: Money,
     pub reason: Option<String>,
@@ -904,6 +908,7 @@ pub struct RefundApproved {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundDenied {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub reason: String,
 }

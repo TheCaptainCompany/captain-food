@@ -81,9 +81,9 @@ Restaurant:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/displayName' }
         - { $ref: 'events.yaml#/RestaurantUpdated/properties/displayName' }
     description:
-      type: text
+      type: { $ref: 'scalars.yaml#/RestaurantDescription' }
+      from: [{ $ref: 'events.yaml#/RestaurantUpdated/properties/description' }]
       nullable: true
-      note: "⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet."
     tags:
       type: jsonb
       from:
@@ -375,7 +375,7 @@ Catalog:
       fk: { $ref: '#/Restaurant/columns/restaurant_id' }
     slug:
       type: { $ref: 'scalars.yaml#/Slug' }
-      note: "⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event)."
+      from: [{ $ref: 'events.yaml#/CatalogCreated/properties/slug' }]
     name:
       from: [{ $ref: 'events.yaml#/CatalogCreated/properties/name' }]
     tree:

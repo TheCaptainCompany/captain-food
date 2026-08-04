@@ -206,6 +206,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundOpened' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_read: order.payment_intent_id }
               orderId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } }
               restaurantId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/restaurantId' } }
               amount: { from_read: order.total_amount_cents }
@@ -232,6 +233,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundOpened' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_read: order.payment_intent_id }
               orderId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } }
               restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/restaurantId' } }
               amount: { from_read: order.total_amount_cents }
@@ -258,6 +260,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundOpened' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_read: order.payment_intent_id }
               orderId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } }
               restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/restaurantId' } }
               amount: { from_read: order.total_amount_cents }
@@ -286,6 +289,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundOpened' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_read: order.payment_intent_id }
               orderId: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } }
               restaurantId: { from: { $ref: 'events.yaml#/RefundRequested/properties/restaurantId' } }
               amount: { from_read: order.total_amount_cents }
@@ -317,6 +321,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundApproved' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_state: payment_intent_id }
               orderId: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/orderId' } }
               amount: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/amount' } }
               reason: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/reason' } }
@@ -338,6 +343,7 @@ RefundProcess:
             event: { $ref: 'events.yaml#/RefundDenied' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
+              paymentIntentId: { from_state: payment_intent_id }
               orderId: { from: { $ref: 'commands.yaml#/DenyRefund/properties/orderId' } }
               reason: { from: { $ref: 'commands.yaml#/DenyRefund/properties/reason' } }
         - state:

@@ -371,7 +371,7 @@ impl TestBed {
             .orders
             .by_id_sync(order_id)
             .and_then(|row| row.payment_intent_id)
-            .or(Some(PaymentIntentId("pi_123".into())));
+            .unwrap_or_else(|| PaymentIntentId("pi_123".into()));
         self.refund_pm
             .upsert(&RefundProcessRow {
                 order_id,

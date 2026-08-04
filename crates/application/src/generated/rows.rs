@@ -13,7 +13,7 @@ pub struct RestaurantRow {
     pub google_place_id: Option<GooglePlaceId>,
     pub slug: Option<Slug>,
     pub display_name: RestaurantDisplayName,
-    pub description: Option<String>,
+    pub description: Option<RestaurantDescription>,
     pub tags: Option<serde_json::Value>,
     pub margin_rate: Option<MarginPercent>,
     pub cuisine_category: Option<CuisineCategory>,

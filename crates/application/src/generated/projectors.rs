@@ -12,7 +12,6 @@ use domain::generated::scalars::*;
 /// Hand-written business logic for `Restaurant`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait RestaurantCompute {
-    fn description(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> Option<String>;
     fn status(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> RestaurantStatus;
     fn order_acceptance(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> OrderAcceptanceMode;
     fn default_currency(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> CurrencyCode;
@@ -29,7 +28,7 @@ pub fn project_restaurant<C: RestaurantCompute>(c: &C, state: Option<RestaurantR
             google_place_id: None,
             slug: None,
             display_name: e.display_name.clone(),
-            description: c.description(state.as_ref(), env),
+            description: None,
             tags: Some(serde_json::to_value(&e.tags).unwrap_or(serde_json::Value::Null)),
             margin_rate: e.margin_rate.clone(),
             cuisine_category: e.cuisine_category.clone(),
@@ -50,7 +49,7 @@ pub fn project_restaurant<C: RestaurantCompute>(c: &C, state: Option<RestaurantR
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
-        DomainEvent::RestaurantUpdated(e) => { let mut row = state?; if let Some(v) = &e.display_name { row.display_name = v.clone(); } row.tags = Some(serde_json::to_value(&e.tags).unwrap_or(serde_json::Value::Null)); row.margin_rate = e.margin_rate.clone(); row.cuisine_category = e.cuisine_category.clone(); row.uber_prices_opt_in = e.uber_prices_opt_in.clone(); row.website = e.website.clone(); row.address = serde_json::to_value(&e.address).unwrap_or(serde_json::Value::Null); row.location = Some(serde_json::to_value(&e.location).unwrap_or(serde_json::Value::Null)); row.opening_hours = serde_json::to_value(&e.opening_hours).unwrap_or(serde_json::Value::Null); row.timezone = e.timezone.clone(); row.preparation_time_minutes = e.preparation_time_minutes.clone(); Some(row) },
+        DomainEvent::RestaurantUpdated(e) => { let mut row = state?; if let Some(v) = &e.display_name { row.display_name = v.clone(); } row.description = e.description.clone(); row.tags = Some(serde_json::to_value(&e.tags).unwrap_or(serde_json::Value::Null)); row.margin_rate = e.margin_rate.clone(); row.cuisine_category = e.cuisine_category.clone(); row.uber_prices_opt_in = e.uber_prices_opt_in.clone(); row.website = e.website.clone(); row.address = serde_json::to_value(&e.address).unwrap_or(serde_json::Value::Null); row.location = Some(serde_json::to_value(&e.location).unwrap_or(serde_json::Value::Null)); row.opening_hours = serde_json::to_value(&e.opening_hours).unwrap_or(serde_json::Value::Null); row.timezone = e.timezone.clone(); row.preparation_time_minutes = e.preparation_time_minutes.clone(); Some(row) },
         DomainEvent::RestaurantActivated(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::RestaurantDeactivated(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::RestaurantAcceptanceModeChanged(_) => { let mut row = state?; let v = c.order_acceptance(Some(&row), env); row.order_acceptance = v; Some(row) },
@@ -187,7 +186,6 @@ pub fn project_customer<C: CustomerCompute>(c: &C, state: Option<CustomerRow>, e
 /// Hand-written business logic for `Catalog`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait CatalogCompute {
-    fn slug(&self, prev: Option<&CatalogRow>, env: &Envelope) -> Slug;
     fn tree(&self, prev: Option<&CatalogRow>, env: &Envelope) -> serde_json::Value;
 }
 
@@ -197,7 +195,7 @@ pub fn project_catalog<C: CatalogCompute>(c: &C, state: Option<CatalogRow>, env:
         DomainEvent::CatalogCreated(e) => Some(CatalogRow {
             catalog_id: e.catalog_id.clone(),
             restaurant_id: e.restaurant_id.clone(),
-            slug: c.slug(state.as_ref(), env),
+            slug: e.slug.clone(),
             name: e.name.clone(),
             tree: c.tree(state.as_ref(), env),
             created_at: env.occurred_at,

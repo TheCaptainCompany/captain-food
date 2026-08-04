@@ -17,8 +17,9 @@
 //! - `ref` = the SIRET (the idempotent external key); `externalIdentifiers` also carry the well-known
 //!   `siret` and `naf` keys (see `scalars.yaml#/ExternalIdentifierKey`).
 //! - NO slug: a registry record carries no storefront address (ADR-20260728-011344) -- the tenant host
-//!   is the OWNER's choice, made via ConfigureRestaurantSlug. `slugify` remains here because it is the
-//!   right tool for a collision-tolerant marketplace listing PATH, which is not a host.
+//!   is the OWNER's choice, made via ConfigureRestaurantSlug. `slugify` now lives in
+//!   `domain::shared::text` (the HubRise catalog import needs it too) and is re-exported here, where
+//!   it is still the right tool for a collision-tolerant marketplace listing PATH, which is not a host.
 //! - `displayName` = enseigne → denomination usuelle (période) → denomination usuelle (unité légale) →
 //!   denomination (unité légale) → "Prénom Nom" for personnes physiques. INSEE capitalisation is kept as-is.
 //! - `listingStatus` = `NON_PARTNER` (a prospect, ADR-0027); `accountId` = None; `openingHours` = []
@@ -81,35 +82,8 @@ pub fn sirene_uuid(seed: &str) -> uuid::Uuid {
 // Mapping — the actual Anti-Corruption boundary
 // ---------------------------------------------------------------------------------------------
 
-/// Lowercase-dash slug matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`, with French accents folded to ASCII.
-/// Non-alphanumeric runs collapse to a single dash; leading/trailing dashes are trimmed.
-pub fn slugify(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        let folded: &str = match c {
-            'à' | 'â' | 'ä' | 'á' | 'ã' | 'À' | 'Â' | 'Ä' | 'Á' | 'Ã' => "a",
-            'ç' | 'Ç' => "c",
-            'é' | 'è' | 'ê' | 'ë' | 'É' | 'È' | 'Ê' | 'Ë' => "e",
-            'î' | 'ï' | 'í' | 'Î' | 'Ï' | 'Í' => "i",
-            'ô' | 'ö' | 'ó' | 'õ' | 'Ô' | 'Ö' | 'Ó' | 'Õ' => "o",
-            'ù' | 'û' | 'ü' | 'ú' | 'Ù' | 'Û' | 'Ü' | 'Ú' => "u",
-            'ÿ' | 'Ÿ' | 'ý' => "y",
-            'ñ' | 'Ñ' => "n",
-            'œ' | 'Œ' => "oe",
-            'æ' | 'Æ' => "ae",
-            _ => {
-                if c.is_ascii_alphanumeric() {
-                    out.push(c.to_ascii_lowercase());
-                } else if !out.ends_with('-') && !out.is_empty() {
-                    out.push('-');
-                }
-                continue;
-            }
-        };
-        out.push_str(folded);
-    }
-    out.trim_matches('-').to_string()
-}
+pub use domain::shared::text::slugify;
+
 
 fn mapping_error(siret: &str, reason: &str) -> DomainError {
     DomainError::Invariant(format!("sirene: établissement {siret}: {reason}"))

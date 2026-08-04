@@ -97,6 +97,7 @@ pub struct ActivateRestaurant {
 pub struct UpdateRestaurant {
     pub restaurant_id: RestaurantId,
     pub display_name: Option<RestaurantDisplayName>,
+    pub description: Option<RestaurantDescription>,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
     #[serde(default)]
@@ -229,6 +230,7 @@ pub struct CreateCatalog {
     pub catalog_id: CatalogId,
     pub restaurant_id: RestaurantId,
     pub name: CatalogName,
+    pub slug: Slug,
     pub r#ref: Option<ExternalReference>,
 }
 

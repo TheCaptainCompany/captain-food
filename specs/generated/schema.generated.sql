@@ -227,7 +227,7 @@ CREATE TABLE payment_process_manager (
 
 CREATE TABLE refund_process_manager (
   order_id UUID PRIMARY KEY,
-  payment_intent_id TEXT NULL,
+  payment_intent_id TEXT NOT NULL,
   refund_id TEXT NULL,
   process_status TEXT NOT NULL,
   approved_amount_cents BIGINT NULL,

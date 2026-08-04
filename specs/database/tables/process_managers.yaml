@@ -37,7 +37,7 @@ refund_process_manager:
     (ApproveRefund / DenyRefund) and, on approval, by the settled PaymentRefunded fact.
   columns:
     order_id:              { type: { $ref: 'scalars.yaml#/OrderId' }, pk: true, note: "The order being refunded — one live run per order." }
-    payment_intent_id:     { type: { $ref: 'scalars.yaml#/PaymentIntentId' }, nullable: true, note: "The captured payment to refund (from the order's payment facts)." }
+    payment_intent_id:     { type: { $ref: 'scalars.yaml#/PaymentIntentId' }, note: "The captured payment to refund (from the order's payment facts). NOT NULL: every leg that opens a run guards on payment_status = CAPTURED and skips otherwise, and the column it reads is fed by PaymentCaptured -- so a run cannot exist without a payment intent." }
     refund_id:             { type: { $ref: 'scalars.yaml#/RefundId' }, nullable: true, note: "Stripe refund id, set when PaymentRefunded settles the run." }
     process_status:        { type: { $ref: 'scalars.yaml#/RefundProcessStatus' } }
     approved_amount_cents: { type: { $ref: 'scalars.yaml#/MoneyCents' }, nullable: true, note: "Approved amount (restaurant or admin; may be partial); null until approved." }

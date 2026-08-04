@@ -5,7 +5,8 @@
 //! (rules.yaml#/CatalogImportReplacesContent), and `OfferStockUpdated` patches one offer's stock in
 //! place. Each offer/option node is enriched with the DERIVED `stockStatus`
 //! (quantity vs lowStockThreshold, scalars.yaml#/StockStatus) so the GraphQL `Offer.stockStatus`
-//! deserializes straight out of the jsonb. `slug` is a spec hole; the per-offer `uberPrice` /
+//! deserializes straight out of the jsonb. `slug` is now carried by `CatalogCreated` and mapped by the
+//! generator (it was a spec hole until then); the per-offer `uberPrice` /
 //! `uberPriceBasis` (ADR-0022/0024) need the restaurant's cuisine_category + UberEstimationPolicy —
 //! cross-stream + referential state — and stay TODO(runtime) (the GraphQL field is nullable).
 #![allow(unused_variables)]
@@ -119,12 +120,6 @@ fn update_offer_stock(tree: &mut Value, offer_id: &Value, stock: &Stock) {
 }
 
 impl CatalogCompute for CatalogProjector {
-    /// ⚠️ HOLE: CatalogCreated carries no slug (spec) — preserve, else empty. TODO(spec): add a slug to the
-    /// event, or derive it from the restaurant.
-    fn slug(&self, prev: Option<&CatalogRow>, env: &Envelope) -> Slug {
-        prev.map(|r| r.slug.clone()).unwrap_or_else(|| Slug(String::new()))
-    }
-
     /// The assembled category→product→offer tree (+ derived per-offer/option `stockStatus`) — see the
     /// module doc for the fold semantics. `uberPrice`/`uberPriceBasis` are TODO(runtime) (cross-stream).
     fn tree(&self, prev: Option<&CatalogRow>, env: &Envelope) -> Value {
@@ -246,6 +241,7 @@ mod tests {
             r#ref: None,
             restaurant_id: restaurant_id(),
             name: CatalogName("Main menu".into()),
+            slug: Slug("main-menu".into()),
         })
     }
 

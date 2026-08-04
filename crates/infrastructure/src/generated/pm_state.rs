@@ -118,7 +118,7 @@ const REFUND_PROCESS_COLUMNS: &str = "order_id, payment_intent_id, refund_id, pr
 fn decode_refund_process(row: &PgRow) -> Result<RefundProcessRow, DomainError> {
     Ok(RefundProcessRow {
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
-        payment_intent_id: row.try_get::<Option<String>, _>("payment_intent_id").map_err(db_err)?.map(PaymentIntentId),
+        payment_intent_id: PaymentIntentId(row.try_get("payment_intent_id").map_err(db_err)?),
         refund_id: row.try_get::<Option<String>, _>("refund_id").map_err(db_err)?.map(RefundId),
         process_status: EnumText::from_text(&row.try_get::<String, _>("process_status").map_err(db_err)?)?,
         approved_amount_cents: row.try_get::<Option<i64>, _>("approved_amount_cents").map_err(db_err)?.map(MoneyCents),
@@ -167,7 +167,7 @@ pub async fn upsert_refund_process_with<'e, E: sqlx::PgExecutor<'e>>(executor: E
     );
     sqlx::query(&sql)
         .bind(row.order_id.0)
-        .bind(row.payment_intent_id.as_ref().map(|v| v.0.clone()))
+        .bind(row.payment_intent_id.0.clone())
         .bind(row.refund_id.as_ref().map(|v| v.0.clone()))
         .bind(row.process_status.to_text())
         .bind(row.approved_amount_cents.map(|v| v.0))

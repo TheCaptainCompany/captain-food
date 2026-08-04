@@ -953,6 +953,7 @@ mod tests {
             r#ref: Some(ExternalReference("cat_1".into())),
             restaurant_id: derive_restaurant_id("loc_1"),
             name: CatalogName("Menu".into()),
+            slug: domain::generated::scalars::Slug("menu".into()),
         });
         let stream = format!("Catalog-{}", derive_catalog_id("cat_1").0);
         store

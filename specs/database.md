@@ -240,7 +240,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `google_place_id` | `GooglePlaceId` | `TEXT` | nullable |  |
 | `slug` | `Slug` | `TEXT` | unique, nullable |  |
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
-| `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
+| `description` | `RestaurantDescription` | `TEXT` | nullable |  |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | `MarginPercent` | `TEXT` | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
 | `cuisine_category` | `CuisineCategory` | `TEXT` | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
@@ -327,7 +327,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | --- | --- | --- | --- | --- |
 | `catalog_id` | `CatalogId` | `UUID` | PK |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | index |  |
-| `slug` | `Slug` | `TEXT` | — | ⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event). |
+| `slug` | `Slug` | `TEXT` | — |  |
 | `name` | `CatalogName` | `TEXT` | — |  |
 | `tree` | `jsonb` | `JSONB` | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |

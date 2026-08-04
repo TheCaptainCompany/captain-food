@@ -63,3 +63,39 @@ pub mod errors {
         }
     }
 }
+
+pub mod text {
+    //! Pure text helpers shared across the layers. `slugify` lives here rather than in an ACL because
+    //! it encodes a DOMAIN rule -- the `Slug` scalar's pattern -- and more than one boundary needs it
+    //! (the SIRENE mapping and the HubRise catalog import).
+
+    /// Lowercase-dash slug matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`, with French accents folded to ASCII.
+    /// Non-alphanumeric runs collapse to a single dash; leading/trailing dashes are trimmed.
+    pub fn slugify(name: &str) -> String {
+        let mut out = String::with_capacity(name.len());
+        for c in name.chars() {
+            let folded: &str = match c {
+                'à' | 'â' | 'ä' | 'á' | 'ã' | 'À' | 'Â' | 'Ä' | 'Á' | 'Ã' => "a",
+                'ç' | 'Ç' => "c",
+                'é' | 'è' | 'ê' | 'ë' | 'É' | 'È' | 'Ê' | 'Ë' => "e",
+                'î' | 'ï' | 'í' | 'Î' | 'Ï' | 'Í' => "i",
+                'ô' | 'ö' | 'ó' | 'õ' | 'Ô' | 'Ö' | 'Ó' | 'Õ' => "o",
+                'ù' | 'û' | 'ü' | 'ú' | 'Ù' | 'Û' | 'Ü' | 'Ú' => "u",
+                'ÿ' | 'Ÿ' | 'ý' => "y",
+                'ñ' | 'Ñ' => "n",
+                'œ' | 'Œ' => "oe",
+                'æ' | 'Æ' => "ae",
+                _ => {
+                    if c.is_ascii_alphanumeric() {
+                        out.push(c.to_ascii_lowercase());
+                    } else if !out.ends_with('-') && !out.is_empty() {
+                        out.push('-');
+                    }
+                    continue;
+                }
+            };
+            out.push_str(folded);
+        }
+        out.trim_matches('-').to_string()
+    }
+}

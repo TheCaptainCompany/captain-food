@@ -509,6 +509,7 @@ pub async fn update_restaurant(
     let event = DomainEvent::RestaurantUpdated(RestaurantUpdated {
         restaurant_id: cmd.restaurant_id,
         display_name: cmd.display_name,
+        description: cmd.description,
         contact: cmd.contact,
         website: cmd.website,
         tags: cmd.tags,
@@ -2786,6 +2787,7 @@ pub async fn create_catalog(
         r#ref: cmd.r#ref,
         restaurant_id: cmd.restaurant_id,
         name: cmd.name,
+        slug: cmd.slug,
     });
     create_if_absent(store, &stream_name, &[event], actor).await.map(|_| ())
 }

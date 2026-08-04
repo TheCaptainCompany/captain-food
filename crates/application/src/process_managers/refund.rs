@@ -8,8 +8,10 @@
 //!   `payment_status` may lag; ADR-20260719-193500 flags the cross-stream projector route);
 //! - `admit` — a re-delivered opening fact never regresses a DECIDED run back to pending;
 //! - the Payment record-idempotency predicates (`domain::payment::already_records`);
-//! - `input_payment_refund` — the Stripe refund input; a pending run without an intent cannot be
-//!   refunded (same typed `RefundNotPending` rejection, fail closed before any gateway call).
+//! - `input_payment_refund` — the Stripe refund input. A pending run without an intent is no longer
+//!   checked here: `refund_process_manager.payment_intent_id` is NOT NULL, so the state cannot be
+//!   built (ADR-20260803-234035 — prefer the compiler over a gate). `read_order` skips the orders
+//!   that never charge, which is where the nullable column is actually narrowed.
 
 use domain::generated::commands::ApproveRefund;
 use domain::generated::entities::Money;
@@ -53,10 +55,21 @@ impl RefundOpenHooks<'_> {
                 order_id.0
             )));
         };
+        // The refund events carry `paymentIntentId` so the Payment aggregate can be addressed by its
+        // identity, so the read must produce one. A captured order always has it (the column is fed by
+        // PaymentCaptured), but the column is nullable for the orders that never charge — a $0
+        // replacement. Skip rather than unwrap: same outcome as the CAPTURED guard below, reached
+        // without a panic if the two ever disagree.
+        let Some(payment_intent_id) = o.payment_intent_id else {
+            return Ok(HookOutcome::Skip(format!(
+                "order {} has no payment intent — nothing to refund",
+                order_id.0
+            )));
+        };
         Ok(HookOutcome::Ready(OrderRead {
             payment_status: o.payment_status,
             total_amount_cents: Money { amount_cents: o.total_amount_cents, currency: o.currency },
-            payment_intent_id: o.payment_intent_id,
+            payment_intent_id,
         }))
     }
 }
@@ -107,18 +120,17 @@ pub struct RefundDecisionHooks;
 
 #[async_trait::async_trait]
 impl refund_process::ApproveRefundHooks for RefundDecisionHooks {
-    /// The captured payment to refund. A pending run without an intent cannot be refunded — the
-    /// same typed rejection, BEFORE any gateway call (fail closed).
+    /// The captured payment to refund. The "pending run without an intent" rejection this used to
+    /// carry is now UNSPELLABLE rather than checked: `refund_process_manager.payment_intent_id` is
+    /// NOT NULL, because every leg that opens a run guards on `payment_status = CAPTURED` and skips
+    /// otherwise. A gate the type system subsumes is deleted, not kept (ADR-20260803-234035).
     async fn input_payment_refund(
         &self,
         cmd: &ApproveRefund,
         row: &RefundProcessRow,
     ) -> Result<HookOutcome<PaymentRefundInput>, DomainError> {
-        let Some(intent) = row.payment_intent_id.clone() else {
-            return Err(DomainError::rejected("RefundNotPending", json!({ "orderId": cmd.order_id })));
-        };
         Ok(HookOutcome::Ready(PaymentRefundInput {
-            payment_intent_id: intent,
+            payment_intent_id: row.payment_intent_id.clone(),
             amount: cmd.amount.clone(),
         }))
     }
@@ -426,7 +438,7 @@ mod tests {
         assert_eq!(outcome, Outcome::Completed);
         let row = pending_row(&state).await;
         assert_eq!(row.process_status, RefundProcessStatus::PENDING_APPROVAL);
-        assert_eq!(row.payment_intent_id, Some(PaymentIntentId("pi_123".into())));
+        assert_eq!(row.payment_intent_id, PaymentIntentId("pi_123".into()));
         assert_eq!(row.reason.as_deref(), Some("Out of ingredients"));
         // The refund-queue fact landed on the Payment stream (tests.yaml then: refundOpened).
         let stream = store.stream(&domain::payment::stream(&PaymentIntentId("pi_123".into())));

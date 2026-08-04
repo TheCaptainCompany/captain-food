@@ -70,7 +70,7 @@ types:
       # during onboarding. Clients must therefore not assume a storefront link exists.
       slug: { $ref: 'scalars.yaml#/Slug', nullable: true }
       displayName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
-      description: { type: string, nullable: true }   # free text — no domain scalar (matches the view column)
+      description: { $ref: 'scalars.yaml#/RestaurantDescription', nullable: true }
       tags: { $ref: 'scalars.yaml#/Tag', array: true }
       cuisineCategory: { $ref: 'scalars.yaml#/CuisineCategory', nullable: true }   # single primary cuisine (Uber estimate coefficient); multi-cuisine discovery is `tags`
       rating: { $ref: 'scalars.yaml#/GoogleRating', nullable: true }

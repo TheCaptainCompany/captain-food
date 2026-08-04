@@ -47,6 +47,7 @@ scalar CatalogName
 scalar CatalogCategoryName
 scalar ProductName
 scalar ProductDescription
+scalar RestaurantDescription
 scalar OfferName
 scalar OptionListName
 scalar OptionName
@@ -612,7 +613,7 @@ type Restaurant {
   externalIdentifiers: [ExternalIdentifier!]!
   slug: Slug
   displayName: RestaurantDisplayName!
-  description: String
+  description: RestaurantDescription
   tags: [Tag!]!
   cuisineCategory: CuisineCategory
   rating: GoogleRating
@@ -1006,6 +1007,7 @@ input ActivateRestaurantInput {
 input UpdateRestaurantInput {
   restaurantId: RestaurantId!
   displayName: RestaurantDisplayName
+  description: RestaurantDescription
   contact: RestaurantContactInput
   website: WebUrl
   tags: [Tag!]
@@ -1094,6 +1096,7 @@ input CreateCatalogInput {
   catalogId: CatalogId!
   restaurantId: RestaurantId!
   name: CatalogName!
+  slug: Slug!
   ref: ExternalReference
 }
 

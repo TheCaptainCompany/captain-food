@@ -8,8 +8,8 @@
 
 use application::queries::RestaurantRow;
 use domain::generated::scalars::{
-    GooglePlaceId, GoogleRating, MarginPercent, RestaurantAccountId, RestaurantDisplayName,
-    RestaurantId, Slug, TimeZone, WebUrl,
+    GooglePlaceId, GoogleRating, MarginPercent, RestaurantAccountId, RestaurantDescription,
+    RestaurantDisplayName, RestaurantId, Slug, TimeZone, WebUrl,
 };
 use domain::generated::scalars::CurrencyCode;
 use domain::shared::errors::DomainError;
@@ -55,7 +55,10 @@ pub(crate) fn decode(row: &PgRow) -> Result<RestaurantRow, DomainError> {
             .map(GooglePlaceId),
         slug: row.try_get::<Option<String>, _>("slug").map_err(db_err)?.map(Slug),
         display_name: RestaurantDisplayName(row.try_get("display_name").map_err(db_err)?),
-        description: row.try_get("description").map_err(db_err)?,
+        description: row
+            .try_get::<Option<String>, _>("description")
+            .map_err(db_err)?
+            .map(RestaurantDescription),
         tags: opt_json(row.try_get("tags").map_err(db_err)?),
         margin_rate: parse_f64_col("margin_rate", row.try_get("margin_rate").map_err(db_err)?)?
             .map(MarginPercent),
@@ -136,7 +139,7 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &RestaurantRow) -> Res
         .bind(row.google_place_id.as_ref().map(|v| v.0.clone()))
         .bind(row.slug.as_ref().map(|s| s.0.clone()))
         .bind(row.display_name.0.clone())
-        .bind(row.description.clone())
+        .bind(row.description.as_ref().map(|d| d.0.clone()))
         .bind(opt_json(row.tags.clone()))
         .bind(row.margin_rate.as_ref().map(|v| v.0.to_string()))
         .bind(opt_to_text(&row.cuisine_category))

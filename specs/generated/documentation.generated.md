@@ -470,7 +470,7 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | <a id="type-restaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ✅ |
 | <a id="type-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ⬜ |
 | <a id="type-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |
-| <a id="type-restaurant--description"></a>`description` | `string` | ⬜ |
+| <a id="type-restaurant--description"></a>`description` | [🔤 `RestaurantDescription`](#scalar-restaurantdescription) | ⬜ |
 | <a id="type-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ✅ |
 | <a id="type-restaurant--cuisinecategory"></a>`cuisineCategory` | [🔤 `CuisineCategory`](#scalar-cuisinecategory) | ⬜ |
 | <a id="type-restaurant--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |
@@ -587,7 +587,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `google_place_id` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`googlePlaceId`](#event-restaurantgooglebusinessprofileupdated--googleplaceid) | nullable |  |
 | `slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantSlugConfigured`.`slug`](#event-restaurantslugconfigured--slug), [⚡ `RestaurantSlugReconfigured`.`slug`](#event-restaurantslugreconfigured--slug) | unique, nullable |  |
 | `display_name` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) _(derived)_ | [⚡ `RestaurantRegistered`.`displayName`](#event-restaurantregistered--displayname), [⚡ `RestaurantUpdated`.`displayName`](#event-restaurantupdated--displayname) | — |  |
-| `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
+| `description` | [🔤 `RestaurantDescription`](#scalar-restaurantdescription) | [⚡ `RestaurantUpdated`.`description`](#event-restaurantupdated--description) | nullable |  |
 | `tags` | `jsonb` | [⚡ `RestaurantRegistered`.`tags`](#event-restaurantregistered--tags), [⚡ `RestaurantUpdated`.`tags`](#event-restaurantupdated--tags) | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | [🔤 `MarginPercent`](#scalar-marginpercent) | [⚡ `RestaurantRegistered`.`marginRate`](#event-restaurantregistered--marginrate), [⚡ `RestaurantUpdated`.`marginRate`](#event-restaurantupdated--marginrate) | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
 | `cuisine_category` | [🔤 `CuisineCategory`](#scalar-cuisinecategory) | [⚡ `RestaurantRegistered`.`cuisineCategory`](#event-restaurantregistered--cuisinecategory), [⚡ `RestaurantUpdated`.`cuisineCategory`](#event-restaurantupdated--cuisinecategory) | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
@@ -767,6 +767,7 @@ Admin edits one or more mutable LOCATION fields (full replace of provided fields
 | --- | --- | --- | --- |
 | <a id="command-updaterestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-updaterestaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ⬜ |  |
+| <a id="command-updaterestaurant--description"></a>`description` | [🔤 `RestaurantDescription`](#scalar-restaurantdescription) | ⬜ | Free-text presentation shown on the storefront and the discovery card. |
 | <a id="command-updaterestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="command-updaterestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="command-updaterestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
@@ -1091,6 +1092,7 @@ One or more editable LOCATION fields of a restaurant have changed.
 | --- | --- | --- | --- |
 | <a id="event-restaurantupdated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantupdated--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ⬜ |  |
+| <a id="event-restaurantupdated--description"></a>`description` | [🔤 `RestaurantDescription`](#scalar-restaurantdescription) | ⬜ |  |
 | <a id="event-restaurantupdated--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="event-restaurantupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="event-restaurantupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
@@ -1408,7 +1410,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(25)_
+### 🔤 Scalars _(26)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1421,6 +1423,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-googlerating"></a>🔤 `GoogleRating` | number | Google Maps / Business Profile average rating (0–5), enrichment only. |
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
+| <a id="scalar-restaurantdescription"></a>🔤 `RestaurantDescription` | string | Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.  |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
 | <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
 | <a id="scalar-pageoffset"></a>🔤 `PageOffset` | integer | Rows to skip before the page for a paginated list query (#113). Absent = 0. |
@@ -2249,7 +2252,7 @@ _🧩 aggregate_ — A restaurant catalog: catalog, category tree, products, off
 | --- | --- | --- | --- | --- |
 | `catalog_id` | [🔤 `CatalogId`](#scalar-catalogid) _(derived)_ | [⚡ `CatalogCreated`.`catalogId`](#event-catalogcreated--catalogid) | PK |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `CatalogCreated`.`restaurantId`](#event-catalogcreated--restaurantid) | index |  |
-| `slug` | [🔤 `Slug`](#scalar-slug) | ⚠️ _(none)_ | — | ⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event). |
+| `slug` | [🔤 `Slug`](#scalar-slug) | [⚡ `CatalogCreated`.`slug`](#event-catalogcreated--slug) | — |  |
 | `name` | [🔤 `CatalogName`](#scalar-catalogname) _(derived)_ | [⚡ `CatalogCreated`.`name`](#event-catalogcreated--name) | — |  |
 | `tree` | `jsonb` | [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported) | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
@@ -2271,6 +2274,7 @@ Admin creates a catalog for a restaurant.
 | <a id="command-createcatalog--catalogid"></a>`catalogId` | [🔤 `CatalogId`](#scalar-catalogid) | ✅ | Client-generated id for the new catalog. |
 | <a id="command-createcatalog--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-createcatalog--name"></a>`name` | [🔤 `CatalogName`](#scalar-catalogname) | ✅ |  |
+| <a id="command-createcatalog--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes. |
 | <a id="command-createcatalog--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 
 <a id="command-addproduct"></a>
@@ -2468,6 +2472,7 @@ A new catalog has been created for a restaurant.
 | <a id="event-catalogcreated--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-catalogcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-catalogcreated--name"></a>`name` | [🔤 `CatalogName`](#scalar-catalogname) | ✅ |  |
+| <a id="event-catalogcreated--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes. |
 
 <a id="event-catalogcategoryadded"></a>
 #### ⚡ Event: `CatalogCategoryAdded`
@@ -5035,6 +5040,7 @@ A refundable fact on a paid order (rejection, cancellation, customer request) op
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-refundopened--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
 | <a id="event-refundopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-refundopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-refundopened--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The captured order total eligible for refund (the decision may approve less). |
@@ -5051,6 +5057,7 @@ The restaurant or an admin approved a refund; the RefundProcess will drive the S
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-refundapproved--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
 | <a id="event-refundapproved--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-refundapproved--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | Approved refund amount (may be partial). |
 | <a id="event-refundapproved--reason"></a>`reason` | `string` | ⬜ |  |
@@ -5066,6 +5073,7 @@ The restaurant or an admin denied a pending refund request.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-refunddenied--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
 | <a id="event-refunddenied--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-refunddenied--reason"></a>`reason` | `string` | ✅ |  |
 

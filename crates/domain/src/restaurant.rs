@@ -52,9 +52,12 @@ pub struct RestaurantState {
     // These are folded for ONE reason: so the aggregate can answer "does this incoming registry
     // record actually change anything?" WITHOUT consulting the read model. That question used to be
     // asked of the `Restaurant` projection through an unindexed JSONB containment scan, once per
-    // staged SIRET; now it is a pure comparison against the fold. The set is exactly the fields
-    // `RestaurantUpdated` can carry — if that event grows a field, it belongs here too, or an
-    // inbound registry change to it would be silently judged a no-op.
+    // staged SIRET; now it is a pure comparison against the fold. The set is the fields
+    // `RestaurantUpdated` can carry AND a registry can report — if the event grows a field a
+    // registry knows about, it belongs here too, or an inbound change to it would be silently
+    // judged a no-op. `description` is the deliberate exclusion: it is owned by the restaurant's
+    // own staff and no registry reports one, so `changes_from_registry` always leaves it `None`
+    // and there is nothing here to compare against.
     /// Contact details (phone/email) as last recorded.
     pub contact: Option<RestaurantContact>,
     /// Public website, when known.
@@ -165,6 +168,10 @@ pub fn changes_from_registry(
     Some(crate::generated::events::RestaurantUpdated {
         restaurant_id: reported.restaurant_id,
         display_name,
+        // A registry has no opinion on the restaurant's own presentation text: SIRENE knows the legal
+        // établissement, not how the place describes itself. Always `None` — never "clear it", which
+        // would let every weekly sweep wipe copy the restaurant's staff wrote (see the doc above).
+        description: None,
         contact,
         website,
         tags,
@@ -332,6 +339,7 @@ mod tests {
         let update = DomainEvent::RestaurantUpdated(RestaurantUpdated {
             restaurant_id: RestaurantId(uuid::Uuid::nil()),
             display_name: None,
+            description: None,
             contact: None,
             website: None,
             tags: vec![],

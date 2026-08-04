@@ -179,6 +179,9 @@ pub struct UpdateRestaurantInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "displayName")]
     pub display_name: Option<RestaurantDisplayName>,
+    /// Free-text presentation shown on the storefront and the discovery card.
+    #[graphql(name = "description")]
+    pub description: Option<RestaurantDescription>,
     #[graphql(name = "contact")]
     pub contact: Option<RestaurantContactInput>,
     #[graphql(name = "website")]
@@ -361,6 +364,9 @@ pub struct CreateCatalogInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "name")]
     pub name: CatalogName,
+    /// URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes.
+    #[graphql(name = "slug")]
+    pub slug: Slug,
     #[graphql(name = "ref")]
     pub r#ref: Option<ExternalReference>,
 }

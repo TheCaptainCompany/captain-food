@@ -231,6 +231,10 @@ UpdateRestaurant:
     displayName:
       $ref: 'scalars.yaml#/RestaurantDisplayName'
       nullable: true
+    description:
+      $ref: 'scalars.yaml#/RestaurantDescription'
+      nullable: true
+      description: "Free-text presentation shown on the storefront and the discovery card."
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
       nullable: true
@@ -470,10 +474,13 @@ CreateCatalog:
       $ref: 'scalars.yaml#/RestaurantId'
     name:
       $ref: 'scalars.yaml#/CatalogName'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "URL-safe catalog label, unique within its restaurant; addresses the catalog in storefront routes."
     ref:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
-  required: [catalogId, restaurantId, name]
+  required: [catalogId, restaurantId, name, slug]
 
 AddProduct:
   description: >

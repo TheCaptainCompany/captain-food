@@ -580,6 +580,21 @@ impl From<ProductDescription> for ds::ProductDescription {
     }
 }
 
+/// Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantDescription(pub String);
+async_graphql::scalar!(RestaurantDescription, "RestaurantDescription", "Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.");
+impl From<ds::RestaurantDescription> for RestaurantDescription {
+    fn from(v: ds::RestaurantDescription) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantDescription> for ds::RestaurantDescription {
+    fn from(v: RestaurantDescription) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Offer label, unique within a product (HubRise SKU name). Example: 'Small', 'Large', 'Default'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OfferName(pub String);

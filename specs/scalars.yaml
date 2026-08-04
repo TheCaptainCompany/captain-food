@@ -214,6 +214,14 @@ ProductDescription:
   type: string
   maxLength: 2000
 
+RestaurantDescription:
+  type: string
+  maxLength: 2000
+  description: >
+    Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card.
+    Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject
+    (one name = one scalar), so the two can diverge without a migration.
+
 OfferName:
   type: string
   maxLength: 140
