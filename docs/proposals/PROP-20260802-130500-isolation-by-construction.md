@@ -244,7 +244,7 @@ withdrawal method named `cancel_scheduling` per #308, lane-scoping declined). Th
 | client methods | `receives`/`reminders` → conditional emission | ✅ compiler (phase 1) |
 | `Mailbox` port (`insert`/`by_message`/`cancel_scheduled`) | the `MailboxAccess` witness — mintable only inside `actor_client` ([ADR-20260803-172654](../adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md)) | ✅ compiler ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) |
 | `View_*` read MODELS | `api.yaml` type `reads:` **or** c4-l3 `components.*.reads[*]` **or** `internal: true` — `read-model-no-reader` ([ADR-20260804-014546](../adr/ADR-20260804-014546-read-models-declare-their-readers.md)) | ✅ validator ([#305 "View_* read declarations"](https://github.com/TheCaptainCompany/captain-food/issues/305)) |
-| `View_*` repository read METHODS | the declaration above is over the SPEC — no gate proves the Rust call sites match it | ❌ hole (#305 successor B: generated `ReadPorts`, undeclared pair → `E0609`) |
+| `View_*` repository read METHODS | the declaration above is over the SPEC — no gate proves the Rust call sites match it | ❌ hole ([#337 "Generated ReadPorts bundle: make an undeclared read not compile"](https://github.com/TheCaptainCompany/captain-food/issues/337)) |
 | `PgEventStore` append | none (level-1 row in §2) | ❌ hole (phase-3 territory) |
 | unused Rust `pub` items generally | `unreachable_pub = deny` — the mechanical form of this directive | D6, deferred by PO decision |
 

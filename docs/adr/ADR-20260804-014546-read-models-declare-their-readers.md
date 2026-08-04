@@ -95,11 +95,11 @@ Two further limits, recorded rather than fixed:
 
 ## Successors
 
-- **[#305 successor A] `query-unreached-by-screen`** — the backward mirror of `screen-unknown-resolver`:
+- **[#336 "Every V0 query must be reached by a screen resolver (query-unreached-by-screen)"](https://github.com/TheCaptainCompany/captain-food/issues/336)** — the backward mirror of `screen-unknown-resolver`:
   every V0 query must be reached by ≥1 screen resolver. Six queries remain unreached, all `slice: V1`,
   so V1 is exempt by construction and the rule is satisfiable today. Needs product decisions about the
   six, so it is a proposal rather than a mechanism.
-- **[#305 successor B] Generated `ReadPorts` bundle — the level-4 close.** Modelled on `CommandDeps` /
+- **[#337 "Generated ReadPorts bundle: make an undeclared read not compile"](https://github.com/TheCaptainCompany/captain-food/issues/337)** — the level-4 close. Modelled on `CommandDeps` /
   `emit_infra_command_router` and the conditional emission in `emit/actor_clients.rs`: one accessor per
   declared `(component, read model)` pair, undeclared → `E0609`. Two costs to name up front:
   `crates/application/src/queries.rs` stays **hand-written** (do not try to generate 709 lines of
