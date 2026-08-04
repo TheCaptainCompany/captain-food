@@ -4016,6 +4016,108 @@ Catalog:
     }
 
     #[test]
+    fn screen_actions_supply_every_required_command_input() {
+        // A screen ACTION is the CALLER of its mutation, so its `variables:` are the whole input --
+        // unlike a resolver's pinned `args:`, which are static defaults the runtime merges caller
+        // variables over (hence `validate_resolver_args` deliberately does NOT check required-arg
+        // coverage). Nothing used to look inside `variables` at all: `action-not-a-mutation` proves
+        // only that the $ref names a mutation, and `op-uncovered-by-story` is satisfied by a story
+        // STEP, which is not a screen. A form that cannot submit stayed invisible until a human
+        // pressed the button.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+
+        // GREEN — the restaurant profile screen wires UpdateRestaurant correctly, so it is absent
+        // from the findings. (The rule has a KNOWN non-empty baseline elsewhere: ten screens across
+        // the backoffice, storefront and rider apps are genuinely unsubmittable, which is what it was
+        // built to surface. Asserting on this one screen keeps the test about the RULE, not the
+        // backlog it exposed.)
+        let flagged = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "action-missing-required-input")
+                .map(|i| i.location.clone())
+                .collect()
+        };
+        assert!(
+            !flagged(&model).iter().any(|l| l.contains("restaurant_profile")),
+            "the profile screen supplies every required UpdateRestaurant input: {:?}",
+            flagged(&model)
+        );
+
+        // RED — drop the one REQUIRED input (`restaurantId`) from that screen's save action.
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_backoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("backoffice declares screens");
+        let profile = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("restaurant_profile"))
+            .expect("the restaurant_profile screen exists");
+        let components = profile
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("the screen has components");
+        let save = components
+            .iter_mut()
+            .find(|c| c.get("id").and_then(|x| x.as_str()) == Some("save_profile"))
+            .expect("the save button exists");
+        save.get_mut("action")
+            .and_then(|a| a.get_mut("variables"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("the save action passes variables")
+            .remove(Value::from("restaurantId"))
+            .expect("restaurantId was being supplied");
+
+        let issues = validate(&model).issues;
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "action-missing-required-input" && i.location.contains("restaurant_profile"))
+            .unwrap_or_else(|| panic!("dropping a required input must fire the rule; got: {:?}", flagged(&model)));
+        assert!(
+            matches!(hit.level, Level::Warning),
+            "the rule WARNS rather than errors: ten pre-existing screens violate it, and a new gate that \
+             fails the build on inherited debt gets weakened instead of paid down"
+        );
+        assert!(hit.message.contains("restaurantId"), "{}", hit.message);
+    }
+
+    #[test]
+    fn screen_actions_do_not_pass_undeclared_command_inputs() {
+        // The write-side mirror of `resolver-unknown-arg`: a variable naming no property of the
+        // command is dropped on the floor, while the spec reads as though the input were wired.
+        // The rider's Accept button is the case that earned it -- it passes `orderId`, which
+        // AcceptDelivery does not declare, and supplies neither of its required inputs.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        assert!(
+            validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input"
+                && i.location.contains("accept_delivery")
+                && i.message.contains("orderId")),
+            "the rider accept action passes an undeclared `orderId` and must be flagged"
+        );
+
+        // RED-to-GREEN: declaring `orderId` on AcceptDelivery clears exactly that finding, proving
+        // the rule reads the command rather than pattern-matching the variable name.
+        model
+            .defs
+            .get_mut("commands.yaml")
+            .and_then(|v| v.get_mut("AcceptDelivery"))
+            .and_then(|v| v.get_mut("properties"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("AcceptDelivery declares properties")
+            .insert(Value::from("orderId"), Value::from("placeholder"));
+        assert!(
+            !validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input"
+                && i.location.contains("accept_delivery")),
+            "declaring the property must clear the finding"
+        );
+    }
+
+    #[test]
     fn graphql_reached_read_models_are_not_re_declared_on_the_gateway() {
         // The whole gate rests on the two declarations NOT overlapping: a read model reached through
         // GraphQL is declared by its api.yaml type `reads:` binding, so re-listing it on

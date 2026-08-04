@@ -10887,6 +10887,34 @@ _Surface_ **`restaurant_backoffice.yaml`**
 **Gaps**
 - ⚠️ refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
 
+<a id="screen-restaurant_profile"></a>
+### 📱 `restaurant_profile` · `/settings/profile` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Restaurant profile                       │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Restaurant profile         │
+│ section — How you appear                 │
+│ section — Main cuisine                   │
+│ section                                  │
+│ button — Save profile                    │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `restaurant.locations` | [🔎 `restaurantLocationsByAccount`](#query-restaurantlocationsbyaccount) |
+| write | `update_restaurant_profile` | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
+
+**Gaps**
+- ⚠️ Same missing `restaurantById` query as the storefront screen: the only single-restaurant read is keyed by SLUG, so this screen reads `restaurantLocationsByAccount` and binds the selected location. A restaurant that has not yet chosen a storefront address has no slug to be fetched by.
+- ⚠️ `openingHours` is editable through UpdateRestaurant but not offered here: a weekly slot editor is a repeatable per-day range control the SDUI component set does not have, and a half-built one would silently drop slots on save. It is left off the form rather than rendered as a control that cannot round-trip the array.
+- ⚠️ `contact`, `address` and `location` are carried by UpdateRestaurant but stay off this screen: address changes move the geocoded position and the delivery quote, so they belong with a geocoding confirmation step rather than in a free-text profile form.
+- ⚠️ `marginRate` is an UpdateRestaurant field the owner must NOT set — it is the Captain service-fee split input (ADR-0017), back-office/ADMIN only. It is excluded here by omission; the mutation still accepts it from an ADMIN caller.
+
 <a id="screen-storefront_address"></a>
 ### 📱 `storefront_address` · `/settings/storefront` · 📱 SDUI · 🔒 auth
 
@@ -11363,6 +11391,24 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-storefront-consequences-redirect"></a>`back.storefront.consequences.redirect` | — | Your old address redirects here, so printed menus and QR codes keep working. | Votre ancienne adresse redirige ici : menus imprimés et QR codes continuent de fonctionner. |
 | <a id="translation-back-storefront-consequences-reserved"></a>`back.storefront.consequences.reserved` | — | The old address stays reserved to you — nobody else can take it. | L'ancienne adresse vous reste réservée — personne d'autre ne peut la prendre. |
 | <a id="translation-back-storefront-save"></a>`back.storefront.save` | — | Save address | Enregistrer l'adresse |
+| <a id="translation-back-profile-title"></a>`back.profile.title` | — | Restaurant profile | Profil du restaurant |
+| <a id="translation-back-profile-identity-title"></a>`back.profile.identity.title` | — | How you appear | Votre présentation |
+| <a id="translation-back-profile-name-label"></a>`back.profile.name.label` | — | Restaurant name | Nom du restaurant |
+| <a id="translation-back-profile-description-label"></a>`back.profile.description.label` | — | Description | Description |
+| <a id="translation-back-profile-description_ph"></a>`back.profile.description_ph` | — | What makes your place worth the trip -- your cooking, your story, your specialities. | Ce qui donne envie de venir chez vous : votre cuisine, votre histoire, vos spécialités. |
+| <a id="translation-back-profile-description-help"></a>`back.profile.description.help` | — | Shown on your storefront and on your card in the marketplace listing. | Affichée sur votre boutique et sur votre fiche dans le catalogue. |
+| <a id="translation-back-profile-website-label"></a>`back.profile.website.label` | — | Website | Site web |
+| <a id="translation-back-profile-website_ph"></a>`back.profile.website_ph` | — | https:// | https:// |
+| <a id="translation-back-profile-tags-label"></a>`back.profile.tags.label` | — | Tags | Étiquettes |
+| <a id="translation-back-profile-tags-help"></a>`back.profile.tags.help` | — | Used to help customers find you when browsing. | Servent à vous trouver lors de la navigation. |
+| <a id="translation-back-profile-cuisine-title"></a>`back.profile.cuisine.title` | — | Main cuisine | Cuisine principale |
+| <a id="translation-back-profile-cuisine-help"></a>`back.profile.cuisine.help` | — | One choice only. It sets the coefficient behind the Uber Eats price comparison, not how customers search for you -- that is your tags. | Un seul choix. Il détermine le coefficient de la comparaison de prix Uber Eats, et non la recherche client -- ce sont vos étiquettes. |
+| <a id="translation-back-profile-cuisine-fast_food"></a>`back.profile.cuisine.fast_food` | — | Fast food | Restauration rapide |
+| <a id="translation-back-profile-cuisine-pizza"></a>`back.profile.cuisine.pizza` | — | Pizza | Pizzeria |
+| <a id="translation-back-profile-cuisine-traditional"></a>`back.profile.cuisine.traditional` | — | Traditional | Traditionnel |
+| <a id="translation-back-profile-cuisine-bistronomic"></a>`back.profile.cuisine.bistronomic` | — | Bistronomic | Bistronomique |
+| <a id="translation-back-profile-cuisine-food_truck"></a>`back.profile.cuisine.food_truck` | — | Food truck | Food truck |
+| <a id="translation-back-profile-save"></a>`back.profile.save` | — | Save profile | Enregistrer le profil |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

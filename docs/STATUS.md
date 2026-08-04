@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-04 — Screen actions are checked against their command's inputs
+> ([ADR-20260804-154700](adr/ADR-20260804-154700-screen-actions-are-checked-against-their-command-inputs.md))**.
+> Asked whether anything declared the screen-form ↔ mutation-input gap, the answer was **no**:
+> `action-not-a-mutation` proves only that the `$ref` names a mutation, `op-uncovered-by-story` is
+> satisfied by a story STEP (not a screen), and `validate_resolver_args` deliberately skips required-arg
+> coverage for QUERIES (a pin is a static default). Nothing read a mutation action's `variables`. Two new
+> WARNING rules now do: **`action-missing-required-input`** (a screen action is the CALLER, so its
+> variables are the whole input) and **`action-unknown-input`** (the write-side mirror of
+> `resolver-unknown-arg`). The validator now walks screen component trees, which it never did.
+> **17 pre-existing violations on the first run** — hence warnings, not errors: a gate that fails the
+> build on inherited debt gets weakened instead of paid down. Tracked in
+> [#342](https://github.com/TheCaptainCompany/captain-food/issues/342). Sharpest case: the rider's
+> **Accept button passes an `orderId` that `AcceptDelivery` does not declare and supplies neither of its
+> required inputs** — the screen's primary action cannot work.
+> Also landed: the **restaurant profile screen** (`/settings/profile`) wiring `updateRestaurant` — the
+> reason `Restaurant.description` was a column no event fed was that the mutation which sets it had
+> **zero screens**, while being story-covered. It declares four `gaps` (no `restaurantById` query;
+> `openingHours`, `contact`/`address` and the ADMIN-only `marginRate` deliberately off the form).
+> **Warning baseline 26 → 43** — a deliberate new-rule change, not drift. Compare against 43 from here.
+
 > ✅ **2026-08-04 — Two dead read-model columns populated; refund facts carry their payment identity
 > ([ADR-20260804-041227](adr/ADR-20260804-041227-populate-the-two-dead-columns-and-address-refund-facts.md))**.
 > An audit of the 31 standing warnings found **none of them were lint noise** — each is an unbuilt
