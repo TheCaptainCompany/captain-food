@@ -410,6 +410,7 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("architecture/c4-l2.yaml", "boundedContexts.*.processManagers[*]", &[Kind::ProcessManager]),
     ("architecture/c4-l3.yaml", "components.*.handles[*]", &[Kind::Aggregate, Kind::ProcessManager]),
     ("architecture/c4-l3.yaml", "components.*.updates[*]", &[Kind::ProjectionView, Kind::ProjectionTable]),
+    ("architecture/c4-l3.yaml", "components.*.reads[*]", &[Kind::ProjectionView, Kind::ProjectionTable]),
 ];
 
 /// The DSL's own FIELD names — every other segment of a `$ref` location is a definition/instance name

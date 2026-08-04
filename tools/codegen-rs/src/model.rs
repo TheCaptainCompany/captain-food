@@ -225,6 +225,7 @@ pub(crate) struct Coverage {
     pub(crate) view_fed_by: usize,
     pub(crate) mutation_links: usize,
     pub(crate) reads_links: usize,
+    pub(crate) component_reads_links: usize,
     pub(crate) story_links: usize,
     pub(crate) test_cases: usize,
     pub(crate) rules: usize,

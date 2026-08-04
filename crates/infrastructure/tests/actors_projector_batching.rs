@@ -293,8 +293,17 @@ async fn actors_and_batching_projector_converge_concurrently() {
                 .fetch_one(&pool)
                 .await
                 .expect("head");
+        // The SLOWEST projector, not the fastest. `projection_checkpoint` is keyed by projector and
+        // holds one row per registered projection ("Restaurant" and "SlugAlias", see
+        // crates/infrastructure/src/projection/worker.rs), which advance independently. `max(position)`
+        // therefore unblocked this loop as soon as EITHER reached head — and assertion 2 below reads
+        // `restaurant`, owned by the Restaurant projector, so a SlugAlias-wins race read a stale
+        // display_name ("R1 v2" instead of "R1 v4") on contended CI runners. `count(*) < 2 THEN 0`
+        // makes a not-yet-written checkpoint row count as "not converged" rather than silently
+        // narrowing the min() to whichever projector happened to register first.
         let ckpt: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(max(position), 0) FROM projection_checkpoint",
+            "SELECT CASE WHEN count(*) < 2 THEN 0::bigint ELSE min(position) END \
+             FROM projection_checkpoint WHERE projector IN ('Restaurant', 'SlugAlias')",
         )
         .fetch_one(&pool)
         .await

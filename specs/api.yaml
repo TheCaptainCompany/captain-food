@@ -213,14 +213,6 @@ types:
       phone: { $ref: 'scalars.yaml#/PhoneNumber' }
       locale: { $ref: 'scalars.yaml#/Locale', nullable: true }
       timezone: { $ref: 'scalars.yaml#/TimeZone', nullable: true }
-  PhoneCountry:
-    description: "A selectable phone country for the dialing-code picker (static reference data)."
-    reads: [{ $ref: 'database/tables/referential.yaml#/PhoneCountry' }]
-    properties:
-      country: { $ref: 'scalars.yaml#/CountryCode' }
-      dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
-      name: { type: string }
-      defaultLocale: { $ref: 'scalars.yaml#/Locale' }
   PaymentIntent:
     description: >
       Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values
@@ -482,11 +474,6 @@ inputs:
 # The input is non-null when any arg is required, nullable when all args are optional filters. Declare
 # args here as usual; the codegen produces the input type + value-object inputs for any entity-typed arg.
 queries:
-
-  phoneCountries:
-    description: "Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33')."
-    returns: { $ref: '#/types/PhoneCountry', array: true }
-    slice: V0
 
   mailboxLanes:
     description: >

@@ -60,6 +60,12 @@ rm -rf target/debug/incremental target/debug/build target/debug/deps   # freed 2
 cold build. In the session where this happened it bought two full rebuilds. Delete only when writes
 are actually failing, and prefer dropping `incremental`/`deps` over the whole `target/`.
 
+**Check `target/release` FIRST (2026-08-04):** it was **1.2G** in a session that only ever ran debug
+gates — `make rust`, `cargo test --workspace` and the codegen all build debug, so `rm -rf
+target/release` is free: no rebuild penalty at all, unlike every lever below it. It is the first thing
+to try when `df` gets tight, not the last. Freeing it took a build from 892M headroom back to 2.1G,
+which was enough to finish `cargo test --workspace` without touching the debug cache.
+
 **The cheap lever inside `deps/` (2026-07-31):** the files **over ~50M are final-LINK products**
 (test binaries — stale hashes accumulate, ~15G across ~20 files after a day of DB-test iteration),
 not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50M -delete` freed

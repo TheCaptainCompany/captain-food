@@ -751,13 +751,6 @@ type CustomerProfile {
   timezone: TimeZone
 }
 
-type PhoneCountry {
-  country: CountryCode!
-  dialingCode: DialingCode!
-  name: String!
-  defaultLocale: Locale!
-}
-
 type PaymentIntent {
   paymentIntentId: PaymentIntentId!
   clientSecret: String
@@ -1747,7 +1740,6 @@ input MetadataInput {
 # Queries — read side
 # ==============================================================================
 type Query {
-  phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
   mailboxLanes: [MailboxLane!]! @auth(requires: [ADMIN])
   poisonedMailboxMessages(input: PoisonedMailboxMessagesQueryInput): [PoisonedMailboxMessage!]! @auth(requires: [ADMIN])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
