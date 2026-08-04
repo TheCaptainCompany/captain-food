@@ -29,7 +29,6 @@ public_user:
         AddToCartLine: { $ref: 'api.yaml#/mutations/addCartLine' }
         RemoveFromCart: { $ref: 'api.yaml#/mutations/removeCartLine' }
         ChangeCartLineQuantity: { $ref: 'api.yaml#/mutations/changeCartLineQuantity' }
-        EnterPhone: { $ref: 'api.yaml#/queries/phoneCountries' }
         RequestPhoneOtp: { $ref: 'api.yaml#/mutations/requestPhoneVerification' }
         VerifyPhone: { $ref: 'api.yaml#/mutations/verifyPhone' }
 

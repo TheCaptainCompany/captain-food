@@ -14,11 +14,6 @@ pub struct QueryRoot;
 
 #[async_graphql::Object(name = "Query")]
 impl QueryRoot {
-    /// Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
-    #[graphql(name = "phoneCountries")]
-    async fn phone_countries(&self) -> async_graphql::Result<Vec<PhoneCountry>> {
-        Err(async_graphql::Error::new("not implemented"))
-    }
     /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
     #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {

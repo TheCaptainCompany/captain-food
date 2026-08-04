@@ -32,7 +32,6 @@ A visitor browsing Captain.Food without being logged in.
 |  | AddToCartLine | [✏️ `addCartLine`](#mutation-addcartline) |
 |  | RemoveFromCart | [✏️ `removeCartLine`](#mutation-removecartline) |
 |  | ChangeCartLineQuantity | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
-|  | EnterPhone | [🔎 `phoneCountries`](#query-phonecountries) |
 |  | RequestPhoneOtp | [✏️ `requestPhoneVerification`](#mutation-requestphoneverification) |
 |  | VerifyPhone | [✏️ `verifyPhone`](#mutation-verifyphone) |
 
@@ -9988,16 +9987,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(8)_
-
-<a id="query-phonecountries"></a>
-#### 🔎 Query: `phoneCountries`
-
-Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
-
-- **Input**: _(none)_
-- **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
-- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+### 🧰 API operations _(7)_
 
 <a id="query-mailboxlanes"></a>
 #### 🔎 Query: `mailboxLanes`
@@ -10066,7 +10056,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(13)_
+### 🧩 Output types _(12)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -10135,20 +10125,6 @@ A selectable option within an option list.
 | <a id="type-option--default"></a>`default` | `boolean` | ✅ |
 | <a id="type-option--availability"></a>`availability` | [🔤 `CatalogItemAvailability`](#scalar-catalogitemavailability) | ✅ |
 | <a id="type-option--stockstatus"></a>`stockStatus` | [🔤 `StockStatus`](#scalar-stockstatus) | ⬜ |
-
-<a id="type-phonecountry"></a>
-#### 🧩 Type: `PhoneCountry`
-
-A selectable phone country for the dialing-code picker (static reference data).
-
-- **Read model**: [🗄️ `PhoneCountry`](#view-phonecountry)
-
-| Field | Type | Required |
-| --- | --- | --- |
-| <a id="type-phonecountry--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |
-| <a id="type-phonecountry--dialingcode"></a>`dialingCode` | [🔤 `DialingCode`](#scalar-dialingcode) | ✅ |
-| <a id="type-phonecountry--name"></a>`name` | `string` | ✅ |
-| <a id="type-phonecountry--defaultlocale"></a>`defaultLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |
 
 <a id="type-paymentintent"></a>
 #### 🧩 Type: `PaymentIntent`
@@ -11539,7 +11515,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 ## 🏛️ Architecture (C4)
 
 C4 views as source-managed DSL (`specs/architecture/c4-l{2,3}.yaml`). Bounded contexts bind their
-aggregates; components bind the aggregates they handle and the read models they update.
+aggregates; components bind the aggregates they handle, the read models they update, and (`reads`) the
+read models they CONSUME outside GraphQL -- every read model must have a declared reader (#305).
 
 **System**: `Captain.Food` — Local-first food ordering & delivery for independent restaurants and food trucks (V0: Tours).
 
@@ -11619,21 +11596,22 @@ aggregates; components bind the aggregates they handle and the read models they 
 | Component | Instrumented | Description | Binds |
 | --- | --- | --- | --- |
 | ⚙️ `graphql-gateway` | 📡 yes | Per-role GraphQL endpoint (/{role}/graphql); applies the @auth/@public ACL; entry span (SERVER). | — |
+| ⚙️ `tenant-host-router` | — no | Resolves the tenant from the Host header ({slug}.captain.food) and 301s a SUPERSEDED label to the restaurant's live address (ADR-20260728-011344). Reads a read model WITHOUT going through GraphQL, so its access is declared here rather than by an api.yaml type binding. | reads [🗄️ `Restaurant`](#view-restaurant), [🗄️ `SlugAlias`](#view-slugalias) |
 | ⚙️ `observability-middleware` | 📡 yes | Attaches business.* attributes + correlation/cause ids to spans; structured JSON logging; the only place domain context meets OTel. | — |
 | ⚙️ `command-bus` | 📡 yes | Dispatches commands to handlers; span 'command.receive'/'command.validate'/'command.handle'. | — |
 | ⚙️ `actor-client` | — no | The compiler-enforced mailbox door (crates/actor_client — #290 phase 1, PROP-20260802-130500 D1/D4): one GENERATED typed client per actor with a SPEC-GATED surface (send/record/schedule/cancel_scheduling exist only where actors.yaml declares a use, ADR-20260802-170059) plus the generic ActorClient operation-status read door. The only place a mailbox row can be constructed (MailboxEntry fields private); graphql-gateway and the ACLs enqueue through it, and PgMailbox (infrastructure) is the SQL adapter behind its Mailbox port. Port-level assembly, pure — NOT instrumented. | — |
-| ⚙️ `command-handlers` | — no | One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented. | handles [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `DeliveryJob`](#actor-deliveryjob) |
-| ⚙️ `process-managers` | 📡 yes | Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch). | handles [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `CartBindingProcess`](#entity-cartbindingprocess), [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
+| ⚙️ `command-handlers` | — no | One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented. | handles [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `DeliveryJob`](#actor-deliveryjob)<br>reads [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Catalog`](#view-catalog), [🗄️ `Customer`](#view-customer), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline) |
+| ⚙️ `process-managers` | 📡 yes | Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch). | handles [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `CartBindingProcess`](#entity-cartbindingprocess), [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess)<br>reads [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking) |
 | ⚙️ `event-store-adapter` | 📡 yes | Appends to domain_events; span 'event.store.append' with business.event_type/stream_id. | — |
 | ⚙️ `event-publisher` | 📡 yes | Publishes appended events to the bus; span 'event.publish' (PRODUCER). | — |
 | ⚙️ `message-consumers` | 📡 yes | Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER). | — |
 | ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Customer`](#view-customer), [🗄️ `Catalog`](#view-catalog), [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob) |
 | ⚙️ `bam-projector` | 📡 yes | Business Activity Monitoring projection (runs in the bam container); business_metrics only. | — |
-| ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | — |
+| ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | reads [🗄️ `Restaurant`](#view-restaurant) |
 | ⚙️ `stripe-adapter` | 📡 yes | Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
 | ⚙️ `supabase-acl` | 📡 yes | Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates. | — |
 | ⚙️ `sirene-google-acl` | 📡 yes | Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate. | — |
-| ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): reads the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. | — |
+| ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description. | — |
 | ⚙️ `avelo37-acl` | 📡 yes | Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter. | — |
 | ⚙️ `coopcycle-acl` | 📡 yes | Anti-Corruption Layer for the CoopCycle delivery federation (issue #58, ADR-20260721-122910): the third PARTNER seam, mirroring avelo37-acl. FEDERATION — CoopCycle is many self-hosted co-op instances, so the outbound offer_job resolves a job to an instance (per-instance base URL + OAuth2 client-credentials, env-gated) and each instance's verified webhook (per-instance secret) is translated into the same inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain. | — |
 | ⚙️ `uber_direct-acl` | 📡 yes | Anti-Corruption Layer for the Uber Direct delivery partner (issue #57, ADR-20260721-172500): a PARTNER seam via the Uber DIRECT delivery API (not the Uber Eats marketplace), mirroring avelo37-acl. ONE central API (no federation): the outbound offer_job fetches an OAuth2 client-credentials token (env-gated by UBER_DIRECT_*) and POSTs a Create Delivery; Uber's verified webhook (X-Uber-Signature raw-body HMAC) is translated into the same inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain. | — |

@@ -4,7 +4,16 @@ description: >
   the internal modules of the CQRS-light + event-log backend. Command handlers bind to their aggregate
   via `$ref` into actors.yaml; projection updaters bind to their read model via `$ref` into views.yaml,
   so the codegen proves every runtime component maps to a declared part of the model (no phantom
-  components, no unmapped aggregates/views). Instrumentation lives in the framework components below
+  components, no unmapped aggregates/views). `updates:` is the WRITE side of a read model; `reads:` is
+  the mirror — the components that CONSUME it without going through GraphQL (ADR-20260804-*, issue #305).
+  A read model reached from GraphQL is already declared by its api.yaml type `reads:` binding, so it must
+  NOT be re-listed on `graphql-gateway` (enforced: `gateway-declares-reads`) — otherwise one blanket
+  declaration there would satisfy the reader gate for every model at once. Any OTHER component declares
+  what it actually consumes, whether or not GraphQL also reads it: `reads:` names the readers no api.yaml
+  type can speak for (the host router, command handlers using a read as a write-side invariant, process
+  managers, the ACLs), and several of those models are legitimately api-bound as well. Every
+  read model must have one reader or the other, or be `internal: true` -- the `read-model-no-reader`
+  gate. Instrumentation lives in the framework components below
   (command bus, event store adapter, publisher, consumers, projections, gateway, middleware), NEVER in
   the aggregates — see docs/claude/observability.md.
 
@@ -14,6 +23,12 @@ components:
   graphql-gateway:
     description: "Per-role GraphQL endpoint (/{role}/graphql); applies the @auth/@public ACL; entry span (SERVER)."
     instrumented: true
+  tenant-host-router:
+    description: "Resolves the tenant from the Host header ({slug}.captain.food) and 301s a SUPERSEDED label to the restaurant's live address (ADR-20260728-011344). Reads a read model WITHOUT going through GraphQL, so its access is declared here rather than by an api.yaml type binding."
+    instrumented: false
+    reads:
+      - { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+      - { $ref: 'database/tables/projection_tables.yaml#/SlugAlias' }
   observability-middleware:
     description: "Attaches business.* attributes + correlation/cause ids to spans; structured JSON logging; the only place domain context meets OTel."
     instrumented: true
@@ -35,6 +50,11 @@ components:
       - { $ref: 'actors.yaml#/Order' }
       - { $ref: 'actors.yaml#/Customer' }
       - { $ref: 'actors.yaml#/DeliveryJob' }
+    reads:
+      - { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Catalog' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Customer' }
+      - { $ref: 'database/tables/projection_tables.yaml#/ProspectionPipeline' }
   process-managers:
     description: "Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch)."
     instrumented: true
@@ -43,6 +63,9 @@ components:
       - { $ref: 'processmanager.yaml#/RefundProcess' }
       - { $ref: 'processmanager.yaml#/CartBindingProcess' }
       - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    reads:
+      - { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+      - { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
   event-store-adapter:
     description: "Appends to domain_events; span 'event.store.append' with business.event_type/stream_id."
     instrumented: true
@@ -70,6 +93,8 @@ components:
   hubrise-acl:
     description: "Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain."
     instrumented: true
+    reads:
+      - { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
   stripe-adapter:
     description: "Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded)."
     instrumented: true
@@ -80,7 +105,7 @@ components:
     description: "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate."
     instrumented: true
   prospection-acl:
-    description: "B2B prospection worker (ADR-0020): reads the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back."
+    description: "B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description."
     instrumented: true
   avelo37-acl:
     description: "Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter."

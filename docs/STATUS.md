@@ -1,7 +1,31 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-08-04 — [#305 "View_* read declarations: no spec says which surface reads which view"](https://github.com/TheCaptainCompany/captain-food/issues/305)
+> ([ADR-20260804-014546](adr/ADR-20260804-014546-read-models-declare-their-readers.md))**: the READ-side
+> equivalent of the #304 hole. `components.*.reads[*]` in `specs/architecture/c4-l3.yaml` — the mirror
+> of the existing `updates[*]`, one row in `refs.rs` — declares which component consumes which read
+> model, and **`read-model-no-reader` (error) replaces `view-no-query` (warning)**. Three ways to pass,
+> all declarations rather than exemptions: an `api.yaml` output type binds it, a component declares it,
+> or it is `internal: true`. A GraphQL-reached model is declared by its api.yaml type binding and is
+> deliberately NOT re-listed on `graphql-gateway`, so the two cannot drift.
+> **Why a gate and not the compiler** (ADR-20260803-234035): the property is a fact about YAML — rustc
+> cannot read `api.yaml`. Nothing here scans Rust, so it is not #329 repeating. The compiler answer
+> (a generated `ReadPorts` bundle, undeclared pair → `E0609`) needs a declaration to generate FROM,
+> which is what this lands; it is the **prerequisite**, tracked as successor B in the ADR.
+> **Bounded claim, stated in the ADR**: this proves every read model has *a* declared reader, NOT that
+> every actual reader is declared — the Rust side stays undeclared until the port bundle. Do not close
+> that with a source scan; that is #329 verbatim.
+> Satisfied with four declarations: a new **`tenant-host-router`** component (`crates/server/src/hosts.rs`
+> had no C4 representation at all despite being a live entry point) covering `SlugAlias` — the one
+> `view-no-query` warning on `main`, read legitimately by the 301 — plus command handlers, process
+> managers and the HubRise ACL. C4 now renders `reads` beside `updates` in both doc surfaces.
+> `phoneCountries` **deleted** (product-owner call): the only V0 query reached by no screen and the only
+> one of 32 with no wired resolver body — it advertised a `reads:` binding while returning
+> `Err("not implemented")`; the `PhoneCountry` reference table stays.
+> **Warning baseline 33 → 32** (`view-no-query ×1` gone, nothing else moved).
 
 > ✅ **2026-08-03 — [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
 > ([ADR-20260803-203455](adr/ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md))**:
@@ -2254,7 +2278,7 @@ Two sessions run in parallel — 🅐 = this (desktop) session, 🅑 = the iPhon
 | 6 | GraphQL **subscriptions** (`SubscriptionRoot` + bus + WS + ACL) | 🅐 | ✅ |
 | 7 | **Structured typed errors** (ADR-20260719-120000) | 🅐 | ✅ |
 | 8 | **Per-field nav-edge ACL** — optional `roles:` on nav fields (default public), same guard/visible as ops; design agreed | 🅐 | 📋 plan mode (after ACL emitter free) |
-| 8b | Delivery/account read queries + catalog `tree` + `me`/favorites | 🅐 | ✅ (read surface complete except `phoneCountries`=client-const, `operation`) |
+| 8b | Delivery/account read queries + catalog `tree` + `me`/favorites | 🅐 | ✅ (read surface complete except `operation`; `phoneCountries` deleted with #305) |
 | 9 | Remove `INTERNAL_TRIGGER_TOKEN`/drain endpoint (use `/ping` warmth) | 🅐 | 🗑️ deferred |
 | 10 | Projection worker robustness (poison-skip) + spin-down mitigation (uptimerobot `/ping`) | 🅐 | ✅ |
 | 10a | **Push-driven drain loops** ([#300](https://github.com/TheCaptainCompany/captain-food/issues/300), ADR-20260802-200416) — `pg_notify` in the append transaction + one `LISTEN` connection wakes the projector AND the saga runner; safety-net drain kept (NOTIFY has no replay) and the fallback reverts to the 1.5 s poll whenever the listener is down; idle head-gate skips per-group queries when the log has not moved | 🅐 | ✅ idle DB round trips ~70,900/h → ~120/h, and sagas react on commit instead of up to 1.5 s later. **Requires a session-mode pooler** (Supabase 5432); `RUN_EVENT_PUSH=false` forces polling |
