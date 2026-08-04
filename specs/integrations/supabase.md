@@ -42,7 +42,10 @@ abandoned magic links / admin-side Supabase changes (model it then like Stripe's
 
 - The API receives `dialingCode` (the **`+33`** the picker emits — NOT ISO `FR`) + `nationalNumber`; the
   backend composes E.164 (`+33` + national, leading 0 stripped) for Supabase and stores the canonical
-  `PhoneNumber`. The picker is served by the `phoneCountries` query (`View_PhoneCountry` reference data).
+  `PhoneNumber`. The picker's list has **no API query today** — `phoneCountries` was deleted with
+  [#305 "View_* read declarations: no spec says which surface reads which view"](https://github.com/TheCaptainCompany/captain-food/issues/305)
+  as unreached by any screen and unimplemented; the `PhoneCountry` reference table remains, and the
+  surface that needs the list declares a query when it is built.
 - The first SMS is localized by `locale` (optional), **defaulted from the dialing code** (`+33` → fr-FR;
   shared codes like `+1` pick a primary). Authenticated sends use the **stored** locale
   (`ChangeLanguage` / `View_Customer.locale`) — no per-call language param.

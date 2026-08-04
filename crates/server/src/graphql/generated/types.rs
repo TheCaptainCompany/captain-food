@@ -708,20 +708,6 @@ pub struct CustomerProfile {
     pub timezone: Option<TimeZone>,
 }
 
-/// A selectable phone country for the dialing-code picker (static reference data).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct PhoneCountry {
-    #[graphql(name = "country")]
-    pub country: CountryCode,
-    #[graphql(name = "dialingCode")]
-    pub dialing_code: DialingCode,
-    #[graphql(name = "name")]
-    pub name: String,
-    #[graphql(name = "defaultLocale")]
-    pub default_locale: Locale,
-}
-
 /// Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` / `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient): resolver-served from the saga state row, never a View_* — hence no `reads`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
