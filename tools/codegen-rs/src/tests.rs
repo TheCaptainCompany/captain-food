@@ -3965,6 +3965,75 @@ Catalog:
     }
 
     #[test]
+    fn every_read_model_has_a_declared_reader() {
+        // #305 — the read-side mirror of the write side's spec-gated surface (ADR-20260802-170059).
+        // A read model is legitimate only if something DECLARES that it reads it: an api.yaml output
+        // type (`reads:`), a c4-l3 component (`components.*.reads`, for the readers no GraphQL type
+        // can speak for), or an explicit `internal: true`. This asserts BOTH directions, because a
+        // rule that cannot fire is worth nothing.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+
+        // GREEN — the committed specs satisfy it.
+        let report = validate(&model);
+        let offenders: Vec<&String> =
+            report.issues.iter().filter(|i| i.rule == "read-model-no-reader").map(|i| &i.location).collect();
+        assert!(offenders.is_empty(), "committed specs must declare a reader for every read model: {:?}", offenders);
+
+        // Blindness guard: the rule must be REACHABLE. `SlugAlias` is read only by the tenant host
+        // router (a 301 that never goes through GraphQL), so it is declared ONLY by the c4-l3
+        // component — no api.yaml type binds it. Dropping that one declaration must trip the gate.
+        // If this ever passes, either SlugAlias gained an api binding or the rule stopped firing.
+        let comps = model
+            .defs
+            .get_mut("architecture/c4-l3.yaml")
+            .and_then(|v| v.get_mut("components"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("c4-l3 declares components");
+        let router = comps
+            .get_mut(Value::from("tenant-host-router"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("tenant-host-router is a declared component");
+        router.remove(Value::from("reads")).expect("tenant-host-router declares reads");
+
+        // RED — SlugAlias now has no declared reader anywhere.
+        let report = validate(&model);
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.rule == "read-model-no-reader" && i.location.ends_with("SlugAlias")),
+            "removing the only declared reader of SlugAlias must be an ERROR; got: {:?}",
+            report.issues.iter().filter(|i| i.rule == "read-model-no-reader").map(|i| &i.location).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_component_reading_an_unknown_read_model_is_rejected() {
+        // The `reads` ref site is under the §1b ref-kind contract (refs.rs REF_CONTRACT), so a typo'd
+        // or deleted target is caught as a dangling ref rather than silently satisfying the reader
+        // gate above — otherwise `reads: [#/Ghost]` would "declare" a reader for nothing.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let router = model
+            .defs
+            .get_mut("architecture/c4-l3.yaml")
+            .and_then(|v| v.get_mut("components"))
+            .and_then(|v| v.get_mut("tenant-host-router"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("tenant-host-router is a declared component");
+        router.insert(
+            Value::from("reads"),
+            serde_yaml::from_str("[{ $ref: 'database/tables/projection_tables.yaml#/GhostModel' }]").unwrap(),
+        );
+        let report = validate(&model);
+        assert!(
+            report.issues.iter().any(|i| i.rule == "ref-dangling" && i.message.contains("GhostModel")),
+            "a component reading an unknown read model must not resolve"
+        );
+    }
+
+    #[test]
     fn real_specs_carry_the_order_retention_pilot_and_gain_no_issues() {
         // The Order pilot IS in the committed catalog (#272 D2): one reminder (OrderExpired,
         // windowed, rescheduled in place), one deletion block (self-trigger on the recorded

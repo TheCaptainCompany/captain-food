@@ -621,12 +621,44 @@ pub(crate) fn validate(model: &Model) -> Report {
                 }
             }
         }
+        // Non-GraphQL readers (#305): `components.*.reads[*]` in architecture/c4-l3.yaml is the mirror
+        // of `updates[*]`, and declares the consumers no api.yaml type can speak for — the tenant host
+        // router, command handlers using a read as a write-side invariant, process managers, the ACLs.
+        let mut component_reads: BTreeSet<String> = BTreeSet::new();
+        if let Some(cm) = model
+            .defs
+            .get("architecture/c4-l3.yaml")
+            .and_then(|v| v.get("components"))
+            .and_then(|v| v.as_mapping())
+        {
+            for (_name, comp) in cm {
+                for r in comp.get("reads").and_then(|v| v.as_sequence()).into_iter().flatten() {
+                    if let Some(target) = r.get("$ref").and_then(|x| x.as_str()).and_then(|s| s.rsplit('/').next()) {
+                        cov.component_reads_links += 1;
+                        component_reads.insert(target.to_string());
+                    }
+                }
+            }
+        }
+        // Every read model must have a DECLARED reader — the read-side mirror of the write side's
+        // spec-gated surface (ADR-20260802-170059, issue #305). Three ways to satisfy it, all
+        // declarations rather than exemptions: an api.yaml output type binds it (`reads:`), a c4-l3
+        // component declares it, or it is explicitly `internal: true`. Replaces the old `view-no-query`
+        // WARNING, which only ever asked the first question and so could not see a non-GraphQL reader.
         for v in &views {
-            if !bound_views.contains(&v.name) && !internal_views.contains(v.name.as_str()) {
-                issues.push(warn(
-                    "view-no-query",
+            if !bound_views.contains(&v.name)
+                && !component_reads.contains(&v.name)
+                && !internal_views.contains(v.name.as_str())
+            {
+                issues.push(err(
+                    "read-model-no-reader",
                     format!("views.yaml/{}", v.name),
-                    format!("View '{}' is bound by no output type (api.yaml types reads).", v.name),
+                    format!(
+                        "read model '{}' has no declared reader — bind it to an api.yaml output type (`reads:`), \
+                         declare the consuming component in architecture/c4-l3.yaml (`components.*.reads`), \
+                         or mark it `internal: true`.",
+                        v.name
+                    ),
                 ));
             }
         }
