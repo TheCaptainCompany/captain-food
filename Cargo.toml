@@ -71,6 +71,20 @@ lto = "thin"          # cross-crate inlining — the main throughput/latency win
 codegen-units = 1     # maximize optimization within each crate (slower build, faster binary)
 strip = true          # drop symbols — smaller binary, faster load, no runtime-speed change
 
+# Debug info is the single largest consumer of disk in this workspace, and almost none of it is read.
+# Measured on the default (`debug = true`) profile: `target/debug` reached 17G, of which `deps/` was
+# 13G, and 85% of the largest artifact (`server`, 506M) was `.debug_*` DWARF sections. Sessions run in
+# a container with a fixed disk allowance, and exhausting it fails builds in ways that look like
+# toolchain corruption rather than a full disk (see docs/claude/sessions.md §2 and §11).
+#
+# `line-tables-only` keeps exactly the debug info anyone here actually consumes — file:line in panic
+# messages and test backtraces — and drops the variable/type DWARF that nothing but an interactive
+# debugger reads. A step debugger still attaches; it just cannot resolve local variables. If you need
+# full DWARF for a debugging session, override locally rather than committing it back:
+#   CARGO_PROFILE_DEV_DEBUG=true cargo build
+[profile.dev]
+debug = "line-tables-only"
+
 # Centralized versions for the light, host-buildable deps used by the skeleton. Heavier framework deps
 # (axum/tokio/async-graphql, sqlx, leptos, tauri, crux, uniffi, reqwest) are added per crate when that
 # layer's real code lands — kept out of the scaffold so `cargo build` stays fast and green everywhere.
