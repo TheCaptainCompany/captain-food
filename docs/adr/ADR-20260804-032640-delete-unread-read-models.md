@@ -80,8 +80,10 @@ by it. It simply no longer points at a read model, so there is no read-navigatio
   header, but the list is doing more work than its name suggests.
 
 ### Follow-up actions
-- Filed as a successor issue: fold `RestaurantAccountUpdated` into a read model when a back-office
-  account surface is specified, and remove both entries from `nonProjectedEvents` then.
+- [#340 "Account updates and deletions reach no read model"](https://github.com/TheCaptainCompany/captain-food/issues/340)
+  — fold `RestaurantAccountUpdated` into a read model when a back-office account surface is specified,
+  decide what an account deletion does to its location rows, and remove both entries from
+  `nonProjectedEvents` then.
 - [#337](https://github.com/TheCaptainCompany/captain-food/issues/337) (referential tables are never
   checked for a reader) is unchanged by this and still open — `PhoneCountry` was found by hand, not by
   the gate. That is the argument for closing #337 rather than relying on manual sweeps.
