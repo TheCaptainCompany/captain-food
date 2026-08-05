@@ -529,14 +529,26 @@ Three independent causes, all invisible from the run list:
 - **The plugin skips DRAFT PRs by design.** Under the claim protocol (docs/BACKLOG.md) a PR is a
   draft for nearly its whole life, so most of those 271 runs were pre-paid no-ops.
 
-Two things worth carrying beyond this workflow:
+Three things worth carrying beyond this workflow:
 
-- **The action restores `.claude/**`, `.mcp.json` and `CLAUDE.md` from `origin/main`** ("PR head is
-  untrusted"). Tool permissions edited on a branch do **not** apply to that branch's own review —
-  they must go in `claude_args: --allowedTools` in the workflow, which *is* taken from the head.
+- **This reviewer cannot be changed on a branch. Only `main` counts.** Under the OAuth-token path
+  the action validates that the workflow file is *byte-identical to the copy on the default branch*
+  and **skips itself** otherwise — green in 10 seconds, one `##[warning]` deep in the log, no review:
+
+  > Skipping action due to workflow validation: The workflow file must exist and have identical
+  > content to the version on the repository's default branch.
+
+  So a PR that edits `claude-code-review.yml` disables its own reviewer, and any change to the
+  reviewer is unprovable until it is merged. Smoke-test it **after** the merge, from a branch that
+  does not touch the workflow. (Same reason the action restores `.claude/**`, `.mcp.json` and
+  `CLAUDE.md` from `origin/main` — "PR head is untrusted". Its config is `main`'s config, always.)
+- **Tool permissions belong in `claude_args: --allowedTools`, not `.claude/settings.json`** — the
+  interactive allowlist is restored from `origin/main` and does not cover what the review plugin
+  needs (`gh pr comment`, the inline-comment MCP tool).
 - **`permission_denials_count` in the run's result JSON is the health metric.** 41 denials in a
   33-turn review meant the agent spent its turns bouncing off an allowlist written for interactive
   sessions. A review job that is green with a high denial count is a review that did not happen.
 
-Smoke-test the reviewer the same way you would a deploy: open a PR carrying a deliberate, realistic
-bug and confirm the finding lands **on the PR**. "The workflow ran" is not evidence.
+Smoke-test the reviewer the same way you would a deploy: land the change, then open a PR carrying a
+deliberate, realistic bug and confirm the finding arrives **on the PR**. "The workflow ran" is not
+evidence — here it was not even true.
