@@ -21,6 +21,14 @@
 > reason `Restaurant.description` was a column no event fed was that the mutation which sets it had
 > **zero screens**, while being story-covered. It declares four `gaps` (no `restaurantById` query;
 > `openingHours`, `contact`/`address` and the ADMIN-only `marginRate` deliberately off the form).
+> Also closed here, the SILENT twin of the same family: a mutation missing from the emitter's dispatch
+> table shipped an `Err("not implemented")` resolver body with no `command_router` arm, while api.yaml
+> declared it, a story step covered it and a role guard protected it. **`recordDeliverySatisfaction` and
+> `escalateDelivery` were in that state with their handlers already written** — only a table row was
+> missing. Both wired; the omission is now impossible: the emitter asserts the stub-arm set equals an
+> explicit **`UNWIRED_MUTATIONS`** allowlist (empty), so an unwired mutation FAILS generation. A
+> generation-time assertion, NOT a validator rule or a source scan — the table lives in the emitter where
+> no `specs/**` gate can see it, and grepping generated Rust for the stub string would be #329 verbatim.
 > **Warning baseline 26 → 43** — a deliberate new-rule change, not drift. Compare against 43 from here.
 
 > ✅ **2026-08-04 — Two dead read-model columns populated; refund facts carry their payment identity

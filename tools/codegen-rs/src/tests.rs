@@ -4016,6 +4016,45 @@ Catalog:
     }
 
     #[test]
+    fn every_api_mutation_has_a_handler() {
+        // The silent half of the "declared but does nothing" family. `wired_mutation_dispatch`
+        // returns None for any mutation missing from its table, and the emitter then writes an
+        // `Err("not implemented")` body with no command_router arm -- while api.yaml declares the
+        // mutation, a story step covers it and a role guard protects it. Nothing in the SPEC gates
+        // can see that, because the table lives in the emitter.
+        //
+        // recordDeliverySatisfaction and escalateDelivery sat in exactly that state with their
+        // handlers already written in application::commands, missing only a table row.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let api = parse_api(&model);
+
+        let declared: std::collections::BTreeSet<&str> =
+            crate::emit::server_graphql::UNWIRED_MUTATIONS.iter().copied().collect();
+        let unwired: Vec<&str> = api
+            .mutations
+            .iter()
+            .map(|m| m.name.as_str())
+            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_none())
+            .filter(|n| !declared.contains(n))
+            .collect();
+        assert!(
+            unwired.is_empty(),
+            "every api.yaml mutation needs a handler in `wired_mutation_dispatch`, or an explicit \
+             UNWIRED_MUTATIONS entry saying it is deliberately not wired yet. Undeclared: {:?}",
+            unwired
+        );
+
+        // The allowlist is a pressure valve, not a parking lot: an entry that is actually wired is
+        // stale and must be removed, or it silently permits a future regression on that name.
+        let stale: Vec<&&str> = declared
+            .iter()
+            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_some())
+            .collect();
+        assert!(stale.is_empty(), "these UNWIRED_MUTATIONS entries are wired -- remove them: {:?}", stale);
+    }
+
+    #[test]
     fn screen_actions_supply_every_required_command_input() {
         // A screen ACTION is the CALLER of its mutation, so its `variables:` are the whole input --
         // unlike a resolver's pinned `args:`, which are static defaults the runtime merges caller

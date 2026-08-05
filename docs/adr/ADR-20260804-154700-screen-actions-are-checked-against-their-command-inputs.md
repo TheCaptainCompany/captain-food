@@ -75,6 +75,11 @@ and is what makes `Restaurant.description` reachable by a human at all.
 
 ### Follow-up actions
 - [#342](https://github.com/TheCaptainCompany/captain-food/issues/342) tracks the 17 findings.
-- `recordDeliverySatisfaction` and `escalateDelivery` still generate `Err("not implemented")` resolver
-  bodies — a mutation absent from the emitter's handler table gets no router arm while `make validate`
-  stays green. That is the same class of hole one layer down, and is not covered by these two rules.
+- **Closed in the same change**: `recordDeliverySatisfaction` and `escalateDelivery` were generating
+  `Err("not implemented")` resolver bodies with no router arm while every spec gate stayed green. Both
+  handlers already existed in `application::commands` — only the emitter's dispatch-table row was
+  missing. Both are wired, and the omission is now impossible: the emitter asserts that the set of
+  mutations reaching the stub arm equals an explicit `UNWIRED_MUTATIONS` allowlist (currently empty), so
+  an unwired mutation FAILS generation rather than shipping a stub. Deliberately a generation-time
+  assertion rather than a validator rule or a source scan: the table lives in the emitter, so no
+  `specs/**` check can see it, and scanning generated Rust for `not implemented` would be #329 again.
