@@ -36,7 +36,9 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE catalog (
           catalog_id UUID PRIMARY KEY,
           restaurant_id UUID NOT NULL,
-          slug TEXT NOT NULL,
+          -- Nullable, mirroring specs/generated/schema.generated.sql: the route label is the owner's
+          -- choice via ConfigureCatalogSlug, so a freshly created catalog has none.
+          slug TEXT,
           name TEXT NOT NULL,
           tree JSONB NOT NULL,
           created_at TIMESTAMPTZ NOT NULL,
