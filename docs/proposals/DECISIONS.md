@@ -367,11 +367,12 @@ that way.
 | # | Decision | Recommended | Answer |
 |---|---|---|---|
 | D1 | Layer A — provisioning | OpenTofu + the official `ovh/ovh` provider — the instance, network, firewall, managed PG plan and DNS become reviewed files | _(open)_ |
-| D2 | Layer B — host configuration | cloud-init `user_data` from the repo (~80 lines, no agent, no daemon); **Ansible named as the escape hatch** at 3+ hosts | _(open)_ |
+| D2 | Layer B — host configuration | cloud-init `user_data` from the repo (~80 lines, no agent, no daemon); **Ansible named as the escape hatch** at 3+ hosts. NixOS deferred on **bootstrap risk** (OVH has no first-class NixOS image) and D7 — no longer on authoring cost | _(open)_ |
 | D3 | **SaltStack: adopt or reject** | **Reject** — its advantage needs ~1,000 nodes and we have one, it adds a listening root-equivalent control plane to the box terminating payment traffic, its pillars become a second config store, its convergence model contradicts the immutable-artifact doctrine, and its stewardship is consolidating into Broadcom's VMware suite. Revisit only for restaurant-side hardware fleets | _(open)_ |
 | D4 | Host posture | Disposable — rebuild, never converge (affordable only because the managed PG is a separate resource, PROP-20260731-061609 D2) | _(open)_ |
 | D5 | OpenTofu state | OVH Object Storage S3 backend + committed `.terraform.lock.hcl`; **never** the repo (public — it would leak the PG credential) | _(open)_ |
 | D6 | Sequencing | cloud-init now, cut over, **then** `tofu import` the live resources — IaC must not block restoring production | _(open)_ |
+| D7 | **Is host config generated from the DSL?** (product owner, 2026-08-05: *"based on the spec in YAML you can generate it… encapsulated in the codegen"*) | **Derive from the specs that ALREADY exist** — compose file, firewall ports and collector config from `configuration.yaml` / `observability.yaml` / `services.yaml` / C4 — **not** a new `specs/host.yaml`, which would be a single-target passthrough with none of the fan-out that earns the repo's other emitters. Target-independent, so it works for cloud-init now and NixOS later | _(open)_ |
 
 Concern registered and unchecked, so this cannot be approved as-is: **cutover-not-blocked** — prod is
 down today and nothing here may delay [#271](https://github.com/TheCaptainCompany/captain-food/issues/271).

@@ -119,7 +119,7 @@ exactly this ground: *"a control plane to operate for ONE pod"*.
 | **cloud-init `user_data`, rendered from the repo** ✅ **recommended** | Exactly sized to §3: the eight items are ~80 declarative lines. **No agent, no master, no daemon, no new port, no new credential.** Runs at first boot, which is the only moment a disposable host needs configuring (D4). Native to OVH Public Cloud and to every other cloud, so it does not lock the migration in. Passed to the instance by OpenTofu, so layers A and B are one `tofu apply` | Not a convergence tool: changing the host means rebuilding it. That is a feature under D4 and a real constraint if D4 goes the other way. Debugging a failed first boot means reading `/var/log/cloud-init-output.log` over SSH |
 | **Ansible** — the named escape hatch, not now | Agentless: pushes over SSH, so it adds **no** daemon and no listening port. Far the largest ecosystem and the most likely thing an agent or a new contributor already knows. Converges an existing host without rebuilding it. The natural upgrade the day D4's premise breaks | For **one** host whose entire configuration is eight items, it is a control repo, an inventory, roles and a second YAML dialect to buy a capability we do not yet need. Playbooks that run twice a year drift from reality and are discovered broken at the worst moment |
 | **SaltStack** ❌ **rejected** | Genuinely excellent at what it is for: persistent minions, event-driven reactors and beacons, and remote execution measured at ~30× Ansible's speed at 1,000 nodes | Every one of those advantages is a **fleet** advantage, and we have one node. It adds a master/minion control plane — a daemon and a new attack surface — to the box terminating payment traffic. Its pillar system would become a second configuration store next to `specs/configuration.yaml`. Its stewardship is consolidating into Broadcom's private-cloud suite. Full argument in D3 |
-| **NixOS** | The best *conceptual* fit on this page, and it deserves to be said plainly: a fully declarative host with atomic rollback is the same doctrine the app already runs on — immutable artifact, digest-pinned, rollback by redeploying the previous one. Whole-system generations make "roll the host back" a real operation, which no other option here offers | An entire second ecosystem — a language, a package set, a mental model — for a team already carrying Rust, a YAML DSL, a codegen, Leptos/WASM and an actor runtime. The learning curve lands **during a production outage**. Deferred, not dismissed: revisit if the host layer ever gets interesting |
+| **NixOS**, optionally with the host config generated from the DSL | The best *conceptual* fit on this page, and it deserves to be said plainly: a fully declarative host with atomic rollback is the same doctrine the app already runs on — immutable artifact, digest-pinned, rollback by redeploying the previous one. Whole-system generations make "roll the host back" a real operation, which no other option here offers, and it is a genuine answer to the incident objection. **Generating it from a spec is technically easy** — Nix reads structured data natively via `builtins.fromJSON`, so no Nix emitter is needed at all | **The ecosystem cost is not removed by codegen — see D7**, which is where this argument is actually settled: codegen encapsulates *authoring*, not *operating*, and a host DSL would be a single-target passthrough with none of the fan-out that earns the repo's other emitters. Independently, **OVH offers no first-class NixOS image**: it is reached by `nixos-infect` over a running Debian, `nixos-anywhere`/kexec, or a custom image upload — fine as considered work, bad as something learned while production is down. Deferred on **bootstrap risk and D7**, not on authoring effort |
 | Hand-run shell script on the box | Nothing to learn | Indistinguishable from hand-clicking, plus a false sense of rigour because a file exists. Nothing guarantees the file was the thing that ran, or ran completely |
 | Docker Compose file only, nothing else | Minimal, and the compose file is needed regardless | Answers only "what containers run", not "what is docker installed on". The other seven items of §3 stay unowned |
 
@@ -227,6 +227,51 @@ Production is **down now**. The gating instinct here is the repo's own "gate, th
 | **cloud-init first (it is the box), cut over, then `tofu import` the live resources** ✅ **recommended** | The cutover needs a configured host regardless, so cloud-init is on the critical path either way and nothing is wasted. IaC adoption happens against **real, running, known-good** resources — importing describes what demonstrably works, rather than betting the restoration of production on freshly-written HCL. Restores service in the already-open window | Between cutover and import, layer A is undocumented — the exact gap this proposal opposes. Time-boxed and tracked on the issue, not left to drift |
 | Full OpenTofu before the cutover | Layer A never has an undocumented moment | Blocks restoring production on learning HCL, with no running system to check the result against. A `tofu apply` bug becomes a *second* outage on top of the first |
 | Never adopt OpenTofu, cloud-init only | Cheapest | Leaves layer A permanently in the console — the failure this proposal exists to prevent. Halves the recommendation and keeps the half that covers less risk |
+
+### D7 — Is the host configuration GENERATED from the DSL, and if so, from what?
+
+Raised by the product owner (2026-08-05): *"Why don't we use NixOS — based on the spec in YAML you can
+generate it, so I don't need to know this ecosystem myself because it's encapsulated in the codegen."*
+It lands on the softest objection on this page: "ecosystem cost" is a weak reason to reject anything in
+a repository whose entire operating model is *the YAML DSL is the source of truth, everything else is
+generated*. D2's NixOS row has been rewritten accordingly — the authoring argument is conceded.
+
+**But codegen encapsulates authoring, not operating.** The generated artifact is what runs, and it is
+what fails. When the host does not come up at 20:30 on a Friday, the error is a Nix evaluation error
+about a module option, and the fix loop is *read the generated Nix → map it back to the spec → change
+the emitter → regenerate → redeploy*. That is longer than editing a file, and the repo's own rule
+("never hand-edit generated output") closes the shortcut deliberately. NixOS's atomic generation
+rollback is a real and partial answer — roll back rather than hand-fix — but rollback restores the
+old state, it does not ship the new change.
+
+**The test that decides it is derivable from this repo's own emitters: semantic level and fan-out.**
+`entities.yaml` declares `Order` once and generates a SQL view, a GraphQL type, a Rust struct and
+documentation — the YAML speaks *food delivery*, several levels above any of its outputs, and one
+declaration reaches four targets. That gap is what earns the codegen. A `specs/host.yaml` would speak
+NixOS-module-options-in-YAML: same semantic level as its output, one target, no fan-out. It would be
+the repo's first emitter with **no abstraction gain** — a lossy passthrough carrying all of Nix's
+concepts with none of Nix's expressiveness, where reaching an unsupported option means extending the
+emitter instead of writing a line.
+
+**Two supporting facts, both cutting against a bespoke Nix emitter.** The Nix ecosystem generates
+config *from* Nix (`pkgs.formats.yaml.generate`, `generators.toYAML`), not the reverse — and where
+structured data does drive NixOS, the idiomatic path is `builtins.fromJSON`, i.e. Nix **reads** the
+data. So a Nix emitter in `tools/codegen-rs` is the expensive way to do this, and the cheap way still
+leaves a hand-written Nix module alive — the ecosystem is not encapsulated either way. And: **if
+codegen removes the authoring cost, it removes it for cloud-init too.** Generation therefore does not
+differentially favour NixOS; NixOS still has to win on its own merits, which is D2's job, not D7's.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Derive host artifacts from the specs that ALREADY exist** ✅ **recommended** | This is the durable idea in the question. `specs/configuration.yaml` already knows every env var and which profile supplies it, `specs/observability.yaml` knows we ship to Honeycomb EU, `services.yaml` and the C4 know what containers exist and what is exposed. Generating the compose file, the firewall port list and the collector config from **those** has real fan-out, and makes the infrastructure **structurally unable to drift** from the app's own declaration — the exact class of bug this whole proposal exists to prevent, now closed by construction rather than by a report. Entirely **target-independent**: it works for cloud-init today and NixOS later | Emitters to write and keep honest. The mapping from "declared in `api.yaml`" to "port open in the firewall" needs care — over-derive it and a spec edit silently changes the security posture, which wants its own gate |
+| A new hand-written `specs/host.yaml` that emits the host config | One obvious place to look. Matches the shape of the question as asked | The passthrough problem above: same semantic level as its output, single target, no fan-out. Buys a YAML dialect and an emitter, and pays for both, to avoid learning a config format we would still have to debug |
+| No generation — cloud-init is a reviewed file in the repo | Zero machinery. ~80 lines a human or an agent reads directly, and the thing that runs is the thing you read, which is worth a great deal during an incident | The env-var list and the exposed-port list are then duplicated between the specs and the host file, and nothing detects them diverging. Acceptable at eight items, less so as the surface grows |
+
+**Recommendation: derive from the existing specs, do not invent a host DSL — and treat the host target
+as a separate, later, reversible choice.** Once the infrastructure artifacts are derived from specs,
+switching the emitter's target from cloud-init to NixOS is a contained change with a working system to
+compare against. That is the "gate, then stabilize" shape applied to the host layer, and it converts
+NixOS from a bet taken during an outage into an ordinary follow-up.
 
 ---
 
@@ -362,10 +407,12 @@ Distinct from the per-option cons above: these are the costs of the **winning** 
 - **Rebuild-not-converge is a real constraint, not a free win.** It is right for a stateless app
   container in front of a managed database. The first time something genuinely stateful wants to live
   on that host, D4 has to be reopened rather than quietly violated.
-- **Nothing here is validator-enforced.** CLAUDE.md prefers executable over prose, and this proposal
-  produces prose plus HCL. The honest position is that the codegen governs `specs/**` and cannot see
-  OVH — the enforcement available is `tofu plan` in CI, which is weaker than a compiler and should be
-  described as such rather than oversold.
+- **Little of this is validator-enforced.** CLAUDE.md prefers executable over prose, and the D1/D2 core
+  produces prose plus HCL. The codegen governs `specs/**` and cannot see OVH, so the enforcement
+  available there is `tofu plan` in CI — weaker than a compiler, and it should be described that way
+  rather than oversold. **D7 is the partial answer** and the reason it is worth taking: deriving the
+  compose file, the port list and the collector config from specs that already exist puts the host
+  back inside the codegen's reach, where drift becomes impossible instead of merely reported.
 - **We may be wrong about scale.** If Captain.Food grows past Tours faster than expected and #242's
   leases land early, multi-instance arrives sooner than this proposal assumes. That does not
   resurrect Salt (Ansible or Kubernetes would be the successors), but it does shorten cloud-init's
@@ -401,7 +448,7 @@ Copied to the tracking issue's checklist on approval, per the README.
 |---|---|
 | **Adopt SaltStack** — the question as asked | Five independent grounds in D3: the scale advantage needs ~1,000 nodes and we have one, it adds a permanently listening root-equivalent control plane to the box terminating payment traffic, its pillars become a second config store beside `specs/configuration.yaml`, its convergence model contradicts the immutable-artifact doctrine PROP-20260729-014500 D5 just established, and its stewardship is consolidating into Broadcom's VMware private-cloud suite. Revisit **only** for a restaurant-hardware fleet, which is a different problem |
 | **Adopt Ansible now instead of cloud-init** | Agentless, so it avoids Salt's central objection, and it is the right answer at 3+ hosts. At one host with eight configuration items it buys convergence we have decided (D4) we do not want. Named as the explicit escape hatch with a stated trigger rather than rejected |
-| **Adopt NixOS** | The best conceptual match to the repo's own doctrine — declarative hosts with atomic generation rollback. Rejected for V0 purely on ecosystem cost during an outage, and flagged as the interesting thing to revisit if the host layer ever earns real investment. If this proposal is wrong, it is most likely wrong here |
+| **Adopt NixOS** (optionally generating its config from the DSL) | The best conceptual match to the repo's own doctrine — declarative hosts with atomic generation rollback, which is a real answer to the incident objection. The "encapsulate it in the codegen" argument (D7) correctly kills the *authoring*-cost rejection, and is conceded. What remains is that codegen does not encapsulate **operating** a stack, that a host DSL would be a single-target passthrough with none of the fan-out earning the repo's other emitters, and that **OVH has no first-class NixOS image** — `nixos-infect`/`nixos-anywhere`/custom upload is a poor thing to learn while production is down. Deferred on bootstrap risk and sequencing, **not** on effort, and reachable later as a contained emitter-target swap once D7 lands |
 | **OVH Managed Kubernetes**, which would subsume both layers | Already rejected in PROP-20260731-061609 D1 — a control plane for one pod. Nothing here changes that, and #193's one-instance cap still holds |
 | **Do nothing; configure the host by hand at cutover** | The Render dashboard one layer deeper. The repo has already paid for this lesson twice (`RUN_SIRENE_WORKER`, `API_SECRET`) and written both costs down |
 | **Re-adopt `render.yaml` as real IaC** | Moot — ADR-20260731-061609 closes the Render workspace rather than fixing it. Render is never resumed |

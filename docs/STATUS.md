@@ -31,7 +31,25 @@
 > named escape hatch at 3+ hosts; NixOS is the honest best conceptual fit, deferred on ecosystem cost.
 > **D6 exists so none of this blocks the cutover**: prod is DOWN, so cloud-init first, cut over, then
 > `tofu import` the live resources. Registered as an unchecked `Concerns` entry, which mechanically
-> blocks `Approved`. Six open decisions in [DECISIONS.md §16](proposals/DECISIONS.md).
+> blocks `Approved`. **Seven** open decisions in [DECISIONS.md §16](proposals/DECISIONS.md).
+> **D7 added 2026-08-05** after the product owner challenged the NixOS rejection — *"based on the spec
+> in YAML you can generate it, so I don't need to know this ecosystem myself because it's encapsulated
+> in the codegen"*. The challenge lands and the authoring-cost objection is **conceded**: "ecosystem
+> cost" is a weak reason to reject anything in a repo whose operating model is generate-everything.
+> What replaces it: **codegen encapsulates authoring, not operating** (a failed boot is debugged in the
+> GENERATED artifact, and "never hand-edit generated output" closes the shortcut by design), and the
+> test derivable from our own emitters is **semantic level + fan-out** — `entities.yaml` declares
+> `Order` once and reaches SQL, GraphQL, Rust and docs, whereas a `specs/host.yaml` would be
+> NixOS-options-in-YAML: same level as its output, one target, no fan-out, and the repo's first emitter
+> with no abstraction gain. Two supporting facts: Nix generates YAML/JSON rather than the reverse (the
+> idiomatic path is `builtins.fromJSON`, i.e. Nix READS the data, so a Nix emitter is the expensive
+> route and the cheap one still leaves a hand-written Nix module), and **codegen removes authoring cost
+> for cloud-init too**, so it does not differentially favour NixOS. NixOS is now deferred on
+> **bootstrap risk** — OVH has no first-class NixOS image (`nixos-infect`/`nixos-anywhere`/custom
+> upload), a poor thing to learn while prod is down — and stays reachable later as a contained
+> emitter-target swap. **The durable idea in the challenge is kept as D7**: derive infra artifacts from
+> the specs that ALREADY exist (`configuration.yaml`, `observability.yaml`, `services.yaml`, C4), which
+> has real fan-out and makes infra structurally unable to drift from the app's declaration.
 
 > ✅ **2026-08-04 — Screen actions are checked against their command's inputs
 > ([ADR-20260804-154700](adr/ADR-20260804-154700-screen-actions-are-checked-against-their-command-inputs.md))**.
