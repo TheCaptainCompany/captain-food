@@ -16,6 +16,10 @@ application = { path = "../application" }
 # door — the SIRENE sweep's fast path. Any other crate enabling this feature is CI-red
 # (codegen guard `bulk_door_feature_is_granted_only_to_infrastructure`).
 actor_client = { path = "../actor_client", features = ["bulk-door"] }
+# PROP-20260802-130500 phase 2 (#306): one dependency per actor this crate may address.
+# An actor absent from this list is an actor whose client type does not exist here.
+client-restaurant = { path = "../clients/restaurant" }
+
 # The durable-mailbox actor machinery (#242, ADR-20260730-234918) — the dependency points INWARD:
 # infrastructure implements its MessageHandler; actor_runtime never sees a Captain.Food type.
 actor_runtime = { path = "../actor_runtime" }
@@ -68,6 +72,9 @@ aes-gcm = "0.10"
 # integration tests seed mailbox rows through the EntryFixture conversion — test-only doors a
 # release build of this crate never sees.
 actor_client = { path = "../actor_client", features = ["test-fixtures"] }
+# Test-only actor reach (#306): `mailbox_wake` drives a Cart lane. A dev-dependency is the right
+# grant — the release graph must not gain an actor because a test needed one.
+client-cart = { path = "../clients/cart" }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is

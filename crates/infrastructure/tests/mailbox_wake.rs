@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use actor_client::generated::actor_clients::CartClient;
+use client_cart::CartClient;
 use actor_client::mailbox::Envelope;
 use actor_runtime::{
     Delivery, HandlerVerdict, InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,

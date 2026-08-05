@@ -61,6 +61,22 @@ jobs:
           deploy=$(jq '.[0].deploy' /tmp/deploys.json)
           status=$(echo "$deploy" | jq -r '.status')
           sha=$(echo "$deploy" | jq -r '.commit.id')
+          # A "live" latest deploy does NOT mean the site is up: an account/billing
+          # suspension takes the whole service offline while /deploys still reports
+          # "live". Reflect it here, or the badge and commit status lie (prod down,
+          # badge green) -- exactly the blind spot that let a billing suspension sit
+          # undetected while every render-status run stayed green.
+          http=$(curl -sS -o /tmp/service.json -w "%{http_code}" -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID")
+          if [ "$http" = "200" ]; then
+            if [ "$(jq -r '.suspended // "not_suspended"' /tmp/service.json)" = "suspended" ]; then
+              who=$(jq -r '(.suspenders // []) | join(",")' /tmp/service.json)
+              echo "::error::Render service $RENDER_SERVICE_ID is SUSPENDED (${who:-unknown}) -- the site is offline regardless of the last deploy status ($status)."
+              status="suspended"
+            fi
+          else
+            echo "::warning::Render API /services/$RENDER_SERVICE_ID returned HTTP $http; cannot confirm suspension state."
+          fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "sha=$sha"       >> "$GITHUB_OUTPUT"
           echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
@@ -71,9 +87,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           case "${{ steps.deploy.outputs.status }}" in
-            live)                                   state=success ;;
-            build_failed|update_failed|canceled)    state=failure ;;
-            *)                                      state=pending ;;
+            live)                                             state=success ;;
+            build_failed|update_failed|canceled|suspended)    state=failure ;;
+            *)                                                state=pending ;;
           esac
           gh api "repos/${{ github.repository }}/statuses/${{ steps.deploy.outputs.sha }}" \
             -f state="$state" -f context="render/deploy" \
@@ -86,9 +102,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           case "${{ steps.deploy.outputs.status }}" in
-            live)                                   color=brightgreen ;;
-            build_failed|update_failed|canceled)    color=red ;;
-            *)                                      color=yellow ;;
+            live)                                             color=brightgreen ;;
+            build_failed|update_failed|canceled|suspended)    color=red ;;
+            *)                                                color=yellow ;;
           esac
           jq -n --arg msg "${{ steps.deploy.outputs.status }} @ ${{ steps.deploy.outputs.short }}" --arg color "$color" \
             '{schemaVersion: 1, label: "render", message: $msg, color: $color}' > render-deploy.json

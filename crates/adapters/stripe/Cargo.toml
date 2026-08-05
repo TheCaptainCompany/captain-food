@@ -13,6 +13,10 @@ application = { path = "../../application" }
 # The actor-mailbox boundary crate (#290 phase 1, PROP-20260802-130500 D1): this adapter addresses
 # actors ONLY through its generated typed clients; phase 2 narrows this to per-actor client crates.
 actor_client = { path = "../../actor_client" }
+# PROP-20260802-130500 phase 2 (#306): one dependency per actor this crate may address.
+# An actor absent from this list is an actor whose client type does not exist here.
+client-payment = { path = "../../clients/payment" }
+
 domain = { path = "../../domain" }
 # The standalone binary (main.rs) constructs a concrete Postgres EventStore.
 infrastructure = { path = "../../infrastructure" }

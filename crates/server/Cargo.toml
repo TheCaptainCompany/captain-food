@@ -12,6 +12,24 @@ application = { path = "../application" }
 # The actor-mailbox boundary crate (#290 phase 1, PROP-20260802-130500 D1/D4): the generated
 # resolvers send through its typed clients and read operation status through its ActorClient.
 actor_client = { path = "../actor_client" }
+# PROP-20260802-130500 phase 2 (#306): one dependency per actor this crate may address.
+# An actor absent from this list is an actor whose client type does not exist here.
+client-cart = { path = "../clients/cart" }
+client-catalog = { path = "../clients/catalog" }
+client-conversation = { path = "../clients/conversation" }
+client-customer = { path = "../clients/customer" }
+client-delivery-job = { path = "../clients/delivery-job" }
+client-delivery-partner-registration = { path = "../clients/delivery-partner-registration" }
+client-mailbox-supervision = { path = "../clients/mailbox-supervision" }
+client-order = { path = "../clients/order" }
+client-place-order-process = { path = "../clients/place-order-process" }
+client-prospect = { path = "../clients/prospect" }
+client-reclamation = { path = "../clients/reclamation" }
+client-refund-process = { path = "../clients/refund-process" }
+client-restaurant = { path = "../clients/restaurant" }
+client-restaurant-account = { path = "../clients/restaurant-account" }
+client-rider = { path = "../clients/rider" }
+
 # The generated GraphQL layer wraps the domain scalars/enums (orphan rule: the async-graphql wrapper
 # newtypes + From conversions live here, `domain` stays GraphQL-free — ADR-0035).
 domain = { path = "../domain" }

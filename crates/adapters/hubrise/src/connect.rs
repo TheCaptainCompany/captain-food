@@ -29,9 +29,9 @@ use std::sync::Arc;
 
 use actor_client::mailbox::{Envelope, Mailbox};
 use actor_client::{ActorClient, OperationStatusBus};
-use actor_client::generated::actor_clients::{
-    CatalogClient, RestaurantAccountClient, RestaurantClient,
-};
+use client_catalog::CatalogClient;
+use client_restaurant::RestaurantClient;
+use client_restaurant_account::RestaurantAccountClient;
 use actor_client::EnqueueOutcome;
 use application::queries::RestaurantReadRepository;
 use domain::generated::commands::{CreateCatalog, RegisterRestaurant, RegisterRestaurantAccount};
