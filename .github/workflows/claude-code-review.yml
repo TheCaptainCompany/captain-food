@@ -3,26 +3,24 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # The code-review plugin bails out on DRAFT pull requests by design, and this repo opens a
+    # draft PR at claim time (docs/BACKLOG.md) and pushes to it for the whole life of the work.
+    # Every one of those pushes was paying for a review that could not produce anything.
+    if: github.event.pull_request.draft == false
 
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # WRITE, not read: the review lands as a PR comment + inline comments. With `pull-requests:
+      # read` the findings have nowhere to go, and the job still reports success.
+      pull-requests: write
+      issues: write
+      # Read the `codegen` / `ci` job results instead of rebuilding them here (a `make validate`
+      # inside the review would cost ~10 min of compile for a signal CI already publishes).
+      actions: read
       id-token: write
 
     steps:
@@ -38,7 +36,17 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # `--comment` is what makes the review reach GitHub. Without it the plugin reports its
+          # findings to stdout only, and the action hides stdout by default (`show_full_output`),
+          # so the whole review is unreadable by anyone. With it: a summary comment even when
+          # nothing is found (proof of life), plus one inline comment per validated finding.
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # Tool permissions MUST live here, not in .claude/settings.json: the action restores
+          # .claude/** from origin/main because the PR head is untrusted, so an allowlist edited on
+          # a branch has no effect on that branch's own review. The interactive allowlist also does
+          # not cover what this plugin needs (`gh pr comment`, the inline-comment MCP tool) — the
+          # first runs of this workflow logged 41 permission denials in a single review.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api repos/TheCaptainCompany/captain-food:*),Bash(gh run view:*),Bash(gh run list:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Task"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
-
