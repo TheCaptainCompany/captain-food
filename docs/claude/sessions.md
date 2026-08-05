@@ -570,3 +570,21 @@ Three things worth carrying beyond this workflow:
 Smoke-test the reviewer the same way you would a deploy: land the change, then open a PR carrying a
 deliberate, realistic bug and confirm the finding arrives **on the PR**. "The workflow ran" is not
 evidence — here it was not even true.
+
+**And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
+`permission_denials_count: 0`, it posted nothing on three consecutive probes of a 5-line diff
+carrying a deliberate oversell hole — 5 turns / $0.29, then 11 turns / $1.01, PR untouched, and no
+"no issues found" summary despite its docs promising one. It front-loads an eligibility check
+(closed / draft / **trivial** / already reviewed) plus a confidence filter, and both decisions are
+invisible from the run. Two consequences worth keeping:
+
+- **Wording in the PR itself decides whether you get a review.** The first probe was titled
+  `DO NOT MERGE` with a body saying "do not review by hand" — the plugin read that as *not a real
+  PR* and bailed in 5 turns. A probe that announces itself is not a probe.
+- **A direct prompt (`gh pr comment` + `create_inline_comment`, "post one every time, including
+  when you find nothing") has no such gate**, which is why the workflow now uses one instead of the
+  plugin. Prefer the form whose contract you can read in the workflow file.
+
+Separately, that probe proved a **test gap**: `cargo test --workspace` and the DB suites both go
+green with the oversell hole in place, so nothing asserts that a stock-TRACKED offer at quantity 0
+rejects the line.

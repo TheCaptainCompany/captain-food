@@ -34,18 +34,37 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          # `--comment` is what makes the review reach GitHub. Without it the plugin reports its
-          # findings to stdout only, and the action hides stdout by default (`show_full_output`),
-          # so the whole review is unreadable by anyone. With it: a summary comment even when
-          # nothing is found (proof of life), plus one inline comment per validated finding.
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # The `code-review` PLUGIN was tried first and removed. Even with `--comment`, correct
+          # write permissions and zero permission denials, it posted nothing on three consecutive
+          # probes: it front-loads an eligibility check (closed / draft / "trivial" / already
+          # reviewed) and a confidence filter, both of which are invisible from the run. On a
+          # 5-line diff carrying a deliberate oversell hole it spent 11 turns and $1.01 and left
+          # the PR untouched — and it never posted the "no issues found" summary its own docs
+          # promise. A direct prompt has no such gate: the instructions below ARE the contract.
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. The PR branch is already checked out here.
+
+            Read CLAUDE.md first: it carries the domain lens this repo is judged by. Weigh findings
+            by it rather than by generic style — oversell and un-accepted orders, a paid order
+            nobody is told about, the ETA, availability vs stock vs orderability, spec↔code drift
+            (specs/** is the source of truth, specs/generated/** is never hand-edited), and the
+            layering rule that outer crates may not be imported by inner ones.
+
+            POST YOUR REVIEW ON GITHUB. That is the only output that exists — anything you return
+            as a message is discarded unread by design (the action hides stdout).
+            - `gh pr comment` for the summary. Post one EVERY time, including when you find
+              nothing: "reviewed, no findings" is the signal that the reviewer ran.
+            - `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for each
+              specific issue, anchored to the line it concerns.
+            Be concrete about consequence: name what breaks, for whom, and under what input.
           # Tool permissions MUST live here, not in .claude/settings.json: the action restores
-          # .claude/** from origin/main because the PR head is untrusted, so an allowlist edited on
-          # a branch has no effect on that branch's own review. The interactive allowlist also does
-          # not cover what this plugin needs (`gh pr comment`, the inline-comment MCP tool) — the
-          # first runs of this workflow logged 41 permission denials in a single review.
+          # .claude/** from origin/main because the PR head is untrusted, and the interactive
+          # allowlist does not cover what a reviewer needs (`gh pr comment`, the inline-comment
+          # MCP tool) — the first runs of this workflow logged 41 permission denials each.
+          # `permission_denials_count` in the run's result JSON is the health metric: it must be 0.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api repos/TheCaptainCompany/captain-food:*),Bash(gh run view:*),Bash(gh run list:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Task"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
