@@ -813,10 +813,11 @@ async fn require_orderable_line(
 /// quantity (`stock_quantity = None` = untracked, never blocks — its derived status is IN_STOCK;
 /// availability ≠ stock, the manual flag is checked separately).
 fn require_stock_covers(offer: &OfferView, requested: i64) -> Result<(), DomainError> {
-    let available = match offer.stock_quantity {
-        None => return Ok(()),
-        Some(quantity) => quantity.0,
-    };
+    let available = offer.stock_quantity.map(|quantity| quantity.0).unwrap_or_default();
+    // Untracked stock never blocks the line.
+    if available <= 0.0 {
+        return Ok(());
+    }
     if (requested as f64) > available {
         return Err(reject(
             "InsufficientStock",
