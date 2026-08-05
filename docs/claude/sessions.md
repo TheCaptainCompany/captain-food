@@ -67,8 +67,18 @@ for f in $(ls migrations/*.sql | sort); do
 done
 
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
+export DB_TESTS_REQUIRED=1                              # ALWAYS set this -- see below
 cargo test -p infrastructure -- --test-threads=1        # --test-threads=1: they share ONE database
 ```
+
+**Set `DB_TESTS_REQUIRED=1` every time, and make it the habit rather than `DATABASE_URL` alone.**
+The gated tests assert on it (#230): with it set and `DATABASE_URL` missing, a suite that would have
+skipped FAILS instead of printing `ok`. Without it the skip is silent, and a full-suite total looks
+identical whether the DB tests ran or not — which is exactly how this rule gets re-learned. On
+2026-08-05 a session read this section's warning, ran `cargo test --workspace` with neither variable,
+saw **857 passed / 0 failed**, and pushed; CI then failed on a hand-written test schema still
+declaring `slug TEXT NOT NULL` for a column the change had made nullable. The same command with both
+variables set reproduced it locally in seconds. The number is not the evidence — the variables are.
 
 Cost that earned it: a CI-only failure on a build-profile PR that could not possibly change
 behaviour, and an hour of diagnosis that a local DB run would have front-loaded.
