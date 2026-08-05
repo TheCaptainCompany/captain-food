@@ -428,6 +428,24 @@ stop-hook flags the agent's uncommitted WIP, leave it — the agent commits gate
 committing under it snapshots untested state. (`git worktree remove` leaves the shell's cwd
 dangling — `cd` out first or ignore the getcwd error.)
 
+**That `push <ref>:main` form is not a style preference — the obvious alternative does not work
+here.** The container's clone is SHALLOW (`.git/shallow` exists), so the local `main` branch is a
+~50-commit GRAFT with no common ancestor to the freshly-fetched `origin/main`: `git checkout main
+&& git merge --ff-only origin/main` dies with **`fatal: refusing to merge unrelated histories`**,
+and `git log` on it shows real-looking commits that are simply a different history object. Do not
+read that as divergent work someone will lose — confirm with `ls .git/shallow` and
+`git merge-base --is-ancestor <local-main> origin/main`, then either push the ref directly or
+`git checkout -B main origin/main`. Branch FROM `origin/main`, never from local `main`.
+
+**The session's git credential can push a ref but cannot DELETE one.** `git push origin --delete
+<branch>` and `git push origin :refs/heads/<branch>` both fail with `send-pack: unexpected
+disconnect while reading sideband packet` — consistently, not transiently, so the retry-with-backoff
+rule does not apply — and no GitHub MCP tool deletes a branch (`create_branch` exists, there is no
+delete). **A branch created in-session cannot be cleaned up from in-session**: say so and leave it
+to the product owner rather than burning turns on syntax variants (cost: four retries plus a tool
+search, 2026-08-05). The practical consequence: for a docs-only change that belongs on `main`, push
+straight to `main` and never create the branch in the first place.
+
 **Run `make rust` only on a COMMITTED tree, and never judge it through a pipe.** `check-drift`
 regenerates and then diffs the WHOLE tree — uncommitted source edits read as "drift" and fail the
 gate by design (its own comment says so). And `make rust ... | tail` reports the PIPE's exit (tail's
