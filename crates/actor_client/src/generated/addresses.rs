@@ -33,6 +33,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "ChangeRiderStatus" => Some(("Rider", Some("riderId"), 5)),
         "ClaimRestaurantListing" => Some(("Restaurant", Some("restaurantId"), 5)),
         "CompleteDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
+        "ConfigureCatalogSlug" => Some(("Catalog", Some("catalogId"), 5)),
         "ConfigureGoogleBusinessProfileOrderLink" => Some(("Restaurant", Some("restaurantId"), 5)),
         "ConfigureRestaurantSlug" => Some(("Restaurant", Some("restaurantId"), 5)),
         "ConfirmEmailVerification" => Some(("Customer", Some("customerId"), 5)),

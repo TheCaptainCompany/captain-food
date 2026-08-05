@@ -9,11 +9,6 @@ use domain::generated::scalars::{CurrencyCode, OrderAcceptanceMode, RestaurantSt
 pub struct RestaurantProjector;
 
 impl RestaurantCompute for RestaurantProjector {
-    /// ⚠️ HOLE: no event carries a restaurant description (spec) — preserve whatever is there.
-    fn description(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> Option<String> {
-        prev.and_then(|r| r.description.clone())
-    }
-
     /// Lifecycle status, derived from the event type.
     fn status(&self, prev: Option<&RestaurantRow>, env: &Envelope) -> RestaurantStatus {
         match &env.event {

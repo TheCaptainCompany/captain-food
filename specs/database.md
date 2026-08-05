@@ -119,22 +119,6 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 <!-- GENERATED:views START — source: specs/database/projection_views.yaml; run `make generate`. Do not edit between the markers. -->
 
-### `View_RestaurantAccount` · 🛶 V0 · 🔒 internal · source aggregate `RestaurantAccount`
-
-- **Consumed by**: command handlers / auth resolution (no GraphQL query).
-- **Fed by**: `RestaurantAccountRegistered`, `RestaurantAccountUpdated`, `RestaurantAccountDeleted`
-- **Note**: Account read model (HubRise restaurant). Holds account-level facts shared by its locations; locations denormalize default_currency from here.
-
-| Column | Type | SQL | Constraints | Notes |
-| --- | --- | --- | --- | --- |
-| `restaurant_account_id` | `RestaurantAccountId` | `UUID` | PK |  |
-| `ref` | `ExternalReference` | `TEXT` | nullable |  |
-| `legal_name` | `RestaurantLegalName` | `TEXT` | — |  |
-| `default_currency` | `CurrencyCode` | `TEXT` | — |  |
-| `timezone` | `TimeZone` | `TEXT` | nullable |  |
-| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
-| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
-
 ### `View_DeliveryJob` · 🛶 V0 · source aggregate `DeliveryJob`
 
 - **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`, `DeliveryDispatchFailed`
@@ -256,7 +240,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `google_place_id` | `GooglePlaceId` | `TEXT` | nullable |  |
 | `slug` | `Slug` | `TEXT` | unique, nullable |  |
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
-| `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
+| `description` | `RestaurantDescription` | `TEXT` | nullable |  |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | `MarginPercent` | `TEXT` | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
 | `cuisine_category` | `CuisineCategory` | `TEXT` | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
@@ -336,14 +320,14 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `Catalog` · 🛶 V0 · source aggregate `Catalog`
 
-- **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`
+- **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`, `CatalogSlugConfigured`
 - **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `catalog_id` | `CatalogId` | `UUID` | PK |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | index |  |
-| `slug` | `Slug` | `TEXT` | — | ⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event). |
+| `slug` | `Slug` | `TEXT` | nullable | Null until the owner configures it (ConfigureCatalogSlug) -- the unset case is first-class, not an empty string, exactly like Restaurant.slug. |
 | `name` | `CatalogName` | `TEXT` | — |  |
 | `tree` | `jsonb` | `JSONB` | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |

@@ -64,6 +64,11 @@ ProspectOutreachStateTransitions:
 # --- Catalog ---
 CatalogCreationForRestaurant:
   description: "A catalog is created for a restaurant; creation is rejected when invalid/duplicate."
+CatalogRouteChosenByOwner:
+  description: >
+    A catalog's route label is chosen by its owner after creation, never derived at creation, and is
+    unique within the restaurant; a label already used by another of that restaurant's catalogs is
+    rejected. Re-submitting the current label changes nothing.
 CatalogProductManagement:
   description: "Products can be added, updated and removed in a catalog, with rejection on invalid operations."
 CatalogCategoryTreeManagement:

@@ -87,6 +87,7 @@ pub struct RestaurantSlugReconfigured {
 pub struct RestaurantUpdated {
     pub restaurant_id: RestaurantId,
     pub display_name: Option<RestaurantDisplayName>,
+    pub description: Option<RestaurantDescription>,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
     #[serde(default)]
@@ -228,6 +229,15 @@ pub struct CatalogCreated {
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,
     pub name: CatalogName,
+}
+
+/// The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label. Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH inside an already-resolved host, so no previous label has to keep resolving and none is reserved. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSlugConfigured {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
 }
 
 /// A category has been added to a catalog.
@@ -885,6 +895,7 @@ pub struct RiderStatusChanged {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundOpened {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
     pub amount: Money,
@@ -895,6 +906,7 @@ pub struct RefundOpened {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundApproved {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub amount: Money,
     pub reason: Option<String>,
@@ -904,6 +916,7 @@ pub struct RefundApproved {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefundDenied {
+    pub payment_intent_id: PaymentIntentId,
     pub order_id: OrderId,
     pub reason: String,
 }
@@ -1090,6 +1103,7 @@ pub enum DomainEvent {
     ProspectMarkedCold(ProspectMarkedCold),
     ProspectReplied(ProspectReplied),
     CatalogCreated(CatalogCreated),
+    CatalogSlugConfigured(CatalogSlugConfigured),
     CatalogCategoryAdded(CatalogCategoryAdded),
     CatalogCategoryUpdated(CatalogCategoryUpdated),
     CatalogCategoryRemoved(CatalogCategoryRemoved),

@@ -228,6 +228,13 @@ pub async fn dispatch_command(
             };
             Some(application::commands::create_catalog(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
         }
+        "ConfigureCatalogSlug" => {
+            let cmd: domain::generated::commands::ConfigureCatalogSlug = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("ConfigureCatalogSlug payload: {e}")))),
+            };
+            Some(application::commands::configure_catalog_slug(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()))
+        }
         "AddProduct" => {
             let cmd: domain::generated::commands::AddProduct = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
@@ -473,6 +480,13 @@ pub async fn dispatch_command(
             };
             Some(application::commands::rate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
         }
+        "RecordDeliverySatisfaction" => {
+            let cmd: domain::generated::commands::RecordDeliverySatisfaction = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("RecordDeliverySatisfaction payload: {e}")))),
+            };
+            Some(application::commands::record_delivery_satisfaction(store.as_ref(), cmd, &actor).await.map(|_| ()))
+        }
         "TipOrder" => {
             let cmd: domain::generated::commands::TipOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
@@ -535,6 +549,13 @@ pub async fn dispatch_command(
                 Err(e) => return Some(Err(DomainError::Repository(format!("CancelDelivery payload: {e}")))),
             };
             Some(application::commands::cancel_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
+        }
+        "EscalateDelivery" => {
+            let cmd: domain::generated::commands::EscalateDelivery = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("EscalateDelivery payload: {e}")))),
+            };
+            Some(application::commands::escalate_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
         }
         "RegisterDeliveryPartnerAvailability" => {
             let cmd: domain::generated::commands::RegisterDeliveryPartnerAvailability = match serde_json::from_value(payload.clone()) {

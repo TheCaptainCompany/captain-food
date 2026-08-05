@@ -371,7 +371,7 @@ impl TestBed {
             .orders
             .by_id_sync(order_id)
             .and_then(|row| row.payment_intent_id)
-            .or(Some(PaymentIntentId("pi_123".into())));
+            .unwrap_or_else(|| PaymentIntentId("pi_123".into()));
         self.refund_pm
             .upsert(&RefundProcessRow {
                 order_id,
@@ -692,6 +692,18 @@ impl CatalogReadRepository for SpecCatalogs {
         _restaurant_id: RestaurantId,
     ) -> Result<Option<crate::queries::CatalogRow>, DomainError> {
         Ok(None)
+    }
+    /// Sentinel (same shape as the other TestBed fakes): a label containing `taken` is reported as
+    /// already used by a SIBLING catalog of the same restaurant. `by_restaurant` returns `None` here,
+    /// so the default derivation could never reach CatalogSlugAlreadyTaken -- the per-restaurant
+    /// uniqueness is a read-model fact, and this is the read model in a spec test.
+    async fn slug_taken(
+        &self,
+        _restaurant_id: RestaurantId,
+        slug: &Slug,
+        _excluding: CatalogId,
+    ) -> Result<bool, DomainError> {
+        Ok(slug.0.contains("taken"))
     }
     async fn offer_by_id(
         &self,

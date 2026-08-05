@@ -149,6 +149,7 @@ restaurant_owner:
       steps:
         ViewCatalog: { $ref: 'api.yaml#/queries/catalog' }
         CreateCatalog: { $ref: 'api.yaml#/mutations/createCatalog' }
+        ChooseCatalogRoute: { $ref: 'api.yaml#/mutations/configureCatalogSlug' }
         AddProduct: { $ref: 'api.yaml#/mutations/addProduct' }
         UpdateProduct: { $ref: 'api.yaml#/mutations/updateProduct' }
         RemoveProduct: { $ref: 'api.yaml#/mutations/removeProduct' }

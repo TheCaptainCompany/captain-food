@@ -149,6 +149,9 @@ fixtures:
   catalogCreated:
     type: { $ref: 'events.yaml#/CatalogCreated' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", name: "Main" }
+  catalogSlugConfigured:
+    type: { $ref: 'events.yaml#/CatalogSlugConfigured' }
+    data: { catalogId: "cat-1", restaurantId: "resto-1", slug: "midi" }
   catalogCategoryAdded:
     type: { $ref: 'events.yaml#/CatalogCategoryAdded' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", category: { id: "pcat-1", catalogId: "cat-1", name: "Pizzas" } }
@@ -396,36 +399,36 @@ fixtures:
     data: { refundId: "re_1", paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
   refundOpened:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
   refundOpenedOnCustomerCancel:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Changed my mind" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Changed my mind" }
   refundOpenedOnRestaurantCancel:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Kitchen closed" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Kitchen closed" }
   refundOpenedOnRequest:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Late delivery" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Late delivery" }
   refundApproved:
     type: { $ref: 'events.yaml#/RefundApproved' }
-    data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
   refundDenied:
     type: { $ref: 'events.yaml#/RefundDenied' }
-    data: { orderId: "order-1", reason: "Outside the refund window" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", reason: "Outside the refund window" }
   # Reclamation refund arm (#207): a FULL_REFUND resolution opens then approves the captured total; a
   # PARTIAL_REFUND opens the full eligible total (RefundOpened) but approves only the recorded amount.
   refundOpenedOnReclamation:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
   refundApprovedOnReclamation:
     type: { $ref: 'events.yaml#/RefundApproved' }
-    data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
   refundOpenedOnReclamationPartial:
     type: { $ref: 'events.yaml#/RefundOpened' }
-    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "One dish was missing" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "One dish was missing" }
   refundApprovedOnReclamationPartial:
     type: { $ref: 'events.yaml#/RefundApproved' }
-    data: { orderId: "order-1", amount: { amountCents: 500, currency: "EUR" }, reason: "One dish was missing" }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", amount: { amountCents: 500, currency: "EUR" }, reason: "One dish was missing" }
 
   # --- Delivery (ADR-0031) ---
   deliveryRequested:
@@ -1086,6 +1089,32 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/RestaurantNotFound' }
       - { $ref: 'errors.yaml#/RefNotUnique' }
+
+  TestCatalogSlugConfigured:
+    name: "The owner chooses the catalog's route label after creation"
+    rules: [{ $ref: 'rules.yaml#/CatalogRouteChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Catalog' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      data: { catalogId: "cat-1", slug: "midi" }
+    then:
+      - { $ref: '#/fixtures/catalogSlugConfigured' }
+
+  TestCatalogSlugIsRejected:
+    name: "Rejects a route label already used by another catalog of the same restaurant, or an unknown catalog"
+    rules: [{ $ref: 'rules.yaml#/CatalogRouteChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Catalog' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/catalogSlugConfigured' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      data: { catalogId: "cat-1", slug: "midi-taken-by-sibling" }
+    thrown:
+      - { $ref: 'errors.yaml#/CatalogNotFound' }
+      - { $ref: 'errors.yaml#/CatalogSlugAlreadyTaken' }
 
   TestCatalogProductAdded:
     name: "Adds a product with one offer to a catalog"
@@ -2665,7 +2694,7 @@ tests:
       - { $ref: '#/fixtures/paymentCaptured' }
     when:
       type: { $ref: 'events.yaml#/RefundOpened' }
-      data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
+      data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
     then:
       - { $ref: '#/fixtures/refundOpened' }
 
@@ -2678,7 +2707,7 @@ tests:
       - { $ref: '#/fixtures/paymentCaptured' }
     when:
       type: { $ref: 'events.yaml#/RefundApproved' }
-      data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
+      data: { paymentIntentId: "pi_123", orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
     then:
       - { $ref: '#/fixtures/refundApproved' }
 
@@ -2691,7 +2720,7 @@ tests:
       - { $ref: '#/fixtures/paymentCaptured' }
     when:
       type: { $ref: 'events.yaml#/RefundDenied' }
-      data: { orderId: "order-1", reason: "Outside the refund window" }
+      data: { paymentIntentId: "pi_123", orderId: "order-1", reason: "Outside the refund window" }
     then:
       - { $ref: '#/fixtures/refundDenied' }
 

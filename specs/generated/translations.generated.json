@@ -391,6 +391,78 @@
     "en": "Pause orders",
     "fr": "Suspendre les commandes"
   },
+  "back.profile.cuisine.bistronomic": {
+    "en": "Bistronomic",
+    "fr": "Bistronomique"
+  },
+  "back.profile.cuisine.fast_food": {
+    "en": "Fast food",
+    "fr": "Restauration rapide"
+  },
+  "back.profile.cuisine.food_truck": {
+    "en": "Food truck",
+    "fr": "Food truck"
+  },
+  "back.profile.cuisine.help": {
+    "en": "One choice only. It sets the coefficient behind the Uber Eats price comparison, not how customers search for you -- that is your tags.",
+    "fr": "Un seul choix. Il détermine le coefficient de la comparaison de prix Uber Eats, et non la recherche client -- ce sont vos étiquettes."
+  },
+  "back.profile.cuisine.pizza": {
+    "en": "Pizza",
+    "fr": "Pizzeria"
+  },
+  "back.profile.cuisine.title": {
+    "en": "Main cuisine",
+    "fr": "Cuisine principale"
+  },
+  "back.profile.cuisine.traditional": {
+    "en": "Traditional",
+    "fr": "Traditionnel"
+  },
+  "back.profile.description.help": {
+    "en": "Shown on your storefront and on your card in the marketplace listing.",
+    "fr": "Affichée sur votre boutique et sur votre fiche dans le catalogue."
+  },
+  "back.profile.description.label": {
+    "en": "Description",
+    "fr": "Description"
+  },
+  "back.profile.description_ph": {
+    "en": "What makes your place worth the trip -- your cooking, your story, your specialities.",
+    "fr": "Ce qui donne envie de venir chez vous : votre cuisine, votre histoire, vos spécialités."
+  },
+  "back.profile.identity.title": {
+    "en": "How you appear",
+    "fr": "Votre présentation"
+  },
+  "back.profile.name.label": {
+    "en": "Restaurant name",
+    "fr": "Nom du restaurant"
+  },
+  "back.profile.save": {
+    "en": "Save profile",
+    "fr": "Enregistrer le profil"
+  },
+  "back.profile.tags.help": {
+    "en": "Used to help customers find you when browsing.",
+    "fr": "Servent à vous trouver lors de la navigation."
+  },
+  "back.profile.tags.label": {
+    "en": "Tags",
+    "fr": "Étiquettes"
+  },
+  "back.profile.title": {
+    "en": "Restaurant profile",
+    "fr": "Profil du restaurant"
+  },
+  "back.profile.website.label": {
+    "en": "Website",
+    "fr": "Site web"
+  },
+  "back.profile.website_ph": {
+    "en": "https://",
+    "fr": "https://"
+  },
   "back.refunds.approve": {
     "en": "Approve refund",
     "fr": "Approuver le remboursement"

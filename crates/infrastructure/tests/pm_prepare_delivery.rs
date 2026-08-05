@@ -554,7 +554,7 @@ async fn approve_refund_flushes_fact_and_run_row_in_one_commit() {
     infrastructure::persistence::PgRefundProcessState::new(pool.clone())
         .upsert(&RefundProcessRow {
             order_id: OrderId(uid(ORDER)),
-            payment_intent_id: Some(PaymentIntentId("pi_prepare_test".into())),
+            payment_intent_id: PaymentIntentId("pi_prepare_test".into()),
             refund_id: None,
             process_status: RefundProcessStatus::PENDING_APPROVAL,
             approved_amount_cents: None,

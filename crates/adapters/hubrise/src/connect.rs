@@ -523,6 +523,9 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 continue;
             }
 
+            // No slug here: the catalog ROUTE is the owner's choice (ConfigureCatalogSlug), never
+            // derived from an imported name. An import that invented one would pin a public path the
+            // merchant never picked, and a HubRise rename would silently not move it.
             let cmd = CreateCatalog {
                 catalog_id,
                 restaurant_id,

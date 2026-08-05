@@ -210,6 +210,7 @@ mod tests {
     }
     fn refund_opened() -> DomainEvent {
         DomainEvent::RefundOpened(RefundOpened {
+            payment_intent_id: pi(),
             order_id: order_id(),
             restaurant_id: restaurant_id(),
             amount: money(1000),
@@ -218,13 +219,18 @@ mod tests {
     }
     fn refund_approved() -> DomainEvent {
         DomainEvent::RefundApproved(RefundApproved {
+            payment_intent_id: pi(),
             order_id: order_id(),
             amount: money(1000),
             reason: None,
         })
     }
     fn refund_denied() -> DomainEvent {
-        DomainEvent::RefundDenied(RefundDenied { order_id: order_id(), reason: "too late".into() })
+        DomainEvent::RefundDenied(RefundDenied {
+            payment_intent_id: pi(),
+            order_id: order_id(),
+            reason: "too late".into(),
+        })
     }
 
     #[test]

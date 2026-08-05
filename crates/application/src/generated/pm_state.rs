@@ -54,8 +54,8 @@ pub trait PaymentProcessStateStore: Send + Sync {
 pub struct RefundProcessRow {
     /// The order being refunded — one live run per order.
     pub order_id: OrderId,
-    /// The captured payment to refund (from the order's payment facts).
-    pub payment_intent_id: Option<PaymentIntentId>,
+    /// The captured payment to refund (from the order's payment facts). NOT NULL: every leg that opens a run guards on payment_status = CAPTURED and skips otherwise, and the column it reads is fed by PaymentCaptured -- so a run cannot exist without a payment intent.
+    pub payment_intent_id: PaymentIntentId,
     /// Stripe refund id, set when PaymentRefunded settles the run.
     pub refund_id: Option<RefundId>,
     pub process_status: RefundProcessStatus,

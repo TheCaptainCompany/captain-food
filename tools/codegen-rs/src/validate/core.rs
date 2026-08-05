@@ -14,6 +14,7 @@ use crate::*;
 /// NOT checked: that every REQUIRED arg is pinned. A pin is a static DEFAULT — the remaining args are
 /// supplied by the caller at runtime (`crates/web/src/graphql.rs#execute_resolver` merges caller
 /// variables OVER the pins), so an unpinned required arg is normal, not an error.
+
 pub(crate) fn validate_resolver_args(model: &Model, issues: &mut Vec<Issue>, at: &str, query: &str, args: &Value) {
     let Some(pinned) = args.as_mapping() else { return };
     let empty = serde_yaml::Mapping::new();
@@ -70,6 +71,35 @@ pub(crate) fn validate_resolver_args(model: &Model, issues: &mut Vec<Issue>, at:
                 ));
             }
         }
+    }
+}
+
+/// Every `action: { type, variables }` block in a screen's component tree, flattened. Components nest
+/// under `content` / `components` / `children` and an action can sit on any node, so this walks the
+/// whole subtree rather than a fixed shape.
+fn collect_screen_actions(node: &Value, out: &mut Vec<(String, BTreeSet<String>)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_screen_actions(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let Some(a) = map.get(Value::String("action".to_string())) {
+                if let Some(t) = a.get("type").and_then(|x| x.as_str()) {
+                    let vars = a
+                        .get("variables")
+                        .and_then(|v| v.as_mapping())
+                        .map(|m| m.keys().filter_map(|k| k.as_str()).map(str::to_string).collect())
+                        .unwrap_or_default();
+                    out.push((t.to_string(), vars));
+                }
+            }
+            for (_, v) in map {
+                collect_screen_actions(v, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1254,6 +1284,9 @@ pub(crate) fn validate(model: &Model) -> Report {
                     }
                 }
             }
+            // action name → the command its mutation carries, so a component's `action.variables`
+            // can be checked against the command's REQUIRED input properties below.
+            let mut action_command: HashMap<String, String> = HashMap::new();
             if let Some(amap) = actions {
                 for (nk, a) in amap {
                     let name = match nk.as_str() {
@@ -1264,6 +1297,17 @@ pub(crate) fn validate(model: &Model) -> Report {
                         Some(r) => r,
                         None => continue,
                     };
+                    if let Some(cmd) = model
+                        .defs
+                        .get("api.yaml")
+                        .and_then(|v| v.get("mutations"))
+                        .and_then(|v| v.get(op_name(rf).as_str()))
+                        .and_then(|v| v.get("command"))
+                        .and_then(|v| v.get("$ref"))
+                        .and_then(|x| x.as_str())
+                    {
+                        action_command.insert(name.to_string(), op_name(cmd));
+                    }
                     if ref_target_file(rf, sfkey).as_deref() != Some("api.yaml")
                         || !rf.contains("/mutations/")
                         || !mutation_names.contains(op_name(rf).as_str())
@@ -1283,6 +1327,75 @@ pub(crate) fn validate(model: &Model) -> Report {
                     cov.screens += 1;
                     let sid = s.get("id").and_then(|x| x.as_str()).unwrap_or("?").to_string();
                     cov.screen_gaps += s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.len()).unwrap_or(0);
+                    // A screen ACTION is the caller of its mutation, so unlike a resolver's pinned
+                    // `args:` (a static default the runtime merges caller variables over) its
+                    // `variables:` are the whole input. A required command property with no variable
+                    // is a form that cannot submit — invisible until a human presses the button,
+                    // because `action-not-a-mutation` only proves the $ref names a mutation and
+                    // `op-uncovered-by-story` is satisfied by a story STEP, which is not a screen.
+                    let mut found: Vec<(String, BTreeSet<String>)> = Vec::new();
+                    if let Some(cs) = s.get("components") {
+                        collect_screen_actions(cs, &mut found);
+                    }
+                    for (action_name, provided) in found {
+                        let Some(cmd) = action_command.get(&action_name) else { continue };
+                        let Some(required) = model
+                            .defs
+                            .get("commands.yaml")
+                            .and_then(|v| v.get(cmd.as_str()))
+                            .and_then(|v| v.get("required"))
+                            .and_then(|v| v.as_sequence())
+                        else {
+                            continue;
+                        };
+                        // The mirror of `resolver-unknown-arg` on the write side: a variable that
+                        // names no property of the command is dropped on the floor, and reads in the
+                        // spec like the input IS wired.
+                        if let Some(props) = model
+                            .defs
+                            .get("commands.yaml")
+                            .and_then(|v| v.get(cmd.as_str()))
+                            .and_then(|v| v.get("properties"))
+                            .and_then(|v| v.as_mapping())
+                        {
+                            let unknown: Vec<&str> = provided
+                                .iter()
+                                .map(|p| p.as_str())
+                                .filter(|p| props.get(Value::String(p.to_string())).is_none())
+                                .collect();
+                            if !unknown.is_empty() {
+                                issues.push(warn(
+                                    "action-unknown-input",
+                                    format!("{}/screens/{}/{}", sfkey, sid, action_name),
+                                    format!(
+                                        "action '{}' passes variable {}, which commands.yaml#/{} does not declare.",
+                                        action_name,
+                                        unknown.join(", "),
+                                        cmd
+                                    ),
+                                ));
+                            }
+                        }
+                        let missing: Vec<&str> = required
+                            .iter()
+                            .filter_map(|r| r.as_str())
+                            .filter(|r| !provided.contains(*r))
+                            .collect();
+                        if !missing.is_empty() {
+                            issues.push(warn(
+                                "action-missing-required-input",
+                                format!("{}/screens/{}/{}", sfkey, sid, action_name),
+                                format!(
+                                    "action '{}' supplies no variable for required {} property {} of \
+                                     commands.yaml#/{} — the mutation is unsubmittable from this screen.",
+                                    action_name,
+                                    if missing.len() == 1 { "input" } else { "inputs" },
+                                    missing.join(", "),
+                                    cmd
+                                ),
+                            ));
+                        }
+                    }
                     // Per-screen roles must be scalars.yaml#/UserType values.
                     if let Some(rs) = s.get("roles").and_then(|x| x.as_sequence()) {
                         for r in rs {

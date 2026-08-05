@@ -231,6 +231,10 @@ UpdateRestaurant:
     displayName:
       $ref: 'scalars.yaml#/RestaurantDisplayName'
       nullable: true
+    description:
+      $ref: 'scalars.yaml#/RestaurantDescription'
+      nullable: true
+      description: "Free-text presentation shown on the storefront and the discovery card."
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
       nullable: true
@@ -470,10 +474,32 @@ CreateCatalog:
       $ref: 'scalars.yaml#/RestaurantId'
     name:
       $ref: 'scalars.yaml#/CatalogName'
+    # NOTE: no `slug` -- same reasoning as RegisterRestaurant (ADR-20260728-011344): the storefront
+    # ROUTE is chosen by the owner via ConfigureCatalogSlug, not derived at creation. A creation that
+    # invented one (e.g. slugified an imported HubRise name) would pin a public path the merchant never
+    # picked, and an import rename would silently not move it.
     ref:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
   required: [catalogId, restaurantId, name]
+
+ConfigureCatalogSlug:
+  description: >
+    The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the
+    restaurant's storefront. A real command precisely because it CAN be refused: the label may already
+    belong to another catalog of the same restaurant, and the person asking is a human who can pick
+    again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error).
+    Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness
+    and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant --
+    a rename simply replaces the label.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "URL-safe catalog label, unique within its restaurant."
+  required: [catalogId, slug]
 
 AddProduct:
   description: >

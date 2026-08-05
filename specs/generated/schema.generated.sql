@@ -227,7 +227,7 @@ CREATE TABLE payment_process_manager (
 
 CREATE TABLE refund_process_manager (
   order_id UUID PRIMARY KEY,
-  payment_intent_id TEXT NULL,
+  payment_intent_id TEXT NOT NULL,
   refund_id TEXT NULL,
   process_status TEXT NOT NULL,
   approved_amount_cents BIGINT NULL,
@@ -251,14 +251,6 @@ CREATE TABLE delivery_dispatch_process_manager (
   current_channel TEXT NULL,
   last_update_utc TIMESTAMPTZ NOT NULL
 );
-
-CREATE TABLE PhoneCountry (
-  country TEXT PRIMARY KEY,
-  dialing_code TEXT NOT NULL,
-  name TEXT NOT NULL,
-  default_locale TEXT NOT NULL
-);
-CREATE INDEX ON PhoneCountry (dialing_code);
 
 CREATE TABLE PricingPolicy (
   currency TEXT PRIMARY KEY,
@@ -408,7 +400,7 @@ CREATE INDEX ON Customer (auth_ref);
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,
-  slug TEXT NOT NULL,
+  slug TEXT,
   name TEXT NOT NULL,
   tree JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,

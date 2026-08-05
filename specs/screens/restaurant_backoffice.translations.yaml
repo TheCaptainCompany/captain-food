@@ -115,3 +115,23 @@ back.storefront.consequences.title: { messages: { en: "What happens when you cha
 back.storefront.consequences.redirect: { messages: { en: "Your old address redirects here, so printed menus and QR codes keep working.", fr: "Votre ancienne adresse redirige ici : menus imprimés et QR codes continuent de fonctionner." } }
 back.storefront.consequences.reserved: { messages: { en: "The old address stays reserved to you — nobody else can take it.", fr: "L'ancienne adresse vous reste réservée — personne d'autre ne peut la prendre." } }
 back.storefront.save:           { messages: { en: "Save address", fr: "Enregistrer l'adresse" } }
+
+# --- Profile (the editable location fields behind UpdateRestaurant) -----------------------------
+back.profile.title:             { messages: { en: "Restaurant profile", fr: "Profil du restaurant" } }
+back.profile.identity.title:    { messages: { en: "How you appear", fr: "Votre présentation" } }
+back.profile.name.label:        { messages: { en: "Restaurant name", fr: "Nom du restaurant" } }
+back.profile.description.label: { messages: { en: "Description", fr: "Description" } }
+back.profile.description_ph:    { messages: { en: "What makes your place worth the trip -- your cooking, your story, your specialities.", fr: "Ce qui donne envie de venir chez vous : votre cuisine, votre histoire, vos spécialités." } }
+back.profile.description.help:  { messages: { en: "Shown on your storefront and on your card in the marketplace listing.", fr: "Affichée sur votre boutique et sur votre fiche dans le catalogue." } }
+back.profile.website.label:     { messages: { en: "Website", fr: "Site web" } }
+back.profile.website_ph:        { messages: { en: "https://", fr: "https://" } }
+back.profile.tags.label:        { messages: { en: "Tags", fr: "Étiquettes" } }
+back.profile.tags.help:         { messages: { en: "Used to help customers find you when browsing.", fr: "Servent à vous trouver lors de la navigation." } }
+back.profile.cuisine.title:     { messages: { en: "Main cuisine", fr: "Cuisine principale" } }
+back.profile.cuisine.help:      { messages: { en: "One choice only. It sets the coefficient behind the Uber Eats price comparison, not how customers search for you -- that is your tags.", fr: "Un seul choix. Il détermine le coefficient de la comparaison de prix Uber Eats, et non la recherche client -- ce sont vos étiquettes." } }
+back.profile.cuisine.fast_food:   { messages: { en: "Fast food", fr: "Restauration rapide" } }
+back.profile.cuisine.pizza:       { messages: { en: "Pizza", fr: "Pizzeria" } }
+back.profile.cuisine.traditional: { messages: { en: "Traditional", fr: "Traditionnel" } }
+back.profile.cuisine.bistronomic: { messages: { en: "Bistronomic", fr: "Bistronomique" } }
+back.profile.cuisine.food_truck:  { messages: { en: "Food truck", fr: "Food truck" } }
+back.profile.save:              { messages: { en: "Save profile", fr: "Enregistrer le profil" } }

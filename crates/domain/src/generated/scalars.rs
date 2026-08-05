@@ -146,6 +146,10 @@ pub struct ProductName(pub String);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProductDescription(pub String);
 
+/// Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RestaurantDescription(pub String);
+
 /// Offer label, unique within a product (HubRise SKU name). Example: 'Small', 'Large', 'Default'.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OfferName(pub String);

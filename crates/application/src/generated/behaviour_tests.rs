@@ -94,7 +94,7 @@ fn fx_restaurant_registered() -> DomainEvent {
 
 /// tests.yaml#/fixtures/restaurantRenamedByRegistry — events.yaml#/RestaurantUpdated
 fn fx_restaurant_renamed_by_registry() -> DomainEvent {
-    DomainEvent::RestaurantUpdated(evs::RestaurantUpdated { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco et Fils".into())), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
+    DomainEvent::RestaurantUpdated(evs::RestaurantUpdated { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco et Fils".into())), description: None, contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
 }
 
 /// tests.yaml#/fixtures/restaurantSlugConfigured — events.yaml#/RestaurantSlugConfigured
@@ -119,7 +119,7 @@ fn fx_restaurant_seeded() -> DomainEvent {
 
 /// tests.yaml#/fixtures/restaurantUpdated — events.yaml#/RestaurantUpdated
 fn fx_restaurant_updated() -> DomainEvent {
-    DomainEvent::RestaurantUpdated(evs::RestaurantUpdated { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco — Centre".into())), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
+    DomainEvent::RestaurantUpdated(evs::RestaurantUpdated { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco — Centre".into())), description: None, contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
 }
 
 /// tests.yaml#/fixtures/restaurantActivated — events.yaml#/RestaurantActivated
@@ -205,6 +205,11 @@ fn fx_prospect_replied() -> DomainEvent {
 /// tests.yaml#/fixtures/catalogCreated — events.yaml#/CatalogCreated
 fn fx_catalog_created() -> DomainEvent {
     DomainEvent::CatalogCreated(evs::CatalogCreated { catalog_id: sc::CatalogId(support::uid("cat-1")), r#ref: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), name: sc::CatalogName("Main".into()) })
+}
+
+/// tests.yaml#/fixtures/catalogSlugConfigured — events.yaml#/CatalogSlugConfigured
+fn fx_catalog_slug_configured() -> DomainEvent {
+    DomainEvent::CatalogSlugConfigured(evs::CatalogSlugConfigured { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("midi".into()) })
 }
 
 /// tests.yaml#/fixtures/catalogCategoryAdded — events.yaml#/CatalogCategoryAdded
@@ -409,52 +414,52 @@ fn fx_payment_refunded() -> DomainEvent {
 
 /// tests.yaml#/fixtures/refundOpened — events.yaml#/RefundOpened
 fn fx_refund_opened() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Out of ingredients".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Out of ingredients".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundOpenedOnCustomerCancel — events.yaml#/RefundOpened
 fn fx_refund_opened_on_customer_cancel() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Changed my mind".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Changed my mind".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundOpenedOnRestaurantCancel — events.yaml#/RefundOpened
 fn fx_refund_opened_on_restaurant_cancel() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Kitchen closed".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Kitchen closed".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundOpenedOnRequest — events.yaml#/RefundOpened
 fn fx_refund_opened_on_request() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Late delivery".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Late delivery".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundApproved — events.yaml#/RefundApproved
 fn fx_refund_approved() -> DomainEvent {
-    DomainEvent::RefundApproved(evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order rejected by the restaurant".to_string()) })
+    DomainEvent::RefundApproved(evs::RefundApproved { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order rejected by the restaurant".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundDenied — events.yaml#/RefundDenied
 fn fx_refund_denied() -> DomainEvent {
-    DomainEvent::RefundDenied(evs::RefundDenied { order_id: sc::OrderId(support::uid("order-1")), reason: "Outside the refund window".to_string() })
+    DomainEvent::RefundDenied(evs::RefundDenied { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), reason: "Outside the refund window".to_string() })
 }
 
 /// tests.yaml#/fixtures/refundOpenedOnReclamation — events.yaml#/RefundOpened
 fn fx_refund_opened_on_reclamation() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundApprovedOnReclamation — events.yaml#/RefundApproved
 fn fx_refund_approved_on_reclamation() -> DomainEvent {
-    DomainEvent::RefundApproved(evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
+    DomainEvent::RefundApproved(evs::RefundApproved { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundOpenedOnReclamationPartial — events.yaml#/RefundOpened
 fn fx_refund_opened_on_reclamation_partial() -> DomainEvent {
-    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
+    DomainEvent::RefundOpened(evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
 }
 
 /// tests.yaml#/fixtures/refundApprovedOnReclamationPartial — events.yaml#/RefundApproved
 fn fx_refund_approved_on_reclamation_partial() -> DomainEvent {
-    DomainEvent::RefundApproved(evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
+    DomainEvent::RefundApproved(evs::RefundApproved { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
 }
 
 /// tests.yaml#/fixtures/deliveryRequested — events.yaml#/DeliveryRequested
@@ -939,7 +944,7 @@ async fn test_restaurant_updated() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::UpdateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco — Centre".into())), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() };
+    let cmd = cmds::UpdateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco — Centre".into())), description: None, contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() };
     let result = crate::commands::update_restaurant(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestRestaurantUpdated: the spec expects acceptance");
     bed.assert_appended("TestRestaurantUpdated", &before, &[
@@ -954,7 +959,7 @@ async fn test_restaurant_update_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::UpdateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-missing")), display_name: None, contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() };
+    let cmd = cmds::UpdateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-missing")), display_name: None, description: None, contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() };
     let result = crate::commands::update_restaurant(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestRestaurantUpdateIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRestaurantUpdateIsRejected", &err, &["RestaurantNotFound", "NoEditableFieldProvided"]);
@@ -1315,6 +1320,37 @@ async fn test_catalog_create_is_rejected() {
     let err = result.expect_err("TestCatalogCreateIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestCatalogCreateIsRejected", &err, &["RestaurantNotFound", "RefNotUnique"]);
     bed.assert_appended("TestCatalogCreateIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCatalogSlugConfigured — "The owner chooses the catalog's route label after creation"
+/// rules: CatalogRouteChosenByOwner
+#[tokio::test]
+async fn test_catalog_slug_configured() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureCatalogSlug { catalog_id: sc::CatalogId(support::uid("cat-1")), slug: sc::Slug("midi".into()) };
+    let result = crate::commands::configure_catalog_slug(&bed.store, &bed.catalogs, cmd, &support::actor()).await;
+    let _ = result.expect("TestCatalogSlugConfigured: the spec expects acceptance");
+    bed.assert_appended("TestCatalogSlugConfigured", &before, &[
+        (format!("Catalog-{}", support::uid("cat-1")), fx_catalog_slug_configured()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestCatalogSlugIsRejected — "Rejects a route label already used by another catalog of the same restaurant, or an unknown catalog"
+/// rules: CatalogRouteChosenByOwner
+#[tokio::test]
+async fn test_catalog_slug_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_catalog_slug_configured()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureCatalogSlug { catalog_id: sc::CatalogId(support::uid("cat-1")), slug: sc::Slug("midi-taken-by-sibling".into()) };
+    let result = crate::commands::configure_catalog_slug(&bed.store, &bed.catalogs, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCatalogSlugIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestCatalogSlugIsRejected", &err, &["CatalogNotFound", "CatalogSlugAlreadyTaken"]);
+    bed.assert_appended("TestCatalogSlugIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestCatalogProductAdded — "Adds a product with one offer to a catalog"
@@ -3093,7 +3129,7 @@ async fn test_pending_refund_visible_until_decided() {
     spec_baseline(&bed).await;
     bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_captured()]).await;
     let before = bed.snapshot();
-    let ev = evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Out of ingredients".to_string()) };
+    let ev = evs::RefundOpened { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Out of ingredients".to_string()) };
     let result = bed.record_fact(&"Payment-pi_123".to_string(), DomainEvent::RefundOpened(ev)).await;
     let _ = result.expect("TestPendingRefundVisibleUntilDecided: the spec expects acceptance");
     bed.assert_appended("TestPendingRefundVisibleUntilDecided", &before, &[
@@ -3109,7 +3145,7 @@ async fn test_payment_refund_approved_recorded() {
     spec_baseline(&bed).await;
     bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_captured()]).await;
     let before = bed.snapshot();
-    let ev = evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order rejected by the restaurant".to_string()) };
+    let ev = evs::RefundApproved { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order rejected by the restaurant".to_string()) };
     let result = bed.record_fact(&"Payment-pi_123".to_string(), DomainEvent::RefundApproved(ev)).await;
     let _ = result.expect("TestPaymentRefundApprovedRecorded: the spec expects acceptance");
     bed.assert_appended("TestPaymentRefundApprovedRecorded", &before, &[
@@ -3125,7 +3161,7 @@ async fn test_payment_refund_denied_recorded() {
     spec_baseline(&bed).await;
     bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_captured()]).await;
     let before = bed.snapshot();
-    let ev = evs::RefundDenied { order_id: sc::OrderId(support::uid("order-1")), reason: "Outside the refund window".to_string() };
+    let ev = evs::RefundDenied { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), reason: "Outside the refund window".to_string() };
     let result = bed.record_fact(&"Payment-pi_123".to_string(), DomainEvent::RefundDenied(ev)).await;
     let _ = result.expect("TestPaymentRefundDeniedRecorded: the spec expects acceptance");
     bed.assert_appended("TestPaymentRefundDeniedRecorded", &before, &[

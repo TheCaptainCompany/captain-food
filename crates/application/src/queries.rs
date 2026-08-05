@@ -13,7 +13,8 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    RefundStatus, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug, StockStatus,
+    CatalogId, RefundStatus, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug,
+    StockStatus,
 };
 use domain::shared::errors::DomainError;
 
@@ -221,6 +222,26 @@ pub fn offer_view_from_tree(tree: &serde_json::Value, offer_id: OfferId) -> Opti
 pub trait CatalogReadRepository: Send + Sync {
     /// A restaurant's catalog (newest first when several exist), or `None` before CatalogCreated.
     async fn by_restaurant(&self, restaurant_id: RestaurantId) -> Result<Option<CatalogRow>, DomainError>;
+
+    /// Whether ANOTHER catalog of this restaurant already uses `slug` -- the per-restaurant
+    /// uniqueness behind `CatalogSlugAlreadyTaken`. A catalog slug is a PATH inside one storefront,
+    /// not a global host, so it is checked against the read model rather than reserved in Postgres
+    /// the way the restaurant host is. Provided: derived from [`Self::by_restaurant`]; override for a
+    /// store that holds several catalogs per restaurant.
+    async fn slug_taken(
+        &self,
+        restaurant_id: RestaurantId,
+        slug: &Slug,
+        excluding: CatalogId,
+    ) -> Result<bool, DomainError> {
+        Ok(self
+            .by_restaurant(restaurant_id)
+            .await?
+            .filter(|c| c.catalog_id != excluding)
+            .and_then(|c| c.slug)
+            .as_ref()
+            == Some(slug))
+    }
 
     /// One offer of the restaurant's live catalog, or `None` when the restaurant has no catalog or
     /// the offer is not in it. Provided: every adapter (Pg included) reads the projected `tree` via

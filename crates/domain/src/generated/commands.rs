@@ -97,6 +97,7 @@ pub struct ActivateRestaurant {
 pub struct UpdateRestaurant {
     pub restaurant_id: RestaurantId,
     pub display_name: Option<RestaurantDisplayName>,
+    pub description: Option<RestaurantDescription>,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
     #[serde(default)]
@@ -230,6 +231,14 @@ pub struct CreateCatalog {
     pub restaurant_id: RestaurantId,
     pub name: CatalogName,
     pub r#ref: Option<ExternalReference>,
+}
+
+/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureCatalogSlug {
+    pub catalog_id: CatalogId,
+    pub slug: Slug,
 }
 
 /// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).

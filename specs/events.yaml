@@ -198,6 +198,9 @@ RestaurantUpdated:
     displayName:
       $ref: 'scalars.yaml#/RestaurantDisplayName'
       nullable: true
+    description:
+      $ref: 'scalars.yaml#/RestaurantDescription'
+      nullable: true
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
       nullable: true
@@ -464,6 +467,28 @@ CatalogCreated:
     - catalogId
     - restaurantId
     - name
+
+CatalogSlugConfigured:
+  description: >
+    The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the
+    restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label.
+    Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH
+    inside an already-resolved host, so no previous label has to keep resolving and none is reserved.
+    The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at,
+    ADR-0041), never payload.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+      description: "The owning restaurant -- the scope the label is unique within."
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+  required:
+    - catalogId
+    - restaurantId
+    - slug
 
 CatalogCategoryAdded:
   description: "A category has been added to a catalog."
@@ -1660,6 +1685,9 @@ RefundOpened:
     `amount` is the captured order total eligible for refund (an approval may still be partial).
   type: object
   properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      description: "Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId})."
     orderId: { $ref: 'scalars.yaml#/OrderId' }
     restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
     amount:
@@ -1669,12 +1697,15 @@ RefundOpened:
       type: string
       maxLength: 500
       nullable: true
-  required: [orderId, restaurantId, amount]
+  required: [paymentIntentId, orderId, restaurantId, amount]
 
 RefundApproved:
   description: "The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount."
   type: object
   properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      description: "Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId})."
     orderId: { $ref: 'scalars.yaml#/OrderId' }
     amount:
       $ref: 'entities.yaml#/Money'
@@ -1683,17 +1714,20 @@ RefundApproved:
       type: string
       maxLength: 500
       nullable: true
-  required: [orderId, amount]
+  required: [paymentIntentId, orderId, amount]
 
 RefundDenied:
   description: "The restaurant or an admin denied a pending refund request."
   type: object
   properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      description: "Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId})."
     orderId: { $ref: 'scalars.yaml#/OrderId' }
     reason:
       type: string
       maxLength: 500
-  required: [orderId, reason]
+  required: [paymentIntentId, orderId, reason]
 
 # --- Order conversations (#129) ---
 

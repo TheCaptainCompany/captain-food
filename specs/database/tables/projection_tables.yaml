@@ -46,7 +46,9 @@ Restaurant:
         - { $ref: 'events.yaml#/RestaurantListingClaimed/properties/accountId' }
       index: true
       nullable: true
-      fk: { $ref: 'database/projection_views.yaml#/View_RestaurantAccount/columns/restaurant_account_id' }
+      # No `fk:` — View_RestaurantAccount was deleted as unread (ADR below). The account id is still
+      # carried and indexed (restaurantLocationsByAccount queries by it); it just no longer points at a
+      # read model, so there is no read-navigation edge to declare.
       note: "NULL for a non-partner public listing; set on claim/conversion."
     listing_status:
       type: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
@@ -79,9 +81,9 @@ Restaurant:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/displayName' }
         - { $ref: 'events.yaml#/RestaurantUpdated/properties/displayName' }
     description:
-      type: text
+      type: { $ref: 'scalars.yaml#/RestaurantDescription' }
+      from: [{ $ref: 'events.yaml#/RestaurantUpdated/properties/description' }]
       nullable: true
-      note: "⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet."
     tags:
       type: jsonb
       from:
@@ -359,6 +361,7 @@ Catalog:
     - { $ref: 'events.yaml#/OptionListRemoved' }
     - { $ref: 'events.yaml#/OfferStockUpdated' }
     - { $ref: 'events.yaml#/CatalogImported' }
+    - { $ref: 'events.yaml#/CatalogSlugConfigured' }   # the storefront route, once the owner picks it
   rules:
     - "`stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0."
     - "Could be normalized (one row per offer) if per-item querying is needed later."
@@ -373,7 +376,9 @@ Catalog:
       fk: { $ref: '#/Restaurant/columns/restaurant_id' }
     slug:
       type: { $ref: 'scalars.yaml#/Slug' }
-      note: "⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event)."
+      from: [{ $ref: 'events.yaml#/CatalogSlugConfigured/properties/slug' }]
+      nullable: true
+      note: "Null until the owner configures it (ConfigureCatalogSlug) -- the unset case is first-class, not an empty string, exactly like Restaurant.slug."
     name:
       from: [{ $ref: 'events.yaml#/CatalogCreated/properties/name' }]
     tree:

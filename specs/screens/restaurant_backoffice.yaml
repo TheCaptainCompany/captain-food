@@ -66,6 +66,7 @@ actions:
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
   escalate_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateDelivery' }, note: "Skip the current channel and advance the ranked dispatch walk (#60)." }
   configure_storefront_slug: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/configureRestaurantSlug' }, note: "Choose or rename the storefront host. A rename 301s the old address and keeps it reserved (ADR-20260728-011344)." }
+  update_restaurant_profile: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/updateRestaurant' }, note: "The editable LOCATION fields. Replace-on-provided: an omitted field is left alone, never cleared." }
   approve_refund: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/approveRefund' } }
   deny_refund:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/denyRefund' } }
   # #129 — order conversation writes. post_message serves BOTH visibilities (PUBLIC reply / INTERNAL note),
@@ -459,6 +460,78 @@ screens:
               variables:
                 reclamationId: "{{ reclamation.reclamationId }}"
                 reason: "{{ reject_reason.value }}"
+      - { component: staff_nav }
+
+  # SCREEN — Restaurant profile: the editable LOCATION fields behind UpdateRestaurant.
+  #
+  # This screen is why `Restaurant.description` exists at all. The column was a spec hole for a long
+  # time — a GraphQL field over a column no event fed — precisely because the mutation that can set it
+  # had no screen: `updateRestaurant` was reached by story steps only, so `op-uncovered-by-story` was
+  # satisfied and nothing ever asked whether a human could reach it.
+  #
+  # Deliberately NOT the storefront address: that is IDENTITY and keeps its own screen, with the
+  # rename consequences stated before the button. This screen is presentation only.
+  - id: restaurant_profile
+    roles: [RESTAURANT_ACCOUNT]
+    route: "/settings/profile"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [restaurant.locations]
+    actions_used: [update_restaurant_profile]
+    gaps:
+      - "Same missing `restaurantById` query as the storefront screen: the only single-restaurant read is keyed by SLUG, so this screen reads `restaurantLocationsByAccount` and binds the selected location. A restaurant that has not yet chosen a storefront address has no slug to be fetched by."
+      - "`openingHours` is editable through UpdateRestaurant but not offered here: a weekly slot editor is a repeatable per-day range control the SDUI component set does not have, and a half-built one would silently drop slots on save. It is left off the form rather than rendered as a control that cannot round-trip the array."
+      - "`contact`, `address` and `location` are carried by UpdateRestaurant but stay off this screen: address changes move the geocoded position and the delivery quote, so they belong with a geocoding confirmation step rather than in a free-text profile form."
+      - "`marginRate` is an UpdateRestaurant field the owner must NOT set — it is the Captain service-fee split input (ADR-0017), back-office/ADMIN only. It is excluded here by omission; the mutation still accepts it from an ADMIN caller."
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.title' } }
+
+      - type: section
+        id: identity
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.identity.title' }
+        content:
+          - { type: text_input, id: display_name_input, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.name.label' }, value: "{{ restaurant.displayName }}" }
+          # The field this whole screen was built for. text_area, not text_input: it is prose.
+          - { type: text_area, id: description_input, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.description.label' }, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.description_ph' }, help: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.description.help' }, value: "{{ restaurant.description }}", max_length: 2000, rows: 5 }
+          - { type: text_input, id: website_input, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.website.label' }, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.website_ph' }, value: "{{ restaurant.website }}" }
+
+      # ONE value, hence single_select — the help text says why, because "cuisine" reads like a
+      # discovery filter and is not one (that is `tags`).
+      - type: section
+        id: cuisine
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.title' }
+        content:
+          - type: chip_multi_select
+            id: cuisine_category
+            single_select: true
+            help: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.help' }
+            options:
+              - { value: FAST_FOOD,   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.fast_food' } }
+              - { value: PIZZA,       label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.pizza' } }
+              - { value: TRADITIONAL, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.traditional' } }
+              - { value: BISTRONOMIC, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.bistronomic' } }
+              - { value: FOOD_TRUCK,  label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.cuisine.food_truck' } }
+
+      - type: section
+        id: tags
+        content:
+          - { type: text_input, id: tags_input, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.tags.label' }, help: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.tags.help' } }
+
+      - type: button
+        id: save_profile
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.save' }
+        variant: primary
+        action:
+          type: update_restaurant_profile
+          variables:
+            restaurantId: "{{ restaurant.id }}"
+            displayName: "{{ display_name_input.value }}"
+            description: "{{ description_input.value }}"
+            website: "{{ website_input.value }}"
+            cuisineCategory: "{{ cuisine_category.value }}"
+            tags: "{{ tags_input.value }}"
       - { component: staff_nav }
 
   # SCREEN — Storefront address (ADR-20260728-011344): choose the {slug}.captain.food host, or rename it.

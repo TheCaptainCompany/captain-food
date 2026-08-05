@@ -286,6 +286,13 @@ Catalog:
       throws:
         - { $ref: 'errors.yaml#/RestaurantNotFound' }
         - { $ref: 'errors.yaml#/RefNotUnique' }
+    - message: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      # ONE fact, unlike the restaurant host: first configuration and a rename both emit
+      # CatalogSlugConfigured (the label replaces). Re-submitting the CURRENT label appends nothing.
+      emits: [{ $ref: 'events.yaml#/CatalogSlugConfigured' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/CatalogSlugAlreadyTaken' }
     - message: { $ref: 'commands.yaml#/AddProduct' }
       emits: [{ $ref: 'events.yaml#/ProductAdded' }]
       throws:

@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use crate::generated::entities::{CatalogCategory, Offer, OptionList, Product};
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
-    ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId, RestaurantId,
+    ExternalReference, OfferId, OptionListId, ProductCategoryId, ProductId, RestaurantId, Slug,
 };
 
 /// What the Catalog command handlers need to know to accept or reject a command. `None` (from
@@ -23,6 +23,11 @@ pub struct CatalogState {
     pub restaurant_id: RestaurantId,
     /// The catalog's own external idempotent import key, when imported.
     pub r#ref: Option<ExternalReference>,
+    /// The storefront ROUTE label, or `None` until the owner configures one. Creation never sets it
+    /// (a creation that invented one would pin a public path the merchant never picked); it arrives
+    /// via CatalogSlugConfigured. Folded so the "already my label" no-op is decidable from the
+    /// aggregate alone, without consulting the read model.
+    pub slug: Option<Slug>,
     /// Category tree (flat, parent links by `parentRef`) — tree invariants fold from here.
     pub categories: Vec<CatalogCategory>,
     /// Products with their offers (SKUs) — existence, refs, offer stock and option-list usage.
@@ -147,6 +152,7 @@ fn apply(state: Option<CatalogState>, event: &DomainEvent) -> Option<CatalogStat
         return Some(CatalogState {
             restaurant_id: e.restaurant_id,
             r#ref: e.r#ref.clone(),
+            slug: None,
             categories: vec![],
             products: vec![],
             option_lists: vec![],
@@ -154,6 +160,7 @@ fn apply(state: Option<CatalogState>, event: &DomainEvent) -> Option<CatalogStat
     }
     let mut s = state?;
     match event {
+        DomainEvent::CatalogSlugConfigured(e) => s.slug = Some(e.slug.clone()),
         DomainEvent::CatalogCategoryAdded(e) => upsert_category(&mut s, &e.category),
         DomainEvent::CatalogCategoryUpdated(e) => upsert_category(&mut s, &e.category),
         DomainEvent::CatalogCategoryRemoved(e) => {

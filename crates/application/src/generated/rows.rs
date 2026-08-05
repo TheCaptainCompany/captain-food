@@ -13,7 +13,7 @@ pub struct RestaurantRow {
     pub google_place_id: Option<GooglePlaceId>,
     pub slug: Option<Slug>,
     pub display_name: RestaurantDisplayName,
-    pub description: Option<String>,
+    pub description: Option<RestaurantDescription>,
     pub tags: Option<serde_json::Value>,
     pub margin_rate: Option<MarginPercent>,
     pub cuisine_category: Option<CuisineCategory>,
@@ -82,7 +82,7 @@ pub struct CustomerRow {
 pub struct CatalogRow {
     pub catalog_id: CatalogId,
     pub restaurant_id: RestaurantId,
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     pub name: CatalogName,
     pub tree: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,

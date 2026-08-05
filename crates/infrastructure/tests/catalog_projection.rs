@@ -36,7 +36,9 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE catalog (
           catalog_id UUID PRIMARY KEY,
           restaurant_id UUID NOT NULL,
-          slug TEXT NOT NULL,
+          -- Nullable, mirroring specs/generated/schema.generated.sql: the route label is the owner's
+          -- choice via ConfigureCatalogSlug, so a freshly created catalog has none.
+          slug TEXT,
           name TEXT NOT NULL,
           tree JSONB NOT NULL,
           created_at TIMESTAMPTZ NOT NULL,
@@ -208,8 +210,8 @@ async fn catalog_event_folds_into_the_read_model() {
     }
 
     // The read repository serves the projected metadata + the assembled tree (the shape the GraphQL
-    // `catalog`/`categories` queries deserialize). `slug` stays the empty string — the documented
-    // projector hole (CatalogCreated carries no slug, TODO(spec)).
+    // `catalog`/`categories` queries deserialize). `slug` is NULL until the owner configures a route
+    // (ConfigureCatalogSlug) — creation never derives one, so an unset label is a first-class state.
     let repo = PgCatalogRepository::new(pool.clone());
     let row = repo
         .by_restaurant(RestaurantId(restaurant_id))
@@ -219,7 +221,7 @@ async fn catalog_event_folds_into_the_read_model() {
     assert_eq!(row.catalog_id.0, catalog_id);
     assert_eq!(row.restaurant_id.0, restaurant_id);
     assert_eq!(row.name.0, "Main menu");
-    assert_eq!(row.slug.0, "");
+    assert_eq!(row.slug, None);
     assert!(row.created_at <= row.updated_at, "content events stamped updated_at");
     assert_eq!(row.tree["categories"][0]["name"], serde_json::json!("Pizzas"));
     assert_eq!(row.tree["products"][0]["name"], serde_json::json!("Margherita"));

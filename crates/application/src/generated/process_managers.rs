@@ -141,10 +141,10 @@ pub mod refund_process {
     pub struct OrderRead {
         /// Feeds the `= CAPTURED` guard.
         pub payment_status: String,
+        /// Feeds `RefundOpened.paymentIntentId`.
+        pub payment_intent_id: domain::generated::scalars::PaymentIntentId,
         /// Feeds `RefundOpened.amount`.
         pub total_amount_cents: domain::generated::entities::Money,
-        /// Feeds `state.set payment_intent_id`.
-        pub payment_intent_id: Option<domain::generated::scalars::PaymentIntentId>,
     }
 
     /// Non-structural hooks for the generated `OrderRejectedByRestaurant` leg — the seams the step DSL cannot express
@@ -198,19 +198,18 @@ pub mod refund_process {
         }
         // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
         let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             amount: order.total_amount_cents.clone(),
             reason: Some(event.reason.clone()),
         };
-        if let Some(deliver_key) = order.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {
@@ -279,19 +278,18 @@ pub mod refund_process {
         }
         // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
         let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             amount: order.total_amount_cents.clone(),
             reason: event.reason.clone(),
         };
-        if let Some(deliver_key) = order.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {
@@ -360,19 +358,18 @@ pub mod refund_process {
         }
         // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
         let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             amount: order.total_amount_cents.clone(),
             reason: Some(event.reason.clone()),
         };
-        if let Some(deliver_key) = order.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {
@@ -441,19 +438,18 @@ pub mod refund_process {
         }
         // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
         let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             amount: order.total_amount_cents.clone(),
             reason: event.reason.clone(),
         };
-        if let Some(deliver_key) = order.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {
@@ -517,18 +513,17 @@ pub mod refund_process {
         }
         // deliver RefundApproved → Payment (the aggregate records the fact)
         let refund_approved = domain::generated::events::RefundApproved {
+            payment_intent_id: row.payment_intent_id.clone(),
             order_id: cmd.order_id,
             amount: cmd.amount.clone(),
             reason: cmd.reason.clone(),
         };
-        if let Some(deliver_key) = row.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_approved(&stream_events, &refund_approved) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundApproved(refund_approved.clone())], actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_approved.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_approved(&stream_events, &refund_approved) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundApproved(refund_approved.clone())], actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {
@@ -574,17 +569,16 @@ pub mod refund_process {
         }
         // deliver RefundDenied → Payment (the aggregate records the fact)
         let refund_denied = domain::generated::events::RefundDenied {
+            payment_intent_id: row.payment_intent_id.clone(),
             order_id: cmd.order_id,
             reason: cmd.reason.clone(),
         };
-        if let Some(deliver_key) = row.payment_intent_id.clone() {
-            let stream = format!("Payment-{}", deliver_key.0);
-            let (stream_events, stream_version) = store.load(&stream).await?;
-            if hooks.should_deliver_refund_denied(&stream_events, &refund_denied) {
-                crate::repository::Repository::new(store)
-                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundDenied(refund_denied.clone())], actor)
-                    .await?;
-            }
+        let stream = format!("Payment-{}", refund_denied.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_denied(&stream_events, &refund_denied) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundDenied(refund_denied.clone())], actor)
+                .await?;
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::RefundProcessRow {

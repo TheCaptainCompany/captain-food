@@ -412,7 +412,7 @@ pub struct Restaurant {
     #[graphql(name = "displayName")]
     pub display_name: RestaurantDisplayName,
     #[graphql(name = "description")]
-    pub description: Option<String>,
+    pub description: Option<RestaurantDescription>,
     #[graphql(name = "tags")]
     #[serde(default)]
     pub tags: Vec<Tag>,
@@ -473,7 +473,7 @@ pub struct Catalog {
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
     #[graphql(name = "slug")]
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     #[graphql(name = "name")]
     pub name: CatalogName,
     #[graphql(name = "categories")]
@@ -1080,7 +1080,7 @@ impl From<RestaurantRow> for Restaurant {
                 .unwrap_or_default(),
             slug: row.slug.map(Into::into),
             display_name: row.display_name.into(),
-            description: row.description,
+            description: row.description.map(Into::into),
             tags: row.tags.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
             cuisine_category: row.cuisine_category.map(Into::into),
             rating: row.rating.map(Into::into),
@@ -1138,7 +1138,7 @@ impl From<(CatalogRow, RestaurantRow)> for Catalog {
         Self {
             id: row.catalog_id.into(),
             restaurant_id: row.restaurant_id.into(),
-            slug: row.slug.into(),
+            slug: row.slug.map(Into::into),
             name: row.name.into(),
             categories: catalog_tree_section(&row.tree, "categories"),
             products: catalog_tree_section(&row.tree, "products"),

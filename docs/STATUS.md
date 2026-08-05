@@ -3,6 +3,73 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-04 — Screen actions are checked against their command's inputs
+> ([ADR-20260804-154700](adr/ADR-20260804-154700-screen-actions-are-checked-against-their-command-inputs.md))**.
+> Asked whether anything declared the screen-form ↔ mutation-input gap, the answer was **no**:
+> `action-not-a-mutation` proves only that the `$ref` names a mutation, `op-uncovered-by-story` is
+> satisfied by a story STEP (not a screen), and `validate_resolver_args` deliberately skips required-arg
+> coverage for QUERIES (a pin is a static default). Nothing read a mutation action's `variables`. Two new
+> WARNING rules now do: **`action-missing-required-input`** (a screen action is the CALLER, so its
+> variables are the whole input) and **`action-unknown-input`** (the write-side mirror of
+> `resolver-unknown-arg`). The validator now walks screen component trees, which it never did.
+> **17 pre-existing violations on the first run** — hence warnings, not errors: a gate that fails the
+> build on inherited debt gets weakened instead of paid down. Tracked in
+> [#342](https://github.com/TheCaptainCompany/captain-food/issues/342). Sharpest case: the rider's
+> **Accept button passes an `orderId` that `AcceptDelivery` does not declare and supplies neither of its
+> required inputs** — the screen's primary action cannot work.
+> Also landed: the **restaurant profile screen** (`/settings/profile`) wiring `updateRestaurant` — the
+> reason `Restaurant.description` was a column no event fed was that the mutation which sets it had
+> **zero screens**, while being story-covered. It declares four `gaps` (no `restaurantById` query;
+> `openingHours`, `contact`/`address` and the ADMIN-only `marginRate` deliberately off the form).
+> Also closed here, the SILENT twin of the same family: a mutation missing from the emitter's dispatch
+> table shipped an `Err("not implemented")` resolver body with no `command_router` arm, while api.yaml
+> declared it, a story step covered it and a role guard protected it. **`recordDeliverySatisfaction` and
+> `escalateDelivery` were in that state with their handlers already written** — only a table row was
+> missing. Both wired; the omission is now impossible: the emitter asserts the stub-arm set equals an
+> explicit **`UNWIRED_MUTATIONS`** allowlist (empty), so an unwired mutation FAILS generation. A
+> generation-time assertion, NOT a validator rule or a source scan — the table lives in the emitter where
+> no `specs/**` gate can see it, and grepping generated Rust for the stub string would be #329 verbatim.
+> **Warning baseline 26 → 43** — a deliberate new-rule change, not drift. Compare against 43 from here.
+
+> ✅ **2026-08-04 — Two dead read-model columns populated; refund facts carry their payment identity
+> ([ADR-20260804-041227](adr/ADR-20260804-041227-populate-the-two-dead-columns-and-address-refund-facts.md))**.
+> An audit of the 31 standing warnings found **none of them were lint noise** — each is an unbuilt
+> feature, a tracked deferral, or a real hole. Five were actionable and are fixed:
+> `Restaurant.description` and `Catalog.slug` now have event lineage (`RestaurantUpdated` gains a
+> nullable `description` on a new dedicated `RestaurantDescription` scalar; `CatalogCreated` gains a
+> REQUIRED `slug` — safe because only `CreateCatalog` emits it, the HubRise path emits `CatalogImported`).
+> `Catalog.slug` had been a **non-null GraphQL field over a column the projector could only fill with the
+> empty string**. The three refund events (`RefundOpened`/`Approved`/`Denied`) now carry
+> `paymentIntentId` — they are delivered as messages to the `Payment` aggregate, whose identity that is.
+> **Two hand-written projector shims deleted** (`CatalogCompute::slug`, `RestaurantCompute::description`)
+> and **one runtime gate deleted because the compiler subsumes it**: tightening
+> `refund_process_manager.payment_intent_id` to NOT NULL (a run cannot exist without a captured payment)
+> made the `RefundNotPending` unwrap-guard unspellable. `slugify` moved to **`domain::shared::text`** —
+> it had no callers outside its own tests and the HubRise catalog import is its second consumer.
+> **Warning baseline 31 → 26**, no new kind. The remainder: unbuilt delivery/rider ×18, credit/cart ×6,
+> [#341](https://github.com/TheCaptainCompany/captain-food/issues/341) (listing opt-out does nothing —
+> the `view-fedby-unused` symptom), and one correct-as-is `identity-property-not-on-command`.
+
+> ✅ **2026-08-04 — Unread read models deleted
+> ([ADR-20260804-032640](adr/ADR-20260804-032640-delete-unread-read-models.md))**, product-owner
+> directive following the #305 gate. **`View_RestaurantAccount`** (the ONLY `internal: true` exemption in
+> the database spec — no api binding, no component read, zero literal hits in `crates/**`) and
+> **`PhoneCountry`** (a `reference: true` table, which the gate does not check at all — zero references
+> anywhere) are gone. **No `crates/**` file changed** as a result: direct proof nothing read them.
+> **"No declared reader" ≠ "unused"** — the bounded claim biting the other way. A trial deletion of the
+> view raised **3 errors**: `Restaurant.restaurant_account_id` carried an `fk:` into it (read-navigation
+> graph) and `projection-updaters` listed it in `updates[*]`. Both removed; the column stays, still
+> indexed, since `restaurantLocationsByAccount` queries by it.
+> **A known hole, deliberately accepted** (product owner chose this over keeping the view or folding the
+> event first): `RestaurantAccountUpdated` and `RestaurantAccountDeleted` now reach NO read model — an
+> account legal-name/timezone change, and an account deletion, land in the log and propagate nowhere.
+> Account data is correct at creation only, because the `Restaurant` projection folds
+> `RestaurantAccountRegistered` for `default_currency`, and silently stale after. A back-office account
+> surface needs a **projection**, not a query. `nonProjectedEvents`' documented meaning was **widened**
+> to carry two reasons — (a) transient/saga-internal, (b) **recorded but unread** — rather than file
+> these two under (a), which would have been false.
+> **Warning baseline 32 → 31** (`view-fedby-unused` 2 → 1; `event-not-projected` held at 11, no new kind).
+
 > ✅ **2026-08-04 — [#305 "View_* read declarations: no spec says which surface reads which view"](https://github.com/TheCaptainCompany/captain-food/issues/305)
 > ([ADR-20260804-014546](adr/ADR-20260804-014546-read-models-declare-their-readers.md))**: the READ-side
 > equivalent of the #304 hole. `components.*.reads[*]` in `specs/architecture/c4-l3.yaml` — the mirror
@@ -24,7 +91,8 @@
 > managers and the HubRise ACL. C4 now renders `reads` beside `updates` in both doc surfaces.
 > `phoneCountries` **deleted** (product-owner call): the only V0 query reached by no screen and the only
 > one of 32 with no wired resolver body — it advertised a `reads:` binding while returning
-> `Err("not implemented")`; the `PhoneCountry` reference table stays.
+> `Err("not implemented")`; the `PhoneCountry` reference table stays *(reversed hours later — see the
+> 032640 entry above; the table was deleted too)*.
 > **Warning baseline 33 → 32** (`view-no-query ×1` gone, nothing else moved).
 
 > ✅ **2026-08-03 — [#306 "Isolation phase 2: one crate per actor client (aggregates AND process managers)"](https://github.com/TheCaptainCompany/captain-food/issues/306)
