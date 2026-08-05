@@ -350,6 +350,35 @@ fleets default-off until DB-persisted posture ([#318](https://github.com/TheCapt
 
 ---
 
+## 16. Who owns the OVH host — PROP-20260805-181926
+
+[PROP-20260805-181926](PROP-20260805-181926-host-provisioning-and-configuration-ownership.md)
+([#349 "Who owns the OVH host: provisioning IaC + host configuration (SaltStack evaluated)"](https://github.com/TheCaptainCompany/captain-food/issues/349)).
+Raised by the product owner as *"SaltStack seems to be an interesting solution"*. It is live because
+the OVH cutover ([#271](https://github.com/TheCaptainCompany/captain-food/issues/271),
+ADR-20260731-061609) gives us a **host OS of our own for the first time** — on Render nothing about
+the machine was ours. Today no file says which OVH resources exist or what is installed on the box,
+which is the Render-dashboard failure mode (`RUN_SIRENE_WORKER` set in no file, `API_SECRET` read by
+no code) one layer deeper. The proposal splits the question into **provisioning** (what resources
+exist — Salt does not address this at all) and **host configuration** (what runs on the box), and
+notes that **application** configuration is already owned by `specs/configuration.yaml` and must stay
+that way.
+
+| # | Decision | Recommended | Answer |
+|---|---|---|---|
+| D1 | Layer A — provisioning | OpenTofu + the official `ovh/ovh` provider — the instance, network, firewall, managed PG plan and DNS become reviewed files | _(open)_ |
+| D2 | Layer B — host configuration | cloud-init `user_data` from the repo (~80 lines, no agent, no daemon); **Ansible named as the escape hatch** at 3+ hosts | _(open)_ |
+| D3 | **SaltStack: adopt or reject** | **Reject** — its advantage needs ~1,000 nodes and we have one, it adds a listening root-equivalent control plane to the box terminating payment traffic, its pillars become a second config store, its convergence model contradicts the immutable-artifact doctrine, and its stewardship is consolidating into Broadcom's VMware suite. Revisit only for restaurant-side hardware fleets | _(open)_ |
+| D4 | Host posture | Disposable — rebuild, never converge (affordable only because the managed PG is a separate resource, PROP-20260731-061609 D2) | _(open)_ |
+| D5 | OpenTofu state | OVH Object Storage S3 backend + committed `.terraform.lock.hcl`; **never** the repo (public — it would leak the PG credential) | _(open)_ |
+| D6 | Sequencing | cloud-init now, cut over, **then** `tofu import` the live resources — IaC must not block restoring production | _(open)_ |
+
+Concern registered and unchecked, so this cannot be approved as-is: **cutover-not-blocked** — prod is
+down today and nothing here may delay [#271](https://github.com/TheCaptainCompany/captain-food/issues/271).
+D6 is the mechanism; checking the concern means confirming that ordering.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

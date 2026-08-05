@@ -1,7 +1,37 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-04. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-05. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 📋 **2026-08-05 — Who owns the OVH host: provisioning IaC + host configuration
+> ([PROP-20260805-181926](proposals/PROP-20260805-181926-host-provisioning-and-configuration-ownership.md),
+> [#349](https://github.com/TheCaptainCompany/captain-food/issues/349)) — DECISION OPEN, nothing built.**
+> Asked whether SaltStack is useful here. The question is live because the OVH cutover
+> ([#271](https://github.com/TheCaptainCompany/captain-food/issues/271), ADR-20260731-061609) gives us
+> a **host OS of our own for the first time** — on Render nothing about the machine was ours — and a
+> grep for `saltstack`/`ansible`/`terraform`/`pulumi`/`nixos`/`cloud-init` across `specs/**`,
+> `docs/**` and `.github/**` returns **zero hits**: no file says which OVH resources exist or what is
+> installed on the box. That is the `RUN_SIRENE_WORKER`/`API_SECRET` dashboard failure one layer
+> deeper, and this time the unrecorded thing is the machine.
+> **The question splits into three layers, and Salt addresses only the middle one**: provisioning
+> (which resources exist — unowned, and Salt does not do this), host configuration (what runs on the
+> box — unowned), and application configuration (**already owned** by `specs/configuration.yaml` +
+> the codegen'd reader + the `env::var` drift test, and it must stay that way — Salt pillars would be
+> a second config store).
+> **Recommended: reject Salt** — its ~30×-at-1,000-nodes advantage is a fleet advantage and
+> [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at ONE instance until
+> #242's leases land; master/minion adds a listening root-equivalent control plane (ZeroMQ 4505/4506)
+> to the box terminating payment traffic; and its convergence model contradicts the immutable-artifact
+> doctrine PROP-20260729-014500 D5 just established (digest-pinned, config baked in, rollback = old
+> digest). Salt earns a genuine revisit **only** for restaurant-side hardware fleets (tablets/KDS/
+> printers) — a different problem, decided on its own merits.
+> **Recommended instead**: OpenTofu + the official `ovh/ovh` provider for provisioning, cloud-init for
+> the host (~80 lines, no agent), the host treated as **disposable — rebuild, never converge** (safe
+> only because PROP-20260731-061609 D2 put the event log on a separate managed PG). Ansible is the
+> named escape hatch at 3+ hosts; NixOS is the honest best conceptual fit, deferred on ecosystem cost.
+> **D6 exists so none of this blocks the cutover**: prod is DOWN, so cloud-init first, cut over, then
+> `tofu import` the live resources. Registered as an unchecked `Concerns` entry, which mechanically
+> blocks `Approved`. Six open decisions in [DECISIONS.md §16](proposals/DECISIONS.md).
 
 > ✅ **2026-08-04 — Screen actions are checked against their command's inputs
 > ([ADR-20260804-154700](adr/ADR-20260804-154700-screen-actions-are-checked-against-their-command-inputs.md))**.
