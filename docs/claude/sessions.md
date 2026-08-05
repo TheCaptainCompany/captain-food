@@ -585,6 +585,11 @@ invisible from the run. Two consequences worth keeping:
   when you find nothing") has no such gate**, which is why the workflow now uses one instead of the
   plugin. Prefer the form whose contract you can read in the workflow file.
 
+The direct prompt then **passed the smoke test on the first try** — 17 turns, 82s, $0.51, one
+denial: it named the `Some(0.0)`/`None` collapse, tied it to the oversell lens, noticed the PR
+description claimed behaviour was unchanged, and proposed the `let-else` fix. Four configurations
+were needed to get there, and only the last one produced any evidence at all.
+
 Separately, that probe proved a **test gap**: `cargo test --workspace` and the DB suites both go
 green with the oversell hole in place, so nothing asserts that a stock-TRACKED offer at quantity 0
 rejects the line.
