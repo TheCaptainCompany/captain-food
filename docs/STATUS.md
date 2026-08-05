@@ -2317,6 +2317,16 @@ Two sessions run in parallel — 🅐 = this (desktop) session, 🅑 = the iPhon
 | 10c | **Push-driven mailbox** ([#313](https://github.com/TheCaptainCompany/captain-food/issues/313), [PROP-20260802-223522](proposals/PROP-20260802-223522-push-driven-mailbox.md) approved D1–D5, ADR-20260802-224532) — `pg_notify` at the `PgMailbox` door (one channel, actor-type payload) wakes workers cross-process; lanes-with-work idle gate; attempts-cap poison policy (`FAILED` + error at the cap); gated `RUN_MAILBOX_PUSH` + `MAILBOX_MAX_DELIVERY_ATTEMPTS` | 🅐 | ✅ door notifies in the enqueue tx (`PgMailbox` + PM chain); listener per process feeds the nudge map cross-process; full pass 60 s under confirmed push (beat stays on heartbeat, degradation = pre-push cadence); poison cap default 5 (`0` = old behaviour); retries back off EXPONENTIALLY since #316 (base x 2^(N-1), ~5 min to terminal at cap 5); heartbeat/lease/cap wired from Config (MAILBOX_* keys were previously unread) |
 | 11 | **CoopCycle** delivery partner (#58) — third `PARTNER` adapter; **federated** per-instance registry + OAuth2 (ADR-20260721-122910) | 🅐 | 🚧 PR #59: DSL surface (staging + services + obs + c4 + integration doc) landed; `crates/adapters/coopcycle` + server wiring in progress |
 
+## 🚨 Open incident — production suspended (2026-08-05)
+
+**`captain-food.onrender.com` is DOWN** (HTTP 404). The Render web service
+`srv-d9ctcpgk1i2s73cj6820` is **suspended for billing** (`suspenders: ["billing"]`, suspended
+~2026-08-04 12:26 UTC). No customer can order — the whole storefront is offline. **Resolution is a
+billing/account action in the Render dashboard** (owner-only; not a code fix). CI on `main` is
+all-green; this is purely the hosting account. Fixed in the same run: `render-status` now reports
+**red** on suspension (ADR-20260805-070138) — previously it read only the last deploy's status and
+showed a false green while prod was down.
+
 ## 🧭 Architecture decisions
 See [`docs/adr/`](adr/) — latest: **20260802-200416 (drain loops woken by Postgres NOTIFY, not a 1.5 s poll — background polling was 95% of outbound bandwidth)**, 0047 (API auth — Supabase JWT/JWKS), 20260719-120000 (structured domain rejections), **20260719-014434 (checkout snapshot on `PaymentIntentCreated`)**, **20260719-031136 (write-side `Repository` / event-sourced actors — handlers + saga runner route through it, never the raw `EventStore`)**, 20260718-145856 amendment (adapter webhook routes → `/adapters/{partner}/webhooks`). **ADR ids are now date-time** to avoid concurrent-session collisions (ADR-20260718-135417).
 
