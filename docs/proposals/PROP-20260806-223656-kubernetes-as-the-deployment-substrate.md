@@ -6,9 +6,9 @@
 - **Realized by**: _(filled at completion)_
 - **Concerns**:
   - [ ] rolling-deploys-blocked-by-193: the headline benefit cannot be used until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases land — a rolling update runs two write-path instances at once, which is exactly what [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) forbids. Approving must state which deploy strategy V0 uses in the meantime.
-  - [ ] database-placement-unresolved: an event log holding paid orders must not land in-cluster by default. D2 must be answered explicitly, not inherited.
+  - [x] database-placement-unresolved: **resolved 2026-08-06** — the product owner chose in-cluster CNPG explicitly, with the operability conditions (≥3 nodes, required anti-affinity, WAL archiving, executed restore drills) carried as part of the answer, not inherited by default.
   - [ ] prod-is-down: the cutover window is an outage. D6 must say whether the cluster is built now or after service is restored.
-  - [ ] agent-access-shape: the product owner has offered the assistant full cluster access (D7). Approving must fix the MECHANISM — standing cluster-admin is a permanent maximum blast radius held by an actor with a demonstrated error rate, and hand-fixing a cluster is the `RUN_SIRENE_WORKER` failure with a better CLI. GitOps + read-mostly RBAC + per-incident break-glass is the recommendation.
+  - [x] agent-access-shape: **resolved 2026-08-06** — the product owner chose the recommended mechanism (*"Of course gitops"*): GitOps as the only change path, read access for diagnostics, fixes as repo changes; practices in §2b.
 
 ---
 
@@ -59,6 +59,13 @@ none of them appeared in the original ADR:
 | **Self-managed PostgreSQL on a Public Cloud INSTANCE attached to the same vRack** — the shape that reconciles cost pressure with the network requirement | Cheaper than managed while keeping the private network: **MKS supports vRack** (choose the private network at cluster creation; every node gains an `eth1` on it, and pod-to-pod plus private traffic routes through it), and a Public Cloud instance can sit on that same network. Block storage attaches for the data directory, so disk grows independently and the instance stays disposable | Backups/WAL archiving are ours (see the free-tier baseline above — still an improvement). One more machine to patch. Reserve `10.2.0.0/16` (pods), `10.3.0.0/16` (services) and `172.17.0.0/16` (Docker) — OVH documents these as non-compliant with vRack and they produce incoherent overlay behaviour |
 | PostgreSQL on a **VPS** beside the cluster (product owner, 2026-08-06: *"Kubernetes for the apps and vps-2 for Postgres?"*) | VPS-2 is the best specs-per-euro on the table — 4 vCores / 8 GB / 75 GB at EUR 7.21, well above a d2-2 | **The VPS cannot join the vRack** (confirmed: the vRack page lists Bare Metal, Hosted Private Cloud, Public Cloud, Additional IP, Enterprise File Storage and Load Balancer — VPS in none), so the database would sit on a **public IP** or behind a WireGuard tunnel we run. Worse in a way specific to clusters: **egress comes from NODE IPs, which are dynamic** — a node replaced by an upgrade, a scale event or autohealing silently breaks an IP allowlist, and stable egress needs a custom gateway, i.e. more machinery. Same instinct as the row above, wrong vehicle |
 | Clever Cloud managed Postgres + OVH cluster | Keeps the good database story while taking the cluster | Two vendors, two bills, **cross-provider network latency on every query** — the private-network property that ruled out two VPS applies here with force |
+
+**D2 ANSWERED 2026-08-06 (product owner, in-session: *"Postgres on Kubernetes"*, after the operability
+conditions were put on the table): PostgreSQL runs IN-CLUSTER via CloudNativePG** — with the conditions
+that made it defensible carried as part of the answer, not as optional extras: **≥3 worker nodes with
+REQUIRED pod anti-affinity** (a single-node "cluster of pods" is one failure domain with extra steps),
+**continuous WAL archiving to object storage**, and **a scheduled, executed restore drill**. The
+operator-capacity objection is closed by D7's access model plus the wake-up loop in §2b.
 
 ### D3 — Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance
 
@@ -121,6 +128,73 @@ better CLI.
 break-glass credential for incidents**, granted per-incident rather than held. Deletion rights over
 `PersistentVolumeClaim`, `StatefulSet` and namespaces stay **outside** the standing role whatever else
 is granted — those are the operations with no undo, and D2's database lives behind them.
+
+**D7 ANSWERED 2026-08-06 (product owner, in-session: *"Of course gitops, for the diagnostics you will
+have access to the Kubernetes cluster and Postgres on Kubernetes. From that you will be able to make
+the change in the repo to fix the production"*)**: the recommended shape as stated — GitOps as the only
+change path, cluster + database READ access for diagnosis, fixes land as repository changes. The
+operating practices this implies are §2b.
+
+## 2b. The agent-admin operating loop — practices that make D7 real
+
+The product owner's vision: the assistant diagnoses production directly and repairs it **through the
+repository**. These are the practices that make that work, each one line of "why" attached:
+
+1. **Manifests are generated, and Argo CD (or Flux) reconciles them** (D5). Spec → generated manifest
+   → cluster, with self-heal on: the cluster cannot drift from git, and git cannot drift from the
+   specs (`check-drift`). Never hand-edit generated manifests — the emergency path is break-glass
+   (below), backfilled the same day.
+2. **CI commits the image digest; the controller deploys it.** `deploy.yml` keeps its manual-dispatch
+   posture but its action becomes: resolve tag → digest, commit the digest bump to the GitOps path.
+   Rollback is `git revert`. ADR-20260730-051500's isolation and digest pinning survive verbatim.
+3. **CNPG with the full discipline, none of it optional**: 3 instances across ≥3 nodes with
+   *required* anti-affinity; **quorum-synchronous replication** for the event log (an async replica
+   can acknowledge a paid order the primary then loses); barman WAL archiving to OVH Object Storage
+   (EU, egress-free); storage class `reclaimPolicy: Retain`; a PodDisruptionBudget; superuser
+   disabled, app access via managed roles.
+4. **The restore drill is scheduled, not aspirational.** A weekly job restores the latest backup into
+   a scratch namespace and verifies row counts + checksums, filing an issue on failure — plus an alert
+   on WAL-archive age. A backup that has never been restored is a hope, not a backup.
+5. **The agent's read path is short-lived and audited**: a per-session ServiceAccount token (TokenRequest
+   with expiry), a ClusterRole limited to `get`/`list`/`watch` + logs + events, a **`claude_ro`
+   SELECT-only Postgres role** for data diagnosis, and k8s audit logging on. No standing write access,
+   no superuser port-forward.
+6. **Break-glass is an event, not a credential**: a time-boxed RoleBinding the product owner applies
+   per incident; every use ends with a backfill PR and a sessions.md/postmortem entry the same day —
+   otherwise the fix is `RUN_SIRENE_WORKER` again.
+7. **Secrets are sealed, because the repo is public**: Sealed Secrets (encrypt-to-cluster-key, safe in
+   a public repo; back the sealing key up offline — losing the cluster must not mean losing every
+   secret), or External Secrets later. The config fail-fast gate (ADR-20260729-010500) is unchanged
+   and still catches a bad value at boot.
+8. **Alerts wake sessions, and they alert on SYMPTOMS**: checkout latency, order-acceptance lag,
+   WAL-archive age, cert expiry — not CPU. Alertmanager → webhook → GitHub issue → a session picks it
+   up with the read path of (5). Deploy and failover events join `specs/observability.yaml` so the
+   contract covers them.
+9. **`strategy: Recreate` is pinned in the generated Deployment** with
+   [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) linked in a comment, flipped
+   only by a spec change once [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)
+   lands (D3).
+10. **A runbook is trusted only after it has been executed once** — failover, restore, node
+    replacement — with the date of last execution recorded in the runbook's header.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant AM as Alertmanager
+    participant GH as GitHub
+    participant CL as Claude session
+    participant K as Cluster + CNPG
+    participant AR as Argo CD
+
+    AM->>GH: webhook opens an incident issue with the firing alert
+    GH->>CL: issue event wakes a session
+    CL->>K: kubectl get, logs, describe -- read-only RBAC, per-session token
+    CL->>K: SELECT as claude_ro -- diagnosis, never mutation
+    CL->>GH: PR with the spec or manifest fix -- gates run as usual
+    GH->>AR: merge to main
+    AR->>K: reconcile -- the fix reaches production as git state
+    Note over CL,K: hand fixes only via time-boxed break-glass,<br/>backfilled by PR the same day
+```
 
 ### D6 — Sequencing, with production down
 

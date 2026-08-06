@@ -407,14 +407,16 @@ this the best available home for PROP-20260805-181926's surviving D7.
 | # | Decision | Recommended | Answer |
 |---|---|---|---|
 | D1 | Kubernetes, or the PaaS decided yesterday? | **OVH MKS** if k8s (free control plane, **free egress**, GA — vs CKE still in public beta); Clever Cloud PaaS retained as the costed fallback | _(open)_ |
-| D2 | **Where does PostgreSQL live?** — the hard one | **Managed, alongside the cluster** — never in-cluster by default: the event log is the one asset that cannot be re-derived. Reopens the cost question closed 2026-08-05 | _(open)_ |
+| D2 | **Where does PostgreSQL live?** — the hard one | Managed alongside the cluster was recommended; the option table also carries a vRack-instance shape and in-cluster CNPG | ✅ **In-cluster CNPG** (product owner, 2026-08-06: *"Postgres on Kubernetes"*) — with the operability conditions as part of the answer: ≥3 nodes, required anti-affinity, WAL archiving to object storage, scheduled executed restore drills |
 | D3 | Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance | **`Recreate`** — a RollingUpdate runs two write paths at once, exactly what [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing exist to prevent. **The headline benefit of k8s is unavailable until #242** | _(open)_ |
 | D4 | Ingress + wildcard TLS | ingress-nginx + cert-manager, DNS-01 for `*.captain.food` | _(open)_ |
 | D5 | Manifests generated from the specs? | **Yes** — the strongest argument for a cluster, and PROP-20260805-181926 D7 with a target that fits | _(open)_ |
 | D6 | Sequencing, with prod DOWN | Restore service on the simplest path first, build the cluster deliberately after — the digest-pinned image runs unchanged on either, so it is a redeploy, not a second migration | _(open)_ |
+| D7 | How does the agent operate the cluster? | GitOps as the only change path + read-mostly RBAC + per-incident break-glass; PVC/StatefulSet/namespace deletes outside every standing role | ✅ **GitOps** (product owner, 2026-08-06: *"Of course gitops"* — diagnostics via cluster + Postgres read access, fixes as repo changes). Practices in the proposal's §2b |
 
-Three concerns registered and unchecked, so this cannot be approved as-is:
-**rolling-deploys-blocked-by-193** · **database-placement-unresolved** · **prod-is-down**.
+Concerns: **database-placement-unresolved** and **agent-access-shape** are ✅ checked (resolved by the
+D2/D7 answers above); **rolling-deploys-blocked-by-193** and **prod-is-down** remain unchecked, so the
+proposal still cannot move to `Approved` — D1 (MKS vs CKE), D3, D4, D5 and D6 are also still open.
 
 ---
 

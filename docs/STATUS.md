@@ -24,7 +24,14 @@
 > supplies none, in-cluster Postgres is the wrong home for an append-only log of paid orders, and
 > managed Postgres was ruled out on cost on 2026-08-05. (3) **OVH MKS is GA with free egress**
 > (including object storage) while **CKE is public beta** — beta is the wrong risk for the money path.
-> Six open decisions + three unchecked concerns in [DECISIONS.md §17](proposals/DECISIONS.md).
+> **Decided so far (2026-08-06, product owner, in-session)**: **D2 — Postgres runs IN-CLUSTER via
+> CNPG** (with ≥3 nodes, required anti-affinity, WAL archiving and executed restore drills as part of
+> the answer) and **D7 — GitOps is the only change path** (*"Of course gitops"*): the agent gets
+> cluster + Postgres READ access for diagnostics and repairs production through repo changes; the
+> operating practices are the proposal's §2b (generated manifests reconciled by Argo CD, CI commits
+> the digest, sealed secrets for the public repo, symptom alerts that wake sessions, weekly restore
+> drill). D1 (MKS vs CKE), D3–D6 and two concerns (rolling-deploys-blocked-by-193, prod-is-down)
+> remain open in [DECISIONS.md §17](proposals/DECISIONS.md).
 
 > 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH — ⚠️ REOPENED, see above
 > ([ADR-20260806-151122](adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
