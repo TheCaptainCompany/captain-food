@@ -33,6 +33,12 @@ So this is a genuinely open decision, not a re-litigation of one.
 suspended (ADR-20260805-070138), production is down, and `.github/workflows/deploy.yml` still targets
 Render. The outage window described in PROP-20260731-061609 §3 is still open.
 
+> **Standing precondition (2026-08-05):** this whole proposal exists ONLY because the destination is
+> an OVH instance we own. The product owner has since raised **Clever Cloud** (French PaaS) — see
+> [PROP-20260731-061609 D1](PROP-20260731-061609-ovh-migration.md). If that is chosen, **D1–D6 below
+> evaporate** (no OS, no provisioning, no host posture, no state backend) and only **D7** survives, in
+> reduced form. Settle the destination before spending anything on D1–D6.
+
 ### Why this is not a small question
 
 This project has already been burned — twice, expensively — by infrastructure knowledge living
