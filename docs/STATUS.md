@@ -26,7 +26,18 @@
 > (SaltStack) is settled by construction. **One blocking precondition before any spend**: whether
 > Clever Cloud meters **egress** the way Render did. Render's outbound-bandwidth exhaustion is one of
 > the incidents that started this migration, and repeating it on a new PaaS is the single way this
-> decision fails. Prices were deliberately NOT recorded — use the vendor estimator, since a
+> decision fails. **✅ That blocker CLEARED 2026-08-06: Clever Cloud includes 10 TB/month egress at no
+> charge** — orders of magnitude above what the WASM bundle plus GraphQL can produce at V0 peak (get it
+> in writing before it is load-bearing). **But object storage is a separate meter**: Cellar egress is
+> **EUR 0.09/GB**, so the planned file-attachment framework
+> ([PROP-20260725-120055](proposals/PROP-20260725-120055-generic-file-attachment-framework.md)) —
+> restaurant and menu **photographs**, in an image-heavy marketplace — is the Render bandwidth failure
+> returning through a different door unless where images are served from is decided deliberately.
+> **Remaining before purchase** (all on the ADR): the estimator's cheap selection is **under-specced**
+> (`pico` = 256 MiB, `XXS Small Space` = 1 GiB disk / 512 MiB / 45 connections — the latter barely
+> above the Supabase free tier being escaped); pick the **Docker runtime, not `Rust`**, or the platform
+> compiles the workspace on every deploy and digest pinning dies with it; and declare the sqlx pool
+> ceiling against the 45-connection limit. Prices/specs come from the vendor estimator only — a
 > third-party spec table already produced wrong VPS-2 figures once (corrected 2026-08-05).
 
 > 📋 **2026-08-05 — Who owns the OVH host: provisioning IaC + host configuration

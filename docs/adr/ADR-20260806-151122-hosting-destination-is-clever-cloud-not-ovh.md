@@ -95,14 +95,25 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
 
 ### Follow-up
 
-- [ ] **Settle the egress question before any spend** — how Clever Cloud meters and prices outbound
-      bandwidth, checked against what the WASM bundle plus GraphQL traffic realistically costs at
-      peak. This is a blocking precondition of the cutover, not a post-migration discovery.
+- [x] **Egress — RESOLVED for the application runtime, 2026-08-06**: Clever Cloud includes **10 TB/month
+      of egress at no charge** (read off the vendor site by the product owner), which is orders of
+      magnitude above anything the WASM bundle plus GraphQL traffic can produce at V0 peak. The Render
+      failure mode does not recur here. *Provenance note*: this figure could not be re-confirmed from
+      an independent search, so **get it in writing** (support or terms) before it is load-bearing —
+      it is the ceiling that ended the last platform, and this ADR already had to correct one claim
+      taken from a secondary source.
+- [ ] **Object-storage (Cellar) egress is priced SEPARATELY and is NOT part of that allowance** —
+      Clever Cloud's own AWS comparison quotes **EUR 0.09/GB**, explicitly labelled "based on Cellar
+      Object Storage bandwidth pricing". Two consequences to size before they surprise us: the planned
+      **file-attachment framework** ([PROP-20260725-120055](../proposals/PROP-20260725-120055-generic-file-attachment-framework.md))
+      means restaurant and menu **photographs**, and a food marketplace is image-heavy — serving those
+      from Cellar is metered bandwidth, which is the Render failure mode returning through a different
+      door. Decide deliberately whether images are served from Cellar, from the app runtime (inside
+      the free allowance), or from a CDN. Backup/WAL storage lands here too.
       **Datum for the fallback (found 2026-08-06 while checking managed Kubernetes): OVH advertises
       egress as FREE** — traffic between clusters, to OVHcloud services and to the internet, with
-      Object Storage egress free since January 2026. So if Clever Cloud's answer is bad, the OVH
-      fallback in PROP-20260731-061609 D1/D2 is *stronger* than when it was costed, on precisely the
-      axis that ended Render.
+      Object Storage egress free since January 2026. So on the object-storage axis specifically, the
+      OVH fallback in PROP-20260731-061609 D1/D2 is *cheaper* than the chosen destination.
 - [x] Price the app instance and a **paid** PostgreSQL plan on the vendor's estimator, Paris region.
       **Done 2026-08-06, specs read off the vendor estimator: `pico` = 1* vCPU / 256 MiB at EUR 4.50,
       `XXS Small Space` = 1 vCPU / 512 MiB / 1 GiB disk / 45 connections / logs + metrics at EUR 5.25
