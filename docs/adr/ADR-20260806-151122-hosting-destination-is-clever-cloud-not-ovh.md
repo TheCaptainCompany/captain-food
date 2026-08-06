@@ -24,8 +24,8 @@ ratchet, and WAL archiving to object storage — mandatory, because self-hosted 
 backups unless we build them.
 
 Clever Cloud is a French PaaS (Paris region) that removes that tail: managed PostgreSQL with daily
-backups at 7-day retention on paid plans and PITR via pgBackRest on request, Docker-image deploys, and
-no operating system of ours anywhere. The decisive argument is capacity, not technology: **a team of
+backups at 7-day retention on paid plans and PITR via pgBackRest on request, Docker deploys, and no
+operating system of ours anywhere. The decisive argument is capacity, not technology: **a team of
 one product owner plus agents should not be operating a PostgreSQL server.** Every hour spent on
 tunnels and WAL shipping is an hour not spent on the ETA, the acceptance timeout, or allergen
 declaration — and this project's own lens says the ETA is the product.
@@ -74,8 +74,13 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
 - The backup gap closes **without us building it**. Measured against the real baseline — Supabase free,
   which has no backups at all — this is the single biggest reliability gain available, and the event
   log is what it protects.
-- Digest-pinned Docker deploys carry over, so ADR-20260721-175411's build half and
-  ADR-20260730-051500's pipeline isolation both survive with a changed target.
+- Digest-pinned deploys carry over, but **only via the Docker runtime and a deliberate pattern** — see
+  the runtime item in Follow-up. Corrected 2026-08-06: this ADR first claimed the GHCR pipeline
+  "largely carries over", which overstated it. Clever Cloud **builds a Dockerfile from the
+  repository; it does not deploy a pre-built image from a registry** (the `CC_DOCKER_LOGIN_*`
+  variables authenticate a registry for base-image pulls during that build, which is a different
+  thing). With the pattern below, ADR-20260721-175411's build half and ADR-20260730-051500's
+  pipeline isolation do both survive with a changed target.
 
 ### Negative
 
@@ -94,8 +99,9 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
       bandwidth, checked against what the WASM bundle plus GraphQL traffic realistically costs at
       peak. This is a blocking precondition of the cutover, not a post-migration discovery.
 - [x] Price the app instance and a **paid** PostgreSQL plan on the vendor's estimator, Paris region.
-      **Done 2026-08-06: Rust `pico` EUR 4.50 + PostgreSQL `XXS Small Space` EUR 5.25 = EUR 9.75 HT/30
-      days** — below the OVH 2 x d2-2 option (EUR 11.42) *and* managed. **But that exact selection is
+      **Done 2026-08-06, specs read off the vendor estimator: `pico` = 1* vCPU / 256 MiB at EUR 4.50,
+      `XXS Small Space` = 1 vCPU / 512 MiB / 1 GiB disk / 45 connections / logs + metrics at EUR 5.25
+      = EUR 9.75 HT/30 days** — below the OVH 2 x d2-2 option (EUR 11.42) *and* managed. **But that exact selection is
       UNDER-SPECCED and must not be the one we buy**: `XXS Small Space` is **1 GB max database size
       with 512 MB memory**, which against the Supabase free tier we are escaping (500 MB / 500 MB
       shared) is 2x the storage and **parity on RAM**. The repo's own history is the argument: the
@@ -104,6 +110,20 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
       to ~4 MB steady state, and `sirene_ingest` is designed **France-wide by department** (~101 of
       them). Add an append-only event log that never shrinks, plus projections and indexes, and 1 GB
       has no headroom at all.
+- [ ] **Use the DOCKER runtime, not the Rust runtime** — the single most consequential setting on the
+      form. Picking `Rust` makes Clever Cloud **compile the workspace from source on every deploy**,
+      which (a) puts builds back on the hosting platform, one of the Render failure modes we are
+      leaving, (b) needs a **dedicated build instance**, since a Rust workspace build will not fit the
+      256 MiB the runtime instance has, and (c) **abandons digest pinning**, contradicting
+      ADR-20260721-175411 and ADR-20260730-051500. The pattern that keeps all three intact: commit a
+      **one-line `Dockerfile`** whose only content is `FROM ghcr.io/thecaptaincompany/captain-food@sha256:<digest>`,
+      written by CI at deploy time. The platform "build" is then a no-op pull of the exact
+      content-addressed artifact CI already produced, the deploy stays manual-dispatch and pinned, and
+      rollback is still redeploying a previous digest.
+- [ ] **Size the sqlx pool against the plan's connection limit** — `XXS Small Space` allows **45**.
+      That is workable but not ignorable: the server runs the projector in-process plus the SIRENE
+      worker plus the actor-mailbox lanes, so the pool ceiling must be a declared value in
+      `specs/configuration.yaml`, not a library default nobody chose.
 - [ ] **Re-size before buying.** Storage scales independently of compute on this platform — the plan
       ladder runs `XXS Small/Medium/Big Space` (Medium = 2 GiB), then `XS Tiny/Small/Medium/Big`, then
       `S Small/Medium/Big/Huge` — so move the **Space** dimension well past 1 GB and the instance
