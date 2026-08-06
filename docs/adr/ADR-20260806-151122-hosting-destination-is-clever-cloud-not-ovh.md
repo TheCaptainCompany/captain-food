@@ -1,6 +1,18 @@
 # ADR-20260806-151122 — The hosting destination is Clever Cloud, not OVH
 
-- **Status**: Accepted (product owner, 2026-08-06, in-session: *"Instead of OVH"* — after Clever Cloud
+- **Status**: **REOPENED 2026-08-06** (product owner: *"Reopen the ADR for Kubernetes"*) — the decision
+  below is **not in force** pending
+  [PROP-20260806-223656 "Kubernetes as the deployment substrate"](../proposals/PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md).
+  **What reopened it**: this ADR's decisive argument was operational capacity — *"a team of one product
+  owner plus agents should not be operating a PostgreSQL server"* — and that rested on a premise about
+  the operator which was **wrong**. The product owner has run Kubernetes professionally, so the largest
+  weight in the decision was mis-specified. Three further arguments, none of them considered here,
+  are recorded in the proposal: **ingress as a light API gateway** (needed for wildcard TLS on any
+  destination), **ecosystem lock-in** (under-weighted below — Tasks, Cellar and add-ons compound), and
+  **manifests as a codegen target** (a cluster can accept generated deployment descriptors, a PaaS
+  cannot). Everything factual below stands and is reused by the proposal — the prices, the egress
+  finding, the runtime/Docker correction and the sizing work are all still valid.
+  Previously Accepted (product owner, 2026-08-06, in-session: *"Instead of OVH"* — after Clever Cloud
   was surfaced and its trade-offs put on the table)
 - **Tracking issue**: [#271 "Migrate hosting to OVH: app compute + PostgreSQL leave Render/Supabase; Supabase retained for identity only"](https://github.com/TheCaptainCompany/captain-food/issues/271) (title now stale — the migration it tracks is unchanged in purpose, changed in destination)
 - **Supersedes, in part**: [ADR-20260731-061609](ADR-20260731-061609-hosting-migrates-to-ovh-supabase-identity-only.md)

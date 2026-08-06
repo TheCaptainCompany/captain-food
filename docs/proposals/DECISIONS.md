@@ -388,6 +388,36 @@ D6 is the mechanism; checking the concern means confirming that ordering.
 
 ---
 
+## 17. Kubernetes as the deployment substrate — PROP-20260806-223656 — ⚠️ REOPENS a decided ADR
+
+[PROP-20260806-223656](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md)
+([#271](https://github.com/TheCaptainCompany/captain-food/issues/271)). Reopens
+[ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md)
+(Clever Cloud), which is **no longer in force**, at the product owner's direction.
+
+**Why**: that ADR's decisive argument was *"a team of one product owner plus agents should not be
+operating a PostgreSQL server"* — a premise about the OPERATOR that was **wrong**. The product owner
+has run Kubernetes professionally, so the heaviest weight in the decision was mis-specified. Three
+further arguments were raised and none appeared in the ADR: **ingress as a light API gateway**
+(wildcard TLS is needed on every destination anyway), **lock-in** (previously dismissed as "a
+Dockerfile and env vars", which under-weighted Tasks/Cellar/add-ons compounding), and **manifests as a
+codegen target** — a cluster can consume generated deployment descriptors, a PaaS cannot, which makes
+this the best available home for PROP-20260805-181926's surviving D7.
+
+| # | Decision | Recommended | Answer |
+|---|---|---|---|
+| D1 | Kubernetes, or the PaaS decided yesterday? | **OVH MKS** if k8s (free control plane, **free egress**, GA — vs CKE still in public beta); Clever Cloud PaaS retained as the costed fallback | _(open)_ |
+| D2 | **Where does PostgreSQL live?** — the hard one | **Managed, alongside the cluster** — never in-cluster by default: the event log is the one asset that cannot be re-derived. Reopens the cost question closed 2026-08-05 | _(open)_ |
+| D3 | Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance | **`Recreate`** — a RollingUpdate runs two write paths at once, exactly what [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing exist to prevent. **The headline benefit of k8s is unavailable until #242** | _(open)_ |
+| D4 | Ingress + wildcard TLS | ingress-nginx + cert-manager, DNS-01 for `*.captain.food` | _(open)_ |
+| D5 | Manifests generated from the specs? | **Yes** — the strongest argument for a cluster, and PROP-20260805-181926 D7 with a target that fits | _(open)_ |
+| D6 | Sequencing, with prod DOWN | Restore service on the simplest path first, build the cluster deliberately after — the digest-pinned image runs unchanged on either, so it is a redeploy, not a second migration | _(open)_ |
+
+Three concerns registered and unchecked, so this cannot be approved as-is:
+**rolling-deploys-blocked-by-193** · **database-placement-unresolved** · **prod-is-down**.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

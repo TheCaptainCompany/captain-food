@@ -3,7 +3,30 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-06. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH
+> ⏳ **2026-08-06 (later) — THE DESTINATION IS REOPENED FOR KUBERNETES
+> ([PROP-20260806-223656](proposals/PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md),
+> product owner: *"Reopen the ADR for Kubernetes"*).** The Clever Cloud decision immediately below is
+> **NOT in force**. **Why**: ADR-20260806-151122's decisive argument was *"a team of one product owner
+> plus agents should not be operating a PostgreSQL server"* — a premise about the OPERATOR that was
+> **wrong**, since the product owner has run Kubernetes professionally. Three further arguments, none
+> of them in that ADR: **ingress as a light API gateway** (wildcard TLS is required on every
+> destination anyway), **lock-in** (previously dismissed as "a Dockerfile and env vars", which
+> under-weighted Clever Tasks/Cellar/add-ons compounding), and **manifests as a codegen target** — a
+> cluster can consume generated deployment descriptors, a PaaS cannot, which gives
+> PROP-20260805-181926's surviving **D7** a target that finally fits.
+> **Everything factual in that ADR stands and is reused**: prices, the 10 TB egress finding, the
+> Docker-vs-Rust-runtime correction, the sizing work.
+> **Three findings that shape the choice.** (1) **A RollingUpdate runs two write paths at once** —
+> exactly what [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) forbids until
+> [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing land, so
+> V0 needs `strategy: Recreate` and **the headline benefit of Kubernetes is unavailable for now**;
+> probes and ingress are the day-one gains. (2) **The database gets HARDER, not easier** — a cluster
+> supplies none, in-cluster Postgres is the wrong home for an append-only log of paid orders, and
+> managed Postgres was ruled out on cost on 2026-08-05. (3) **OVH MKS is GA with free egress**
+> (including object storage) while **CKE is public beta** — beta is the wrong risk for the money path.
+> Six open decisions + three unchecked concerns in [DECISIONS.md §17](proposals/DECISIONS.md).
+
+> 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH — ⚠️ REOPENED, see above
 > ([ADR-20260806-151122](adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
 > product-owner decision: *"Instead of OVH"*).** This supersedes **only point 1** of
 > ADR-20260731-061609 — the destination. **Points 2–4 survive verbatim**: Supabase stays
