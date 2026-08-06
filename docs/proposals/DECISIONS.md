@@ -350,7 +350,15 @@ fleets default-off until DB-persisted posture ([#318](https://github.com/TheCapt
 
 ---
 
-## 16. Who owns the OVH host — PROP-20260805-181926
+## 16. Who owns the OVH host — PROP-20260805-181926 — ⚠️ MOSTLY MOOT 2026-08-06
+
+> **The destination changed to Clever Cloud** ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
+> product owner: *"Instead of OVH"*). A PaaS means **no host OS of ours**, so **D1–D6 below have no
+> subject** — they stay as the costed record of the option space, not as decisions anyone owes an
+> answer to. **Only D7 is still open**, in reduced form. **D3 (SaltStack) is settled by construction**:
+> there is no machine for it to configure. The one live question moved to the ADR's follow-up —
+> **whether Clever Cloud meters egress the way Render did**, which gates any spend, because egress
+> exhaustion is one of the incidents that started this migration.
 
 [PROP-20260805-181926](PROP-20260805-181926-host-provisioning-and-configuration-ownership.md)
 ([#349 "Who owns the OVH host: provisioning IaC + host configuration (SaltStack evaluated)"](https://github.com/TheCaptainCompany/captain-food/issues/349)).

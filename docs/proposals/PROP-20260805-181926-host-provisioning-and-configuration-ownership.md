@@ -1,12 +1,20 @@
 # PROP-20260805-181926 — Who owns the OVH host: provisioning IaC and host configuration (SaltStack evaluated)
 
-- **Status**: Proposed
+- **Status**: **Mostly MOOT as of 2026-08-06** — the destination became Clever Cloud, a PaaS
+  ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
+  product owner: *"Instead of OVH"*). **There is no host OS of ours any more, so D1–D6 have no
+  subject** and are retained as the costed record of the option space, not as live decisions.
+  **Only D7 survives** — deriving deployment artifacts from the specs that already exist — and it
+  survives in reduced form, since a PaaS wants a smaller artifact set. Everything below is preserved
+  as written because the analysis is what produced the destination change: working the consequences
+  of owning a host is exactly how the undifferentiated tail (WireGuard, block volumes, WAL archiving)
+  became visible.
 - **Date**: 2026-08-05
 - **Tracking issue**: [#349 "Who owns the OVH host: provisioning IaC + host configuration (SaltStack evaluated)"](https://github.com/TheCaptainCompany/captain-food/issues/349)
-- **Realized by**: _(filled at completion)_
-- **Builds on**: [#271 "Migrate hosting to OVH"](https://github.com/TheCaptainCompany/captain-food/issues/271) / ADR-20260731-061609 (the migration this decision serves) · PROP-20260729-014500 / ADR-20260729-020000 (application configuration already has an owner — this proposal must not take it back)
+- **Realized by**: _(D7 only — filled at completion)_
+- **Builds on**: [#271 "Migrate hosting to OVH"](https://github.com/TheCaptainCompany/captain-food/issues/271) / ADR-20260731-061609 (the migration this decision served) · PROP-20260729-014500 / ADR-20260729-020000 (application configuration already has an owner — this proposal must not take it back)
 - **Concerns**:
-  - [ ] cutover-not-blocked: no part of this may delay the OVH cutover — production is down today, and D6 exists to keep IaC adoption strictly behind it.
+  - [x] cutover-not-blocked: **resolved by the destination change** — with no host to provision, nothing here can delay the cutover. The concern is now carried by ADR-20260806-151122's egress follow-up instead.
 
 ---
 

@@ -1,7 +1,33 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-05. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-06. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH
+> ([ADR-20260806-151122](adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
+> product-owner decision: *"Instead of OVH"*).** This supersedes **only point 1** of
+> ADR-20260731-061609 — the destination. **Points 2–4 survive verbatim**: Supabase stays
+> IDENTITY-ONLY, the build side does not move (GitHub Actions + GHCR + the isolated
+> build → manual deploy → migrate pipeline, target renamed), and the cutover still uses the existing
+> outage. **The reasons for leaving Render/Supabase are unchanged and were not revisited.** OVH
+> remains the SMS provider (ADR-20260722-174500) — this changes where the app and database run,
+> nothing else.
+> **Why it changed**: choosing an OVH instance meant owning a host OS for the first time, and working
+> that through generated a tail of work with no customer value — a WireGuard overlay (OVH **VPS cannot
+> join a vRack**, a confirmed fact: the vRack page lists Bare Metal, Hosted Private Cloud, Public
+> Cloud, Additional IP, Enterprise File Storage and Load Balancer, and VPS is in none of them), block
+> volumes for the database disk, an upscale-only resize ratchet, and **WAL archiving we would have to
+> build**. Clever Cloud (French PaaS, Paris) removes all of it: managed PostgreSQL with daily backups
+> at 7-day retention on **paid** plans (the free `DEV` plan has had NO backups since 2025-10-01 — the
+> same trap as the Supabase free tier), PITR via pgBackRest on request, Docker-image deploys.
+> Sovereignty improves too: France, European jurisdiction, explicitly outside the Cloud Act.
+> **Consequence**: [PROP-20260805-181926](proposals/PROP-20260805-181926-host-provisioning-and-configuration-ownership.md)
+> is **mostly moot** — D1–D6 have no subject without a host we own, **only D7 survives**, and D3
+> (SaltStack) is settled by construction. **One blocking precondition before any spend**: whether
+> Clever Cloud meters **egress** the way Render did. Render's outbound-bandwidth exhaustion is one of
+> the incidents that started this migration, and repeating it on a new PaaS is the single way this
+> decision fails. Prices were deliberately NOT recorded — use the vendor estimator, since a
+> third-party spec table already produced wrong VPS-2 figures once (corrected 2026-08-05).
 
 > 📋 **2026-08-05 — Who owns the OVH host: provisioning IaC + host configuration
 > ([PROP-20260805-181926](proposals/PROP-20260805-181926-host-provisioning-and-configuration-ownership.md),

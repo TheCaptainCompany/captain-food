@@ -1,6 +1,13 @@
 # ADR-20260731-061609 — Hosting migrates to OVH; Supabase is retained for identity only
 
-- **Status**: Accepted (product owner, 2026-07-31: *"We are going to migrate to OVH. Render +
+- **Status**: **Superseded IN PART by [ADR-20260806-151122](ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md)**
+  (product owner, 2026-08-06: *"Instead of OVH"*) — **only point 1, the destination**: app compute and
+  the domain PostgreSQL go to **Clever Cloud** (French PaaS, Paris), not OVH, because owning a host OS
+  generated a tail of undifferentiated work (WireGuard, block volumes, WAL archiving) that a managed
+  platform removes. **Points 2, 3 and 4 below remain in force verbatim**, as does the whole Context —
+  the reasons for leaving Render/Supabase are unchanged and are NOT what was revisited. OVH also
+  remains the SMS provider (ADR-20260722-174500).
+  Originally Accepted (product owner, 2026-07-31: *"We are going to migrate to OVH. Render +
   Supabase does not match our need — the limitations are exhausted and too expensive for the
   project. We will keep Supabase for the identity."*)
 - **Tracking issue**: [#271 "Migrate hosting to OVH…"](https://github.com/TheCaptainCompany/captain-food/issues/271)
