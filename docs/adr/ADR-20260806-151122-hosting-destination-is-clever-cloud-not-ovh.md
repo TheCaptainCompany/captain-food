@@ -93,7 +93,24 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
 - [ ] **Settle the egress question before any spend** — how Clever Cloud meters and prices outbound
       bandwidth, checked against what the WASM bundle plus GraphQL traffic realistically costs at
       peak. This is a blocking precondition of the cutover, not a post-migration discovery.
-- [ ] Price the app instance and a **paid** PostgreSQL plan on the vendor's estimator, Paris region.
+- [x] Price the app instance and a **paid** PostgreSQL plan on the vendor's estimator, Paris region.
+      **Done 2026-08-06: Rust `pico` EUR 4.50 + PostgreSQL `XXS Small Space` EUR 5.25 = EUR 9.75 HT/30
+      days** — below the OVH 2 x d2-2 option (EUR 11.42) *and* managed. **But that exact selection is
+      UNDER-SPECCED and must not be the one we buy**: `XXS Small Space` is **1 GB max database size
+      with 512 MB memory**, which against the Supabase free tier we are escaping (500 MB / 500 MB
+      shared) is 2x the storage and **parity on RAM**. The repo's own history is the argument: the
+      SIRENE mirror measured **655 MB for 339k rows — 77% of the whole database — at department 37
+      alone** before [#231](https://github.com/TheCaptainCompany/captain-food/issues/231) reclaimed it
+      to ~4 MB steady state, and `sirene_ingest` is designed **France-wide by department** (~101 of
+      them). Add an append-only event log that never shrinks, plus projections and indexes, and 1 GB
+      has no headroom at all.
+- [ ] **Re-size before buying.** Storage scales independently of compute on this platform — the plan
+      ladder runs `XXS Small/Medium/Big Space` (Medium = 2 GiB), then `XS Tiny/Small/Medium/Big`, then
+      `S Small/Medium/Big/Huge` — so move the **Space** dimension well past 1 GB and the instance
+      dimension past 512 MB of memory. For the app, `pico`'s exact shape was NOT verified (`nano` is
+      1 vCPU / 512 MB, `XS` is 1 vCPU / 1 GB): size it remembering the server does **not** just serve
+      requests — the projector runs **in-process** (ADR-0040/0043), alongside the SIRENE sync worker
+      and the actor-mailbox workers. Budget for a real total above EUR 9.75, which still compares well.
 - [ ] Confirm PITR (pgBackRest) availability and how it is requested, since it is not on by default.
 - [ ] Retarget `deploy.yml` at Clever Cloud, and retire `render-config-sync.yml` as already planned.
 - [ ] Rename/re-scope [#271](https://github.com/TheCaptainCompany/captain-food/issues/271) — its title
