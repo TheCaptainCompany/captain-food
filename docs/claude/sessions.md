@@ -91,6 +91,37 @@ regenerated files`. Running `make generate` then changes nothing and the failure
 the fix is to **commit your own change**, not to regenerate. Real drift names files under
 `specs/generated/**` or `crates/**/generated/**`.
 
+**Before diagnosing weird CI behaviour, check `githubstatus.com` — three symptoms together mean the
+PLATFORM, not your change**: jobs completing as `cancelled` (rather than `failure`), a run sitting
+`queued` for tens of minutes, and — the tell — **pushes creating NO workflow run at all**. On
+2026-08-06 all three appeared at once and `ci` went red on `main` for three consecutive docs-only
+commits; the cause was a GitHub Actions major outage and nothing in the repo was wrong. One curl
+settles it:
+
+```bash
+curl -sS https://www.githubstatus.com/api/v2/summary.json \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status']['description']);\
+print([c['status'] for c in d['components'] if c['name']=='Actions'])"
+```
+
+Two consequences worth knowing before planning around it. **A red `ci` on `main` is not automatically
+yours** — read the failing job's *conclusion* first: `cancelled` with no failed step is the platform,
+`failure` with a named step is you. And **a workflow-file change cannot be verified any other way**:
+`make rust` does not execute `.github/workflows/**`, so the authoritative test for a CI edit is the
+workflow running. During an Actions outage such a PR simply waits in draft — do not mark it ready and
+never enable auto-merge on it, because a required check that cannot run leaves the PR hanging on
+"Expected - waiting for status".
+
+**Do not write a Monitor/poll loop with `|| true` on every stage.** The same session lost 14 minutes
+to a watcher whose `curl` and `python3` stages were all `|| true`-guarded: every call failed, the loop
+emitted nothing, and *silence was indistinguishable from "still running"*. Let the failing stage
+surface, or echo an explicit heartbeat — a watcher that cannot report its own breakage is worse than
+none, because it manufactures false confidence.
+
+**`git reset --hard` to sync a branch DISCARDS uncommitted edits in the working tree** — including
+ones made minutes earlier in the same turn. It cost a re-do of this very section. Commit first, or
+use `git checkout <branch>` and let git refuse the switch when it would clobber something.
+
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the
