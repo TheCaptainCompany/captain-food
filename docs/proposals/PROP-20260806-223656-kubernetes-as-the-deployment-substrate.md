@@ -8,6 +8,7 @@
   - [ ] rolling-deploys-blocked-by-193: the headline benefit cannot be used until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases land — a rolling update runs two write-path instances at once, which is exactly what [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) forbids. Approving must state which deploy strategy V0 uses in the meantime.
   - [ ] database-placement-unresolved: an event log holding paid orders must not land in-cluster by default. D2 must be answered explicitly, not inherited.
   - [ ] prod-is-down: the cutover window is an outage. D6 must say whether the cluster is built now or after service is restored.
+  - [ ] agent-access-shape: the product owner has offered the assistant full cluster access (D7). Approving must fix the MECHANISM — standing cluster-admin is a permanent maximum blast radius held by an actor with a demonstrated error rate, and hand-fixing a cluster is the `RUN_SIRENE_WORKER` failure with a better CLI. GitOps + read-mostly RBAC + per-incident break-glass is the recommendation.
 
 ---
 
@@ -89,6 +90,37 @@ contract, and `c4-l2.yaml` declares the containers. Emitting Deployments, Servic
 env blocks from those makes the cluster **structurally unable to drift from the specs**, which no PaaS
 console can offer. This is PROP-20260805-181926 D7 with a target that actually fits: manifests are
 declarative data, which is what this codegen is good at.
+
+### D7 — How does the agent operate the cluster? (product owner: *"full access to the Kubernetes cluster"*)
+
+The product owner has offered to grant the assistant full cluster access so it can act as production
+admin (2026-08-06). The intent is right — someone must be able to *do* the work — but the mechanism
+matters more than the permission, for a reason this repository has already paid for.
+
+**Access was never the gap; continuity was.** Credentials do not make an agent awake. If the primary
+fails at 03:00 and no session is running, a cluster-admin kubeconfig in a vault changes nothing. A
+scheduled routine narrows this — it gives detection and even remediation at the polling interval — but
+it is monitoring with automated action, not a pager, and it puts an LLM's judgement on the money path
+unsupervised.
+
+**The stronger objection is that imperative access recreates the exact failure that started this
+migration.** A cluster fixed by hand at 03:00 is state that exists in **no file** — which is
+`RUN_SIRENE_WORKER` set in no file and no dashboard (6,649 rows PENDING, an evening to diagnose), and
+`API_SECRET` configured on a service and read by nothing. This repo's entire doctrine is that
+hand-edited runtime state is the bug. A `kubectl edit` on production is the Render dashboard with a
+better CLI.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **GitOps: the agent proposes manifest changes as PRs, a controller (Argo CD / Flux) reconciles the cluster** ✅ **recommended** | The agent's "access" becomes **the repository** — auditable, reviewable, revertible, and already governed by the gates. Perfectly consistent with the operating model, and **D5 is what makes it work**: manifests generated from the specs mean the cluster cannot drift from the DSL. Every production change has a diff and an author. Rollback is `git revert` | A controller to install and keep current. Emergency changes take a PR round-trip unless break-glass exists (below) |
+| Standing cluster-admin kubeconfig for the agent | Fastest possible action; nothing to build | Largest blast radius available, held permanently, by an actor with a **demonstrated** error rate — in the single session that produced this proposal: wrong VPS-2 specs taken from a secondary source, a `rust-cache` config that would have keyed a broken cache, a monitor whose `\|\| true` guards made total failure look like progress, and a `git reset --hard` that discarded its own uncommitted work. Every one was recoverable because the target was docs and CI. The same error rate against `kubectl delete pvc` is not |
+| Read-mostly RBAC + narrow writes (`get`/`list`/`log`/`describe`/`rollout restart`/`scale`) | Covers most real diagnosis and much of the remediation; small blast radius; complements GitOps rather than competing | Cannot fix what needs a manifest change — which is the point: those go through the PR path |
+| No runtime access at all | Zero risk | Blind. Diagnosis without logs and events is guesswork, and that helps nobody |
+
+**Recommendation: GitOps for change + read-mostly RBAC for diagnosis + an explicit, short-lived
+break-glass credential for incidents**, granted per-incident rather than held. Deletion rights over
+`PersistentVolumeClaim`, `StatefulSet` and namespaces stay **outside** the standing role whatever else
+is granted — those are the operations with no undo, and D2's database lives behind them.
 
 ### D6 — Sequencing, with production down
 
