@@ -98,6 +98,11 @@ as launch blockers rather than backlog items, that is a substantive gain, not a 
 - [ ] **Settle the egress question before any spend** — how Clever Cloud meters and prices outbound
       bandwidth, checked against what the WASM bundle plus GraphQL traffic realistically costs at
       peak. This is a blocking precondition of the cutover, not a post-migration discovery.
+      **Datum for the fallback (found 2026-08-06 while checking managed Kubernetes): OVH advertises
+      egress as FREE** — traffic between clusters, to OVHcloud services and to the internet, with
+      Object Storage egress free since January 2026. So if Clever Cloud's answer is bad, the OVH
+      fallback in PROP-20260731-061609 D1/D2 is *stronger* than when it was costed, on precisely the
+      axis that ended Render.
 - [x] Price the app instance and a **paid** PostgreSQL plan on the vendor's estimator, Paris region.
       **Done 2026-08-06, specs read off the vendor estimator: `pico` = 1* vCPU / 256 MiB at EUR 4.50,
       `XXS Small Space` = 1 vCPU / 512 MiB / 1 GiB disk / 45 connections / logs + metrics at EUR 5.25
