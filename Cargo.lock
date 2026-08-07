@@ -9,6 +9,122 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 
 [[package]]
+name = "actor-cart"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+]
+
+[[package]]
+name = "actor-catalog"
+version = "0.1.0"
+dependencies = [
+ "domain-catalog",
+ "domain-common",
+]
+
+[[package]]
+name = "actor-conversation"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-comms",
+]
+
+[[package]]
+name = "actor-customer"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-customer",
+]
+
+[[package]]
+name = "actor-customer-credit"
+version = "0.1.0"
+dependencies = [
+ "domain-payments",
+]
+
+[[package]]
+name = "actor-delivery-job"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-delivery",
+]
+
+[[package]]
+name = "actor-delivery-partner-registration"
+version = "0.1.0"
+dependencies = [
+ "domain-delivery",
+]
+
+[[package]]
+name = "actor-mailbox-supervision"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+]
+
+[[package]]
+name = "actor-order"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+]
+
+[[package]]
+name = "actor-payment"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+ "domain-payments",
+]
+
+[[package]]
+name = "actor-prospect"
+version = "0.1.0"
+dependencies = [
+ "domain-network",
+]
+
+[[package]]
+name = "actor-reclamation"
+version = "0.1.0"
+dependencies = [
+ "domain-ordering",
+]
+
+[[package]]
+name = "actor-restaurant"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-network",
+]
+
+[[package]]
+name = "actor-restaurant-account"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-network",
+]
+
+[[package]]
+name = "actor-rider"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-delivery",
+]
+
+[[package]]
 name = "actor_client"
 version = "0.1.0"
 dependencies = [
@@ -37,6 +153,10 @@ dependencies = [
  "tracing",
  "uuid",
 ]
+
+[[package]]
+name = "adapters"
+version = "0.1.0"
 
 [[package]]
 name = "aead"
@@ -445,6 +565,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bam"
+version = "0.1.0"
+dependencies = [
+ "domain-catalog",
+ "domain-common",
+ "domain-comms",
+ "domain-customer",
+ "domain-delivery",
+ "domain-network",
+ "domain-ordering",
+ "domain-payments",
+]
+
+[[package]]
 name = "base16"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -485,6 +619,18 @@ checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "bo-admin"
+version = "0.1.0"
+
+[[package]]
+name = "bo-restaurant"
+version = "0.1.0"
+
+[[package]]
+name = "bo-rider"
+version = "0.1.0"
 
 [[package]]
 name = "bumpalo"
@@ -1458,6 +1604,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "fo-marketplace"
+version = "0.1.0"
+
+[[package]]
+name = "fo-storefront"
+version = "0.1.0"
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1597,6 +1751,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-admin"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-customer"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-external"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-public"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-restaurant"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-restaurant-account"
+version = "0.1.0"
+
+[[package]]
+name = "gateway-rider"
+version = "0.1.0"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,6 +1879,62 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "graphql-catalog"
+version = "0.1.0"
+dependencies = [
+ "domain-catalog",
+]
+
+[[package]]
+name = "graphql-common"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+]
+
+[[package]]
+name = "graphql-comms"
+version = "0.1.0"
+dependencies = [
+ "domain-comms",
+]
+
+[[package]]
+name = "graphql-customer"
+version = "0.1.0"
+dependencies = [
+ "domain-customer",
+]
+
+[[package]]
+name = "graphql-delivery"
+version = "0.1.0"
+dependencies = [
+ "domain-delivery",
+]
+
+[[package]]
+name = "graphql-network"
+version = "0.1.0"
+dependencies = [
+ "domain-network",
+]
+
+[[package]]
+name = "graphql-ordering"
+version = "0.1.0"
+dependencies = [
+ "domain-ordering",
+]
+
+[[package]]
+name = "graphql-payments"
+version = "0.1.0"
+dependencies = [
+ "domain-payments",
 ]
 
 [[package]]
@@ -2969,6 +3207,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "pm-cart-binding"
+version = "0.1.0"
+dependencies = [
+ "domain-customer",
+ "domain-ordering",
+]
+
+[[package]]
+name = "pm-delivery-dispatch"
+version = "0.1.0"
+dependencies = [
+ "domain-delivery",
+ "domain-ordering",
+]
+
+[[package]]
+name = "pm-place-order"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+ "domain-payments",
+]
+
+[[package]]
+name = "pm-reclamation"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+ "domain-payments",
+]
+
+[[package]]
+name = "pm-refund"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "domain-ordering",
+ "domain-payments",
+]
+
+[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3105,6 +3386,55 @@ dependencies = [
  "syn",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "projector-catalog"
+version = "0.1.0"
+dependencies = [
+ "domain-catalog",
+]
+
+[[package]]
+name = "projector-comms"
+version = "0.1.0"
+dependencies = [
+ "domain-comms",
+]
+
+[[package]]
+name = "projector-customer"
+version = "0.1.0"
+dependencies = [
+ "domain-customer",
+]
+
+[[package]]
+name = "projector-delivery"
+version = "0.1.0"
+dependencies = [
+ "domain-delivery",
+]
+
+[[package]]
+name = "projector-network"
+version = "0.1.0"
+dependencies = [
+ "domain-network",
+]
+
+[[package]]
+name = "projector-ordering"
+version = "0.1.0"
+dependencies = [
+ "domain-ordering",
+]
+
+[[package]]
+name = "projector-payments"
+version = "0.1.0"
+dependencies = [
+ "domain-payments",
 ]
 
 [[package]]

@@ -251,6 +251,48 @@ fn main() {
             eprintln!("✓ wrote {}", c.dir);
         }
     }
+    // crates/bins/{name}/: PER-DEPLOYABLE BIN CRATES (#382, ADR-20260807-183024 step 3). One
+    // crate per c4-l2 deployable, manifest = the bin's scope assertion (deps from the derived
+    // crate graph). STALE bins are REMOVED (a bin for a deployable the topology no longer
+    // declares is an image that deploys nowhere but still builds). Guarded on a non-empty
+    // topology so a degenerate flat-layout model can never mass-delete.
+    let bin_crates = emit_bin_crates(&model);
+    if !bin_crates.is_empty() {
+        let bins_root = repo_root(&specs).join("crates/bins");
+        let keep: std::collections::BTreeSet<String> =
+            bin_crates.iter().map(|c| c.name.clone()).collect();
+        if let Ok(rd) = fs::read_dir(&bins_root) {
+            for e in rd.flatten() {
+                let p = e.path();
+                let stale = p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| !keep.contains(n));
+                if stale {
+                    if let Err(e) = fs::remove_dir_all(&p) {
+                        eprintln!("✗ remove stale bin crate {}: {}", p.display(), e);
+                        std::process::exit(1);
+                    }
+                    eprintln!("✓ removed stale bin crate {}", p.display());
+                }
+            }
+        }
+        for c in &bin_crates {
+            let dir = repo_root(&specs).join(&c.dir);
+            if let Err(e) = fs::create_dir_all(dir.join("src")) {
+                eprintln!("✗ create {}: {}", dir.display(), e);
+                std::process::exit(1);
+            }
+            for (name, content) in [("Cargo.toml", &c.manifest), ("src/main.rs", &c.main)] {
+                let path = dir.join(name);
+                if let Err(e) = fs::write(&path, content) {
+                    eprintln!("✗ write {}: {}", path.display(), e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        eprintln!("✓ wrote {} bin crates under crates/bins/", bin_crates.len());
+    }
     // crates/domain/src/generated/{scalars,entities,events,commands}.rs: since #373 RE-EXPORT
     // facades over the per-scope crates (+ the cross-scope DomainEvent union, global error
     // catalog, states and lifecycles). mod.rs lists them.

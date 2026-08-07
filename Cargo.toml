@@ -14,6 +14,14 @@ members = [
                                # edges (validator-proved DAG). A GLOB on purpose: a new scope's crate
                                # joins the workspace by being generated, so the members list cannot
                                # drift from the spec.
+    "crates/bins/*",           # PER-DEPLOYABLE BIN CRATES (#382, ADR-20260807-183024 step 3): one
+                               # GENERATED binary crate per c4-l2 deployable (actor-*/pm-*/
+                               # projector-*/graphql-*/gateway-*/fo-*/bo-*/adapters/bam), each
+                               # manifest linking ONLY the domain-scope crates its crate-graph
+                               # entry declares — the manifest is the scope assertion. Skeletons
+                               # until #349/#358 flip deployment (gate-then-stabilize); the
+                               # monolith `server` remains the deployed runtime. A GLOB on
+                               # purpose: a new deployable joins the workspace by being generated.
     "crates/domain",           # ★ pure DDD facade — re-exports the scope crates' generated types
                                # (same type identity) + hand-written aggregates, DomainEvent union,
                                # states/lifecycles folds; depends only on crates/domains/*

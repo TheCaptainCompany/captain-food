@@ -3,7 +3,27 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (2) IMPLEMENTED, PR IN REVIEW — per-scope domain
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (3) IMPLEMENTED, PR IN REVIEW — the bin crates
+> ([#382](https://github.com/TheCaptainCompany/captain-food/issues/382) "Bin crates:
+> per-actor/per-PM/per-projector/per-subgraph/per-gateway/per-surface binaries from the c4-l2
+> topology", [PR #383](https://github.com/TheCaptainCompany/captain-food/pull/383)).** The codegen
+> emits ONE BINARY CRATE PER DEPLOYABLE under `crates/bins/` (workspace glob member, stale bins
+> pruned): 15 `actor-*` + 5 `pm-*` (deps = the crate-graph's spec-declared reach), 7
+> `projector-{scope}` + 8 `graphql-{scope}` (deps = their scope's crate; the kernel gets a
+> subgraph but no projector), 7 `gateway-{role}` and 6 surface bins (`fo-*`/`bo-*`/`adapters`) with
+> NO domain crates, and `bam` linking every scope (cross-scope consumer by design) — 49 bins, each
+> manifest the bin's SCOPE ASSERTION (`use … as _;` makes every declared link compile-checked;
+> machete-clean). `specs/generated/crate-graph.generated.json` now carries the FULL bin topology
+> (+ `path` per bin) — the #349 input contract; validator §15 (`c4-bin-name-mismatch` /
+> `c4-bin-missing` / `c4-bin-unknown`) keeps derived bins ↔ c4-l2 containers drift-free both ways.
+> GATE-THEN-STABILIZE: all 49 are SKELETONS (identity + exit); the monolith `server` bin remains
+> the deployed runtime until [#349](https://github.com/TheCaptainCompany/captain-food/issues/349)
+> (manifests emitter) / [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) (MKS
+> cutover) flip deployment. Step-2's recorded facade limit is now closed FOR THE BINS (each links
+> only its scopes); the monolith consumers stay facade-coupled until they retire. Validate 0
+> errors / 43 warnings (kinds identical to baseline).
+>
+> ✅ **2026-08-07 — ADR-183024 REALIZATION STEP (2) MERGED — per-scope domain
 > crates + kernel ([#373](https://github.com/TheCaptainCompany/captain-food/issues/373) "Domain
 > splits into per-scope GENERATED crates; crate graph derived from spec $refs",
 > [PR #381](https://github.com/TheCaptainCompany/captain-food/pull/381)).** The codegen emits one

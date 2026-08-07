@@ -40,8 +40,15 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
   pruned; workspace membership via the `crates/domains/*` glob), `crates/domain`'s generated modules
   become re-exporting FACADES (same paths, same type identity) keeping the cross-scope artifacts
   (DomainEvent union, global error catalog, states/lifecycles), and `emit_crate_graph` commits the
-  derived topology to `specs/generated/crate-graph.generated.json` (`bins` = each actor/PM → the
-  domain crates its refs reach — the input contract for the step-(3) bin emitter). Other Rust
+  derived topology to `specs/generated/crate-graph.generated.json`. Since #382 (step 3),
+  `emit_bin_crates` writes ONE BINARY CRATE PER DEPLOYABLE under `crates/bins/` (49 bins:
+  `actor-*`/`pm-*`/`projector-{scope}`/`graphql-{scope}`/`gateway-{role}`/surfaces/`bam`;
+  manifests = the bin's scope assertion, stale bins pruned, `crates/bins/*` workspace glob), the
+  crate-graph `bins` section covers the FULL topology (+ `path` per bin — the #349 input
+  contract), and validator §15 (`c4-bin-*`) keeps derived bins ↔ `c4-l2.yaml` containers
+  drift-free both ways. NOTE the glob bootstrap order: a workspace glob that matches NOTHING
+  fails every cargo command including the generator's own build — introducing a new generated
+  crate family means generating once before (or in the same change as) the glob lands. Other Rust
   emitters: domain types (scalars/entities/events/commands/errors/lifecycles),
   projection rows/projectors + PM state stores (app + Pg, item 5), the service catalog (item 4, issue #26:
   `emit_services_application` traits, `emit_services_http_clients` + `emit_service_bindings`
