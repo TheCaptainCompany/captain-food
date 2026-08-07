@@ -160,6 +160,19 @@ per-pod attack surface.
   [#349](https://github.com/TheCaptainCompany/captain-food/issues/349) emitter then derives bin
   crates ↔ Dockerfile targets ↔ Deployments from C4 + `actors.yaml` as one chain; `deploy.yml`
   becomes a matrix of per-surface digest pins, which also buys per-surface rollback.
+- **CI builds and deploys ONLY what changed** (product owner directive, 2026-08-07) — a REQUIREMENT,
+  not an optimization, because without it the split un-delivers itself: Rust builds are not
+  bit-reproducible, so an unconditional rebuild mints a NEW digest for IDENTICAL source, every pin
+  bumps, and under `Recreate` every Deployment restarts — the Order drain pausing for a rider CSS
+  change, the exact failure the per-surface split exists to prevent. Therefore the skip keys on
+  **source, not digest**: per image, hash the bin's crate CLOSURE (`cargo metadata` gives the graph;
+  hash the tracked files of those crates + `Cargo.lock` + `rust-toolchain.toml` + the Dockerfile
+  stage + the wasm-bundle inputs for surface images), record the hash on the published image (OCI
+  annotation), and skip build → publish → pin-bump when it matches the last published one. Precedent
+  exists: `build-image.yml` already carries a "decide whether the deployable image changed" step for
+  the single image — this generalizes it to a per-image matrix. Honest corollary: a `Cargo.lock`
+  bump or a shared-crate (`domain`, generated code) change ripples every closure and legitimately
+  rebuilds everything — that is correctness, not a bug in the detection.
 - **Bills**: per-pod sqlx pools become small DECLARED values (2–3; pgbouncer as the later escape
   hatch); the full shape wants two nodes from day one — **d2-8 + d2-4 + LB S ≈ €38.04/mo ex-VAT**
   (within ADR-20260807-114122's ladder; the single-d2-8 €26.60 rung is too snug for ~25 pods). The
