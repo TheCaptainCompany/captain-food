@@ -1,0 +1,27 @@
+version: 1
+description: >
+  payments scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+RefundNotPending:
+  description: >
+    The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending
+    approval — either no refund run exists for the order, or it was already approved, denied or settled.
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "No refund is pending approval for this order."
+    fr: "Aucun remboursement n'est en attente d'approbation pour cette commande."
+
+
+InsufficientCustomerCredit:
+  description: >
+    A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance
+    (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.
+  context:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+  messages:
+    en: "You do not have enough store credit for this."
+    fr: "Vous n'avez pas assez d'avoir en boutique pour cela."

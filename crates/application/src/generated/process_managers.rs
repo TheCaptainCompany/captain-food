@@ -14,698 +14,6 @@ pub enum HookOutcome<T> {
     Skip(String),
 }
 
-/// Generated step pipelines for `processmanager.yaml#/PlaceOrderProcess`.
-pub mod place_order_process {
-
-    /// Non-structural hooks for the generated `PaymentCaptured` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
-    #[async_trait::async_trait]
-    pub trait PaymentCapturedHooks: Send + Sync {
-        /// Build the FULL `OrderPlaced` payload — the DSL `with` covers only [orderId]; the rest is computed
-        /// (spec note: — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.). `Skip` ends the leg as a benign no-op; `Err` aborts and surfaces.
-        async fn build_order_placed(&self, event: &domain::generated::events::PaymentCaptured, row: &crate::pm_state::PaymentProcessRow) -> Result<super::HookOutcome<domain::generated::events::OrderPlaced>, domain::shared::errors::DomainError>;
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `OrderPlaced` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_order_placed(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::OrderPlaced) -> bool;
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `CartCheckedOut` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_cart_checked_out(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::CartCheckedOut) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::PaymentProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/PaymentCaptured` — generated step pipeline (issue #25).
-    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
-    pub async fn on_payment_captured(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::PaymentProcessStateStore,
-        hooks: &dyn PaymentCapturedHooks,
-        event: &domain::generated::events::PaymentCaptured,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this capture belongs to.
-        let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
-            return Err(domain::shared::errors::DomainError::rejected("PaymentEventOrphaned", serde_json::json!({ "paymentIntentId": &event.payment_intent_id })));
-        };
-        // state.expect process_status = AWAITING_PAYMENT_RESULT — a failed expect is a benign skip. Already-resolved run → skip (benign Stripe re-delivery).
-        if row.process_status != domain::generated::scalars::PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
-            return Ok(Outcome::Skipped(format!("payment_process_manager run is {:?}, expected AWAITING_PAYMENT_RESULT — Already-resolved run → skip (benign Stripe re-delivery).", row.process_status)));
-        }
-        // deliver OrderPlaced → Order (the aggregate records the fact) — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.
-        let order_placed = match hooks.build_order_placed(event, &row).await? {
-            super::HookOutcome::Ready(v) => v,
-            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
-        };
-        let stream = format!("Order-{}", order_placed.order_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_order_placed(&stream_events, &order_placed) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())], &actor)
-                .await?;
-        }
-        // deliver CartCheckedOut → Cart (the aggregate records the fact)
-        let cart_checked_out = domain::generated::events::CartCheckedOut {
-            cart_id: row.cart_id,
-            order_id: row.order_id,
-        };
-        let stream = format!("Cart-{}", cart_checked_out.cart_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_cart_checked_out(&stream_events, &cart_checked_out) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::CartCheckedOut(cart_checked_out.clone())], &actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::PaymentProcessRow {
-            payment_status: domain::generated::scalars::PaymentStatus::CAPTURED,
-            process_status: domain::generated::scalars::PaymentProcessStatus::ORDER_PLACED,
-            last_processed_stripe_event_id: Some(domain::generated::scalars::ExternalReference(env.event_id.to_string())),
-            ..row
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-
-    /// Non-structural hooks for the generated `PaymentFailed` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// Payment failed: resolve the run; no order is placed and the cart stays OPEN.
-    pub trait PaymentFailedHooks: Send + Sync {
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::PaymentProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/PaymentFailed` — generated step pipeline (issue #25).
-    /// Payment failed: resolve the run; no order is placed and the cart stays OPEN.
-    pub async fn on_payment_failed(
-        state: &dyn crate::pm_state::PaymentProcessStateStore,
-        hooks: &dyn PaymentFailedHooks,
-        event: &domain::generated::events::PaymentFailed,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this failure belongs to.
-        let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
-            return Err(domain::shared::errors::DomainError::rejected("PaymentEventOrphaned", serde_json::json!({ "paymentIntentId": &event.payment_intent_id })));
-        };
-        // state.expect process_status = AWAITING_PAYMENT_RESULT — a failed expect is a benign skip. Already-resolved run → skip (benign Stripe re-delivery).
-        if row.process_status != domain::generated::scalars::PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
-            return Ok(Outcome::Skipped(format!("payment_process_manager run is {:?}, expected AWAITING_PAYMENT_RESULT — Already-resolved run → skip (benign Stripe re-delivery).", row.process_status)));
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc). No domain event — the cart stays OPEN for the customer to retry.
-        let mut updated = crate::pm_state::PaymentProcessRow {
-            payment_status: domain::generated::scalars::PaymentStatus::FAILED,
-            process_status: domain::generated::scalars::PaymentProcessStatus::FAILED,
-            last_processed_stripe_event_id: Some(domain::generated::scalars::ExternalReference(env.event_id.to_string())),
-            ..row
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-}
-
-/// Generated step pipelines for `processmanager.yaml#/RefundProcess`.
-pub mod refund_process {
-
-    /// Columns of `OrderTracking` consumed by this PM's `read order` step, typed by their consumers.
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct OrderRead {
-        /// Feeds the `= CAPTURED` guard.
-        pub payment_status: String,
-        /// Feeds `RefundOpened.paymentIntentId`.
-        pub payment_intent_id: domain::generated::scalars::PaymentIntentId,
-        /// Feeds `RefundOpened.amount`.
-        pub total_amount_cents: domain::generated::entities::Money,
-    }
-
-    /// Non-structural hooks for the generated `OrderRejectedByRestaurant` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
-    #[async_trait::async_trait]
-    pub trait OrderRejectedByRestaurantHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
-        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
-
-        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
-        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
-        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
-            None
-        }
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/OrderRejectedByRestaurant` — generated step pipeline (issue #25).
-    /// The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
-    pub async fn on_order_rejected_by_restaurant(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn OrderRejectedByRestaurantHooks,
-        event: &domain::generated::events::OrderRejectedByRestaurant,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
-        let order = match hooks.read_order(event.order_id).await? {
-            super::HookOutcome::Ready(v) => v,
-            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
-        };
-        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
-        if order.payment_status != "CAPTURED" {
-            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
-        }
-        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
-        if let Some(existing) = state.by_order(event.order_id).await? {
-            if let Some(reason) = hooks.admit(&existing) {
-                return Ok(Outcome::Skipped(reason));
-            }
-        }
-        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
-        let refund_opened = domain::generated::events::RefundOpened {
-            payment_intent_id: order.payment_intent_id.clone(),
-            order_id: event.order_id,
-            restaurant_id: event.restaurant_id,
-            amount: order.total_amount_cents.clone(),
-            reason: Some(event.reason.clone()),
-        };
-        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            order_id: event.order_id,
-            payment_intent_id: order.payment_intent_id.clone(),
-            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
-            reason: Some(event.reason.clone()),
-            refund_id: None,
-            approved_amount_cents: None,
-            // Ignored on write — the store stamps now() (runtime envelope).
-            last_update_utc: chrono::Utc::now(),
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-
-    /// Non-structural hooks for the generated `OrderCancelledByCustomer` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The customer cancelled a paid order — open a pending refund for a restaurant/admin decision.
-    #[async_trait::async_trait]
-    pub trait OrderCancelledByCustomerHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
-        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
-
-        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
-        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
-        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
-            None
-        }
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/OrderCancelledByCustomer` — generated step pipeline (issue #25).
-    /// The customer cancelled a paid order — open a pending refund for a restaurant/admin decision.
-    pub async fn on_order_cancelled_by_customer(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn OrderCancelledByCustomerHooks,
-        event: &domain::generated::events::OrderCancelledByCustomer,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
-        let order = match hooks.read_order(event.order_id).await? {
-            super::HookOutcome::Ready(v) => v,
-            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
-        };
-        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
-        if order.payment_status != "CAPTURED" {
-            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
-        }
-        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
-        if let Some(existing) = state.by_order(event.order_id).await? {
-            if let Some(reason) = hooks.admit(&existing) {
-                return Ok(Outcome::Skipped(reason));
-            }
-        }
-        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
-        let refund_opened = domain::generated::events::RefundOpened {
-            payment_intent_id: order.payment_intent_id.clone(),
-            order_id: event.order_id,
-            restaurant_id: event.restaurant_id,
-            amount: order.total_amount_cents.clone(),
-            reason: event.reason.clone(),
-        };
-        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            order_id: event.order_id,
-            payment_intent_id: order.payment_intent_id.clone(),
-            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
-            reason: event.reason.clone(),
-            refund_id: None,
-            approved_amount_cents: None,
-            // Ignored on write — the store stamps now() (runtime envelope).
-            last_update_utc: chrono::Utc::now(),
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-
-    /// Non-structural hooks for the generated `OrderCancelledByRestaurant` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision.
-    #[async_trait::async_trait]
-    pub trait OrderCancelledByRestaurantHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
-        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
-
-        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
-        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
-        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
-            None
-        }
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/OrderCancelledByRestaurant` — generated step pipeline (issue #25).
-    /// The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision.
-    pub async fn on_order_cancelled_by_restaurant(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn OrderCancelledByRestaurantHooks,
-        event: &domain::generated::events::OrderCancelledByRestaurant,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
-        let order = match hooks.read_order(event.order_id).await? {
-            super::HookOutcome::Ready(v) => v,
-            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
-        };
-        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
-        if order.payment_status != "CAPTURED" {
-            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
-        }
-        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
-        if let Some(existing) = state.by_order(event.order_id).await? {
-            if let Some(reason) = hooks.admit(&existing) {
-                return Ok(Outcome::Skipped(reason));
-            }
-        }
-        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
-        let refund_opened = domain::generated::events::RefundOpened {
-            payment_intent_id: order.payment_intent_id.clone(),
-            order_id: event.order_id,
-            restaurant_id: event.restaurant_id,
-            amount: order.total_amount_cents.clone(),
-            reason: Some(event.reason.clone()),
-        };
-        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            order_id: event.order_id,
-            payment_intent_id: order.payment_intent_id.clone(),
-            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
-            reason: Some(event.reason.clone()),
-            refund_id: None,
-            approved_amount_cents: None,
-            // Ignored on write — the store stamps now() (runtime envelope).
-            last_update_utc: chrono::Utc::now(),
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-
-    /// Non-structural hooks for the generated `RefundRequested` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a pending refund for a restaurant/admin decision. 
-    #[async_trait::async_trait]
-    pub trait RefundRequestedHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
-        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
-
-        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
-        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
-        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
-            None
-        }
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/RefundRequested` — generated step pipeline (issue #25).
-    /// The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a pending refund for a restaurant/admin decision. 
-    pub async fn on_refund_requested(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn RefundRequestedHooks,
-        event: &domain::generated::events::RefundRequested,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
-        let order = match hooks.read_order(event.order_id).await? {
-            super::HookOutcome::Ready(v) => v,
-            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
-        };
-        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
-        if order.payment_status != "CAPTURED" {
-            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
-        }
-        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
-        if let Some(existing) = state.by_order(event.order_id).await? {
-            if let Some(reason) = hooks.admit(&existing) {
-                return Ok(Outcome::Skipped(reason));
-            }
-        }
-        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
-        let refund_opened = domain::generated::events::RefundOpened {
-            payment_intent_id: order.payment_intent_id.clone(),
-            order_id: event.order_id,
-            restaurant_id: event.restaurant_id,
-            amount: order.total_amount_cents.clone(),
-            reason: event.reason.clone(),
-        };
-        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            order_id: event.order_id,
-            payment_intent_id: order.payment_intent_id.clone(),
-            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
-            reason: event.reason.clone(),
-            refund_id: None,
-            approved_amount_cents: None,
-            // Ignored on write — the store stamps now() (runtime envelope).
-            last_update_utc: chrono::Utc::now(),
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-
-    /// Non-structural hooks for the generated `ApproveRefund` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The restaurant or an admin approves the pending refund (possibly partial): request the Stripe refund and record the decision on the Payment. 
-    #[async_trait::async_trait]
-    pub trait ApproveRefundHooks: Send + Sync {
-        /// Build the `payment.refund` input for this leg. — Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run. `Skip` skips just this call — the leg continues.
-        async fn input_payment_refund(&self, cmd: &domain::generated::commands::ApproveRefund, row: &crate::pm_state::RefundProcessRow) -> Result<super::HookOutcome<crate::generated::services::PaymentRefundInput>, domain::shared::errors::DomainError>;
-
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundApproved` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_approved(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundApproved) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// COMMAND leg `commands.yaml#/ApproveRefund` — generated step pipeline (issue #25).
-    /// The restaurant or an admin approves the pending refund (possibly partial): request the Stripe refund and record the decision on the Payment. 
-    pub async fn approve_refund(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        payment: &dyn crate::generated::services::PaymentService,
-        hooks: &dyn ApproveRefundHooks,
-        cmd: domain::generated::commands::ApproveRefund,
-        actor: &crate::ports::Actor,
-    ) -> Result<(), domain::shared::errors::DomainError> {
-        // state.by order_id — load the run this trigger correlates to.
-        let Some(row) = state.by_order(cmd.order_id).await? else {
-            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
-        };
-        // guard state.process_status = PENDING_APPROVAL — throws RefundNotPending. Also thrown when no run exists for the order.
-        if row.process_status != domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL {
-            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
-        }
-        // call payment.refund — Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run.
-        match hooks.input_payment_refund(&cmd, &row).await? {
-            super::HookOutcome::Ready(input) => {
-                payment.refund(input, &crate::generated::services::ServiceCallMeta::new(actor.correlation_id)).await?;
-            }
-            super::HookOutcome::Skip(reason) => {
-                tracing::warn!(saga = "RefundProcess", port = "payment", operation = "refund", %reason, "service call skipped");
-            }
-        }
-        // deliver RefundApproved → Payment (the aggregate records the fact)
-        let refund_approved = domain::generated::events::RefundApproved {
-            payment_intent_id: row.payment_intent_id.clone(),
-            order_id: cmd.order_id,
-            amount: cmd.amount.clone(),
-            reason: cmd.reason.clone(),
-        };
-        let stream = format!("Payment-{}", refund_approved.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_approved(&stream_events, &refund_approved) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundApproved(refund_approved.clone())], actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            process_status: domain::generated::scalars::RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT,
-            approved_amount_cents: Some(cmd.amount.amount_cents),
-            reason: cmd.reason.clone(),
-            ..row
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(())
-    }
-
-    /// Non-structural hooks for the generated `DenyRefund` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The restaurant or an admin denies the pending refund: record the decision on the Payment and close the run.
-    pub trait DenyRefundHooks: Send + Sync {
-        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
-        /// `RefundDenied` be appended? (A re-delivered trigger must find the fact already recorded.)
-        fn should_deliver_refund_denied(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundDenied) -> bool;
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// COMMAND leg `commands.yaml#/DenyRefund` — generated step pipeline (issue #25).
-    /// The restaurant or an admin denies the pending refund: record the decision on the Payment and close the run.
-    pub async fn deny_refund(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn DenyRefundHooks,
-        cmd: domain::generated::commands::DenyRefund,
-        actor: &crate::ports::Actor,
-    ) -> Result<(), domain::shared::errors::DomainError> {
-        // state.by order_id — load the run this trigger correlates to.
-        let Some(row) = state.by_order(cmd.order_id).await? else {
-            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
-        };
-        // guard state.process_status = PENDING_APPROVAL — throws RefundNotPending. 
-        if row.process_status != domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL {
-            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
-        }
-        // deliver RefundDenied → Payment (the aggregate records the fact)
-        let refund_denied = domain::generated::events::RefundDenied {
-            payment_intent_id: row.payment_intent_id.clone(),
-            order_id: cmd.order_id,
-            reason: cmd.reason.clone(),
-        };
-        let stream = format!("Payment-{}", refund_denied.payment_intent_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_refund_denied(&stream_events, &refund_denied) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundDenied(refund_denied.clone())], actor)
-                .await?;
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            process_status: domain::generated::scalars::RefundProcessStatus::DENIED,
-            reason: Some(cmd.reason.clone()),
-            ..row
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(())
-    }
-
-    /// Non-structural hooks for the generated `PaymentRefunded` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The fact is already in the log; nothing to emit. 
-    pub trait PaymentRefundedHooks: Send + Sync {
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/PaymentRefunded` — generated step pipeline (issue #25).
-    /// Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The fact is already in the log; nothing to emit. 
-    pub async fn on_payment_refunded(
-        state: &dyn crate::pm_state::RefundProcessStateStore,
-        hooks: &dyn PaymentRefundedHooks,
-        event: &domain::generated::events::PaymentRefunded,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        // state.by order_id — load the run this trigger correlates to. Unknown or already-settled run → skip (idempotent under Stripe re-delivery).
-        let Some(row) = state.by_order(event.order_id).await? else {
-            return Ok(Outcome::Skipped(format!("no refund_process_manager run for order_id {:?} — Unknown or already-settled run → skip (idempotent under Stripe re-delivery).", event.order_id)));
-        };
-        // state.expect process_status = APPROVED_AWAITING_SETTLEMENT — a failed expect is a benign skip. Unknown or already-settled run → skip (idempotent under Stripe re-delivery).
-        if row.process_status != domain::generated::scalars::RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT {
-            return Ok(Outcome::Skipped(format!("refund_process_manager run is {:?}, expected APPROVED_AWAITING_SETTLEMENT — Unknown or already-settled run → skip (idempotent under Stripe re-delivery).", row.process_status)));
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::RefundProcessRow {
-            refund_id: Some(event.refund_id.clone()),
-            process_status: domain::generated::scalars::RefundProcessStatus::REFUNDED,
-            ..row
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-}
-
-/// Generated step pipelines for `processmanager.yaml#/CartBindingProcess`.
-pub mod cart_binding_process {
-
-    /// Columns of `Cart` consumed by this PM's `read open_carts` step, typed by their consumers.
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct OpenCartsRead {
-        /// Feeds `BindCartToCustomer.cartId`.
-        pub cart_id: domain::generated::scalars::CartId,
-    }
-
-    /// Non-structural hooks for the generated `CustomerIdentified` leg — the seams the step DSL cannot express
-    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// Bind every OPEN cart of the identified session to the customer.
-    #[async_trait::async_trait]
-    pub trait CustomerIdentifiedHooks: Send + Sync {
-        /// Execute `read open_carts` over `Cart` (where session_id = message.sessionId, status = OPEN). Absence = empty (no skip).
-        async fn read_open_carts(&self, session_id: domain::generated::scalars::SessionId) -> Result<Vec<OpenCartsRead>, domain::shared::errors::DomainError>;
-
-        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
-        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
-        fn admit(&self, _existing: &crate::pm_state::CartBindingRow) -> Option<String> {
-            None
-        }
-
-        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
-        /// credential, ADR-20260720-015500) — default: none.
-        fn finalize(&self, _row: &mut crate::pm_state::CartBindingRow) {}
-    }
-
-    /// EVENT leg `events.yaml#/CustomerIdentified` — generated step pipeline (issue #25).
-    /// Bind every OPEN cart of the identified session to the customer.
-    pub async fn on_customer_identified(
-        store: &dyn crate::ports::EventStore,
-        state: &dyn crate::pm_state::CartBindingStateStore,
-        hooks: &dyn CustomerIdentifiedHooks,
-        event: &domain::generated::events::CustomerIdentified,
-        env: &crate::process_managers::TriggerEnvelope,
-    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
-        use crate::process_managers::Outcome;
-        let actor = crate::process_managers::saga_actor(env);
-        // read `open_carts` ← Cart where session_id = message.sessionId, status = OPEN.
-        let open_carts = hooks.read_open_carts(event.session_id).await?;
-        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
-        if let Some(existing) = state.by_session(event.session_id).await? {
-            if let Some(reason) = hooks.admit(&existing) {
-                return Ok(Outcome::Skipped(reason));
-            }
-        }
-        // send BindCartToCustomer (the target validates and may reject; a rejection is logged and skipped) — One command per open cart; the Cart validates (one-time bind) and emits CartBoundToCustomer.
-        for item in &open_carts {
-            let sent = domain::generated::commands::BindCartToCustomer {
-                cart_id: item.cart_id,
-                customer_id: event.customer_id,
-            };
-            match crate::commands::bind_cart_to_customer(store, sent, &actor).await {
-                Ok(()) => {}
-                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
-                Err(domain::shared::errors::DomainError::Repository(e)) => {
-                    return Err(domain::shared::errors::DomainError::Repository(e))
-                }
-                Err(rejection) => {
-                    tracing::warn!(saga = "CartBindingProcess", command = "BindCartToCustomer", %rejection, "command rejected -- leg skipped, the target aggregate's own invariants stand");
-                }
-            }
-        }
-        // state.set — upsert the run row (envelope stamps last_update_utc).
-        let mut updated = crate::pm_state::CartBindingRow {
-            session_id: event.session_id,
-            customer_id: event.customer_id,
-            // Ignored on write — the store stamps now() (runtime envelope).
-            last_update_utc: chrono::Utc::now(),
-        };
-        hooks.finalize(&mut updated);
-        state.upsert(&updated).await?;
-        Ok(Outcome::Completed)
-    }
-}
-
 /// Generated step pipelines for `processmanager.yaml#/DeliveryDispatchProcess`.
 pub mod delivery_dispatch_process {
 
@@ -1301,6 +609,203 @@ pub mod delivery_dispatch_process {
     }
 }
 
+/// Generated step pipelines for `processmanager.yaml#/PlaceOrderProcess`.
+pub mod place_order_process {
+
+    /// Non-structural hooks for the generated `PaymentCaptured` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
+    #[async_trait::async_trait]
+    pub trait PaymentCapturedHooks: Send + Sync {
+        /// Build the FULL `OrderPlaced` payload — the DSL `with` covers only [orderId]; the rest is computed
+        /// (spec note: — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.). `Skip` ends the leg as a benign no-op; `Err` aborts and surfaces.
+        async fn build_order_placed(&self, event: &domain::generated::events::PaymentCaptured, row: &crate::pm_state::PaymentProcessRow) -> Result<super::HookOutcome<domain::generated::events::OrderPlaced>, domain::shared::errors::DomainError>;
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `OrderPlaced` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_order_placed(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::OrderPlaced) -> bool;
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `CartCheckedOut` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_cart_checked_out(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::CartCheckedOut) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::PaymentProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/PaymentCaptured` — generated step pipeline (issue #25).
+    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
+    pub async fn on_payment_captured(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::PaymentProcessStateStore,
+        hooks: &dyn PaymentCapturedHooks,
+        event: &domain::generated::events::PaymentCaptured,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this capture belongs to.
+        let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("PaymentEventOrphaned", serde_json::json!({ "paymentIntentId": &event.payment_intent_id })));
+        };
+        // state.expect process_status = AWAITING_PAYMENT_RESULT — a failed expect is a benign skip. Already-resolved run → skip (benign Stripe re-delivery).
+        if row.process_status != domain::generated::scalars::PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
+            return Ok(Outcome::Skipped(format!("payment_process_manager run is {:?}, expected AWAITING_PAYMENT_RESULT — Already-resolved run → skip (benign Stripe re-delivery).", row.process_status)));
+        }
+        // deliver OrderPlaced → Order (the aggregate records the fact) — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.
+        let order_placed = match hooks.build_order_placed(event, &row).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        let stream = format!("Order-{}", order_placed.order_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_order_placed(&stream_events, &order_placed) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())], &actor)
+                .await?;
+        }
+        // deliver CartCheckedOut → Cart (the aggregate records the fact)
+        let cart_checked_out = domain::generated::events::CartCheckedOut {
+            cart_id: row.cart_id,
+            order_id: row.order_id,
+        };
+        let stream = format!("Cart-{}", cart_checked_out.cart_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_cart_checked_out(&stream_events, &cart_checked_out) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::CartCheckedOut(cart_checked_out.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::PaymentProcessRow {
+            payment_status: domain::generated::scalars::PaymentStatus::CAPTURED,
+            process_status: domain::generated::scalars::PaymentProcessStatus::ORDER_PLACED,
+            last_processed_stripe_event_id: Some(domain::generated::scalars::ExternalReference(env.event_id.to_string())),
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `PaymentFailed` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// Payment failed: resolve the run; no order is placed and the cart stays OPEN.
+    pub trait PaymentFailedHooks: Send + Sync {
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::PaymentProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/PaymentFailed` — generated step pipeline (issue #25).
+    /// Payment failed: resolve the run; no order is placed and the cart stays OPEN.
+    pub async fn on_payment_failed(
+        state: &dyn crate::pm_state::PaymentProcessStateStore,
+        hooks: &dyn PaymentFailedHooks,
+        event: &domain::generated::events::PaymentFailed,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this failure belongs to.
+        let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("PaymentEventOrphaned", serde_json::json!({ "paymentIntentId": &event.payment_intent_id })));
+        };
+        // state.expect process_status = AWAITING_PAYMENT_RESULT — a failed expect is a benign skip. Already-resolved run → skip (benign Stripe re-delivery).
+        if row.process_status != domain::generated::scalars::PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
+            return Ok(Outcome::Skipped(format!("payment_process_manager run is {:?}, expected AWAITING_PAYMENT_RESULT — Already-resolved run → skip (benign Stripe re-delivery).", row.process_status)));
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc). No domain event — the cart stays OPEN for the customer to retry.
+        let mut updated = crate::pm_state::PaymentProcessRow {
+            payment_status: domain::generated::scalars::PaymentStatus::FAILED,
+            process_status: domain::generated::scalars::PaymentProcessStatus::FAILED,
+            last_processed_stripe_event_id: Some(domain::generated::scalars::ExternalReference(env.event_id.to_string())),
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+}
+
+/// Generated step pipelines for `processmanager.yaml#/CartBindingProcess`.
+pub mod cart_binding_process {
+
+    /// Columns of `Cart` consumed by this PM's `read open_carts` step, typed by their consumers.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct OpenCartsRead {
+        /// Feeds `BindCartToCustomer.cartId`.
+        pub cart_id: domain::generated::scalars::CartId,
+    }
+
+    /// Non-structural hooks for the generated `CustomerIdentified` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// Bind every OPEN cart of the identified session to the customer.
+    #[async_trait::async_trait]
+    pub trait CustomerIdentifiedHooks: Send + Sync {
+        /// Execute `read open_carts` over `Cart` (where session_id = message.sessionId, status = OPEN). Absence = empty (no skip).
+        async fn read_open_carts(&self, session_id: domain::generated::scalars::SessionId) -> Result<Vec<OpenCartsRead>, domain::shared::errors::DomainError>;
+
+        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
+        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
+        fn admit(&self, _existing: &crate::pm_state::CartBindingRow) -> Option<String> {
+            None
+        }
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::CartBindingRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/CustomerIdentified` — generated step pipeline (issue #25).
+    /// Bind every OPEN cart of the identified session to the customer.
+    pub async fn on_customer_identified(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::CartBindingStateStore,
+        hooks: &dyn CustomerIdentifiedHooks,
+        event: &domain::generated::events::CustomerIdentified,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // read `open_carts` ← Cart where session_id = message.sessionId, status = OPEN.
+        let open_carts = hooks.read_open_carts(event.session_id).await?;
+        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
+        if let Some(existing) = state.by_session(event.session_id).await? {
+            if let Some(reason) = hooks.admit(&existing) {
+                return Ok(Outcome::Skipped(reason));
+            }
+        }
+        // send BindCartToCustomer (the target validates and may reject; a rejection is logged and skipped) — One command per open cart; the Cart validates (one-time bind) and emits CartBoundToCustomer.
+        for item in &open_carts {
+            let sent = domain::generated::commands::BindCartToCustomer {
+                cart_id: item.cart_id,
+                customer_id: event.customer_id,
+            };
+            match crate::commands::bind_cart_to_customer(store, sent, &actor).await {
+                Ok(()) => {}
+                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                Err(domain::shared::errors::DomainError::Repository(e)) => {
+                    return Err(domain::shared::errors::DomainError::Repository(e))
+                }
+                Err(rejection) => {
+                    tracing::warn!(saga = "CartBindingProcess", command = "BindCartToCustomer", %rejection, "command rejected -- leg skipped, the target aggregate's own invariants stand");
+                }
+            }
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::CartBindingRow {
+            session_id: event.session_id,
+            customer_id: event.customer_id,
+            // Ignored on write — the store stamps now() (runtime envelope).
+            last_update_utc: chrono::Utc::now(),
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+}
+
 /// Generated step pipelines for `processmanager.yaml#/ReclamationProcess`.
 pub mod reclamation_process {
 
@@ -1350,5 +855,500 @@ pub mod reclamation_process {
             return Ok(Outcome::Completed);
         }
         Ok(leg_outcome)
+    }
+}
+
+/// Generated step pipelines for `processmanager.yaml#/RefundProcess`.
+pub mod refund_process {
+
+    /// Columns of `OrderTracking` consumed by this PM's `read order` step, typed by their consumers.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct OrderRead {
+        /// Feeds the `= CAPTURED` guard.
+        pub payment_status: String,
+        /// Feeds `RefundOpened.paymentIntentId`.
+        pub payment_intent_id: domain::generated::scalars::PaymentIntentId,
+        /// Feeds `RefundOpened.amount`.
+        pub total_amount_cents: domain::generated::entities::Money,
+    }
+
+    /// Non-structural hooks for the generated `OrderRejectedByRestaurant` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
+    #[async_trait::async_trait]
+    pub trait OrderRejectedByRestaurantHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
+        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
+        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
+            None
+        }
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/OrderRejectedByRestaurant` — generated step pipeline (issue #25).
+    /// The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
+    pub async fn on_order_rejected_by_restaurant(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn OrderRejectedByRestaurantHooks,
+        event: &domain::generated::events::OrderRejectedByRestaurant,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
+        if order.payment_status != "CAPTURED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
+        }
+        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
+        if let Some(existing) = state.by_order(event.order_id).await? {
+            if let Some(reason) = hooks.admit(&existing) {
+                return Ok(Outcome::Skipped(reason));
+            }
+        }
+        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
+        let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
+            order_id: event.order_id,
+            restaurant_id: event.restaurant_id,
+            amount: order.total_amount_cents.clone(),
+            reason: Some(event.reason.clone()),
+        };
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            order_id: event.order_id,
+            payment_intent_id: order.payment_intent_id.clone(),
+            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
+            reason: Some(event.reason.clone()),
+            refund_id: None,
+            approved_amount_cents: None,
+            // Ignored on write — the store stamps now() (runtime envelope).
+            last_update_utc: chrono::Utc::now(),
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `OrderCancelledByCustomer` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The customer cancelled a paid order — open a pending refund for a restaurant/admin decision.
+    #[async_trait::async_trait]
+    pub trait OrderCancelledByCustomerHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
+        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
+        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
+            None
+        }
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/OrderCancelledByCustomer` — generated step pipeline (issue #25).
+    /// The customer cancelled a paid order — open a pending refund for a restaurant/admin decision.
+    pub async fn on_order_cancelled_by_customer(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn OrderCancelledByCustomerHooks,
+        event: &domain::generated::events::OrderCancelledByCustomer,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
+        if order.payment_status != "CAPTURED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
+        }
+        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
+        if let Some(existing) = state.by_order(event.order_id).await? {
+            if let Some(reason) = hooks.admit(&existing) {
+                return Ok(Outcome::Skipped(reason));
+            }
+        }
+        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
+        let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
+            order_id: event.order_id,
+            restaurant_id: event.restaurant_id,
+            amount: order.total_amount_cents.clone(),
+            reason: event.reason.clone(),
+        };
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            order_id: event.order_id,
+            payment_intent_id: order.payment_intent_id.clone(),
+            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
+            reason: event.reason.clone(),
+            refund_id: None,
+            approved_amount_cents: None,
+            // Ignored on write — the store stamps now() (runtime envelope).
+            last_update_utc: chrono::Utc::now(),
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `OrderCancelledByRestaurant` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision.
+    #[async_trait::async_trait]
+    pub trait OrderCancelledByRestaurantHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
+        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
+        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
+            None
+        }
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/OrderCancelledByRestaurant` — generated step pipeline (issue #25).
+    /// The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision.
+    pub async fn on_order_cancelled_by_restaurant(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn OrderCancelledByRestaurantHooks,
+        event: &domain::generated::events::OrderCancelledByRestaurant,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
+        if order.payment_status != "CAPTURED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
+        }
+        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
+        if let Some(existing) = state.by_order(event.order_id).await? {
+            if let Some(reason) = hooks.admit(&existing) {
+                return Ok(Outcome::Skipped(reason));
+            }
+        }
+        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
+        let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
+            order_id: event.order_id,
+            restaurant_id: event.restaurant_id,
+            amount: order.total_amount_cents.clone(),
+            reason: Some(event.reason.clone()),
+        };
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            order_id: event.order_id,
+            payment_intent_id: order.payment_intent_id.clone(),
+            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
+            reason: Some(event.reason.clone()),
+            refund_id: None,
+            approved_amount_cents: None,
+            // Ignored on write — the store stamps now() (runtime envelope).
+            last_update_utc: chrono::Utc::now(),
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `RefundRequested` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a pending refund for a restaurant/admin decision. 
+    #[async_trait::async_trait]
+    pub trait RefundRequestedHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
+        /// the leg as a benign skip (e.g. never regress a decided run). Default: admit.
+        fn admit(&self, _existing: &crate::pm_state::RefundProcessRow) -> Option<String> {
+            None
+        }
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundOpened` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_opened(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundOpened) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/RefundRequested` — generated step pipeline (issue #25).
+    /// The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a pending refund for a restaurant/admin decision. 
+    pub async fn on_refund_requested(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn RefundRequestedHooks,
+        event: &domain::generated::events::RefundRequested,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = CAPTURED — benign alternative: Nothing captured → nothing to refund.
+        if order.payment_status != "CAPTURED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not CAPTURED — Nothing captured → nothing to refund.", order.payment_status)));
+        }
+        // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
+        if let Some(existing) = state.by_order(event.order_id).await? {
+            if let Some(reason) = hooks.admit(&existing) {
+                return Ok(Outcome::Skipped(reason));
+            }
+        }
+        // deliver RefundOpened → Payment (the aggregate records the fact) — The refund queue fact (View_PendingRefunds); the Payment records it idempotently.
+        let refund_opened = domain::generated::events::RefundOpened {
+            payment_intent_id: order.payment_intent_id.clone(),
+            order_id: event.order_id,
+            restaurant_id: event.restaurant_id,
+            amount: order.total_amount_cents.clone(),
+            reason: event.reason.clone(),
+        };
+        let stream = format!("Payment-{}", refund_opened.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_opened(&stream_events, &refund_opened) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundOpened(refund_opened.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            order_id: event.order_id,
+            payment_intent_id: order.payment_intent_id.clone(),
+            process_status: domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL,
+            reason: event.reason.clone(),
+            refund_id: None,
+            approved_amount_cents: None,
+            // Ignored on write — the store stamps now() (runtime envelope).
+            last_update_utc: chrono::Utc::now(),
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `ApproveRefund` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant or an admin approves the pending refund (possibly partial): request the Stripe refund and record the decision on the Payment. 
+    #[async_trait::async_trait]
+    pub trait ApproveRefundHooks: Send + Sync {
+        /// Build the `payment.refund` input for this leg. — Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run. `Skip` skips just this call — the leg continues.
+        async fn input_payment_refund(&self, cmd: &domain::generated::commands::ApproveRefund, row: &crate::pm_state::RefundProcessRow) -> Result<super::HookOutcome<crate::generated::services::PaymentRefundInput>, domain::shared::errors::DomainError>;
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundApproved` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_approved(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundApproved) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// COMMAND leg `commands.yaml#/ApproveRefund` — generated step pipeline (issue #25).
+    /// The restaurant or an admin approves the pending refund (possibly partial): request the Stripe refund and record the decision on the Payment. 
+    pub async fn approve_refund(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        payment: &dyn crate::generated::services::PaymentService,
+        hooks: &dyn ApproveRefundHooks,
+        cmd: domain::generated::commands::ApproveRefund,
+        actor: &crate::ports::Actor,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        // state.by order_id — load the run this trigger correlates to.
+        let Some(row) = state.by_order(cmd.order_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
+        };
+        // guard state.process_status = PENDING_APPROVAL — throws RefundNotPending. Also thrown when no run exists for the order.
+        if row.process_status != domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL {
+            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
+        }
+        // call payment.refund — Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run.
+        match hooks.input_payment_refund(&cmd, &row).await? {
+            super::HookOutcome::Ready(input) => {
+                payment.refund(input, &crate::generated::services::ServiceCallMeta::new(actor.correlation_id)).await?;
+            }
+            super::HookOutcome::Skip(reason) => {
+                tracing::warn!(saga = "RefundProcess", port = "payment", operation = "refund", %reason, "service call skipped");
+            }
+        }
+        // deliver RefundApproved → Payment (the aggregate records the fact)
+        let refund_approved = domain::generated::events::RefundApproved {
+            payment_intent_id: row.payment_intent_id.clone(),
+            order_id: cmd.order_id,
+            amount: cmd.amount.clone(),
+            reason: cmd.reason.clone(),
+        };
+        let stream = format!("Payment-{}", refund_approved.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_approved(&stream_events, &refund_approved) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundApproved(refund_approved.clone())], actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            process_status: domain::generated::scalars::RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT,
+            approved_amount_cents: Some(cmd.amount.amount_cents),
+            reason: cmd.reason.clone(),
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(())
+    }
+
+    /// Non-structural hooks for the generated `DenyRefund` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant or an admin denies the pending refund: record the decision on the Payment and close the run.
+    pub trait DenyRefundHooks: Send + Sync {
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `RefundDenied` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_refund_denied(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::RefundDenied) -> bool;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// COMMAND leg `commands.yaml#/DenyRefund` — generated step pipeline (issue #25).
+    /// The restaurant or an admin denies the pending refund: record the decision on the Payment and close the run.
+    pub async fn deny_refund(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn DenyRefundHooks,
+        cmd: domain::generated::commands::DenyRefund,
+        actor: &crate::ports::Actor,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        // state.by order_id — load the run this trigger correlates to.
+        let Some(row) = state.by_order(cmd.order_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
+        };
+        // guard state.process_status = PENDING_APPROVAL — throws RefundNotPending. 
+        if row.process_status != domain::generated::scalars::RefundProcessStatus::PENDING_APPROVAL {
+            return Err(domain::shared::errors::DomainError::rejected("RefundNotPending", serde_json::json!({ "orderId": &cmd.order_id })));
+        }
+        // deliver RefundDenied → Payment (the aggregate records the fact)
+        let refund_denied = domain::generated::events::RefundDenied {
+            payment_intent_id: row.payment_intent_id.clone(),
+            order_id: cmd.order_id,
+            reason: cmd.reason.clone(),
+        };
+        let stream = format!("Payment-{}", refund_denied.payment_intent_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_refund_denied(&stream_events, &refund_denied) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::RefundDenied(refund_denied.clone())], actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            process_status: domain::generated::scalars::RefundProcessStatus::DENIED,
+            reason: Some(cmd.reason.clone()),
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(())
+    }
+
+    /// Non-structural hooks for the generated `PaymentRefunded` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The fact is already in the log; nothing to emit. 
+    pub trait PaymentRefundedHooks: Send + Sync {
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::RefundProcessRow) {}
+    }
+
+    /// EVENT leg `events.yaml#/PaymentRefunded` — generated step pipeline (issue #25).
+    /// Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The fact is already in the log; nothing to emit. 
+    pub async fn on_payment_refunded(
+        state: &dyn crate::pm_state::RefundProcessStateStore,
+        hooks: &dyn PaymentRefundedHooks,
+        event: &domain::generated::events::PaymentRefunded,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // state.by order_id — load the run this trigger correlates to. Unknown or already-settled run → skip (idempotent under Stripe re-delivery).
+        let Some(row) = state.by_order(event.order_id).await? else {
+            return Ok(Outcome::Skipped(format!("no refund_process_manager run for order_id {:?} — Unknown or already-settled run → skip (idempotent under Stripe re-delivery).", event.order_id)));
+        };
+        // state.expect process_status = APPROVED_AWAITING_SETTLEMENT — a failed expect is a benign skip. Unknown or already-settled run → skip (idempotent under Stripe re-delivery).
+        if row.process_status != domain::generated::scalars::RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT {
+            return Ok(Outcome::Skipped(format!("refund_process_manager run is {:?}, expected APPROVED_AWAITING_SETTLEMENT — Unknown or already-settled run → skip (idempotent under Stripe re-delivery).", row.process_status)));
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc).
+        let mut updated = crate::pm_state::RefundProcessRow {
+            refund_id: Some(event.refund_id.clone()),
+            process_status: domain::generated::scalars::RefundProcessStatus::REFUNDED,
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
     }
 }

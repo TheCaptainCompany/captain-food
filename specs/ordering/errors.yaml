@@ -1,0 +1,327 @@
+version: 1
+description: >
+  ordering scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+RestaurantPaused:
+  description: "Restaurant acceptance mode is PAUSED; it cannot take orders."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    restaurantName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+  messages:
+    en: "'{restaurantName}' is not taking orders right now."
+    fr: "'{restaurantName}' ne prend pas de commandes pour le moment."
+
+
+# =====================================================================
+# Availability & stock (shared by cart and checkout)
+# =====================================================================
+
+OfferUnavailable:
+  description: "Offer availability is UNAVAILABLE (manual flag)."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+    offerName: { $ref: 'scalars.yaml#/OfferName' }
+  messages:
+    en: "'{productName}' ({offerName}) is currently unavailable."
+    fr: "'{productName}' ({offerName}) est actuellement indisponible."
+
+
+InsufficientStock:
+  description: "Requested quantity exceeds available stock."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+    offerName: { $ref: 'scalars.yaml#/OfferName' }
+    requested: { $ref: 'scalars.yaml#/Quantity' }
+    available: { $ref: 'scalars.yaml#/Quantity' }
+  messages:
+    en: "Only {available} left of '{productName}' ({offerName}), but {requested} were requested."
+    fr: "Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés."
+
+
+QuantityExceedsLimit:
+  description: "Requested quantity exceeds the per-line maximum."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+  messages:
+    en: "You can't order that many of '{productName}'."
+    fr: "Vous ne pouvez pas commander autant de '{productName}'."
+
+
+InvalidOptionSelection:
+  description: "A selected option does not belong to the offer, or violates the option list's min/max."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+  messages:
+    en: "Invalid option selection for '{productName}'."
+    fr: "Sélection d'options invalide pour '{productName}'."
+
+
+# =====================================================================
+# Cart
+# =====================================================================
+
+CartNotFound:
+  description: "No cart with this id."
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+  messages:
+    en: "Cart not found."
+    fr: "Panier introuvable."
+
+
+CartNotOpen:
+  description: "Cart is not OPEN (already checked out)."
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    status: { $ref: 'scalars.yaml#/CartStatus' }
+  messages:
+    en: "This cart can no longer be modified."
+    fr: "Ce panier ne peut plus être modifié."
+
+
+CartRestaurantMismatch:
+  description: "Line/checkout restaurant differs from the cart's restaurant (no mixing)."
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    restaurantName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+  messages:
+    en: "Your cart already has items from another restaurant, not '{restaurantName}'."
+    fr: "Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'."
+
+
+CartLineNotFound:
+  description: "No line with this id in the cart."
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    cartLineId: { $ref: 'scalars.yaml#/CartLineId' }
+  messages:
+    en: "This cart line no longer exists."
+    fr: "Cette ligne du panier n'existe plus."
+
+
+CartEmpty:
+  description: "Checkout attempted on an empty cart."
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+  messages:
+    en: "Your cart is empty."
+    fr: "Votre panier est vide."
+
+
+# =====================================================================
+# Order
+# =====================================================================
+
+OrderNotFound:
+  description: "No order with this id."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "Order not found."
+    fr: "Commande introuvable."
+
+
+InvalidOrderStatus:
+  description: "Order is not in a status that allows this transition."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    currentStatus: { $ref: 'scalars.yaml#/OrderStatus' }
+  messages:
+    en: "This action is not allowed while the order is '{currentStatus}'."
+    fr: "Cette action n'est pas autorisée tant que la commande est '{currentStatus}'."
+
+
+OrderAlreadyRated:
+  description: "The delivery (rider thumb) has already been rated for this order; final."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You have already rated this delivery."
+    fr: "Vous avez déjà noté cette livraison."
+
+
+RestaurantAlreadyRated:
+  description: "The restaurant has already been rated for this order; final (one per order)."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You have already rated the restaurant for this order."
+    fr: "Vous avez déjà noté le restaurant pour cette commande."
+
+
+DeliverySatisfactionAlreadyRecorded:
+  description: "The delivery-delay satisfaction survey has already been answered for this order; final (one per order)."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You have already answered the delivery survey for this order."
+    fr: "Vous avez déjà répondu au questionnaire de livraison pour cette commande."
+
+
+InvalidTipRecipient:
+  description: "The tipper cannot tip this recipient (e.g. a restaurant tipping itself)."
+  context:
+    tippedBy: { $ref: 'scalars.yaml#/Tipper' }
+    recipient: { $ref: 'scalars.yaml#/TipRecipient' }
+  messages:
+    en: "You can't send a tip to this recipient."
+    fr: "Vous ne pouvez pas envoyer de pourboire à ce destinataire."
+
+
+DeliveryAddressRequired:
+  description: "serviceType is DELIVERY but no delivery address was provided."
+  context: {}
+  messages:
+    en: "A delivery address is required for delivery."
+    fr: "Une adresse de livraison est requise pour la livraison."
+
+
+OutsideDeliveryArea:
+  description: "Delivery address is outside the restaurant's delivery area."
+  context:
+    restaurantName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+  messages:
+    en: "This address is outside the delivery area of '{restaurantName}'."
+    fr: "Cette adresse est en dehors de la zone de livraison de '{restaurantName}'."
+
+
+# =====================================================================
+# Payment
+# =====================================================================
+
+PaymentDeclined:
+  description: "Stripe declined the payment synchronously at checkout (no order placed)."
+  context: {}
+  messages:
+    en: "Payment was declined."
+    fr: "Le paiement a été refusé."
+
+
+PriceMismatch:
+  description: >
+    The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the
+    server recomputed from the live catalog. The server is the only price authority: the checkout is
+    rejected so the customer is never charged an amount other than the one they were shown.
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    expectedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    submittedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+  messages:
+    en: "Prices have changed since you loaded the menu. Please review your cart and try again."
+    fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer."
+
+
+PriceUnresolvable:
+  description: >
+    A cart line's price could not be resolved from the live catalog at checkout (offer or selected
+    option no longer present). Fail-closed: the checkout is rejected — the server never falls back
+    to a client-supplied amount.
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+  messages:
+    en: "An item in your cart is no longer available at a known price. Please review your cart."
+    fr: "Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier."
+
+
+CannotOrderTestRestaurant:
+  description: >
+    A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real
+    customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "This restaurant is not available."
+    fr: "Ce restaurant n'est pas disponible."
+
+
+# --- Reclamations / customer claims (#151) ---
+
+ReclamationAlreadyExists:
+  description: >
+    OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a
+    second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A reclamation already exists with this id."
+    fr: "Une réclamation existe déjà avec cet identifiant."
+
+
+ReclamationNotFound:
+  description: >
+    Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the
+    reclamation is opened (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "No reclamation exists with this id."
+    fr: "Aucune réclamation n'existe avec cet identifiant."
+
+
+ReclamationNotOpen:
+  description: >
+    Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be
+    decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "This reclamation is not open."
+    fr: "Cette réclamation n'est pas ouverte."
+
+
+ReclamationNotReopenable:
+  description: >
+    Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided
+    reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "This reclamation cannot be reopened."
+    fr: "Cette réclamation ne peut pas être rouverte."
+
+
+RejectionReasonRequired:
+  description: >
+    A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was
+    declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A reason is required to reject a reclamation."
+    fr: "Un motif est requis pour rejeter une réclamation."
+
+
+PartialRefundAmountRequired:
+  description: >
+    A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the
+    amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A refund amount is required for a partial refund."
+    fr: "Un montant de remboursement est requis pour un remboursement partiel."
+
+
+RefundExceedsCaptured:
+  description: >
+    A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the
+    ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is
+    rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    requestedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    capturedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+  messages:
+    en: "The refund amount exceeds the order's captured total."
+    fr: "Le montant du remboursement dépasse le total encaissé de la commande."

@@ -1,0 +1,228 @@
+version: 1
+description: >
+  customer scope — commands fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `commands.yaml` catalog; $refs stay kind-logical
+  (`commands.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# 5. Identify via phone OTP  (persona: customer)  — story-map activity 5
+# =====================================================================
+# We WRAP Supabase Auth behind our GraphQL (ADR-0015). The phone is given as a DialingCode ('+33', the
+# value the country picker emits) + NationalPhoneNumber; the handler composes the canonical E.164 phone.
+# OTP send IS a command (we can reject it) but emits NO event; only the verified FACTS are events.
+
+RequestPhoneVerification:
+  description: >
+    Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event.
+    `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+  type: object
+  properties:
+    dialingCode:
+      $ref: 'scalars.yaml#/DialingCode'
+    nationalNumber:
+      $ref: 'scalars.yaml#/NationalPhoneNumber'
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+      nullable: true
+      description: "SMS language; defaults from the dialing code's country when absent."
+  required: [dialingCode, nationalNumber]
+
+
+VerifyPhone:
+  description: >
+    Verify the SMS OTP with Supabase Auth, then register-or-identify: a first verified phone CREATES the
+    Customer (CustomerRegistered), a returning phone RESOLVES + signs in (CustomerIdentified). The
+    backend decides new-vs-returning; the client never calls register/identify directly.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      description: "Client-generated id, used only when the phone is new; ignored for a returning phone."
+    dialingCode:
+      $ref: 'scalars.yaml#/DialingCode'
+    nationalNumber:
+      $ref: 'scalars.yaml#/NationalPhoneNumber'
+    code:
+      $ref: 'scalars.yaml#/OtpCode'
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "The visitor session verifying the phone — carried onto CustomerIdentified so CartBindingProcess binds this session's open carts."
+    displayName:
+      $ref: 'scalars.yaml#/CustomerDisplayName'
+      nullable: true
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+      nullable: true
+      description: "Persisted on registration; defaults from the dialing code when absent."
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+  required: [customerId, dialingCode, nationalNumber, code, sessionId]
+
+
+RequestEmailVerification:
+  description: >
+    Ask Supabase Auth to email a magic link to verify/link an email for the signed-in customer. Emits no
+    event; the message is localized via the customer's STORED locale (no per-call language param).
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+  required: [customerId, email]
+
+
+ConfirmEmailVerification:
+  description: >
+    Confirm an email magic link: the client returns the Supabase token, we VERIFY it server-side and
+    link the now-verified email to the Customer. Used for both the initial email and later changes.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    token:
+      $ref: 'scalars.yaml#/EmailVerificationToken'
+  required: [customerId, token]
+
+
+RequestPhoneChange:
+  description: "Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored locale). Emits no event."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    newDialingCode:
+      $ref: 'scalars.yaml#/DialingCode'
+    newNationalNumber:
+      $ref: 'scalars.yaml#/NationalPhoneNumber'
+  required: [customerId, newDialingCode, newNationalNumber]
+
+
+ConfirmPhoneChange:
+  description: "Verify the OTP on the new phone and change the customer's phone (→ canonical E.164 PhoneNumber)."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    newDialingCode:
+      $ref: 'scalars.yaml#/DialingCode'
+    newNationalNumber:
+      $ref: 'scalars.yaml#/NationalPhoneNumber'
+    code:
+      $ref: 'scalars.yaml#/OtpCode'
+  required: [customerId, newDialingCode, newNationalNumber, code]
+
+
+# =====================================================================
+# 5b. Customer self-service: favorites & profile  (persona: customer)
+# =====================================================================
+# NOTE: password / OTP / session are handled by the auth provider (Supabase Auth) and WRAPPED by the
+# commands above (ADR-0015); there is deliberately no ChangeCustomerPassword.
+
+ChangeLanguage:
+  description: >
+    Persist the customer's preferred language (the single locale setter). The stored locale then
+    localizes subsequent authenticated SMS/email sends — so they need no per-call language param.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+  required: [customerId, locale]
+
+
+MarkRestaurantAsFavorite:
+  description: "Customer marks a restaurant as a favorite for quick access."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [customerId, restaurantId]
+
+
+UnmarkRestaurantAsFavorite:
+  description: "Customer removes a restaurant from their favorites."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [customerId, restaurantId]
+
+
+UpdateCustomerInfo:
+  description: "Customer updates their display name. (Email is verified-only — set via ConfirmEmailVerification.)"
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    displayName:
+      $ref: 'scalars.yaml#/CustomerDisplayName'
+      nullable: true
+  required: [customerId]
+
+
+SetCustomerPreferences:
+  description: "Customer sets discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is set via ChangeLanguage."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+    dietaryTags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    favoriteCuisines:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+  required: [customerId]
+
+
+SetCustomerAddress:
+  description: "Customer adds or updates a saved delivery address in their address book."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    addressId:
+      $ref: 'scalars.yaml#/AddressId'
+      description: "Client-generated id; re-using it updates that address."
+    label:
+      type: string
+      maxLength: 80
+      nullable: true
+    address:
+      $ref: 'entities.yaml#/Address'
+  required: [customerId, addressId, address]
+
+
+RemoveCustomerAddress:
+  description: "Customer removes a saved address from their address book."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    addressId:
+      $ref: 'scalars.yaml#/AddressId'
+  required: [customerId, addressId]
+
+
+SetCustomerPaymentMethod:
+  description: "Customer sets or updates their preferred Stripe payment method."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    paymentMethodId:
+      $ref: 'scalars.yaml#/PaymentMethodId'
+  required: [customerId, paymentMethodId]

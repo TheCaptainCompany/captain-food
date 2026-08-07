@@ -14,184 +14,6 @@ pub struct ErrorDef {
     pub message_fr: &'static str,
 }
 
-/// No valid authentication for this path/role.
-pub const UNAUTHORIZED: ErrorDef = ErrorDef {
-    code: "Unauthorized",
-    message_en: "You must be signed in to do this.",
-    message_fr: "Vous devez être connecté pour effectuer cette action.",
-};
-
-/// Authenticated, but not allowed to act on this resource (e.g. not the owner).
-pub const FORBIDDEN: ErrorDef = ErrorDef {
-    code: "Forbidden",
-    message_en: "You are not allowed to perform this action.",
-    message_fr: "Vous n'êtes pas autorisé à effectuer cette action.",
-};
-
-/// Input failed schema validation (type, format, required, bounds).
-/// Context: `field`.
-pub const VALIDATION_ERROR: ErrorDef = ErrorDef {
-    code: "ValidationError",
-    message_en: "The field '{field}' is invalid.",
-    message_fr: "Le champ '{field}' est invalide.",
-};
-
-/// Concurrent modification (optimistic-concurrency version clash); retry.
-pub const CONFLICT: ErrorDef = ErrorDef {
-    code: "Conflict",
-    message_en: "This item was modified meanwhile. Please retry.",
-    message_fr: "Cet élément a été modifié entre-temps. Veuillez réessayer.",
-};
-
-/// Too many requests on this path.
-pub const RATE_LIMITED: ErrorDef = ErrorDef {
-    code: "RateLimited",
-    message_en: "Too many requests. Please slow down.",
-    message_fr: "Trop de requêtes. Veuillez patienter.",
-};
-
-/// Unexpected server error.
-pub const INTERNAL: ErrorDef = ErrorDef {
-    code: "Internal",
-    message_en: "Something went wrong on our side.",
-    message_fr: "Une erreur est survenue de notre côté.",
-};
-
-/// No restaurant account with this id (e.g. registering a location under a missing account).
-/// Context: `restaurantAccountId`.
-pub const RESTAURANT_ACCOUNT_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "RestaurantAccountNotFound",
-    message_en: "Restaurant account not found.",
-    message_fr: "Compte restaurant introuvable.",
-};
-
-/// No restaurant with this id.
-/// Context: `restaurantId`.
-pub const RESTAURANT_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "RestaurantNotFound",
-    message_en: "Restaurant not found.",
-    message_fr: "Restaurant introuvable.",
-};
-
-/// Another restaurant already holds this slug. Includes a label a restaurant RELEASED by renaming: released labels stay reserved so their 301 redirect cannot be hijacked (ADR-20260728-011344).
-/// Context: `slug`.
-pub const SLUG_ALREADY_TAKEN: ErrorDef = ErrorDef {
-    code: "SlugAlreadyTaken",
-    message_en: "The address '{slug}' is already taken.",
-    message_fr: "L'adresse '{slug}' est déjà utilisée.",
-};
-
-/// The restaurant has no storefront address yet, so it cannot be activated — customers would have no host to reach it on (ADR-20260728-011344). Aggregate-local: the fold sees whether RestaurantSlugConfigured ever landed, so no read model is consulted.
-/// Context: `restaurantId`.
-pub const SLUG_NOT_CONFIGURED: ErrorDef = ErrorDef {
-    code: "SlugNotConfigured",
-    message_en: "Choose your storefront address before going live.",
-    message_fr: "Choisissez l'adresse de votre boutique avant la mise en ligne.",
-};
-
-/// The external reference (idempotent import key) is already owned by another aggregate.
-/// Context: `ref`.
-pub const REF_ALREADY_USED: ErrorDef = ErrorDef {
-    code: "RefAlreadyUsed",
-    message_en: "The reference '{ref}' is already in use.",
-    message_fr: "La référence '{ref}' est déjà utilisée.",
-};
-
-/// Currency is not a valid ISO 4217 code.
-/// Context: `currency`.
-pub const INVALID_CURRENCY: ErrorDef = ErrorDef {
-    code: "InvalidCurrency",
-    message_en: "'{currency}' is not a valid currency.",
-    message_fr: "'{currency}' n'est pas une devise valide.",
-};
-
-/// Operation requires an ACTIVE restaurant.
-/// Context: `restaurantId`, `restaurantName`.
-pub const RESTAURANT_NOT_ACTIVE: ErrorDef = ErrorDef {
-    code: "RestaurantNotActive",
-    message_en: "The restaurant '{restaurantName}' is not active.",
-    message_fr: "Le restaurant '{restaurantName}' n'est pas actif.",
-};
-
-/// Activation requires at least one catalog with one orderable offer.
-/// Context: `restaurantId`, `restaurantName`.
-pub const RESTAURANT_NOT_READY_FOR_ACTIVATION: ErrorDef = ErrorDef {
-    code: "RestaurantNotReadyForActivation",
-    message_en: "Add at least one orderable product before activating '{restaurantName}'.",
-    message_fr: "Ajoutez au moins un produit commandable avant d'activer '{restaurantName}'.",
-};
-
-/// Restaurant acceptance mode is PAUSED; it cannot take orders.
-/// Context: `restaurantId`, `restaurantName`.
-pub const RESTAURANT_PAUSED: ErrorDef = ErrorDef {
-    code: "RestaurantPaused",
-    message_en: "'{restaurantName}' is not taking orders right now.",
-    message_fr: "'{restaurantName}' ne prend pas de commandes pour le moment.",
-};
-
-/// Requested acceptance mode equals the current one.
-/// Context: `restaurantId`, `restaurantName`, `mode`.
-pub const ACCEPTANCE_MODE_UNCHANGED: ErrorDef = ErrorDef {
-    code: "AcceptanceModeUnchanged",
-    message_en: "'{restaurantName}' is already in '{mode}' mode.",
-    message_fr: "'{restaurantName}' est déjà en mode '{mode}'.",
-};
-
-/// Update command carried no editable field.
-pub const NO_EDITABLE_FIELD_PROVIDED: ErrorDef = ErrorDef {
-    code: "NoEditableFieldProvided",
-    message_en: "Provide at least one field to update.",
-    message_fr: "Indiquez au moins un champ à modifier.",
-};
-
-/// The restaurant listing has already been claimed by an owner.
-/// Context: `restaurantId`.
-pub const LISTING_ALREADY_CLAIMED: ErrorDef = ErrorDef {
-    code: "ListingAlreadyClaimed",
-    message_en: "This restaurant listing has already been claimed.",
-    message_fr: "Cette fiche restaurant a déjà été revendiquée.",
-};
-
-/// Could not verify ownership of the listing (Google Business Profile proof rejected).
-/// Context: `restaurantId`.
-pub const LISTING_OWNERSHIP_NOT_VERIFIED: ErrorDef = ErrorDef {
-    code: "ListingOwnershipNotVerified",
-    message_en: "We couldn't verify that you own this restaurant. Please confirm via your Google Business Profile.",
-    message_fr: "Nous n'avons pas pu vérifier que ce restaurant vous appartient. Confirmez via votre fiche Google Business Profile.",
-};
-
-/// No Google Business Profile 'Order online' link is configured to verify.
-/// Context: `restaurantId`.
-pub const GBP_ORDER_LINK_NOT_CONFIGURED: ErrorDef = ErrorDef {
-    code: "GbpOrderLinkNotConfigured",
-    message_en: "Configure the Google 'Order online' link before verifying it.",
-    message_fr: "Configurez le lien Google « Commander en ligne » avant de le vérifier.",
-};
-
-/// The prospect already received the maximum number of outreach contacts (anti-spam: ≤ 3).
-/// Context: `restaurantId`.
-pub const PROSPECT_CONTACT_LIMIT_REACHED: ErrorDef = ErrorDef {
-    code: "ProspectContactLimitReached",
-    message_en: "This prospect has already been contacted the maximum number of times.",
-    message_fr: "Ce prospect a déjà été contacté le nombre maximum de fois.",
-};
-
-/// A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart).
-/// Context: `restaurantId`.
-pub const PROSPECT_CONTACTED_TOO_RECENTLY: ErrorDef = ErrorDef {
-    code: "ProspectContactedTooRecently",
-    message_en: "This prospect was contacted too recently; wait before contacting again.",
-    message_fr: "Ce prospect a été contacté trop récemment ; patientez avant de le recontacter.",
-};
-
-/// No prospect (contact history) exists for this restaurant.
-/// Context: `restaurantId`.
-pub const PROSPECT_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "ProspectNotFound",
-    message_en: "Prospect not found.",
-    message_fr: "Prospect introuvable.",
-};
-
 /// No catalog with this id (or it does not belong to the restaurant).
 /// Context: `catalogId`.
 pub const CATALOG_NOT_FOUND: ErrorDef = ErrorDef {
@@ -312,14 +134,6 @@ pub const OPTION_LIST_IN_USE: ErrorDef = ErrorDef {
     message_fr: "La liste d'options '{optionListName}' est encore utilisée par un produit.",
 };
 
-/// No offer with this id in the catalog.
-/// Context: `offerId`.
-pub const OFFER_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "OfferNotFound",
-    message_en: "Product offer not found.",
-    message_fr: "Offere de produit introuvable.",
-};
-
 /// Offer is not stock-tracked, so its stock cannot be set.
 /// Context: `offerId`, `productName`, `offerName`.
 pub const OFFER_NOT_STOCK_TRACKED: ErrorDef = ErrorDef {
@@ -342,272 +156,70 @@ pub const MISSING_REF: ErrorDef = ErrorDef {
     message_fr: "Chaque élément importé doit avoir une référence.",
 };
 
-/// Offer availability is UNAVAILABLE (manual flag).
-/// Context: `offerId`, `productName`, `offerName`.
-pub const OFFER_UNAVAILABLE: ErrorDef = ErrorDef {
-    code: "OfferUnavailable",
-    message_en: "'{productName}' ({offerName}) is currently unavailable.",
-    message_fr: "'{productName}' ({offerName}) est actuellement indisponible.",
+/// No valid authentication for this path/role.
+pub const UNAUTHORIZED: ErrorDef = ErrorDef {
+    code: "Unauthorized",
+    message_en: "You must be signed in to do this.",
+    message_fr: "Vous devez être connecté pour effectuer cette action.",
 };
 
-/// Requested quantity exceeds available stock.
-/// Context: `offerId`, `productName`, `offerName`, `requested`, `available`.
-pub const INSUFFICIENT_STOCK: ErrorDef = ErrorDef {
-    code: "InsufficientStock",
-    message_en: "Only {available} left of '{productName}' ({offerName}), but {requested} were requested.",
-    message_fr: "Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés.",
+/// Authenticated, but not allowed to act on this resource (e.g. not the owner).
+pub const FORBIDDEN: ErrorDef = ErrorDef {
+    code: "Forbidden",
+    message_en: "You are not allowed to perform this action.",
+    message_fr: "Vous n'êtes pas autorisé à effectuer cette action.",
 };
 
-/// Requested quantity exceeds the per-line maximum.
-/// Context: `offerId`, `productName`.
-pub const QUANTITY_EXCEEDS_LIMIT: ErrorDef = ErrorDef {
-    code: "QuantityExceedsLimit",
-    message_en: "You can't order that many of '{productName}'.",
-    message_fr: "Vous ne pouvez pas commander autant de '{productName}'.",
+/// Input failed schema validation (type, format, required, bounds).
+/// Context: `field`.
+pub const VALIDATION_ERROR: ErrorDef = ErrorDef {
+    code: "ValidationError",
+    message_en: "The field '{field}' is invalid.",
+    message_fr: "Le champ '{field}' est invalide.",
 };
 
-/// A selected option does not belong to the offer, or violates the option list's min/max.
-/// Context: `offerId`, `productName`.
-pub const INVALID_OPTION_SELECTION: ErrorDef = ErrorDef {
-    code: "InvalidOptionSelection",
-    message_en: "Invalid option selection for '{productName}'.",
-    message_fr: "Sélection d'options invalide pour '{productName}'.",
+/// Concurrent modification (optimistic-concurrency version clash); retry.
+pub const CONFLICT: ErrorDef = ErrorDef {
+    code: "Conflict",
+    message_en: "This item was modified meanwhile. Please retry.",
+    message_fr: "Cet élément a été modifié entre-temps. Veuillez réessayer.",
 };
 
-/// No cart with this id.
-/// Context: `cartId`.
-pub const CART_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "CartNotFound",
-    message_en: "Cart not found.",
-    message_fr: "Panier introuvable.",
+/// Too many requests on this path.
+pub const RATE_LIMITED: ErrorDef = ErrorDef {
+    code: "RateLimited",
+    message_en: "Too many requests. Please slow down.",
+    message_fr: "Trop de requêtes. Veuillez patienter.",
 };
 
-/// Cart is not OPEN (already checked out).
-/// Context: `cartId`, `status`.
-pub const CART_NOT_OPEN: ErrorDef = ErrorDef {
-    code: "CartNotOpen",
-    message_en: "This cart can no longer be modified.",
-    message_fr: "Ce panier ne peut plus être modifié.",
+/// Unexpected server error.
+pub const INTERNAL: ErrorDef = ErrorDef {
+    code: "Internal",
+    message_en: "Something went wrong on our side.",
+    message_fr: "Une erreur est survenue de notre côté.",
 };
 
-/// Line/checkout restaurant differs from the cart's restaurant (no mixing).
-/// Context: `cartId`, `restaurantId`, `restaurantName`.
-pub const CART_RESTAURANT_MISMATCH: ErrorDef = ErrorDef {
-    code: "CartRestaurantMismatch",
-    message_en: "Your cart already has items from another restaurant, not '{restaurantName}'.",
-    message_fr: "Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'.",
+/// No restaurant with this id.
+/// Context: `restaurantId`.
+pub const RESTAURANT_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "RestaurantNotFound",
+    message_en: "Restaurant not found.",
+    message_fr: "Restaurant introuvable.",
 };
 
-/// No line with this id in the cart.
-/// Context: `cartId`, `cartLineId`.
-pub const CART_LINE_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "CartLineNotFound",
-    message_en: "This cart line no longer exists.",
-    message_fr: "Cette ligne du panier n'existe plus.",
+/// Update command carried no editable field.
+pub const NO_EDITABLE_FIELD_PROVIDED: ErrorDef = ErrorDef {
+    code: "NoEditableFieldProvided",
+    message_en: "Provide at least one field to update.",
+    message_fr: "Indiquez au moins un champ à modifier.",
 };
 
-/// Checkout attempted on an empty cart.
-/// Context: `cartId`.
-pub const CART_EMPTY: ErrorDef = ErrorDef {
-    code: "CartEmpty",
-    message_en: "Your cart is empty.",
-    message_fr: "Votre panier est vide.",
-};
-
-/// The SMS OTP code does not match (rejected by Supabase Auth).
-/// Context: `phone`.
-pub const INVALID_VERIFICATION_CODE: ErrorDef = ErrorDef {
-    code: "InvalidVerificationCode",
-    message_en: "The verification code is incorrect. Please try again.",
-    message_fr: "Le code de vérification est incorrect. Veuillez réessayer.",
-};
-
-/// The SMS OTP (or email link) has expired; request a new one.
-pub const VERIFICATION_CODE_EXPIRED: ErrorDef = ErrorDef {
-    code: "VerificationCodeExpired",
-    message_en: "The verification code has expired. Please request a new one.",
-    message_fr: "Le code de vérification a expiré. Veuillez en demander un nouveau.",
-};
-
-/// The email magic-link token failed server-side verification with Supabase Auth.
-pub const INVALID_VERIFICATION_TOKEN: ErrorDef = ErrorDef {
-    code: "InvalidVerificationToken",
-    message_en: "This email verification link is invalid or has already been used.",
-    message_fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé.",
-};
-
-/// The email is already linked to another customer.
-/// Context: `email`.
-pub const EMAIL_ALREADY_IN_USE: ErrorDef = ErrorDef {
-    code: "EmailAlreadyInUse",
-    message_en: "The email '{email}' is already in use by another account.",
-    message_fr: "L'e-mail '{email}' est déjà utilisé par un autre compte.",
-};
-
-/// The phone number is already linked to another customer (on change).
-/// Context: `phone`.
-pub const PHONE_ALREADY_IN_USE: ErrorDef = ErrorDef {
-    code: "PhoneAlreadyInUse",
-    message_en: "The phone number '{phone}' is already in use by another account.",
-    message_fr: "Le numéro '{phone}' est déjà utilisé par un autre compte.",
-};
-
-/// No order with this id.
-/// Context: `orderId`.
-pub const ORDER_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "OrderNotFound",
-    message_en: "Order not found.",
-    message_fr: "Commande introuvable.",
-};
-
-/// Order is not in a status that allows this transition.
-/// Context: `orderId`, `currentStatus`.
-pub const INVALID_ORDER_STATUS: ErrorDef = ErrorDef {
-    code: "InvalidOrderStatus",
-    message_en: "This action is not allowed while the order is '{currentStatus}'.",
-    message_fr: "Cette action n'est pas autorisée tant que la commande est '{currentStatus}'.",
-};
-
-/// The delivery (rider thumb) has already been rated for this order; final.
-/// Context: `orderId`.
-pub const ORDER_ALREADY_RATED: ErrorDef = ErrorDef {
-    code: "OrderAlreadyRated",
-    message_en: "You have already rated this delivery.",
-    message_fr: "Vous avez déjà noté cette livraison.",
-};
-
-/// The restaurant has already been rated for this order; final (one per order).
-/// Context: `orderId`.
-pub const RESTAURANT_ALREADY_RATED: ErrorDef = ErrorDef {
-    code: "RestaurantAlreadyRated",
-    message_en: "You have already rated the restaurant for this order.",
-    message_fr: "Vous avez déjà noté le restaurant pour cette commande.",
-};
-
-/// The delivery-delay satisfaction survey has already been answered for this order; final (one per order).
-/// Context: `orderId`.
-pub const DELIVERY_SATISFACTION_ALREADY_RECORDED: ErrorDef = ErrorDef {
-    code: "DeliverySatisfactionAlreadyRecorded",
-    message_en: "You have already answered the delivery survey for this order.",
-    message_fr: "Vous avez déjà répondu au questionnaire de livraison pour cette commande.",
-};
-
-/// The tipper cannot tip this recipient (e.g. a restaurant tipping itself).
-/// Context: `tippedBy`, `recipient`.
-pub const INVALID_TIP_RECIPIENT: ErrorDef = ErrorDef {
-    code: "InvalidTipRecipient",
-    message_en: "You can't send a tip to this recipient.",
-    message_fr: "Vous ne pouvez pas envoyer de pourboire à ce destinataire.",
-};
-
-/// serviceType is DELIVERY but no delivery address was provided.
-pub const DELIVERY_ADDRESS_REQUIRED: ErrorDef = ErrorDef {
-    code: "DeliveryAddressRequired",
-    message_en: "A delivery address is required for delivery.",
-    message_fr: "Une adresse de livraison est requise pour la livraison.",
-};
-
-/// Delivery address is outside the restaurant's delivery area.
-/// Context: `restaurantName`.
-pub const OUTSIDE_DELIVERY_AREA: ErrorDef = ErrorDef {
-    code: "OutsideDeliveryArea",
-    message_en: "This address is outside the delivery area of '{restaurantName}'.",
-    message_fr: "Cette adresse est en dehors de la zone de livraison de '{restaurantName}'.",
-};
-
-/// No delivery job with this id.
-/// Context: `deliveryJobId`.
-pub const DELIVERY_JOB_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "DeliveryJobNotFound",
-    message_en: "Delivery job not found.",
-    message_fr: "Livraison introuvable.",
-};
-
-/// The delivery job is not in a status that allows this transition.
-/// Context: `deliveryJobId`, `currentStatus`, `expectedStatus`.
-pub const INVALID_DELIVERY_STATUS: ErrorDef = ErrorDef {
-    code: "InvalidDeliveryStatus",
-    message_en: "This action is not allowed while the delivery is '{currentStatus}'.",
-    message_fr: "Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'.",
-};
-
-/// The delivery job has already been accepted by a courier/rider.
-/// Context: `deliveryJobId`.
-pub const DELIVERY_ALREADY_ASSIGNED: ErrorDef = ErrorDef {
-    code: "DeliveryAlreadyAssigned",
-    message_en: "This delivery has already been taken.",
-    message_fr: "Cette livraison a déjà été prise en charge.",
-};
-
-/// A registration with this id already exists (idempotent self-registration guard).
-/// Context: `registrationId`.
-pub const DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED: ErrorDef = ErrorDef {
-    code: "DeliveryPartnerAvailabilityAlreadyRequested",
-    message_en: "This availability registration already exists.",
-    message_fr: "Cette demande de disponibilité existe déjà.",
-};
-
-/// No delivery-partner availability registration with this id.
-/// Context: `registrationId`.
-pub const DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "DeliveryPartnerAvailabilityNotFound",
-    message_en: "Availability registration not found.",
-    message_fr: "Demande de disponibilité introuvable.",
-};
-
-/// The availability registration is not PENDING, so it cannot be approved.
-/// Context: `registrationId`, `currentStatus`.
-pub const DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING: ErrorDef = ErrorDef {
-    code: "DeliveryPartnerAvailabilityNotPending",
-    message_en: "This availability registration is not awaiting review.",
-    message_fr: "Cette demande de disponibilité n'est pas en attente de validation.",
-};
-
-/// A rider is already registered for this identity (authRef/id).
-/// Context: `riderId`.
-pub const RIDER_ALREADY_REGISTERED: ErrorDef = ErrorDef {
-    code: "RiderAlreadyRegistered",
-    message_en: "You are already registered as a rider.",
-    message_fr: "Vous êtes déjà inscrit en tant que livreur.",
-};
-
-/// No rider with this id.
-/// Context: `riderId`.
-pub const RIDER_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "RiderNotFound",
-    message_en: "Rider not found.",
-    message_fr: "Livreur introuvable.",
-};
-
-/// The rider is not in a status that allows this transition.
-/// Context: `riderId`, `currentStatus`, `targetStatus`.
-pub const INVALID_RIDER_STATUS_TRANSITION: ErrorDef = ErrorDef {
-    code: "InvalidRiderStatusTransition",
-    message_en: "A rider cannot move from '{currentStatus}' to '{targetStatus}'.",
-    message_fr: "Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'.",
-};
-
-/// Stripe declined the payment synchronously at checkout (no order placed).
-pub const PAYMENT_DECLINED: ErrorDef = ErrorDef {
-    code: "PaymentDeclined",
-    message_en: "Payment was declined.",
-    message_fr: "Le paiement a été refusé.",
-};
-
-/// The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.
-/// Context: `cartId`, `expectedAmountCents`, `submittedAmountCents`, `currency`.
-pub const PRICE_MISMATCH: ErrorDef = ErrorDef {
-    code: "PriceMismatch",
-    message_en: "Prices have changed since you loaded the menu. Please review your cart and try again.",
-    message_fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer.",
-};
-
-/// A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.
-/// Context: `cartId`, `offerId`.
-pub const PRICE_UNRESOLVABLE: ErrorDef = ErrorDef {
-    code: "PriceUnresolvable",
-    message_en: "An item in your cart is no longer available at a known price. Please review your cart.",
-    message_fr: "Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier.",
+/// No offer with this id in the catalog.
+/// Context: `offerId`.
+pub const OFFER_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "OfferNotFound",
+    message_en: "Product offer not found.",
+    message_fr: "Offere de produit introuvable.",
 };
 
 /// A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.
@@ -618,28 +230,20 @@ pub const PAYMENT_EVENT_ORPHANED: ErrorDef = ErrorDef {
     message_fr: "Événement de paiement reçu pour un checkout inconnu.",
 };
 
-/// The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.
-/// Context: `orderId`.
-pub const REFUND_NOT_PENDING: ErrorDef = ErrorDef {
-    code: "RefundNotPending",
-    message_en: "No refund is pending approval for this order.",
-    message_fr: "Aucun remboursement n'est en attente d'approbation pour cette commande.",
+/// No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row).
+/// Context: `targetMessageId`.
+pub const MAILBOX_MESSAGE_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "MailboxMessageNotFound",
+    message_en: "Mailbox message not found.",
+    message_fr: "Message de boîte aux lettres introuvable.",
 };
 
-/// A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.
-/// Context: `customerId`.
-pub const INSUFFICIENT_CUSTOMER_CREDIT: ErrorDef = ErrorDef {
-    code: "InsufficientCustomerCredit",
-    message_en: "You do not have enough store credit for this.",
-    message_fr: "Vous n'avez pas assez d'avoir en boutique pour cela.",
-};
-
-/// A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).
-/// Context: `restaurantId`.
-pub const CANNOT_ORDER_TEST_RESTAURANT: ErrorDef = ErrorDef {
-    code: "CannotOrderTestRestaurant",
-    message_en: "This restaurant is not available.",
-    message_fr: "Ce restaurant n'est pas disponible.",
+/// The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError): handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/ DUPLICATE rows already ran — requeueing any of them would re-execute something the system decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
+/// Context: `targetMessageId`, `status`.
+pub const MAILBOX_MESSAGE_NOT_REQUEUEABLE: ErrorDef = ErrorDef {
+    code: "MailboxMessageNotRequeueable",
+    message_en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued.",
+    message_fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file.",
 };
 
 /// OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).
@@ -722,6 +326,402 @@ pub const PARTICIPANT_NOT_MUTED: ErrorDef = ErrorDef {
     message_fr: "Ce participant n'est pas actuellement muet.",
 };
 
+/// The SMS OTP code does not match (rejected by Supabase Auth).
+/// Context: `phone`.
+pub const INVALID_VERIFICATION_CODE: ErrorDef = ErrorDef {
+    code: "InvalidVerificationCode",
+    message_en: "The verification code is incorrect. Please try again.",
+    message_fr: "Le code de vérification est incorrect. Veuillez réessayer.",
+};
+
+/// The SMS OTP (or email link) has expired; request a new one.
+pub const VERIFICATION_CODE_EXPIRED: ErrorDef = ErrorDef {
+    code: "VerificationCodeExpired",
+    message_en: "The verification code has expired. Please request a new one.",
+    message_fr: "Le code de vérification a expiré. Veuillez en demander un nouveau.",
+};
+
+/// The email magic-link token failed server-side verification with Supabase Auth.
+pub const INVALID_VERIFICATION_TOKEN: ErrorDef = ErrorDef {
+    code: "InvalidVerificationToken",
+    message_en: "This email verification link is invalid or has already been used.",
+    message_fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé.",
+};
+
+/// The email is already linked to another customer.
+/// Context: `email`.
+pub const EMAIL_ALREADY_IN_USE: ErrorDef = ErrorDef {
+    code: "EmailAlreadyInUse",
+    message_en: "The email '{email}' is already in use by another account.",
+    message_fr: "L'e-mail '{email}' est déjà utilisé par un autre compte.",
+};
+
+/// The phone number is already linked to another customer (on change).
+/// Context: `phone`.
+pub const PHONE_ALREADY_IN_USE: ErrorDef = ErrorDef {
+    code: "PhoneAlreadyInUse",
+    message_en: "The phone number '{phone}' is already in use by another account.",
+    message_fr: "Le numéro '{phone}' est déjà utilisé par un autre compte.",
+};
+
+/// No delivery job with this id.
+/// Context: `deliveryJobId`.
+pub const DELIVERY_JOB_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "DeliveryJobNotFound",
+    message_en: "Delivery job not found.",
+    message_fr: "Livraison introuvable.",
+};
+
+/// The delivery job is not in a status that allows this transition.
+/// Context: `deliveryJobId`, `currentStatus`, `expectedStatus`.
+pub const INVALID_DELIVERY_STATUS: ErrorDef = ErrorDef {
+    code: "InvalidDeliveryStatus",
+    message_en: "This action is not allowed while the delivery is '{currentStatus}'.",
+    message_fr: "Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'.",
+};
+
+/// The delivery job has already been accepted by a courier/rider.
+/// Context: `deliveryJobId`.
+pub const DELIVERY_ALREADY_ASSIGNED: ErrorDef = ErrorDef {
+    code: "DeliveryAlreadyAssigned",
+    message_en: "This delivery has already been taken.",
+    message_fr: "Cette livraison a déjà été prise en charge.",
+};
+
+/// A registration with this id already exists (idempotent self-registration guard).
+/// Context: `registrationId`.
+pub const DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityAlreadyRequested",
+    message_en: "This availability registration already exists.",
+    message_fr: "Cette demande de disponibilité existe déjà.",
+};
+
+/// No delivery-partner availability registration with this id.
+/// Context: `registrationId`.
+pub const DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityNotFound",
+    message_en: "Availability registration not found.",
+    message_fr: "Demande de disponibilité introuvable.",
+};
+
+/// The availability registration is not PENDING, so it cannot be approved.
+/// Context: `registrationId`, `currentStatus`.
+pub const DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityNotPending",
+    message_en: "This availability registration is not awaiting review.",
+    message_fr: "Cette demande de disponibilité n'est pas en attente de validation.",
+};
+
+/// A rider is already registered for this identity (authRef/id).
+/// Context: `riderId`.
+pub const RIDER_ALREADY_REGISTERED: ErrorDef = ErrorDef {
+    code: "RiderAlreadyRegistered",
+    message_en: "You are already registered as a rider.",
+    message_fr: "Vous êtes déjà inscrit en tant que livreur.",
+};
+
+/// No rider with this id.
+/// Context: `riderId`.
+pub const RIDER_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "RiderNotFound",
+    message_en: "Rider not found.",
+    message_fr: "Livreur introuvable.",
+};
+
+/// The rider is not in a status that allows this transition.
+/// Context: `riderId`, `currentStatus`, `targetStatus`.
+pub const INVALID_RIDER_STATUS_TRANSITION: ErrorDef = ErrorDef {
+    code: "InvalidRiderStatusTransition",
+    message_en: "A rider cannot move from '{currentStatus}' to '{targetStatus}'.",
+    message_fr: "Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'.",
+};
+
+/// No restaurant account with this id (e.g. registering a location under a missing account).
+/// Context: `restaurantAccountId`.
+pub const RESTAURANT_ACCOUNT_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "RestaurantAccountNotFound",
+    message_en: "Restaurant account not found.",
+    message_fr: "Compte restaurant introuvable.",
+};
+
+/// Another restaurant already holds this slug. Includes a label a restaurant RELEASED by renaming: released labels stay reserved so their 301 redirect cannot be hijacked (ADR-20260728-011344).
+/// Context: `slug`.
+pub const SLUG_ALREADY_TAKEN: ErrorDef = ErrorDef {
+    code: "SlugAlreadyTaken",
+    message_en: "The address '{slug}' is already taken.",
+    message_fr: "L'adresse '{slug}' est déjà utilisée.",
+};
+
+/// The restaurant has no storefront address yet, so it cannot be activated — customers would have no host to reach it on (ADR-20260728-011344). Aggregate-local: the fold sees whether RestaurantSlugConfigured ever landed, so no read model is consulted.
+/// Context: `restaurantId`.
+pub const SLUG_NOT_CONFIGURED: ErrorDef = ErrorDef {
+    code: "SlugNotConfigured",
+    message_en: "Choose your storefront address before going live.",
+    message_fr: "Choisissez l'adresse de votre boutique avant la mise en ligne.",
+};
+
+/// The external reference (idempotent import key) is already owned by another aggregate.
+/// Context: `ref`.
+pub const REF_ALREADY_USED: ErrorDef = ErrorDef {
+    code: "RefAlreadyUsed",
+    message_en: "The reference '{ref}' is already in use.",
+    message_fr: "La référence '{ref}' est déjà utilisée.",
+};
+
+/// Currency is not a valid ISO 4217 code.
+/// Context: `currency`.
+pub const INVALID_CURRENCY: ErrorDef = ErrorDef {
+    code: "InvalidCurrency",
+    message_en: "'{currency}' is not a valid currency.",
+    message_fr: "'{currency}' n'est pas une devise valide.",
+};
+
+/// Operation requires an ACTIVE restaurant.
+/// Context: `restaurantId`, `restaurantName`.
+pub const RESTAURANT_NOT_ACTIVE: ErrorDef = ErrorDef {
+    code: "RestaurantNotActive",
+    message_en: "The restaurant '{restaurantName}' is not active.",
+    message_fr: "Le restaurant '{restaurantName}' n'est pas actif.",
+};
+
+/// Activation requires at least one catalog with one orderable offer.
+/// Context: `restaurantId`, `restaurantName`.
+pub const RESTAURANT_NOT_READY_FOR_ACTIVATION: ErrorDef = ErrorDef {
+    code: "RestaurantNotReadyForActivation",
+    message_en: "Add at least one orderable product before activating '{restaurantName}'.",
+    message_fr: "Ajoutez au moins un produit commandable avant d'activer '{restaurantName}'.",
+};
+
+/// Requested acceptance mode equals the current one.
+/// Context: `restaurantId`, `restaurantName`, `mode`.
+pub const ACCEPTANCE_MODE_UNCHANGED: ErrorDef = ErrorDef {
+    code: "AcceptanceModeUnchanged",
+    message_en: "'{restaurantName}' is already in '{mode}' mode.",
+    message_fr: "'{restaurantName}' est déjà en mode '{mode}'.",
+};
+
+/// The restaurant listing has already been claimed by an owner.
+/// Context: `restaurantId`.
+pub const LISTING_ALREADY_CLAIMED: ErrorDef = ErrorDef {
+    code: "ListingAlreadyClaimed",
+    message_en: "This restaurant listing has already been claimed.",
+    message_fr: "Cette fiche restaurant a déjà été revendiquée.",
+};
+
+/// Could not verify ownership of the listing (Google Business Profile proof rejected).
+/// Context: `restaurantId`.
+pub const LISTING_OWNERSHIP_NOT_VERIFIED: ErrorDef = ErrorDef {
+    code: "ListingOwnershipNotVerified",
+    message_en: "We couldn't verify that you own this restaurant. Please confirm via your Google Business Profile.",
+    message_fr: "Nous n'avons pas pu vérifier que ce restaurant vous appartient. Confirmez via votre fiche Google Business Profile.",
+};
+
+/// No Google Business Profile 'Order online' link is configured to verify.
+/// Context: `restaurantId`.
+pub const GBP_ORDER_LINK_NOT_CONFIGURED: ErrorDef = ErrorDef {
+    code: "GbpOrderLinkNotConfigured",
+    message_en: "Configure the Google 'Order online' link before verifying it.",
+    message_fr: "Configurez le lien Google « Commander en ligne » avant de le vérifier.",
+};
+
+/// The prospect already received the maximum number of outreach contacts (anti-spam: ≤ 3).
+/// Context: `restaurantId`.
+pub const PROSPECT_CONTACT_LIMIT_REACHED: ErrorDef = ErrorDef {
+    code: "ProspectContactLimitReached",
+    message_en: "This prospect has already been contacted the maximum number of times.",
+    message_fr: "Ce prospect a déjà été contacté le nombre maximum de fois.",
+};
+
+/// A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart).
+/// Context: `restaurantId`.
+pub const PROSPECT_CONTACTED_TOO_RECENTLY: ErrorDef = ErrorDef {
+    code: "ProspectContactedTooRecently",
+    message_en: "This prospect was contacted too recently; wait before contacting again.",
+    message_fr: "Ce prospect a été contacté trop récemment ; patientez avant de le recontacter.",
+};
+
+/// No prospect (contact history) exists for this restaurant.
+/// Context: `restaurantId`.
+pub const PROSPECT_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "ProspectNotFound",
+    message_en: "Prospect not found.",
+    message_fr: "Prospect introuvable.",
+};
+
+/// Restaurant acceptance mode is PAUSED; it cannot take orders.
+/// Context: `restaurantId`, `restaurantName`.
+pub const RESTAURANT_PAUSED: ErrorDef = ErrorDef {
+    code: "RestaurantPaused",
+    message_en: "'{restaurantName}' is not taking orders right now.",
+    message_fr: "'{restaurantName}' ne prend pas de commandes pour le moment.",
+};
+
+/// Offer availability is UNAVAILABLE (manual flag).
+/// Context: `offerId`, `productName`, `offerName`.
+pub const OFFER_UNAVAILABLE: ErrorDef = ErrorDef {
+    code: "OfferUnavailable",
+    message_en: "'{productName}' ({offerName}) is currently unavailable.",
+    message_fr: "'{productName}' ({offerName}) est actuellement indisponible.",
+};
+
+/// Requested quantity exceeds available stock.
+/// Context: `offerId`, `productName`, `offerName`, `requested`, `available`.
+pub const INSUFFICIENT_STOCK: ErrorDef = ErrorDef {
+    code: "InsufficientStock",
+    message_en: "Only {available} left of '{productName}' ({offerName}), but {requested} were requested.",
+    message_fr: "Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés.",
+};
+
+/// Requested quantity exceeds the per-line maximum.
+/// Context: `offerId`, `productName`.
+pub const QUANTITY_EXCEEDS_LIMIT: ErrorDef = ErrorDef {
+    code: "QuantityExceedsLimit",
+    message_en: "You can't order that many of '{productName}'.",
+    message_fr: "Vous ne pouvez pas commander autant de '{productName}'.",
+};
+
+/// A selected option does not belong to the offer, or violates the option list's min/max.
+/// Context: `offerId`, `productName`.
+pub const INVALID_OPTION_SELECTION: ErrorDef = ErrorDef {
+    code: "InvalidOptionSelection",
+    message_en: "Invalid option selection for '{productName}'.",
+    message_fr: "Sélection d'options invalide pour '{productName}'.",
+};
+
+/// No cart with this id.
+/// Context: `cartId`.
+pub const CART_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "CartNotFound",
+    message_en: "Cart not found.",
+    message_fr: "Panier introuvable.",
+};
+
+/// Cart is not OPEN (already checked out).
+/// Context: `cartId`, `status`.
+pub const CART_NOT_OPEN: ErrorDef = ErrorDef {
+    code: "CartNotOpen",
+    message_en: "This cart can no longer be modified.",
+    message_fr: "Ce panier ne peut plus être modifié.",
+};
+
+/// Line/checkout restaurant differs from the cart's restaurant (no mixing).
+/// Context: `cartId`, `restaurantId`, `restaurantName`.
+pub const CART_RESTAURANT_MISMATCH: ErrorDef = ErrorDef {
+    code: "CartRestaurantMismatch",
+    message_en: "Your cart already has items from another restaurant, not '{restaurantName}'.",
+    message_fr: "Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'.",
+};
+
+/// No line with this id in the cart.
+/// Context: `cartId`, `cartLineId`.
+pub const CART_LINE_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "CartLineNotFound",
+    message_en: "This cart line no longer exists.",
+    message_fr: "Cette ligne du panier n'existe plus.",
+};
+
+/// Checkout attempted on an empty cart.
+/// Context: `cartId`.
+pub const CART_EMPTY: ErrorDef = ErrorDef {
+    code: "CartEmpty",
+    message_en: "Your cart is empty.",
+    message_fr: "Votre panier est vide.",
+};
+
+/// No order with this id.
+/// Context: `orderId`.
+pub const ORDER_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "OrderNotFound",
+    message_en: "Order not found.",
+    message_fr: "Commande introuvable.",
+};
+
+/// Order is not in a status that allows this transition.
+/// Context: `orderId`, `currentStatus`.
+pub const INVALID_ORDER_STATUS: ErrorDef = ErrorDef {
+    code: "InvalidOrderStatus",
+    message_en: "This action is not allowed while the order is '{currentStatus}'.",
+    message_fr: "Cette action n'est pas autorisée tant que la commande est '{currentStatus}'.",
+};
+
+/// The delivery (rider thumb) has already been rated for this order; final.
+/// Context: `orderId`.
+pub const ORDER_ALREADY_RATED: ErrorDef = ErrorDef {
+    code: "OrderAlreadyRated",
+    message_en: "You have already rated this delivery.",
+    message_fr: "Vous avez déjà noté cette livraison.",
+};
+
+/// The restaurant has already been rated for this order; final (one per order).
+/// Context: `orderId`.
+pub const RESTAURANT_ALREADY_RATED: ErrorDef = ErrorDef {
+    code: "RestaurantAlreadyRated",
+    message_en: "You have already rated the restaurant for this order.",
+    message_fr: "Vous avez déjà noté le restaurant pour cette commande.",
+};
+
+/// The delivery-delay satisfaction survey has already been answered for this order; final (one per order).
+/// Context: `orderId`.
+pub const DELIVERY_SATISFACTION_ALREADY_RECORDED: ErrorDef = ErrorDef {
+    code: "DeliverySatisfactionAlreadyRecorded",
+    message_en: "You have already answered the delivery survey for this order.",
+    message_fr: "Vous avez déjà répondu au questionnaire de livraison pour cette commande.",
+};
+
+/// The tipper cannot tip this recipient (e.g. a restaurant tipping itself).
+/// Context: `tippedBy`, `recipient`.
+pub const INVALID_TIP_RECIPIENT: ErrorDef = ErrorDef {
+    code: "InvalidTipRecipient",
+    message_en: "You can't send a tip to this recipient.",
+    message_fr: "Vous ne pouvez pas envoyer de pourboire à ce destinataire.",
+};
+
+/// serviceType is DELIVERY but no delivery address was provided.
+pub const DELIVERY_ADDRESS_REQUIRED: ErrorDef = ErrorDef {
+    code: "DeliveryAddressRequired",
+    message_en: "A delivery address is required for delivery.",
+    message_fr: "Une adresse de livraison est requise pour la livraison.",
+};
+
+/// Delivery address is outside the restaurant's delivery area.
+/// Context: `restaurantName`.
+pub const OUTSIDE_DELIVERY_AREA: ErrorDef = ErrorDef {
+    code: "OutsideDeliveryArea",
+    message_en: "This address is outside the delivery area of '{restaurantName}'.",
+    message_fr: "Cette adresse est en dehors de la zone de livraison de '{restaurantName}'.",
+};
+
+/// Stripe declined the payment synchronously at checkout (no order placed).
+pub const PAYMENT_DECLINED: ErrorDef = ErrorDef {
+    code: "PaymentDeclined",
+    message_en: "Payment was declined.",
+    message_fr: "Le paiement a été refusé.",
+};
+
+/// The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.
+/// Context: `cartId`, `expectedAmountCents`, `submittedAmountCents`, `currency`.
+pub const PRICE_MISMATCH: ErrorDef = ErrorDef {
+    code: "PriceMismatch",
+    message_en: "Prices have changed since you loaded the menu. Please review your cart and try again.",
+    message_fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer.",
+};
+
+/// A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.
+/// Context: `cartId`, `offerId`.
+pub const PRICE_UNRESOLVABLE: ErrorDef = ErrorDef {
+    code: "PriceUnresolvable",
+    message_en: "An item in your cart is no longer available at a known price. Please review your cart.",
+    message_fr: "Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier.",
+};
+
+/// A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).
+/// Context: `restaurantId`.
+pub const CANNOT_ORDER_TEST_RESTAURANT: ErrorDef = ErrorDef {
+    code: "CannotOrderTestRestaurant",
+    message_en: "This restaurant is not available.",
+    message_fr: "Ce restaurant n'est pas disponible.",
+};
+
 /// OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).
 /// Context: `reclamationId`.
 pub const RECLAMATION_ALREADY_EXISTS: ErrorDef = ErrorDef {
@@ -778,47 +778,24 @@ pub const REFUND_EXCEEDS_CAPTURED: ErrorDef = ErrorDef {
     message_fr: "Le montant du remboursement dépasse le total encaissé de la commande.",
 };
 
-/// No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row).
-/// Context: `targetMessageId`.
-pub const MAILBOX_MESSAGE_NOT_FOUND: ErrorDef = ErrorDef {
-    code: "MailboxMessageNotFound",
-    message_en: "Mailbox message not found.",
-    message_fr: "Message de boîte aux lettres introuvable.",
+/// The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.
+/// Context: `orderId`.
+pub const REFUND_NOT_PENDING: ErrorDef = ErrorDef {
+    code: "RefundNotPending",
+    message_en: "No refund is pending approval for this order.",
+    message_fr: "Aucun remboursement n'est en attente d'approbation pour cette commande.",
 };
 
-/// The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError): handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/ DUPLICATE rows already ran — requeueing any of them would re-execute something the system decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
-/// Context: `targetMessageId`, `status`.
-pub const MAILBOX_MESSAGE_NOT_REQUEUEABLE: ErrorDef = ErrorDef {
-    code: "MailboxMessageNotRequeueable",
-    message_en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued.",
-    message_fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file.",
+/// A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.
+/// Context: `customerId`.
+pub const INSUFFICIENT_CUSTOMER_CREDIT: ErrorDef = ErrorDef {
+    code: "InsufficientCustomerCredit",
+    message_en: "You do not have enough store credit for this.",
+    message_fr: "Vous n'avez pas assez d'avoir en boutique pour cela.",
 };
 
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
-    UNAUTHORIZED,
-    FORBIDDEN,
-    VALIDATION_ERROR,
-    CONFLICT,
-    RATE_LIMITED,
-    INTERNAL,
-    RESTAURANT_ACCOUNT_NOT_FOUND,
-    RESTAURANT_NOT_FOUND,
-    SLUG_ALREADY_TAKEN,
-    SLUG_NOT_CONFIGURED,
-    REF_ALREADY_USED,
-    INVALID_CURRENCY,
-    RESTAURANT_NOT_ACTIVE,
-    RESTAURANT_NOT_READY_FOR_ACTIVATION,
-    RESTAURANT_PAUSED,
-    ACCEPTANCE_MODE_UNCHANGED,
-    NO_EDITABLE_FIELD_PROVIDED,
-    LISTING_ALREADY_CLAIMED,
-    LISTING_OWNERSHIP_NOT_VERIFIED,
-    GBP_ORDER_LINK_NOT_CONFIGURED,
-    PROSPECT_CONTACT_LIMIT_REACHED,
-    PROSPECT_CONTACTED_TOO_RECENTLY,
-    PROSPECT_NOT_FOUND,
     CATALOG_NOT_FOUND,
     CATALOG_SLUG_ALREADY_TAKEN,
     CURRENCY_MISMATCH,
@@ -834,48 +811,21 @@ pub const ERRORS: &[ErrorDef] = &[
     OPTION_LIST_MUST_HAVE_OPTION,
     INVALID_SELECTION_BOUNDS,
     OPTION_LIST_IN_USE,
-    OFFER_NOT_FOUND,
     OFFER_NOT_STOCK_TRACKED,
     CATALOG_TRANSLATION_FAILED,
     MISSING_REF,
-    OFFER_UNAVAILABLE,
-    INSUFFICIENT_STOCK,
-    QUANTITY_EXCEEDS_LIMIT,
-    INVALID_OPTION_SELECTION,
-    CART_NOT_FOUND,
-    CART_NOT_OPEN,
-    CART_RESTAURANT_MISMATCH,
-    CART_LINE_NOT_FOUND,
-    CART_EMPTY,
-    INVALID_VERIFICATION_CODE,
-    VERIFICATION_CODE_EXPIRED,
-    INVALID_VERIFICATION_TOKEN,
-    EMAIL_ALREADY_IN_USE,
-    PHONE_ALREADY_IN_USE,
-    ORDER_NOT_FOUND,
-    INVALID_ORDER_STATUS,
-    ORDER_ALREADY_RATED,
-    RESTAURANT_ALREADY_RATED,
-    DELIVERY_SATISFACTION_ALREADY_RECORDED,
-    INVALID_TIP_RECIPIENT,
-    DELIVERY_ADDRESS_REQUIRED,
-    OUTSIDE_DELIVERY_AREA,
-    DELIVERY_JOB_NOT_FOUND,
-    INVALID_DELIVERY_STATUS,
-    DELIVERY_ALREADY_ASSIGNED,
-    DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED,
-    DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND,
-    DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING,
-    RIDER_ALREADY_REGISTERED,
-    RIDER_NOT_FOUND,
-    INVALID_RIDER_STATUS_TRANSITION,
-    PAYMENT_DECLINED,
-    PRICE_MISMATCH,
-    PRICE_UNRESOLVABLE,
+    UNAUTHORIZED,
+    FORBIDDEN,
+    VALIDATION_ERROR,
+    CONFLICT,
+    RATE_LIMITED,
+    INTERNAL,
+    RESTAURANT_NOT_FOUND,
+    NO_EDITABLE_FIELD_PROVIDED,
+    OFFER_NOT_FOUND,
     PAYMENT_EVENT_ORPHANED,
-    REFUND_NOT_PENDING,
-    INSUFFICIENT_CUSTOMER_CREDIT,
-    CANNOT_ORDER_TEST_RESTAURANT,
+    MAILBOX_MESSAGE_NOT_FOUND,
+    MAILBOX_MESSAGE_NOT_REQUEUEABLE,
     CONVERSATION_ALREADY_OPEN,
     CONVERSATION_NOT_FOUND,
     NOT_A_PARTICIPANT,
@@ -886,6 +836,56 @@ pub const ERRORS: &[ErrorDef] = &[
     TRANSLATION_ALREADY_RECORDED,
     MUTE_REASON_REQUIRED,
     PARTICIPANT_NOT_MUTED,
+    INVALID_VERIFICATION_CODE,
+    VERIFICATION_CODE_EXPIRED,
+    INVALID_VERIFICATION_TOKEN,
+    EMAIL_ALREADY_IN_USE,
+    PHONE_ALREADY_IN_USE,
+    DELIVERY_JOB_NOT_FOUND,
+    INVALID_DELIVERY_STATUS,
+    DELIVERY_ALREADY_ASSIGNED,
+    DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED,
+    DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND,
+    DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING,
+    RIDER_ALREADY_REGISTERED,
+    RIDER_NOT_FOUND,
+    INVALID_RIDER_STATUS_TRANSITION,
+    RESTAURANT_ACCOUNT_NOT_FOUND,
+    SLUG_ALREADY_TAKEN,
+    SLUG_NOT_CONFIGURED,
+    REF_ALREADY_USED,
+    INVALID_CURRENCY,
+    RESTAURANT_NOT_ACTIVE,
+    RESTAURANT_NOT_READY_FOR_ACTIVATION,
+    ACCEPTANCE_MODE_UNCHANGED,
+    LISTING_ALREADY_CLAIMED,
+    LISTING_OWNERSHIP_NOT_VERIFIED,
+    GBP_ORDER_LINK_NOT_CONFIGURED,
+    PROSPECT_CONTACT_LIMIT_REACHED,
+    PROSPECT_CONTACTED_TOO_RECENTLY,
+    PROSPECT_NOT_FOUND,
+    RESTAURANT_PAUSED,
+    OFFER_UNAVAILABLE,
+    INSUFFICIENT_STOCK,
+    QUANTITY_EXCEEDS_LIMIT,
+    INVALID_OPTION_SELECTION,
+    CART_NOT_FOUND,
+    CART_NOT_OPEN,
+    CART_RESTAURANT_MISMATCH,
+    CART_LINE_NOT_FOUND,
+    CART_EMPTY,
+    ORDER_NOT_FOUND,
+    INVALID_ORDER_STATUS,
+    ORDER_ALREADY_RATED,
+    RESTAURANT_ALREADY_RATED,
+    DELIVERY_SATISFACTION_ALREADY_RECORDED,
+    INVALID_TIP_RECIPIENT,
+    DELIVERY_ADDRESS_REQUIRED,
+    OUTSIDE_DELIVERY_AREA,
+    PAYMENT_DECLINED,
+    PRICE_MISMATCH,
+    PRICE_UNRESOLVABLE,
+    CANNOT_ORDER_TEST_RESTAURANT,
     RECLAMATION_ALREADY_EXISTS,
     RECLAMATION_NOT_FOUND,
     RECLAMATION_NOT_OPEN,
@@ -893,8 +893,8 @@ pub const ERRORS: &[ErrorDef] = &[
     REJECTION_REASON_REQUIRED,
     PARTIAL_REFUND_AMOUNT_REQUIRED,
     REFUND_EXCEEDS_CAPTURED,
-    MAILBOX_MESSAGE_NOT_FOUND,
-    MAILBOX_MESSAGE_NOT_REQUEUEABLE,
+    REFUND_NOT_PENDING,
+    INSUFFICIENT_CUSTOMER_CREDIT,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

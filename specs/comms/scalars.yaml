@@ -1,0 +1,75 @@
+version: 1
+description: >
+  comms scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Order conversations / messaging (#129) ---
+# In-app per-order message thread (aggregate `Conversation`, id = orderId; ADR-20260725-015921).
+
+ConversationMessageId:
+  type: string
+  format: uuid
+  description: >
+    Client-generated id of one posted conversation message — the idempotency key for PostMessage
+    (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId`
+    (the command_journal submission id); this identifies the business message itself (#129).
+
+
+MessageVisibility:
+  type: string
+  enum: [PUBLIC, INTERNAL]
+  description: >
+    Audience of a conversation message: PUBLIC = visible to the customer in the order thread;
+    INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
+
+
+ConversationAuthorRole:
+  type: string
+  enum: [CUSTOMER, RESTAURANT, RIDER, ADMIN]
+  description: >
+    Business role that authored a conversation message. A semantic role that changes the meaning of the
+    thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the
+    acting user stays on domain_events.user_id) (#129).
+
+
+MessageBody:
+  type: string
+  maxLength: 2000
+  description: "Free-text body of a conversation message (#129)."
+
+
+MuteReason:
+  type: string
+  maxLength: 500
+  description: >
+    The REQUIRED justification recorded when a participant is muted in an order conversation; a mute
+    without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).
+
+
+EscalationReason:
+  type: string
+  maxLength: 500
+  description: >
+    Why an admin was pulled into an order conversation — the reason recorded when the restaurant or
+    rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+
+
+TranslatedText:
+  type: string
+  maxLength: 2000
+  description: >
+    A conversation message body translated into one target locale — the cached (persisted) translation
+    reused across readers (translate once, reuse; #129).
+
+
+ClaimTimelineEventKind:
+  type: string
+  enum: [OPENED, RESOLVED, REJECTED, REOPENED, EVIDENCE_ATTACHED]
+  description: >
+    Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order
+    conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED
+    (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached
+    — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's
+    status and evidence inline without copying the reclamation's own read model (§2.5, #155).

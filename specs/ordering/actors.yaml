@@ -1,0 +1,301 @@
+version: 1
+description: >
+  ordering scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Cart:
+  type: aggregate
+  identity: { $ref: '#/Cart/state/cartId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A visitor's in-progress selection for one restaurant, built (possibly as a guest) before checkout. Validated incrementally; converted to an Order by PlaceOrderProcess."
+  # Line edits and the customer bind do not touch the status — only checkout closes the cart
+  # (carts never expire, so there is no abandonment state).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/CartStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/CartStarted' }
+        to: OPEN
+    transitions:
+      - { from: [OPEN], event: { $ref: 'events.yaml#/CartCheckedOut' }, to: CHECKED_OUT }
+    terminal: [CHECKED_OUT]
+  receives:
+    - message: { $ref: 'commands.yaml#/AddCartLine' }
+      emits: [{ $ref: 'events.yaml#/CartStarted' }, { $ref: 'events.yaml#/CartLineAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartRestaurantMismatch' }
+        - { $ref: 'errors.yaml#/OfferNotFound' }
+        - { $ref: 'errors.yaml#/OfferUnavailable' }
+        - { $ref: 'errors.yaml#/InsufficientStock' }
+        - { $ref: 'errors.yaml#/InvalidOptionSelection' }
+        - { $ref: 'errors.yaml#/QuantityExceedsLimit' }
+      effect: "CartStarted only when the cart is created (first line)."
+    - message: { $ref: 'commands.yaml#/RemoveCartLine' }
+      emits: [{ $ref: 'events.yaml#/CartLineRemoved' }]
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartLineNotFound' }
+    - message: { $ref: 'commands.yaml#/ChangeCartLineQuantity' }
+      emits: [{ $ref: 'events.yaml#/CartLineQuantityChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartLineNotFound' }
+        - { $ref: 'errors.yaml#/InsufficientStock' }
+        - { $ref: 'errors.yaml#/QuantityExceedsLimit' }
+    - message:
+          $ref: 'commands.yaml#/BindCartToCustomer'
+      emits:
+      - $ref: 'events.yaml#/CartBoundToCustomer'
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+    - message: { $ref: 'events.yaml#/CartCheckedOut' }
+      emits: [{ $ref: 'events.yaml#/CartCheckedOut' }]
+      effect: "PlaceOrderProcess delivers the checkout fact on payment capture; the Cart records it and closes (idempotent)."
+
+
+Order:
+  type: aggregate
+  identity: { $ref: '#/Order/state/orderId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
+  # OUT_FOR_DELIVERY is deliberately absent: no Order event enters it — it is a read-side
+  # presentation status derived by the OrderTracking projection from delivery facts (ADR-20260720-004419).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/OrderStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/OrderPlaced' }
+        to: PLACED
+    transitions:
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }, to: ACCEPTED }
+      - { from: [ACCEPTED], event: { $ref: 'events.yaml#/OrderPreparationStarted' }, to: PREPARING }
+      # A restaurant may skip the explicit preparation step (ready straight from ACCEPTED).
+      - { from: [ACCEPTED, PREPARING], event: { $ref: 'events.yaml#/OrderMarkedReady' }, to: READY }
+      - { from: [READY], event: { $ref: 'events.yaml#/OrderDelivered' }, to: DELIVERED }
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }, to: REJECTED }
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, to: CANCELLED_BY_CUSTOMER }
+      - { from: [ACCEPTED, PREPARING, READY], event: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }, to: CANCELLED_BY_RESTAURANT }
+    terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT]
+  # GDPR retention pilot (ADR-20260731-153000/-160000/-214500, #272): every terminal receive
+  # `schedules:` the OrderExpired reminder (reschedule in place — the LAST terminal fact wins the
+  # clock); the promotion pass delivers it when due and the delivery RECORDS the fact (record
+  # semantics — never Rejected). The `deletion:` block then reacts to the RECORDED OrderExpired:
+  # the window lives on the REMINDER (not the trigger) because the expiry must be a recorded
+  # business fact projections can fold to tombstone (ADR-20260731-160000 §2) — an engine-internal
+  # timer would erase read models without a foldable cause in the log.
+  reminders:
+    OrderExpired:
+      payload: { $ref: 'events.yaml#/OrderExpired' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place        # ADR-20260731-150500: re-declaring postpones the SAME row
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
+  receives:
+    - message: { $ref: 'events.yaml#/OrderPlaced' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+      effect: "Birth: PlaceOrderProcess delivers OrderPlaced; the Order records it (idempotent)."
+    # No-charge replacement birth (ReclamationProcess REPLACEMENT arm, ADR-20260726-171736 / #159): remakes
+    # the original order (read by originalOrderId) as a NEW Order with the SAME items, $0 buyer total and no
+    # paymentIntentId, linked via OrderPlaced.replacementOf. Idempotent per reclamationId (deterministic
+    # orderId, absorbed at version 0). Saga-dispatched — no public mutation (command-no-mutation is expected).
+    - message: { $ref: 'commands.yaml#/PlaceReplacementOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+      effect: "Remake the original order as a linked no-charge replacement (OrderPlaced replacementOf, buyer total 0)."
+    - message: { $ref: 'commands.yaml#/AcceptOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderAcceptedByRestaurant' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: 'commands.yaml#/StartPreparation' }
+      emits: [{ $ref: 'events.yaml#/OrderPreparationStarted' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: 'commands.yaml#/MarkOrderReady' }
+      emits: [{ $ref: 'events.yaml#/OrderMarkedReady' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: 'commands.yaml#/MarkOrderDelivered' }
+      emits: [{ $ref: 'events.yaml#/OrderDelivered' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
+    - message: { $ref: 'commands.yaml#/RejectOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderRejectedByRestaurant' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
+    - message: { $ref: 'commands.yaml#/CancelOrderByCustomer' }
+      emits: [{ $ref: 'events.yaml#/OrderCancelledByCustomer' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
+    - message: { $ref: 'commands.yaml#/CancelOrderByRestaurant' }
+      emits: [{ $ref: 'events.yaml#/OrderCancelledByRestaurant' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
+    - message: { $ref: 'commands.yaml#/RateOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderRated' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }   # only a DELIVERED order can be rated
+        - { $ref: 'errors.yaml#/OrderAlreadyRated' }
+    - message: { $ref: 'commands.yaml#/RateRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantRated' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+        - { $ref: 'errors.yaml#/RestaurantAlreadyRated' }
+    - message: { $ref: 'commands.yaml#/RecordDeliverySatisfaction' }
+      emits: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }   # only a DELIVERED order can be surveyed
+        - { $ref: 'errors.yaml#/DeliverySatisfactionAlreadyRecorded' }
+    - message: { $ref: 'commands.yaml#/TipOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderTipped' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+        - { $ref: 'errors.yaml#/InvalidTipRecipient' }
+    - message: { $ref: 'commands.yaml#/RequestRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: [{ $ref: 'events.yaml#/OrderExpired' }]
+      effect: >
+        The promotion pass delivered the retention reminder: record the expiry with record
+        semantics — Recorded, or Ignored (stream already gone) / Duplicate (already expired) —
+        NEVER Rejected (ADR-20260731-153000 §1a: the deadline's passage cannot be refused). The
+        erasure ACTION on this recording is the deletion engine's journey (deletion: block above).
+
+
+Reclamation:
+  type: aggregate
+  identity: { $ref: '#/Reclamation/state/reclamationId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    Customer claim/dispute over a delivered order; id = reclamationId (its own identity, correlated to an
+    orderId — MULTIPLE reclamations may exist per order, #153). OpenReclamation is its birth; it then moves
+    through OPEN -> RESOLVED/REJECTED, and a decided reclamation may be reopened back to OPEN. This slice is
+    the lifecycle only: ReclamationResolved records the DECISION (+ amount for a PARTIAL_REFUND) so the
+    downstream refund/credit/replacement slices react later; the aggregate performs no money-move.
+    ReclamationOpened carries customerId/restaurantId (client-supplied, like OrderPlaced) so the
+    View_Reclamation read model can scope "my claims" and the restaurant's claims queue (#154).
+    FOLLOW-UP (NOT enforced yet): the 14-day window and order-eligibility (order exists/DELIVERED) are
+    cross-aggregate/temporal invariants that belong in the APPLICATION layer (reading the order's
+    delivered-at vs now). They are DEFERRED because the pure command-handler signature has no clock seam
+    — a wall-clock stamp in a handler would break command→event determinism (see report_delivery_issue),
+    and the order's delivered-at is event-envelope metadata not surfaced in the Order fold state. The
+    DELIVERED-eligibility half is a clean cross-aggregate read (fold the Order stream, as require_order
+    does); the 14-day-window half needs an injected clock that does not exist yet. Kept together as one
+    follow-up rather than shipping a half-guard with unenforceable errors/rules (#151).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/ReclamationStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/ReclamationOpened' }
+        to: OPEN
+    transitions:
+      - { from: [OPEN], event: { $ref: 'events.yaml#/ReclamationResolved' }, to: RESOLVED }
+      - { from: [OPEN], event: { $ref: 'events.yaml#/ReclamationRejected' }, to: REJECTED }
+      # A decided reclamation can be reopened — RESOLVED/REJECTED are therefore NOT terminal.
+      - { from: [RESOLVED, REJECTED], event: { $ref: 'events.yaml#/ReclamationReopened' }, to: OPEN }
+    terminal: []
+  receives:
+    - message: { $ref: 'commands.yaml#/OpenReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationOpened' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationAlreadyExists' }
+    - message: { $ref: 'commands.yaml#/ResolveReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationResolved' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+        - { $ref: 'errors.yaml#/PartialRefundAmountRequired' }
+    - message: { $ref: 'commands.yaml#/RejectReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationRejected' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+        - { $ref: 'errors.yaml#/RejectionReasonRequired' }
+    - message: { $ref: 'commands.yaml#/ReopenReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationReopened' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotReopenable' }
+    # Evidence may be attached in ANY lifecycle state — the only guard is that the claim exists (#156).
+    - message: { $ref: 'commands.yaml#/AttachReclamationEvidence' }
+      emits: [{ $ref: 'events.yaml#/ReclamationEvidenceAttached' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+
+# --- Process managers (sagas) — #272 Runtime D1 (PM mailboxes, ADR-20260801-023000) ---
+#
+# These entries land STRICTLY WITH the D-A wiring (the prepare-phase delivery + the gated
+# resolvers): the generated addressing flips the three mutations the moment they exist, and the
+# flip ships GATED behind PM_MAILBOX_DELIVERY (gate-then-stabilize — the default flip is its own
+# one-line ADR after the gated form is smoked).
+
+PlaceOrderProcess:
+  type: process-manager
+  identity: { $ref: '#/PlaceOrderProcess/state/orderId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the
+    cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and
+    freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order
+    materializes only when Stripe reports the capture: the PaymentCaptured reaction
+    re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and
+    emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process
+    state; the customer retries by resubmitting checkout.
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits:
+        - { $ref: 'events.yaml#/PaymentIntentCreated' }
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartEmpty' }
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantPaused' }
+        - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+        - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
+        - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
+        - { $ref: 'errors.yaml#/PriceMismatch' }
+        - { $ref: 'errors.yaml#/PriceUnresolvable' }
+        - { $ref: 'errors.yaml#/PaymentDeclined' }
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits:
+        - { $ref: 'events.yaml#/OrderPlaced' }
+      effect: "Inbound Stripe fact: re-materialize the frozen checkout and place the order, idempotently (a redelivered capture is a no-op)."
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: []
+      effect: "Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry."

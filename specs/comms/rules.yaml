@@ -1,0 +1,40 @@
+version: 1
+description: >
+  comms scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Order conversations / messaging (#129) ---
+ConversationIdentityIsTheOrder:
+  description: "A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)."
+
+OnlyParticipantsWriteToAnAggregate:
+  description: "A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)."
+
+AuthorRoleIsPinnedToThePrincipal:
+  description: "A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)."
+
+CustomerChatRequiresRestaurantOptIn:
+  description: "A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)."
+
+MessagesCarryVisibility:
+  description: "Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)."
+
+MessagePostingIsIdempotent:
+  description: "Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)."
+
+MuteRequiresAReason:
+  description: "Muting a participant in an order conversation requires a justification reason; a mute without one is rejected (#129)."
+
+AdminJoinsByReasonedEscalation:
+  description: "An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)."
+
+OnlyMutedParticipantsCanBeUnmuted:
+  description: "Unmuting a role that is not currently muted is rejected (#129)."
+
+TranslationsAreCachedOncePerLocale:
+  description: "A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)."
+
+TranslationTargetsAPostedMessage:
+  description: "A translation can only be recorded for a message that was actually posted to the conversation (#129)."

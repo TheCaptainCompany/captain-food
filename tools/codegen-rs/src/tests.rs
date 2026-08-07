@@ -949,15 +949,9 @@ keys:
     #[test]
     fn a_declared_default_is_not_re_implemented_at_the_call_site() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
-            .expect("specs/configuration.yaml must exist");
-        let model = Model {
-            defs: BTreeMap::from([(
-                "configuration.yaml".to_string(),
-                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
-            )]),
-            ..Default::default()
-        };
+        // The configuration catalog is split across specs/{scope}/configuration.yaml fragments
+        // (ADR-20260807-183024 D5) — load the merged logical model, not one file.
+        let model = load_model(&root.join("specs")).expect("load real specs");
         let defaulted: BTreeSet<String> = parse_config_keys(&model)
             .into_iter()
             .filter(|k| k.default.is_some() && k.consumer == "server")
@@ -1042,15 +1036,9 @@ keys:
     #[test]
     fn every_env_var_read_by_the_crates_is_declared() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
-            .expect("specs/configuration.yaml must exist — it is the configuration source of truth");
-        let model = Model {
-            defs: BTreeMap::from([(
-                "configuration.yaml".to_string(),
-                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
-            )]),
-            ..Default::default()
-        };
+        // The configuration catalog is split across specs/{scope}/configuration.yaml fragments
+        // (ADR-20260807-183024 D5) — load the merged logical model, not one file.
+        let model = load_model(&root.join("specs")).expect("load real specs");
         let declared: BTreeSet<String> =
             parse_config_keys(&model).into_iter().map(|k| k.name).collect();
         assert!(!declared.is_empty(), "no keys parsed from configuration.yaml");
@@ -1593,10 +1581,10 @@ keys:
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let generated = std::fs::read_to_string(root.join("crates/server/src/generated/config.rs"))
             .expect("generated config reader must exist -- run `make generate`");
-        let scalars = std::fs::read_to_string(root.join("specs/scalars.yaml"))
-            .expect("specs/scalars.yaml must exist");
-        let scalars: serde_yaml::Value =
-            serde_yaml::from_str(&scalars).expect("scalars.yaml parses");
+        // The scalars catalog is split across specs/{scope}/scalars.yaml fragments
+        // (ADR-20260807-183024 D1) — read the merged logical catalog from the loader.
+        let model = load_model(&root.join("specs").to_path_buf()).expect("load real specs");
+        let scalars = model.defs.get("scalars.yaml").expect("scalars catalog").clone();
 
         // The raw-literal form is the bug itself: escapes written for a normal literal, emitted where
         // they are taken verbatim. Pinned directly so a revert fails loudly rather than subtly.

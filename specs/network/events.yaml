@@ -1,0 +1,460 @@
+version: 1
+description: >
+  network scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Restaurant
+# =====================================================================
+
+RestaurantAccountRegistered:
+  description: "A restaurant account (HubRise: restaurant) was created; it owns one or more locations."
+  type: object
+  properties:
+    restaurantAccountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    legalName:
+      $ref: 'scalars.yaml#/RestaurantLegalName'
+    contact:
+      $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    defaultCurrency:
+      $ref: 'scalars.yaml#/CurrencyCode'
+    defaultTaxRate:
+      $ref: 'entities.yaml#/TaxRate'
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+  required:
+    - restaurantAccountId
+    - legalName
+    - defaultCurrency
+    - defaultTaxRate
+
+
+RestaurantAccountUpdated:
+  description: "One or more account-level fields changed (legal name, contact, default tax, timezone)."
+  type: object
+  properties:
+    restaurantAccountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+    legalName:
+      $ref: 'scalars.yaml#/RestaurantLegalName'
+      nullable: true
+    contact:
+      $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    defaultTaxRate:
+      $ref: 'entities.yaml#/TaxRate'
+      nullable: true
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+  required:
+    - restaurantAccountId
+
+
+RestaurantAccountDeleted:
+  description: "A restaurant account was closed/deleted."
+  type: object
+  properties:
+    restaurantAccountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantAccountId
+
+
+RestaurantRegistered:
+  description: >
+    A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner
+    location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing
+    (no accountId). The listingStatus and externalIdentifiers distinguish them.
+  type: object
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    externalIdentifiers:
+      type: array
+      items:
+        $ref: 'entities.yaml#/ExternalIdentifier'
+    # NOTE: no `slug` (ADR-20260728-011344). The slug is the STOREFRONT HOST
+    # ({slug}.captain.food) — an identity the OWNER chooses during onboarding, not an attribute
+    # derivable from a registration. It arrives later via RestaurantSlugConfigured. Deriving it here
+    # reserved ~200k hostnames for open-data listings that never opted in, made identity a function
+    # of INSEE's mutable denominationUsuelle, and collided systematically (the NIC only
+    # disambiguates within a company).
+    displayName:
+      $ref: 'scalars.yaml#/RestaurantDisplayName'
+    contact:
+      $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
+    cuisineCategory:
+      $ref: 'scalars.yaml#/CuisineCategory'
+      nullable: true
+    uberPricesOptIn:
+      type: boolean
+      nullable: true
+    address:
+      $ref: 'entities.yaml#/Address'
+    location:
+      $ref: 'entities.yaml#/GeoPoint'
+      nullable: true
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+    preparationTimeMinutes:
+      type: integer
+      minimum: 0
+      nullable: true
+    openingHours:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OpeningHoursSlot'
+  required:
+    - restaurantId
+    - listingStatus
+    - displayName
+    - address
+
+
+RestaurantSlugConfigured:
+  description: >
+    The restaurant's STOREFRONT ADDRESS has been chosen for the first time — {slug}.captain.food now
+    resolves to it (ADR-20260728-011344). Emitted from ConfigureRestaurantSlug during onboarding,
+    after ownership is verified and before activation: a restaurant cannot be activated without one.
+    The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at,
+    ADR-0041), never payload.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "The chosen storefront host label. Unique across all CONFIGURED restaurants."
+  required:
+    - restaurantId
+    - slug
+
+
+RestaurantSlugReconfigured:
+  description: >
+    The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Distinct from
+    RestaurantSlugConfigured because a rename carries an obligation the first configuration does not:
+    the previous host is already on printed menus, QR codes, Google listings and inbound links, so it
+    must keep resolving. `previousSlug` is business data — it feeds the slug-alias read model that
+    serves the 301, and it keeps the old label RESERVED so a competitor cannot claim it and inherit
+    the redirect.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "The new storefront host label."
+    previousSlug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "The label being superseded — kept reserved, and 301-redirected to `slug`."
+  required:
+    - restaurantId
+    - slug
+    - previousSlug
+
+
+RestaurantUpdated:
+  description: "One or more editable LOCATION fields of a restaurant have changed."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    displayName:
+      $ref: 'scalars.yaml#/RestaurantDisplayName'
+      nullable: true
+    description:
+      $ref: 'scalars.yaml#/RestaurantDescription'
+      nullable: true
+    contact:
+      $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+      nullable: true
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
+    cuisineCategory:
+      $ref: 'scalars.yaml#/CuisineCategory'
+      nullable: true
+    uberPricesOptIn:
+      type: boolean
+      nullable: true
+    address:
+      $ref: 'entities.yaml#/Address'
+      nullable: true
+    location:
+      $ref: 'entities.yaml#/GeoPoint'
+      nullable: true
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+    preparationTimeMinutes:
+      type: integer
+      minimum: 0
+      nullable: true
+    openingHours:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OpeningHoursSlot'
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantActivated:
+  description: "Restaurant is now visible and orderable by customers."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantDeactivated:
+  description: "Restaurant can no longer receive orders."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantAcceptanceModeChanged:
+  description: "Restaurant toggled its order acceptance mode (e.g. busy, paused)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    mode:
+      $ref: 'scalars.yaml#/OrderAcceptanceMode'
+  required:
+    - restaurantId
+    - mode
+
+
+RestaurantRemoved:
+  description: "A location was removed (delisted) from its account."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+    - accountId
+
+
+RestaurantGoogleBusinessProfileUpdated:
+  description: >
+    GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Google's rating/reviews)
+    were observed/refreshed. Carries ONLY data intrinsic to the Google listing — never general restaurant
+    info (name/address/hours/phone/website/tags), which flows through Register/UpdateRestaurant. This keeps
+    Sirene and Google feeding the same restaurant side-by-side with no cross-source dependency.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    googlePlaceId:
+      $ref: 'scalars.yaml#/GooglePlaceId'
+      nullable: true
+    rating:
+      $ref: 'scalars.yaml#/GoogleRating'
+      nullable: true
+    reviewsCount:
+      type: integer
+      minimum: 0
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantListingClaimed:
+  description: "An owner proved ownership of the listing (Google Business Profile verification) and claimed it."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+    proof:
+      type: string
+      maxLength: 255
+      description: "Reference to the accepted Google ownership proof (audit; the token itself is not stored)."
+  required:
+    - restaurantId
+
+
+RestaurantListingOptedOut:
+  description: "An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantMarkedClosed:
+  description: "The establishment was reported closed (e.g. Sirene closure); recorded via the sync ACL."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+
+RestaurantListingStatusChanged:
+  description: "The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+    - listingStatus
+
+
+RestaurantGoogleBusinessProfileOrderLinkConfigured:
+  description: "The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    gbpOrderUrl:
+      $ref: 'scalars.yaml#/WebUrl'
+  required:
+    - restaurantId
+    - gbpOrderUrl
+
+
+RestaurantGoogleBusinessProfileOrderLinkVerified:
+  description: "The configured GBP 'Order online' link was pinged and its live status recorded (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    status:
+      $ref: 'scalars.yaml#/GbpLinkStatus'
+  required:
+    - restaurantId
+    - status
+
+
+# --- Prospection (ADR-0020). Facts only — the score is a read-model projection, never an event. ---
+
+ProspectContacted:
+  description: "A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the sequence."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    channel:
+      $ref: 'scalars.yaml#/OutreachChannel'
+    sequenceStep:
+      type: integer
+      minimum: 0
+      description: "Day-offset step in the sequence (e.g. 0 = J+0, 7 = J+7 relance, 21 = J+21)."
+  required:
+    - restaurantId
+    - channel
+    - sequenceStep
+
+
+ProspectMarkedCold:
+  description: "A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+
+ProspectReplied:
+  description: "A prospect replied to outreach; the sequence stops pending human follow-up."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    note:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId

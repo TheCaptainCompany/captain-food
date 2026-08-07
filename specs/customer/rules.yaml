@@ -1,0 +1,31 @@
+version: 1
+description: >
+  customer scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Customer ---
+PhoneVerificationRegistersOrIdentifies:
+  description: "Phone-OTP verification registers a new customer or identifies a returning one; an invalid code is rejected."
+
+EmailVerificationUniqueTokenValid:
+  description: "Email verification requires a unique email and a valid token; duplicates/invalid tokens are rejected."
+
+PhoneChangeVerifiedAndUnique:
+  description: "A phone change is verified and must be unique; a duplicate is rejected."
+
+CustomerProfileUpdate:
+  description: "A customer can change language and profile info; an update with no field is rejected."
+
+CustomerPreferences:
+  description: "A customer's preferences can be set."
+
+FavoritesManagement:
+  description: "A customer can favorite/unfavorite restaurants; favoriting an unknown one is rejected and unfavoriting a non-favorite is a no-op."
+
+AddressBookManagement:
+  description: "A customer can add/update and remove saved delivery addresses."
+
+PaymentMethodStorage:
+  description: "A customer's payment method can be stored."

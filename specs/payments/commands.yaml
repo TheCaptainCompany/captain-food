@@ -1,0 +1,69 @@
+version: 1
+description: >
+  payments scope — commands fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `commands.yaml` catalog; $refs stay kind-logical
+  (`commands.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Refund (restaurant- or admin-approved — RefundProcess state PM)
+# =====================================================================
+
+ApproveRefund:
+  description: "The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "Approved refund amount (may be partial)."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, amount]
+
+
+DenyRefund:
+  description: "The RESTAURANT (its own orders) or an ADMIN denies a pending refund request."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason:
+      type: string
+      maxLength: 500
+  required: [orderId, reason]
+
+
+# =====================================================================
+# Customer store-credit ledger (CustomerCredit aggregate, #158)
+# Saga-/checkout-driven internal commands — no public GraphQL mutation
+# (command-no-mutation WARNING is expected, like the other internal commands).
+# =====================================================================
+
+GrantCustomerCredit:
+  description: >
+    Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is
+    resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The credit amount to add to the customer's available balance."
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  required: [customerId, amount, reclamationId]
+
+
+ConsumeCustomerCredit:
+  description: >
+    Spend a customer's available store credit at checkout (rejected if it exceeds the available balance,
+    errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The credit amount to spend (<= available balance)."
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  required: [customerId, amount, orderId]

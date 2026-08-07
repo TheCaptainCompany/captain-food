@@ -1,0 +1,184 @@
+version: 1
+description: >
+  network scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+# --- Identity & Slugs ---
+
+RestaurantAccountId:
+  type: string
+  format: uuid
+  description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."
+
+
+UserId:
+  type: string
+  format: uuid
+
+
+ExternalIdentifierKey:
+  type: string
+  maxLength: 64
+  description: >
+    Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier).
+    Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id',
+    'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands;
+    cross-reference sources (a google_place_id usually distinguishes them).
+
+
+GooglePlaceId:
+  type: string
+  maxLength: 255
+  description: "Google Maps Place id identifying the establishment (enrichment / Business Profile)."
+
+
+Latitude:
+  type: number
+  minimum: -90
+  maximum: 90
+  description: "WGS84 latitude in decimal degrees."
+
+
+Longitude:
+  type: number
+  minimum: -180
+  maximum: 180
+  description: "WGS84 longitude in decimal degrees."
+
+
+GoogleRating:
+  type: number
+  minimum: 0
+  maximum: 5
+  description: "Google Maps / Business Profile average rating (0–5), enrichment only."
+
+
+WebUrl:
+  type: string
+  pattern: "^https?://"
+  maxLength: 2048
+  description: "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link."
+
+
+RestaurantLegalName:
+  type: string
+  maxLength: 255
+  description: >
+    Legal entity name used for invoices and contracts.
+    Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
+
+
+RestaurantDescription:
+  type: string
+  maxLength: 2000
+  description: >
+    Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card.
+    Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject
+    (one name = one scalar), so the two can diverge without a migration.
+
+
+PageOffset:
+  type: integer
+  minimum: 0
+  description: "Rows to skip before the page for a paginated list query (#113). Absent = 0."
+
+
+MarginPercent:
+  type: number
+  minimum: 0
+  maximum: 100
+  description: >
+    A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017):
+    the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
+
+
+# --- Time ---
+
+Weekday:
+  type: string
+  enum:
+    - MONDAY
+    - TUESDAY
+    - WEDNESDAY
+    - THURSDAY
+    - FRIDAY
+    - SATURDAY
+    - SUNDAY
+
+
+TimeOfDay:
+  type: string
+  pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+  description: "Local time of day, HH:mm (HubRise opening_hours format)."
+
+
+RestaurantStatus:
+  type: string
+  enum:
+    - DRAFT
+    - ACTIVE
+    - INACTIVE
+
+
+RestaurantListingStatus:
+  type: string
+  enum:
+    - NON_PARTNER       # public listing seeded from open data (Sirene/Google); not orderable, no agreement
+    - PASSIVE_PARTNER   # menu synced (e.g. HubRise) but no signed contract; not orderable
+    - ACTIVE_PARTNER    # signed partner; orderable when also RestaurantStatus ACTIVE and not PAUSED
+  description: >
+    Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational
+    DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
+
+
+GbpLinkStatus:
+  type: string
+  enum: [UNSET, CONFIGURED, VERIFIED, BROKEN]
+  description: "State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1)."
+
+
+ProspectionScore:
+  type: integer
+  minimum: 0
+  maximum: 10
+  description: "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event."
+
+
+ProspectPipelineStatus:
+  type: string
+  enum: [NEW, CONTACTED, COLD, REPLIED, CONVERTED]
+  description: "Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER."
+
+
+OutreachChannel:
+  type: string
+  enum: [EMAIL, SLACK, PHONE]
+  description: "Channel of a prospection contact (email via Resend, Slack alert, or phone)."
+
+
+OrderAcceptanceMode:
+  type: string
+  enum: [NORMAL, BUSY, PAUSED]
+  description: "Current order acceptance mode of a restaurant (HubRise: order_acceptance)."
+
+
+# --- Discovery / filtering ---
+
+PriceRange:
+  type: string
+  enum: [BUDGET, MODERATE, PREMIUM]
+  description: "Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$)."
+
+
+RestaurantListKey:
+  type: string
+  enum:
+    - ORDER_AGAIN      # restaurants the customer has ordered from before
+    - RECOMMENDED      # "Places you might like" / "Tailored to your taste"
+    - TOP_DEALS        # "Most loved deals on Captain.Food"
+    - GREEN_PACKAGING  # "Spots using Green Packaging"
+  description: >
+    Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model
+    resolves the actual member restaurants (editorial rules / customer history); the client just
+    asks for a list by key.

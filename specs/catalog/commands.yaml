@@ -1,0 +1,243 @@
+version: 1
+description: >
+  catalog scope — commands fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `commands.yaml` catalog; $refs stay kind-logical
+  (`commands.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# 2. Publish the catalog  (persona: admin)  — story-map activity 2
+# =====================================================================
+
+CreateCatalog:
+  description: "Admin creates a catalog for a restaurant."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+      description: "Client-generated id for the new catalog."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    name:
+      $ref: 'scalars.yaml#/CatalogName'
+    # NOTE: no `slug` -- same reasoning as RegisterRestaurant (ADR-20260728-011344): the storefront
+    # ROUTE is chosen by the owner via ConfigureCatalogSlug, not derived at creation. A creation that
+    # invented one (e.g. slugified an imported HubRise name) would pin a public path the merchant never
+    # picked, and an import rename would silently not move it.
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+  required: [catalogId, restaurantId, name]
+
+
+ConfigureCatalogSlug:
+  description: >
+    The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the
+    restaurant's storefront. A real command precisely because it CAN be refused: the label may already
+    belong to another catalog of the same restaurant, and the person asking is a human who can pick
+    again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error).
+    Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness
+    and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant --
+    a rename simply replaces the label.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "URL-safe catalog label, unique within its restaurant."
+  required: [catalogId, slug]
+
+
+AddProduct:
+  description: >
+    Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product
+    id and each offer id (client-generated).
+  type: object
+  properties:
+    productId:
+      $ref: 'scalars.yaml#/ProductId'
+      description: "Client-generated id for the new product."
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    categoryRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    name:
+      $ref: 'scalars.yaml#/ProductName'
+    description:
+      $ref: 'scalars.yaml#/ProductDescription'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    taxRate:
+      $ref: 'entities.yaml#/TaxRate'
+    offers:
+      type: array
+      items:
+        $ref: 'entities.yaml#/Offer'
+      minItems: 1
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+  required: [productId, catalogId, restaurantId, name, taxRate, offers]
+
+
+UpdateProduct:
+  description: "Admin updates an existing product (full replace, including offers)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    product:
+      $ref: 'entities.yaml#/Product'
+  required: [catalogId, restaurantId, product]
+
+
+RemoveProduct:
+  description: "Admin removes a product from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    productId:
+      $ref: 'scalars.yaml#/ProductId'
+  required: [catalogId, restaurantId, productId]
+
+
+AddCatalogCategory:
+  description: "Admin adds a category to a catalog (categories form a tree via parentRef)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    category:
+      $ref: 'entities.yaml#/CatalogCategory'
+  required: [catalogId, restaurantId, category]
+
+
+UpdateCatalogCategory:
+  description: "Admin updates a category (full replace)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    category:
+      $ref: 'entities.yaml#/CatalogCategory'
+  required: [catalogId, restaurantId, category]
+
+
+RemoveCatalogCategory:
+  description: "Admin removes a category from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    productCategoryId:
+      $ref: 'scalars.yaml#/ProductCategoryId'
+  required: [catalogId, restaurantId, productCategoryId]
+
+
+AddOptionList:
+  description: "Admin adds an option list (modifier group) to a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionList:
+      $ref: 'entities.yaml#/OptionList'
+  required: [catalogId, restaurantId, optionList]
+
+
+UpdateOptionList:
+  description: "Admin updates an option list (full replace)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionList:
+      $ref: 'entities.yaml#/OptionList'
+  required: [catalogId, restaurantId, optionList]
+
+
+RemoveOptionList:
+  description: "Admin removes an option list from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionListId:
+      $ref: 'scalars.yaml#/OptionListId'
+  required: [catalogId, restaurantId, optionListId]
+
+
+UpdateOfferStock:
+  description: >
+    Admin (or inventory sync) sets the stock level of a offer. The StockStatus
+    is derived server-side from quantity vs lowStockThreshold.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    offerId:
+      $ref: 'scalars.yaml#/OfferId'
+    quantity:
+      $ref: 'scalars.yaml#/Quantity'
+    lowStockThreshold:
+      $ref: 'scalars.yaml#/Quantity'
+      nullable: true
+    expiresAt:
+      type: string
+      format: date-time
+      nullable: true
+  required: [catalogId, restaurantId, offerId, quantity]
+
+
+ImportCatalog:
+  description: >
+    Admin/system imports or re-syncs a full catalog from an external source (HubRise),
+    replacing the current catalog content. Idempotent via entity `ref`s (HubRise import key).
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    source:
+      type: string
+      enum: [HUBRISE, MANUAL]
+    categories:
+      type: array
+      items:
+        $ref: 'entities.yaml#/CatalogCategory'
+    products:
+      type: array
+      items:
+        $ref: 'entities.yaml#/Product'
+    optionLists:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OptionList'
+  required: [catalogId, restaurantId, source, categories, products, optionLists]

@@ -1,0 +1,124 @@
+version: 1
+description: >
+  comms scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Order conversations / messaging (#129) ---
+
+ConversationAlreadyOpen:
+  description: >
+    OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is
+    idempotent-guarded, so a second open is rejected (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "A conversation is already open for this order."
+    fr: "Une conversation est déjà ouverte pour cette commande."
+
+
+ConversationNotFound:
+  description: >
+    PostMessage targeted an order whose conversation was never opened; a message cannot be posted before
+    the conversation exists (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "No conversation exists for this order."
+    fr: "Aucune conversation n'existe pour cette commande."
+
+
+NotAParticipant:
+  description: >
+    The acting principal is not a participant of the aggregate instance it tried to write to — the
+    aggregate's own folded state names its participants and the caller is not among them
+    (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The
+    instance's existence is NOT disclosed beyond this rejection.
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You are not a participant in this conversation."
+    fr: "Vous ne participez pas à cette conversation."
+
+
+RoleMismatch:
+  description: >
+    The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER
+    posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 /
+    PROP-20260728-135632 requires.claims).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "The author role does not match your account."
+    fr: "Le rôle d'auteur ne correspond pas à votre compte."
+
+
+CustomerChatDisabled:
+  description: >
+    A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only
+    staff may post on that thread (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "Customer messaging is disabled for this order."
+    fr: "La messagerie client est désactivée pour cette commande."
+
+
+MessageAlreadyPosted:
+  description: >
+    A message with this client-generated messageId was already posted to the conversation; the re-post
+    is a duplicate and is rejected (idempotency; #129).
+  context:
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+  messages:
+    en: "This message has already been posted."
+    fr: "Ce message a déjà été envoyé."
+
+
+MessageNotFoundInConversation:
+  description: >
+    A translation targeted a message that was never posted to the conversation; a translation can only be
+    recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+  messages:
+    en: "No such message exists in this conversation."
+    fr: "Ce message n'existe pas dans cette conversation."
+
+
+TranslationAlreadyRecorded:
+  description: >
+    A translation for this message and target locale is already cached; the re-record is idempotent and
+    rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    locale: { $ref: 'scalars.yaml#/Locale' }
+  messages:
+    en: "This message is already translated into this language."
+    fr: "Ce message est déjà traduit dans cette langue."
+
+
+MuteReasonRequired:
+  description: >
+    A participant was muted without a justification reason; a mute must record why
+    (rules.yaml#/MuteRequiresAReason) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "A reason is required to mute a participant."
+    fr: "Un motif est requis pour rendre un participant muet."
+
+
+ParticipantNotMuted:
+  description: >
+    An unmute targeted a role that is not currently muted in the order's conversation
+    (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+  messages:
+    en: "This participant is not currently muted."
+    fr: "Ce participant n'est pas actuellement muet."

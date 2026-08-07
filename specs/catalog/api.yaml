@@ -1,0 +1,166 @@
+version: 1
+description: >
+  catalog scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+  Catalog:
+    description: "A restaurant's catalog (categories → products → offers + option lists)."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Catalog' }]
+    properties:
+      id: { $ref: 'scalars.yaml#/CatalogId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      slug: { $ref: 'scalars.yaml#/Slug', nullable: true }   # null until the owner configures it
+      name: { $ref: 'scalars.yaml#/CatalogName' }
+      categories: { $ref: '#/types/CatalogCategory', array: true }   # assembled from Catalog.tree
+      products: { $ref: '#/types/Product', array: true }
+      optionLists: { $ref: '#/types/OptionList', array: true }
+      updatedAt: { type: string, format: date-time }
+
+
+  # Catalog sub-types — the read/API shape, assembled within Catalog.tree. Dedicated API
+  # types (NOT entities.yaml refs): the read shape carries presentation fields (images) and a DERIVED
+  # stockStatus, whereas the write entity carries raw Stock and write-only internals.
+  CatalogCategory:
+    description: "A catalog category (tree via parentRef)."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Catalog' }]   # category tree is assembled from the catalog projection
+    properties:
+      id: { $ref: 'scalars.yaml#/ProductCategoryId' }
+      parentRef: { $ref: 'scalars.yaml#/ExternalReference', nullable: true }
+      name: { $ref: 'scalars.yaml#/CatalogCategoryName' }
+      description: { $ref: 'scalars.yaml#/ProductDescription', nullable: true }
+      tags: { $ref: 'scalars.yaml#/Tag', array: true }
+      imageIds: { $ref: 'scalars.yaml#/ImageId', array: true }
+
+  Product:
+    description: "A catalog product grouping one or more purchasable offers."
+    properties:
+      id: { $ref: 'scalars.yaml#/ProductId' }
+      categoryRef: { $ref: 'scalars.yaml#/ExternalReference', nullable: true }
+      name: { $ref: 'scalars.yaml#/ProductName' }
+      description: { $ref: 'scalars.yaml#/ProductDescription', nullable: true }
+      tags: { $ref: 'scalars.yaml#/Tag', array: true }
+      imageIds: { $ref: 'scalars.yaml#/ImageId', array: true }
+      taxRate: { $ref: 'entities.yaml#/TaxRate' }
+      offers: { $ref: '#/types/Offer', array: true }
+
+  Offer:
+    description: "A purchasable offer (SKU) of a product, with its price and derived availability."
+    properties:
+      id: { $ref: 'scalars.yaml#/OfferId' }
+      name: { $ref: 'scalars.yaml#/OfferName' }
+      price: { $ref: 'entities.yaml#/Money' }
+      uberPrice: { $ref: 'entities.yaml#/Money', nullable: true }   # product-level Uber comparison (ADR-0022): estimated (coefficient×price) or real; null if no cuisine
+      uberPriceBasis: { $ref: 'scalars.yaml#/ComparisonBasis', nullable: true }   # ESTIMATED (V0) or REAL (opt-in + HubRise)
+      availability: { $ref: 'scalars.yaml#/CatalogItemAvailability' }
+      stockStatus: { $ref: 'scalars.yaml#/StockStatus' }   # DERIVED (quantity vs lowStockThreshold)
+      optionListIds: { $ref: 'scalars.yaml#/OptionListId', array: true }
+
+  OptionList:
+    description: "A modifier group (HubRise option list)."
+    properties:
+      id: { $ref: 'scalars.yaml#/OptionListId' }
+      name: { $ref: 'scalars.yaml#/OptionListName' }
+      minSelections: { type: integer }
+      maxSelections: { type: integer, nullable: true }
+      multipleSelection: { type: boolean }
+      options: { $ref: '#/types/Option', array: true }
+
+  Option:
+    description: "A selectable option within an option list."
+    properties:
+      id: { $ref: 'scalars.yaml#/OptionId' }
+      name: { $ref: 'scalars.yaml#/OptionName' }
+      price: { $ref: 'entities.yaml#/Money' }
+      default: { type: boolean }
+      availability: { $ref: 'scalars.yaml#/CatalogItemAvailability' }
+      stockStatus: { $ref: 'scalars.yaml#/StockStatus', nullable: true }   # DERIVED; null when not stock-tracked
+
+queries:
+
+
+  catalog:
+    description: "A restaurant's full catalog (categories → products → offers + option lists)."
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
+    returns: { $ref: '#/types/Catalog', nullable: true }
+    slice: V0
+
+  categories:
+    description: >
+      The category tree of a restaurant's catalog (for filtering & product discovery). Derived from
+      Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
+    returns: { $ref: '#/types/CatalogCategory', array: true }
+    slice: V0
+
+mutations:
+
+
+  createCatalog:
+    command: { $ref: 'commands.yaml#/CreateCatalog' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  configureCatalogSlug:
+    command: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  addProduct:
+    command: { $ref: 'commands.yaml#/AddProduct' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  updateProduct:
+    command: { $ref: 'commands.yaml#/UpdateProduct' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  removeProduct:
+    command: { $ref: 'commands.yaml#/RemoveProduct' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  addCatalogCategory:
+    command: { $ref: 'commands.yaml#/AddCatalogCategory' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  updateCatalogCategory:
+    command: { $ref: 'commands.yaml#/UpdateCatalogCategory' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  removeCatalogCategory:
+    command: { $ref: 'commands.yaml#/RemoveCatalogCategory' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  addOptionList:
+    command: { $ref: 'commands.yaml#/AddOptionList' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  updateOptionList:
+    command: { $ref: 'commands.yaml#/UpdateOptionList' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  removeOptionList:
+    command: { $ref: 'commands.yaml#/RemoveOptionList' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  updateOfferStock:
+    command: { $ref: 'commands.yaml#/UpdateOfferStock' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  importCatalog:
+    command: { $ref: 'commands.yaml#/ImportCatalog' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]
+    slice: V1

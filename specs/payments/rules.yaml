@@ -1,0 +1,28 @@
+version: 1
+description: >
+  payments scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+CheckoutAbortsOnPaymentFailure:
+  description: "On payment failure the saga aborts, no order is placed and the cart stays open."
+
+RefundSettledFactRecorded:
+  description: "The settled refund fact reported back by Stripe is recorded."
+
+OrphanPaymentEventFlagged:
+  description: "A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped."
+
+
+# --- Customer store-credit ledger + ReclamationProcess saga (#158, ADR-20260726-163737) ---
+CreditGrantIncreasesBalance:
+  description: "Granting store credit to a customer increases their available balance by the granted amount (#158)."
+
+CreditConsumeDecreasesBalance:
+  description: "Spending store credit decreases the customer's available balance by the consumed amount (#158)."
+
+CreditCannotBeOverspent:
+  description: "A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)."
+
+CreditConsumedAtMostOncePerOrder:
+  description: "Store credit is consumed at most once per order: the debit is keyed by the client-minted orderId, so a re-delivered or retried consume for an order already debited is a benign no-op — the same order never spends credit twice (#158, Part B of #207)."

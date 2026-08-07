@@ -1,0 +1,203 @@
+version: 1
+description: >
+  delivery scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+DeliveryPartnerRegistration:
+  type: aggregate
+  identity: { $ref: '#/DeliveryPartnerRegistration/state/registrationId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    A delivery partner's self-registration of availability to serve one city on one catalog channel (#61);
+    id = registrationId. RegisterDeliveryPartnerAvailability is its birth (lands PENDING); an admin
+    approves it, and the partner or an admin may revoke it. Status invariants read only this stream's fold
+    — the review state, not referential FK integrity (channel/city existence is enforced at the boundary,
+    a follow-up). The approved set is the substrate the #60 city dispatch ranking consumes (wiring deferred).
+  receives:
+    - message: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityAlreadyRequested' }
+    - message: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotPending' }
+    - message: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
+
+
+
+DeliveryJob:
+  type: aggregate
+  identity: { $ref: '#/DeliveryJob/state/deliveryJobId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    One delivery of an order (bounded context: delivery). Born from DeliveryRequested (emitted by
+    DeliveryDispatchProcess), then fulfilled by EITHER an independent Captain rider (these commands) OR a
+    delivery partner (inbound DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated, recorded via the
+    avelo37-acl — no command). ADR-0031.
+  # PENDING → ASSIGNED → PICKED_UP → OUT_FOR_DELIVERY → DELIVERED, with the PICKED_UP → DELIVERED
+  # hand-over shortcut; CANCELLED/FAILED close the job early. DeliveryStatusUpdated (rider/admin
+  # correction) and DeliveryPartnerStatusUpdated (partner report) carry their target state in the
+  # payload — the DSL's dynamic-target form (`via: status`, ADR-20260721-093027): one event, one
+  # declared edge per target. FAILED is NOT terminal: a failed dispatch can still be manually
+  # cancelled (rules.yaml#/DeliveryCancellableBeforeCompletion), but no status report leaves it.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/DeliveryRequested' }
+        to: PENDING
+    transitions:
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }, to: ASSIGNED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }, to: ASSIGNED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAssignedToPartner' }, to: ASSIGNED }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }, to: PENDING }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPickedUp' }, to: PICKED_UP }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryCompleted' }, to: DELIVERED }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY, FAILED], event: { $ref: 'events.yaml#/DeliveryCancelled' }, to: CANCELLED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }, to: FAILED }
+      # Dynamic targets — the reported status IS the target state (event payload `status`).
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: ASSIGNED, via: status }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: PICKED_UP, via: status }
+      - { from: [PICKED_UP], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: OUT_FOR_DELIVERY, via: status }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: DELIVERED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: CANCELLED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: FAILED, via: status }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: ASSIGNED, via: status }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: PICKED_UP, via: status }
+      - { from: [PICKED_UP], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: OUT_FOR_DELIVERY, via: status }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: DELIVERED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: CANCELLED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: FAILED, via: status }
+    terminal: [DELIVERED, CANCELLED]
+  receives:
+    - message: { $ref: 'events.yaml#/DeliveryRequested' }
+      emits: [{ $ref: 'events.yaml#/DeliveryRequested' }]
+      effect: "Birth: DeliveryDispatchProcess delivers DeliveryRequested; the DeliveryJob records it (idempotent)."
+    - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByPartner' }]
+      effect: "Inbound partner acceptance (via the avelo37 ACL use case): the DeliveryJob records the assigned courier (idempotent by partnerRef)."
+    - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner' }]
+      effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess advances the ranked channel walk (#60)."
+    - message: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+      emits: [{ $ref: 'events.yaml#/DeliveryOfferTimedOut' }]
+      effect: "The DeliveryOfferTimeoutWorker's fact that an outstanding offer expired (#60): the DeliveryJob records it (mirrors the inbound rejection); DeliveryDispatchProcess advances the ranked channel walk."
+    - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
+      emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
+      effect: "Inbound partner progress report (via the avelo37 ACL, two-layer inbox — the same event the UpdateDeliveryStatus command emits on the rider/admin path): the DeliveryJob records the reported transition (idempotent; lifecycle-guarded at append), and DeliveryDispatchProcess closes the order on DELIVERED."
+    - message: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+      emits: [{ $ref: 'events.yaml#/DeliveryDispatchFailed' }]
+      effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (the ranked channel walk is exhausted — fail closed, #60): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."
+    - message: { $ref: 'commands.yaml#/AcceptDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByRider' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # only a PENDING job can be accepted
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+    - message: { $ref: 'commands.yaml#/ConfirmPickup' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPickedUp' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be ASSIGNED to this rider
+    - message: { $ref: 'commands.yaml#/CompleteDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryCompleted' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+    - message: { $ref: 'commands.yaml#/CancelDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryCancelled' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot be cancelled
+    - message: { $ref: 'commands.yaml#/EscalateDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryEscalationRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }   # only a known job can be escalated; self-dispatch/exhaustion are the saga's concern, not thrown here (#60)
+    - message: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
+      emits: [{ $ref: 'events.yaml#/DeliveryIssueReported' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot report an issue
+    - message: { $ref: 'commands.yaml#/ResolveDeliveryIssue' }
+      emits: [{ $ref: 'events.yaml#/DeliveryIssueResolved' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot resolve an issue
+
+    - message: { $ref: 'commands.yaml#/UpdateDeliveryStatus' }
+      emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
+
+    - message: { $ref: 'commands.yaml#/AssignDeliveryToPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryAssignedToPartner' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a PENDING job
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+    - message: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be an ASSIGNED job
+
+    - message: { $ref: 'commands.yaml#/UpdateDeliveryPartnerStatus' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
+    - message: { $ref: 'commands.yaml#/DeclineDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryDeclinedByRider' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # only a PENDING job can be declined
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+
+    
+Rider:
+  type: aggregate
+  identity: { $ref: '#/Rider/state/riderId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A rider identity, linked to the auth provider user (authRef)."
+  # Availability machine. RiderRegistered carries the birth status in its payload (`via: status`,
+  # ADR-20260721-093027) — canonically OFFLINE (rules.yaml#/RiderLifecycle); RiderStatusChanged
+  # carries its target state the same way. SUSPENDED is admin-imposed from anywhere (idempotently
+  # re-suspendable — the self-loop is deliberate); reinstatement goes through OFFLINE only. No
+  # terminal state.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/RiderRegistered' }
+        to: OFFLINE
+        via: status
+    transitions:
+      - { from: [OFFLINE, ON_DELIVERY], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: AVAILABLE, via: status }
+      - { from: [AVAILABLE, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: OFFLINE, via: status }
+      - { from: [AVAILABLE], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: ON_DELIVERY, via: status }
+      - { from: [OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: SUSPENDED, via: status }
+    terminal: []
+  receives:
+    - message: { $ref: 'commands.yaml#/RegisterRider' }
+      emits: [{ $ref: 'events.yaml#/RiderRegistered' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderAlreadyRegistered' }
+    - message: { $ref: 'commands.yaml#/UpdateRiderInfo' }
+      emits: [{ $ref: 'events.yaml#/RiderInfoUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/NoEditableFieldProvided' }
+    - message: { $ref: 'commands.yaml#/ChangeRiderStatus' }
+      emits: [{ $ref: 'events.yaml#/RiderStatusChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }

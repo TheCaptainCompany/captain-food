@@ -1,0 +1,92 @@
+version: 1
+description: >
+  ordering scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+CartLineId:
+  type: string
+  format: uuid
+  description: "Identifies a line within a cart, used to edit its quantity or remove it."
+
+
+# --- Ratings ---
+
+StarRating:
+  type: integer
+  minimum: 0
+  maximum: 5
+  description: "Restaurant rating in stars (0–5), given by the customer on a delivered order."
+
+
+ThumbRating:
+  type: string
+  enum: [UP, DOWN]
+  description: "Rider rating: thumbs up or down."
+
+
+RatingComment:
+  type: string
+  maxLength: 1000
+  description: "Free-text comment accompanying a restaurant rating."
+
+
+DeliveryTimeliness:
+  type: string
+  enum:
+    - ON_TIME          # arrived within the promised window
+    - ACCEPTABLE_DELAY # late, but the customer was fine with it
+    - TOO_LATE         # unacceptably late
+  description: >
+    The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is
+    delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the
+    restaurant's self-dispatch-vs-Captain decision.
+
+
+DeliveryDissatisfactionReason:
+  type: string
+  maxLength: 300
+  description: "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62)."
+
+
+TipRecipient:
+  type: string
+  enum: [RIDER, RESTAURANT, CAPTAIN]
+  description: >
+    Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100%
+    passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.
+
+
+Tipper:
+  type: string
+  enum: [CUSTOMER, RESTAURANT]
+  description: >
+    Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/
+    Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.
+
+
+CartStatus:
+  type: string
+  enum:
+    - OPEN          # being built (possibly by a guest); persists indefinitely (Uber Eats style)
+    - CHECKED_OUT   # converted to an Order at checkout
+  description: >
+    Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never
+    abandoned/expired — they persist until checked out, so there is no abandonment state.
+
+
+ReclamationDescription:
+  type: string
+  maxLength: 1000
+  description: "Free-text description of the problem the customer is claiming about the order (#151)."
+
+
+ReclamationStatus:
+  type: string
+  enum: [OPEN, RESOLVED, REJECTED]
+  description: >
+    Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation):
+    OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on
+    ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in
+    `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).

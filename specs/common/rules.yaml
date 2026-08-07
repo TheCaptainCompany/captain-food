@@ -1,0 +1,34 @@
+version: 2
+description: >
+  Business rules / invariants the system must uphold (ADR-0032). Each behaviour test in tests.yaml links
+  to at least one rule via `rules: [{ $ref: 'rules.yaml#/RuleName' }]`, and the validator enforces the link
+  BOTH ways: every rule is exercised by ≥1 test, and every test asserts ≥1 rule. Rules say WHAT we
+  guarantee (readable intent); tests say HOW it's verified (Given/When/Then). A rule may span several tests
+  (typically a happy path + its rejection). Keyed by PascalCase name; description is the guarantee.
+
+CheckoutSnapshotFrozenAtIntent:
+  description: "When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store."
+
+OrderMaterializedOnPaymentCapture:
+  description: "On payment capture the order is materialized and the cart is closed."
+
+RefundRequiresApproval:
+  description: "Only an explicit decision — by the RESTAURANT for its own orders, or by an ADMIN — resolves a pending refund: ApproveRefund (possibly partial) requests the Stripe refund, DenyRefund closes it; both are rejected when no refund is pending approval for the order."
+
+
+# --- CartBindingProcess ---
+GuestCartsBoundOnIdentification:
+  description: "A returning visitor's open guest carts are bound to their Customer on identification."
+
+ReadyDeliveryOrderTriggersDispatch:
+  description: "A ready DELIVERY order triggers creation of a delivery job (dispatch)."
+
+OnlyCapPoisonedMailboxRowsAreRequeueable:
+  description: >
+    An admin requeue returns a POISONED mailbox row — one the delivery-attempts cap flipped to
+    terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4) — to
+    RECEIVED with attempts reset and error + backoff schedule cleared, and records the
+    intervention as a MailboxMessageRequeued fact on the row's supervision stream. Rows in any
+    other state are never requeued: handler REJECTED/FAILED verdicts are recorded business
+    decisions, and SUCCEEDED/IGNORED/DUPLICATE rows already ran — re-executing either class
+    would overturn something the system decided on purpose (#315, ADR-20260803-002712 Q1).

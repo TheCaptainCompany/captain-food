@@ -1,0 +1,181 @@
+version: 1
+description: >
+  payments scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+  PaymentIntent:
+    description: >
+      Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values
+      placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` /
+      `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when
+      it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient):
+      resolver-served from the saga state row, never a View_* — hence no `reads`.
+    properties:
+      paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
+      clientSecret: { type: string, nullable: true }
+      status: { $ref: 'scalars.yaml#/PaymentStatus' }
+
+  CustomerCredit:
+    description: >
+      The authenticated customer's store-credit balance (#158, Part B of #207): the spendable goodwill
+      credit (from resolved claims) the customer can apply at checkout. One row per customer with a
+      ledger; `balanceCents` is the projector's running SUM (Σ granted − Σ consumed), never negative.
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }]
+    properties:
+      customerId: { $ref: 'scalars.yaml#/CustomerId' }
+      balanceCents: { $ref: 'scalars.yaml#/MoneyCents' }
+      currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+
+  Refund:
+    description: >
+      A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
+      decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles.
+      Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
+    reads: [{ $ref: 'database/projection_views.yaml#/View_PendingRefunds' }]
+    properties:
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/RefundStatus' }
+      amount: { $ref: 'entities.yaml#/Money' }   # the captured total eligible for refund
+      approvedAmount: { $ref: 'entities.yaml#/Money', nullable: true }   # the (possibly partial) approved amount
+      reason: { type: string, nullable: true }   # free text — the opening fact's reason, then the decision's
+      refundId: { $ref: 'scalars.yaml#/RefundId', nullable: true }   # Stripe Refund id once settled
+      requestedAt: { type: string, format: date-time }
+      decidedAt: { type: string, format: date-time, nullable: true }
+
+  PricingPolicy:
+    description: "The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency."
+    reads: [{ $ref: 'database/tables/referential.yaml#/PricingPolicy' }]
+    properties:
+      currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+      feeRate: { type: number }
+      buyerShare: { type: number }
+      marginLow: { type: number }
+      marginHigh: { type: number }
+      effectiveFrom: { type: string, format: date-time }
+
+  UberEstimationPolicy:
+    description: "Calibratable per-cuisine Uber Eats mark-up coefficient (ADR-0024/0030); admin/transparency."
+    reads: [{ $ref: 'database/tables/referential.yaml#/UberEstimationPolicy' }]
+    properties:
+      cuisineCategory: { $ref: 'scalars.yaml#/CuisineCategory' }
+      priceCoefficient: { type: number }
+      effectiveFrom: { type: string, format: date-time }
+
+  UberSplitPolicy:
+    description: "Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0024/0025/0030); admin/transparency."
+    reads: [{ $ref: 'database/tables/referential.yaml#/UberSplitPolicy' }]
+    properties:
+      currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+      uberCommissionPct: { type: number }
+      riderBaseCents: { type: integer }
+      riderPerKmCents: { type: integer }
+      avgDeliveryFeeCents: { type: integer }
+      platformFeePct: { type: number }
+      effectiveFrom: { type: string, format: date-time }
+
+queries:
+
+
+  paymentStatus:
+    description: >
+      The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret
+      while the run is in flight, and the folded PaymentStatus — the read-side home of the values
+      placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception
+      to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths
+      only, ownership-scoped in the resolver — the
+      checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null
+      (never an existence oracle).
+    args:
+      orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
+    returns: { $ref: '#/types/PaymentIntent', nullable: true }
+    roles: [PUBLIC, CUSTOMER, ADMIN]
+    slice: V0
+
+
+  pendingRefunds:
+    description: >
+      The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status
+      (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders'
+      refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/RefundStatus' }
+    returns: { $ref: '#/types/Refund', array: true }
+    roles: [RESTAURANT, ADMIN]
+    slice: V0
+
+
+  customerCredit:
+    description: >
+      The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped
+      server-side to the caller's Customer identity (the verified session principal → Customer row, the
+      same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees
+      null (no credit).
+    returns: { $ref: '#/types/CustomerCredit', nullable: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+
+  pricingPolicy:
+    description: "The active Captain service-fee policy (admin; calibration/transparency)."
+    returns: { $ref: '#/types/PricingPolicy', array: true }
+    roles: [ADMIN]
+    slice: V1
+
+
+  uberEstimationPolicy:
+    description: "The active per-cuisine Uber Eats mark-up coefficients (admin; calibration/transparency)."
+    returns: { $ref: '#/types/UberEstimationPolicy', array: true }
+    roles: [ADMIN]
+    slice: V1
+
+
+  uberSplitPolicy:
+    description: "The active Uber Eats split/fee assumptions for the estimated comparison (admin; calibration/transparency)."
+    returns: { $ref: '#/types/UberSplitPolicy', array: true }
+    roles: [ADMIN]
+    slice: V1
+
+
+
+
+# --- Writes (mutations) ---------------------------------------------------------------------------
+# One mutation = one command, ACCEPTANCE-FIRST (ADR-20260720-015500). The input type is GENERATED
+# from the command's payload in commands.yaml (`<Command>Input`), so commands are NOT re-described
+# here — only the GraphQL-specific parts are: `roles` (→ @auth/@public) and `slice`. Every mutation
+# additionally takes an optional `metadata: MetadataInput` (#/inputs) and returns the ONE shared
+# `MutationAcceptance` payload (envelope echo + operationStatus). Mutations declare NO per-operation
+# payload (the validator forbids it): business outcomes are reads — poll/subscribe operationStatus,
+# and read the domain results from the read models (checkout's Stripe handle: queries/paymentStatus).
+
+mutations:
+
+  approveRefund:
+    command: { $ref: 'commands.yaml#/ApproveRefund' }
+    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    slice: V0
+
+  denyRefund:
+    command: { $ref: 'commands.yaml#/DenyRefund' }
+    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    slice: V0
+
+subscriptions:
+
+  paymentStatusChanged:
+    description: >
+      Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus,
+      ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so
+      the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling.
+      Literal roles like the query (#31), ownership-scoped at stream setup (customer / session /
+      ADMIN) —
+      strangers get an empty stream.
+    args:
+      orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
+    returns: { $ref: '#/types/PaymentIntent' }
+    roles: [PUBLIC, CUSTOMER, ADMIN]
+    slice: V0

@@ -1,0 +1,67 @@
+version: 1
+description: >
+  delivery scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+DeliveryJobId:
+  type: string
+  format: uuid
+  description: "Identifies one DeliveryJob (a single delivery of an order from restaurant to customer)."
+
+
+CityId:
+  type: string
+  format: uuid
+  description: "A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60)."
+
+
+RiderStatus:
+  type: string
+  enum:
+    - OFFLINE        # not accepting jobs
+    - AVAILABLE      # online, can be offered jobs
+    - ON_DELIVERY    # currently fulfilling a delivery
+    - SUSPENDED      # blocked by admin — terminal until reinstated
+  description: "Availability/lifecycle status of an independent Captain rider."
+
+
+# Who fulfils a delivery: an external delivery PARTNER (e.g. Avelo37, with its own couriers) or an
+# INDEPENDENT Captain rider (RIDER role) accepting the job directly. Both converge on one DeliveryJob.
+DeliveryProvider:
+  type: string
+  enum: [PARTNER, INDEPENDENT]
+  description: "Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider)."
+
+
+DeliveryChannelKey:
+  type: string
+  pattern: "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+  maxLength: 40
+  description: "Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60)."
+
+
+# --- Delivery partner self-registration (#61) ---
+# A delivery partner declares its availability to serve a city on a known catalog channel through the
+# EXTERNAL GraphQL API; an admin reviews it. The approved set is the substrate the city dispatch
+# ranking (#60) consumes (dispatch wiring is a follow-up). Runtime write-path over domain_events.
+DeliveryPartnerRegistrationId:
+  type: string
+  format: uuid
+  description: "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration."
+
+
+DeliveryPartnerName:
+  type: string
+  maxLength: 200
+  description: "The delivery partner's display/legal name as stated on self-registration (#61)."
+
+
+CityAvailabilityStatus:
+  type: string
+  enum:
+    - PENDING           # self-registered, awaiting admin review
+    - APPROVED          # an admin approved it; eligible for the city's dispatch ranking (#60 consumption is a follow-up)
+    - REVOKED           # withdrawn by the partner or disabled by an admin; not eligible
+  description: "Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled."

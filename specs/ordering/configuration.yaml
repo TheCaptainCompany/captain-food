@@ -1,0 +1,22 @@
+version: 1
+description: >
+  ordering scope — configuration fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `configuration.yaml` catalog; $refs stay kind-logical
+  (`configuration.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+keys:
+
+
+  ORDER_RETENTION_WINDOW_DAYS:
+    type: int
+    default: 3650
+    gates: >
+      The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal
+      order schedules its OrderExpired reminder this many days out; recording the delivered fact
+      starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE
+      window for now, set to the conservative accounting horizon (~10 years) because the
+      per-data-category split (personal vs financial retention, a legal/product input) is still
+      open — shortening it below the accounting horizon before that split lands would delete
+      financial facts French commercial law retains. Rescheduling is safe: changing this value
+      re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion
+      engine re-reads it at delivery.

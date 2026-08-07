@@ -5,15 +5,482 @@ use serde::{Deserialize, Serialize};
 use super::scalars::*;
 use super::entities::*;
 
-/// A single cart line as expressed by the customer. References the catalog by id; the handler resolves names/prices/tax from the current catalog and computes totals. Client-supplied prices are NEVER trusted.
+/// Admin creates a catalog for a restaurant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CartLine {
-    pub cart_line_id: CartLineId,
-    pub offer_id: OfferId,
-    pub quantity: i64,
+pub struct CreateCatalog {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub name: CatalogName,
+    pub r#ref: Option<ExternalReference>,
+}
+
+/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureCatalogSlug {
+    pub catalog_id: CatalogId,
+    pub slug: Slug,
+}
+
+/// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddProduct {
+    pub product_id: ProductId,
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub category_ref: Option<ExternalReference>,
+    pub name: ProductName,
+    pub description: Option<ProductDescription>,
     #[serde(default)]
-    pub selected_option_ids: Vec<OptionId>,
+    pub tags: Vec<Tag>,
+    pub tax_rate: TaxRate,
+    pub offers: Vec<Offer>,
+    pub r#ref: Option<ExternalReference>,
+}
+
+/// Admin updates an existing product (full replace, including offers).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProduct {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub product: Product,
+}
+
+/// Admin removes a product from a catalog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveProduct {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub product_id: ProductId,
+}
+
+/// Admin adds a category to a catalog (categories form a tree via parentRef).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddCatalogCategory {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub category: CatalogCategory,
+}
+
+/// Admin updates a category (full replace).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCatalogCategory {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub category: CatalogCategory,
+}
+
+/// Admin removes a category from a catalog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveCatalogCategory {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub product_category_id: ProductCategoryId,
+}
+
+/// Admin adds an option list (modifier group) to a catalog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddOptionList {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub option_list: OptionList,
+}
+
+/// Admin updates an option list (full replace).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOptionList {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub option_list: OptionList,
+}
+
+/// Admin removes an option list from a catalog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveOptionList {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub option_list_id: OptionListId,
+}
+
+/// Admin (or inventory sync) sets the stock level of a offer. The StockStatus is derived server-side from quantity vs lowStockThreshold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOfferStock {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub offer_id: OfferId,
+    pub quantity: Quantity,
+    pub low_stock_threshold: Option<Quantity>,
+    pub expires_at: Option<String>,
+}
+
+/// Admin/system imports or re-syncs a full catalog from an external source (HubRise), replacing the current catalog content. Idempotent via entity `ref`s (HubRise import key).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCatalog {
+    pub catalog_id: CatalogId,
+    pub restaurant_id: RestaurantId,
+    pub source: String,
+    pub categories: Vec<CatalogCategory>,
+    pub products: Vec<Product>,
+    pub option_lists: Vec<OptionList>,
+}
+
+/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequeueMailboxMessage {
+    pub target_message_id: MessageId,
+}
+
+/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenConversation {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub customer_chat_enabled: bool,
+}
+
+/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostMessage {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub author_role: ConversationAuthorRole,
+    pub visibility: MessageVisibility,
+    pub body: MessageBody,
+    pub original_locale: Locale,
+    #[serde(default)]
+    pub attachment_refs: Vec<AttachmentRef>,
+}
+
+/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMessageTranslation {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub locale: Locale,
+    pub text: TranslatedText,
+}
+
+/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateToAdmin {
+    pub order_id: OrderId,
+    pub reason: EscalationReason,
+}
+
+/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteParticipant {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+    pub reason: Option<MuteReason>,
+    pub until: Option<String>,
+}
+
+/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmuteParticipant {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+}
+
+/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPhoneVerification {
+    pub dialing_code: DialingCode,
+    pub national_number: NationalPhoneNumber,
+    pub locale: Option<Locale>,
+}
+
+/// Verify the SMS OTP with Supabase Auth, then register-or-identify: a first verified phone CREATES the Customer (CustomerRegistered), a returning phone RESOLVES + signs in (CustomerIdentified). The backend decides new-vs-returning; the client never calls register/identify directly.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyPhone {
+    pub customer_id: CustomerId,
+    pub dialing_code: DialingCode,
+    pub national_number: NationalPhoneNumber,
+    pub code: OtpCode,
+    pub session_id: SessionId,
+    pub display_name: Option<CustomerDisplayName>,
+    pub locale: Option<Locale>,
+    pub timezone: Option<TimeZone>,
+}
+
+/// Ask Supabase Auth to email a magic link to verify/link an email for the signed-in customer. Emits no event; the message is localized via the customer's STORED locale (no per-call language param).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestEmailVerification {
+    pub customer_id: CustomerId,
+    pub email: EmailAddress,
+}
+
+/// Confirm an email magic link: the client returns the Supabase token, we VERIFY it server-side and link the now-verified email to the Customer. Used for both the initial email and later changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmEmailVerification {
+    pub customer_id: CustomerId,
+    pub token: EmailVerificationToken,
+}
+
+/// Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored locale). Emits no event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPhoneChange {
+    pub customer_id: CustomerId,
+    pub new_dialing_code: DialingCode,
+    pub new_national_number: NationalPhoneNumber,
+}
+
+/// Verify the OTP on the new phone and change the customer's phone (→ canonical E.164 PhoneNumber).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPhoneChange {
+    pub customer_id: CustomerId,
+    pub new_dialing_code: DialingCode,
+    pub new_national_number: NationalPhoneNumber,
+    pub code: OtpCode,
+}
+
+/// Persist the customer's preferred language (the single locale setter). The stored locale then localizes subsequent authenticated SMS/email sends — so they need no per-call language param.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeLanguage {
+    pub customer_id: CustomerId,
+    pub locale: Locale,
+}
+
+/// Customer marks a restaurant as a favorite for quick access.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkRestaurantAsFavorite {
+    pub customer_id: CustomerId,
+    pub restaurant_id: RestaurantId,
+}
+
+/// Customer removes a restaurant from their favorites.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmarkRestaurantAsFavorite {
+    pub customer_id: CustomerId,
+    pub restaurant_id: RestaurantId,
+}
+
+/// Customer updates their display name. (Email is verified-only — set via ConfirmEmailVerification.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCustomerInfo {
+    pub customer_id: CustomerId,
+    pub display_name: Option<CustomerDisplayName>,
+}
+
+/// Customer sets discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is set via ChangeLanguage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerPreferences {
+    pub customer_id: CustomerId,
+    pub timezone: Option<TimeZone>,
+    #[serde(default)]
+    pub dietary_tags: Vec<Tag>,
+    #[serde(default)]
+    pub favorite_cuisines: Vec<Tag>,
+}
+
+/// Customer adds or updates a saved delivery address in their address book.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerAddress {
+    pub customer_id: CustomerId,
+    pub address_id: AddressId,
+    pub label: Option<String>,
+    pub address: Address,
+}
+
+/// Customer removes a saved address from their address book.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveCustomerAddress {
+    pub customer_id: CustomerId,
+    pub address_id: AddressId,
+}
+
+/// Customer sets or updates their preferred Stripe payment method.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerPaymentMethod {
+    pub customer_id: CustomerId,
+    pub payment_method_id: PaymentMethodId,
+}
+
+/// An independent Captain rider accepts a pending delivery job.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+}
+
+/// The assigned rider confirms they collected the order from the restaurant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPickup {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+}
+
+/// Restaurant/admin cancels a delivery job before it completes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub reason: Option<String>,
+}
+
+/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub reason: Option<String>,
+}
+
+/// The assigned rider marks the delivery complete (handed to the customer).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+}
+
+/// An independent rider declines a pending delivery job (it stays PENDING, re-offerable).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclineDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+    pub reason: Option<String>,
+}
+
+/// Report an issue on a delivery job (rider/partner/support).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDeliveryIssue {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: Option<RiderId>,
+    pub issue: String,
+}
+
+/// Resolve a previously reported delivery issue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveDeliveryIssue {
+    pub delivery_job_id: DeliveryJobId,
+    pub resolution: String,
+}
+
+/// Drive a delivery job's status (independent-rider path / admin correction).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDeliveryStatus {
+    pub delivery_job_id: DeliveryJobId,
+    pub status: DeliveryStatus,
+}
+
+/// Assign a pending delivery job to a delivery partner for fulfilment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignDeliveryToPartner {
+    pub delivery_job_id: DeliveryJobId,
+    pub partner_ref: ExternalReference,
+}
+
+/// Unassign a delivery job from its partner (to re-offer it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnassignDeliveryFromPartner {
+    pub delivery_job_id: DeliveryJobId,
+    pub reason: Option<String>,
+}
+
+/// Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDeliveryPartnerStatus {
+    pub delivery_job_id: DeliveryJobId,
+    pub partner_ref: Option<ExternalReference>,
+    pub status: DeliveryStatus,
+}
+
+/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub channel: DeliveryChannelKey,
+    pub city_id: CityId,
+    pub partner_name: DeliveryPartnerName,
+    pub contact_email: EmailAddress,
+}
+
+/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+}
+
+/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub reason: Option<String>,
+}
+
+/// Register as an independent Captain rider (linked to the auth provider user).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterRider {
+    pub rider_id: RiderId,
+    pub auth_ref: ExternalReference,
+    pub display_name: String,
+    pub phone: PhoneNumber,
+}
+
+/// Update editable rider profile fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRiderInfo {
+    pub rider_id: RiderId,
+    pub display_name: Option<String>,
+    pub phone: Option<PhoneNumber>,
+}
+
+/// Change a rider's availability/lifecycle status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeRiderStatus {
+    pub rider_id: RiderId,
+    pub status: RiderStatus,
 }
 
 /// Admin creates a restaurant ACCOUNT (HubRise: restaurant) that will own one or more locations. Account-level facts (legal entity, billing contact, currency, default tax, timezone) live here.
@@ -223,135 +690,15 @@ pub struct RecordProspectReply {
     pub note: Option<String>,
 }
 
-/// Admin creates a catalog for a restaurant.
+/// A single cart line as expressed by the customer. References the catalog by id; the handler resolves names/prices/tax from the current catalog and computes totals. Client-supplied prices are NEVER trusted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateCatalog {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub name: CatalogName,
-    pub r#ref: Option<ExternalReference>,
-}
-
-/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigureCatalogSlug {
-    pub catalog_id: CatalogId,
-    pub slug: Slug,
-}
-
-/// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddProduct {
-    pub product_id: ProductId,
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub category_ref: Option<ExternalReference>,
-    pub name: ProductName,
-    pub description: Option<ProductDescription>,
-    #[serde(default)]
-    pub tags: Vec<Tag>,
-    pub tax_rate: TaxRate,
-    pub offers: Vec<Offer>,
-    pub r#ref: Option<ExternalReference>,
-}
-
-/// Admin updates an existing product (full replace, including offers).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateProduct {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub product: Product,
-}
-
-/// Admin removes a product from a catalog.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveProduct {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub product_id: ProductId,
-}
-
-/// Admin adds a category to a catalog (categories form a tree via parentRef).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddCatalogCategory {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub category: CatalogCategory,
-}
-
-/// Admin updates a category (full replace).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateCatalogCategory {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub category: CatalogCategory,
-}
-
-/// Admin removes a category from a catalog.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveCatalogCategory {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub product_category_id: ProductCategoryId,
-}
-
-/// Admin adds an option list (modifier group) to a catalog.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddOptionList {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub option_list: OptionList,
-}
-
-/// Admin updates an option list (full replace).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateOptionList {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub option_list: OptionList,
-}
-
-/// Admin removes an option list from a catalog.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveOptionList {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub option_list_id: OptionListId,
-}
-
-/// Admin (or inventory sync) sets the stock level of a offer. The StockStatus is derived server-side from quantity vs lowStockThreshold.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateOfferStock {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
+pub struct CartLine {
+    pub cart_line_id: CartLineId,
     pub offer_id: OfferId,
-    pub quantity: Quantity,
-    pub low_stock_threshold: Option<Quantity>,
-    pub expires_at: Option<String>,
-}
-
-/// Admin/system imports or re-syncs a full catalog from an external source (HubRise), replacing the current catalog content. Idempotent via entity `ref`s (HubRise import key).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportCatalog {
-    pub catalog_id: CatalogId,
-    pub restaurant_id: RestaurantId,
-    pub source: String,
-    pub categories: Vec<CatalogCategory>,
-    pub products: Vec<Product>,
-    pub option_lists: Vec<OptionList>,
+    pub quantity: i64,
+    #[serde(default)]
+    pub selected_option_ids: Vec<OptionId>,
 }
 
 /// Visitor adds a line to a cart, validated against the live catalog. The client generates the cartId and sends it on every add; the first add for a new cartId creates the cart (idempotently), binding it to the restaurant.
@@ -381,134 +728,6 @@ pub struct ChangeCartLineQuantity {
     pub cart_line_id: CartLineId,
     pub quantity: i64,
     pub session_id: SessionId,
-}
-
-/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestPhoneVerification {
-    pub dialing_code: DialingCode,
-    pub national_number: NationalPhoneNumber,
-    pub locale: Option<Locale>,
-}
-
-/// Verify the SMS OTP with Supabase Auth, then register-or-identify: a first verified phone CREATES the Customer (CustomerRegistered), a returning phone RESOLVES + signs in (CustomerIdentified). The backend decides new-vs-returning; the client never calls register/identify directly.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyPhone {
-    pub customer_id: CustomerId,
-    pub dialing_code: DialingCode,
-    pub national_number: NationalPhoneNumber,
-    pub code: OtpCode,
-    pub session_id: SessionId,
-    pub display_name: Option<CustomerDisplayName>,
-    pub locale: Option<Locale>,
-    pub timezone: Option<TimeZone>,
-}
-
-/// Ask Supabase Auth to email a magic link to verify/link an email for the signed-in customer. Emits no event; the message is localized via the customer's STORED locale (no per-call language param).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestEmailVerification {
-    pub customer_id: CustomerId,
-    pub email: EmailAddress,
-}
-
-/// Confirm an email magic link: the client returns the Supabase token, we VERIFY it server-side and link the now-verified email to the Customer. Used for both the initial email and later changes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmEmailVerification {
-    pub customer_id: CustomerId,
-    pub token: EmailVerificationToken,
-}
-
-/// Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored locale). Emits no event.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestPhoneChange {
-    pub customer_id: CustomerId,
-    pub new_dialing_code: DialingCode,
-    pub new_national_number: NationalPhoneNumber,
-}
-
-/// Verify the OTP on the new phone and change the customer's phone (→ canonical E.164 PhoneNumber).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmPhoneChange {
-    pub customer_id: CustomerId,
-    pub new_dialing_code: DialingCode,
-    pub new_national_number: NationalPhoneNumber,
-    pub code: OtpCode,
-}
-
-/// Persist the customer's preferred language (the single locale setter). The stored locale then localizes subsequent authenticated SMS/email sends — so they need no per-call language param.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeLanguage {
-    pub customer_id: CustomerId,
-    pub locale: Locale,
-}
-
-/// Customer marks a restaurant as a favorite for quick access.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkRestaurantAsFavorite {
-    pub customer_id: CustomerId,
-    pub restaurant_id: RestaurantId,
-}
-
-/// Customer removes a restaurant from their favorites.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnmarkRestaurantAsFavorite {
-    pub customer_id: CustomerId,
-    pub restaurant_id: RestaurantId,
-}
-
-/// Customer updates their display name. (Email is verified-only — set via ConfirmEmailVerification.)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateCustomerInfo {
-    pub customer_id: CustomerId,
-    pub display_name: Option<CustomerDisplayName>,
-}
-
-/// Customer sets discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is set via ChangeLanguage.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerPreferences {
-    pub customer_id: CustomerId,
-    pub timezone: Option<TimeZone>,
-    #[serde(default)]
-    pub dietary_tags: Vec<Tag>,
-    #[serde(default)]
-    pub favorite_cuisines: Vec<Tag>,
-}
-
-/// Customer adds or updates a saved delivery address in their address book.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerAddress {
-    pub customer_id: CustomerId,
-    pub address_id: AddressId,
-    pub label: Option<String>,
-    pub address: Address,
-}
-
-/// Customer removes a saved address from their address book.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveCustomerAddress {
-    pub customer_id: CustomerId,
-    pub address_id: AddressId,
-}
-
-/// Customer sets or updates their preferred Stripe payment method.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerPaymentMethod {
-    pub customer_id: CustomerId,
-    pub payment_method_id: PaymentMethodId,
 }
 
 /// SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it against the live catalog, prices it server-side, takes payment via Stripe, records the order, then closes the cart. This is the V0 risk point: it depends on an external actor (Stripe) and must be a saga with a failure branch. Now that the customer has verified their phone, customerId is bound here.
@@ -635,199 +854,12 @@ pub struct RequestRefund {
     pub reason: Option<String>,
 }
 
-/// An independent Captain rider accepts a pending delivery job.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcceptDelivery {
-    pub delivery_job_id: DeliveryJobId,
-    pub rider_id: RiderId,
-}
-
-/// The assigned rider confirms they collected the order from the restaurant.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmPickup {
-    pub delivery_job_id: DeliveryJobId,
-    pub rider_id: RiderId,
-}
-
-/// Restaurant/admin cancels a delivery job before it completes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CancelDelivery {
-    pub delivery_job_id: DeliveryJobId,
-    pub reason: Option<String>,
-}
-
-/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EscalateDelivery {
-    pub delivery_job_id: DeliveryJobId,
-    pub reason: Option<String>,
-}
-
 /// Bind a cart to a customer (after phone verification). The cart is then owned by the customer and can be retrieved across sessions. This is a one-time operation per cart.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BindCartToCustomer {
     pub cart_id: CartId,
     pub customer_id: CustomerId,
-}
-
-/// The assigned rider marks the delivery complete (handed to the customer).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompleteDelivery {
-    pub delivery_job_id: DeliveryJobId,
-    pub rider_id: RiderId,
-}
-
-/// An independent rider declines a pending delivery job (it stays PENDING, re-offerable).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeclineDelivery {
-    pub delivery_job_id: DeliveryJobId,
-    pub rider_id: RiderId,
-    pub reason: Option<String>,
-}
-
-/// Report an issue on a delivery job (rider/partner/support).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportDeliveryIssue {
-    pub delivery_job_id: DeliveryJobId,
-    pub rider_id: Option<RiderId>,
-    pub issue: String,
-}
-
-/// Resolve a previously reported delivery issue.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResolveDeliveryIssue {
-    pub delivery_job_id: DeliveryJobId,
-    pub resolution: String,
-}
-
-/// Drive a delivery job's status (independent-rider path / admin correction).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateDeliveryStatus {
-    pub delivery_job_id: DeliveryJobId,
-    pub status: DeliveryStatus,
-}
-
-/// Assign a pending delivery job to a delivery partner for fulfilment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssignDeliveryToPartner {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: ExternalReference,
-}
-
-/// Unassign a delivery job from its partner (to re-offer it).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnassignDeliveryFromPartner {
-    pub delivery_job_id: DeliveryJobId,
-    pub reason: Option<String>,
-}
-
-/// Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateDeliveryPartnerStatus {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: Option<ExternalReference>,
-    pub status: DeliveryStatus,
-}
-
-/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterDeliveryPartnerAvailability {
-    pub registration_id: DeliveryPartnerRegistrationId,
-    pub channel: DeliveryChannelKey,
-    pub city_id: CityId,
-    pub partner_name: DeliveryPartnerName,
-    pub contact_email: EmailAddress,
-}
-
-/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApproveDeliveryPartnerAvailability {
-    pub registration_id: DeliveryPartnerRegistrationId,
-}
-
-/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RevokeDeliveryPartnerAvailability {
-    pub registration_id: DeliveryPartnerRegistrationId,
-    pub reason: Option<String>,
-}
-
-/// Register as an independent Captain rider (linked to the auth provider user).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterRider {
-    pub rider_id: RiderId,
-    pub auth_ref: ExternalReference,
-    pub display_name: String,
-    pub phone: PhoneNumber,
-}
-
-/// Update editable rider profile fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateRiderInfo {
-    pub rider_id: RiderId,
-    pub display_name: Option<String>,
-    pub phone: Option<PhoneNumber>,
-}
-
-/// Change a rider's availability/lifecycle status.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeRiderStatus {
-    pub rider_id: RiderId,
-    pub status: RiderStatus,
-}
-
-/// The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApproveRefund {
-    pub order_id: OrderId,
-    pub amount: Money,
-    pub reason: Option<String>,
-}
-
-/// The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DenyRefund {
-    pub order_id: OrderId,
-    pub reason: String,
-}
-
-/// Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrantCustomerCredit {
-    pub customer_id: CustomerId,
-    pub amount: Money,
-    pub reclamation_id: ReclamationId,
-}
-
-/// Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConsumeCustomerCredit {
-    pub customer_id: CustomerId,
-    pub amount: Money,
-    pub order_id: OrderId,
 }
 
 /// Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159). Dispatched by the ReclamationProcess saga; NOT a public GraphQL mutation. The handler reads the ORIGINAL order (by originalOrderId) and remakes it as a new Order carrying the SAME line items, a $0 buyer total and NO paymentIntentId (no Stripe), linked via OrderPlaced.replacementOf. It then enters the normal fulfilment/dispatch flow (the restaurant remakes it, the rider redelivers). Idempotent per reclamationId: the saga derives a deterministic orderId from reclamationId, so a re-delivered ReclamationResolved re-targets the same new-order stream and is absorbed as a no-op — never a second replacement.
@@ -837,66 +869,6 @@ pub struct PlaceReplacementOrder {
     pub order_id: OrderId,
     pub original_order_id: OrderId,
     pub reclamation_id: ReclamationId,
-}
-
-/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenConversation {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub customer_chat_enabled: bool,
-}
-
-/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PostMessage {
-    pub order_id: OrderId,
-    pub message_id: ConversationMessageId,
-    pub author_role: ConversationAuthorRole,
-    pub visibility: MessageVisibility,
-    pub body: MessageBody,
-    pub original_locale: Locale,
-    #[serde(default)]
-    pub attachment_refs: Vec<AttachmentRef>,
-}
-
-/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordMessageTranslation {
-    pub order_id: OrderId,
-    pub message_id: ConversationMessageId,
-    pub locale: Locale,
-    pub text: TranslatedText,
-}
-
-/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EscalateToAdmin {
-    pub order_id: OrderId,
-    pub reason: EscalationReason,
-}
-
-/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MuteParticipant {
-    pub order_id: OrderId,
-    pub muted_role: ConversationAuthorRole,
-    pub reason: Option<MuteReason>,
-    pub until: Option<String>,
-}
-
-/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnmuteParticipant {
-    pub order_id: OrderId,
-    pub muted_role: ConversationAuthorRole,
 }
 
 /// Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The client supplies `customerId` (whose claim) and `restaurantId` (whose restaurant's order), mirroring how placeOrder supplies them — they scope the read model (#154). The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
@@ -946,9 +918,37 @@ pub struct AttachReclamationEvidence {
     pub attachment_ref: AttachmentRef,
 }
 
-/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+/// The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RequeueMailboxMessage {
-    pub target_message_id: MessageId,
+pub struct ApproveRefund {
+    pub order_id: OrderId,
+    pub amount: Money,
+    pub reason: Option<String>,
+}
+
+/// The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DenyRefund {
+    pub order_id: OrderId,
+    pub reason: String,
+}
+
+/// Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantCustomerCredit {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub reclamation_id: ReclamationId,
+}
+
+/// Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsumeCustomerCredit {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub order_id: OrderId,
 }

@@ -1,0 +1,21 @@
+version: 1
+description: >
+  payments scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+RefundId:
+  type: string
+  maxLength: 255
+  description: "Stripe Refund id (provider reference). Example: 're_3Nabc...'."
+
+
+RefundStatus:
+  type: string
+  enum: [REQUESTED, APPROVED, DENIED, REFUNDED]
+  description: >
+    Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds):
+    REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved
+    (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded).
+    Distinct from RefundProcessStatus, the RefundProcess state-table run status.

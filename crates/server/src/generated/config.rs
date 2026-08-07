@@ -177,6 +177,16 @@ impl fmt::Display for MissingConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub profile: Profile,
+    /// HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET — we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already connected locations are unaffected, since the worker uses their per-connection tokens. When a client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets literal per-profile `deploy` values here rather than a repo secret.
+    pub hubrise_client_id: Option<String>,
+    /// HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
+    pub hubrise_webhook_secret: Option<String>,
+    /// HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
+    pub hubrise_api_base_url: Option<String>,
+    /// Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
+    pub hubrise_connect_redirect_url: Option<String>,
+    /// Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so one token covers every location of the account. Narrowing it means a connected restaurant's catalog or stock silently stops syncing for the locations the scope no longer covers.
+    pub hubrise_oauth_scope: Option<String>,
     /// Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all.
     pub database_url: String,
     /// Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused.
@@ -189,10 +199,6 @@ pub struct Config {
     pub auth_session_key: String,
     /// Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
     pub supabase_sms_hook_secret: Option<String>,
-    /// Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so "is production actually live?" is answerable.
-    pub stripe_secret_key: String,
-    /// HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY.
-    pub stripe_webhook_secret: String,
     /// Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export.
     pub honeycomb_api_key: Option<String>,
     /// OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent.
@@ -203,16 +209,10 @@ pub struct Config {
     pub otel_traces_sample_ratio: String,
     /// Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default.
     pub log_level: String,
-    /// HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET — we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already connected locations are unaffected, since the worker uses their per-connection tokens. When a client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets literal per-profile `deploy` values here rather than a repo secret.
-    pub hubrise_client_id: Option<String>,
-    /// HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
-    pub hubrise_webhook_secret: Option<String>,
     /// Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047). Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
     pub external_api_tokens: Option<String>,
     /// Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`). Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for its hourly poll instead of starting in seconds.
     pub internal_trigger_token: Option<String>,
-    /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
-    pub delivery_offer_max_ttl_seconds: i64,
     /// How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -223,8 +223,6 @@ pub struct Config {
     pub actor_activation_idle_seconds: i64,
     /// The activation cache's byte bound (PROP-20260728-152752 §3.5 "hot cache pressure evicts by size"): crossing it evicts least-recently-used held states, sized by their serialized event payloads. Idle actors expire by the clock (ACTOR_ACTIVATION_IDLE_SECONDS); this bound is the backstop for a hot Friday-peak set larger than memory should carry.
     pub actor_activation_max_memory_mb: i64,
-    /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
-    pub order_retention_window_days: i64,
     /// Events per projection unit-of-work flush (PROP-20260730-230803 §2, 100–1000): one transaction per THIS MANY events instead of one per event. Higher = fewer fsyncs but a larger replay window after a crash and a bigger in-memory identity map. Reader lands with the #267 batched projector.
     pub projection_batch_size: i64,
     /// Early-flush bound on the projection identity map (PROP-20260730-230803 §4): a batch whose loaded row states outgrow this flushes before reaching PROJECTION_BATCH_SIZE, keeping wide rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched projector.
@@ -245,10 +243,6 @@ pub struct Config {
     pub run_deletion_engine: bool,
     /// Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without bound.
     pub run_retention_sweep: bool,
-    /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
-    pub run_sirene_worker: bool,
-    /// Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
-    pub run_delivery_offer_timeout: bool,
     /// OVH API application key — one of the THREE values the v1 signature needs (`X-Ovh-Application`). Missing any one of the three and the SMS client is None, so the Send-SMS hook 503s and Supabase surfaces an OTP delivery error to the customer.
     pub ovh_application_key: Option<String>,
     /// OVH API application secret — the HMAC key for `X-Ovh-Signature` (`sha1(secret + "+" + consumerKey + "+" + METHOD + "+" + URL + "+" + BODY + "+" + timestamp)`). The one value here that grants send capability; treat it as a payment credential.
@@ -261,6 +255,16 @@ pub struct Config {
     pub ovh_sms_sender: Option<String>,
     /// OVH API base URL. Unset, the client substitutes `https://eu.api.ovh.com/1.0` — the EU region, which is the deliberate choice for data residency (ADR-20260722-174500) and must match the region the API credentials were created in. Declares NO `default` for the same reason as OVH_SMS_SENDER: the fallback is the client's.
     pub ovh_endpoint: Option<String>,
+    /// TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check never reaches the app and the deploy fails.
+    pub port: i64,
+    /// Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
+    pub web_assets_dir: String,
+    /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
+    pub captain_build_version: Option<String>,
+    /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
+    pub delivery_offer_max_ttl_seconds: i64,
+    /// Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
+    pub run_delivery_offer_timeout: bool,
     /// Static bearer key for the Avelo37 partner API. Unset, the outbound gateway is not built and jobs reach independent riders only — no delivery is lost, but the partner channel is silently absent, so an operator expecting Avelo37 coverage sees none.
     pub avelo37_api_key: Option<String>,
     /// Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own production constant -- hence no `default` here, which would duplicate it.
@@ -283,18 +287,14 @@ pub struct Config {
     pub uber_direct_scope: Option<String>,
     /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
     pub coopcycle_instances: Option<String>,
-    /// HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
-    pub hubrise_api_base_url: Option<String>,
-    /// Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
-    pub hubrise_connect_redirect_url: Option<String>,
-    /// Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so one token covers every location of the account. Narrowing it means a connected restaurant's catalog or stock silently stops syncing for the locations the scope no longer covers.
-    pub hubrise_oauth_scope: Option<String>,
-    /// TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check never reaches the app and the deploy fails.
-    pub port: i64,
-    /// Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
-    pub web_assets_dir: String,
-    /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
-    pub captain_build_version: Option<String>,
+    /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
+    pub run_sirene_worker: bool,
+    /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
+    pub order_retention_window_days: i64,
+    /// Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so "is production actually live?" is answerable.
+    pub stripe_secret_key: String,
+    /// HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY.
+    pub stripe_webhook_secret: String,
 }
 
 impl Config {
@@ -337,6 +337,11 @@ impl Config {
             }
         };
         let mut problems = ConfigProblems::default();
+        let hubrise_client_id = raw("HUBRISE_CLIENT_ID");
+        let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
+        let hubrise_api_base_url = raw("HUBRISE_API_BASE_URL");
+        let hubrise_connect_redirect_url = raw("HUBRISE_CONNECT_REDIRECT_URL");
+        let hubrise_oauth_scope = raw("HUBRISE_OAUTH_SCOPE");
         let database_url = raw("DATABASE_URL");
         if database_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -363,16 +368,6 @@ impl Config {
         }
         let auth_session_key = auth_session_key.unwrap_or_default();
         let supabase_sms_hook_secret = raw("SUPABASE_SMS_HOOK_SECRET");
-        let stripe_secret_key = raw("STRIPE_SECRET_KEY");
-        if stripe_secret_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            problems.missing.push(MissingKey { name: "STRIPE_SECRET_KEY", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
-        }
-        let stripe_secret_key = stripe_secret_key.unwrap_or_default();
-        let stripe_webhook_secret = raw("STRIPE_WEBHOOK_SECRET");
-        if stripe_webhook_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
-        }
-        let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
         let honeycomb_api_key = raw("HONEYCOMB_API_KEY");
         let honeycomb_api_endpoint = raw("HONEYCOMB_API_ENDPOINT").or_else(|| baked("HONEYCOMB_API_ENDPOINT", profile).map(str::to_string));
         let honeycomb_api_endpoint = honeycomb_api_endpoint.unwrap_or_else(|| "https://api.eu1.honeycomb.io".to_string());
@@ -382,11 +377,8 @@ impl Config {
         let otel_traces_sample_ratio = otel_traces_sample_ratio.unwrap_or_else(|| "1.0".to_string());
         let log_level = raw("LOG_LEVEL").or_else(|| baked("LOG_LEVEL", profile).map(str::to_string));
         let log_level = log_level.unwrap_or_else(|| "info".to_string());
-        let hubrise_client_id = raw("HUBRISE_CLIENT_ID");
-        let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
-        let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -395,7 +387,6 @@ impl Config {
             .unwrap_or(false);
         let actor_activation_idle_seconds = raw("ACTOR_ACTIVATION_IDLE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
         let actor_activation_max_memory_mb = raw("ACTOR_ACTIVATION_MAX_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
-        let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         let projection_batch_size = raw("PROJECTION_BATCH_SIZE").and_then(|v| v.parse::<i64>().ok()).unwrap_or(500);
         let projection_batch_memory_mb = raw("PROJECTION_BATCH_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
         let projection_partitions = raw("PROJECTION_PARTITIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(16);
@@ -424,20 +415,21 @@ impl Config {
             .or_else(|| baked("RUN_RETENTION_SWEEP", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true))
             .unwrap_or(true);
-        let run_sirene_worker = raw("RUN_SIRENE_WORKER")
-            .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
-            .unwrap_or(false);
-        let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT")
-            .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true))
-            .unwrap_or(true);
         let ovh_application_key = raw("OVH_APPLICATION_KEY");
         let ovh_application_secret = raw("OVH_APPLICATION_SECRET");
         let ovh_consumer_key = raw("OVH_CONSUMER_KEY");
         let ovh_sms_service_name = raw("OVH_SMS_SERVICE_NAME");
         let ovh_sms_sender = raw("OVH_SMS_SENDER");
         let ovh_endpoint = raw("OVH_ENDPOINT");
+        let port = raw("PORT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(8080);
+        let web_assets_dir = raw("WEB_ASSETS_DIR");
+        let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
+        let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
+        let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT")
+            .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true))
+            .unwrap_or(true);
         let avelo37_api_key = raw("AVELO37_API_KEY");
         let avelo37_api_base_url = raw("AVELO37_API_BASE_URL");
         let avelo37_webhook_secret = raw("AVELO37_WEBHOOK_SECRET");
@@ -449,13 +441,31 @@ impl Config {
         let uber_direct_token_url = raw("UBER_DIRECT_TOKEN_URL");
         let uber_direct_scope = raw("UBER_DIRECT_SCOPE");
         let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
-        let hubrise_api_base_url = raw("HUBRISE_API_BASE_URL");
-        let hubrise_connect_redirect_url = raw("HUBRISE_CONNECT_REDIRECT_URL");
-        let hubrise_oauth_scope = raw("HUBRISE_OAUTH_SCOPE");
-        let port = raw("PORT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(8080);
-        let web_assets_dir = raw("WEB_ASSETS_DIR");
-        let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
-        let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let run_sirene_worker = raw("RUN_SIRENE_WORKER")
+            .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
+            .unwrap_or(false);
+        let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
+        let stripe_secret_key = raw("STRIPE_SECRET_KEY");
+        if stripe_secret_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "STRIPE_SECRET_KEY", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
+        }
+        let stripe_secret_key = stripe_secret_key.unwrap_or_default();
+        let stripe_webhook_secret = raw("STRIPE_WEBHOOK_SECRET");
+        if stripe_webhook_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
+        }
+        let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
+        if let Some(v) = hubrise_api_base_url.as_deref() {
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
+            }
+        }
+        if let Some(v) = hubrise_connect_redirect_url.as_deref() {
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HUBRISE_CONNECT_REDIRECT_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent." });
+            }
+        }
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -474,16 +484,6 @@ impl Config {
         if let Some(v) = Some(auth_session_key.as_str()) {
             if !v.is_empty() && !matches_pattern("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", v) {
                 problems.invalid.push(InvalidKey { name: "AUTH_SESSION_KEY", scalar: "AuthSessionKey", pattern: "^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
-            }
-        }
-        if let Some(v) = Some(stripe_secret_key.as_str()) {
-            if !v.is_empty() && !matches_pattern("^sk_(test|live)_[A-Za-z0-9]+$", v) {
-                problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: "^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
-            }
-        }
-        if let Some(v) = Some(stripe_webhook_secret.as_str()) {
-            if !v.is_empty() && !matches_pattern("^whsec_[A-Za-z0-9_-]+$", v) {
-                problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: "^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
             }
         }
         if let Some(v) = honeycomb_api_key.as_deref() {
@@ -521,43 +521,42 @@ impl Config {
                 problems.invalid.push(InvalidKey { name: "UBER_DIRECT_TOKEN_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "OAuth2 token-endpoint override. Unset, the adapter's own constant applies." });
             }
         }
-        if let Some(v) = hubrise_api_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
+        if let Some(v) = Some(stripe_secret_key.as_str()) {
+            if !v.is_empty() && !matches_pattern("^sk_(test|live)_[A-Za-z0-9]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: "^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
             }
         }
-        if let Some(v) = hubrise_connect_redirect_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_CONNECT_REDIRECT_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent." });
+        if let Some(v) = Some(stripe_webhook_secret.as_str()) {
+            if !v.is_empty() && !matches_pattern("^whsec_[A-Za-z0-9_-]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: "^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
             }
         }
         (
             Self {
                 profile,
+                hubrise_client_id,
+                hubrise_webhook_secret,
+                hubrise_api_base_url,
+                hubrise_connect_redirect_url,
+                hubrise_oauth_scope,
                 database_url,
                 supabase_url,
                 supabase_publishable_key,
                 supabase_jwks_url,
                 auth_session_key,
                 supabase_sms_hook_secret,
-                stripe_secret_key,
-                stripe_webhook_secret,
                 honeycomb_api_key,
                 honeycomb_api_endpoint,
                 honeycomb_dataset,
                 otel_traces_sample_ratio,
                 log_level,
-                hubrise_client_id,
-                hubrise_webhook_secret,
                 external_api_tokens,
                 internal_trigger_token,
-                delivery_offer_max_ttl_seconds,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
                 actor_activation_idle_seconds,
                 actor_activation_max_memory_mb,
-                order_retention_window_days,
                 projection_batch_size,
                 projection_batch_memory_mb,
                 projection_partitions,
@@ -568,14 +567,17 @@ impl Config {
                 mailbox_max_delivery_attempts,
                 run_deletion_engine,
                 run_retention_sweep,
-                run_sirene_worker,
-                run_delivery_offer_timeout,
                 ovh_application_key,
                 ovh_application_secret,
                 ovh_consumer_key,
                 ovh_sms_service_name,
                 ovh_sms_sender,
                 ovh_endpoint,
+                port,
+                web_assets_dir,
+                captain_build_version,
+                delivery_offer_max_ttl_seconds,
+                run_delivery_offer_timeout,
                 avelo37_api_key,
                 avelo37_api_base_url,
                 avelo37_webhook_secret,
@@ -587,12 +589,10 @@ impl Config {
                 uber_direct_token_url,
                 uber_direct_scope,
                 coopcycle_instances,
-                hubrise_api_base_url,
-                hubrise_connect_redirect_url,
-                hubrise_oauth_scope,
-                port,
-                web_assets_dir,
-                captain_build_version,
+                run_sirene_worker,
+                order_retention_window_days,
+                stripe_secret_key,
+                stripe_webhook_secret,
             },
             problems,
         )
@@ -614,30 +614,29 @@ impl Config {
     /// "is production actually live?" is answerable without reading a secret.
     pub fn boot_report(&self) -> String {
         let mut out = format!("config: profile={}, {} keys resolved\n", self.profile, KEY_COUNT);
+        out.push_str(&format!("  HUBRISE_CLIENT_ID          = {}\n", self.hubrise_client_id.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  HUBRISE_WEBHOOK_SECRET     = {}\n", if self.hubrise_webhook_secret.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  HUBRISE_API_BASE_URL       = {}\n", self.hubrise_api_base_url.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  HUBRISE_CONNECT_REDIRECT_URL = {}\n", self.hubrise_connect_redirect_url.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  HUBRISE_OAUTH_SCOPE        = {}\n", self.hubrise_oauth_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  DATABASE_URL               = {}\n", if self.database_url.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  SUPABASE_URL               = {}\n", self.supabase_url));
         out.push_str(&format!("  SUPABASE_PUBLISHABLE_KEY   = {}\n", self.supabase_publishable_key));
         out.push_str(&format!("  SUPABASE_JWKS_URL          = {}\n", self.supabase_jwks_url));
         out.push_str(&format!("  AUTH_SESSION_KEY           = {}\n", if self.auth_session_key.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  SUPABASE_SMS_HOOK_SECRET   = {}\n", if self.supabase_sms_hook_secret.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
-        out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  HONEYCOMB_API_KEY          = {}\n", if self.honeycomb_api_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  HONEYCOMB_API_ENDPOINT     = {}\n", self.honeycomb_api_endpoint));
         out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
         out.push_str(&format!("  OTEL_TRACES_SAMPLE_RATIO   = {}\n", self.otel_traces_sample_ratio));
         out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
-        out.push_str(&format!("  HUBRISE_CLIENT_ID          = {}\n", self.hubrise_client_id.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_WEBHOOK_SECRET     = {}\n", if self.hubrise_webhook_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
         out.push_str(&format!("  ACTOR_ACTIVATION_IDLE_SECONDS = {}\n", self.actor_activation_idle_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATION_MAX_MEMORY_MB = {}\n", self.actor_activation_max_memory_mb));
-        out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  PROJECTION_BATCH_SIZE      = {}\n", self.projection_batch_size));
         out.push_str(&format!("  PROJECTION_BATCH_MEMORY_MB = {}\n", self.projection_batch_memory_mb));
         out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
@@ -648,14 +647,17 @@ impl Config {
         out.push_str(&format!("  MAILBOX_MAX_DELIVERY_ATTEMPTS = {}\n", self.mailbox_max_delivery_attempts));
         out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
-        out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
-        out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
         out.push_str(&format!("  OVH_APPLICATION_KEY        = {}\n", if self.ovh_application_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  OVH_APPLICATION_SECRET     = {}\n", if self.ovh_application_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  OVH_CONSUMER_KEY           = {}\n", if self.ovh_consumer_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  OVH_SMS_SERVICE_NAME       = {}\n", if self.ovh_sms_service_name.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  OVH_SMS_SENDER             = {}\n", self.ovh_sms_sender.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  OVH_ENDPOINT               = {}\n", self.ovh_endpoint.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  PORT                       = {}\n", self.port));
+        out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
+        out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
+        out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
         out.push_str(&format!("  AVELO37_API_KEY            = {}\n", if self.avelo37_api_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  AVELO37_API_BASE_URL       = {}\n", self.avelo37_api_base_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  AVELO37_WEBHOOK_SECRET     = {}\n", if self.avelo37_webhook_secret.is_some() { "set" } else { "unset" }));
@@ -667,12 +669,10 @@ impl Config {
         out.push_str(&format!("  UBER_DIRECT_TOKEN_URL      = {}\n", self.uber_direct_token_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  UBER_DIRECT_SCOPE          = {}\n", self.uber_direct_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_API_BASE_URL       = {}\n", self.hubrise_api_base_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_CONNECT_REDIRECT_URL = {}\n", self.hubrise_connect_redirect_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_OAUTH_SCOPE        = {}\n", self.hubrise_oauth_scope.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  PORT                       = {}\n", self.port));
-        out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
-        out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
+        out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
+        out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
+        out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
         out
     }
 }
@@ -682,6 +682,11 @@ pub const KEY_COUNT: usize = 59;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
+    "HUBRISE_CLIENT_ID",
+    "HUBRISE_WEBHOOK_SECRET",
+    "HUBRISE_API_BASE_URL",
+    "HUBRISE_CONNECT_REDIRECT_URL",
+    "HUBRISE_OAUTH_SCOPE",
     "APP_PROFILE",
     "DATABASE_URL",
     "SUPABASE_URL",
@@ -689,24 +694,18 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SUPABASE_JWKS_URL",
     "AUTH_SESSION_KEY",
     "SUPABASE_SMS_HOOK_SECRET",
-    "STRIPE_SECRET_KEY",
-    "STRIPE_WEBHOOK_SECRET",
     "HONEYCOMB_API_KEY",
     "HONEYCOMB_API_ENDPOINT",
     "HONEYCOMB_DATASET",
     "OTEL_TRACES_SAMPLE_RATIO",
     "LOG_LEVEL",
-    "HUBRISE_CLIENT_ID",
-    "HUBRISE_WEBHOOK_SECRET",
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
-    "DELIVERY_OFFER_MAX_TTL_SECONDS",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",
     "ACTOR_ACTIVATION_IDLE_SECONDS",
     "ACTOR_ACTIVATION_MAX_MEMORY_MB",
-    "ORDER_RETENTION_WINDOW_DAYS",
     "PROJECTION_BATCH_SIZE",
     "PROJECTION_BATCH_MEMORY_MB",
     "PROJECTION_PARTITIONS",
@@ -717,14 +716,17 @@ pub const DECLARED_KEYS: &[&str] = &[
     "MAILBOX_MAX_DELIVERY_ATTEMPTS",
     "RUN_DELETION_ENGINE",
     "RUN_RETENTION_SWEEP",
-    "RUN_SIRENE_WORKER",
-    "RUN_DELIVERY_OFFER_TIMEOUT",
     "OVH_APPLICATION_KEY",
     "OVH_APPLICATION_SECRET",
     "OVH_CONSUMER_KEY",
     "OVH_SMS_SERVICE_NAME",
     "OVH_SMS_SENDER",
     "OVH_ENDPOINT",
+    "PORT",
+    "WEB_ASSETS_DIR",
+    "CAPTAIN_BUILD_VERSION",
+    "DELIVERY_OFFER_MAX_TTL_SECONDS",
+    "RUN_DELIVERY_OFFER_TIMEOUT",
     "AVELO37_API_KEY",
     "AVELO37_API_BASE_URL",
     "AVELO37_WEBHOOK_SECRET",
@@ -736,12 +738,10 @@ pub const DECLARED_KEYS: &[&str] = &[
     "UBER_DIRECT_TOKEN_URL",
     "UBER_DIRECT_SCOPE",
     "COOPCYCLE_INSTANCES",
-    "HUBRISE_API_BASE_URL",
-    "HUBRISE_CONNECT_REDIRECT_URL",
-    "HUBRISE_OAUTH_SCOPE",
-    "PORT",
-    "WEB_ASSETS_DIR",
-    "CAPTAIN_BUILD_VERSION",
+    "RUN_SIRENE_WORKER",
+    "ORDER_RETENTION_WINDOW_DAYS",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -771,8 +771,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
-    ("RUN_SIRENE_WORKER", "production", "true"),
-    ("RUN_SIRENE_WORKER", "staging", "true"),
     ("RUN_DELIVERY_OFFER_TIMEOUT", "production", "true"),
     ("RUN_DELIVERY_OFFER_TIMEOUT", "staging", "true"),
+    ("RUN_SIRENE_WORKER", "production", "true"),
+    ("RUN_SIRENE_WORKER", "staging", "true"),
 ];

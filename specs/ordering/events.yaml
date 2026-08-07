@@ -1,0 +1,552 @@
+version: 1
+description: >
+  ordering scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+CartBoundToCustomer:
+  description: >
+    A cart that was started by a guest visitor (no customerId) was bound to a Customer after sign-in.
+    This is a domain event, not an auth event. The cartId is the same as the original guest cart; the
+    cart's customerId is now set to the signed-in customer.
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+  required:
+    - cartId
+    - customerId
+
+
+
+
+# =====================================================================
+# Cart
+# =====================================================================
+# Pre-checkout selection. High-churn and often abandoned, so payloads stay minimal (ids +
+# quantity); display prices are derived by the read projection, not carried here.
+
+CartStarted:
+  description: "A new cart was created for a restaurant (emitted with the first line added)."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "The visitor session that started the cart — the key CartBindingProcess uses to bind guest carts on CustomerIdentified."
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+      description: "Null while the visitor is a guest; bound at checkout."
+  required:
+    - cartId
+    - restaurantId
+    - sessionId
+
+
+CartLineAdded:
+  description: "A line was added to a cart."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    line:
+      $ref: 'entities.yaml#/CartLineItem'
+  required:
+    - cartId
+    - line
+
+
+CartLineQuantityChanged:
+  description: "The quantity of an existing cart line changed."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+    quantity:
+      type: integer
+      minimum: 1
+  required:
+    - cartId
+    - cartLineId
+    - quantity
+
+
+CartLineRemoved:
+  description: "A line was removed from a cart."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+  required:
+    - cartId
+    - cartLineId
+
+
+CartCheckedOut:
+  description: "The cart was converted to an order at checkout and is now closed."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+  required:
+    - cartId
+    - orderId
+
+
+# =====================================================================
+# Orders
+# =====================================================================
+
+OrderPlaced:
+  description: "A customer has placed an order and payment was successfully authorized/captured."
+  type: object
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    customerContact:
+      $ref: 'entities.yaml#/CustomerContact'
+    serviceType:
+      $ref: 'scalars.yaml#/ServiceType'
+    deliveryAddress:
+      $ref: 'entities.yaml#/Address'
+      nullable: true
+    items:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OrderLineItem'
+      minItems: 1
+    totalAmount:
+      $ref: 'entities.yaml#/Money'
+    breakdown:
+      $ref: 'entities.yaml#/PaymentBreakdown'
+      description: "Server-computed fee/split breakdown (ADR-0016/0017); breakdown.total == totalAmount."
+    note:
+      $ref: 'scalars.yaml#/OrderNote'
+      nullable: true
+    replacementOf:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: >
+        Set when this order is a NO-CHARGE replacement remade for a resolved reclamation
+        (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159): the id of the ORIGINAL order it
+        replaces. A replacement is a normal Order that flows through the usual fulfilment/dispatch, but
+        carries a $0 buyer total and NO paymentIntentId (no Stripe). Absent for an ordinary paid order.
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      nullable: true
+      description: >
+        The captured Stripe PaymentIntent for a paid order. ABSENT for a no-charge replacement order
+        (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).
+  required:
+    - orderId
+    - restaurantId
+    - customerContact
+    - serviceType
+    - items
+    - totalAmount
+    - breakdown
+
+
+OrderAcceptedByRestaurant:
+  description: "Restaurant has accepted to prepare the order."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    estimatedReadyAt:
+      type: string
+      format: date-time
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+
+
+OrderPreparationStarted:
+  description: "Restaurant has started preparing an accepted order (status PREPARING)."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required:
+    - orderId
+    - restaurantId
+
+
+OrderRejectedByRestaurant:
+  description: "Restaurant has rejected the order."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+  required:
+    - orderId
+    - restaurantId
+    - reason
+
+
+OrderMarkedReady:
+  description: "Restaurant has marked the order as ready for pickup/delivery."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required:
+    - orderId
+    - restaurantId
+
+
+OrderDelivered:
+  description: "The order has been delivered to the customer."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required:
+    - orderId
+    - restaurantId
+
+
+OrderCancelledByCustomer:
+  description: "The customer cancelled the order."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+
+
+OrderCancelledByRestaurant:
+  description: "The restaurant cancelled the order after initial acceptance."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+  required:
+    - orderId
+    - restaurantId
+    - reason
+
+
+OrderRated:
+  description: "The customer rated the delivery of a completed order (rider thumbs up/down)."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    riderThumb:
+      $ref: 'scalars.yaml#/ThumbRating'
+  required:
+    - orderId
+    - restaurantId
+    - riderThumb
+
+
+RestaurantRated:
+  description: "The customer rated the restaurant of a completed order (0–5 stars + optional comment)."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    stars:
+      $ref: 'scalars.yaml#/StarRating'
+    comment:
+      $ref: 'scalars.yaml#/RatingComment'
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+    - stars
+
+
+DeliverySatisfactionRecorded:
+  description: >
+    The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the
+    timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    timeliness:
+      $ref: 'scalars.yaml#/DeliveryTimeliness'
+    reason:
+      $ref: 'scalars.yaml#/DeliveryDissatisfactionReason'
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+    - timeliness
+
+
+OrderTipped:
+  description: >
+    A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order
+    (ADR-012). Separate from the price; Captain keeps 0%. Additive — multiple OrderTipped accumulate.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    tippedBy:
+      $ref: 'scalars.yaml#/Tipper'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    tips:
+      type: array
+      minItems: 1
+      items:
+        $ref: 'entities.yaml#/Tip'
+  required:
+    - orderId
+    - restaurantId
+    - tippedBy
+    - tips
+
+
+RefundRequested:
+  description: "The customer requested a refund for an order; the RefundProcess will drive Stripe."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+
+
+# =====================================================================
+# Refund (restaurant- or admin-approved; RefundProcess state PM)
+# =====================================================================
+
+RefundOpened:
+  description: >
+    A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a
+    restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment
+    is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state.
+    `amount` is the captured order total eligible for refund (an approval may still be partial).
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      description: "Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId})."
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The captured order total eligible for refund (the decision may approve less)."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [paymentIntentId, orderId, restaurantId, amount]
+
+
+# --- Reclamations / customer claims (#151) ---
+
+ReclamationOpened:
+  description: >
+    Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the
+    category, the customer's description and — optionally — the resolution the customer requested.
+    Carries `customerId` (whose claim) and `restaurantId` (on whose restaurant's order) — business data
+    the client supplies, mirroring how OrderPlaced carries them — so the read model can scope "my
+    claims" and the restaurant's claims queue (#154). The 14-day window and order-eligibility (order
+    exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+    description: { $ref: 'scalars.yaml#/ReclamationDescription' }
+    requestedResolution:
+      $ref: 'scalars.yaml#/ReclamationResolution'
+      nullable: true
+  required: [reclamationId, orderId, customerId, restaurantId, category, description]
+
+
+ReclamationResolved:
+  description: >
+    A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND or a
+    GOODWILL_CREDIT, the `refundAmount` — so the downstream refund/credit/replacement slices can react to
+    the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151).
+    `orderId` AND `customerId` ride along (sourced from the aggregate's own fold state, established at
+    ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by
+    order (§2.5, #155), and so the ReclamationProcess saga can grant goodwill credit to the claimant
+    without a read step (ADR-20260726-163737, #158).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    resolution: { $ref: 'scalars.yaml#/ReclamationResolution' }
+    note:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+    refundAmount:
+      $ref: 'entities.yaml#/Money'
+      nullable: true
+  required: [reclamationId, orderId, customerId, resolution]
+
+
+ReclamationRejected:
+  description: >
+    A reclamation was rejected (the claim was declined) with a recorded reason
+    (rules.yaml#/ReclamationRejectionCarriesAReason) (#151). `orderId` rides along (from the aggregate's
+    fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason: { $ref: 'scalars.yaml#/ReclamationReason' }
+  required: [reclamationId, orderId, reason]
+
+
+ReclamationReopened:
+  description: >
+    A previously decided (resolved or rejected) reclamation was reopened for another look
+    (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why
+    — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject)
+    (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the
+    per-order conversation thread, keyed by order (#155).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+  required: [reclamationId, orderId]
+
+
+ReclamationEvidenceAttached:
+  description: >
+    The customer attached an evidence photo to their claim — an opaque, framework-managed attachment ref
+    (storage/moderation/GDPR retention handled generically by the framework, not this aggregate; #156).
+    Evidence may be attached in any lifecycle state — the only guard is that the claim exists. `orderId`
+    rides along (from the aggregate's fold state, established at ReclamationOpened) so the evidence weaves
+    into the per-order conversation thread, keyed by order (§2.5, #155).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    attachmentRef: { $ref: 'scalars.yaml#/AttachmentRef' }
+  required: [reclamationId, orderId, attachmentRef]
+
+
+# --- Order retention & deletion (GDPR pilot: ADR-20260731-153000 / -160000 / -214500, #272) ---
+
+OrderExpired:
+  description: >
+    The order's retention window elapsed — at this moment the order IS expired: no discussion, no
+    rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order
+    actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the
+    terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and
+    recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it
+    starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone
+    their rows, and the generic deletion engine reacts to the recorded fact with the journey that
+    ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the
+    engine's journey lands (#194 "GDPR erasure").
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  required: [orderId]
+
+
+OrderDeleted:
+  description: >
+    The deletion receipt (ADR-20260731-160000 §6): recorded on the DELETION LEDGER stream — never on
+    the (about-to-be / already deleted) order streams — when the generic deletion engine's journey
+    completes (projection checkpoints verified → technical tombstone appended → streams deleted from
+    domain_events + domain_stream). Carries PSEUDONYMOUS domain references only: whose order was
+    erased must remain answerable (GDPR accountability), but never the erased personal payloads
+    (address, phone, conversation content — those are gone).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+      description: "Null for a guest order — the accountability reference, not personal data."
+    policy:
+      type: string
+      maxLength: 100
+      description: "The configuration key naming the retention window under which erasure ran (ORDER_RETENTION_WINDOW_DAYS)."
+    tombstoneEventId:
+      type: string
+      maxLength: 36
+      nullable: true
+      description: "The technical tombstone event (envelope-level, ADR-20260731-160000 §5) that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp."
+  required: [orderId, restaurantId, policy]

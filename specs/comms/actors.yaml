@@ -1,0 +1,100 @@
+version: 1
+description: >
+  comms scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Conversation:
+  type: aggregate
+  identity: { $ref: '#/Conversation/state/orderId' }   # a conversation's identity IS its order (ADR-20260725-015921)
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  # PILOT of the declared-state DSL (PROP-20260728-135632 §2.1, Approved — validation-only in
+  # #242 slice 1; generation of apply/fold + requires enforcement is slice 2). Each field mirrors
+  # the hand-written ConversationState in crates/domain/src/conversation.rs; parity is asserted
+  # when states.rs generation lands.
+  state:
+    customerId:
+      type: { $ref: 'scalars.yaml#/CustomerId' }
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerId' }]
+      nullable: true
+      note: "The participant requires.acting.CUSTOMER authorizes against (#235); null = guest order, CUSTOMER denied."
+    restaurantId:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/restaurantId' }]
+      note: "The participant requires.acting.RESTAURANT authorizes against (#235)."
+    customerChatEnabled:
+      type: boolean
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerChatEnabled' }]
+      note: "CustomerChatDisabled gate."
+    messageIds:
+      mode: set
+      of: { $ref: 'scalars.yaml#/ConversationMessageId' }
+      from: [{ $ref: 'events.yaml#/MessagePosted/properties/messageId' }]
+      note: "MessageAlreadyPosted idempotency guard."
+    adminInvited:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
+      note: "Set by a reasoned escalation (#129)."
+    mutedRoles:
+      mode: set
+      of: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+      from: [{ $ref: 'events.yaml#/ParticipantMuted/properties/mutedRole' }]
+      removedBy: [{ $ref: 'events.yaml#/ParticipantUnmuted/properties/mutedRole' }]
+      note: "ParticipantNotMuted guard."
+    translations:
+      mode: set
+      of:
+        messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+        locale: { $ref: 'scalars.yaml#/Locale' }
+      from: [{ $ref: 'events.yaml#/MessageTranslationAdded' }]
+      note: "TranslationAlreadyRecorded idempotency guard (composite element, keys read off the payload by name)."
+  description: >
+    Per-order in-app message thread; id = orderId (a conversation's identity IS its order,
+    ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true);
+    PostMessage appends a message with PUBLIC/INTERNAL visibility. A CUSTOMER author is rejected when
+    customer chat is disabled. Idempotent by messageId. (#129)
+  receives:
+    - message: { $ref: 'commands.yaml#/OpenConversation' }
+      emits: [{ $ref: 'events.yaml#/ConversationOpened' }]
+      throws: [{ $ref: 'errors.yaml#/ConversationAlreadyOpen' }]
+    - message: { $ref: 'commands.yaml#/PostMessage' }
+      # Write-side per-instance authorization (#235, PROP-20260728-135632 §2.2) — DECLARED here,
+      # validated by req-*; ENFORCED (and its NotAParticipant/RoleMismatch errors + negative tests
+      # added) when slice 2 generates the precondition. RIDER deliberately absent = denied.
+      requires:
+        acting:
+          CUSTOMER:   { $ref: '#/Conversation/state/customerId' }
+          RESTAURANT: { $ref: '#/Conversation/state/restaurantId' }
+          ADMIN:      any
+        claims:
+          authorRole: actor.role
+      emits: [{ $ref: 'events.yaml#/MessagePosted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/NotAParticipant' }
+        - { $ref: 'errors.yaml#/RoleMismatch' }
+        - { $ref: 'errors.yaml#/CustomerChatDisabled' }
+        - { $ref: 'errors.yaml#/MessageAlreadyPosted' }
+    - message: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+      emits: [{ $ref: 'events.yaml#/MessageTranslationAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/MessageNotFoundInConversation' }
+        - { $ref: 'errors.yaml#/TranslationAlreadyRecorded' }
+    - message: { $ref: 'commands.yaml#/EscalateToAdmin' }
+      emits: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+    - message: { $ref: 'commands.yaml#/MuteParticipant' }
+      emits: [{ $ref: 'events.yaml#/ParticipantMuted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/MuteReasonRequired' }
+    - message: { $ref: 'commands.yaml#/UnmuteParticipant' }
+      emits: [{ $ref: 'events.yaml#/ParticipantUnmuted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/ParticipantNotMuted' }

@@ -7,36 +7,6 @@
 
 use domain::generated::scalars as ds;
 
-/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RestaurantAccountId(pub uuid::Uuid);
-async_graphql::scalar!(RestaurantAccountId, "RestaurantAccountId", "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.");
-impl From<ds::RestaurantAccountId> for RestaurantAccountId {
-    fn from(v: ds::RestaurantAccountId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RestaurantAccountId> for ds::RestaurantAccountId {
-    fn from(v: RestaurantAccountId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// A single restaurant location (HubRise: location), belonging to a RestaurantAccount.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RestaurantId(pub uuid::Uuid);
-async_graphql::scalar!(RestaurantId, "RestaurantId", "A single restaurant location (HubRise: location), belonging to a RestaurantAccount.");
-impl From<ds::RestaurantId> for RestaurantId {
-    fn from(v: ds::RestaurantId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RestaurantId> for ds::RestaurantId {
-    fn from(v: RestaurantId) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Catalog id (HubRise: catalog).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CatalogId(pub uuid::Uuid);
@@ -62,6 +32,143 @@ impl From<ds::ProductCategoryId> for ProductCategoryId {
 }
 impl From<ProductCategoryId> for ds::ProductCategoryId {
     fn from(v: ProductCategoryId) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ImageId(pub uuid::Uuid);
+async_graphql::scalar!(ImageId);
+impl From<ds::ImageId> for ImageId {
+    fn from(v: ds::ImageId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ImageId> for ds::ImageId {
+    fn from(v: ImageId) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CatalogName(pub String);
+async_graphql::scalar!(CatalogName);
+impl From<ds::CatalogName> for CatalogName {
+    fn from(v: ds::CatalogName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<CatalogName> for ds::CatalogName {
+    fn from(v: CatalogName) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CatalogCategoryName(pub String);
+async_graphql::scalar!(CatalogCategoryName);
+impl From<ds::CatalogCategoryName> for CatalogCategoryName {
+    fn from(v: ds::CatalogCategoryName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<CatalogCategoryName> for ds::CatalogCategoryName {
+    fn from(v: CatalogCategoryName) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ProductDescription(pub String);
+async_graphql::scalar!(ProductDescription);
+impl From<ds::ProductDescription> for ProductDescription {
+    fn from(v: ds::ProductDescription) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ProductDescription> for ds::ProductDescription {
+    fn from(v: ProductDescription) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct OptionListName(pub String);
+async_graphql::scalar!(OptionListName);
+impl From<ds::OptionListName> for OptionListName {
+    fn from(v: ds::OptionListName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<OptionListName> for ds::OptionListName {
+    fn from(v: OptionListName) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CatalogItemAvailability {
+    #[graphql(name = "AVAILABLE")]
+    AVAILABLE,
+    #[graphql(name = "UNAVAILABLE")]
+    UNAVAILABLE,
+}
+impl From<ds::CatalogItemAvailability> for CatalogItemAvailability {
+    fn from(v: ds::CatalogItemAvailability) -> Self {
+        match v {
+            ds::CatalogItemAvailability::AVAILABLE => Self::AVAILABLE,
+            ds::CatalogItemAvailability::UNAVAILABLE => Self::UNAVAILABLE,
+        }
+    }
+}
+impl From<CatalogItemAvailability> for ds::CatalogItemAvailability {
+    fn from(v: CatalogItemAvailability) -> Self {
+        match v {
+            CatalogItemAvailability::AVAILABLE => Self::AVAILABLE,
+            CatalogItemAvailability::UNAVAILABLE => Self::UNAVAILABLE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum StockStatus {
+    #[graphql(name = "IN_STOCK")]
+    IN_STOCK,
+    #[graphql(name = "LOW_STOCK")]
+    LOW_STOCK,
+    #[graphql(name = "OUT_OF_STOCK")]
+    OUT_OF_STOCK,
+}
+impl From<ds::StockStatus> for StockStatus {
+    fn from(v: ds::StockStatus) -> Self {
+        match v {
+            ds::StockStatus::IN_STOCK => Self::IN_STOCK,
+            ds::StockStatus::LOW_STOCK => Self::LOW_STOCK,
+            ds::StockStatus::OUT_OF_STOCK => Self::OUT_OF_STOCK,
+        }
+    }
+}
+impl From<StockStatus> for ds::StockStatus {
+    fn from(v: StockStatus) -> Self {
+        match v {
+            StockStatus::IN_STOCK => Self::IN_STOCK,
+            StockStatus::LOW_STOCK => Self::LOW_STOCK,
+            StockStatus::OUT_OF_STOCK => Self::OUT_OF_STOCK,
+        }
+    }
+}
+
+/// A single restaurant location (HubRise: location), belonging to a RestaurantAccount.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantId(pub uuid::Uuid);
+async_graphql::scalar!(RestaurantId, "RestaurantId", "A single restaurant location (HubRise: location), belonging to a RestaurantAccount.");
+impl From<ds::RestaurantId> for RestaurantId {
+    fn from(v: ds::RestaurantId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantId> for ds::RestaurantId {
+    fn from(v: RestaurantId) -> Self {
         Self(v.0)
     }
 }
@@ -181,21 +288,6 @@ impl From<CartId> for ds::CartId {
     }
 }
 
-/// Identifies a line within a cart, used to edit its quantity or remove it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct CartLineId(pub uuid::Uuid);
-async_graphql::scalar!(CartLineId, "CartLineId", "Identifies a line within a cart, used to edit its quantity or remove it.");
-impl From<ds::CartLineId> for CartLineId {
-    fn from(v: ds::CartLineId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<CartLineId> for ds::CartLineId {
-    fn from(v: CartLineId) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CorrelationId(pub uuid::Uuid);
@@ -256,21 +348,6 @@ impl From<TraceId> for ds::TraceId {
     }
 }
 
-/// Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryJobId(pub uuid::Uuid);
-async_graphql::scalar!(DeliveryJobId, "DeliveryJobId", "Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).");
-impl From<ds::DeliveryJobId> for DeliveryJobId {
-    fn from(v: ds::DeliveryJobId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DeliveryJobId> for ds::DeliveryJobId {
-    fn from(v: DeliveryJobId) -> Self {
-        Self(v.0)
-    }
-}
-
 /// An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RiderId(pub uuid::Uuid);
@@ -301,79 +378,6 @@ impl From<PaymentIntentId> for ds::PaymentIntentId {
     }
 }
 
-/// Stripe Refund id (provider reference). Example: 're_3Nabc...'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RefundId(pub String);
-async_graphql::scalar!(RefundId, "RefundId", "Stripe Refund id (provider reference). Example: 're_3Nabc...'.");
-impl From<ds::RefundId> for RefundId {
-    fn from(v: ds::RefundId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RefundId> for ds::RefundId {
-    fn from(v: RefundId) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct UserId(pub uuid::Uuid);
-async_graphql::scalar!(UserId);
-impl From<ds::UserId> for UserId {
-    fn from(v: ds::UserId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<UserId> for ds::UserId {
-    fn from(v: UserId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Identifies a saved address in a customer's address book.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct AddressId(pub uuid::Uuid);
-async_graphql::scalar!(AddressId, "AddressId", "Identifies a saved address in a customer's address book.");
-impl From<ds::AddressId> for AddressId {
-    fn from(v: ds::AddressId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<AddressId> for ds::AddressId {
-    fn from(v: AddressId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct PaymentMethodId(pub String);
-async_graphql::scalar!(PaymentMethodId, "PaymentMethodId", "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.");
-impl From<ds::PaymentMethodId> for PaymentMethodId {
-    fn from(v: ds::PaymentMethodId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<PaymentMethodId> for ds::PaymentMethodId {
-    fn from(v: PaymentMethodId) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ImageId(pub uuid::Uuid);
-async_graphql::scalar!(ImageId);
-impl From<ds::ImageId> for ImageId {
-    fn from(v: ds::ImageId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ImageId> for ds::ImageId {
-    fn from(v: ImageId) -> Self {
-        Self(v.0)
-    }
-}
-
 /// External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ExternalReference(pub String);
@@ -385,96 +389,6 @@ impl From<ds::ExternalReference> for ExternalReference {
 }
 impl From<ExternalReference> for ds::ExternalReference {
     fn from(v: ExternalReference) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ExternalIdentifierKey(pub String);
-async_graphql::scalar!(ExternalIdentifierKey, "ExternalIdentifierKey", "Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).");
-impl From<ds::ExternalIdentifierKey> for ExternalIdentifierKey {
-    fn from(v: ds::ExternalIdentifierKey) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ExternalIdentifierKey> for ds::ExternalIdentifierKey {
-    fn from(v: ExternalIdentifierKey) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Google Maps Place id identifying the establishment (enrichment / Business Profile).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct GooglePlaceId(pub String);
-async_graphql::scalar!(GooglePlaceId, "GooglePlaceId", "Google Maps Place id identifying the establishment (enrichment / Business Profile).");
-impl From<ds::GooglePlaceId> for GooglePlaceId {
-    fn from(v: ds::GooglePlaceId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<GooglePlaceId> for ds::GooglePlaceId {
-    fn from(v: GooglePlaceId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// WGS84 latitude in decimal degrees.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct Latitude(pub f64);
-async_graphql::scalar!(Latitude, "Latitude", "WGS84 latitude in decimal degrees.");
-impl From<ds::Latitude> for Latitude {
-    fn from(v: ds::Latitude) -> Self {
-        Self(v.0)
-    }
-}
-impl From<Latitude> for ds::Latitude {
-    fn from(v: Latitude) -> Self {
-        Self(v.0)
-    }
-}
-
-/// WGS84 longitude in decimal degrees.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct Longitude(pub f64);
-async_graphql::scalar!(Longitude, "Longitude", "WGS84 longitude in decimal degrees.");
-impl From<ds::Longitude> for Longitude {
-    fn from(v: ds::Longitude) -> Self {
-        Self(v.0)
-    }
-}
-impl From<Longitude> for ds::Longitude {
-    fn from(v: Longitude) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Google Maps / Business Profile average rating (0–5), enrichment only.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct GoogleRating(pub f64);
-async_graphql::scalar!(GoogleRating, "GoogleRating", "Google Maps / Business Profile average rating (0–5), enrichment only.");
-impl From<ds::GoogleRating> for GoogleRating {
-    fn from(v: ds::GoogleRating) -> Self {
-        Self(v.0)
-    }
-}
-impl From<GoogleRating> for ds::GoogleRating {
-    fn from(v: GoogleRating) -> Self {
-        Self(v.0)
-    }
-}
-
-/// An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct WebUrl(pub String);
-async_graphql::scalar!(WebUrl, "WebUrl", "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.");
-impl From<ds::WebUrl> for WebUrl {
-    fn from(v: ds::WebUrl) -> Self {
-        Self(v.0)
-    }
-}
-impl From<WebUrl> for ds::WebUrl {
-    fn from(v: WebUrl) -> Self {
         Self(v.0)
     }
 }
@@ -509,49 +423,6 @@ impl From<RestaurantDisplayName> for ds::RestaurantDisplayName {
     }
 }
 
-/// Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RestaurantLegalName(pub String);
-async_graphql::scalar!(RestaurantLegalName, "RestaurantLegalName", "Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.");
-impl From<ds::RestaurantLegalName> for RestaurantLegalName {
-    fn from(v: ds::RestaurantLegalName) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RestaurantLegalName> for ds::RestaurantLegalName {
-    fn from(v: RestaurantLegalName) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct CatalogName(pub String);
-async_graphql::scalar!(CatalogName);
-impl From<ds::CatalogName> for CatalogName {
-    fn from(v: ds::CatalogName) -> Self {
-        Self(v.0)
-    }
-}
-impl From<CatalogName> for ds::CatalogName {
-    fn from(v: CatalogName) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct CatalogCategoryName(pub String);
-async_graphql::scalar!(CatalogCategoryName);
-impl From<ds::CatalogCategoryName> for CatalogCategoryName {
-    fn from(v: ds::CatalogCategoryName) -> Self {
-        Self(v.0)
-    }
-}
-impl From<CatalogCategoryName> for ds::CatalogCategoryName {
-    fn from(v: CatalogCategoryName) -> Self {
-        Self(v.0)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProductName(pub String);
 async_graphql::scalar!(ProductName);
@@ -562,35 +433,6 @@ impl From<ds::ProductName> for ProductName {
 }
 impl From<ProductName> for ds::ProductName {
     fn from(v: ProductName) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ProductDescription(pub String);
-async_graphql::scalar!(ProductDescription);
-impl From<ds::ProductDescription> for ProductDescription {
-    fn from(v: ds::ProductDescription) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ProductDescription> for ds::ProductDescription {
-    fn from(v: ProductDescription) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RestaurantDescription(pub String);
-async_graphql::scalar!(RestaurantDescription, "RestaurantDescription", "Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.");
-impl From<ds::RestaurantDescription> for RestaurantDescription {
-    fn from(v: ds::RestaurantDescription) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RestaurantDescription> for ds::RestaurantDescription {
-    fn from(v: RestaurantDescription) -> Self {
         Self(v.0)
     }
 }
@@ -606,20 +448,6 @@ impl From<ds::OfferName> for OfferName {
 }
 impl From<OfferName> for ds::OfferName {
     fn from(v: OfferName) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct OptionListName(pub String);
-async_graphql::scalar!(OptionListName);
-impl From<ds::OptionListName> for OptionListName {
-    fn from(v: ds::OptionListName) -> Self {
-        Self(v.0)
-    }
-}
-impl From<OptionListName> for ds::OptionListName {
-    fn from(v: OptionListName) -> Self {
         Self(v.0)
     }
 }
@@ -682,66 +510,6 @@ impl From<PhoneNumber> for ds::PhoneNumber {
     }
 }
 
-/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DialingCode(pub String);
-async_graphql::scalar!(DialingCode, "DialingCode", "Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.");
-impl From<ds::DialingCode> for DialingCode {
-    fn from(v: ds::DialingCode) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DialingCode> for ds::DialingCode {
-    fn from(v: DialingCode) -> Self {
-        Self(v.0)
-    }
-}
-
-/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct NationalPhoneNumber(pub String);
-async_graphql::scalar!(NationalPhoneNumber, "NationalPhoneNumber", "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.");
-impl From<ds::NationalPhoneNumber> for NationalPhoneNumber {
-    fn from(v: ds::NationalPhoneNumber) -> Self {
-        Self(v.0)
-    }
-}
-impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
-    fn from(v: NationalPhoneNumber) -> Self {
-        Self(v.0)
-    }
-}
-
-/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct OtpCode(pub String);
-async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).");
-impl From<ds::OtpCode> for OtpCode {
-    fn from(v: ds::OtpCode) -> Self {
-        Self(v.0)
-    }
-}
-impl From<OtpCode> for ds::OtpCode {
-    fn from(v: OtpCode) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct EmailVerificationToken(pub String);
-async_graphql::scalar!(EmailVerificationToken, "EmailVerificationToken", "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).");
-impl From<ds::EmailVerificationToken> for EmailVerificationToken {
-    fn from(v: ds::EmailVerificationToken) -> Self {
-        Self(v.0)
-    }
-}
-impl From<EmailVerificationToken> for ds::EmailVerificationToken {
-    fn from(v: EmailVerificationToken) -> Self {
-        Self(v.0)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AddressLine(pub String);
 async_graphql::scalar!(AddressLine);
@@ -766,21 +534,6 @@ impl From<ds::CityName> for CityName {
 }
 impl From<CityName> for ds::CityName {
     fn from(v: CityName) -> Self {
-        Self(v.0)
-    }
-}
-
-/// A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct CityId(pub uuid::Uuid);
-async_graphql::scalar!(CityId, "CityId", "A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).");
-impl From<ds::CityId> for CityId {
-    fn from(v: ds::CityId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<CityId> for ds::CityId {
-    fn from(v: CityId) -> Self {
         Self(v.0)
     }
 }
@@ -889,21 +642,6 @@ impl From<PageLimit> for ds::PageLimit {
     }
 }
 
-/// Rows to skip before the page for a paginated list query (#113). Absent = 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct PageOffset(pub i64);
-async_graphql::scalar!(PageOffset, "PageOffset", "Rows to skip before the page for a paginated list query (#113). Absent = 0.");
-impl From<ds::PageOffset> for PageOffset {
-    fn from(v: ds::PageOffset) -> Self {
-        Self(v.0)
-    }
-}
-impl From<PageOffset> for ds::PageOffset {
-    fn from(v: PageOffset) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Percentage tax rate. Example: 10.0 for 10%.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct TaxRatePercent(pub f64);
@@ -915,21 +653,6 @@ impl From<ds::TaxRatePercent> for TaxRatePercent {
 }
 impl From<TaxRatePercent> for ds::TaxRatePercent {
     fn from(v: TaxRatePercent) -> Self {
-        Self(v.0)
-    }
-}
-
-/// A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct MarginPercent(pub f64);
-async_graphql::scalar!(MarginPercent, "MarginPercent", "A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.");
-impl From<ds::MarginPercent> for MarginPercent {
-    fn from(v: ds::MarginPercent) -> Self {
-        Self(v.0)
-    }
-}
-impl From<MarginPercent> for ds::MarginPercent {
-    fn from(v: MarginPercent) -> Self {
         Self(v.0)
     }
 }
@@ -973,164 +696,6 @@ impl From<ds::OrderNote> for OrderNote {
 }
 impl From<OrderNote> for ds::OrderNote {
     fn from(v: OrderNote) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Restaurant rating in stars (0–5), given by the customer on a delivered order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct StarRating(pub i64);
-async_graphql::scalar!(StarRating, "StarRating", "Restaurant rating in stars (0–5), given by the customer on a delivered order.");
-impl From<ds::StarRating> for StarRating {
-    fn from(v: ds::StarRating) -> Self {
-        Self(v.0)
-    }
-}
-impl From<StarRating> for ds::StarRating {
-    fn from(v: StarRating) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Rider rating: thumbs up or down.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ThumbRating {
-    #[graphql(name = "UP")]
-    UP,
-    #[graphql(name = "DOWN")]
-    DOWN,
-}
-impl From<ds::ThumbRating> for ThumbRating {
-    fn from(v: ds::ThumbRating) -> Self {
-        match v {
-            ds::ThumbRating::UP => Self::UP,
-            ds::ThumbRating::DOWN => Self::DOWN,
-        }
-    }
-}
-impl From<ThumbRating> for ds::ThumbRating {
-    fn from(v: ThumbRating) -> Self {
-        match v {
-            ThumbRating::UP => Self::UP,
-            ThumbRating::DOWN => Self::DOWN,
-        }
-    }
-}
-
-/// Free-text comment accompanying a restaurant rating.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RatingComment(pub String);
-async_graphql::scalar!(RatingComment, "RatingComment", "Free-text comment accompanying a restaurant rating.");
-impl From<ds::RatingComment> for RatingComment {
-    fn from(v: ds::RatingComment) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RatingComment> for ds::RatingComment {
-    fn from(v: RatingComment) -> Self {
-        Self(v.0)
-    }
-}
-
-/// The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum DeliveryTimeliness {
-    #[graphql(name = "ON_TIME")]
-    ON_TIME,
-    #[graphql(name = "ACCEPTABLE_DELAY")]
-    ACCEPTABLE_DELAY,
-    #[graphql(name = "TOO_LATE")]
-    TOO_LATE,
-}
-impl From<ds::DeliveryTimeliness> for DeliveryTimeliness {
-    fn from(v: ds::DeliveryTimeliness) -> Self {
-        match v {
-            ds::DeliveryTimeliness::ON_TIME => Self::ON_TIME,
-            ds::DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
-            ds::DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
-        }
-    }
-}
-impl From<DeliveryTimeliness> for ds::DeliveryTimeliness {
-    fn from(v: DeliveryTimeliness) -> Self {
-        match v {
-            DeliveryTimeliness::ON_TIME => Self::ON_TIME,
-            DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
-            DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
-        }
-    }
-}
-
-/// Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryDissatisfactionReason(pub String);
-async_graphql::scalar!(DeliveryDissatisfactionReason, "DeliveryDissatisfactionReason", "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).");
-impl From<ds::DeliveryDissatisfactionReason> for DeliveryDissatisfactionReason {
-    fn from(v: ds::DeliveryDissatisfactionReason) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DeliveryDissatisfactionReason> for ds::DeliveryDissatisfactionReason {
-    fn from(v: DeliveryDissatisfactionReason) -> Self {
-        Self(v.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum Weekday {
-    #[graphql(name = "MONDAY")]
-    MONDAY,
-    #[graphql(name = "TUESDAY")]
-    TUESDAY,
-    #[graphql(name = "WEDNESDAY")]
-    WEDNESDAY,
-    #[graphql(name = "THURSDAY")]
-    THURSDAY,
-    #[graphql(name = "FRIDAY")]
-    FRIDAY,
-    #[graphql(name = "SATURDAY")]
-    SATURDAY,
-    #[graphql(name = "SUNDAY")]
-    SUNDAY,
-}
-impl From<ds::Weekday> for Weekday {
-    fn from(v: ds::Weekday) -> Self {
-        match v {
-            ds::Weekday::MONDAY => Self::MONDAY,
-            ds::Weekday::TUESDAY => Self::TUESDAY,
-            ds::Weekday::WEDNESDAY => Self::WEDNESDAY,
-            ds::Weekday::THURSDAY => Self::THURSDAY,
-            ds::Weekday::FRIDAY => Self::FRIDAY,
-            ds::Weekday::SATURDAY => Self::SATURDAY,
-            ds::Weekday::SUNDAY => Self::SUNDAY,
-        }
-    }
-}
-impl From<Weekday> for ds::Weekday {
-    fn from(v: Weekday) -> Self {
-        match v {
-            Weekday::MONDAY => Self::MONDAY,
-            Weekday::TUESDAY => Self::TUESDAY,
-            Weekday::WEDNESDAY => Self::WEDNESDAY,
-            Weekday::THURSDAY => Self::THURSDAY,
-            Weekday::FRIDAY => Self::FRIDAY,
-            Weekday::SATURDAY => Self::SATURDAY,
-            Weekday::SUNDAY => Self::SUNDAY,
-        }
-    }
-}
-
-/// Local time of day, HH:mm (HubRise opening_hours format).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TimeOfDay(pub String);
-async_graphql::scalar!(TimeOfDay, "TimeOfDay", "Local time of day, HH:mm (HubRise opening_hours format).");
-impl From<ds::TimeOfDay> for TimeOfDay {
-    fn from(v: ds::TimeOfDay) -> Self {
-        Self(v.0)
-    }
-}
-impl From<TimeOfDay> for ds::TimeOfDay {
-    fn from(v: TimeOfDay) -> Self {
         Self(v.0)
     }
 }
@@ -1257,343 +822,6 @@ impl From<DeliveryStatus> for ds::DeliveryStatus {
     }
 }
 
-/// Availability/lifecycle status of an independent Captain rider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum RiderStatus {
-    #[graphql(name = "OFFLINE")]
-    OFFLINE,
-    #[graphql(name = "AVAILABLE")]
-    AVAILABLE,
-    #[graphql(name = "ON_DELIVERY")]
-    ON_DELIVERY,
-    #[graphql(name = "SUSPENDED")]
-    SUSPENDED,
-}
-impl From<ds::RiderStatus> for RiderStatus {
-    fn from(v: ds::RiderStatus) -> Self {
-        match v {
-            ds::RiderStatus::OFFLINE => Self::OFFLINE,
-            ds::RiderStatus::AVAILABLE => Self::AVAILABLE,
-            ds::RiderStatus::ON_DELIVERY => Self::ON_DELIVERY,
-            ds::RiderStatus::SUSPENDED => Self::SUSPENDED,
-        }
-    }
-}
-impl From<RiderStatus> for ds::RiderStatus {
-    fn from(v: RiderStatus) -> Self {
-        match v {
-            RiderStatus::OFFLINE => Self::OFFLINE,
-            RiderStatus::AVAILABLE => Self::AVAILABLE,
-            RiderStatus::ON_DELIVERY => Self::ON_DELIVERY,
-            RiderStatus::SUSPENDED => Self::SUSPENDED,
-        }
-    }
-}
-
-/// Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum DeliveryProvider {
-    #[graphql(name = "PARTNER")]
-    PARTNER,
-    #[graphql(name = "INDEPENDENT")]
-    INDEPENDENT,
-}
-impl From<ds::DeliveryProvider> for DeliveryProvider {
-    fn from(v: ds::DeliveryProvider) -> Self {
-        match v {
-            ds::DeliveryProvider::PARTNER => Self::PARTNER,
-            ds::DeliveryProvider::INDEPENDENT => Self::INDEPENDENT,
-        }
-    }
-}
-impl From<DeliveryProvider> for ds::DeliveryProvider {
-    fn from(v: DeliveryProvider) -> Self {
-        match v {
-            DeliveryProvider::PARTNER => Self::PARTNER,
-            DeliveryProvider::INDEPENDENT => Self::INDEPENDENT,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum RestaurantStatus {
-    #[graphql(name = "DRAFT")]
-    DRAFT,
-    #[graphql(name = "ACTIVE")]
-    ACTIVE,
-    #[graphql(name = "INACTIVE")]
-    INACTIVE,
-}
-impl From<ds::RestaurantStatus> for RestaurantStatus {
-    fn from(v: ds::RestaurantStatus) -> Self {
-        match v {
-            ds::RestaurantStatus::DRAFT => Self::DRAFT,
-            ds::RestaurantStatus::ACTIVE => Self::ACTIVE,
-            ds::RestaurantStatus::INACTIVE => Self::INACTIVE,
-        }
-    }
-}
-impl From<RestaurantStatus> for ds::RestaurantStatus {
-    fn from(v: RestaurantStatus) -> Self {
-        match v {
-            RestaurantStatus::DRAFT => Self::DRAFT,
-            RestaurantStatus::ACTIVE => Self::ACTIVE,
-            RestaurantStatus::INACTIVE => Self::INACTIVE,
-        }
-    }
-}
-
-/// Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum RestaurantListingStatus {
-    #[graphql(name = "NON_PARTNER")]
-    NON_PARTNER,
-    #[graphql(name = "PASSIVE_PARTNER")]
-    PASSIVE_PARTNER,
-    #[graphql(name = "ACTIVE_PARTNER")]
-    ACTIVE_PARTNER,
-}
-impl From<ds::RestaurantListingStatus> for RestaurantListingStatus {
-    fn from(v: ds::RestaurantListingStatus) -> Self {
-        match v {
-            ds::RestaurantListingStatus::NON_PARTNER => Self::NON_PARTNER,
-            ds::RestaurantListingStatus::PASSIVE_PARTNER => Self::PASSIVE_PARTNER,
-            ds::RestaurantListingStatus::ACTIVE_PARTNER => Self::ACTIVE_PARTNER,
-        }
-    }
-}
-impl From<RestaurantListingStatus> for ds::RestaurantListingStatus {
-    fn from(v: RestaurantListingStatus) -> Self {
-        match v {
-            RestaurantListingStatus::NON_PARTNER => Self::NON_PARTNER,
-            RestaurantListingStatus::PASSIVE_PARTNER => Self::PASSIVE_PARTNER,
-            RestaurantListingStatus::ACTIVE_PARTNER => Self::ACTIVE_PARTNER,
-        }
-    }
-}
-
-/// State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum GbpLinkStatus {
-    #[graphql(name = "UNSET")]
-    UNSET,
-    #[graphql(name = "CONFIGURED")]
-    CONFIGURED,
-    #[graphql(name = "VERIFIED")]
-    VERIFIED,
-    #[graphql(name = "BROKEN")]
-    BROKEN,
-}
-impl From<ds::GbpLinkStatus> for GbpLinkStatus {
-    fn from(v: ds::GbpLinkStatus) -> Self {
-        match v {
-            ds::GbpLinkStatus::UNSET => Self::UNSET,
-            ds::GbpLinkStatus::CONFIGURED => Self::CONFIGURED,
-            ds::GbpLinkStatus::VERIFIED => Self::VERIFIED,
-            ds::GbpLinkStatus::BROKEN => Self::BROKEN,
-        }
-    }
-}
-impl From<GbpLinkStatus> for ds::GbpLinkStatus {
-    fn from(v: GbpLinkStatus) -> Self {
-        match v {
-            GbpLinkStatus::UNSET => Self::UNSET,
-            GbpLinkStatus::CONFIGURED => Self::CONFIGURED,
-            GbpLinkStatus::VERIFIED => Self::VERIFIED,
-            GbpLinkStatus::BROKEN => Self::BROKEN,
-        }
-    }
-}
-
-/// B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct ProspectionScore(pub i64);
-async_graphql::scalar!(ProspectionScore, "ProspectionScore", "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.");
-impl From<ds::ProspectionScore> for ProspectionScore {
-    fn from(v: ds::ProspectionScore) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ProspectionScore> for ds::ProspectionScore {
-    fn from(v: ProspectionScore) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ProspectPipelineStatus {
-    #[graphql(name = "NEW")]
-    NEW,
-    #[graphql(name = "CONTACTED")]
-    CONTACTED,
-    #[graphql(name = "COLD")]
-    COLD,
-    #[graphql(name = "REPLIED")]
-    REPLIED,
-    #[graphql(name = "CONVERTED")]
-    CONVERTED,
-}
-impl From<ds::ProspectPipelineStatus> for ProspectPipelineStatus {
-    fn from(v: ds::ProspectPipelineStatus) -> Self {
-        match v {
-            ds::ProspectPipelineStatus::NEW => Self::NEW,
-            ds::ProspectPipelineStatus::CONTACTED => Self::CONTACTED,
-            ds::ProspectPipelineStatus::COLD => Self::COLD,
-            ds::ProspectPipelineStatus::REPLIED => Self::REPLIED,
-            ds::ProspectPipelineStatus::CONVERTED => Self::CONVERTED,
-        }
-    }
-}
-impl From<ProspectPipelineStatus> for ds::ProspectPipelineStatus {
-    fn from(v: ProspectPipelineStatus) -> Self {
-        match v {
-            ProspectPipelineStatus::NEW => Self::NEW,
-            ProspectPipelineStatus::CONTACTED => Self::CONTACTED,
-            ProspectPipelineStatus::COLD => Self::COLD,
-            ProspectPipelineStatus::REPLIED => Self::REPLIED,
-            ProspectPipelineStatus::CONVERTED => Self::CONVERTED,
-        }
-    }
-}
-
-/// Channel of a prospection contact (email via Resend, Slack alert, or phone).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum OutreachChannel {
-    #[graphql(name = "EMAIL")]
-    EMAIL,
-    #[graphql(name = "SLACK")]
-    SLACK,
-    #[graphql(name = "PHONE")]
-    PHONE,
-}
-impl From<ds::OutreachChannel> for OutreachChannel {
-    fn from(v: ds::OutreachChannel) -> Self {
-        match v {
-            ds::OutreachChannel::EMAIL => Self::EMAIL,
-            ds::OutreachChannel::SLACK => Self::SLACK,
-            ds::OutreachChannel::PHONE => Self::PHONE,
-        }
-    }
-}
-impl From<OutreachChannel> for ds::OutreachChannel {
-    fn from(v: OutreachChannel) -> Self {
-        match v {
-            OutreachChannel::EMAIL => Self::EMAIL,
-            OutreachChannel::SLACK => Self::SLACK,
-            OutreachChannel::PHONE => Self::PHONE,
-        }
-    }
-}
-
-/// Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100% passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum TipRecipient {
-    #[graphql(name = "RIDER")]
-    RIDER,
-    #[graphql(name = "RESTAURANT")]
-    RESTAURANT,
-    #[graphql(name = "CAPTAIN")]
-    CAPTAIN,
-}
-impl From<ds::TipRecipient> for TipRecipient {
-    fn from(v: ds::TipRecipient) -> Self {
-        match v {
-            ds::TipRecipient::RIDER => Self::RIDER,
-            ds::TipRecipient::RESTAURANT => Self::RESTAURANT,
-            ds::TipRecipient::CAPTAIN => Self::CAPTAIN,
-        }
-    }
-}
-impl From<TipRecipient> for ds::TipRecipient {
-    fn from(v: TipRecipient) -> Self {
-        match v {
-            TipRecipient::RIDER => Self::RIDER,
-            TipRecipient::RESTAURANT => Self::RESTAURANT,
-            TipRecipient::CAPTAIN => Self::CAPTAIN,
-        }
-    }
-}
-
-/// Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/ Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum Tipper {
-    #[graphql(name = "CUSTOMER")]
-    CUSTOMER,
-    #[graphql(name = "RESTAURANT")]
-    RESTAURANT,
-}
-impl From<ds::Tipper> for Tipper {
-    fn from(v: ds::Tipper) -> Self {
-        match v {
-            ds::Tipper::CUSTOMER => Self::CUSTOMER,
-            ds::Tipper::RESTAURANT => Self::RESTAURANT,
-        }
-    }
-}
-impl From<Tipper> for ds::Tipper {
-    fn from(v: Tipper) -> Self {
-        match v {
-            Tipper::CUSTOMER => Self::CUSTOMER,
-            Tipper::RESTAURANT => Self::RESTAURANT,
-        }
-    }
-}
-
-/// Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never abandoned/expired — they persist until checked out, so there is no abandonment state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum CartStatus {
-    #[graphql(name = "OPEN")]
-    OPEN,
-    #[graphql(name = "CHECKED_OUT")]
-    CHECKED_OUT,
-}
-impl From<ds::CartStatus> for CartStatus {
-    fn from(v: ds::CartStatus) -> Self {
-        match v {
-            ds::CartStatus::OPEN => Self::OPEN,
-            ds::CartStatus::CHECKED_OUT => Self::CHECKED_OUT,
-        }
-    }
-}
-impl From<CartStatus> for ds::CartStatus {
-    fn from(v: CartStatus) -> Self {
-        match v {
-            CartStatus::OPEN => Self::OPEN,
-            CartStatus::CHECKED_OUT => Self::CHECKED_OUT,
-        }
-    }
-}
-
-/// Current order acceptance mode of a restaurant (HubRise: order_acceptance).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum OrderAcceptanceMode {
-    #[graphql(name = "NORMAL")]
-    NORMAL,
-    #[graphql(name = "BUSY")]
-    BUSY,
-    #[graphql(name = "PAUSED")]
-    PAUSED,
-}
-impl From<ds::OrderAcceptanceMode> for OrderAcceptanceMode {
-    fn from(v: ds::OrderAcceptanceMode) -> Self {
-        match v {
-            ds::OrderAcceptanceMode::NORMAL => Self::NORMAL,
-            ds::OrderAcceptanceMode::BUSY => Self::BUSY,
-            ds::OrderAcceptanceMode::PAUSED => Self::PAUSED,
-        }
-    }
-}
-impl From<OrderAcceptanceMode> for ds::OrderAcceptanceMode {
-    fn from(v: OrderAcceptanceMode) -> Self {
-        match v {
-            OrderAcceptanceMode::NORMAL => Self::NORMAL,
-            OrderAcceptanceMode::BUSY => Self::BUSY,
-            OrderAcceptanceMode::PAUSED => Self::PAUSED,
-        }
-    }
-}
-
 /// Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum PaymentStatus {
@@ -1623,39 +851,6 @@ impl From<PaymentStatus> for ds::PaymentStatus {
             PaymentStatus::CAPTURED => Self::CAPTURED,
             PaymentStatus::FAILED => Self::FAILED,
             PaymentStatus::REFUNDED => Self::REFUNDED,
-        }
-    }
-}
-
-/// Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum RefundStatus {
-    #[graphql(name = "REQUESTED")]
-    REQUESTED,
-    #[graphql(name = "APPROVED")]
-    APPROVED,
-    #[graphql(name = "DENIED")]
-    DENIED,
-    #[graphql(name = "REFUNDED")]
-    REFUNDED,
-}
-impl From<ds::RefundStatus> for RefundStatus {
-    fn from(v: ds::RefundStatus) -> Self {
-        match v {
-            ds::RefundStatus::REQUESTED => Self::REQUESTED,
-            ds::RefundStatus::APPROVED => Self::APPROVED,
-            ds::RefundStatus::DENIED => Self::DENIED,
-            ds::RefundStatus::REFUNDED => Self::REFUNDED,
-        }
-    }
-}
-impl From<RefundStatus> for ds::RefundStatus {
-    fn from(v: RefundStatus) -> Self {
-        match v {
-            RefundStatus::REQUESTED => Self::REQUESTED,
-            RefundStatus::APPROVED => Self::APPROVED,
-            RefundStatus::DENIED => Self::DENIED,
-            RefundStatus::REFUNDED => Self::REFUNDED,
         }
     }
 }
@@ -2001,21 +1196,6 @@ impl From<RestaurantDispatchMode> for ds::RestaurantDispatchMode {
     }
 }
 
-/// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryChannelKey(pub String);
-async_graphql::scalar!(DeliveryChannelKey, "DeliveryChannelKey", "Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).");
-impl From<ds::DeliveryChannelKey> for DeliveryChannelKey {
-    fn from(v: ds::DeliveryChannelKey) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DeliveryChannelKey> for ds::DeliveryChannelKey {
-    fn from(v: DeliveryChannelKey) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum DeliveryChannelKind {
@@ -2037,146 +1217,6 @@ impl From<DeliveryChannelKind> for ds::DeliveryChannelKind {
         match v {
             DeliveryChannelKind::POOL => Self::POOL,
             DeliveryChannelKind::PARTNER => Self::PARTNER,
-        }
-    }
-}
-
-/// A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryPartnerRegistrationId(pub uuid::Uuid);
-async_graphql::scalar!(DeliveryPartnerRegistrationId, "DeliveryPartnerRegistrationId", "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.");
-impl From<ds::DeliveryPartnerRegistrationId> for DeliveryPartnerRegistrationId {
-    fn from(v: ds::DeliveryPartnerRegistrationId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DeliveryPartnerRegistrationId> for ds::DeliveryPartnerRegistrationId {
-    fn from(v: DeliveryPartnerRegistrationId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// The delivery partner's display/legal name as stated on self-registration (#61).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryPartnerName(pub String);
-async_graphql::scalar!(DeliveryPartnerName, "DeliveryPartnerName", "The delivery partner's display/legal name as stated on self-registration (#61).");
-impl From<ds::DeliveryPartnerName> for DeliveryPartnerName {
-    fn from(v: ds::DeliveryPartnerName) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DeliveryPartnerName> for ds::DeliveryPartnerName {
-    fn from(v: DeliveryPartnerName) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum CityAvailabilityStatus {
-    #[graphql(name = "PENDING")]
-    PENDING,
-    #[graphql(name = "APPROVED")]
-    APPROVED,
-    #[graphql(name = "REVOKED")]
-    REVOKED,
-}
-impl From<ds::CityAvailabilityStatus> for CityAvailabilityStatus {
-    fn from(v: ds::CityAvailabilityStatus) -> Self {
-        match v {
-            ds::CityAvailabilityStatus::PENDING => Self::PENDING,
-            ds::CityAvailabilityStatus::APPROVED => Self::APPROVED,
-            ds::CityAvailabilityStatus::REVOKED => Self::REVOKED,
-        }
-    }
-}
-impl From<CityAvailabilityStatus> for ds::CityAvailabilityStatus {
-    fn from(v: CityAvailabilityStatus) -> Self {
-        match v {
-            CityAvailabilityStatus::PENDING => Self::PENDING,
-            CityAvailabilityStatus::APPROVED => Self::APPROVED,
-            CityAvailabilityStatus::REVOKED => Self::REVOKED,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum CatalogItemAvailability {
-    #[graphql(name = "AVAILABLE")]
-    AVAILABLE,
-    #[graphql(name = "UNAVAILABLE")]
-    UNAVAILABLE,
-}
-impl From<ds::CatalogItemAvailability> for CatalogItemAvailability {
-    fn from(v: ds::CatalogItemAvailability) -> Self {
-        match v {
-            ds::CatalogItemAvailability::AVAILABLE => Self::AVAILABLE,
-            ds::CatalogItemAvailability::UNAVAILABLE => Self::UNAVAILABLE,
-        }
-    }
-}
-impl From<CatalogItemAvailability> for ds::CatalogItemAvailability {
-    fn from(v: CatalogItemAvailability) -> Self {
-        match v {
-            CatalogItemAvailability::AVAILABLE => Self::AVAILABLE,
-            CatalogItemAvailability::UNAVAILABLE => Self::UNAVAILABLE,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum StockStatus {
-    #[graphql(name = "IN_STOCK")]
-    IN_STOCK,
-    #[graphql(name = "LOW_STOCK")]
-    LOW_STOCK,
-    #[graphql(name = "OUT_OF_STOCK")]
-    OUT_OF_STOCK,
-}
-impl From<ds::StockStatus> for StockStatus {
-    fn from(v: ds::StockStatus) -> Self {
-        match v {
-            ds::StockStatus::IN_STOCK => Self::IN_STOCK,
-            ds::StockStatus::LOW_STOCK => Self::LOW_STOCK,
-            ds::StockStatus::OUT_OF_STOCK => Self::OUT_OF_STOCK,
-        }
-    }
-}
-impl From<StockStatus> for ds::StockStatus {
-    fn from(v: StockStatus) -> Self {
-        match v {
-            StockStatus::IN_STOCK => Self::IN_STOCK,
-            StockStatus::LOW_STOCK => Self::LOW_STOCK,
-            StockStatus::OUT_OF_STOCK => Self::OUT_OF_STOCK,
-        }
-    }
-}
-
-/// Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum PriceRange {
-    #[graphql(name = "BUDGET")]
-    BUDGET,
-    #[graphql(name = "MODERATE")]
-    MODERATE,
-    #[graphql(name = "PREMIUM")]
-    PREMIUM,
-}
-impl From<ds::PriceRange> for PriceRange {
-    fn from(v: ds::PriceRange) -> Self {
-        match v {
-            ds::PriceRange::BUDGET => Self::BUDGET,
-            ds::PriceRange::MODERATE => Self::MODERATE,
-            ds::PriceRange::PREMIUM => Self::PREMIUM,
-        }
-    }
-}
-impl From<PriceRange> for ds::PriceRange {
-    fn from(v: PriceRange) -> Self {
-        match v {
-            PriceRange::BUDGET => Self::BUDGET,
-            PriceRange::MODERATE => Self::MODERATE,
-            PriceRange::PREMIUM => Self::PREMIUM,
         }
     }
 }
@@ -2239,39 +1279,6 @@ impl From<ComparisonBasis> for ds::ComparisonBasis {
         match v {
             ComparisonBasis::ESTIMATED => Self::ESTIMATED,
             ComparisonBasis::REAL => Self::REAL,
-        }
-    }
-}
-
-/// Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum RestaurantListKey {
-    #[graphql(name = "ORDER_AGAIN")]
-    ORDER_AGAIN,
-    #[graphql(name = "RECOMMENDED")]
-    RECOMMENDED,
-    #[graphql(name = "TOP_DEALS")]
-    TOP_DEALS,
-    #[graphql(name = "GREEN_PACKAGING")]
-    GREEN_PACKAGING,
-}
-impl From<ds::RestaurantListKey> for RestaurantListKey {
-    fn from(v: ds::RestaurantListKey) -> Self {
-        match v {
-            ds::RestaurantListKey::ORDER_AGAIN => Self::ORDER_AGAIN,
-            ds::RestaurantListKey::RECOMMENDED => Self::RECOMMENDED,
-            ds::RestaurantListKey::TOP_DEALS => Self::TOP_DEALS,
-            ds::RestaurantListKey::GREEN_PACKAGING => Self::GREEN_PACKAGING,
-        }
-    }
-}
-impl From<RestaurantListKey> for ds::RestaurantListKey {
-    fn from(v: RestaurantListKey) -> Self {
-        match v {
-            RestaurantListKey::ORDER_AGAIN => Self::ORDER_AGAIN,
-            RestaurantListKey::RECOMMENDED => Self::RECOMMENDED,
-            RestaurantListKey::TOP_DEALS => Self::TOP_DEALS,
-            RestaurantListKey::GREEN_PACKAGING => Self::GREEN_PACKAGING,
         }
     }
 }
@@ -2345,94 +1352,6 @@ impl From<UserType> for ds::UserType {
     }
 }
 
-/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ConversationMessageId(pub uuid::Uuid);
-async_graphql::scalar!(ConversationMessageId, "ConversationMessageId", "Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).");
-impl From<ds::ConversationMessageId> for ConversationMessageId {
-    fn from(v: ds::ConversationMessageId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ConversationMessageId> for ds::ConversationMessageId {
-    fn from(v: ConversationMessageId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum MessageVisibility {
-    #[graphql(name = "PUBLIC")]
-    PUBLIC,
-    #[graphql(name = "INTERNAL")]
-    INTERNAL,
-}
-impl From<ds::MessageVisibility> for MessageVisibility {
-    fn from(v: ds::MessageVisibility) -> Self {
-        match v {
-            ds::MessageVisibility::PUBLIC => Self::PUBLIC,
-            ds::MessageVisibility::INTERNAL => Self::INTERNAL,
-        }
-    }
-}
-impl From<MessageVisibility> for ds::MessageVisibility {
-    fn from(v: MessageVisibility) -> Self {
-        match v {
-            MessageVisibility::PUBLIC => Self::PUBLIC,
-            MessageVisibility::INTERNAL => Self::INTERNAL,
-        }
-    }
-}
-
-/// Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ConversationAuthorRole {
-    #[graphql(name = "CUSTOMER")]
-    CUSTOMER,
-    #[graphql(name = "RESTAURANT")]
-    RESTAURANT,
-    #[graphql(name = "RIDER")]
-    RIDER,
-    #[graphql(name = "ADMIN")]
-    ADMIN,
-}
-impl From<ds::ConversationAuthorRole> for ConversationAuthorRole {
-    fn from(v: ds::ConversationAuthorRole) -> Self {
-        match v {
-            ds::ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
-            ds::ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
-            ds::ConversationAuthorRole::RIDER => Self::RIDER,
-            ds::ConversationAuthorRole::ADMIN => Self::ADMIN,
-        }
-    }
-}
-impl From<ConversationAuthorRole> for ds::ConversationAuthorRole {
-    fn from(v: ConversationAuthorRole) -> Self {
-        match v {
-            ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
-            ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
-            ConversationAuthorRole::RIDER => Self::RIDER,
-            ConversationAuthorRole::ADMIN => Self::ADMIN,
-        }
-    }
-}
-
-/// Free-text body of a conversation message (#129).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct MessageBody(pub String);
-async_graphql::scalar!(MessageBody, "MessageBody", "Free-text body of a conversation message (#129).");
-impl From<ds::MessageBody> for MessageBody {
-    fn from(v: ds::MessageBody) -> Self {
-        Self(v.0)
-    }
-}
-impl From<MessageBody> for ds::MessageBody {
-    fn from(v: MessageBody) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentRef(pub String);
@@ -2444,51 +1363,6 @@ impl From<ds::AttachmentRef> for AttachmentRef {
 }
 impl From<AttachmentRef> for ds::AttachmentRef {
     fn from(v: AttachmentRef) -> Self {
-        Self(v.0)
-    }
-}
-
-/// The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct MuteReason(pub String);
-async_graphql::scalar!(MuteReason, "MuteReason", "The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).");
-impl From<ds::MuteReason> for MuteReason {
-    fn from(v: ds::MuteReason) -> Self {
-        Self(v.0)
-    }
-}
-impl From<MuteReason> for ds::MuteReason {
-    fn from(v: MuteReason) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct EscalationReason(pub String);
-async_graphql::scalar!(EscalationReason, "EscalationReason", "Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).");
-impl From<ds::EscalationReason> for EscalationReason {
-    fn from(v: ds::EscalationReason) -> Self {
-        Self(v.0)
-    }
-}
-impl From<EscalationReason> for ds::EscalationReason {
-    fn from(v: EscalationReason) -> Self {
-        Self(v.0)
-    }
-}
-
-/// A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TranslatedText(pub String);
-async_graphql::scalar!(TranslatedText, "TranslatedText", "A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).");
-impl From<ds::TranslatedText> for TranslatedText {
-    fn from(v: ds::TranslatedText) -> Self {
-        Self(v.0)
-    }
-}
-impl From<TranslatedText> for ds::TranslatedText {
-    fn from(v: TranslatedText) -> Self {
         Self(v.0)
     }
 }
@@ -2590,21 +1464,6 @@ impl From<ReclamationResolution> for ds::ReclamationResolution {
     }
 }
 
-/// Free-text description of the problem the customer is claiming about the order (#151).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ReclamationDescription(pub String);
-async_graphql::scalar!(ReclamationDescription, "ReclamationDescription", "Free-text description of the problem the customer is claiming about the order (#151).");
-impl From<ds::ReclamationDescription> for ReclamationDescription {
-    fn from(v: ds::ReclamationDescription) -> Self {
-        Self(v.0)
-    }
-}
-impl From<ReclamationDescription> for ds::ReclamationDescription {
-    fn from(v: ReclamationDescription) -> Self {
-        Self(v.0)
-    }
-}
-
 /// Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ReclamationReason(pub String);
@@ -2617,72 +1476,6 @@ impl From<ds::ReclamationReason> for ReclamationReason {
 impl From<ReclamationReason> for ds::ReclamationReason {
     fn from(v: ReclamationReason) -> Self {
         Self(v.0)
-    }
-}
-
-/// Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ReclamationStatus {
-    #[graphql(name = "OPEN")]
-    OPEN,
-    #[graphql(name = "RESOLVED")]
-    RESOLVED,
-    #[graphql(name = "REJECTED")]
-    REJECTED,
-}
-impl From<ds::ReclamationStatus> for ReclamationStatus {
-    fn from(v: ds::ReclamationStatus) -> Self {
-        match v {
-            ds::ReclamationStatus::OPEN => Self::OPEN,
-            ds::ReclamationStatus::RESOLVED => Self::RESOLVED,
-            ds::ReclamationStatus::REJECTED => Self::REJECTED,
-        }
-    }
-}
-impl From<ReclamationStatus> for ds::ReclamationStatus {
-    fn from(v: ReclamationStatus) -> Self {
-        match v {
-            ReclamationStatus::OPEN => Self::OPEN,
-            ReclamationStatus::RESOLVED => Self::RESOLVED,
-            ReclamationStatus::REJECTED => Self::REJECTED,
-        }
-    }
-}
-
-/// Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ClaimTimelineEventKind {
-    #[graphql(name = "OPENED")]
-    OPENED,
-    #[graphql(name = "RESOLVED")]
-    RESOLVED,
-    #[graphql(name = "REJECTED")]
-    REJECTED,
-    #[graphql(name = "REOPENED")]
-    REOPENED,
-    #[graphql(name = "EVIDENCE_ATTACHED")]
-    EVIDENCE_ATTACHED,
-}
-impl From<ds::ClaimTimelineEventKind> for ClaimTimelineEventKind {
-    fn from(v: ds::ClaimTimelineEventKind) -> Self {
-        match v {
-            ds::ClaimTimelineEventKind::OPENED => Self::OPENED,
-            ds::ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
-            ds::ClaimTimelineEventKind::REJECTED => Self::REJECTED,
-            ds::ClaimTimelineEventKind::REOPENED => Self::REOPENED,
-            ds::ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
-        }
-    }
-}
-impl From<ClaimTimelineEventKind> for ds::ClaimTimelineEventKind {
-    fn from(v: ClaimTimelineEventKind) -> Self {
-        match v {
-            ClaimTimelineEventKind::OPENED => Self::OPENED,
-            ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
-            ClaimTimelineEventKind::REJECTED => Self::REJECTED,
-            ClaimTimelineEventKind::REOPENED => Self::REOPENED,
-            ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
-        }
     }
 }
 
@@ -2865,5 +1658,1212 @@ impl From<ds::LogLevel> for LogLevel {
 impl From<LogLevel> for ds::LogLevel {
     fn from(v: LogLevel) -> Self {
         Self(v.0)
+    }
+}
+
+/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ConversationMessageId(pub uuid::Uuid);
+async_graphql::scalar!(ConversationMessageId, "ConversationMessageId", "Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).");
+impl From<ds::ConversationMessageId> for ConversationMessageId {
+    fn from(v: ds::ConversationMessageId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ConversationMessageId> for ds::ConversationMessageId {
+    fn from(v: ConversationMessageId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum MessageVisibility {
+    #[graphql(name = "PUBLIC")]
+    PUBLIC,
+    #[graphql(name = "INTERNAL")]
+    INTERNAL,
+}
+impl From<ds::MessageVisibility> for MessageVisibility {
+    fn from(v: ds::MessageVisibility) -> Self {
+        match v {
+            ds::MessageVisibility::PUBLIC => Self::PUBLIC,
+            ds::MessageVisibility::INTERNAL => Self::INTERNAL,
+        }
+    }
+}
+impl From<MessageVisibility> for ds::MessageVisibility {
+    fn from(v: MessageVisibility) -> Self {
+        match v {
+            MessageVisibility::PUBLIC => Self::PUBLIC,
+            MessageVisibility::INTERNAL => Self::INTERNAL,
+        }
+    }
+}
+
+/// Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ConversationAuthorRole {
+    #[graphql(name = "CUSTOMER")]
+    CUSTOMER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+    #[graphql(name = "RIDER")]
+    RIDER,
+    #[graphql(name = "ADMIN")]
+    ADMIN,
+}
+impl From<ds::ConversationAuthorRole> for ConversationAuthorRole {
+    fn from(v: ds::ConversationAuthorRole) -> Self {
+        match v {
+            ds::ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
+            ds::ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
+            ds::ConversationAuthorRole::RIDER => Self::RIDER,
+            ds::ConversationAuthorRole::ADMIN => Self::ADMIN,
+        }
+    }
+}
+impl From<ConversationAuthorRole> for ds::ConversationAuthorRole {
+    fn from(v: ConversationAuthorRole) -> Self {
+        match v {
+            ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
+            ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
+            ConversationAuthorRole::RIDER => Self::RIDER,
+            ConversationAuthorRole::ADMIN => Self::ADMIN,
+        }
+    }
+}
+
+/// Free-text body of a conversation message (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MessageBody(pub String);
+async_graphql::scalar!(MessageBody, "MessageBody", "Free-text body of a conversation message (#129).");
+impl From<ds::MessageBody> for MessageBody {
+    fn from(v: ds::MessageBody) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MessageBody> for ds::MessageBody {
+    fn from(v: MessageBody) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MuteReason(pub String);
+async_graphql::scalar!(MuteReason, "MuteReason", "The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).");
+impl From<ds::MuteReason> for MuteReason {
+    fn from(v: ds::MuteReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MuteReason> for ds::MuteReason {
+    fn from(v: MuteReason) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct EscalationReason(pub String);
+async_graphql::scalar!(EscalationReason, "EscalationReason", "Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).");
+impl From<ds::EscalationReason> for EscalationReason {
+    fn from(v: ds::EscalationReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<EscalationReason> for ds::EscalationReason {
+    fn from(v: EscalationReason) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TranslatedText(pub String);
+async_graphql::scalar!(TranslatedText, "TranslatedText", "A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).");
+impl From<ds::TranslatedText> for TranslatedText {
+    fn from(v: ds::TranslatedText) -> Self {
+        Self(v.0)
+    }
+}
+impl From<TranslatedText> for ds::TranslatedText {
+    fn from(v: TranslatedText) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ClaimTimelineEventKind {
+    #[graphql(name = "OPENED")]
+    OPENED,
+    #[graphql(name = "RESOLVED")]
+    RESOLVED,
+    #[graphql(name = "REJECTED")]
+    REJECTED,
+    #[graphql(name = "REOPENED")]
+    REOPENED,
+    #[graphql(name = "EVIDENCE_ATTACHED")]
+    EVIDENCE_ATTACHED,
+}
+impl From<ds::ClaimTimelineEventKind> for ClaimTimelineEventKind {
+    fn from(v: ds::ClaimTimelineEventKind) -> Self {
+        match v {
+            ds::ClaimTimelineEventKind::OPENED => Self::OPENED,
+            ds::ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
+            ds::ClaimTimelineEventKind::REJECTED => Self::REJECTED,
+            ds::ClaimTimelineEventKind::REOPENED => Self::REOPENED,
+            ds::ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
+        }
+    }
+}
+impl From<ClaimTimelineEventKind> for ds::ClaimTimelineEventKind {
+    fn from(v: ClaimTimelineEventKind) -> Self {
+        match v {
+            ClaimTimelineEventKind::OPENED => Self::OPENED,
+            ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
+            ClaimTimelineEventKind::REJECTED => Self::REJECTED,
+            ClaimTimelineEventKind::REOPENED => Self::REOPENED,
+            ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
+        }
+    }
+}
+
+/// Identifies a saved address in a customer's address book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AddressId(pub uuid::Uuid);
+async_graphql::scalar!(AddressId, "AddressId", "Identifies a saved address in a customer's address book.");
+impl From<ds::AddressId> for AddressId {
+    fn from(v: ds::AddressId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<AddressId> for ds::AddressId {
+    fn from(v: AddressId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct PaymentMethodId(pub String);
+async_graphql::scalar!(PaymentMethodId, "PaymentMethodId", "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.");
+impl From<ds::PaymentMethodId> for PaymentMethodId {
+    fn from(v: ds::PaymentMethodId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<PaymentMethodId> for ds::PaymentMethodId {
+    fn from(v: PaymentMethodId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DialingCode(pub String);
+async_graphql::scalar!(DialingCode, "DialingCode", "Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.");
+impl From<ds::DialingCode> for DialingCode {
+    fn from(v: ds::DialingCode) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DialingCode> for ds::DialingCode {
+    fn from(v: DialingCode) -> Self {
+        Self(v.0)
+    }
+}
+
+/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct NationalPhoneNumber(pub String);
+async_graphql::scalar!(NationalPhoneNumber, "NationalPhoneNumber", "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.");
+impl From<ds::NationalPhoneNumber> for NationalPhoneNumber {
+    fn from(v: ds::NationalPhoneNumber) -> Self {
+        Self(v.0)
+    }
+}
+impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
+    fn from(v: NationalPhoneNumber) -> Self {
+        Self(v.0)
+    }
+}
+
+/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct OtpCode(pub String);
+async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).");
+impl From<ds::OtpCode> for OtpCode {
+    fn from(v: ds::OtpCode) -> Self {
+        Self(v.0)
+    }
+}
+impl From<OtpCode> for ds::OtpCode {
+    fn from(v: OtpCode) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct EmailVerificationToken(pub String);
+async_graphql::scalar!(EmailVerificationToken, "EmailVerificationToken", "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).");
+impl From<ds::EmailVerificationToken> for EmailVerificationToken {
+    fn from(v: ds::EmailVerificationToken) -> Self {
+        Self(v.0)
+    }
+}
+impl From<EmailVerificationToken> for ds::EmailVerificationToken {
+    fn from(v: EmailVerificationToken) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryJobId(pub uuid::Uuid);
+async_graphql::scalar!(DeliveryJobId, "DeliveryJobId", "Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).");
+impl From<ds::DeliveryJobId> for DeliveryJobId {
+    fn from(v: ds::DeliveryJobId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryJobId> for ds::DeliveryJobId {
+    fn from(v: DeliveryJobId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CityId(pub uuid::Uuid);
+async_graphql::scalar!(CityId, "CityId", "A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).");
+impl From<ds::CityId> for CityId {
+    fn from(v: ds::CityId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<CityId> for ds::CityId {
+    fn from(v: CityId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Availability/lifecycle status of an independent Captain rider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RiderStatus {
+    #[graphql(name = "OFFLINE")]
+    OFFLINE,
+    #[graphql(name = "AVAILABLE")]
+    AVAILABLE,
+    #[graphql(name = "ON_DELIVERY")]
+    ON_DELIVERY,
+    #[graphql(name = "SUSPENDED")]
+    SUSPENDED,
+}
+impl From<ds::RiderStatus> for RiderStatus {
+    fn from(v: ds::RiderStatus) -> Self {
+        match v {
+            ds::RiderStatus::OFFLINE => Self::OFFLINE,
+            ds::RiderStatus::AVAILABLE => Self::AVAILABLE,
+            ds::RiderStatus::ON_DELIVERY => Self::ON_DELIVERY,
+            ds::RiderStatus::SUSPENDED => Self::SUSPENDED,
+        }
+    }
+}
+impl From<RiderStatus> for ds::RiderStatus {
+    fn from(v: RiderStatus) -> Self {
+        match v {
+            RiderStatus::OFFLINE => Self::OFFLINE,
+            RiderStatus::AVAILABLE => Self::AVAILABLE,
+            RiderStatus::ON_DELIVERY => Self::ON_DELIVERY,
+            RiderStatus::SUSPENDED => Self::SUSPENDED,
+        }
+    }
+}
+
+/// Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryProvider {
+    #[graphql(name = "PARTNER")]
+    PARTNER,
+    #[graphql(name = "INDEPENDENT")]
+    INDEPENDENT,
+}
+impl From<ds::DeliveryProvider> for DeliveryProvider {
+    fn from(v: ds::DeliveryProvider) -> Self {
+        match v {
+            ds::DeliveryProvider::PARTNER => Self::PARTNER,
+            ds::DeliveryProvider::INDEPENDENT => Self::INDEPENDENT,
+        }
+    }
+}
+impl From<DeliveryProvider> for ds::DeliveryProvider {
+    fn from(v: DeliveryProvider) -> Self {
+        match v {
+            DeliveryProvider::PARTNER => Self::PARTNER,
+            DeliveryProvider::INDEPENDENT => Self::INDEPENDENT,
+        }
+    }
+}
+
+/// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryChannelKey(pub String);
+async_graphql::scalar!(DeliveryChannelKey, "DeliveryChannelKey", "Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).");
+impl From<ds::DeliveryChannelKey> for DeliveryChannelKey {
+    fn from(v: ds::DeliveryChannelKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryChannelKey> for ds::DeliveryChannelKey {
+    fn from(v: DeliveryChannelKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryPartnerRegistrationId(pub uuid::Uuid);
+async_graphql::scalar!(DeliveryPartnerRegistrationId, "DeliveryPartnerRegistrationId", "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.");
+impl From<ds::DeliveryPartnerRegistrationId> for DeliveryPartnerRegistrationId {
+    fn from(v: ds::DeliveryPartnerRegistrationId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryPartnerRegistrationId> for ds::DeliveryPartnerRegistrationId {
+    fn from(v: DeliveryPartnerRegistrationId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The delivery partner's display/legal name as stated on self-registration (#61).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryPartnerName(pub String);
+async_graphql::scalar!(DeliveryPartnerName, "DeliveryPartnerName", "The delivery partner's display/legal name as stated on self-registration (#61).");
+impl From<ds::DeliveryPartnerName> for DeliveryPartnerName {
+    fn from(v: ds::DeliveryPartnerName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryPartnerName> for ds::DeliveryPartnerName {
+    fn from(v: DeliveryPartnerName) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CityAvailabilityStatus {
+    #[graphql(name = "PENDING")]
+    PENDING,
+    #[graphql(name = "APPROVED")]
+    APPROVED,
+    #[graphql(name = "REVOKED")]
+    REVOKED,
+}
+impl From<ds::CityAvailabilityStatus> for CityAvailabilityStatus {
+    fn from(v: ds::CityAvailabilityStatus) -> Self {
+        match v {
+            ds::CityAvailabilityStatus::PENDING => Self::PENDING,
+            ds::CityAvailabilityStatus::APPROVED => Self::APPROVED,
+            ds::CityAvailabilityStatus::REVOKED => Self::REVOKED,
+        }
+    }
+}
+impl From<CityAvailabilityStatus> for ds::CityAvailabilityStatus {
+    fn from(v: CityAvailabilityStatus) -> Self {
+        match v {
+            CityAvailabilityStatus::PENDING => Self::PENDING,
+            CityAvailabilityStatus::APPROVED => Self::APPROVED,
+            CityAvailabilityStatus::REVOKED => Self::REVOKED,
+        }
+    }
+}
+
+/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantAccountId(pub uuid::Uuid);
+async_graphql::scalar!(RestaurantAccountId, "RestaurantAccountId", "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.");
+impl From<ds::RestaurantAccountId> for RestaurantAccountId {
+    fn from(v: ds::RestaurantAccountId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantAccountId> for ds::RestaurantAccountId {
+    fn from(v: RestaurantAccountId) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct UserId(pub uuid::Uuid);
+async_graphql::scalar!(UserId);
+impl From<ds::UserId> for UserId {
+    fn from(v: ds::UserId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<UserId> for ds::UserId {
+    fn from(v: UserId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ExternalIdentifierKey(pub String);
+async_graphql::scalar!(ExternalIdentifierKey, "ExternalIdentifierKey", "Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).");
+impl From<ds::ExternalIdentifierKey> for ExternalIdentifierKey {
+    fn from(v: ds::ExternalIdentifierKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ExternalIdentifierKey> for ds::ExternalIdentifierKey {
+    fn from(v: ExternalIdentifierKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Google Maps Place id identifying the establishment (enrichment / Business Profile).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct GooglePlaceId(pub String);
+async_graphql::scalar!(GooglePlaceId, "GooglePlaceId", "Google Maps Place id identifying the establishment (enrichment / Business Profile).");
+impl From<ds::GooglePlaceId> for GooglePlaceId {
+    fn from(v: ds::GooglePlaceId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<GooglePlaceId> for ds::GooglePlaceId {
+    fn from(v: GooglePlaceId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// WGS84 latitude in decimal degrees.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct Latitude(pub f64);
+async_graphql::scalar!(Latitude, "Latitude", "WGS84 latitude in decimal degrees.");
+impl From<ds::Latitude> for Latitude {
+    fn from(v: ds::Latitude) -> Self {
+        Self(v.0)
+    }
+}
+impl From<Latitude> for ds::Latitude {
+    fn from(v: Latitude) -> Self {
+        Self(v.0)
+    }
+}
+
+/// WGS84 longitude in decimal degrees.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct Longitude(pub f64);
+async_graphql::scalar!(Longitude, "Longitude", "WGS84 longitude in decimal degrees.");
+impl From<ds::Longitude> for Longitude {
+    fn from(v: ds::Longitude) -> Self {
+        Self(v.0)
+    }
+}
+impl From<Longitude> for ds::Longitude {
+    fn from(v: Longitude) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Google Maps / Business Profile average rating (0–5), enrichment only.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct GoogleRating(pub f64);
+async_graphql::scalar!(GoogleRating, "GoogleRating", "Google Maps / Business Profile average rating (0–5), enrichment only.");
+impl From<ds::GoogleRating> for GoogleRating {
+    fn from(v: ds::GoogleRating) -> Self {
+        Self(v.0)
+    }
+}
+impl From<GoogleRating> for ds::GoogleRating {
+    fn from(v: GoogleRating) -> Self {
+        Self(v.0)
+    }
+}
+
+/// An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct WebUrl(pub String);
+async_graphql::scalar!(WebUrl, "WebUrl", "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.");
+impl From<ds::WebUrl> for WebUrl {
+    fn from(v: ds::WebUrl) -> Self {
+        Self(v.0)
+    }
+}
+impl From<WebUrl> for ds::WebUrl {
+    fn from(v: WebUrl) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantLegalName(pub String);
+async_graphql::scalar!(RestaurantLegalName, "RestaurantLegalName", "Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.");
+impl From<ds::RestaurantLegalName> for RestaurantLegalName {
+    fn from(v: ds::RestaurantLegalName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantLegalName> for ds::RestaurantLegalName {
+    fn from(v: RestaurantLegalName) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantDescription(pub String);
+async_graphql::scalar!(RestaurantDescription, "RestaurantDescription", "Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.");
+impl From<ds::RestaurantDescription> for RestaurantDescription {
+    fn from(v: ds::RestaurantDescription) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantDescription> for ds::RestaurantDescription {
+    fn from(v: RestaurantDescription) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Rows to skip before the page for a paginated list query (#113). Absent = 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct PageOffset(pub i64);
+async_graphql::scalar!(PageOffset, "PageOffset", "Rows to skip before the page for a paginated list query (#113). Absent = 0.");
+impl From<ds::PageOffset> for PageOffset {
+    fn from(v: ds::PageOffset) -> Self {
+        Self(v.0)
+    }
+}
+impl From<PageOffset> for ds::PageOffset {
+    fn from(v: PageOffset) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct MarginPercent(pub f64);
+async_graphql::scalar!(MarginPercent, "MarginPercent", "A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.");
+impl From<ds::MarginPercent> for MarginPercent {
+    fn from(v: ds::MarginPercent) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MarginPercent> for ds::MarginPercent {
+    fn from(v: MarginPercent) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum Weekday {
+    #[graphql(name = "MONDAY")]
+    MONDAY,
+    #[graphql(name = "TUESDAY")]
+    TUESDAY,
+    #[graphql(name = "WEDNESDAY")]
+    WEDNESDAY,
+    #[graphql(name = "THURSDAY")]
+    THURSDAY,
+    #[graphql(name = "FRIDAY")]
+    FRIDAY,
+    #[graphql(name = "SATURDAY")]
+    SATURDAY,
+    #[graphql(name = "SUNDAY")]
+    SUNDAY,
+}
+impl From<ds::Weekday> for Weekday {
+    fn from(v: ds::Weekday) -> Self {
+        match v {
+            ds::Weekday::MONDAY => Self::MONDAY,
+            ds::Weekday::TUESDAY => Self::TUESDAY,
+            ds::Weekday::WEDNESDAY => Self::WEDNESDAY,
+            ds::Weekday::THURSDAY => Self::THURSDAY,
+            ds::Weekday::FRIDAY => Self::FRIDAY,
+            ds::Weekday::SATURDAY => Self::SATURDAY,
+            ds::Weekday::SUNDAY => Self::SUNDAY,
+        }
+    }
+}
+impl From<Weekday> for ds::Weekday {
+    fn from(v: Weekday) -> Self {
+        match v {
+            Weekday::MONDAY => Self::MONDAY,
+            Weekday::TUESDAY => Self::TUESDAY,
+            Weekday::WEDNESDAY => Self::WEDNESDAY,
+            Weekday::THURSDAY => Self::THURSDAY,
+            Weekday::FRIDAY => Self::FRIDAY,
+            Weekday::SATURDAY => Self::SATURDAY,
+            Weekday::SUNDAY => Self::SUNDAY,
+        }
+    }
+}
+
+/// Local time of day, HH:mm (HubRise opening_hours format).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TimeOfDay(pub String);
+async_graphql::scalar!(TimeOfDay, "TimeOfDay", "Local time of day, HH:mm (HubRise opening_hours format).");
+impl From<ds::TimeOfDay> for TimeOfDay {
+    fn from(v: ds::TimeOfDay) -> Self {
+        Self(v.0)
+    }
+}
+impl From<TimeOfDay> for ds::TimeOfDay {
+    fn from(v: TimeOfDay) -> Self {
+        Self(v.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RestaurantStatus {
+    #[graphql(name = "DRAFT")]
+    DRAFT,
+    #[graphql(name = "ACTIVE")]
+    ACTIVE,
+    #[graphql(name = "INACTIVE")]
+    INACTIVE,
+}
+impl From<ds::RestaurantStatus> for RestaurantStatus {
+    fn from(v: ds::RestaurantStatus) -> Self {
+        match v {
+            ds::RestaurantStatus::DRAFT => Self::DRAFT,
+            ds::RestaurantStatus::ACTIVE => Self::ACTIVE,
+            ds::RestaurantStatus::INACTIVE => Self::INACTIVE,
+        }
+    }
+}
+impl From<RestaurantStatus> for ds::RestaurantStatus {
+    fn from(v: RestaurantStatus) -> Self {
+        match v {
+            RestaurantStatus::DRAFT => Self::DRAFT,
+            RestaurantStatus::ACTIVE => Self::ACTIVE,
+            RestaurantStatus::INACTIVE => Self::INACTIVE,
+        }
+    }
+}
+
+/// Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RestaurantListingStatus {
+    #[graphql(name = "NON_PARTNER")]
+    NON_PARTNER,
+    #[graphql(name = "PASSIVE_PARTNER")]
+    PASSIVE_PARTNER,
+    #[graphql(name = "ACTIVE_PARTNER")]
+    ACTIVE_PARTNER,
+}
+impl From<ds::RestaurantListingStatus> for RestaurantListingStatus {
+    fn from(v: ds::RestaurantListingStatus) -> Self {
+        match v {
+            ds::RestaurantListingStatus::NON_PARTNER => Self::NON_PARTNER,
+            ds::RestaurantListingStatus::PASSIVE_PARTNER => Self::PASSIVE_PARTNER,
+            ds::RestaurantListingStatus::ACTIVE_PARTNER => Self::ACTIVE_PARTNER,
+        }
+    }
+}
+impl From<RestaurantListingStatus> for ds::RestaurantListingStatus {
+    fn from(v: RestaurantListingStatus) -> Self {
+        match v {
+            RestaurantListingStatus::NON_PARTNER => Self::NON_PARTNER,
+            RestaurantListingStatus::PASSIVE_PARTNER => Self::PASSIVE_PARTNER,
+            RestaurantListingStatus::ACTIVE_PARTNER => Self::ACTIVE_PARTNER,
+        }
+    }
+}
+
+/// State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum GbpLinkStatus {
+    #[graphql(name = "UNSET")]
+    UNSET,
+    #[graphql(name = "CONFIGURED")]
+    CONFIGURED,
+    #[graphql(name = "VERIFIED")]
+    VERIFIED,
+    #[graphql(name = "BROKEN")]
+    BROKEN,
+}
+impl From<ds::GbpLinkStatus> for GbpLinkStatus {
+    fn from(v: ds::GbpLinkStatus) -> Self {
+        match v {
+            ds::GbpLinkStatus::UNSET => Self::UNSET,
+            ds::GbpLinkStatus::CONFIGURED => Self::CONFIGURED,
+            ds::GbpLinkStatus::VERIFIED => Self::VERIFIED,
+            ds::GbpLinkStatus::BROKEN => Self::BROKEN,
+        }
+    }
+}
+impl From<GbpLinkStatus> for ds::GbpLinkStatus {
+    fn from(v: GbpLinkStatus) -> Self {
+        match v {
+            GbpLinkStatus::UNSET => Self::UNSET,
+            GbpLinkStatus::CONFIGURED => Self::CONFIGURED,
+            GbpLinkStatus::VERIFIED => Self::VERIFIED,
+            GbpLinkStatus::BROKEN => Self::BROKEN,
+        }
+    }
+}
+
+/// B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct ProspectionScore(pub i64);
+async_graphql::scalar!(ProspectionScore, "ProspectionScore", "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.");
+impl From<ds::ProspectionScore> for ProspectionScore {
+    fn from(v: ds::ProspectionScore) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ProspectionScore> for ds::ProspectionScore {
+    fn from(v: ProspectionScore) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ProspectPipelineStatus {
+    #[graphql(name = "NEW")]
+    NEW,
+    #[graphql(name = "CONTACTED")]
+    CONTACTED,
+    #[graphql(name = "COLD")]
+    COLD,
+    #[graphql(name = "REPLIED")]
+    REPLIED,
+    #[graphql(name = "CONVERTED")]
+    CONVERTED,
+}
+impl From<ds::ProspectPipelineStatus> for ProspectPipelineStatus {
+    fn from(v: ds::ProspectPipelineStatus) -> Self {
+        match v {
+            ds::ProspectPipelineStatus::NEW => Self::NEW,
+            ds::ProspectPipelineStatus::CONTACTED => Self::CONTACTED,
+            ds::ProspectPipelineStatus::COLD => Self::COLD,
+            ds::ProspectPipelineStatus::REPLIED => Self::REPLIED,
+            ds::ProspectPipelineStatus::CONVERTED => Self::CONVERTED,
+        }
+    }
+}
+impl From<ProspectPipelineStatus> for ds::ProspectPipelineStatus {
+    fn from(v: ProspectPipelineStatus) -> Self {
+        match v {
+            ProspectPipelineStatus::NEW => Self::NEW,
+            ProspectPipelineStatus::CONTACTED => Self::CONTACTED,
+            ProspectPipelineStatus::COLD => Self::COLD,
+            ProspectPipelineStatus::REPLIED => Self::REPLIED,
+            ProspectPipelineStatus::CONVERTED => Self::CONVERTED,
+        }
+    }
+}
+
+/// Channel of a prospection contact (email via Resend, Slack alert, or phone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum OutreachChannel {
+    #[graphql(name = "EMAIL")]
+    EMAIL,
+    #[graphql(name = "SLACK")]
+    SLACK,
+    #[graphql(name = "PHONE")]
+    PHONE,
+}
+impl From<ds::OutreachChannel> for OutreachChannel {
+    fn from(v: ds::OutreachChannel) -> Self {
+        match v {
+            ds::OutreachChannel::EMAIL => Self::EMAIL,
+            ds::OutreachChannel::SLACK => Self::SLACK,
+            ds::OutreachChannel::PHONE => Self::PHONE,
+        }
+    }
+}
+impl From<OutreachChannel> for ds::OutreachChannel {
+    fn from(v: OutreachChannel) -> Self {
+        match v {
+            OutreachChannel::EMAIL => Self::EMAIL,
+            OutreachChannel::SLACK => Self::SLACK,
+            OutreachChannel::PHONE => Self::PHONE,
+        }
+    }
+}
+
+/// Current order acceptance mode of a restaurant (HubRise: order_acceptance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum OrderAcceptanceMode {
+    #[graphql(name = "NORMAL")]
+    NORMAL,
+    #[graphql(name = "BUSY")]
+    BUSY,
+    #[graphql(name = "PAUSED")]
+    PAUSED,
+}
+impl From<ds::OrderAcceptanceMode> for OrderAcceptanceMode {
+    fn from(v: ds::OrderAcceptanceMode) -> Self {
+        match v {
+            ds::OrderAcceptanceMode::NORMAL => Self::NORMAL,
+            ds::OrderAcceptanceMode::BUSY => Self::BUSY,
+            ds::OrderAcceptanceMode::PAUSED => Self::PAUSED,
+        }
+    }
+}
+impl From<OrderAcceptanceMode> for ds::OrderAcceptanceMode {
+    fn from(v: OrderAcceptanceMode) -> Self {
+        match v {
+            OrderAcceptanceMode::NORMAL => Self::NORMAL,
+            OrderAcceptanceMode::BUSY => Self::BUSY,
+            OrderAcceptanceMode::PAUSED => Self::PAUSED,
+        }
+    }
+}
+
+/// Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum PriceRange {
+    #[graphql(name = "BUDGET")]
+    BUDGET,
+    #[graphql(name = "MODERATE")]
+    MODERATE,
+    #[graphql(name = "PREMIUM")]
+    PREMIUM,
+}
+impl From<ds::PriceRange> for PriceRange {
+    fn from(v: ds::PriceRange) -> Self {
+        match v {
+            ds::PriceRange::BUDGET => Self::BUDGET,
+            ds::PriceRange::MODERATE => Self::MODERATE,
+            ds::PriceRange::PREMIUM => Self::PREMIUM,
+        }
+    }
+}
+impl From<PriceRange> for ds::PriceRange {
+    fn from(v: PriceRange) -> Self {
+        match v {
+            PriceRange::BUDGET => Self::BUDGET,
+            PriceRange::MODERATE => Self::MODERATE,
+            PriceRange::PREMIUM => Self::PREMIUM,
+        }
+    }
+}
+
+/// Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RestaurantListKey {
+    #[graphql(name = "ORDER_AGAIN")]
+    ORDER_AGAIN,
+    #[graphql(name = "RECOMMENDED")]
+    RECOMMENDED,
+    #[graphql(name = "TOP_DEALS")]
+    TOP_DEALS,
+    #[graphql(name = "GREEN_PACKAGING")]
+    GREEN_PACKAGING,
+}
+impl From<ds::RestaurantListKey> for RestaurantListKey {
+    fn from(v: ds::RestaurantListKey) -> Self {
+        match v {
+            ds::RestaurantListKey::ORDER_AGAIN => Self::ORDER_AGAIN,
+            ds::RestaurantListKey::RECOMMENDED => Self::RECOMMENDED,
+            ds::RestaurantListKey::TOP_DEALS => Self::TOP_DEALS,
+            ds::RestaurantListKey::GREEN_PACKAGING => Self::GREEN_PACKAGING,
+        }
+    }
+}
+impl From<RestaurantListKey> for ds::RestaurantListKey {
+    fn from(v: RestaurantListKey) -> Self {
+        match v {
+            RestaurantListKey::ORDER_AGAIN => Self::ORDER_AGAIN,
+            RestaurantListKey::RECOMMENDED => Self::RECOMMENDED,
+            RestaurantListKey::TOP_DEALS => Self::TOP_DEALS,
+            RestaurantListKey::GREEN_PACKAGING => Self::GREEN_PACKAGING,
+        }
+    }
+}
+
+/// Identifies a line within a cart, used to edit its quantity or remove it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CartLineId(pub uuid::Uuid);
+async_graphql::scalar!(CartLineId, "CartLineId", "Identifies a line within a cart, used to edit its quantity or remove it.");
+impl From<ds::CartLineId> for CartLineId {
+    fn from(v: ds::CartLineId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<CartLineId> for ds::CartLineId {
+    fn from(v: CartLineId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Restaurant rating in stars (0–5), given by the customer on a delivered order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct StarRating(pub i64);
+async_graphql::scalar!(StarRating, "StarRating", "Restaurant rating in stars (0–5), given by the customer on a delivered order.");
+impl From<ds::StarRating> for StarRating {
+    fn from(v: ds::StarRating) -> Self {
+        Self(v.0)
+    }
+}
+impl From<StarRating> for ds::StarRating {
+    fn from(v: StarRating) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Rider rating: thumbs up or down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ThumbRating {
+    #[graphql(name = "UP")]
+    UP,
+    #[graphql(name = "DOWN")]
+    DOWN,
+}
+impl From<ds::ThumbRating> for ThumbRating {
+    fn from(v: ds::ThumbRating) -> Self {
+        match v {
+            ds::ThumbRating::UP => Self::UP,
+            ds::ThumbRating::DOWN => Self::DOWN,
+        }
+    }
+}
+impl From<ThumbRating> for ds::ThumbRating {
+    fn from(v: ThumbRating) -> Self {
+        match v {
+            ThumbRating::UP => Self::UP,
+            ThumbRating::DOWN => Self::DOWN,
+        }
+    }
+}
+
+/// Free-text comment accompanying a restaurant rating.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RatingComment(pub String);
+async_graphql::scalar!(RatingComment, "RatingComment", "Free-text comment accompanying a restaurant rating.");
+impl From<ds::RatingComment> for RatingComment {
+    fn from(v: ds::RatingComment) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RatingComment> for ds::RatingComment {
+    fn from(v: RatingComment) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryTimeliness {
+    #[graphql(name = "ON_TIME")]
+    ON_TIME,
+    #[graphql(name = "ACCEPTABLE_DELAY")]
+    ACCEPTABLE_DELAY,
+    #[graphql(name = "TOO_LATE")]
+    TOO_LATE,
+}
+impl From<ds::DeliveryTimeliness> for DeliveryTimeliness {
+    fn from(v: ds::DeliveryTimeliness) -> Self {
+        match v {
+            ds::DeliveryTimeliness::ON_TIME => Self::ON_TIME,
+            ds::DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
+            ds::DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
+        }
+    }
+}
+impl From<DeliveryTimeliness> for ds::DeliveryTimeliness {
+    fn from(v: DeliveryTimeliness) -> Self {
+        match v {
+            DeliveryTimeliness::ON_TIME => Self::ON_TIME,
+            DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
+            DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
+        }
+    }
+}
+
+/// Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryDissatisfactionReason(pub String);
+async_graphql::scalar!(DeliveryDissatisfactionReason, "DeliveryDissatisfactionReason", "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).");
+impl From<ds::DeliveryDissatisfactionReason> for DeliveryDissatisfactionReason {
+    fn from(v: ds::DeliveryDissatisfactionReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryDissatisfactionReason> for ds::DeliveryDissatisfactionReason {
+    fn from(v: DeliveryDissatisfactionReason) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100% passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum TipRecipient {
+    #[graphql(name = "RIDER")]
+    RIDER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+    #[graphql(name = "CAPTAIN")]
+    CAPTAIN,
+}
+impl From<ds::TipRecipient> for TipRecipient {
+    fn from(v: ds::TipRecipient) -> Self {
+        match v {
+            ds::TipRecipient::RIDER => Self::RIDER,
+            ds::TipRecipient::RESTAURANT => Self::RESTAURANT,
+            ds::TipRecipient::CAPTAIN => Self::CAPTAIN,
+        }
+    }
+}
+impl From<TipRecipient> for ds::TipRecipient {
+    fn from(v: TipRecipient) -> Self {
+        match v {
+            TipRecipient::RIDER => Self::RIDER,
+            TipRecipient::RESTAURANT => Self::RESTAURANT,
+            TipRecipient::CAPTAIN => Self::CAPTAIN,
+        }
+    }
+}
+
+/// Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/ Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum Tipper {
+    #[graphql(name = "CUSTOMER")]
+    CUSTOMER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+}
+impl From<ds::Tipper> for Tipper {
+    fn from(v: ds::Tipper) -> Self {
+        match v {
+            ds::Tipper::CUSTOMER => Self::CUSTOMER,
+            ds::Tipper::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+impl From<Tipper> for ds::Tipper {
+    fn from(v: Tipper) -> Self {
+        match v {
+            Tipper::CUSTOMER => Self::CUSTOMER,
+            Tipper::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+
+/// Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never abandoned/expired — they persist until checked out, so there is no abandonment state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CartStatus {
+    #[graphql(name = "OPEN")]
+    OPEN,
+    #[graphql(name = "CHECKED_OUT")]
+    CHECKED_OUT,
+}
+impl From<ds::CartStatus> for CartStatus {
+    fn from(v: ds::CartStatus) -> Self {
+        match v {
+            ds::CartStatus::OPEN => Self::OPEN,
+            ds::CartStatus::CHECKED_OUT => Self::CHECKED_OUT,
+        }
+    }
+}
+impl From<CartStatus> for ds::CartStatus {
+    fn from(v: CartStatus) -> Self {
+        match v {
+            CartStatus::OPEN => Self::OPEN,
+            CartStatus::CHECKED_OUT => Self::CHECKED_OUT,
+        }
+    }
+}
+
+/// Free-text description of the problem the customer is claiming about the order (#151).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ReclamationDescription(pub String);
+async_graphql::scalar!(ReclamationDescription, "ReclamationDescription", "Free-text description of the problem the customer is claiming about the order (#151).");
+impl From<ds::ReclamationDescription> for ReclamationDescription {
+    fn from(v: ds::ReclamationDescription) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ReclamationDescription> for ds::ReclamationDescription {
+    fn from(v: ReclamationDescription) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ReclamationStatus {
+    #[graphql(name = "OPEN")]
+    OPEN,
+    #[graphql(name = "RESOLVED")]
+    RESOLVED,
+    #[graphql(name = "REJECTED")]
+    REJECTED,
+}
+impl From<ds::ReclamationStatus> for ReclamationStatus {
+    fn from(v: ds::ReclamationStatus) -> Self {
+        match v {
+            ds::ReclamationStatus::OPEN => Self::OPEN,
+            ds::ReclamationStatus::RESOLVED => Self::RESOLVED,
+            ds::ReclamationStatus::REJECTED => Self::REJECTED,
+        }
+    }
+}
+impl From<ReclamationStatus> for ds::ReclamationStatus {
+    fn from(v: ReclamationStatus) -> Self {
+        match v {
+            ReclamationStatus::OPEN => Self::OPEN,
+            ReclamationStatus::RESOLVED => Self::RESOLVED,
+            ReclamationStatus::REJECTED => Self::REJECTED,
+        }
+    }
+}
+
+/// Stripe Refund id (provider reference). Example: 're_3Nabc...'.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RefundId(pub String);
+async_graphql::scalar!(RefundId, "RefundId", "Stripe Refund id (provider reference). Example: 're_3Nabc...'.");
+impl From<ds::RefundId> for RefundId {
+    fn from(v: ds::RefundId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RefundId> for ds::RefundId {
+    fn from(v: RefundId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RefundStatus {
+    #[graphql(name = "REQUESTED")]
+    REQUESTED,
+    #[graphql(name = "APPROVED")]
+    APPROVED,
+    #[graphql(name = "DENIED")]
+    DENIED,
+    #[graphql(name = "REFUNDED")]
+    REFUNDED,
+}
+impl From<ds::RefundStatus> for RefundStatus {
+    fn from(v: ds::RefundStatus) -> Self {
+        match v {
+            ds::RefundStatus::REQUESTED => Self::REQUESTED,
+            ds::RefundStatus::APPROVED => Self::APPROVED,
+            ds::RefundStatus::DENIED => Self::DENIED,
+            ds::RefundStatus::REFUNDED => Self::REFUNDED,
+        }
+    }
+}
+impl From<RefundStatus> for ds::RefundStatus {
+    fn from(v: RefundStatus) -> Self {
+        match v {
+            RefundStatus::REQUESTED => Self::REQUESTED,
+            RefundStatus::APPROVED => Self::APPROVED,
+            RefundStatus::DENIED => Self::DENIED,
+            RefundStatus::REFUNDED => Self::REFUNDED,
+        }
     }
 }

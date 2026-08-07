@@ -237,6 +237,15 @@ _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mo
 
 ### 🧰 API operations _(28)_
 
+<a id="query-restaurantdeliveries"></a>
+#### 🔎 Query: `restaurantDeliveries`
+
+A restaurant's active delivery jobs (delivery board; ownership enforced server-side).
+
+- **Input**: 🧩 `RestaurantDeliveriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `DeliveryStatus`](#scalar-deliverystatus)
+- **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) (list) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
+
 <a id="query-restaurants"></a>
 #### 🔎 Query: `restaurants`
 
@@ -256,45 +265,6 @@ A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-<a id="query-restaurantdeliveries"></a>
-#### 🔎 Query: `restaurantDeliveries`
-
-A restaurant's active delivery jobs (delivery board; ownership enforced server-side).
-
-- **Input**: 🧩 `RestaurantDeliveriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `DeliveryStatus`](#scalar-deliverystatus)
-- **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) (list) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
-
-<a id="query-restaurantdeliverysatisfaction"></a>
-#### 🔎 Query: `restaurantDeliverySatisfaction`
-
-A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
-
-
-- **Input**: 🧩 `RestaurantDeliverySatisfactionQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `timeliness?`: [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness)
-- **Returns**: [🧩 `DeliverySatisfaction`](#type-deliverysatisfaction) (list) · **reads** [🗄️ `View_DeliverySatisfaction`](#view-view_deliverysatisfaction)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
-
-<a id="query-pendingrefunds"></a>
-#### 🔎 Query: `pendingRefunds`
-
-The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
-
-
-- **Input**: 🧩 `PendingRefundsQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `RefundStatus`](#scalar-refundstatus)
-- **Returns**: [🧩 `Refund`](#type-refund) (list) · **reads** [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
-- **Roles**: RESTAURANT, ADMIN · **slice** V0
-
-<a id="query-restaurantreclamations"></a>
-#### 🔎 Query: `restaurantReclamations`
-
-The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
-
-
-- **Input**: 🧩 `RestaurantReclamationsQueryInput` — `status?`: [🔤 `ReclamationStatus`](#scalar-reclamationstatus), `category?`: [🔤 `ReclamationCategory`](#scalar-reclamationcategory), `overdue?`: `boolean`
-- **Returns**: [🧩 `Reclamation`](#type-reclamation) (list) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
-
 <a id="query-restaurantlocationsbyaccount"></a>
 #### 🔎 Query: `restaurantLocationsByAccount`
 
@@ -312,6 +282,36 @@ B2B prospection pipeline (admin): scored prospects, optionally filtered by minim
 - **Input**: 🧩 `ProspectionPipelineQueryInput` — `minScore?`: [🔤 `ProspectionScore`](#scalar-prospectionscore), `status?`: [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus)
 - **Returns**: [🧩 `Prospect`](#type-prospect) (list) · **reads** [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 - **Roles**: ADMIN · **slice** V1
+
+<a id="query-restaurantdeliverysatisfaction"></a>
+#### 🔎 Query: `restaurantDeliverySatisfaction`
+
+A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+
+
+- **Input**: 🧩 `RestaurantDeliverySatisfactionQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `timeliness?`: [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness)
+- **Returns**: [🧩 `DeliverySatisfaction`](#type-deliverysatisfaction) (list) · **reads** [🗄️ `View_DeliverySatisfaction`](#view-view_deliverysatisfaction)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
+
+<a id="query-restaurantreclamations"></a>
+#### 🔎 Query: `restaurantReclamations`
+
+The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
+
+
+- **Input**: 🧩 `RestaurantReclamationsQueryInput` — `status?`: [🔤 `ReclamationStatus`](#scalar-reclamationstatus), `category?`: [🔤 `ReclamationCategory`](#scalar-reclamationcategory), `overdue?`: `boolean`
+- **Returns**: [🧩 `Reclamation`](#type-reclamation) (list) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
+
+<a id="query-pendingrefunds"></a>
+#### 🔎 Query: `pendingRefunds`
+
+The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+
+
+- **Input**: 🧩 `PendingRefundsQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `RefundStatus`](#scalar-refundstatus)
+- **Returns**: [🧩 `Refund`](#type-refund) (list) · **reads** [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
 
 <a id="mutation-registerrestaurantaccount"></a>
 #### ✏️ Mutation: `registerRestaurantAccount`
@@ -1415,6 +1415,9 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 
 | Scalar | Type | Description |
 | --- | --- | --- |
+| <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
+| <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
+| <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
 | <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
 | <a id="scalar-externalidentifierkey"></a>🔤 `ExternalIdentifierKey` | string | Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).  |
@@ -1425,8 +1428,6 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
 | <a id="scalar-restaurantdescription"></a>🔤 `RestaurantDescription` | string | Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.  |
-| <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
-| <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
 | <a id="scalar-pageoffset"></a>🔤 `PageOffset` | integer | Rows to skip before the page for a paginated list query (#113). Absent = 0. |
 | <a id="scalar-marginpercent"></a>🔤 `MarginPercent` | number | A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.  |
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
@@ -1439,7 +1440,6 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-outreachchannel"></a>🔤 `OutreachChannel` | enum (EMAIL \| SLACK \| PHONE) | Channel of a prospection contact (email via Resend, Slack alert, or phone). |
 | <a id="scalar-orderacceptancemode"></a>🔤 `OrderAcceptanceMode` | enum (NORMAL \| BUSY \| PAUSED) | Current order acceptance mode of a restaurant (HubRise: order_acceptance). |
 | <a id="scalar-pricerange"></a>🔤 `PriceRange` | enum (BUDGET \| MODERATE \| PREMIUM) | Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$). |
-| <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
 
 ### ⛔ Errors _(14)_
@@ -2789,7 +2789,6 @@ A purchasable offer of a product (HubRise: SKU).
 | --- | --- | --- |
 | <a id="scalar-catalogid"></a>🔤 `CatalogId` | string _uuid_ | Catalog id (HubRise: catalog). |
 | <a id="scalar-productcategoryid"></a>🔤 `ProductCategoryId` | string _uuid_ |  |
-| <a id="scalar-optionlistid"></a>🔤 `OptionListId` | string _uuid_ |  |
 | <a id="scalar-imageid"></a>🔤 `ImageId` | string _uuid_ |  |
 | <a id="scalar-catalogname"></a>🔤 `CatalogName` | string |  |
 | <a id="scalar-catalogcategoryname"></a>🔤 `CatalogCategoryName` | string |  |
@@ -2797,6 +2796,7 @@ A purchasable offer of a product (HubRise: SKU).
 | <a id="scalar-optionlistname"></a>🔤 `OptionListName` | string |  |
 | <a id="scalar-catalogitemavailability"></a>🔤 `CatalogItemAvailability` | enum (AVAILABLE \| UNAVAILABLE) |  |
 | <a id="scalar-stockstatus"></a>🔤 `StockStatus` | enum (IN_STOCK \| LOW_STOCK \| OUT_OF_STOCK) |  |
+| <a id="scalar-optionlistid"></a>🔤 `OptionListId` | string _uuid_ |  |
 
 ### ⛔ Errors _(18)_
 
@@ -3143,6 +3143,26 @@ _Cart selection → checkout → order lifecycle, incl. the checkout & refund sa
 
 ### 🧰 API operations _(36)_
 
+<a id="query-orderconversation"></a>
+#### 🔎 Query: `orderConversation`
+
+The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
+
+
+- **Input**: 🧩 `OrderConversationQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
+- **Returns**: [🧩 `OrderConversation`](#type-orderconversation) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+
+<a id="query-orderconversationinternalnotes"></a>
+#### 🔎 Query: `orderConversationInternalNotes`
+
+The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
+
+
+- **Input**: 🧩 `OrderConversationInternalNotesQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
+- **Returns**: [🧩 `ConversationInternalNotes`](#type-conversationinternalnotes) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
 
@@ -3171,26 +3191,6 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 - **Returns**: [🧩 `Order`](#type-order) · **reads** [🗄️ `OrderTracking`](#view-ordertracking)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
-<a id="query-orderconversation"></a>
-#### 🔎 Query: `orderConversation`
-
-The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
-
-
-- **Input**: 🧩 `OrderConversationQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
-- **Returns**: [🧩 `OrderConversation`](#type-orderconversation) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
-- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-
-<a id="query-orderconversationinternalnotes"></a>
-#### 🔎 Query: `orderConversationInternalNotes`
-
-The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
-
-
-- **Input**: 🧩 `OrderConversationInternalNotesQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
-- **Returns**: [🧩 `ConversationInternalNotes`](#type-conversationinternalnotes) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-
 <a id="query-reclamation"></a>
 #### 🔎 Query: `reclamation`
 
@@ -3200,6 +3200,48 @@ A single reclamation by id (#154) — claim detail for the customer who raised i
 - **Input**: 🧩 `ReclamationQueryInput!` — `reclamationId`: [🔤 `ReclamationId`](#scalar-reclamationid)
 - **Returns**: [🧩 `Reclamation`](#type-reclamation) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
+
+<a id="mutation-openconversation"></a>
+#### ✏️ Mutation: `openConversation`
+
+- **Command**: [📩 `OpenConversation`](#command-openconversation) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-postmessage"></a>
+#### ✏️ Mutation: `postMessage`
+
+- **Command**: [📩 `PostMessage`](#command-postmessage) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-recordmessagetranslation"></a>
+#### ✏️ Mutation: `recordMessageTranslation`
+
+- **Command**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-escalatetoadmin"></a>
+#### ✏️ Mutation: `escalateToAdmin`
+
+- **Command**: [📩 `EscalateToAdmin`](#command-escalatetoadmin) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-muteparticipant"></a>
+#### ✏️ Mutation: `muteParticipant`
+
+- **Command**: [📩 `MuteParticipant`](#command-muteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-unmuteparticipant"></a>
+#### ✏️ Mutation: `unmuteParticipant`
+
+- **Command**: [📩 `UnmuteParticipant`](#command-unmuteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-addcartline"></a>
 #### ✏️ Mutation: `addCartLine`
@@ -3313,62 +3355,6 @@ A single reclamation by id (#154) — claim detail for the customer who raised i
 - **Roles**: CUSTOMER · **slice** V1
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-<a id="mutation-approverefund"></a>
-#### ✏️ Mutation: `approveRefund`
-
-- **Command**: [📩 `ApproveRefund`](#command-approverefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
-- **Roles**: RESTAURANT, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-denyrefund"></a>
-#### ✏️ Mutation: `denyRefund`
-
-- **Command**: [📩 `DenyRefund`](#command-denyrefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
-- **Roles**: RESTAURANT, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-openconversation"></a>
-#### ✏️ Mutation: `openConversation`
-
-- **Command**: [📩 `OpenConversation`](#command-openconversation) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-postmessage"></a>
-#### ✏️ Mutation: `postMessage`
-
-- **Command**: [📩 `PostMessage`](#command-postmessage) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-recordmessagetranslation"></a>
-#### ✏️ Mutation: `recordMessageTranslation`
-
-- **Command**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-escalatetoadmin"></a>
-#### ✏️ Mutation: `escalateToAdmin`
-
-- **Command**: [📩 `EscalateToAdmin`](#command-escalatetoadmin) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-muteparticipant"></a>
-#### ✏️ Mutation: `muteParticipant`
-
-- **Command**: [📩 `MuteParticipant`](#command-muteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
-<a id="mutation-unmuteparticipant"></a>
-#### ✏️ Mutation: `unmuteParticipant`
-
-- **Command**: [📩 `UnmuteParticipant`](#command-unmuteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
-- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
-- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
-
 <a id="mutation-openreclamation"></a>
 #### ✏️ Mutation: `openReclamation`
 
@@ -3404,6 +3390,20 @@ A single reclamation by id (#154) — claim detail for the customer who raised i
 - **Roles**: CUSTOMER · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-approverefund"></a>
+#### ✏️ Mutation: `approveRefund`
+
+- **Command**: [📩 `ApproveRefund`](#command-approverefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-denyrefund"></a>
+#### ✏️ Mutation: `denyRefund`
+
+- **Command**: [📩 `DenyRefund`](#command-denyrefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="subscription-orderstatuschanged"></a>
 #### 🔔 Subscription: [`orderStatusChanged`](#subscription-orderstatuschanged)
 
@@ -3415,6 +3415,39 @@ Order status change events for ONE order, tracked by orderId — what the confir
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
 ### 🧩 Output types _(8)_
+
+<a id="type-orderconversation"></a>
+#### 🧩 Type: `OrderConversation`
+
+The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
+
+
+- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-orderconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-orderconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
+| <a id="type-orderconversation--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |
+| <a id="type-orderconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |
+| <a id="type-orderconversation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
+| <a id="type-orderconversation--messages"></a>`messages` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+| <a id="type-orderconversation--claimevents"></a>`claimEvents` | [[📦 `ClaimTimelineEntry`](#entity-claimtimelineentry)] | ✅ |
+
+<a id="type-conversationinternalnotes"></a>
+#### 🧩 Type: `ConversationInternalNotes`
+
+The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
+
+
+- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-conversationinternalnotes--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-conversationinternalnotes--notes"></a>`notes` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+| <a id="type-conversationinternalnotes--admininvited"></a>`adminInvited` | `boolean` | ✅ |
+| <a id="type-conversationinternalnotes--mutedparticipants"></a>`mutedParticipants` | [[📦 `MutedParticipant`](#entity-mutedparticipant)] | ✅ |
 
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
@@ -3546,40 +3579,22 @@ A refund opened for decision on a paid order (RefundProcess): REQUESTED until th
 | <a id="type-refund--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
 | <a id="type-refund--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
 
-<a id="type-orderconversation"></a>
-#### 🧩 Type: `OrderConversation`
-
-The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
-
-
-- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required |
-| --- | --- | --- |
-| <a id="type-orderconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
-| <a id="type-orderconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
-| <a id="type-orderconversation--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |
-| <a id="type-orderconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |
-| <a id="type-orderconversation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
-| <a id="type-orderconversation--messages"></a>`messages` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
-| <a id="type-orderconversation--claimevents"></a>`claimEvents` | [[📦 `ClaimTimelineEntry`](#entity-claimtimelineentry)] | ✅ |
-
-<a id="type-conversationinternalnotes"></a>
-#### 🧩 Type: `ConversationInternalNotes`
-
-The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
-
-
-- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required |
-| --- | --- | --- |
-| <a id="type-conversationinternalnotes--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
-| <a id="type-conversationinternalnotes--notes"></a>`notes` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
-| <a id="type-conversationinternalnotes--admininvited"></a>`adminInvited` | `boolean` | ✅ |
-| <a id="type-conversationinternalnotes--mutedparticipants"></a>`mutedParticipants` | [[📦 `MutedParticipant`](#entity-mutedparticipant)] | ✅ |
-
 ### 🎭 Actors _(11)_
+
+<a id="actor-conversation"></a>
+#### 🎭 Actor: `Conversation`
+
+_🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversation's identity IS its order, ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true); PostMessage appends a message with PUBLIC/INTERNAL visibility. A CUSTOMER author is rejected when customer chat is disabled. Idempotent by messageId. (#129)
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
+| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
+| [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) | [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded) |
+| [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
+| [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
+| [📩 `UnmuteParticipant`](#command-unmuteparticipant) | [⚡ `ParticipantUnmuted`](#event-participantunmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted) |
 
 <a id="actor-cart"></a>
 #### 🎭 Actor: `Cart`
@@ -3660,48 +3675,6 @@ stateDiagram-v2
   CANCELLED_BY_RESTAURANT --> [*]
 ```
 
-<a id="actor-payment"></a>
-#### 🎭 Actor: `Payment`
-
-_🧩 aggregate_ — A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state.
-
-| Receives | Emits → | Throws |
-| --- | --- | --- |
-| [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | — |
-| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `PaymentCaptured`](#event-paymentcaptured) | — |
-| [⚡ `PaymentFailed`](#event-paymentfailed) | [⚡ `PaymentFailed`](#event-paymentfailed) | — |
-| [⚡ `PaymentRefunded`](#event-paymentrefunded) | [⚡ `PaymentRefunded`](#event-paymentrefunded) | — |
-| [⚡ `RefundOpened`](#event-refundopened) | [⚡ `RefundOpened`](#event-refundopened) | — |
-| [⚡ `RefundApproved`](#event-refundapproved) | [⚡ `RefundApproved`](#event-refundapproved) | — |
-| [⚡ `RefundDenied`](#event-refunddenied) | [⚡ `RefundDenied`](#event-refunddenied) | — |
-
-Lifecycle (generated from the declared state machine):
-
-```mermaid
-stateDiagram-v2
-  [*] --> PENDING : PaymentIntentCreated
-  PENDING --> CAPTURED : PaymentCaptured
-  PENDING --> FAILED : PaymentFailed
-  CAPTURED --> REFUNDED : PaymentRefunded
-  FAILED --> [*]
-  REFUNDED --> [*]
-```
-
-<a id="actor-conversation"></a>
-#### 🎭 Actor: `Conversation`
-
-_🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversation's identity IS its order, ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true); PostMessage appends a message with PUBLIC/INTERNAL visibility. A CUSTOMER author is rejected when customer chat is disabled. Idempotent by messageId. (#129)
-
-
-| Receives | Emits → | Throws |
-| --- | --- | --- |
-| [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
-| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
-| [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) | [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded) |
-| [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
-| [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
-| [📩 `UnmuteParticipant`](#command-unmuteparticipant) | [⚡ `ParticipantUnmuted`](#event-participantunmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted) |
-
 <a id="actor-reclamation"></a>
 #### 🎭 Actor: `Reclamation`
 
@@ -3726,17 +3699,6 @@ stateDiagram-v2
   RESOLVED --> OPEN : ReclamationReopened
   REJECTED --> OPEN : ReclamationReopened
 ```
-
-<a id="actor-customercredit"></a>
-#### 🎭 Actor: `CustomerCredit`
-
-_🧩 aggregate_ — A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at checkout) are recorded as facts on the customer's ledger stream; the AVAILABLE BALANCE is a fold over them (granted − consumed, never negative). No status lifecycle — a ledger has a balance, not a state. GrantCustomerCredit is idempotent per reclamationId (at most one grant per resolved claim), so a re-delivered ReclamationResolved from the ReclamationProcess saga never double-grants (ADR-20260726-163737, #158). Both commands are saga-/checkout-driven (no public GraphQL mutation).
-
-
-| Receives | Emits → | Throws |
-| --- | --- | --- |
-| [📩 `GrantCustomerCredit`](#command-grantcustomercredit) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
-| [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) | [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed) | [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit) |
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -3799,6 +3761,44 @@ sequenceDiagram
   PM->>ST: set payment_status=FAILED, process_status=FAILED, last_processed_stripe_event_id=envelope.event_id
   end
 ```
+
+<a id="actor-payment"></a>
+#### 🎭 Actor: `Payment`
+
+_🧩 aggregate_ — A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state.
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | — |
+| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `PaymentCaptured`](#event-paymentcaptured) | — |
+| [⚡ `PaymentFailed`](#event-paymentfailed) | [⚡ `PaymentFailed`](#event-paymentfailed) | — |
+| [⚡ `PaymentRefunded`](#event-paymentrefunded) | [⚡ `PaymentRefunded`](#event-paymentrefunded) | — |
+| [⚡ `RefundOpened`](#event-refundopened) | [⚡ `RefundOpened`](#event-refundopened) | — |
+| [⚡ `RefundApproved`](#event-refundapproved) | [⚡ `RefundApproved`](#event-refundapproved) | — |
+| [⚡ `RefundDenied`](#event-refunddenied) | [⚡ `RefundDenied`](#event-refunddenied) | — |
+
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING : PaymentIntentCreated
+  PENDING --> CAPTURED : PaymentCaptured
+  PENDING --> FAILED : PaymentFailed
+  CAPTURED --> REFUNDED : PaymentRefunded
+  FAILED --> [*]
+  REFUNDED --> [*]
+```
+
+<a id="actor-customercredit"></a>
+#### 🎭 Actor: `CustomerCredit`
+
+_🧩 aggregate_ — A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at checkout) are recorded as facts on the customer's ledger stream; the AVAILABLE BALANCE is a fold over them (granted − consumed, never negative). No status lifecycle — a ledger has a balance, not a state. GrantCustomerCredit is idempotent per reclamationId (at most one grant per resolved claim), so a re-delivered ReclamationResolved from the ReclamationProcess saga never double-grants (ADR-20260726-163737, #158). Both commands are saga-/checkout-driven (no public GraphQL mutation).
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `GrantCustomerCredit`](#command-grantcustomercredit) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
+| [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) | [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed) | [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit) |
 
 <a id="actor-refundprocess"></a>
 #### 🎭 Actor: `RefundProcess`
@@ -3935,6 +3935,31 @@ sequenceDiagram
   end
 ```
 
+<a id="actor-reclamationprocess"></a>
+#### 🎭 Actor: `ReclamationProcess`
+
+_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). REFUND arm (WIRED, ADR-20260727-090000 / #207): on a FULL_REFUND / PARTIAL_REFUND resolution the saga drives the EXISTING refund path (RefundProcess) to a SETTLED Stripe refund -- the restaurant's resolution IS the approval, so the refund settles WITHOUT a separate manual ApproveRefund. In one reaction the saga reads the order (cross-aggregate, by orderId) for the captured total + payment intent, then drives RefundProcess's two application legs in order: on_refund_requested OPENS the PENDING_APPROVAL run (delivering RefundOpened to the Payment so View_PendingRefunds folds it) and then, because the resolution IS the approval, approve_refund drives the Stripe refund (delivering RefundApproved, run -> APPROVED_AWAITING_SETTLEMENT); the inbound PaymentRefunded later settles it via the normal RefundProcess leg. RefundProcess stays the ONE Stripe-driving mechanism -- nothing is duplicated. FULL_REFUND refunds the captured total; PARTIAL_REFUND the recorded amount, rejected with errors.yaml#/RefundExceedsCaptured when it exceeds the captured total (rules.yaml#/RefundResolutionCappedAtCaptured). Idempotent per reclamationId: a re-delivered resolution finds the run already APPROVED/settled (the RefundProcess state-row admission guard) and RefundOpened/RefundApproved already recorded (the Payment's own fold), so it never opens or settles a second refund. REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted), [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved) | [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured) |
+
+Sequence (generated from the typed steps):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant IN as Inbox (trigger)
+  participant PM as ReclamationProcess (decides)
+  participant AG_CustomerCredit as CustomerCredit (aggregate)
+  rect rgb(245,245,245)
+  IN->>PM: ReclamationResolved (event)
+  PM->>AG_CustomerCredit: send GrantCustomerCredit — the aggregate validates
+  Note over PM: skip unless precondition holds
+  end
+```
+
 <a id="actor-refundprocess"></a>
 #### 🎭 Actor: `RefundProcess`
 
@@ -4010,31 +4035,6 @@ sequenceDiagram
   IN->>PM: PaymentRefunded (event)
   PM->>ST: by order_id=PaymentRefunded.orderId; expect process_status=APPROVED_AWAITING_SETTLEMENT
   PM->>ST: set refund_id=PaymentRefunded.refundId, process_status=REFUNDED
-  end
-```
-
-<a id="actor-reclamationprocess"></a>
-#### 🎭 Actor: `ReclamationProcess`
-
-_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). REFUND arm (WIRED, ADR-20260727-090000 / #207): on a FULL_REFUND / PARTIAL_REFUND resolution the saga drives the EXISTING refund path (RefundProcess) to a SETTLED Stripe refund -- the restaurant's resolution IS the approval, so the refund settles WITHOUT a separate manual ApproveRefund. In one reaction the saga reads the order (cross-aggregate, by orderId) for the captured total + payment intent, then drives RefundProcess's two application legs in order: on_refund_requested OPENS the PENDING_APPROVAL run (delivering RefundOpened to the Payment so View_PendingRefunds folds it) and then, because the resolution IS the approval, approve_refund drives the Stripe refund (delivering RefundApproved, run -> APPROVED_AWAITING_SETTLEMENT); the inbound PaymentRefunded later settles it via the normal RefundProcess leg. RefundProcess stays the ONE Stripe-driving mechanism -- nothing is duplicated. FULL_REFUND refunds the captured total; PARTIAL_REFUND the recorded amount, rejected with errors.yaml#/RefundExceedsCaptured when it exceeds the captured total (rules.yaml#/RefundResolutionCappedAtCaptured). Idempotent per reclamationId: a re-delivered resolution finds the run already APPROVED/settled (the RefundProcess state-row admission guard) and RefundOpened/RefundApproved already recorded (the Payment's own fold), so it never opens or settles a second refund. REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
-
-
-| Receives | Emits → | Throws |
-| --- | --- | --- |
-| [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted), [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved) | [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured) |
-
-Sequence (generated from the typed steps):
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant IN as Inbox (trigger)
-  participant PM as ReclamationProcess (decides)
-  participant AG_CustomerCredit as CustomerCredit (aggregate)
-  rect rgb(245,245,245)
-  IN->>PM: ReclamationResolved (event)
-  PM->>AG_CustomerCredit: send GrantCustomerCredit — the aggregate validates
-  Note over PM: skip unless precondition holds
   end
 ```
 
@@ -4218,6 +4218,101 @@ sequenceDiagram
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
 ### 📩 Commands _(33)_
+
+<a id="command-openconversation"></a>
+#### 📩 Command: `OpenConversation`
+
+Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+
+- **Dispatched by**: [✏️ `openConversation`](#mutation-openconversation) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **Throws**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-openconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-openconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-openconversation--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="command-openconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
+
+<a id="command-postmessage"></a>
+#### 📩 Command: `PostMessage`
+
+Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+
+- **Dispatched by**: [✏️ `postMessage`](#mutation-postmessage) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `MessagePosted`](#event-messageposted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-postmessage--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-postmessage--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="command-postmessage--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="command-postmessage--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
+| <a id="command-postmessage--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
+| <a id="command-postmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="command-postmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+
+<a id="command-recordmessagetranslation"></a>
+#### 📩 Command: `RecordMessageTranslation`
+
+Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+
+- **Dispatched by**: [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-recordmessagetranslation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-recordmessagetranslation--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="command-recordmessagetranslation--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="command-recordmessagetranslation--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
+
+<a id="command-escalatetoadmin"></a>
+#### 📩 Command: `EscalateToAdmin`
+
+Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+
+- **Dispatched by**: [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-escalatetoadmin--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-escalatetoadmin--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
+
+<a id="command-muteparticipant"></a>
+#### 📩 Command: `MuteParticipant`
+
+Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+
+- **Dispatched by**: [✏️ `muteParticipant`](#mutation-muteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ParticipantMuted`](#event-participantmuted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-muteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-muteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="command-muteparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ⬜ |  |
+| <a id="command-muteparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
+
+<a id="command-unmuteparticipant"></a>
+#### 📩 Command: `UnmuteParticipant`
+
+Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+
+- **Dispatched by**: [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-unmuteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-unmuteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -4482,65 +4577,6 @@ Bind a cart to a customer (after phone verification). The cart is then owned by 
 | <a id="command-bindcarttocustomer--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
 | <a id="command-bindcarttocustomer--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 
-<a id="command-approverefund"></a>
-#### 📩 Command: `ApproveRefund`
-
-The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
-
-- **Dispatched by**: [✏️ `approveRefund`](#mutation-approverefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
-- **Emits**: [⚡ `RefundApproved`](#event-refundapproved)
-- **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-approverefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-approverefund--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | Approved refund amount (may be partial). |
-| <a id="command-approverefund--reason"></a>`reason` | `string` | ⬜ |  |
-
-<a id="command-denyrefund"></a>
-#### 📩 Command: `DenyRefund`
-
-The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
-
-- **Dispatched by**: [✏️ `denyRefund`](#mutation-denyrefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
-- **Emits**: [⚡ `RefundDenied`](#event-refunddenied)
-- **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
-
-<a id="command-grantcustomercredit"></a>
-#### 📩 Command: `GrantCustomerCredit`
-
-Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
-
-- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
-- **Emits**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
-- **Throws**: —
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-grantcustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
-| <a id="command-grantcustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to add to the customer's available balance. |
-| <a id="command-grantcustomercredit--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
-
-<a id="command-consumecustomercredit"></a>
-#### 📩 Command: `ConsumeCustomerCredit`
-
-Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
-
-- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
-- **Emits**: [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
-- **Throws**: [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-consumecustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
-| <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
-| <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-
 <a id="command-placereplacementorder"></a>
 #### 📩 Command: `PlaceReplacementOrder`
 
@@ -4555,101 +4591,6 @@ Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResol
 | <a id="command-placereplacementorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Saga-generated id for the new replacement order (deterministic from reclamationId — the idempotency key). |
 | <a id="command-placereplacementorder--originalorderid"></a>`originalOrderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | The original order to remake; its line items and delivery details are copied verbatim. |
 | <a id="command-placereplacementorder--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
-
-<a id="command-openconversation"></a>
-#### 📩 Command: `OpenConversation`
-
-Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
-
-- **Dispatched by**: [✏️ `openConversation`](#mutation-openconversation) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **Throws**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-openconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-openconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="command-openconversation--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
-| <a id="command-openconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
-
-<a id="command-postmessage"></a>
-#### 📩 Command: `PostMessage`
-
-Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
-
-- **Dispatched by**: [✏️ `postMessage`](#mutation-postmessage) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `MessagePosted`](#event-messageposted)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-postmessage--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-postmessage--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
-| <a id="command-postmessage--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
-| <a id="command-postmessage--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
-| <a id="command-postmessage--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
-| <a id="command-postmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
-| <a id="command-postmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
-
-<a id="command-recordmessagetranslation"></a>
-#### 📩 Command: `RecordMessageTranslation`
-
-Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
-
-- **Dispatched by**: [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-recordmessagetranslation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-recordmessagetranslation--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
-| <a id="command-recordmessagetranslation--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
-| <a id="command-recordmessagetranslation--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
-
-<a id="command-escalatetoadmin"></a>
-#### 📩 Command: `EscalateToAdmin`
-
-Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
-
-- **Dispatched by**: [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-escalatetoadmin--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-escalatetoadmin--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
-
-<a id="command-muteparticipant"></a>
-#### 📩 Command: `MuteParticipant`
-
-Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
-
-- **Dispatched by**: [✏️ `muteParticipant`](#mutation-muteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `ParticipantMuted`](#event-participantmuted)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-muteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-muteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
-| <a id="command-muteparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ⬜ |  |
-| <a id="command-muteparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
-
-<a id="command-unmuteparticipant"></a>
-#### 📩 Command: `UnmuteParticipant`
-
-Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
-
-- **Dispatched by**: [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
-- **Emits**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-unmuteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="command-unmuteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
 <a id="command-openreclamation"></a>
 #### 📩 Command: `OpenReclamation`
@@ -4728,7 +4669,194 @@ Attach an evidence photo (opaque, framework-managed attachment ref) to an existi
 | <a id="command-attachreclamationevidence--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="command-attachreclamationevidence--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
 
+<a id="command-approverefund"></a>
+#### 📩 Command: `ApproveRefund`
+
+The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
+
+- **Dispatched by**: [✏️ `approveRefund`](#mutation-approverefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
+- **Emits**: [⚡ `RefundApproved`](#event-refundapproved)
+- **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-approverefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-approverefund--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | Approved refund amount (may be partial). |
+| <a id="command-approverefund--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-denyrefund"></a>
+#### 📩 Command: `DenyRefund`
+
+The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
+
+- **Dispatched by**: [✏️ `denyRefund`](#mutation-denyrefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
+- **Emits**: [⚡ `RefundDenied`](#event-refunddenied)
+- **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
+
+<a id="command-grantcustomercredit"></a>
+#### 📩 Command: `GrantCustomerCredit`
+
+Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+
+- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
+- **Emits**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **Throws**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-grantcustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-grantcustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to add to the customer's available balance. |
+| <a id="command-grantcustomercredit--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+
+<a id="command-consumecustomercredit"></a>
+#### 📩 Command: `ConsumeCustomerCredit`
+
+Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+
+- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
+- **Emits**: [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
+- **Throws**: [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-consumecustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
+| <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+
 ### ⚡ Events _(40)_
+
+<a id="event-paymentintentcreated"></a>
+#### ⚡ Event: `PaymentIntentCreated`
+
+A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
+
+- **Emitted by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentintentcreated--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentintentcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-paymentintentcreated--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-paymentintentcreated--checkout"></a>`checkout` | [📦 `CheckoutSnapshot`](#entity-checkoutsnapshot) | ✅ | The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture). |
+
+<a id="event-refundapproved"></a>
+#### ⚡ Event: `RefundApproved`
+
+The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-refundapproved--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
+| <a id="event-refundapproved--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-refundapproved--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | Approved refund amount (may be partial). |
+| <a id="event-refundapproved--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-conversationopened"></a>
+#### ⚡ Event: `ConversationOpened`
+
+Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-conversationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-conversationopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-conversationopened--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-conversationopened--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
+
+<a id="event-messageposted"></a>
+#### ⚡ Event: `MessagePosted`
+
+A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-messageposted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-messageposted--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="event-messageposted--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="event-messageposted--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
+| <a id="event-messageposted--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
+| <a id="event-messageposted--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="event-messageposted--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+
+<a id="event-messagetranslationadded"></a>
+#### ⚡ Event: `MessageTranslationAdded`
+
+A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-messagetranslationadded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-messagetranslationadded--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="event-messagetranslationadded--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="event-messagetranslationadded--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
+
+<a id="event-admininvitedtoconversation"></a>
+#### ⚡ Event: `AdminInvitedToConversation`
+
+An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-admininvitedtoconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-admininvitedtoconversation--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
+
+<a id="event-participantmuted"></a>
+#### ⚡ Event: `ParticipantMuted`
+
+A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-participantmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-participantmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="event-participantmuted--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
+| <a id="event-participantmuted--until"></a>`until` | `string` _date-time_ | ⬜ |  |
+
+<a id="event-participantunmuted"></a>
+#### ⚡ Event: `ParticipantUnmuted`
+
+A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-participantunmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-participantunmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -5027,78 +5155,12 @@ The customer requested a refund for an order; the RefundProcess will drive Strip
 | <a id="event-refundrequested--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="event-refundrequested--reason"></a>`reason` | `string` | ⬜ |  |
 
-<a id="event-paymentintentcreated"></a>
-#### ⚡ Event: `PaymentIntentCreated`
-
-A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
-- **Consumed by**: [🎭 `Payment`](#actor-payment)
-- **Projected into**: _non-projected (saga/transient)_
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-paymentintentcreated--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
-| <a id="event-paymentintentcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
-| <a id="event-paymentintentcreated--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
-| <a id="event-paymentintentcreated--checkout"></a>`checkout` | [📦 `CheckoutSnapshot`](#entity-checkoutsnapshot) | ✅ | The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture). |
-
-<a id="event-paymentcaptured"></a>
-#### ⚡ Event: `PaymentCaptured`
-
-Payment was successfully authorized/captured for an order.
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment)
-- **Consumed by**: [🎭 `Payment`](#actor-payment), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-paymentcaptured--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
-| <a id="event-paymentcaptured--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when captured before the Order aggregate is created in the saga. |
-| <a id="event-paymentcaptured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentcaptured--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
-
-<a id="event-paymentfailed"></a>
-#### ⚡ Event: `PaymentFailed`
-
-Payment authorization/capture failed; no order is placed.
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment)
-- **Consumed by**: [🎭 `Payment`](#actor-payment), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
-- **Projected into**: —
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-paymentfailed--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
-| <a id="event-paymentfailed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentfailed--reason"></a>`reason` | `string` | ✅ |  |
-
-<a id="event-paymentrefunded"></a>
-#### ⚡ Event: `PaymentRefunded`
-
-A captured payment was refunded (e.g. after rejection or cancellation).
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment)
-- **Consumed by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds), [🗄️ `OrderTracking`](#view-ordertracking)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-paymentrefunded--refundid"></a>`refundId` | [🔤 `RefundId`](#scalar-refundid) | ✅ |  |
-| <a id="event-paymentrefunded--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
-| <a id="event-paymentrefunded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-paymentrefunded--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentrefunded--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
-| <a id="event-paymentrefunded--reason"></a>`reason` | `string` | ⬜ |  |
-
 <a id="event-refundopened"></a>
 #### ⚡ Event: `RefundOpened`
 
 A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state. `amount` is the captured order total eligible for refund (an approval may still be partial).
 
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `ReclamationProcess`](#actor-reclamationprocess), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
 - **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
 
@@ -5109,132 +5171,6 @@ A refundable fact on a paid order (rejection, cancellation, customer request) op
 | <a id="event-refundopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-refundopened--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The captured order total eligible for refund (the decision may approve less). |
 | <a id="event-refundopened--reason"></a>`reason` | `string` | ⬜ |  |
-
-<a id="event-refundapproved"></a>
-#### ⚡ Event: `RefundApproved`
-
-The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount.
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
-- **Consumed by**: [🎭 `Payment`](#actor-payment)
-- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-refundapproved--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
-| <a id="event-refundapproved--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-refundapproved--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | Approved refund amount (may be partial). |
-| <a id="event-refundapproved--reason"></a>`reason` | `string` | ⬜ |  |
-
-<a id="event-refunddenied"></a>
-#### ⚡ Event: `RefundDenied`
-
-The restaurant or an admin denied a pending refund request.
-
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
-- **Consumed by**: [🎭 `Payment`](#actor-payment)
-- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-refunddenied--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
-| <a id="event-refunddenied--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-refunddenied--reason"></a>`reason` | `string` | ✅ |  |
-
-<a id="event-conversationopened"></a>
-#### ⚡ Event: `ConversationOpened`
-
-Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-conversationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-conversationopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-conversationopened--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
-| <a id="event-conversationopened--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
-
-<a id="event-messageposted"></a>
-#### ⚡ Event: `MessagePosted`
-
-A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-messageposted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-messageposted--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
-| <a id="event-messageposted--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
-| <a id="event-messageposted--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
-| <a id="event-messageposted--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
-| <a id="event-messageposted--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
-| <a id="event-messageposted--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
-
-<a id="event-messagetranslationadded"></a>
-#### ⚡ Event: `MessageTranslationAdded`
-
-A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-messagetranslationadded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-messagetranslationadded--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
-| <a id="event-messagetranslationadded--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
-| <a id="event-messagetranslationadded--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
-
-<a id="event-admininvitedtoconversation"></a>
-#### ⚡ Event: `AdminInvitedToConversation`
-
-An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-admininvitedtoconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-admininvitedtoconversation--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
-
-<a id="event-participantmuted"></a>
-#### ⚡ Event: `ParticipantMuted`
-
-A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-participantmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-participantmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
-| <a id="event-participantmuted--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
-| <a id="event-participantmuted--until"></a>`until` | `string` _date-time_ | ⬜ |  |
-
-<a id="event-participantunmuted"></a>
-#### ⚡ Event: `ParticipantUnmuted`
-
-A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
-
-- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
-- **Consumed by**: —
-- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-participantunmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="event-participantunmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
 <a id="event-reclamationopened"></a>
 #### ⚡ Event: `ReclamationOpened`
@@ -5318,6 +5254,83 @@ The customer attached an evidence photo to their claim — an opaque, framework-
 | <a id="event-reclamationevidenceattached--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationevidenceattached--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
 
+<a id="event-orderexpired"></a>
+#### ⚡ Event: `OrderExpired`
+
+The order's retention window elapsed — at this moment the order IS expired: no discussion, no rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone their rows, and the generic deletion engine reacts to the recorded fact with the journey that ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the engine's journey lands (#194 "GDPR erasure").
+
+- **Emitted by**: [🎭 `Order`](#actor-order)
+- **Consumed by**: —
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-orderexpired--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+
+<a id="event-paymentcaptured"></a>
+#### ⚡ Event: `PaymentCaptured`
+
+Payment was successfully authorized/captured for an order.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentcaptured--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentcaptured--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when captured before the Order aggregate is created in the saga. |
+| <a id="event-paymentcaptured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentcaptured--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+
+<a id="event-paymentfailed"></a>
+#### ⚡ Event: `PaymentFailed`
+
+Payment authorization/capture failed; no order is placed.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentfailed--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentfailed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentfailed--reason"></a>`reason` | `string` | ✅ |  |
+
+<a id="event-paymentrefunded"></a>
+#### ⚡ Event: `PaymentRefunded`
+
+A captured payment was refunded (e.g. after rejection or cancellation).
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds), [🗄️ `OrderTracking`](#view-ordertracking)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentrefunded--refundid"></a>`refundId` | [🔤 `RefundId`](#scalar-refundid) | ✅ |  |
+| <a id="event-paymentrefunded--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentrefunded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-paymentrefunded--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentrefunded--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-paymentrefunded--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-refunddenied"></a>
+#### ⚡ Event: `RefundDenied`
+
+The restaurant or an admin denied a pending refund request.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-refunddenied--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ | Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId}). |
+| <a id="event-refunddenied--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-refunddenied--reason"></a>`reason` | `string` | ✅ |  |
+
 <a id="event-customercreditgranted"></a>
 #### ⚡ Event: `CustomerCreditGranted`
 
@@ -5348,19 +5361,6 @@ Store credit was spent by a customer at checkout (id = customerId). `amount` (Mo
 | <a id="event-customercreditconsumed--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-customercreditconsumed--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
-<a id="event-orderexpired"></a>
-#### ⚡ Event: `OrderExpired`
-
-The order's retention window elapsed — at this moment the order IS expired: no discussion, no rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone their rows, and the generic deletion engine reacts to the recorded fact with the journey that ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the engine's journey lands (#194 "GDPR erasure").
-
-- **Emitted by**: [🎭 `Order`](#actor-order)
-- **Consumed by**: —
-- **Projected into**: _non-projected (saga/transient)_
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-orderexpired--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-
 ### 📦 Entities _(15)_
 
 <a id="entity-money"></a>
@@ -5389,29 +5389,6 @@ The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016
 | <a id="entity-paymentbreakdown--riderpayout"></a>`riderPayout` | [📦 `Money`](#entity-money) | ✅ | Transfer to the rider Connect account = delivery. |
 | <a id="entity-paymentbreakdown--captainnet"></a>`captainNet` | [📦 `Money`](#entity-money) | ✅ | Kept on the Captain platform account = serviceFee + restaurantContribution (gross of Stripe). |
 
-<a id="entity-ubercomparison"></a>
-#### 📦 Entity: `UberComparison`
-
-What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="entity-ubercomparison--total"></a>`total` | [📦 `Money`](#entity-money) | ✅ | Estimated (or real) all-in Uber Eats price for the same order. |
-| <a id="entity-ubercomparison--restaurantshare"></a>`restaurantShare` | [📦 `Money`](#entity-money) | ✅ | What the restaurant would net on Uber (after its ~30% commission). |
-| <a id="entity-ubercomparison--ridershare"></a>`riderShare` | [📦 `Money`](#entity-money) | ✅ | What the courier would earn on Uber (base + per-km; per-km not modelled in V0). |
-| <a id="entity-ubercomparison--platformshare"></a>`platformShare` | [📦 `Money`](#entity-money) | ✅ | What Uber Eats would keep = total − restaurantShare − riderShare. |
-| <a id="entity-ubercomparison--basis"></a>`basis` | [🔤 `ComparisonBasis`](#scalar-comparisonbasis) | ✅ | REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED. |
-
-<a id="entity-tip"></a>
-#### 📦 Entity: `Tip`
-
-One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="entity-tip--recipient"></a>`recipient` | [🔤 `TipRecipient`](#scalar-tiprecipient) | ✅ |  |
-| <a id="entity-tip--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
-
 <a id="entity-customercontact"></a>
 #### 📦 Entity: `CustomerContact`
 
@@ -5420,31 +5397,6 @@ One customer tip to a single recipient (ADR-012). Optional, separate from the pr
 | <a id="entity-customercontact--displayname"></a>`displayName` | [🔤 `CustomerDisplayName`](#scalar-customerdisplayname) | ✅ |  |
 | <a id="entity-customercontact--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ |  |
 | <a id="entity-customercontact--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |  |
-
-<a id="entity-cartlineitem"></a>
-#### 📦 Entity: `CartLineItem`
-
-A line stored in a cart: the customer's selection by id (no prices stored).
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="entity-cartlineitem--cartlineid"></a>`cartLineId` | [🔤 `CartLineId`](#scalar-cartlineid) | ✅ |  |
-| <a id="entity-cartlineitem--offerid"></a>`offerId` | [🔤 `OfferId`](#scalar-offerid) | ✅ |  |
-| <a id="entity-cartlineitem--quantity"></a>`quantity` | `integer` | ✅ |  |
-| <a id="entity-cartlineitem--selectedoptionids"></a>`selectedOptionIds` | [[🔤 `OptionId`](#scalar-optionid)] | ⬜ |  |
-
-<a id="entity-cart"></a>
-#### 📦 Entity: `Cart`
-
-A customer's in-progress selection for a SINGLE restaurant. customerId is null while the visitor is still a guest; it is bound at checkout once the phone is verified.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="entity-cart--id"></a>`id` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
-| <a id="entity-cart--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-cart--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
-| <a id="entity-cart--status"></a>`status` | [🔤 `CartStatus`](#scalar-cartstatus) | ✅ |  |
-| <a id="entity-cart--lines"></a>`lines` | [[📦 `CartLineItem`](#entity-cartlineitem)] | ✅ |  |
 
 <a id="entity-selectedoption"></a>
 #### 📦 Entity: `SelectedOption`
@@ -5492,24 +5444,6 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-checkoutsnapshot--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="entity-checkoutsnapshot--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ |  |
 | <a id="entity-checkoutsnapshot--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
-
-<a id="entity-order"></a>
-#### 📦 Entity: `Order`
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="entity-order--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
-| <a id="entity-order--id"></a>`id` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
-| <a id="entity-order--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
-| <a id="entity-order--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
-| <a id="entity-order--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
-| <a id="entity-order--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
-| <a id="entity-order--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
-| <a id="entity-order--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ |  |
-| <a id="entity-order--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
-| <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
-| <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
 <a id="entity-conversationmessage"></a>
 #### 📦 Entity: `ConversationMessage`
@@ -5565,49 +5499,125 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="entity-claimtimelineentry--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ⬜ |  |
 | <a id="entity-claimtimelineentry--at"></a>`at` | `string` _date-time_ | ✅ |  |
 
+<a id="entity-ubercomparison"></a>
+#### 📦 Entity: `UberComparison`
+
+What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-ubercomparison--total"></a>`total` | [📦 `Money`](#entity-money) | ✅ | Estimated (or real) all-in Uber Eats price for the same order. |
+| <a id="entity-ubercomparison--restaurantshare"></a>`restaurantShare` | [📦 `Money`](#entity-money) | ✅ | What the restaurant would net on Uber (after its ~30% commission). |
+| <a id="entity-ubercomparison--ridershare"></a>`riderShare` | [📦 `Money`](#entity-money) | ✅ | What the courier would earn on Uber (base + per-km; per-km not modelled in V0). |
+| <a id="entity-ubercomparison--platformshare"></a>`platformShare` | [📦 `Money`](#entity-money) | ✅ | What Uber Eats would keep = total − restaurantShare − riderShare. |
+| <a id="entity-ubercomparison--basis"></a>`basis` | [🔤 `ComparisonBasis`](#scalar-comparisonbasis) | ✅ | REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED. |
+
+<a id="entity-tip"></a>
+#### 📦 Entity: `Tip`
+
+One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-tip--recipient"></a>`recipient` | [🔤 `TipRecipient`](#scalar-tiprecipient) | ✅ |  |
+| <a id="entity-tip--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+
+<a id="entity-cartlineitem"></a>
+#### 📦 Entity: `CartLineItem`
+
+A line stored in a cart: the customer's selection by id (no prices stored).
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-cartlineitem--cartlineid"></a>`cartLineId` | [🔤 `CartLineId`](#scalar-cartlineid) | ✅ |  |
+| <a id="entity-cartlineitem--offerid"></a>`offerId` | [🔤 `OfferId`](#scalar-offerid) | ✅ |  |
+| <a id="entity-cartlineitem--quantity"></a>`quantity` | `integer` | ✅ |  |
+| <a id="entity-cartlineitem--selectedoptionids"></a>`selectedOptionIds` | [[🔤 `OptionId`](#scalar-optionid)] | ⬜ |  |
+
+<a id="entity-cart"></a>
+#### 📦 Entity: `Cart`
+
+A customer's in-progress selection for a SINGLE restaurant. customerId is null while the visitor is still a guest; it is bound at checkout once the phone is verified.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-cart--id"></a>`id` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
+| <a id="entity-cart--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="entity-cart--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-cart--status"></a>`status` | [🔤 `CartStatus`](#scalar-cartstatus) | ✅ |  |
+| <a id="entity-cart--lines"></a>`lines` | [[📦 `CartLineItem`](#entity-cartlineitem)] | ✅ |  |
+
+<a id="entity-order"></a>
+#### 📦 Entity: `Order`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-order--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
+| <a id="entity-order--id"></a>`id` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="entity-order--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
+| <a id="entity-order--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-order--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
+| <a id="entity-order--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
+| <a id="entity-order--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
+| <a id="entity-order--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ |  |
+| <a id="entity-order--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
+| <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
+
 ### 🔤 Scalars _(34)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-optionid"></a>🔤 `OptionId` | string _uuid_ |  |
 | <a id="scalar-cartid"></a>🔤 `CartId` | string _uuid_ |  |
-| <a id="scalar-cartlineid"></a>🔤 `CartLineId` | string _uuid_ | Identifies a line within a cart, used to edit its quantity or remove it. |
 | <a id="scalar-paymentintentid"></a>🔤 `PaymentIntentId` | string | Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'. |
-| <a id="scalar-refundid"></a>🔤 `RefundId` | string | Stripe Refund id (provider reference). Example: 're_3Nabc...'. |
 | <a id="scalar-moneycents"></a>🔤 `MoneyCents` | integer | Monetary amount in minor units (e.g. cents). |
 | <a id="scalar-ordernote"></a>🔤 `OrderNote` | string |  |
+| <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
+| <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
+| <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
+| <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
+| <a id="scalar-reclamationid"></a>🔤 `ReclamationId` | string _uuid_ | Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).  |
+| <a id="scalar-reclamationcategory"></a>🔤 `ReclamationCategory` | enum (MISSING_ITEM \| WRONG_ITEM \| QUALITY \| LATE_DELIVERY \| DAMAGED \| NOT_DELIVERED \| OTHER) | What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).  |
+| <a id="scalar-reclamationresolution"></a>🔤 `ReclamationResolution` | enum (FULL_REFUND \| PARTIAL_REFUND \| REPLACEMENT \| GOODWILL_CREDIT \| REJECTED) | The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).  |
+| <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
+| <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).  |
+| <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
+| <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
+| <a id="scalar-messagebody"></a>🔤 `MessageBody` | string | Free-text body of a conversation message (#129). |
+| <a id="scalar-mutereason"></a>🔤 `MuteReason` | string | The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).  |
+| <a id="scalar-escalationreason"></a>🔤 `EscalationReason` | string | Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).  |
+| <a id="scalar-translatedtext"></a>🔤 `TranslatedText` | string | A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).  |
+| <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
+| <a id="scalar-cartlineid"></a>🔤 `CartLineId` | string _uuid_ | Identifies a line within a cart, used to edit its quantity or remove it. |
 | <a id="scalar-starrating"></a>🔤 `StarRating` | integer | Restaurant rating in stars (0–5), given by the customer on a delivered order. |
 | <a id="scalar-thumbrating"></a>🔤 `ThumbRating` | enum (UP \| DOWN) | Rider rating: thumbs up or down. |
 | <a id="scalar-ratingcomment"></a>🔤 `RatingComment` | string | Free-text comment accompanying a restaurant rating. |
 | <a id="scalar-deliverytimeliness"></a>🔤 `DeliveryTimeliness` | enum (ON_TIME \| ACCEPTABLE_DELAY \| TOO_LATE) | The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.  |
 | <a id="scalar-deliverydissatisfactionreason"></a>🔤 `DeliveryDissatisfactionReason` | string | Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62). |
-| <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
 | <a id="scalar-tiprecipient"></a>🔤 `TipRecipient` | enum (RIDER \| RESTAURANT \| CAPTAIN) | Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100% passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.  |
 | <a id="scalar-tipper"></a>🔤 `Tipper` | enum (CUSTOMER \| RESTAURANT) | Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/ Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.  |
 | <a id="scalar-cartstatus"></a>🔤 `CartStatus` | enum (OPEN \| CHECKED_OUT) | Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never abandoned/expired — they persist until checked out, so there is no abandonment state.  |
-| <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
-| <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
-| <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
-| <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).  |
-| <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
-| <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
-| <a id="scalar-messagebody"></a>🔤 `MessageBody` | string | Free-text body of a conversation message (#129). |
-| <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
-| <a id="scalar-mutereason"></a>🔤 `MuteReason` | string | The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).  |
-| <a id="scalar-escalationreason"></a>🔤 `EscalationReason` | string | Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).  |
-| <a id="scalar-translatedtext"></a>🔤 `TranslatedText` | string | A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).  |
-| <a id="scalar-reclamationid"></a>🔤 `ReclamationId` | string _uuid_ | Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).  |
-| <a id="scalar-reclamationcategory"></a>🔤 `ReclamationCategory` | enum (MISSING_ITEM \| WRONG_ITEM \| QUALITY \| LATE_DELIVERY \| DAMAGED \| NOT_DELIVERED \| OTHER) | What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).  |
-| <a id="scalar-reclamationresolution"></a>🔤 `ReclamationResolution` | enum (FULL_REFUND \| PARTIAL_REFUND \| REPLACEMENT \| GOODWILL_CREDIT \| REJECTED) | The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).  |
 | <a id="scalar-reclamationdescription"></a>🔤 `ReclamationDescription` | string | Free-text description of the problem the customer is claiming about the order (#151). |
-| <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
-| <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
+| <a id="scalar-refundid"></a>🔤 `RefundId` | string | Stripe Refund id (provider reference). Example: 're_3Nabc...'. |
+| <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 
 ### ⛔ Errors _(40)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
+| <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
+| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
+| <a id="error-notaparticipant"></a>⛔ `NotAParticipant` | The acting principal is not a participant of the aggregate instance it tried to write to — the aggregate's own folded state names its participants and the caller is not among them (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The instance's existence is NOT disclosed beyond this rejection.  | 🇬🇧 You are not a participant in this conversation. | 🇫🇷 Vous ne participez pas à cette conversation. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-rolemismatch"></a>⛔ `RoleMismatch` | The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 / PROP-20260728-135632 requires.claims).  | 🇬🇧 The author role does not match your account. | 🇫🇷 Le rôle d'auteur ne correspond pas à votre compte. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-messagenotfoundinconversation"></a>⛔ `MessageNotFoundInConversation` | A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).  | 🇬🇧 No such message exists in this conversation. | 🇫🇷 Ce message n'existe pas dans cette conversation. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
+| <a id="error-translationalreadyrecorded"></a>⛔ `TranslationAlreadyRecorded` | A translation for this message and target locale is already cached; the re-record is idempotent and rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).  | 🇬🇧 This message is already translated into this language. | 🇫🇷 Ce message est déjà traduit dans cette langue. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
+| <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
+| <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-restaurantpaused"></a>⛔ `RestaurantPaused` | Restaurant acceptance mode is PAUSED; it cannot take orders. | 🇬🇧 '{restaurantName}' is not taking orders right now. | 🇫🇷 '{restaurantName}' ne prend pas de commandes pour le moment. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-offerunavailable"></a>⛔ `OfferUnavailable` | Offer availability is UNAVAILABLE (manual flag). | 🇬🇧 '{productName}' ({offerName}) is currently unavailable. | 🇫🇷 '{productName}' ({offerName}) est actuellement indisponible. | [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-insufficientstock"></a>⛔ `InsufficientStock` | Requested quantity exceeds available stock. | 🇬🇧 Only {available} left of '{productName}' ({offerName}), but {requested} were requested. | 🇫🇷 Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés. | [📩 `AddCartLine`](#command-addcartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) |
@@ -5629,27 +5639,115 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-paymentdeclined"></a>⛔ `PaymentDeclined` | Stripe declined the payment synchronously at checkout (no order placed). | 🇬🇧 Payment was declined. | 🇫🇷 Le paiement a été refusé. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-pricemismatch"></a>⛔ `PriceMismatch` | The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.  | 🇬🇧 Prices have changed since you loaded the menu. Please review your cart and try again. | 🇫🇷 Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-priceunresolvable"></a>⛔ `PriceUnresolvable` | A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.  | 🇬🇧 An item in your cart is no longer available at a known price. Please review your cart. | 🇫🇷 Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier. | [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
-| <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
-| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
-| <a id="error-notaparticipant"></a>⛔ `NotAParticipant` | The acting principal is not a participant of the aggregate instance it tried to write to — the aggregate's own folded state names its participants and the caller is not among them (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The instance's existence is NOT disclosed beyond this rejection.  | 🇬🇧 You are not a participant in this conversation. | 🇫🇷 Vous ne participez pas à cette conversation. | [📩 `PostMessage`](#command-postmessage) |
-| <a id="error-rolemismatch"></a>⛔ `RoleMismatch` | The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 / PROP-20260728-135632 requires.claims).  | 🇬🇧 The author role does not match your account. | 🇫🇷 Le rôle d'auteur ne correspond pas à votre compte. | [📩 `PostMessage`](#command-postmessage) |
-| <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
-| <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
-| <a id="error-messagenotfoundinconversation"></a>⛔ `MessageNotFoundInConversation` | A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).  | 🇬🇧 No such message exists in this conversation. | 🇫🇷 Ce message n'existe pas dans cette conversation. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
-| <a id="error-translationalreadyrecorded"></a>⛔ `TranslationAlreadyRecorded` | A translation for this message and target locale is already cached; the re-record is idempotent and rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).  | 🇬🇧 This message is already translated into this language. | 🇫🇷 Ce message est déjà traduit dans cette langue. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
-| <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
-| <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-reclamationalreadyexists"></a>⛔ `ReclamationAlreadyExists` | OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).  | 🇬🇧 A reclamation already exists with this id. | 🇫🇷 Une réclamation existe déjà avec cet identifiant. | [📩 `OpenReclamation`](#command-openreclamation) |
 | <a id="error-reclamationnotfound"></a>⛔ `ReclamationNotFound` | Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the reclamation is opened (#151).  | 🇬🇧 No reclamation exists with this id. | 🇫🇷 Aucune réclamation n'existe avec cet identifiant. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation), [📩 `ReopenReclamation`](#command-reopenreclamation), [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence) |
 | <a id="error-reclamationnotopen"></a>⛔ `ReclamationNotOpen` | Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).  | 🇬🇧 This reclamation is not open. | 🇫🇷 Cette réclamation n'est pas ouverte. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-reclamationnotreopenable"></a>⛔ `ReclamationNotReopenable` | Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).  | 🇬🇧 This reclamation cannot be reopened. | 🇫🇷 Cette réclamation ne peut pas être rouverte. | [📩 `ReopenReclamation`](#command-reopenreclamation) |
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
+| <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
+| <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 
 ### 📐 Business rules _(48)_
+
+<a id="rule-checkoutsnapshotfrozenatintent"></a>
+#### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
+
+_When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store._
+
+- **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPaymentIntentCreatedRecorded`](#test-testpaymentintentcreatedrecorded)
+
+<a id="rule-ordermaterializedonpaymentcapture"></a>
+#### 📐 Rule: `OrderMaterializedOnPaymentCapture`
+
+_On payment capture the order is materialized and the cart is closed._
+
+- **Verified by**: [🧪 `TestPlaceOrderPaymentCapturedPlacesOrder`](#test-testplaceorderpaymentcapturedplacesorder), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
+
+<a id="rule-refundrequiresapproval"></a>
+#### 📐 Rule: `RefundRequiresApproval`
+
+_Only an explicit decision — by the RESTAURANT for its own orders, or by an ADMIN — resolves a pending refund: ApproveRefund (possibly partial) requests the Stripe refund, DenyRefund closes it; both are rejected when no refund is pending approval for the order._
+
+- **Verified by**: [🧪 `TestPaymentRefundApprovedRecorded`](#test-testpaymentrefundapprovedrecorded), [🧪 `TestPaymentRefundDeniedRecorded`](#test-testpaymentrefunddeniedrecorded), [🧪 `TestRefundApprovedByAdmin`](#test-testrefundapprovedbyadmin), [🧪 `TestRefundDeniedByAdmin`](#test-testrefunddeniedbyadmin), [🧪 `TestRefundDecisionRejectedWhenNotPending`](#test-testrefunddecisionrejectedwhennotpending)
+
+<a id="rule-conversationidentityistheorder"></a>
+#### 📐 Rule: `ConversationIdentityIsTheOrder`
+
+_A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)._
+
+- **Verified by**: [🧪 `TestConversationOpened`](#test-testconversationopened), [🧪 `TestConversationOpenedTwiceIsRejected`](#test-testconversationopenedtwiceisrejected), [🧪 `TestPostToUnopenedConversationIsRejected`](#test-testposttounopenedconversationisrejected)
+
+<a id="rule-onlyparticipantswritetoanaggregate"></a>
+#### 📐 Rule: `OnlyParticipantsWriteToAnAggregate`
+
+_A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)._
+
+- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected), [🧪 `TestRiderPostDenied`](#test-testriderpostdenied)
+
+<a id="rule-authorroleispinnedtotheprincipal"></a>
+#### 📐 Rule: `AuthorRoleIsPinnedToThePrincipal`
+
+_A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)._
+
+- **Verified by**: [🧪 `TestForgedAuthorRoleRejected`](#test-testforgedauthorrolerejected)
+
+<a id="rule-customerchatrequiresrestaurantoptin"></a>
+#### 📐 Rule: `CustomerChatRequiresRestaurantOptIn`
+
+_A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)._
+
+- **Verified by**: [🧪 `TestPublicMessagePosted`](#test-testpublicmessageposted), [🧪 `TestCustomerPostRejectedWhenChatDisabled`](#test-testcustomerpostrejectedwhenchatdisabled)
+
+<a id="rule-messagescarryvisibility"></a>
+#### 📐 Rule: `MessagesCarryVisibility`
+
+_Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)._
+
+- **Verified by**: [🧪 `TestInternalNotePosted`](#test-testinternalnoteposted)
+
+<a id="rule-messagepostingisidempotent"></a>
+#### 📐 Rule: `MessagePostingIsIdempotent`
+
+_Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)._
+
+- **Verified by**: [🧪 `TestDuplicateMessageRejected`](#test-testduplicatemessagerejected)
+
+<a id="rule-muterequiresareason"></a>
+#### 📐 Rule: `MuteRequiresAReason`
+
+_Muting a participant in an order conversation requires a justification reason; a mute without one is rejected (#129)._
+
+- **Verified by**: [🧪 `TestParticipantMuted`](#test-testparticipantmuted), [🧪 `TestMuteWithoutReasonRejected`](#test-testmutewithoutreasonrejected)
+
+<a id="rule-adminjoinsbyreasonedescalation"></a>
+#### 📐 Rule: `AdminJoinsByReasonedEscalation`
+
+_An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)._
+
+- **Verified by**: [🧪 `TestAdminEscalated`](#test-testadminescalated), [🧪 `TestEscalateUnopenedRejected`](#test-testescalateunopenedrejected)
+
+<a id="rule-onlymutedparticipantscanbeunmuted"></a>
+#### 📐 Rule: `OnlyMutedParticipantsCanBeUnmuted`
+
+_Unmuting a role that is not currently muted is rejected (#129)._
+
+- **Verified by**: [🧪 `TestParticipantUnmuted`](#test-testparticipantunmuted), [🧪 `TestUnmuteNotMutedRejected`](#test-testunmutenotmutedrejected)
+
+<a id="rule-translationsarecachedonceperlocale"></a>
+#### 📐 Rule: `TranslationsAreCachedOncePerLocale`
+
+_A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)._
+
+- **Verified by**: [🧪 `TestMessageTranslationRecorded`](#test-testmessagetranslationrecorded), [🧪 `TestTranslationAlreadyRecordedRejected`](#test-testtranslationalreadyrecordedrejected)
+
+<a id="rule-translationtargetsapostedmessage"></a>
+#### 📐 Rule: `TranslationTargetsAPostedMessage`
+
+_A translation can only be recorded for a message that was actually posted to the conversation (#129)._
+
+- **Verified by**: [🧪 `TestTranslateUnknownMessageRejected`](#test-testtranslateunknownmessagerejected)
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5735,33 +5833,12 @@ _Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it 
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
 
-<a id="rule-checkoutsnapshotfrozenatintent"></a>
-#### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
-
-_When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store._
-
-- **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPaymentIntentCreatedRecorded`](#test-testpaymentintentcreatedrecorded)
-
 <a id="rule-ordertestmodeisolation"></a>
 #### 📐 Rule: `OrderTestModeIsolation`
 
 _Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics._
 
 - **Verified by**: [🧪 `TestPlaceOrderRejectsTestRestaurantForLiveOrder`](#test-testplaceorderrejectstestrestaurantforliveorder)
-
-<a id="rule-ordermaterializedonpaymentcapture"></a>
-#### 📐 Rule: `OrderMaterializedOnPaymentCapture`
-
-_On payment capture the order is materialized and the cart is closed._
-
-- **Verified by**: [🧪 `TestPlaceOrderPaymentCapturedPlacesOrder`](#test-testplaceorderpaymentcapturedplacesorder), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
-
-<a id="rule-checkoutabortsonpaymentfailure"></a>
-#### 📐 Rule: `CheckoutAbortsOnPaymentFailure`
-
-_On payment failure the saga aborts, no order is placed and the cart stays open._
-
-- **Verified by**: [🧪 `TestPlaceOrderPaymentFailedPlacesNothing`](#test-testplaceorderpaymentfailedplacesnothing), [🧪 `TestPaymentFailedRecorded`](#test-testpaymentfailedrecorded)
 
 <a id="rule-refundonrejectionorcancellation"></a>
 #### 📐 Rule: `RefundOnRejectionOrCancellation`
@@ -5770,110 +5847,12 @@ _When a paid order is rejected, cancelled, or a refund is requested, a refund is
 
 - **Verified by**: [🧪 `TestRefundOnOrderRejected`](#test-testrefundonorderrejected), [🧪 `TestRefundOnOrderCancelledByCustomer`](#test-testrefundonordercancelledbycustomer), [🧪 `TestRefundOnOrderCancelledByRestaurant`](#test-testrefundonordercancelledbyrestaurant), [🧪 `TestRefundOnRefundRequested`](#test-testrefundonrefundrequested)
 
-<a id="rule-refundrequiresapproval"></a>
-#### 📐 Rule: `RefundRequiresApproval`
-
-_Only an explicit decision — by the RESTAURANT for its own orders, or by an ADMIN — resolves a pending refund: ApproveRefund (possibly partial) requests the Stripe refund, DenyRefund closes it; both are rejected when no refund is pending approval for the order._
-
-- **Verified by**: [🧪 `TestPaymentRefundApprovedRecorded`](#test-testpaymentrefundapprovedrecorded), [🧪 `TestPaymentRefundDeniedRecorded`](#test-testpaymentrefunddeniedrecorded), [🧪 `TestRefundApprovedByAdmin`](#test-testrefundapprovedbyadmin), [🧪 `TestRefundDeniedByAdmin`](#test-testrefunddeniedbyadmin), [🧪 `TestRefundDecisionRejectedWhenNotPending`](#test-testrefunddecisionrejectedwhennotpending)
-
-<a id="rule-refundsettledfactrecorded"></a>
-#### 📐 Rule: `RefundSettledFactRecorded`
-
-_The settled refund fact reported back by Stripe is recorded._
-
-- **Verified by**: [🧪 `TestRefundSettledFactRecorded`](#test-testrefundsettledfactrecorded), [🧪 `TestPaymentRefundedRecorded`](#test-testpaymentrefundedrecorded)
-
 <a id="rule-pendingrefundvisibleuntildecided"></a>
 #### 📐 Rule: `PendingRefundVisibleUntilDecided`
 
 _A refund opened for decision is recorded as a domain fact (RefundOpened on the Payment) and stays visible in the refund queue (pendingRefunds) as REQUESTED until an explicit decision resolves it; the decision and the Stripe settlement update its status (APPROVED/DENIED, then REFUNDED) instead of dropping it._
 
 - **Verified by**: [🧪 `TestPendingRefundVisibleUntilDecided`](#test-testpendingrefundvisibleuntildecided)
-
-<a id="rule-orphanpaymenteventflagged"></a>
-#### 📐 Rule: `OrphanPaymentEventFlagged`
-
-_A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped._
-
-- **Verified by**: [🧪 `TestPaymentCaptureOrphanIsFlagged`](#test-testpaymentcaptureorphanisflagged)
-
-<a id="rule-conversationidentityistheorder"></a>
-#### 📐 Rule: `ConversationIdentityIsTheOrder`
-
-_A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)._
-
-- **Verified by**: [🧪 `TestConversationOpened`](#test-testconversationopened), [🧪 `TestConversationOpenedTwiceIsRejected`](#test-testconversationopenedtwiceisrejected), [🧪 `TestPostToUnopenedConversationIsRejected`](#test-testposttounopenedconversationisrejected)
-
-<a id="rule-onlyparticipantswritetoanaggregate"></a>
-#### 📐 Rule: `OnlyParticipantsWriteToAnAggregate`
-
-_A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)._
-
-- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected), [🧪 `TestRiderPostDenied`](#test-testriderpostdenied)
-
-<a id="rule-authorroleispinnedtotheprincipal"></a>
-#### 📐 Rule: `AuthorRoleIsPinnedToThePrincipal`
-
-_A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)._
-
-- **Verified by**: [🧪 `TestForgedAuthorRoleRejected`](#test-testforgedauthorrolerejected)
-
-<a id="rule-customerchatrequiresrestaurantoptin"></a>
-#### 📐 Rule: `CustomerChatRequiresRestaurantOptIn`
-
-_A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)._
-
-- **Verified by**: [🧪 `TestPublicMessagePosted`](#test-testpublicmessageposted), [🧪 `TestCustomerPostRejectedWhenChatDisabled`](#test-testcustomerpostrejectedwhenchatdisabled)
-
-<a id="rule-messagescarryvisibility"></a>
-#### 📐 Rule: `MessagesCarryVisibility`
-
-_Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)._
-
-- **Verified by**: [🧪 `TestInternalNotePosted`](#test-testinternalnoteposted)
-
-<a id="rule-messagepostingisidempotent"></a>
-#### 📐 Rule: `MessagePostingIsIdempotent`
-
-_Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)._
-
-- **Verified by**: [🧪 `TestDuplicateMessageRejected`](#test-testduplicatemessagerejected)
-
-<a id="rule-muterequiresareason"></a>
-#### 📐 Rule: `MuteRequiresAReason`
-
-_Muting a participant in an order conversation requires a justification reason; a mute without one is rejected (#129)._
-
-- **Verified by**: [🧪 `TestParticipantMuted`](#test-testparticipantmuted), [🧪 `TestMuteWithoutReasonRejected`](#test-testmutewithoutreasonrejected)
-
-<a id="rule-adminjoinsbyreasonedescalation"></a>
-#### 📐 Rule: `AdminJoinsByReasonedEscalation`
-
-_An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)._
-
-- **Verified by**: [🧪 `TestAdminEscalated`](#test-testadminescalated), [🧪 `TestEscalateUnopenedRejected`](#test-testescalateunopenedrejected)
-
-<a id="rule-onlymutedparticipantscanbeunmuted"></a>
-#### 📐 Rule: `OnlyMutedParticipantsCanBeUnmuted`
-
-_Unmuting a role that is not currently muted is rejected (#129)._
-
-- **Verified by**: [🧪 `TestParticipantUnmuted`](#test-testparticipantunmuted), [🧪 `TestUnmuteNotMutedRejected`](#test-testunmutenotmutedrejected)
-
-<a id="rule-translationsarecachedonceperlocale"></a>
-#### 📐 Rule: `TranslationsAreCachedOncePerLocale`
-
-_A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)._
-
-- **Verified by**: [🧪 `TestMessageTranslationRecorded`](#test-testmessagetranslationrecorded), [🧪 `TestTranslationAlreadyRecordedRejected`](#test-testtranslationalreadyrecordedrejected)
-
-<a id="rule-translationtargetsapostedmessage"></a>
-#### 📐 Rule: `TranslationTargetsAPostedMessage`
-
-_A translation can only be recorded for a message that was actually posted to the conversation (#129)._
-
-- **Verified by**: [🧪 `TestTranslateUnknownMessageRejected`](#test-testtranslateunknownmessagerejected)
 
 <a id="rule-reclamationisuniqueperid"></a>
 #### 📐 Rule: `ReclamationIsUniquePerId`
@@ -5917,34 +5896,6 @@ _Evidence (an attachment ref) can only be attached to an existing reclamation; a
 
 - **Verified by**: [🧪 `TestReclamationEvidenceAttached`](#test-testreclamationevidenceattached), [🧪 `TestAttachEvidenceMissingReclamationRejected`](#test-testattachevidencemissingreclamationrejected)
 
-<a id="rule-creditgrantincreasesbalance"></a>
-#### 📐 Rule: `CreditGrantIncreasesBalance`
-
-_Granting store credit to a customer increases their available balance by the granted amount (#158)._
-
-- **Verified by**: [🧪 `TestCustomerCreditGranted`](#test-testcustomercreditgranted)
-
-<a id="rule-creditconsumedecreasesbalance"></a>
-#### 📐 Rule: `CreditConsumeDecreasesBalance`
-
-_Spending store credit decreases the customer's available balance by the consumed amount (#158)._
-
-- **Verified by**: [🧪 `TestCustomerCreditConsumed`](#test-testcustomercreditconsumed)
-
-<a id="rule-creditcannotbeoverspent"></a>
-#### 📐 Rule: `CreditCannotBeOverspent`
-
-_A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)._
-
-- **Verified by**: [🧪 `TestConsumeBeyondBalanceRejected`](#test-testconsumebeyondbalancerejected)
-
-<a id="rule-creditconsumedatmostonceperorder"></a>
-#### 📐 Rule: `CreditConsumedAtMostOncePerOrder`
-
-_Store credit is consumed at most once per order: the debit is keyed by the client-minted orderId, so a re-delivered or retried consume for an order already debited is a benign no-op — the same order never spends credit twice (#158, Part B of #207)._
-
-- **Verified by**: [🧪 `TestConsumeSameOrderTwiceIsNoOp`](#test-testconsumesameordertwiceisnoop)
-
 <a id="rule-goodwillcreditgrantedonresolution"></a>
 #### 📐 Rule: `GoodwillCreditGrantedOnResolution`
 
@@ -5987,7 +5938,248 @@ _Delivering the due OrderExpired reminder records the fact with record semantics
 
 - **Verified by**: [🧪 `TestOrderExpiredRecorded`](#test-testorderexpiredrecorded), [🧪 `TestOrderExpiredRedeliveryIsNoOp`](#test-testorderexpiredredeliveryisnoop)
 
+<a id="rule-checkoutabortsonpaymentfailure"></a>
+#### 📐 Rule: `CheckoutAbortsOnPaymentFailure`
+
+_On payment failure the saga aborts, no order is placed and the cart stays open._
+
+- **Verified by**: [🧪 `TestPlaceOrderPaymentFailedPlacesNothing`](#test-testplaceorderpaymentfailedplacesnothing), [🧪 `TestPaymentFailedRecorded`](#test-testpaymentfailedrecorded)
+
+<a id="rule-refundsettledfactrecorded"></a>
+#### 📐 Rule: `RefundSettledFactRecorded`
+
+_The settled refund fact reported back by Stripe is recorded._
+
+- **Verified by**: [🧪 `TestRefundSettledFactRecorded`](#test-testrefundsettledfactrecorded), [🧪 `TestPaymentRefundedRecorded`](#test-testpaymentrefundedrecorded)
+
+<a id="rule-orphanpaymenteventflagged"></a>
+#### 📐 Rule: `OrphanPaymentEventFlagged`
+
+_A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped._
+
+- **Verified by**: [🧪 `TestPaymentCaptureOrphanIsFlagged`](#test-testpaymentcaptureorphanisflagged)
+
+<a id="rule-creditgrantincreasesbalance"></a>
+#### 📐 Rule: `CreditGrantIncreasesBalance`
+
+_Granting store credit to a customer increases their available balance by the granted amount (#158)._
+
+- **Verified by**: [🧪 `TestCustomerCreditGranted`](#test-testcustomercreditgranted)
+
+<a id="rule-creditconsumedecreasesbalance"></a>
+#### 📐 Rule: `CreditConsumeDecreasesBalance`
+
+_Spending store credit decreases the customer's available balance by the consumed amount (#158)._
+
+- **Verified by**: [🧪 `TestCustomerCreditConsumed`](#test-testcustomercreditconsumed)
+
+<a id="rule-creditcannotbeoverspent"></a>
+#### 📐 Rule: `CreditCannotBeOverspent`
+
+_A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)._
+
+- **Verified by**: [🧪 `TestConsumeBeyondBalanceRejected`](#test-testconsumebeyondbalancerejected)
+
+<a id="rule-creditconsumedatmostonceperorder"></a>
+#### 📐 Rule: `CreditConsumedAtMostOncePerOrder`
+
+_Store credit is consumed at most once per order: the debit is keyed by the client-minted orderId, so a re-delivered or retried consume for an order already debited is a benign no-op — the same order never spends credit twice (#158, Part B of #207)._
+
+- **Verified by**: [🧪 `TestConsumeSameOrderTwiceIsNoOp`](#test-testconsumesameordertwiceisnoop)
+
 ### 🧪 Tests _(11)_
+
+**[🎭 `Conversation`](#actor-conversation)**
+
+<a id="test-testconversationopened"></a>
+#### 🧪 Test: `TestConversationOpened`
+
+_Opens the per-order conversation_
+
+- **Given**: _(none)_
+- **When**: [📩 `OpenConversation`](#command-openconversation)
+- **Then**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testconversationopenedtwiceisrejected"></a>
+#### 🧪 Test: `TestConversationOpenedTwiceIsRejected`
+
+_Opening an already-open conversation is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `OpenConversation`](#command-openconversation)
+- **Thrown**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testposttounopenedconversationisrejected"></a>
+#### 🧪 Test: `TestPostToUnopenedConversationIsRejected`
+
+_Posting a message before the conversation is opened is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testpublicmessageposted"></a>
+#### 🧪 Test: `TestPublicMessagePosted`
+
+_A customer posts a public message to the thread (chat enabled)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Then**: [⚡ `MessagePosted`](#event-messageposted)
+- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
+
+<a id="test-testinternalnoteposted"></a>
+#### 🧪 Test: `TestInternalNotePosted`
+
+_The restaurant posts an internal staff note (not shown to the customer)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Then**: [⚡ `MessagePosted`](#event-messageposted)
+- **Verifies**: [📐 `MessagesCarryVisibility`](#rule-messagescarryvisibility)
+
+<a id="test-testcustomerpostrejectedwhenchatdisabled"></a>
+#### 🧪 Test: `TestCustomerPostRejectedWhenChatDisabled`
+
+_A customer post is rejected when the restaurant disabled customer chat_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `CustomerChatDisabled`](#error-customerchatdisabled)
+- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
+
+<a id="test-testduplicatemessagerejected"></a>
+#### 🧪 Test: `TestDuplicateMessageRejected`
+
+_Re-posting a message with an already-seen messageId is rejected (idempotency)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+- **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
+
+<a id="test-testpostbystrangerrejected"></a>
+#### 🧪 Test: `TestPostByStrangerRejected`
+
+_A customer who is not the order's customer cannot post into its thread_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
+
+<a id="test-testforgedauthorrolerejected"></a>
+#### 🧪 Test: `TestForgedAuthorRoleRejected`
+
+_A customer cannot post as authorRole RESTAURANT (forged staff note)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `RoleMismatch`](#error-rolemismatch)
+- **Verifies**: [📐 `AuthorRoleIsPinnedToThePrincipal`](#rule-authorroleispinnedtotheprincipal)
+
+<a id="test-testriderpostdenied"></a>
+#### 🧪 Test: `TestRiderPostDenied`
+
+_A rider cannot post into an order thread (RIDER absent from requires.acting = denied)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
+
+<a id="test-testmessagetranslationrecorded"></a>
+#### 🧪 Test: `TestMessageTranslationRecorded`
+
+_A posted message is translated into a target locale and the translation is cached_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Then**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
+
+<a id="test-testtranslateunknownmessagerejected"></a>
+#### 🧪 Test: `TestTranslateUnknownMessageRejected`
+
+_Translating a message that was never posted is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Thrown**: [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation)
+- **Verifies**: [📐 `TranslationTargetsAPostedMessage`](#rule-translationtargetsapostedmessage)
+
+<a id="test-testtranslationalreadyrecordedrejected"></a>
+#### 🧪 Test: `TestTranslationAlreadyRecordedRejected`
+
+_Re-recording an existing (message, locale) translation is rejected (idempotency)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Thrown**: [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
+- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
+
+<a id="test-testadminescalated"></a>
+#### 🧪 Test: `TestAdminEscalated`
+
+_The restaurant escalates the conversation to an admin with a reason_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
+- **Then**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
+- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
+
+<a id="test-testescalateunopenedrejected"></a>
+#### 🧪 Test: `TestEscalateUnopenedRejected`
+
+_Escalating a conversation that was never opened is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
+- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
+
+<a id="test-testparticipantmuted"></a>
+#### 🧪 Test: `TestParticipantMuted`
+
+_A participant is muted with a recorded reason_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
+- **Then**: [⚡ `ParticipantMuted`](#event-participantmuted)
+- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
+
+<a id="test-testmutewithoutreasonrejected"></a>
+#### 🧪 Test: `TestMuteWithoutReasonRejected`
+
+_Muting a participant without a reason is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
+- **Thrown**: [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
+- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
+
+<a id="test-testparticipantunmuted"></a>
+#### 🧪 Test: `TestParticipantUnmuted`
+
+_A currently muted participant is unmuted_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `ParticipantMuted`](#event-participantmuted)
+- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
+- **Then**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
+- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
+
+<a id="test-testunmutenotmutedrejected"></a>
+#### 🧪 Test: `TestUnmuteNotMutedRejected`
+
+_Unmuting a role that is not currently muted is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
+- **Thrown**: [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
+- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
 
 **[🎭 `Cart`](#actor-cart)**
 
@@ -6313,270 +6505,6 @@ _Places a no-charge replacement order copying the original's items, linked via r
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced)
 - **Verifies**: [📐 `ReplacementOrderPlacedOnResolution`](#rule-replacementorderplacedonresolution)
 
-**[🎭 `Payment`](#actor-payment)**
-
-<a id="test-testpaymentintentcreatedrecorded"></a>
-#### 🧪 Test: `TestPaymentIntentCreatedRecorded`
-
-_The Payment is born by recording PaymentIntentCreated with the frozen checkout snapshot_
-
-- **Given**: _(none)_
-- **When**: [📩 `PaymentIntentCreated`](#command-paymentintentcreated)
-- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Verifies**: [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
-
-<a id="test-testpaymentcapturedrecorded"></a>
-#### 🧪 Test: `TestPaymentCapturedRecorded`
-
-_The Payment records the inbound Stripe capture fact (delivered via the ACL, idempotent)_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
-- **Then**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
-
-<a id="test-testpaymentfailedrecorded"></a>
-#### 🧪 Test: `TestPaymentFailedRecorded`
-
-_The Payment records the inbound Stripe failure fact (cart stays open downstream)_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
-- **Then**: [⚡ `PaymentFailed`](#event-paymentfailed)
-- **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
-
-<a id="test-testpaymentrefundedrecorded"></a>
-#### 🧪 Test: `TestPaymentRefundedRecorded`
-
-_The Payment records the settled refund fact reported by Stripe (idempotent)_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
-- **Then**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
-- **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
-
-<a id="test-testpendingrefundvisibleuntildecided"></a>
-#### 🧪 Test: `TestPendingRefundVisibleUntilDecided`
-
-_The Payment records the opened refund (RefundOpened, idempotent) so the refund queue folds it as REQUESTED until decided_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundOpened`](#command-refundopened)
-- **Then**: [⚡ `RefundOpened`](#event-refundopened)
-- **Verifies**: [📐 `PendingRefundVisibleUntilDecided`](#rule-pendingrefundvisibleuntildecided)
-
-<a id="test-testpaymentrefundapprovedrecorded"></a>
-#### 🧪 Test: `TestPaymentRefundApprovedRecorded`
-
-_The Payment records the refund approval (restaurant or admin) delivered by RefundProcess_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundApproved`](#command-refundapproved)
-- **Then**: [⚡ `RefundApproved`](#event-refundapproved)
-- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
-
-<a id="test-testpaymentrefunddeniedrecorded"></a>
-#### 🧪 Test: `TestPaymentRefundDeniedRecorded`
-
-_The Payment records the refund denial (restaurant or admin) delivered by RefundProcess_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundDenied`](#command-refunddenied)
-- **Then**: [⚡ `RefundDenied`](#event-refunddenied)
-- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
-
-**[🎭 `Conversation`](#actor-conversation)**
-
-<a id="test-testconversationopened"></a>
-#### 🧪 Test: `TestConversationOpened`
-
-_Opens the per-order conversation_
-
-- **Given**: _(none)_
-- **When**: [📩 `OpenConversation`](#command-openconversation)
-- **Then**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
-
-<a id="test-testconversationopenedtwiceisrejected"></a>
-#### 🧪 Test: `TestConversationOpenedTwiceIsRejected`
-
-_Opening an already-open conversation is rejected_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `OpenConversation`](#command-openconversation)
-- **Thrown**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
-- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
-
-<a id="test-testposttounopenedconversationisrejected"></a>
-#### 🧪 Test: `TestPostToUnopenedConversationIsRejected`
-
-_Posting a message before the conversation is opened is rejected_
-
-- **Given**: _(none)_
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
-- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
-
-<a id="test-testpublicmessageposted"></a>
-#### 🧪 Test: `TestPublicMessagePosted`
-
-_A customer posts a public message to the thread (chat enabled)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Then**: [⚡ `MessagePosted`](#event-messageposted)
-- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
-
-<a id="test-testinternalnoteposted"></a>
-#### 🧪 Test: `TestInternalNotePosted`
-
-_The restaurant posts an internal staff note (not shown to the customer)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Then**: [⚡ `MessagePosted`](#event-messageposted)
-- **Verifies**: [📐 `MessagesCarryVisibility`](#rule-messagescarryvisibility)
-
-<a id="test-testcustomerpostrejectedwhenchatdisabled"></a>
-#### 🧪 Test: `TestCustomerPostRejectedWhenChatDisabled`
-
-_A customer post is rejected when the restaurant disabled customer chat_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `CustomerChatDisabled`](#error-customerchatdisabled)
-- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
-
-<a id="test-testduplicatemessagerejected"></a>
-#### 🧪 Test: `TestDuplicateMessageRejected`
-
-_Re-posting a message with an already-seen messageId is rejected (idempotency)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
-- **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
-
-<a id="test-testpostbystrangerrejected"></a>
-#### 🧪 Test: `TestPostByStrangerRejected`
-
-_A customer who is not the order's customer cannot post into its thread_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
-- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
-
-<a id="test-testforgedauthorrolerejected"></a>
-#### 🧪 Test: `TestForgedAuthorRoleRejected`
-
-_A customer cannot post as authorRole RESTAURANT (forged staff note)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `RoleMismatch`](#error-rolemismatch)
-- **Verifies**: [📐 `AuthorRoleIsPinnedToThePrincipal`](#rule-authorroleispinnedtotheprincipal)
-
-<a id="test-testriderpostdenied"></a>
-#### 🧪 Test: `TestRiderPostDenied`
-
-_A rider cannot post into an order thread (RIDER absent from requires.acting = denied)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `PostMessage`](#command-postmessage)
-- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
-- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
-
-<a id="test-testmessagetranslationrecorded"></a>
-#### 🧪 Test: `TestMessageTranslationRecorded`
-
-_A posted message is translated into a target locale and the translation is cached_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
-- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
-- **Then**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
-- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
-
-<a id="test-testtranslateunknownmessagerejected"></a>
-#### 🧪 Test: `TestTranslateUnknownMessageRejected`
-
-_Translating a message that was never posted is rejected_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
-- **Thrown**: [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation)
-- **Verifies**: [📐 `TranslationTargetsAPostedMessage`](#rule-translationtargetsapostedmessage)
-
-<a id="test-testtranslationalreadyrecordedrejected"></a>
-#### 🧪 Test: `TestTranslationAlreadyRecordedRejected`
-
-_Re-recording an existing (message, locale) translation is rejected (idempotency)_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
-- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
-- **Thrown**: [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
-- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
-
-<a id="test-testadminescalated"></a>
-#### 🧪 Test: `TestAdminEscalated`
-
-_The restaurant escalates the conversation to an admin with a reason_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
-- **Then**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
-- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
-
-<a id="test-testescalateunopenedrejected"></a>
-#### 🧪 Test: `TestEscalateUnopenedRejected`
-
-_Escalating a conversation that was never opened is rejected_
-
-- **Given**: _(none)_
-- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
-- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
-- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
-
-<a id="test-testparticipantmuted"></a>
-#### 🧪 Test: `TestParticipantMuted`
-
-_A participant is muted with a recorded reason_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
-- **Then**: [⚡ `ParticipantMuted`](#event-participantmuted)
-- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
-
-<a id="test-testmutewithoutreasonrejected"></a>
-#### 🧪 Test: `TestMuteWithoutReasonRejected`
-
-_Muting a participant without a reason is rejected_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
-- **Thrown**: [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
-- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
-
-<a id="test-testparticipantunmuted"></a>
-#### 🧪 Test: `TestParticipantUnmuted`
-
-_A currently muted participant is unmuted_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `ParticipantMuted`](#event-participantmuted)
-- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
-- **Then**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
-- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
-
-<a id="test-testunmutenotmutedrejected"></a>
-#### 🧪 Test: `TestUnmuteNotMutedRejected`
-
-_Unmuting a role that is not currently muted is rejected_
-
-- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
-- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
-- **Thrown**: [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
-- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
-
 **[🎭 `Reclamation`](#actor-reclamation)**
 
 <a id="test-testreclamationopened"></a>
@@ -6729,6 +6657,170 @@ _Attaching evidence to a reclamation that does not exist is rejected_
 - **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
 - **Verifies**: [📐 `ReclamationEvidenceTargetsAnExistingClaim`](#rule-reclamationevidencetargetsanexistingclaim)
 
+**[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
+
+<a id="test-testplaceordercreatespaymentintent"></a>
+#### 🧪 Test: `TestPlaceOrderCreatesPaymentIntent`
+
+_Checkout reads the open cart, prices it, and creates a Stripe payment intent_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
+
+<a id="test-testplaceorderrecomputespriceserverside"></a>
+#### 🧪 Test: `TestPlaceOrderRecomputesPriceServerSide`
+
+_Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectspricemismatch"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
+
+_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceMismatch`](#error-pricemismatch)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectsunresolvableprice"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsUnresolvablePrice`
+
+_A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderisrejected"></a>
+#### 🧪 Test: `TestPlaceOrderIsRejected`
+
+_Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartEmpty`](#error-cartempty), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderrejectstestrestaurantforliveorder"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsTestRestaurantForLiveOrder`
+
+_A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
+- **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
+
+<a id="test-testplaceorderpaymentcapturedplacesorder"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`
+
+_On payment capture the saga materializes the order and closes the cart_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+
+<a id="test-testplaceorderpaymentfailedplacesnothing"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
+
+_On payment failure the saga aborts and places no order (cart stays open)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
+
+<a id="test-testpaymentcaptureorphanisflagged"></a>
+#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
+
+_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
+- **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
+
+**[🎭 `Payment`](#actor-payment)**
+
+<a id="test-testpaymentintentcreatedrecorded"></a>
+#### 🧪 Test: `TestPaymentIntentCreatedRecorded`
+
+_The Payment is born by recording PaymentIntentCreated with the frozen checkout snapshot_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentIntentCreated`](#command-paymentintentcreated)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
+
+<a id="test-testpaymentcapturedrecorded"></a>
+#### 🧪 Test: `TestPaymentCapturedRecorded`
+
+_The Payment records the inbound Stripe capture fact (delivered via the ACL, idempotent)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Then**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+
+<a id="test-testpaymentfailedrecorded"></a>
+#### 🧪 Test: `TestPaymentFailedRecorded`
+
+_The Payment records the inbound Stripe failure fact (cart stays open downstream)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **Then**: [⚡ `PaymentFailed`](#event-paymentfailed)
+- **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
+
+<a id="test-testpaymentrefundedrecorded"></a>
+#### 🧪 Test: `TestPaymentRefundedRecorded`
+
+_The Payment records the settled refund fact reported by Stripe (idempotent)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **Then**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
+- **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
+
+<a id="test-testpendingrefundvisibleuntildecided"></a>
+#### 🧪 Test: `TestPendingRefundVisibleUntilDecided`
+
+_The Payment records the opened refund (RefundOpened, idempotent) so the refund queue folds it as REQUESTED until decided_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **When**: [📩 `RefundOpened`](#command-refundopened)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `PendingRefundVisibleUntilDecided`](#rule-pendingrefundvisibleuntildecided)
+
+<a id="test-testpaymentrefundapprovedrecorded"></a>
+#### 🧪 Test: `TestPaymentRefundApprovedRecorded`
+
+_The Payment records the refund approval (restaurant or admin) delivered by RefundProcess_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **When**: [📩 `RefundApproved`](#command-refundapproved)
+- **Then**: [⚡ `RefundApproved`](#event-refundapproved)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+<a id="test-testpaymentrefunddeniedrecorded"></a>
+#### 🧪 Test: `TestPaymentRefundDeniedRecorded`
+
+_The Payment records the refund denial (restaurant or admin) delivered by RefundProcess_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **When**: [📩 `RefundDenied`](#command-refunddenied)
+- **Then**: [⚡ `RefundDenied`](#event-refunddenied)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
 **[🎭 `CustomerCredit`](#actor-customercredit)**
 
 <a id="test-testcustomercreditgranted"></a>
@@ -6771,98 +6863,6 @@ _Consuming store credit again for the same order is a benign no-op (exactly-once
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CreditConsumedAtMostOncePerOrder`](#rule-creditconsumedatmostonceperorder)
 
-**[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
-
-<a id="test-testplaceordercreatespaymentintent"></a>
-#### 🧪 Test: `TestPlaceOrderCreatesPaymentIntent`
-
-_Checkout reads the open cart, prices it, and creates a Stripe payment intent_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
-
-<a id="test-testplaceorderrecomputespriceserverside"></a>
-#### 🧪 Test: `TestPlaceOrderRecomputesPriceServerSide`
-
-_Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
-
-<a id="test-testplaceorderrejectspricemismatch"></a>
-#### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
-
-_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Thrown**: [⛔ `PriceMismatch`](#error-pricemismatch)
-- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
-
-<a id="test-testplaceorderrejectsunresolvableprice"></a>
-#### 🧪 Test: `TestPlaceOrderRejectsUnresolvablePrice`
-
-_A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
-- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
-
-<a id="test-testplaceorderisrejected"></a>
-#### 🧪 Test: `TestPlaceOrderIsRejected`
-
-_Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Thrown**: [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartEmpty`](#error-cartempty), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
-- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
-
-<a id="test-testplaceorderrejectstestrestaurantforliveorder"></a>
-#### 🧪 Test: `TestPlaceOrderRejectsTestRestaurantForLiveOrder`
-
-_A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)_
-
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `PlaceOrder`](#command-placeorder)
-- **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
-- **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
-
-<a id="test-testplaceorderpaymentcapturedplacesorder"></a>
-#### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`
-
-_On payment capture the saga materializes the order and closes the cart_
-
-- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
-- **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
-
-<a id="test-testplaceorderpaymentfailedplacesnothing"></a>
-#### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
-
-_On payment failure the saga aborts and places no order (cart stays open)_
-
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
-- **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
-
-<a id="test-testpaymentcaptureorphanisflagged"></a>
-#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
-
-_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
-
-- **Given**: _(none)_
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
-- **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
-- **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
-
 **[🎭 `RefundProcess`](#actor-refundprocess)**
 
 <a id="test-testrefundonorderrejected"></a>
@@ -7036,88 +7036,6 @@ _A capture matching no checkout run aborts the saga with a typed error (never a 
 - **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
 - **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
 - **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
-
-**[🎭 `RefundProcess`](#actor-refundprocess)**
-
-<a id="test-testrefundonorderrejected"></a>
-#### 🧪 Test: `TestRefundOnOrderRejected`
-
-_Requests a Stripe refund when an order is rejected by the restaurant_
-
-- **Given**: _(none)_
-- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
-- **Then**: [⚡ `RefundOpened`](#event-refundopened)
-- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
-
-<a id="test-testrefundonordercancelledbycustomer"></a>
-#### 🧪 Test: `TestRefundOnOrderCancelledByCustomer`
-
-_Requests a Stripe refund when the customer cancels the order_
-
-- **Given**: _(none)_
-- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
-- **Then**: [⚡ `RefundOpened`](#event-refundopened)
-- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
-
-<a id="test-testrefundonordercancelledbyrestaurant"></a>
-#### 🧪 Test: `TestRefundOnOrderCancelledByRestaurant`
-
-_Requests a Stripe refund when the restaurant cancels the order_
-
-- **Given**: _(none)_
-- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
-- **Then**: [⚡ `RefundOpened`](#event-refundopened)
-- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
-
-<a id="test-testrefundonrefundrequested"></a>
-#### 🧪 Test: `TestRefundOnRefundRequested`
-
-_Validates eligibility and requests a Stripe refund on a customer refund request_
-
-- **Given**: _(none)_
-- **When**: [📩 `RefundRequested`](#command-refundrequested)
-- **Then**: [⚡ `RefundOpened`](#event-refundopened)
-- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
-
-<a id="test-testrefundsettledfactrecorded"></a>
-#### 🧪 Test: `TestRefundSettledFactRecorded`
-
-_Records the settled refund fact reported back by Stripe_
-
-- **Given**: _(none)_
-- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
-- **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
-
-<a id="test-testrefundapprovedbyadmin"></a>
-#### 🧪 Test: `TestRefundApprovedByAdmin`
-
-_The restaurant or an admin approves the pending refund: Stripe refund requested, decision recorded on the Payment_
-
-- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
-- **When**: [📩 `ApproveRefund`](#command-approverefund)
-- **Then**: [⚡ `RefundApproved`](#event-refundapproved)
-- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
-
-<a id="test-testrefunddeniedbyadmin"></a>
-#### 🧪 Test: `TestRefundDeniedByAdmin`
-
-_The restaurant or an admin denies the pending refund: the run closes with the decision recorded on the Payment_
-
-- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
-- **When**: [📩 `DenyRefund`](#command-denyrefund)
-- **Then**: [⚡ `RefundDenied`](#event-refunddenied)
-- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
-
-<a id="test-testrefunddecisionrejectedwhennotpending"></a>
-#### 🧪 Test: `TestRefundDecisionRejectedWhenNotPending`
-
-_A refund decision on an order with no refund pending approval is rejected_
-
-- **Given**: _(none)_
-- **When**: [📩 `ApproveRefund`](#command-approverefund)
-- **Thrown**: [⛔ `RefundNotPending`](#error-refundnotpending)
-- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
 **[🎭 `ReclamationProcess`](#actor-reclamationprocess)**
 
@@ -7160,6 +7078,88 @@ _Rejects a partial refund resolution that exceeds the order's captured total_
 - **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
 - **Thrown**: [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured)
 - **Verifies**: [📐 `RefundResolutionCappedAtCaptured`](#rule-refundresolutioncappedatcaptured)
+
+**[🎭 `RefundProcess`](#actor-refundprocess)**
+
+<a id="test-testrefundonorderrejected"></a>
+#### 🧪 Test: `TestRefundOnOrderRejected`
+
+_Requests a Stripe refund when an order is rejected by the restaurant_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonordercancelledbycustomer"></a>
+#### 🧪 Test: `TestRefundOnOrderCancelledByCustomer`
+
+_Requests a Stripe refund when the customer cancels the order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonordercancelledbyrestaurant"></a>
+#### 🧪 Test: `TestRefundOnOrderCancelledByRestaurant`
+
+_Requests a Stripe refund when the restaurant cancels the order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonrefundrequested"></a>
+#### 🧪 Test: `TestRefundOnRefundRequested`
+
+_Validates eligibility and requests a Stripe refund on a customer refund request_
+
+- **Given**: _(none)_
+- **When**: [📩 `RefundRequested`](#command-refundrequested)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundsettledfactrecorded"></a>
+#### 🧪 Test: `TestRefundSettledFactRecorded`
+
+_Records the settled refund fact reported back by Stripe_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
+
+<a id="test-testrefundapprovedbyadmin"></a>
+#### 🧪 Test: `TestRefundApprovedByAdmin`
+
+_The restaurant or an admin approves the pending refund: Stripe refund requested, decision recorded on the Payment_
+
+- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
+- **When**: [📩 `ApproveRefund`](#command-approverefund)
+- **Then**: [⚡ `RefundApproved`](#event-refundapproved)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+<a id="test-testrefunddeniedbyadmin"></a>
+#### 🧪 Test: `TestRefundDeniedByAdmin`
+
+_The restaurant or an admin denies the pending refund: the run closes with the decision recorded on the Payment_
+
+- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
+- **When**: [📩 `DenyRefund`](#command-denyrefund)
+- **Then**: [⚡ `RefundDenied`](#event-refunddenied)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+<a id="test-testrefunddecisionrejectedwhennotpending"></a>
+#### 🧪 Test: `TestRefundDecisionRejectedWhenNotPending`
+
+_A refund decision on an order with no refund pending approval is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `ApproveRefund`](#command-approverefund)
+- **Thrown**: [⛔ `RefundNotPending`](#error-refundnotpending)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
 ### 📡 Observability _(3)_
 
@@ -7379,16 +7379,6 @@ _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favo
 
 ### 🧰 API operations _(21)_
 
-<a id="query-paymentstatus"></a>
-#### 🔎 Query: `paymentStatus`
-
-The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
-
-
-- **Input**: 🧩 `PaymentStatusQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
-- **Returns**: [🧩 `PaymentIntent`](#type-paymentintent) · **reads** —
-- **Roles**: PUBLIC, CUSTOMER, ADMIN · **slice** V0
-
 <a id="query-me"></a>
 #### 🔎 Query: `me`
 
@@ -7425,6 +7415,16 @@ The authenticated customer's own reclamations (claims/disputes), newest-first (#
 - **Input**: _(none)_
 - **Returns**: [🧩 `Reclamation`](#type-reclamation) (list) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
 - **Roles**: CUSTOMER · **slice** V1
+
+<a id="query-paymentstatus"></a>
+#### 🔎 Query: `paymentStatus`
+
+The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
+
+
+- **Input**: 🧩 `PaymentStatusQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
+- **Returns**: [🧩 `PaymentIntent`](#type-paymentintent) · **reads** —
+- **Roles**: PUBLIC, CUSTOMER, ADMIN · **slice** V0
 
 <a id="query-customercredit"></a>
 #### 🔎 Query: `customerCredit`
@@ -8060,6 +8060,13 @@ Customer set or updated their preferred Stripe payment method.
 
 ### 📐 Business rules _(9)_
 
+<a id="rule-guestcartsboundonidentification"></a>
+#### 📐 Rule: `GuestCartsBoundOnIdentification`
+
+_A returning visitor's open guest carts are bound to their Customer on identification._
+
+- **Verified by**: [🧪 `TestCartBindingOnCustomerIdentified`](#test-testcartbindingoncustomeridentified), [🧪 `TestCartBoundToCustomer`](#test-testcartboundtocustomer)
+
 <a id="rule-phoneverificationregistersoridentifies"></a>
 #### 📐 Rule: `PhoneVerificationRegistersOrIdentifies`
 
@@ -8115,13 +8122,6 @@ _A customer can add/update and remove saved delivery addresses._
 _A customer's payment method can be stored._
 
 - **Verified by**: [🧪 `TestCustomerPaymentMethodSet`](#test-testcustomerpaymentmethodset)
-
-<a id="rule-guestcartsboundonidentification"></a>
-#### 📐 Rule: `GuestCartsBoundOnIdentification`
-
-_A returning visitor's open guest carts are bound to their Customer on identification._
-
-- **Verified by**: [🧪 `TestCartBindingOnCustomerIdentified`](#test-testcartbindingoncustomeridentified), [🧪 `TestCartBoundToCustomer`](#test-testcartboundtocustomer)
 
 ### 🧪 Tests _(2)_
 
@@ -9412,8 +9412,8 @@ A rider's availability/lifecycle status changed.
 
 | Scalar | Type | Description |
 | --- | --- | --- |
-| <a id="scalar-deliveryjobid"></a>🔤 `DeliveryJobId` | string _uuid_ | Identifies one DeliveryJob (a single delivery of an order from restaurant to customer). |
 | <a id="scalar-riderid"></a>🔤 `RiderId` | string _uuid_ | An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only). |
+| <a id="scalar-deliveryjobid"></a>🔤 `DeliveryJobId` | string _uuid_ | Identifies one DeliveryJob (a single delivery of an order from restaurant to customer). |
 | <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-riderstatus"></a>🔤 `RiderStatus` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY \| SUSPENDED) | Availability/lifecycle status of an independent Captain rider. |
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
@@ -9438,6 +9438,13 @@ A rider's availability/lifecycle status changed.
 
 ### 📐 Business rules _(18)_
 
+<a id="rule-readydeliveryordertriggersdispatch"></a>
+#### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
+
+_A ready DELIVERY order triggers creation of a delivery job (dispatch)._
+
+- **Verified by**: [🧪 `TestDispatchOnOrderReady`](#test-testdispatchonorderready), [🧪 `TestDeliveryJobBornOnDeliveryRequested`](#test-testdeliveryjobbornondeliveryrequested)
+
 <a id="rule-deliveryacceptedonlywhenpending"></a>
 #### 📐 Rule: `DeliveryAcceptedOnlyWhenPending`
 
@@ -9459,13 +9466,6 @@ _A delivery job can be cancelled before completion but not after it is delivered
 
 - **Verified by**: [🧪 `TestCancelDelivery`](#test-testcanceldelivery), [🧪 `TestCancelDeliveryIsRejected`](#test-testcanceldeliveryisrejected)
 
-<a id="rule-readydeliveryordertriggersdispatch"></a>
-#### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
-
-_A ready DELIVERY order triggers creation of a delivery job (dispatch)._
-
-- **Verified by**: [🧪 `TestDispatchOnOrderReady`](#test-testdispatchonorderready), [🧪 `TestDeliveryJobBornOnDeliveryRequested`](#test-testdeliveryjobbornondeliveryrequested)
-
 <a id="rule-partneracceptancerecordscourier"></a>
 #### 📐 Rule: `PartnerAcceptanceRecordsCourier`
 
@@ -9486,13 +9486,6 @@ _When the partner declines (inbound), the job is re-offered or flagged for manua
 _When Captain dispatches, the delivery job walks the city's ranked channel list, offering each ranked channel at most once in rank order; once every ranked channel has been offered and none accepts, the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (#60, supersedes ADR-20260720-004556)._
 
 - **Verified by**: [🧪 `TestDispatchFailsAfterOfferCap`](#test-testdispatchfailsafteroffercap), [🧪 `TestDeliveryJobRecordsDispatchFailure`](#test-testdeliveryjobrecordsdispatchfailure)
-
-<a id="rule-restaurantdispatchbypassesrouting"></a>
-#### 📐 Rule: `RestaurantDispatchBypassesRouting`
-
-_A RESTAURANT-dispatch order (RestaurantDispatchMode RESTAURANT) is never offered to a delivery channel: the dispatch run short-circuits to SELF_DISPATCHED and Captain only tracks the delivery, while the restaurant drives its progress and the customer still gets order tracking (#60)._
-
-- **Verified by**: [🧪 `TestDispatchSelfDispatched`](#test-testdispatchselfdispatched)
 
 <a id="rule-cityrankingwalkedinorder"></a>
 #### 📐 Rule: `CityRankingWalkedInOrder`
@@ -9563,6 +9556,13 @@ _A self-registered city availability becomes APPROVED (eligible for the city's d
 _A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions._
 
 - **Verified by**: [🧪 `TestRiderRegistered`](#test-testriderregistered), [🧪 `TestRiderRegisterAgainIsRejected`](#test-testriderregisteragainisrejected), [🧪 `TestRiderInfoUpdated`](#test-testriderinfoupdated), [🧪 `TestRiderUpdateIsRejectedWhenNotFound`](#test-testriderupdateisrejectedwhennotfound), [🧪 `TestRiderStatusChanged`](#test-testriderstatuschanged), [🧪 `TestRiderStatusChangeIsRejected`](#test-testriderstatuschangeisrejected)
+
+<a id="rule-restaurantdispatchbypassesrouting"></a>
+#### 📐 Rule: `RestaurantDispatchBypassesRouting`
+
+_A RESTAURANT-dispatch order (RestaurantDispatchMode RESTAURANT) is never offered to a delivery channel: the dispatch run short-circuits to SELF_DISPATCHED and Captain only tracks the delivery, while the restaurant drives its progress and the customer still gets order tracking (#60)._
+
+- **Verified by**: [🧪 `TestDispatchSelfDispatched`](#test-testdispatchselfdispatched)
 
 ### 🧪 Tests _(4)_
 
@@ -10181,20 +10181,6 @@ A selectable option within an option list.
 | <a id="type-option--availability"></a>`availability` | [🔤 `CatalogItemAvailability`](#scalar-catalogitemavailability) | ✅ |
 | <a id="type-option--stockstatus"></a>`stockStatus` | [🔤 `StockStatus`](#scalar-stockstatus) | ⬜ |
 
-<a id="type-paymentintent"></a>
-#### 🧩 Type: `PaymentIntent`
-
-Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` / `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient): resolver-served from the saga state row, never a View_* — hence no `reads`.
-
-
-- **Read model**: _(resolved within a parent projection)_
-
-| Field | Type | Required |
-| --- | --- | --- |
-| <a id="type-paymentintent--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |
-| <a id="type-paymentintent--clientsecret"></a>`clientSecret` | `string` | ⬜ |
-| <a id="type-paymentintent--status"></a>`status` | [🔤 `PaymentStatus`](#scalar-paymentstatus) | ✅ |
-
 <a id="type-mutationacceptance"></a>
 #### 🧩 Type: `MutationAcceptance`
 
@@ -10271,6 +10257,20 @@ Live status of a journaled command (ADR-20260720-015300), keyed by its `messageI
 | <a id="type-operation--errorcode"></a>`errorCode` | `string` | ⬜ |
 | <a id="type-operation--message"></a>`message` | `string` | ⬜ |
 | <a id="type-operation--occurredat"></a>`occurredAt` | `string` _date-time_ | ✅ |
+
+<a id="type-paymentintent"></a>
+#### 🧩 Type: `PaymentIntent`
+
+Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` / `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient): resolver-served from the saga state row, never a View_* — hence no `reads`.
+
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-paymentintent--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |
+| <a id="type-paymentintent--clientsecret"></a>`clientSecret` | `string` | ⬜ |
+| <a id="type-paymentintent--status"></a>`status` | [🔤 `PaymentStatus`](#scalar-paymentstatus) | ✅ |
 
 <a id="type-pricingpolicy"></a>
 #### 🧩 Type: `PricingPolicy`
@@ -10440,8 +10440,8 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
 | <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path. | 🇬🇧 Too many requests. Please slow down. | 🇫🇷 Trop de requêtes. Veuillez patienter. | — |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
-| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
+| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |

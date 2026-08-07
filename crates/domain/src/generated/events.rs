@@ -5,222 +5,6 @@ use serde::{Deserialize, Serialize};
 use super::scalars::*;
 use super::entities::*;
 
-/// A restaurant account (HubRise: restaurant) was created; it owns one or more locations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAccountRegistered {
-    pub restaurant_account_id: RestaurantAccountId,
-    pub r#ref: Option<ExternalReference>,
-    pub legal_name: RestaurantLegalName,
-    pub contact: Option<RestaurantContact>,
-    pub default_currency: CurrencyCode,
-    pub default_tax_rate: TaxRate,
-    pub timezone: Option<TimeZone>,
-}
-
-/// One or more account-level fields changed (legal name, contact, default tax, timezone).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAccountUpdated {
-    pub restaurant_account_id: RestaurantAccountId,
-    pub legal_name: Option<RestaurantLegalName>,
-    pub contact: Option<RestaurantContact>,
-    pub default_tax_rate: Option<TaxRate>,
-    pub timezone: Option<TimeZone>,
-}
-
-/// A restaurant account was closed/deleted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAccountDeleted {
-    pub restaurant_account_id: RestaurantAccountId,
-    pub reason: Option<String>,
-}
-
-/// A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing (no accountId). The listingStatus and externalIdentifiers distinguish them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantRegistered {
-    pub mode: Option<Mode>,
-    pub restaurant_id: RestaurantId,
-    pub account_id: Option<RestaurantAccountId>,
-    pub listing_status: RestaurantListingStatus,
-    pub r#ref: Option<ExternalReference>,
-    #[serde(default)]
-    pub external_identifiers: Vec<ExternalIdentifier>,
-    pub display_name: RestaurantDisplayName,
-    pub contact: Option<RestaurantContact>,
-    pub website: Option<WebUrl>,
-    #[serde(default)]
-    pub tags: Vec<Tag>,
-    pub margin_rate: Option<MarginPercent>,
-    pub cuisine_category: Option<CuisineCategory>,
-    pub uber_prices_opt_in: Option<bool>,
-    pub address: Address,
-    pub location: Option<GeoPoint>,
-    pub timezone: Option<TimeZone>,
-    pub preparation_time_minutes: Option<i64>,
-    #[serde(default)]
-    pub opening_hours: Vec<OpeningHoursSlot>,
-}
-
-/// The restaurant's STOREFRONT ADDRESS has been chosen for the first time — {slug}.captain.food now resolves to it (ADR-20260728-011344). Emitted from ConfigureRestaurantSlug during onboarding, after ownership is verified and before activation: a restaurant cannot be activated without one. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantSlugConfigured {
-    pub restaurant_id: RestaurantId,
-    pub slug: Slug,
-}
-
-/// The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Distinct from RestaurantSlugConfigured because a rename carries an obligation the first configuration does not: the previous host is already on printed menus, QR codes, Google listings and inbound links, so it must keep resolving. `previousSlug` is business data — it feeds the slug-alias read model that serves the 301, and it keeps the old label RESERVED so a competitor cannot claim it and inherit the redirect.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantSlugReconfigured {
-    pub restaurant_id: RestaurantId,
-    pub slug: Slug,
-    pub previous_slug: Slug,
-}
-
-/// One or more editable LOCATION fields of a restaurant have changed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantUpdated {
-    pub restaurant_id: RestaurantId,
-    pub display_name: Option<RestaurantDisplayName>,
-    pub description: Option<RestaurantDescription>,
-    pub contact: Option<RestaurantContact>,
-    pub website: Option<WebUrl>,
-    #[serde(default)]
-    pub tags: Vec<Tag>,
-    pub margin_rate: Option<MarginPercent>,
-    pub cuisine_category: Option<CuisineCategory>,
-    pub uber_prices_opt_in: Option<bool>,
-    pub address: Option<Address>,
-    pub location: Option<GeoPoint>,
-    pub timezone: Option<TimeZone>,
-    pub preparation_time_minutes: Option<i64>,
-    #[serde(default)]
-    pub opening_hours: Vec<OpeningHoursSlot>,
-}
-
-/// Restaurant is now visible and orderable by customers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantActivated {
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// Restaurant can no longer receive orders.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantDeactivated {
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// Restaurant toggled its order acceptance mode (e.g. busy, paused).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAcceptanceModeChanged {
-    pub restaurant_id: RestaurantId,
-    pub mode: OrderAcceptanceMode,
-}
-
-/// A location was removed (delisted) from its account.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantRemoved {
-    pub restaurant_id: RestaurantId,
-    pub account_id: RestaurantAccountId,
-    pub reason: Option<String>,
-}
-
-/// GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Google's rating/reviews) were observed/refreshed. Carries ONLY data intrinsic to the Google listing — never general restaurant info (name/address/hours/phone/website/tags), which flows through Register/UpdateRestaurant. This keeps Sirene and Google feeding the same restaurant side-by-side with no cross-source dependency.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantGoogleBusinessProfileUpdated {
-    pub restaurant_id: RestaurantId,
-    pub google_place_id: Option<GooglePlaceId>,
-    pub rating: Option<GoogleRating>,
-    pub reviews_count: Option<i64>,
-}
-
-/// An owner proved ownership of the listing (Google Business Profile verification) and claimed it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantListingClaimed {
-    pub restaurant_id: RestaurantId,
-    pub account_id: Option<RestaurantAccountId>,
-    pub proof: Option<String>,
-}
-
-/// An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantListingOptedOut {
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// The establishment was reported closed (e.g. Sirene closure); recorded via the sync ACL.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantMarkedClosed {
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantListingStatusChanged {
-    pub restaurant_id: RestaurantId,
-    pub listing_status: RestaurantListingStatus,
-    pub reason: Option<String>,
-}
-
-/// The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page (ADR-0021; V1).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantGoogleBusinessProfileOrderLinkConfigured {
-    pub restaurant_id: RestaurantId,
-    pub gbp_order_url: WebUrl,
-}
-
-/// The configured GBP 'Order online' link was pinged and its live status recorded (ADR-0021; V1).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantGoogleBusinessProfileOrderLinkVerified {
-    pub restaurant_id: RestaurantId,
-    pub status: GbpLinkStatus,
-}
-
-/// A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the sequence.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProspectContacted {
-    pub restaurant_id: RestaurantId,
-    pub channel: OutreachChannel,
-    pub sequence_step: i64,
-}
-
-/// A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProspectMarkedCold {
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// A prospect replied to outreach; the sequence stops pending human follow-up.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProspectReplied {
-    pub restaurant_id: RestaurantId,
-    pub note: Option<String>,
-}
-
 /// A new catalog has been created for a restaurant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -343,6 +127,95 @@ pub struct CatalogImported {
     pub option_lists: Vec<OptionList>,
 }
 
+/// A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentIntentCreated {
+    pub payment_intent_id: PaymentIntentId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub amount: Money,
+    pub checkout: CheckoutSnapshot,
+}
+
+/// The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefundApproved {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: OrderId,
+    pub amount: Money,
+    pub reason: Option<String>,
+}
+
+/// An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delivery-attempts cap, error code DeliveryInfrastructureError) to RECEIVED for redelivery (#315) — attempts reset, error and backoff schedule cleared, the lane's worker nudged. The audit fact of the operator action: WHO requeued is the envelope's acting user (ADR-0041), never payload; `actorType` names the lane whose row was requeued so the audit trail reads without dereferencing the id. Idempotent at the port: requeueing a row that is ALREADY deliverable again records the intent without touching the row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxMessageRequeued {
+    pub target_message_id: MessageId,
+    pub actor_type: MailboxActorType,
+}
+
+/// Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationOpened {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub customer_chat_enabled: bool,
+}
+
+/// A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePosted {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub author_role: ConversationAuthorRole,
+    pub visibility: MessageVisibility,
+    pub body: MessageBody,
+    pub original_locale: Locale,
+    #[serde(default)]
+    pub attachment_refs: Vec<AttachmentRef>,
+}
+
+/// A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageTranslationAdded {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub locale: Locale,
+    pub text: TranslatedText,
+}
+
+/// An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminInvitedToConversation {
+    pub order_id: OrderId,
+    pub reason: EscalationReason,
+}
+
+/// A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantMuted {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+    pub reason: MuteReason,
+    pub until: Option<String>,
+}
+
+/// A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantUnmuted {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+}
+
 /// A customer account was created on first phone verification (passwordless OTP, identity managed by the auth provider). Phone number is the primary identifier.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -364,14 +237,6 @@ pub struct CustomerIdentified {
     pub customer_id: CustomerId,
     pub auth_ref: ExternalReference,
     pub session_id: SessionId,
-}
-
-/// A cart that was started by a guest visitor (no customerId) was bound to a Customer after sign-in. This is a domain event, not an auth event. The cartId is the same as the original guest cart; the cart's customerId is now set to the signed-in customer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartBoundToCustomer {
-    pub cart_id: CartId,
-    pub customer_id: CustomerId,
 }
 
 /// Customer marked a restaurant as a favorite.
@@ -458,223 +323,6 @@ pub struct CustomerAddressRemoved {
 pub struct CustomerPaymentMethodSet {
     pub customer_id: CustomerId,
     pub payment_method_id: PaymentMethodId,
-}
-
-/// A new cart was created for a restaurant (emitted with the first line added).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartStarted {
-    pub cart_id: CartId,
-    pub restaurant_id: RestaurantId,
-    pub session_id: SessionId,
-    pub customer_id: Option<CustomerId>,
-}
-
-/// A line was added to a cart.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartLineAdded {
-    pub cart_id: CartId,
-    pub line: CartLineItem,
-}
-
-/// The quantity of an existing cart line changed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartLineQuantityChanged {
-    pub cart_id: CartId,
-    pub cart_line_id: CartLineId,
-    pub quantity: i64,
-}
-
-/// A line was removed from a cart.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartLineRemoved {
-    pub cart_id: CartId,
-    pub cart_line_id: CartLineId,
-}
-
-/// The cart was converted to an order at checkout and is now closed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CartCheckedOut {
-    pub cart_id: CartId,
-    pub order_id: OrderId,
-}
-
-/// A customer has placed an order and payment was successfully authorized/captured.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderPlaced {
-    pub mode: Option<Mode>,
-    pub order_id: OrderId,
-    pub r#ref: Option<ExternalReference>,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub customer_contact: CustomerContact,
-    pub service_type: ServiceType,
-    pub delivery_address: Option<Address>,
-    pub items: Vec<OrderLineItem>,
-    pub total_amount: Money,
-    pub breakdown: PaymentBreakdown,
-    pub note: Option<OrderNote>,
-    pub replacement_of: Option<OrderId>,
-    pub payment_intent_id: Option<PaymentIntentId>,
-}
-
-/// Restaurant has accepted to prepare the order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderAcceptedByRestaurant {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub estimated_ready_at: Option<String>,
-}
-
-/// Restaurant has started preparing an accepted order (status PREPARING).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderPreparationStarted {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-}
-
-/// Restaurant has rejected the order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderRejectedByRestaurant {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub reason: String,
-}
-
-/// Restaurant has marked the order as ready for pickup/delivery.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderMarkedReady {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-}
-
-/// The order has been delivered to the customer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderDelivered {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-}
-
-/// The customer cancelled the order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderCancelledByCustomer {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub reason: Option<String>,
-}
-
-/// The restaurant cancelled the order after initial acceptance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderCancelledByRestaurant {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub reason: String,
-}
-
-/// The customer rated the delivery of a completed order (rider thumbs up/down).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderRated {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub rider_thumb: ThumbRating,
-}
-
-/// The customer rated the restaurant of a completed order (0–5 stars + optional comment).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantRated {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub stars: StarRating,
-    pub comment: Option<RatingComment>,
-}
-
-/// The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliverySatisfactionRecorded {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub timeliness: DeliveryTimeliness,
-    pub reason: Option<DeliveryDissatisfactionReason>,
-}
-
-/// A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order (ADR-012). Separate from the price; Captain keeps 0%. Additive — multiple OrderTipped accumulate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderTipped {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub tipped_by: Tipper,
-    pub customer_id: Option<CustomerId>,
-    pub tips: Vec<Tip>,
-}
-
-/// The customer requested a refund for an order; the RefundProcess will drive Stripe.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefundRequested {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub reason: Option<String>,
-}
-
-/// A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentIntentCreated {
-    pub payment_intent_id: PaymentIntentId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub amount: Money,
-    pub checkout: CheckoutSnapshot,
-}
-
-/// Payment was successfully authorized/captured for an order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentCaptured {
-    pub payment_intent_id: PaymentIntentId,
-    pub order_id: Option<OrderId>,
-    pub restaurant_id: RestaurantId,
-    pub amount: Money,
-}
-
-/// Payment authorization/capture failed; no order is placed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentFailed {
-    pub payment_intent_id: PaymentIntentId,
-    pub restaurant_id: RestaurantId,
-    pub reason: String,
-}
-
-/// A captured payment was refunded (e.g. after rejection or cancellation).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentRefunded {
-    pub refund_id: RefundId,
-    pub payment_intent_id: PaymentIntentId,
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub amount: Money,
-    pub reason: Option<String>,
 }
 
 /// A delivery job has been created for a ready DELIVERY order and offered for fulfilment (dispatched to a partner and/or made available to independent riders). Emitted by DeliveryDispatchProcess.
@@ -891,6 +539,405 @@ pub struct RiderStatusChanged {
     pub status: RiderStatus,
 }
 
+/// A restaurant account (HubRise: restaurant) was created; it owns one or more locations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccountRegistered {
+    pub restaurant_account_id: RestaurantAccountId,
+    pub r#ref: Option<ExternalReference>,
+    pub legal_name: RestaurantLegalName,
+    pub contact: Option<RestaurantContact>,
+    pub default_currency: CurrencyCode,
+    pub default_tax_rate: TaxRate,
+    pub timezone: Option<TimeZone>,
+}
+
+/// One or more account-level fields changed (legal name, contact, default tax, timezone).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccountUpdated {
+    pub restaurant_account_id: RestaurantAccountId,
+    pub legal_name: Option<RestaurantLegalName>,
+    pub contact: Option<RestaurantContact>,
+    pub default_tax_rate: Option<TaxRate>,
+    pub timezone: Option<TimeZone>,
+}
+
+/// A restaurant account was closed/deleted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccountDeleted {
+    pub restaurant_account_id: RestaurantAccountId,
+    pub reason: Option<String>,
+}
+
+/// A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing (no accountId). The listingStatus and externalIdentifiers distinguish them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRegistered {
+    pub mode: Option<Mode>,
+    pub restaurant_id: RestaurantId,
+    pub account_id: Option<RestaurantAccountId>,
+    pub listing_status: RestaurantListingStatus,
+    pub r#ref: Option<ExternalReference>,
+    #[serde(default)]
+    pub external_identifiers: Vec<ExternalIdentifier>,
+    pub display_name: RestaurantDisplayName,
+    pub contact: Option<RestaurantContact>,
+    pub website: Option<WebUrl>,
+    #[serde(default)]
+    pub tags: Vec<Tag>,
+    pub margin_rate: Option<MarginPercent>,
+    pub cuisine_category: Option<CuisineCategory>,
+    pub uber_prices_opt_in: Option<bool>,
+    pub address: Address,
+    pub location: Option<GeoPoint>,
+    pub timezone: Option<TimeZone>,
+    pub preparation_time_minutes: Option<i64>,
+    #[serde(default)]
+    pub opening_hours: Vec<OpeningHoursSlot>,
+}
+
+/// The restaurant's STOREFRONT ADDRESS has been chosen for the first time — {slug}.captain.food now resolves to it (ADR-20260728-011344). Emitted from ConfigureRestaurantSlug during onboarding, after ownership is verified and before activation: a restaurant cannot be activated without one. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantSlugConfigured {
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
+}
+
+/// The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Distinct from RestaurantSlugConfigured because a rename carries an obligation the first configuration does not: the previous host is already on printed menus, QR codes, Google listings and inbound links, so it must keep resolving. `previousSlug` is business data — it feeds the slug-alias read model that serves the 301, and it keeps the old label RESERVED so a competitor cannot claim it and inherit the redirect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantSlugReconfigured {
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
+    pub previous_slug: Slug,
+}
+
+/// One or more editable LOCATION fields of a restaurant have changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantUpdated {
+    pub restaurant_id: RestaurantId,
+    pub display_name: Option<RestaurantDisplayName>,
+    pub description: Option<RestaurantDescription>,
+    pub contact: Option<RestaurantContact>,
+    pub website: Option<WebUrl>,
+    #[serde(default)]
+    pub tags: Vec<Tag>,
+    pub margin_rate: Option<MarginPercent>,
+    pub cuisine_category: Option<CuisineCategory>,
+    pub uber_prices_opt_in: Option<bool>,
+    pub address: Option<Address>,
+    pub location: Option<GeoPoint>,
+    pub timezone: Option<TimeZone>,
+    pub preparation_time_minutes: Option<i64>,
+    #[serde(default)]
+    pub opening_hours: Vec<OpeningHoursSlot>,
+}
+
+/// Restaurant is now visible and orderable by customers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantActivated {
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// Restaurant can no longer receive orders.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantDeactivated {
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// Restaurant toggled its order acceptance mode (e.g. busy, paused).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAcceptanceModeChanged {
+    pub restaurant_id: RestaurantId,
+    pub mode: OrderAcceptanceMode,
+}
+
+/// A location was removed (delisted) from its account.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRemoved {
+    pub restaurant_id: RestaurantId,
+    pub account_id: RestaurantAccountId,
+    pub reason: Option<String>,
+}
+
+/// GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Google's rating/reviews) were observed/refreshed. Carries ONLY data intrinsic to the Google listing — never general restaurant info (name/address/hours/phone/website/tags), which flows through Register/UpdateRestaurant. This keeps Sirene and Google feeding the same restaurant side-by-side with no cross-source dependency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantGoogleBusinessProfileUpdated {
+    pub restaurant_id: RestaurantId,
+    pub google_place_id: Option<GooglePlaceId>,
+    pub rating: Option<GoogleRating>,
+    pub reviews_count: Option<i64>,
+}
+
+/// An owner proved ownership of the listing (Google Business Profile verification) and claimed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantListingClaimed {
+    pub restaurant_id: RestaurantId,
+    pub account_id: Option<RestaurantAccountId>,
+    pub proof: Option<String>,
+}
+
+/// An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantListingOptedOut {
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// The establishment was reported closed (e.g. Sirene closure); recorded via the sync ACL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantMarkedClosed {
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantListingStatusChanged {
+    pub restaurant_id: RestaurantId,
+    pub listing_status: RestaurantListingStatus,
+    pub reason: Option<String>,
+}
+
+/// The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page (ADR-0021; V1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantGoogleBusinessProfileOrderLinkConfigured {
+    pub restaurant_id: RestaurantId,
+    pub gbp_order_url: WebUrl,
+}
+
+/// The configured GBP 'Order online' link was pinged and its live status recorded (ADR-0021; V1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantGoogleBusinessProfileOrderLinkVerified {
+    pub restaurant_id: RestaurantId,
+    pub status: GbpLinkStatus,
+}
+
+/// A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the sequence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProspectContacted {
+    pub restaurant_id: RestaurantId,
+    pub channel: OutreachChannel,
+    pub sequence_step: i64,
+}
+
+/// A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProspectMarkedCold {
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// A prospect replied to outreach; the sequence stops pending human follow-up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProspectReplied {
+    pub restaurant_id: RestaurantId,
+    pub note: Option<String>,
+}
+
+/// A cart that was started by a guest visitor (no customerId) was bound to a Customer after sign-in. This is a domain event, not an auth event. The cartId is the same as the original guest cart; the cart's customerId is now set to the signed-in customer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartBoundToCustomer {
+    pub cart_id: CartId,
+    pub customer_id: CustomerId,
+}
+
+/// A new cart was created for a restaurant (emitted with the first line added).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartStarted {
+    pub cart_id: CartId,
+    pub restaurant_id: RestaurantId,
+    pub session_id: SessionId,
+    pub customer_id: Option<CustomerId>,
+}
+
+/// A line was added to a cart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineAdded {
+    pub cart_id: CartId,
+    pub line: CartLineItem,
+}
+
+/// The quantity of an existing cart line changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineQuantityChanged {
+    pub cart_id: CartId,
+    pub cart_line_id: CartLineId,
+    pub quantity: i64,
+}
+
+/// A line was removed from a cart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineRemoved {
+    pub cart_id: CartId,
+    pub cart_line_id: CartLineId,
+}
+
+/// The cart was converted to an order at checkout and is now closed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartCheckedOut {
+    pub cart_id: CartId,
+    pub order_id: OrderId,
+}
+
+/// A customer has placed an order and payment was successfully authorized/captured.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderPlaced {
+    pub mode: Option<Mode>,
+    pub order_id: OrderId,
+    pub r#ref: Option<ExternalReference>,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub customer_contact: CustomerContact,
+    pub service_type: ServiceType,
+    pub delivery_address: Option<Address>,
+    pub items: Vec<OrderLineItem>,
+    pub total_amount: Money,
+    pub breakdown: PaymentBreakdown,
+    pub note: Option<OrderNote>,
+    pub replacement_of: Option<OrderId>,
+    pub payment_intent_id: Option<PaymentIntentId>,
+}
+
+/// Restaurant has accepted to prepare the order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderAcceptedByRestaurant {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub estimated_ready_at: Option<String>,
+}
+
+/// Restaurant has started preparing an accepted order (status PREPARING).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderPreparationStarted {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+}
+
+/// Restaurant has rejected the order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRejectedByRestaurant {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub reason: String,
+}
+
+/// Restaurant has marked the order as ready for pickup/delivery.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderMarkedReady {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+}
+
+/// The order has been delivered to the customer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDelivered {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+}
+
+/// The customer cancelled the order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCancelledByCustomer {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// The restaurant cancelled the order after initial acceptance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCancelledByRestaurant {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub reason: String,
+}
+
+/// The customer rated the delivery of a completed order (rider thumbs up/down).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRated {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub rider_thumb: ThumbRating,
+}
+
+/// The customer rated the restaurant of a completed order (0–5 stars + optional comment).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRated {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub stars: StarRating,
+    pub comment: Option<RatingComment>,
+}
+
+/// The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverySatisfactionRecorded {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub timeliness: DeliveryTimeliness,
+    pub reason: Option<DeliveryDissatisfactionReason>,
+}
+
+/// A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order (ADR-012). Separate from the price; Captain keeps 0%. Additive — multiple OrderTipped accumulate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderTipped {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub tipped_by: Tipper,
+    pub customer_id: Option<CustomerId>,
+    pub tips: Vec<Tip>,
+}
+
+/// The customer requested a refund for an order; the RefundProcess will drive Stripe.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefundRequested {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub reason: Option<String>,
+}
+
 /// A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state. `amount` is the captured order total eligible for refund (an approval may still be partial).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -900,85 +947,6 @@ pub struct RefundOpened {
     pub restaurant_id: RestaurantId,
     pub amount: Money,
     pub reason: Option<String>,
-}
-
-/// The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefundApproved {
-    pub payment_intent_id: PaymentIntentId,
-    pub order_id: OrderId,
-    pub amount: Money,
-    pub reason: Option<String>,
-}
-
-/// The restaurant or an admin denied a pending refund request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefundDenied {
-    pub payment_intent_id: PaymentIntentId,
-    pub order_id: OrderId,
-    pub reason: String,
-}
-
-/// Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConversationOpened {
-    pub order_id: OrderId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub customer_chat_enabled: bool,
-}
-
-/// A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessagePosted {
-    pub order_id: OrderId,
-    pub message_id: ConversationMessageId,
-    pub author_role: ConversationAuthorRole,
-    pub visibility: MessageVisibility,
-    pub body: MessageBody,
-    pub original_locale: Locale,
-    #[serde(default)]
-    pub attachment_refs: Vec<AttachmentRef>,
-}
-
-/// A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageTranslationAdded {
-    pub order_id: OrderId,
-    pub message_id: ConversationMessageId,
-    pub locale: Locale,
-    pub text: TranslatedText,
-}
-
-/// An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AdminInvitedToConversation {
-    pub order_id: OrderId,
-    pub reason: EscalationReason,
-}
-
-/// A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParticipantMuted {
-    pub order_id: OrderId,
-    pub muted_role: ConversationAuthorRole,
-    pub reason: MuteReason,
-    pub until: Option<String>,
-}
-
-/// A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParticipantUnmuted {
-    pub order_id: OrderId,
-    pub muted_role: ConversationAuthorRole,
 }
 
 /// Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the category, the customer's description and — optionally — the resolution the customer requested. Carries `customerId` (whose claim) and `restaurantId` (on whose restaurant's order) — business data the client supplies, mirroring how OrderPlaced carries them — so the read model can scope "my claims" and the restaurant's claims queue (#154). The 14-day window and order-eligibility (order exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
@@ -1033,24 +1001,6 @@ pub struct ReclamationEvidenceAttached {
     pub attachment_ref: AttachmentRef,
 }
 
-/// Goodwill store credit was granted to a customer (id = customerId). Emitted by the CustomerCredit aggregate when the ReclamationProcess saga resolves a claim as GOODWILL_CREDIT. `reclamationId` is the idempotent grant key: at most one grant per resolved claim, so a re-delivered ReclamationResolved never double-grants. `amount` (Money) increases the customer's available balance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomerCreditGranted {
-    pub customer_id: CustomerId,
-    pub amount: Money,
-    pub reclamation_id: ReclamationId,
-}
-
-/// Store credit was spent by a customer at checkout (id = customerId). `amount` (Money) decreases the available balance; `orderId` is the order the credit was applied to. Consuming more than the available balance is rejected (errors.yaml#/InsufficientCustomerCredit) — the balance never goes negative. Driven by the checkout flow (a flagged follow-up, ADR-20260726-163737 §checkout-consume); recorded as a fact.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomerCreditConsumed {
-    pub customer_id: CustomerId,
-    pub amount: Money,
-    pub order_id: OrderId,
-}
-
 /// The order's retention window elapsed — at this moment the order IS expired: no discussion, no rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone their rows, and the generic deletion engine reacts to the recorded fact with the journey that ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the engine's journey lands (#194 "GDPR erasure").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1069,39 +1019,68 @@ pub struct OrderDeleted {
     pub tombstone_event_id: Option<String>,
 }
 
-/// An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delivery-attempts cap, error code DeliveryInfrastructureError) to RECEIVED for redelivery (#315) — attempts reset, error and backoff schedule cleared, the lane's worker nudged. The audit fact of the operator action: WHO requeued is the envelope's acting user (ADR-0041), never payload; `actorType` names the lane whose row was requeued so the audit trail reads without dereferencing the id. Idempotent at the port: requeueing a row that is ALREADY deliverable again records the intent without touching the row.
+/// Payment was successfully authorized/captured for an order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MailboxMessageRequeued {
-    pub target_message_id: MessageId,
-    pub actor_type: MailboxActorType,
+pub struct PaymentCaptured {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: Option<OrderId>,
+    pub restaurant_id: RestaurantId,
+    pub amount: Money,
+}
+
+/// Payment authorization/capture failed; no order is placed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentFailed {
+    pub payment_intent_id: PaymentIntentId,
+    pub restaurant_id: RestaurantId,
+    pub reason: String,
+}
+
+/// A captured payment was refunded (e.g. after rejection or cancellation).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentRefunded {
+    pub refund_id: RefundId,
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub amount: Money,
+    pub reason: Option<String>,
+}
+
+/// The restaurant or an admin denied a pending refund request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefundDenied {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: OrderId,
+    pub reason: String,
+}
+
+/// Goodwill store credit was granted to a customer (id = customerId). Emitted by the CustomerCredit aggregate when the ReclamationProcess saga resolves a claim as GOODWILL_CREDIT. `reclamationId` is the idempotent grant key: at most one grant per resolved claim, so a re-delivered ReclamationResolved never double-grants. `amount` (Money) increases the customer's available balance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerCreditGranted {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub reclamation_id: ReclamationId,
+}
+
+/// Store credit was spent by a customer at checkout (id = customerId). `amount` (Money) decreases the available balance; `orderId` is the order the credit was applied to. Consuming more than the available balance is rejected (errors.yaml#/InsufficientCustomerCredit) — the balance never goes negative. Driven by the checkout flow (a flagged follow-up, ADR-20260726-163737 §checkout-consume); recorded as a fact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerCreditConsumed {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub order_id: OrderId,
 }
 
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
 pub enum DomainEvent {
-    RestaurantAccountRegistered(RestaurantAccountRegistered),
-    RestaurantAccountUpdated(RestaurantAccountUpdated),
-    RestaurantAccountDeleted(RestaurantAccountDeleted),
-    RestaurantRegistered(RestaurantRegistered),
-    RestaurantSlugConfigured(RestaurantSlugConfigured),
-    RestaurantSlugReconfigured(RestaurantSlugReconfigured),
-    RestaurantUpdated(RestaurantUpdated),
-    RestaurantActivated(RestaurantActivated),
-    RestaurantDeactivated(RestaurantDeactivated),
-    RestaurantAcceptanceModeChanged(RestaurantAcceptanceModeChanged),
-    RestaurantRemoved(RestaurantRemoved),
-    RestaurantGoogleBusinessProfileUpdated(RestaurantGoogleBusinessProfileUpdated),
-    RestaurantListingClaimed(RestaurantListingClaimed),
-    RestaurantListingOptedOut(RestaurantListingOptedOut),
-    RestaurantMarkedClosed(RestaurantMarkedClosed),
-    RestaurantListingStatusChanged(RestaurantListingStatusChanged),
-    RestaurantGoogleBusinessProfileOrderLinkConfigured(RestaurantGoogleBusinessProfileOrderLinkConfigured),
-    RestaurantGoogleBusinessProfileOrderLinkVerified(RestaurantGoogleBusinessProfileOrderLinkVerified),
-    ProspectContacted(ProspectContacted),
-    ProspectMarkedCold(ProspectMarkedCold),
-    ProspectReplied(ProspectReplied),
     CatalogCreated(CatalogCreated),
     CatalogSlugConfigured(CatalogSlugConfigured),
     CatalogCategoryAdded(CatalogCategoryAdded),
@@ -1115,9 +1094,17 @@ pub enum DomainEvent {
     OptionListRemoved(OptionListRemoved),
     OfferStockUpdated(OfferStockUpdated),
     CatalogImported(CatalogImported),
+    PaymentIntentCreated(PaymentIntentCreated),
+    RefundApproved(RefundApproved),
+    MailboxMessageRequeued(MailboxMessageRequeued),
+    ConversationOpened(ConversationOpened),
+    MessagePosted(MessagePosted),
+    MessageTranslationAdded(MessageTranslationAdded),
+    AdminInvitedToConversation(AdminInvitedToConversation),
+    ParticipantMuted(ParticipantMuted),
+    ParticipantUnmuted(ParticipantUnmuted),
     CustomerRegistered(CustomerRegistered),
     CustomerIdentified(CustomerIdentified),
-    CartBoundToCustomer(CartBoundToCustomer),
     RestaurantFavorited(RestaurantFavorited),
     RestaurantUnfavorited(RestaurantUnfavorited),
     CustomerInfoUpdated(CustomerInfoUpdated),
@@ -1128,28 +1115,6 @@ pub enum DomainEvent {
     CustomerAddressSet(CustomerAddressSet),
     CustomerAddressRemoved(CustomerAddressRemoved),
     CustomerPaymentMethodSet(CustomerPaymentMethodSet),
-    CartStarted(CartStarted),
-    CartLineAdded(CartLineAdded),
-    CartLineQuantityChanged(CartLineQuantityChanged),
-    CartLineRemoved(CartLineRemoved),
-    CartCheckedOut(CartCheckedOut),
-    OrderPlaced(OrderPlaced),
-    OrderAcceptedByRestaurant(OrderAcceptedByRestaurant),
-    OrderPreparationStarted(OrderPreparationStarted),
-    OrderRejectedByRestaurant(OrderRejectedByRestaurant),
-    OrderMarkedReady(OrderMarkedReady),
-    OrderDelivered(OrderDelivered),
-    OrderCancelledByCustomer(OrderCancelledByCustomer),
-    OrderCancelledByRestaurant(OrderCancelledByRestaurant),
-    OrderRated(OrderRated),
-    RestaurantRated(RestaurantRated),
-    DeliverySatisfactionRecorded(DeliverySatisfactionRecorded),
-    OrderTipped(OrderTipped),
-    RefundRequested(RefundRequested),
-    PaymentIntentCreated(PaymentIntentCreated),
-    PaymentCaptured(PaymentCaptured),
-    PaymentFailed(PaymentFailed),
-    PaymentRefunded(PaymentRefunded),
     DeliveryRequested(DeliveryRequested),
     DeliveryAcceptedByRider(DeliveryAcceptedByRider),
     DeliveryPickedUp(DeliveryPickedUp),
@@ -1173,23 +1138,58 @@ pub enum DomainEvent {
     RiderRegistered(RiderRegistered),
     RiderInfoUpdated(RiderInfoUpdated),
     RiderStatusChanged(RiderStatusChanged),
+    RestaurantAccountRegistered(RestaurantAccountRegistered),
+    RestaurantAccountUpdated(RestaurantAccountUpdated),
+    RestaurantAccountDeleted(RestaurantAccountDeleted),
+    RestaurantRegistered(RestaurantRegistered),
+    RestaurantSlugConfigured(RestaurantSlugConfigured),
+    RestaurantSlugReconfigured(RestaurantSlugReconfigured),
+    RestaurantUpdated(RestaurantUpdated),
+    RestaurantActivated(RestaurantActivated),
+    RestaurantDeactivated(RestaurantDeactivated),
+    RestaurantAcceptanceModeChanged(RestaurantAcceptanceModeChanged),
+    RestaurantRemoved(RestaurantRemoved),
+    RestaurantGoogleBusinessProfileUpdated(RestaurantGoogleBusinessProfileUpdated),
+    RestaurantListingClaimed(RestaurantListingClaimed),
+    RestaurantListingOptedOut(RestaurantListingOptedOut),
+    RestaurantMarkedClosed(RestaurantMarkedClosed),
+    RestaurantListingStatusChanged(RestaurantListingStatusChanged),
+    RestaurantGoogleBusinessProfileOrderLinkConfigured(RestaurantGoogleBusinessProfileOrderLinkConfigured),
+    RestaurantGoogleBusinessProfileOrderLinkVerified(RestaurantGoogleBusinessProfileOrderLinkVerified),
+    ProspectContacted(ProspectContacted),
+    ProspectMarkedCold(ProspectMarkedCold),
+    ProspectReplied(ProspectReplied),
+    CartBoundToCustomer(CartBoundToCustomer),
+    CartStarted(CartStarted),
+    CartLineAdded(CartLineAdded),
+    CartLineQuantityChanged(CartLineQuantityChanged),
+    CartLineRemoved(CartLineRemoved),
+    CartCheckedOut(CartCheckedOut),
+    OrderPlaced(OrderPlaced),
+    OrderAcceptedByRestaurant(OrderAcceptedByRestaurant),
+    OrderPreparationStarted(OrderPreparationStarted),
+    OrderRejectedByRestaurant(OrderRejectedByRestaurant),
+    OrderMarkedReady(OrderMarkedReady),
+    OrderDelivered(OrderDelivered),
+    OrderCancelledByCustomer(OrderCancelledByCustomer),
+    OrderCancelledByRestaurant(OrderCancelledByRestaurant),
+    OrderRated(OrderRated),
+    RestaurantRated(RestaurantRated),
+    DeliverySatisfactionRecorded(DeliverySatisfactionRecorded),
+    OrderTipped(OrderTipped),
+    RefundRequested(RefundRequested),
     RefundOpened(RefundOpened),
-    RefundApproved(RefundApproved),
-    RefundDenied(RefundDenied),
-    ConversationOpened(ConversationOpened),
-    MessagePosted(MessagePosted),
-    MessageTranslationAdded(MessageTranslationAdded),
-    AdminInvitedToConversation(AdminInvitedToConversation),
-    ParticipantMuted(ParticipantMuted),
-    ParticipantUnmuted(ParticipantUnmuted),
     ReclamationOpened(ReclamationOpened),
     ReclamationResolved(ReclamationResolved),
     ReclamationRejected(ReclamationRejected),
     ReclamationReopened(ReclamationReopened),
     ReclamationEvidenceAttached(ReclamationEvidenceAttached),
-    CustomerCreditGranted(CustomerCreditGranted),
-    CustomerCreditConsumed(CustomerCreditConsumed),
     OrderExpired(OrderExpired),
     OrderDeleted(OrderDeleted),
-    MailboxMessageRequeued(MailboxMessageRequeued),
+    PaymentCaptured(PaymentCaptured),
+    PaymentFailed(PaymentFailed),
+    PaymentRefunded(PaymentRefunded),
+    RefundDenied(RefundDenied),
+    CustomerCreditGranted(CustomerCreditGranted),
+    CustomerCreditConsumed(CustomerCreditConsumed),
 }

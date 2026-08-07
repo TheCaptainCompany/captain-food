@@ -849,8 +849,8 @@ impl ActionKey {
 pub fn subscription_input_type(operation: &str) -> Option<&'static str> {
     match operation {
         "operationStatusChanged" => Some("OperationStatusChangedSubscriptionInput"),
-        "paymentStatusChanged" => Some("PaymentStatusChangedSubscriptionInput"),
         "orderStatusChanged" => Some("OrderStatusChangedSubscriptionInput"),
+        "paymentStatusChanged" => Some("PaymentStatusChangedSubscriptionInput"),
         _ => None,
     }
 }

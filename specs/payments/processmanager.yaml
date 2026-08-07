@@ -1,0 +1,194 @@
+version: 1
+description: >
+  payments scope — processmanager fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `processmanager.yaml` catalog; $refs stay kind-logical
+  (`processmanager.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+RefundProcess:
+  type: process-manager
+  description: >
+    Approved refunds. A refundable fact (rejection, cancellation, customer request) OPENS a
+    pending refund: RefundOpened is delivered to the Payment aggregate (so the refund queue,
+    View_PendingRefunds, folds from the log) and the state row goes PENDING_APPROVAL; the RESTAURANT
+    (its own orders) or an ADMIN decides with ApproveRefund / DenyRefund (authz = api.yaml roles); on
+    approval the outbound Stripe refund is requested and the run settles when Stripe reports
+    PaymentRefunded (the fact itself is recorded by the Payment aggregate). The refund-eligibility
+    window is a config value enforced at approval, not a domain rule.
+  state_table: { $ref: 'database/tables/process_managers.yaml#/refund_process_manager' }
+  ports:
+    payment: { $ref: 'services.yaml#/payment' }
+  receives:
+    - message: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+      description: "The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: CAPTURED } } }
+            skip: true
+            note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_read: order.payment_intent_id }
+              orderId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
+        - state:
+            set:
+              order_id: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } }
+              payment_intent_id: { from_read: order.payment_intent_id }
+              process_status: { const: PENDING_APPROVAL }
+              reason: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/reason' } }
+    - message: { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+      description: "The customer cancelled a paid order — open a pending refund for a restaurant/admin decision."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: CAPTURED } } }
+            skip: true
+            note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_read: order.payment_intent_id }
+              orderId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
+        - state:
+            set:
+              order_id: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } }
+              payment_intent_id: { from_read: order.payment_intent_id }
+              process_status: { const: PENDING_APPROVAL }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/reason' } }
+    - message: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+      description: "The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: CAPTURED } } }
+            skip: true
+            note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_read: order.payment_intent_id }
+              orderId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
+        - state:
+            set:
+              order_id: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } }
+              payment_intent_id: { from_read: order.payment_intent_id }
+              process_status: { const: PENDING_APPROVAL }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/reason' } }
+    - message: { $ref: 'events.yaml#/RefundRequested' }
+      description: >
+        The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a
+        pending refund for a restaurant/admin decision.
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: CAPTURED } } }
+            skip: true
+            note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_read: order.payment_intent_id }
+              orderId: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/RefundRequested/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/RefundRequested/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
+        - state:
+            set:
+              order_id: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } }
+              payment_intent_id: { from_read: order.payment_intent_id }
+              process_status: { const: PENDING_APPROVAL }
+              reason: { from: { $ref: 'events.yaml#/RefundRequested/properties/reason' } }
+
+    - message: { $ref: 'commands.yaml#/ApproveRefund' }
+      description: >
+        The restaurant or an admin approves the pending refund (possibly partial): request the Stripe
+        refund and record the decision on the Payment.
+      steps:
+        - state:
+            by: { order_id: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/orderId' } } }
+        - guard:
+            that: { state: { process_status: { const: PENDING_APPROVAL } } }
+            throws: { $ref: 'errors.yaml#/RefundNotPending' }
+            note: "Also thrown when no run exists for the order."
+        - call:
+            port: payment
+            operation: refund
+            note: "Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundApproved' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_state: payment_intent_id }
+              orderId: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/orderId' } }
+              amount: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/amount' } }
+              reason: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/reason' } }
+        - state:
+            set:
+              process_status: { const: APPROVED_AWAITING_SETTLEMENT }
+              approved_amount_cents: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/amount' } }
+              reason: { from: { $ref: 'commands.yaml#/ApproveRefund/properties/reason' } }
+
+    - message: { $ref: 'commands.yaml#/DenyRefund' }
+      description: "The restaurant or an admin denies the pending refund: record the decision on the Payment and close the run."
+      steps:
+        - state:
+            by: { order_id: { from: { $ref: 'commands.yaml#/DenyRefund/properties/orderId' } } }
+        - guard:
+            that: { state: { process_status: { const: PENDING_APPROVAL } } }
+            throws: { $ref: 'errors.yaml#/RefundNotPending' }
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundDenied' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_state: payment_intent_id }
+              orderId: { from: { $ref: 'commands.yaml#/DenyRefund/properties/orderId' } }
+              reason: { from: { $ref: 'commands.yaml#/DenyRefund/properties/reason' } }
+        - state:
+            set:
+              process_status: { const: DENIED }
+              reason: { from: { $ref: 'commands.yaml#/DenyRefund/properties/reason' } }
+
+    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+      description: >
+        Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The
+        fact is already in the log; nothing to emit.
+      steps:
+        - state:
+            by: { order_id: { from: { $ref: 'events.yaml#/PaymentRefunded/properties/orderId' } } }
+            expect: { process_status: { const: APPROVED_AWAITING_SETTLEMENT } }
+            note: "Unknown or already-settled run → skip (idempotent under Stripe re-delivery)."
+        - state:
+            set:
+              refund_id: { from: { $ref: 'events.yaml#/PaymentRefunded/properties/refundId' } }
+              process_status: { const: REFUNDED }

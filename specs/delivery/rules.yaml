@@ -1,0 +1,59 @@
+version: 1
+description: >
+  delivery scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Delivery (ADR-0031) ---
+DeliveryAcceptedOnlyWhenPending:
+  description: "A pending delivery job can be accepted by an independent rider only once."
+
+DeliveryPickupAndCompletionByRider:
+  description: "The assigned rider confirms pickup then records hand-over, in the correct order."
+
+DeliveryCancellableBeforeCompletion:
+  description: "A delivery job can be cancelled before completion but not after it is delivered."
+
+PartnerAcceptanceRecordsCourier:
+  description: "When the partner accepts (inbound), the assigned courier is recorded on the job."
+
+PartnerRejectionReoffers:
+  description: "When the partner declines (inbound), the job is re-offered or flagged for manual handling."
+
+DispatchExhaustionFailsClosed:
+  description: "When Captain dispatches, the delivery job walks the city's ranked channel list, offering each ranked channel at most once in rank order; once every ranked channel has been offered and none accepts, the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (#60, supersedes ADR-20260720-004556)."
+
+CityRankingWalkedInOrder:
+  description: "When Captain dispatches, channels are offered in the city's configured rank order (CityDeliveryRanking, rank 1 first): the birth offer goes to the rank-1 channel and each advance moves to the next rank (#60)."
+
+TimeoutEscalatesToNextChannel:
+  description: "When an outstanding delivery offer times out (DeliveryOfferTimedOut), the dispatch advances to the next ranked channel (or fails closed when the ranked walk is exhausted) — a stale offer never blocks the walk (#60)."
+
+ManualEscalateSkipsChannel:
+  description: "An operator (restaurant/admin) may escalate an outstanding delivery offer (EscalateDelivery → DeliveryEscalationRequested), skipping the channel currently offered and advancing to the next ranked channel (or failing closed when the ranked walk is exhausted) (#60)."
+
+OrderClosedOnDeliveryCompletion:
+  description: "The order is closed (OrderDelivered) when the partner reports DELIVERED or an independent rider completes the delivery."
+
+DeliveryPartnerAssignmentLifecycle:
+  description: "A PENDING delivery job can be assigned to a delivery partner (once), unassigned to be re-offered, and partner-reported status changes apply only as valid transitions."
+
+DeliveryDeclineKeepsJobPending:
+  description: "An independent rider may decline a pending delivery job; the job stays PENDING and re-offerable."
+
+DeliveryIssueLifecycle:
+  description: "A delivery issue can be reported on a non-delivered job and later resolved."
+
+
+# --- Delivery partner self-registration (#61) ---
+DeliveryPartnerSelfRegistersCityAvailability:
+  description: "A delivery partner can self-register (via the EXTERNAL API) its availability to serve a city on a catalog channel; the registration is idempotent by its client-generated id and lands PENDING (#61)."
+
+DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval:
+  description: "A self-registered city availability becomes APPROVED (eligible for the city's dispatch ranking) only after an admin approves a PENDING registration; approving anything not PENDING is rejected, and a registration may later be revoked by the partner or an admin (#61)."
+
+
+# --- Rider ---
+RiderLifecycle:
+  description: "A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions."

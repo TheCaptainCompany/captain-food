@@ -14,6 +14,32 @@ pub struct QueryRoot;
 
 #[async_graphql::Object(name = "Query")]
 impl QueryRoot {
+    /// A restaurant's full catalog (categories → products → offers + option lists).
+    #[graphql(name = "catalog")]
+    async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        // The non-null `restaurant` navigation field: hydrate from the Restaurant read model (both rows
+        // are projections of the same domain log, so the FK target always exists).
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("catalog references an unknown restaurant"))?;
+        Ok(Some(Catalog::from((row, restaurant))))
+    }
+    /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
+    #[graphql(name = "categories")]
+    async fn categories(&self, ctx: &async_graphql::Context<'_>, input: CategoriesQueryInput) -> async_graphql::Result<Vec<CatalogCategory>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        let row = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Categories live inside the projected Catalog.tree jsonb; an absent catalog or an empty
+        // tree (a catalog created before any content event) yields an empty list.
+        Ok(row.map(|r| catalog_tree_section::<CatalogCategory>(&r.tree, "categories")).unwrap_or_default())
+    }
     /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
     #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {
@@ -62,43 +88,19 @@ impl QueryRoot {
         }
         Ok(Some(super::mutation::operation_from_journal(&row)))
     }
-    /// The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
-    #[graphql(name = "paymentStatus", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
-    async fn payment_status(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusQueryInput) -> async_graphql::Result<Option<PaymentIntent>> {
-        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;
-        let Some(row) = pm
-            .by_order(input.order_id.into())
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        let admin = matches!(
-            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-            Some(crate::graphql::acl::RequestRole::Admin)
-        );
-        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
-        let session_owned = session.is_some() && session == row.session_id.as_ref().map(|s| s.0);
-        let mut customer_owned = false;
-        if let (Some(auth_ref), Some(row_customer)) = (
-            ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()),
-            row.customer_id.as_ref(),
-        ) {
-            let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
-            customer_owned = customers
-                .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-                .await
-                .map_err(|e| async_graphql::Error::new(e.to_string()))?
-                .is_some_and(|c| c.customer_id == *row_customer);
-        }
-        if !(admin || customer_owned || session_owned) {
-            return Ok(None);
-        }
-        Ok(Some(PaymentIntent {
-            payment_intent_id: row.payment_intent_id.into(),
-            client_secret: row.client_secret,
-            status: row.payment_status.into(),
-        }))
+    /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
+    #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    async fn order_conversation(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
+        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(OrderConversation::from))
+    }
+    /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
+    #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
+    async fn order_conversation_internal_notes(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
+        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(ConversationInternalNotes::from))
     }
     /// The signed-in customer's own profile (resolves the session authRef → Customer via Customer).
     #[graphql(name = "me", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
@@ -114,153 +116,6 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(CustomerProfile::from))
-    }
-    /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
-    #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn favorite_restaurants(&self, ctx: &async_graphql::Context<'_>, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
-        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = customers.by_id(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
-            return Ok(Vec::new());
-        };
-        // The projected favorite set is a jsonb array of restaurant-id strings (CustomerProjector);
-        // resolve each against the Restaurant read model (an unknown id simply drops out).
-        let ids: Vec<uuid::Uuid> = row
-            .favorite_restaurant_ids
-            .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok())).collect())
-            .unwrap_or_default();
-        let mut out = Vec::new();
-        for id in ids {
-            let found = restaurants
-                .by_id(domain::generated::scalars::RestaurantId(id))
-                .await
-                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-            if let Some(r) = found {
-                out.push(Restaurant::from(r));
-            }
-        }
-        Ok(out)
-    }
-    /// Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
-    #[graphql(name = "restaurants")]
-    async fn restaurants(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantsQueryInput>) -> async_graphql::Result<Vec<Restaurant>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let filter = input
-            .map(|i| application::queries::RestaurantFilter { search: i.search, orderable_only: i.orderable_only, limit: i.limit.map(|v| v.0), offset: i.offset.map(|v| v.0) })
-            .unwrap_or_default();
-        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Restaurant::from).collect())
-    }
-    /// A restaurant's full catalog (categories → products → offers + option lists).
-    #[graphql(name = "catalog")]
-    async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
-            return Ok(None);
-        };
-        // The non-null `restaurant` navigation field: hydrate from the Restaurant read model (both rows
-        // are projections of the same domain log, so the FK target always exists).
-        let restaurant = restaurants
-            .by_id(row.restaurant_id)
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .ok_or_else(|| async_graphql::Error::new("catalog references an unknown restaurant"))?;
-        Ok(Some(Catalog::from((row, restaurant))))
-    }
-    /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
-    #[graphql(name = "categories")]
-    async fn categories(&self, ctx: &async_graphql::Context<'_>, input: CategoriesQueryInput) -> async_graphql::Result<Vec<CatalogCategory>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
-        let row = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        // Categories live inside the projected Catalog.tree jsonb; an absent catalog or an empty
-        // tree (a catalog created before any content event) yields an empty list.
-        Ok(row.map(|r| catalog_tree_section::<CatalogCategory>(&r.tree, "categories")).unwrap_or_default())
-    }
-    /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
-    #[graphql(name = "restaurant")]
-    async fn restaurant(&self, ctx: &async_graphql::Context<'_>, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let row = repo.by_slug(input.slug.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(Restaurant::from))
-    }
-    /// A customer's carts (one OPEN cart per restaurant).
-    #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
-    async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let rows = repo.by_customer(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
-        // (a cart is only ever started against a projected restaurant, so a match always exists).
-        let by_id: std::collections::HashMap<_, _> = restaurants
-            .list(application::queries::RestaurantFilter::default())
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .into_iter()
-            .map(|r| (r.restaurant_id.0, r))
-            .collect();
-        Ok(rows
-            .into_iter()
-            .filter_map(|c| by_id.get(&c.restaurant_id.0).cloned().map(|r| Cart::from((c, r))))
-            .collect())
-    }
-    /// A single cart by id (session-scoped; readable by the guest/customer who owns it).
-    #[graphql(name = "cart")]
-    async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
-            return Ok(None);
-        };
-        let restaurant = restaurants
-            .by_id(row.restaurant_id)
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(Cart::from((row, restaurant))))
-    }
-    /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
-    #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
-    async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let filter = input
-            .map(|i| application::queries::OrderFilter {
-                customer_id: i.customer_id.map(Into::into),
-                restaurant_id: i.restaurant_id.map(Into::into),
-                status: i.status.map(Into::into),
-            })
-            .unwrap_or_default();
-        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
-        // (an order is only ever placed against a projected restaurant, so a match always exists).
-        let by_id: std::collections::HashMap<_, _> = restaurants
-            .list(application::queries::RestaurantFilter::default())
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .into_iter()
-            .map(|r| (r.restaurant_id.0, r))
-            .collect();
-        Ok(rows
-            .into_iter()
-            .filter_map(|o| by_id.get(&o.restaurant_id.0).cloned().map(|r| Order::from((o, r))))
-            .collect())
-    }
-    /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
-    #[graphql(name = "order", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
-    async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
-        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
-            return Ok(None);
-        };
-        let restaurant = restaurants
-            .by_id(row.restaurant_id)
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .ok_or_else(|| async_graphql::Error::new("order references an unknown restaurant"))?;
-        Ok(Some(Order::from((row, restaurant))))
     }
     /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
     #[graphql(name = "delivery", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
@@ -341,43 +196,6 @@ impl QueryRoot {
         }
         Ok(out)
     }
-    /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
-    #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
-    async fn restaurant_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliverySatisfactionQueryInput) -> async_graphql::Result<Vec<DeliverySatisfaction>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliverySatisfactionReadRepository>>()?;
-        let rows = repo
-            .by_restaurant(input.restaurant_id.into(), input.timeliness.map(Into::into))
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(DeliverySatisfaction::from).collect())
-    }
-    /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
-    #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
-    async fn order_conversation(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
-        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(OrderConversation::from))
-    }
-    /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
-    #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
-    async fn order_conversation_internal_notes(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
-        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(ConversationInternalNotes::from))
-    }
-    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
-    #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
-    async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;
-        let filter = input
-            .map(|i| application::queries::RefundFilter {
-                restaurant_id: i.restaurant_id.map(Into::into),
-                status: i.status.map(Into::into),
-            })
-            .unwrap_or_default();
-        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Refund::from).collect())
-    }
     /// Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of its own submissions and an admin works the review queue. Optional filters by city, channel and status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
     #[graphql(name = "deliveryPartnerAvailabilities", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
     async fn delivery_partner_availabilities(&self, ctx: &async_graphql::Context<'_>, input: Option<DeliveryPartnerAvailabilitiesQueryInput>) -> async_graphql::Result<Vec<DeliveryPartnerAvailability>> {
@@ -392,62 +210,49 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(DeliveryPartnerAvailability::from).collect())
     }
-    /// The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row); an anonymous caller sees an empty list.
-    #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn my_reclamations(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<Reclamation>> {
-        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+    /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
+    #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn favorite_restaurants(&self, ctx: &async_graphql::Context<'_>, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
+        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = customers.by_id(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
             return Ok(Vec::new());
         };
-        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
-        let Some(customer) = customers
-            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-        else {
-            return Ok(Vec::new());
-        };
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
-        let rows = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Reclamation::from).collect())
+        // The projected favorite set is a jsonb array of restaurant-id strings (CustomerProjector);
+        // resolve each against the Restaurant read model (an unknown id simply drops out).
+        let ids: Vec<uuid::Uuid> = row
+            .favorite_restaurant_ids
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok())).collect())
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for id in ids {
+            let found = restaurants
+                .by_id(domain::generated::scalars::RestaurantId(id))
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            if let Some(r) = found {
+                out.push(Restaurant::from(r));
+            }
+        }
+        Ok(out)
     }
-    /// The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row, the same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees null (no credit).
-    #[graphql(name = "customerCredit", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn customer_credit(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerCredit>> {
-        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
-            return Ok(None);
-        };
-        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
-        let Some(customer) = customers
-            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;
-        let row = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(CustomerCredit::from))
-    }
-    /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
-    #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
-    async fn restaurant_reclamations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantReclamationsQueryInput>) -> async_graphql::Result<Vec<Reclamation>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+    /// Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
+    #[graphql(name = "restaurants")]
+    async fn restaurants(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantsQueryInput>) -> async_graphql::Result<Vec<Restaurant>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let filter = input
-            .map(|i| application::queries::ReclamationFilter {
-                status: i.status.map(Into::into),
-                category: i.category.map(Into::into),
-                overdue: i.overdue,
-            })
+            .map(|i| application::queries::RestaurantFilter { search: i.search, orderable_only: i.orderable_only, limit: i.limit.map(|v| v.0), offset: i.offset.map(|v| v.0) })
             .unwrap_or_default();
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Reclamation::from).collect())
+        Ok(rows.into_iter().map(Restaurant::from).collect())
     }
-    /// A single reclamation by id (#154) — claim detail for the customer who raised it and the restaurant/admin deciding it. Null when unknown.
-    #[graphql(name = "reclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
-    async fn reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReclamationQueryInput) -> async_graphql::Result<Option<Reclamation>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
-        let row = repo.by_id(input.reclamation_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(Reclamation::from))
+    /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
+    #[graphql(name = "restaurant")]
+    async fn restaurant(&self, ctx: &async_graphql::Context<'_>, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let row = repo.by_slug(input.slug.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(Restaurant::from))
     }
     /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
@@ -481,6 +286,201 @@ impl QueryRoot {
             .into_iter()
             .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, r))))
             .collect())
+    }
+    /// A customer's carts (one OPEN cart per restaurant).
+    #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
+    async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let rows = repo.by_customer(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
+        // (a cart is only ever started against a projected restaurant, so a match always exists).
+        let by_id: std::collections::HashMap<_, _> = restaurants
+            .list(application::queries::RestaurantFilter::default())
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .into_iter()
+            .map(|r| (r.restaurant_id.0, r))
+            .collect();
+        Ok(rows
+            .into_iter()
+            .filter_map(|c| by_id.get(&c.restaurant_id.0).cloned().map(|r| Cart::from((c, r))))
+            .collect())
+    }
+    /// A single cart by id (session-scoped; readable by the guest/customer who owns it).
+    #[graphql(name = "cart")]
+    async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
+        Ok(Some(Cart::from((row, restaurant))))
+    }
+    /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
+    #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::OrderFilter {
+                customer_id: i.customer_id.map(Into::into),
+                restaurant_id: i.restaurant_id.map(Into::into),
+                status: i.status.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
+        // (an order is only ever placed against a projected restaurant, so a match always exists).
+        let by_id: std::collections::HashMap<_, _> = restaurants
+            .list(application::queries::RestaurantFilter::default())
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .into_iter()
+            .map(|r| (r.restaurant_id.0, r))
+            .collect();
+        Ok(rows
+            .into_iter()
+            .filter_map(|o| by_id.get(&o.restaurant_id.0).cloned().map(|r| Order::from((o, r))))
+            .collect())
+    }
+    /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
+    #[graphql(name = "order", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("order references an unknown restaurant"))?;
+        Ok(Some(Order::from((row, restaurant))))
+    }
+    /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+    #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn restaurant_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliverySatisfactionQueryInput) -> async_graphql::Result<Vec<DeliverySatisfaction>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliverySatisfactionReadRepository>>()?;
+        let rows = repo
+            .by_restaurant(input.restaurant_id.into(), input.timeliness.map(Into::into))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(DeliverySatisfaction::from).collect())
+    }
+    /// The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row); an anonymous caller sees an empty list.
+    #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn my_reclamations(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<Reclamation>> {
+        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+            return Ok(Vec::new());
+        };
+        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
+        let Some(customer) = customers
+            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Ok(Vec::new());
+        };
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let rows = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Reclamation::from).collect())
+    }
+    /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
+    #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn restaurant_reclamations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantReclamationsQueryInput>) -> async_graphql::Result<Vec<Reclamation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::ReclamationFilter {
+                status: i.status.map(Into::into),
+                category: i.category.map(Into::into),
+                overdue: i.overdue,
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Reclamation::from).collect())
+    }
+    /// A single reclamation by id (#154) — claim detail for the customer who raised it and the restaurant/admin deciding it. Null when unknown.
+    #[graphql(name = "reclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    async fn reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReclamationQueryInput) -> async_graphql::Result<Option<Reclamation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let row = repo.by_id(input.reclamation_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(Reclamation::from))
+    }
+    /// The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
+    #[graphql(name = "paymentStatus", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
+    async fn payment_status(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusQueryInput) -> async_graphql::Result<Option<PaymentIntent>> {
+        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;
+        let Some(row) = pm
+            .by_order(input.order_id.into())
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let admin = matches!(
+            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
+            Some(crate::graphql::acl::RequestRole::Admin)
+        );
+        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
+        let session_owned = session.is_some() && session == row.session_id.as_ref().map(|s| s.0);
+        let mut customer_owned = false;
+        if let (Some(auth_ref), Some(row_customer)) = (
+            ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()),
+            row.customer_id.as_ref(),
+        ) {
+            let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
+            customer_owned = customers
+                .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                .is_some_and(|c| c.customer_id == *row_customer);
+        }
+        if !(admin || customer_owned || session_owned) {
+            return Ok(None);
+        }
+        Ok(Some(PaymentIntent {
+            payment_intent_id: row.payment_intent_id.into(),
+            client_secret: row.client_secret,
+            status: row.payment_status.into(),
+        }))
+    }
+    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+    #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::RefundFilter {
+                restaurant_id: i.restaurant_id.map(Into::into),
+                status: i.status.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Refund::from).collect())
+    }
+    /// The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row, the same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees null (no credit).
+    #[graphql(name = "customerCredit", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn customer_credit(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerCredit>> {
+        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+            return Ok(None);
+        };
+        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
+        let Some(customer) = customers
+            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;
+        let row = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(CustomerCredit::from))
     }
     /// The active Captain service-fee policy (admin; calibration/transparency).
     #[graphql(name = "pricingPolicy", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
