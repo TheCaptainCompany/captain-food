@@ -122,6 +122,19 @@ none, because it manufactures false confidence.
 ones made minutes earlier in the same turn. It cost a re-do of this very section. Commit first, or
 use `git checkout <branch>` and let git refuse the switch when it would clobber something.
 
+**After a context compaction (or any "Continue from where you left off"), your own recent actions may
+be missing from what you remember — CHECK THE REPO before re-creating anything.** On 2026-08-07 a
+session claimed #358, opened its draft PR, pushed two commits — then a compaction resumed it from an
+earlier checkpoint, and it re-created the SAME realization backlog as seven duplicate issues
+(#366–#372, closed as duplicates) and committed a docs change onto the #358 work branch without
+noticing HEAD had moved. Two rules. Before creating issues/branches/PRs after any resume, spend 30
+seconds on: `git reflog -5` + `git branch --show-current` + read the tracking issue's last comments —
+**the claim comment carries the session link, so grep it for YOUR OWN session id**: if it is yours,
+the "other session" is you, pre-compaction, and the work is yours to continue, not to redo. And
+verify `git branch --show-current` immediately before EVERY commit on `main` — an unnoticed branch
+switch put a `main` commit on a feature branch, and `git push origin main` then reported
+"Everything up-to-date" because local `main` genuinely matched origin while HEAD sat elsewhere.
+
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
 `df` reporting `Avail 0` with a low `Used` figure means the **allowance** is spent, not that the

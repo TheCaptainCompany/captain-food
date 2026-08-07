@@ -42,6 +42,22 @@
 > complete"; realization issues land under
 > [#271](https://github.com/TheCaptainCompany/captain-food/issues/271). PROP-20260806-223656 is
 > `Approved`; §2b carries the ten operating practices.
+> **Realization backlog CREATED and STARTED** (ordered index on
+> [#271](https://github.com/TheCaptainCompany/captain-food/issues/271)):
+> 🚧 [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) MKS bootstrap — **claimed,
+> draft PR [#365](https://github.com/TheCaptainCompany/captain-food/pull/365)**, OVH auth shape
+> established + node trio priced (MKS Free plan + d2-8 trio + LB S ≈ EUR 67.80/mo ex-VAT — d2-4 too
+> thin for the ~8.5 Gi request budget); console steps need the product owner live ·
+> [#361](https://github.com/TheCaptainCompany/captain-food/issues/361) NS Dynadot→OVH DNS (**product
+> owner live — Dynadot login**) ·
+> [#359](https://github.com/TheCaptainCompany/captain-food/issues/359) Argo CD ·
+> [#360](https://github.com/TheCaptainCompany/captain-food/issues/360) CNPG ·
+> [#362](https://github.com/TheCaptainCompany/captain-food/issues/362) ingress/TLS + sealed secrets ·
+> [#349](https://github.com/TheCaptainCompany/captain-food/issues/349) manifests emitter (D5) ·
+> [#363](https://github.com/TheCaptainCompany/captain-food/issues/363) deploy.yml→GitOps ·
+> [#364](https://github.com/TheCaptainCompany/captain-food/issues/364) observability/alert loop.
+> (#366–#372 were an accidental duplicate set — created after a context compaction hid this very
+> session's own claim — and are closed as duplicates; the lesson is in sessions.md.)
 
 > 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH — ⚠️ REOPENED, see above
 > ([ADR-20260806-151122](adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
