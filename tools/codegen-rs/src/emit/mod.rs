@@ -2,6 +2,7 @@
 
 pub(crate) mod actor_clients; // actor_client crate: typed per-actor mailbox clients (#284) + addressing tables (#290)
 pub(crate) mod behaviour_tests; // application behaviour_tests.rs from tests.yaml (§7 corpus)
+pub(crate) mod bins; // per-deployable bin crates under crates/bins/ (#382, ADR-20260807-183024 step 3)
 pub(crate) mod docs; // documentation.generated.{md,html} + context map + story parsing
 pub(crate) mod domain_scopes; // per-scope domain crates + kernel + crate graph (#373)
 pub(crate) mod pm_orchestrators; // application process_managers.rs (typed-step PM legs)
@@ -16,6 +17,7 @@ pub(crate) mod web; // web crate: tokens CSS, SDUI registry, data layer, screens
 
 pub(crate) use actor_clients::*;
 pub(crate) use behaviour_tests::*;
+pub(crate) use bins::*;
 pub(crate) use docs::*;
 pub(crate) use domain_scopes::*;
 pub(crate) use pm_orchestrators::*;

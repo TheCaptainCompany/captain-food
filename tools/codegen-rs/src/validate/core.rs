@@ -1261,6 +1261,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     // kernel purity, api nested-intra-scope. No-op on a flat layout (fixtures have no scope dirs).
     validate_scopes(model, &mut issues);
 
+    // --- 15. Bin topology ↔ c4-l2 containers (ADR-20260807-183024 step 3, #382): derived bins
+    // and the container list may not drift, either direction. No-op without containers/scopes.
+    validate_bin_topology(model, &mut issues);
+
     // --- 11. SDUI screens (screens/*.yaml, one file per app/audience): each app's spec is bound to the
     // API (ADR-0033/0037). Generic over all screens files — no hard-coded screens filename. Each screen
     // declares `roles` (⊆ UserType) and the file declares `app_types` (⊆ web|ios|android|windows).
