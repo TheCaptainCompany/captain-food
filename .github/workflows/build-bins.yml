@@ -1,0 +1,178 @@
+# Per-bin build matrix + determinator gate (#363, ADR-20260807-183024 step 5) -- ADDITIVE and
+# NON-REQUIRED alongside the monolith pipeline (build-image.yml stays authoritative for what
+# actually runs; ADR-20260730-051500's build/deploy isolation is preserved unchanged).
+#
+# Two jobs, one bias -- FAIL OPEN TO REBUILDING, NEVER TO SKIPPING (the settled #363 protocol:
+# a false "changed" costs one useless rebuild; a false "unchanged" ships stale production
+# silently). The decision logic lives in the TESTED tool (tools/codegen-rs, bin `determinator`
+# -- the guppy `determinator` library over the workspace graph + repo path rules); this workflow
+# only wires git plumbing to it and treats every tool failure as "everything is affected".
+#
+# - `affected` (pull_request): computes which bins the PR's diff can reach (spec-derived crate
+#   graph, not a hand list) and builds + tests exactly those. A docs-only PR builds nothing; a
+#   domain-scope PR builds that scope's bins; anything ambiguous builds all 49.
+# - `publish` (workflow_run after green ci on main): compares each bin's SOURCE-CLOSURE hash
+#   (git blob shas, `determinator hash`) against the deploy ledger deploy/pins/{bin}.json
+#   (ADR-20260807-220528: pins are emitter input; {digest, source_hash}) and builds + pushes
+#   per-bin images ONLY for hash-changed bins. Rust builds are not bit-reproducible, so the skip
+#   keys on source, never on digest -- otherwise an unconditional rebuild would mint new digests
+#   for identical source, bump every pin, and restart every Recreate Deployment for a docs
+#   commit (the exact failure the per-bin split exists to prevent).
+#   On tool error the job FAILS LOUDLY and publishes nothing: that is still fail-safe, because
+#   deploy-bins.yml refuses to pin a tag that was never published -- staleness cannot ship
+#   silently, it can only block visibly.
+#
+# One shared cargo-chef cook: deploy/generated/Dockerfile.bin declares ARG BIN strictly AFTER
+# the cook layer, so every per-bin build in the loop below reuses one cooked dependency layer
+# (local + GHA cache, scope=bins to stay clear of the monolith image's cache).
+name: build-bins
+
+on:
+  pull_request:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-bins-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NS: ghcr.io/thecaptaincompany/captain-food
+
+jobs:
+  affected:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # need the merge-base commit AND a worktree of it for the base cargo metadata
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Every failure path here falls through to "__all__" -- the asserted fail-open property
+      # one level up from the tool's own (tested) fail-open. Deliberately NO `set -e`: an
+      # early exit on a failed step would end the job green WITHOUT a decision.
+      - name: Compute the affected bin set (fail open to ALL on any doubt)
+        id: affected
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+          decide_all() {
+            echo "::warning::affected-set fallback to ALL bins: $1"
+            echo "affected=__all__" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          MB=$(git merge-base "$BASE_SHA" "$HEAD_SHA") || decide_all "merge-base unresolvable"
+          git diff --name-only "$MB" "$HEAD_SHA" > /tmp/changed.txt || decide_all "diff failed"
+          echo "changed files since merge-base $MB:"; cat /tmp/changed.txt
+          # Base-revision cargo metadata (a worktree, so the determinator library can also diff
+          # the two dependency graphs -- feature/dependency changes a file list would miss).
+          git worktree add /tmp/base-tree "$MB" || decide_all "base worktree failed"
+          (cd /tmp/base-tree && cargo metadata --format-version 1 > /tmp/base-metadata.json) \
+            || decide_all "base cargo metadata failed"
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml --bin determinator -- \
+            affected --changed-files /tmp/changed.txt --base-metadata /tmp/base-metadata.json \
+            > /tmp/affected.json || decide_all "determinator exited non-zero"
+          cat /tmp/affected.json
+          all=$(jq -r '.all' /tmp/affected.json) || decide_all "unreadable decision"
+          if [ "$all" = "true" ]; then
+            decide_all "$(jq -r '.reason // "full blast radius"' /tmp/affected.json)"
+          fi
+          bins=$(jq -r '.affected_bins | join(" ")' /tmp/affected.json) || decide_all "unreadable bin list"
+          echo "affected=$bins" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test the affected bins
+        env:
+          AFFECTED: ${{ steps.affected.outputs.affected }}
+        run: |
+          set -euo pipefail
+          if [ "$AFFECTED" = "__all__" ]; then
+            bins=$(jq -r '.images | keys | join(" ")' deploy/generated/images.json)
+          else
+            bins="$AFFECTED"
+          fi
+          if [ -z "$bins" ]; then
+            echo "no bins affected by this change -- nothing to build (a docs commit builds nothing)"
+            exit 0
+          fi
+          echo "building + testing: $bins"
+          flags=""
+          for b in $bins; do flags="$flags -p $b"; done
+          # shellcheck disable=SC2086 # word-splitting the -p flags is the point
+          cargo build $flags
+          cargo test $flags
+
+  publish:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330 # worst case (Cargo.lock/kernel ripple) rebuilds all 49 bins sequentially
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }} # the exact commit that passed ci
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Compare source-closure hashes against the pin ledger
+        id: changed
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml --bin determinator -- \
+            hash --pins deploy/pins > /tmp/hashes.json
+          jq '{changed, unchanged: (.unchanged | length)}' /tmp/hashes.json
+          echo "bins=$(jq -r '.changed | join(" ")' /tmp/hashes.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.changed.outputs.bins != ''
+
+      - name: Log in to GHCR
+        if: steps.changed.outputs.bins != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # scoped by this job's `packages: write`
+
+      - name: Build and push the hash-changed bin images (one shared chef cook)
+        if: steps.changed.outputs.bins != ''
+        env:
+          BINS: ${{ steps.changed.outputs.bins }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          short="${SHA:0:7}"
+          for b in $BINS; do
+            h=$(jq -r --arg b "$b" '.hashes[$b]' /tmp/hashes.json)
+            echo "::group::build+push $b (source_hash $h)"
+            docker buildx build \
+              -f deploy/generated/Dockerfile.bin \
+              --build-arg BIN="$b" \
+              --build-arg SOURCE_HASH="$h" \
+              --build-arg CAPTAIN_BUILD_VERSION="$short" \
+              --tag "$IMAGE_NS/$b:sha-$short" \
+              --provenance=false \
+              --push \
+              --cache-from type=gha,scope=bins \
+              --cache-to type=gha,mode=max,scope=bins \
+              .
+            echo "::endgroup::"
+          done
+          echo "published $(echo "$BINS" | wc -w) image(s); the ledger is written ONLY by deploy-bins.yml (manual dispatch)"
+
+      - name: Nothing changed
+        if: steps.changed.outputs.bins == ''
+        run: echo "every bin's source closure matches the pin ledger -- nothing to build or publish"

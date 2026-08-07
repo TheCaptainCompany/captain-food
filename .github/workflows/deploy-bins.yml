@@ -1,0 +1,98 @@
+# Per-bin GitOps deploy: write the {digest, source_hash} pin ledger (#363, ADR-20260807-183024
+# step 5; pin discipline per ADR-20260807-220528) -- MANUAL DISPATCH, and GATED: nothing applies
+# the generated manifests yet (no Argo CD until #366), so this workflow changes only the LEDGER,
+# never what runs. The monolith deploy.yml remains the authoritative deploy path until cutover
+# (#358). ADR-20260730-051500's posture carries over: publishing images is automatic
+# (build-bins.yml), changing the deployed-state record is a deliberate human dispatch.
+#
+# What one dispatch does (the settled #363 protocol, two-level skip):
+#   1. Recompute every bin's source-closure hash (`determinator hash`, tested tool) and compare
+#      with deploy/pins/{bin}.json -- repo-vs-repo, atomic with the pin.
+#   2. For ONLY the hash-changed bins: resolve the per-bin image digest published by
+#      build-bins.yml for THIS commit, verify the image's food.captain.source-hash label matches
+#      the computed hash (forensic belt -- refuse to pin an image whose recorded source is not
+#      the source being deployed), and write the pin.
+#   3. Regenerate deploy/generated/** (pins are emitter INPUT: the digest is baked into the
+#      Deployment manifests) and push pins + manifests as ONE commit -- so Argo (once live)
+#      syncs once and restarts only the changed Deployments. `git log -- deploy/pins` IS the
+#      deploy history; `git revert` of a pin commit is per-image rollback.
+#
+# Failure posture: every ambiguity here FAILS THE RUN before writing anything -- a missing tag
+# means build-bins has not finished (or failed) for this commit; a label mismatch means the
+# registry holds something other than what this tree says. Neither may become a pin.
+name: deploy-bins
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # pushes the pin-bump commit to main
+  packages: read
+
+concurrency:
+  group: deploy-bins
+  cancel-in-progress: false
+
+env:
+  IMAGE_NS: ghcr.io/thecaptaincompany/captain-food
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5 # main HEAD at dispatch time; push happens back to main below
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Log in to GHCR (read -- resolve digests + verify source-hash labels)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write the hash-changed pins, regenerate manifests, push ONE commit
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml --bin determinator -- \
+            hash --pins deploy/pins > /tmp/hashes.json
+          changed=$(jq -r '.changed | join(" ")' /tmp/hashes.json)
+          if [ -z "$changed" ]; then
+            echo "ledger already matches source -- nothing to deploy"
+            exit 0
+          fi
+          short="${GITHUB_SHA:0:7}"
+          summary=""
+          for b in $changed; do
+            h=$(jq -r --arg b "$b" '.hashes[$b]' /tmp/hashes.json)
+            img="$IMAGE_NS/$b"
+            digest=$(docker buildx imagetools inspect "$img:sha-$short" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"') || true
+            if [ -z "${digest:-}" ]; then
+              echo "::error::$b: no published image $img:sha-$short -- did build-bins finish green for this commit?"
+              exit 1
+            fi
+            label=$(docker buildx imagetools inspect "$img:sha-$short" \
+              --format '{{index .Image.Config.Labels "food.captain.source-hash"}}' || true)
+            if [ "$label" != "$h" ]; then
+              echo "::error::$b: published source-hash label '$label' != computed '$h' -- refusing to pin"
+              exit 1
+            fi
+            jq -n --arg d "$digest" --arg h "$h" '{digest: $d, source_hash: $h}' > "deploy/pins/$b.json"
+            summary="$summary $b=sha-$short"
+          done
+          # Pins are generator input (ADR-20260807-220528): the pin bump and the manifest change
+          # it implies land as ONE commit, or check-drift would fail the next ci run.
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --specs specs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/pins deploy/generated
+          git commit -m "deploy:$summary" \
+            -m "Pin-bump commit (#363 deploy ledger, ADR-20260807-220528): {digest, source_hash} for the hash-changed bins only + the regenerated manifests that bake the digests in. Per-image rollback = git revert of this commit."
+          git push origin HEAD:main || {
+            echo "::error::push rejected -- main moved during this run (or a ruleset blocked it); re-dispatch"
+            exit 1
+          }
+          echo "pinned:$summary"

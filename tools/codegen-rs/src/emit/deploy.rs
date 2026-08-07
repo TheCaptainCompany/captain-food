@@ -468,10 +468,13 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
-ARG BIN
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
+# ARG BIN is declared strictly AFTER the cook: a RUN that follows an ARG keys its layer cache on
+# the ARG's value, so declaring BIN earlier would give every bin its own cook -- 49 dependency
+# compiles instead of the one shared cook the matrix build relies on (#363).
+ARG BIN
 RUN cargo build --release -p "${BIN}"
 
 FROM debian:bookworm-slim AS runtime
@@ -480,11 +483,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/${BIN} /usr/local/bin/app
 # Build identity (ADR-20260721-175411): declared in the FINAL stage only, so a new SHA never
-# invalidates the cached cook layers. The bin shell reports it at /health.
+# invalidates the cached cook layers. The bin shell reports it at /health. SOURCE_HASH is the
+# #363 source-closure hash baked in as a forensic label -- the pin ledger
+# (deploy/pins/{bin}.json) stays the authoritative compare (repo-vs-repo, ADR-20260807-220528);
+# the label lets an image on the registry answer "what source produced you?" on its own.
 ARG CAPTAIN_BUILD_VERSION=dev
+ARG SOURCE_HASH=unknown
 ENV CAPTAIN_BUILD_VERSION=$CAPTAIN_BUILD_VERSION
 LABEL org.opencontainers.image.revision=$CAPTAIN_BUILD_VERSION \
-      org.opencontainers.image.source=https://github.com/TheCaptainCompany/captain-food
+      org.opencontainers.image.source=https://github.com/TheCaptainCompany/captain-food \
+      food.captain.source-hash=$SOURCE_HASH
 CMD ["app"]
 "#
     .to_string()
