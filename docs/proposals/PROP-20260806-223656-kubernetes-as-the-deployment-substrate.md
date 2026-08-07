@@ -173,6 +173,30 @@ per-pod attack surface.
   the single image — this generalizes it to a per-image matrix. Honest corollary: a `Cargo.lock`
   bump or a shared-crate (`domain`, generated code) change ripples every closure and legitimately
   rebuilds everything — that is correctness, not a bug in the detection.
+  **Detection protocol (settled with the product owner, 2026-08-07)** — *fail open to REBUILDING,
+  never to skipping* (a false "changed" costs one useless restart; a false "unchanged" ships stale
+  production silently): (1) per-bin hash = the `cargo metadata`-derived workspace-crate closure
+  (mechanically derived, never hand-listed) hashed via **git's own blob shas**
+  (`git ls-tree -r HEAD -- <crate dirs>`, sorted `(path, blob)` list — content-addressed, no file
+  reads, timestamp-immune) + the global inputs whose change rebuilds everything (`Cargo.lock`
+  wholesale in v1 — sound but coarse; per-bin `cargo tree` is the v2 refinement if lock churn
+  proves noisy — `rust-toolchain.toml`, the Dockerfile, `build-image.yml` itself) + the `web`
+  closure for surface images (wasm inputs); (2) the last-published hash lives **in the GitOps pin
+  file** — each pin becomes `{digest, source_hash}`, so the compare is repo-vs-repo, atomic with
+  the pin and auditable in git log (the OCI annotation is kept as forensic belt); (3) the skip is
+  **two-level**, preserving ADR-20260730-051500's isolation: `build-image` (auto) builds/publishes
+  only hash-changed images via one shared cargo-chef cook fanning to the changed final stages;
+  `deploy` (manual dispatch) writes only hash-changed pins in ONE commit, so Argo syncs once and
+  restarts only those Deployments; (4) **completeness is a codegen TEST**: every bin crate maps to
+  exactly one image and back — a new bin without a mapping is a build failure, not a workload that
+  silently never deploys. Net effect: a docs commit builds and restarts nothing; a single-surface
+  change builds one image and restarts one pod, and the Order drain never blinks.
+  **Node budget CONFIRMED (product owner, 2026-08-07: "Ok for your config")**: d2-8 + d2-4 + LB S
+  = €38.04/mo ex-VAT — the entry rung for the full-split topology (6× d2-2 was examined and
+  rejected: d2-2 does not appear in the MKS worker-flavor catalog, per-node overhead would eat
+  ~30% of usable RAM across six 1-vCPU nodes for MORE money, and node count does not protect
+  singletons — replicas do, and replicas wait on #242; granularity comes from per-flavor node
+  POOLS later).
 - **Bills**: per-pod sqlx pools become small DECLARED values (2–3; pgbouncer as the later escape
   hatch); the full shape wants two nodes from day one — **d2-8 + d2-4 + LB S ≈ €38.04/mo ex-VAT**
   (within ADR-20260807-114122's ladder; the single-d2-8 €26.60 rung is too snug for ~25 pods). The
