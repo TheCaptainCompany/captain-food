@@ -12,116 +12,146 @@ checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 name = "actor-cart"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-catalog"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-catalog",
  "domain-common",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-conversation"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-comms",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-customer"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-customer",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-customer-credit"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-delivery-job"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-delivery",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-delivery-partner-registration"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-delivery",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-mailbox-supervision"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-order"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-payment"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-prospect"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-network",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-reclamation"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-restaurant"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-network",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-restaurant-account"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-network",
+ "tokio",
 ]
 
 [[package]]
 name = "actor-rider"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-delivery",
+ "tokio",
 ]
 
 [[package]]
@@ -157,6 +187,10 @@ dependencies = [
 [[package]]
 name = "adapters"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "aead"
@@ -568,6 +602,7 @@ dependencies = [
 name = "bam"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-catalog",
  "domain-common",
  "domain-comms",
@@ -576,6 +611,7 @@ dependencies = [
  "domain-network",
  "domain-ordering",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
@@ -623,14 +659,26 @@ dependencies = [
 [[package]]
 name = "bo-admin"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "bo-restaurant"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "bo-rider"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "bumpalo"
@@ -1606,10 +1654,18 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 [[package]]
 name = "fo-marketplace"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "fo-storefront"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "foldhash"
@@ -1753,30 +1809,58 @@ dependencies = [
 [[package]]
 name = "gateway-admin"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-customer"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-external"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-public"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-restaurant"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-restaurant-account"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "gateway-rider"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
 
 [[package]]
 name = "generic-array"
@@ -1885,56 +1969,72 @@ dependencies = [
 name = "graphql-catalog"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-catalog",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-common"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-comms"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-comms",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-customer"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-customer",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-delivery"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-delivery",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-network"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-network",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-ordering"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "graphql-payments"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
@@ -3210,43 +3310,53 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "pm-cart-binding"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-customer",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "pm-delivery-dispatch"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-delivery",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "pm-place-order"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
 name = "pm-reclamation"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
 name = "pm-refund"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
@@ -3392,49 +3502,63 @@ dependencies = [
 name = "projector-catalog"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-catalog",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-comms"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-comms",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-customer"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-customer",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-delivery"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-delivery",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-network"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-network",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-ordering"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-ordering",
+ "tokio",
 ]
 
 [[package]]
 name = "projector-payments"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "domain-payments",
+ "tokio",
 ]
 
 [[package]]
