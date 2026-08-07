@@ -140,6 +140,11 @@ pub struct ProcessManagerRunner {
     /// drops whole; RefundProcess keeps only its refund-OPENING legs (order facts are not in
     /// D-B's scope). The runner retires fully at the gate's default flip.
     pm_mailboxes: bool,
+    /// Registry slice this runner drains: `None` = every PM (the monolith's in-process runner);
+    /// `Some(name)` = only that PM — the `pm-{name}` bins (#385, ADR-20260807-183024) each host
+    /// their own. Per-PM checkpoints (`pm:<Name>`) make the split free: a filtered runner
+    /// advances exactly the rows a full runner would for that PM.
+    only: Option<&'static str>,
     status: Arc<Mutex<ProcessManagerStatus>>,
     /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY PM.
     /// `-1` means nothing observed yet, so the first tick after start always drains.
@@ -160,6 +165,7 @@ impl ProcessManagerRunner {
             partner: Arc::new(NoopDeliveryService),
             payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
             pm_mailboxes: false,
+            only: None,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
             last_head: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
@@ -171,6 +177,23 @@ impl ProcessManagerRunner {
     pub fn with_pm_mailboxes(mut self, on: bool) -> Self {
         self.pm_mailboxes = on;
         self
+    }
+
+    /// Restrict this runner to ONE named process manager (its spec name, e.g.
+    /// `"CartBindingProcess"`) — the `pm-{name}` bin posture (#385). A name matching no
+    /// registered PM is a wiring bug the loop start reports loudly (zero groups drained is
+    /// indistinguishable from idle otherwise).
+    pub fn with_only(mut self, pm: &'static str) -> Self {
+        self.only = Some(pm);
+        self
+    }
+
+    /// The registry slice this runner drains (name-filtered when restricted).
+    fn groups(&self) -> impl Iterator<Item = &'static PmGroup> {
+        let only = self.only;
+        REGISTRY
+            .iter()
+            .filter(move |g| only.is_none_or(|name| g.checkpoint.strip_prefix("pm:") == Some(name)))
     }
 
     /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
@@ -226,6 +249,14 @@ impl ProcessManagerRunner {
     /// keeps the unassisted 1.5 s cadence; with a waiter the fallback interval tracks whether the
     /// listener is actually up, so losing push restores fast polling instead of delaying sagas.
     pub async fn run_loop_with(self, mut wake: Option<crate::persistence::event_wake::EventWaiter>) {
+        // A restricted runner draining ZERO groups is a wiring bug (a with_only name matching no
+        // registered PM), not an idle runner — say so once, loudly, before the silent loop starts.
+        if self.groups().next().is_none() {
+            tracing::error!(
+                only = ?self.only,
+                "saga runner: restriction matches NO registered process manager -- nothing will ever drain"
+            );
+        }
         self.status_mut().running = true;
         let runner = std::sync::Arc::new(self);
         loop {
@@ -258,7 +289,7 @@ impl ProcessManagerRunner {
             return Ok(TickOutcome { checkpoint: head, head, surfaced: Vec::new() });
         }
         let mut surfaced = Vec::new();
-        for group in REGISTRY {
+        for group in self.groups() {
             self.drain_group(group, &mut surfaced).await?;
         }
         // Only a pass that drained EVERY PM may arm the gate — an aborted leg returns above with the

@@ -71,7 +71,7 @@ pub fn standalone_workers_enabled() -> bool {
 /// this value: the caller retries until the database answers, because a fleet that cannot reach
 /// the database has nothing to deliver anyway — and a guessed posture is the exact stall the
 /// row exists to remove.
-async fn pm_gate_posture(pool: &sqlx::PgPool, adapter: &'static str) -> Option<bool> {
+pub async fn pm_mailbox_delivery_posture(pool: &sqlx::PgPool, adapter: &'static str) -> Option<bool> {
     use crate::persistence::runtime_posture::{self, PostureRead};
     let mut attempt = 0u32;
     loop {
@@ -161,11 +161,36 @@ mod tests {
     }
 }
 
-/// Fully Pg-backed [`CommandDeps`] for a standalone adapter process. External services the
-/// adapter's lanes never exercise are fail-closed stand-ins; `payments` is injected because only
-/// the caller knows whether its deployment carries Stripe credentials (the Stripe adapter does,
-/// a delivery adapter does not).
+/// Fully Pg-backed [`CommandDeps`] for a process hosting mailbox workers OUTSIDE the monolith
+/// composition root — a standalone adapter, or a per-actor bin (#385). External services resolve
+/// exactly like the monolith's: ENV-GATED with the fail-closed stand-in as the default —
+/// identity is the real Supabase ACL when `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set
+/// (else auth-dependent deliveries decline), sessions are the encrypted Pg store when
+/// `AUTH_SESSION_KEY` is set (else the no-op). `payments` stays injected because only the caller
+/// knows whether its deployment carries Stripe credentials AND only bins whose spec declares the
+/// `payment` port link the Stripe adapter (the adapter crate sits above this one).
 pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
+    let auth: Arc<dyn IdentityService> = match crate::SupabaseIdentityService::from_env() {
+        Some(adapter) => {
+            tracing::info!(binding = "identity", impl_ = "SupabaseIdentityService", "standalone deps: identity service wired (SUPABASE_URL set)");
+            Arc::new(adapter)
+        }
+        None => {
+            tracing::warn!(binding = "identity", impl_ = "FailClosedIdentityService", "standalone deps: SUPABASE_URL/PUBLISHABLE_KEY unset -- identity-dependent deliveries decline");
+            Arc::new(crate::FailClosedIdentityService)
+        }
+    };
+    let sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
+        match crate::PgAuthSessionStore::from_env(pool.clone()) {
+            Some(store) => {
+                tracing::info!(binding = "auth_sessions", impl_ = "encrypted Pg store", "standalone deps: auth session store wired (AUTH_SESSION_KEY set)");
+                Arc::new(store)
+            }
+            None => {
+                tracing::warn!(binding = "auth_sessions", "standalone deps: AUTH_SESSION_KEY unset -- session-cookie deliveries are no-ops");
+                Arc::new(application::auth_sessions::NoopAuthSessionStore)
+            }
+        };
     CommandDeps {
         store: Arc::new(crate::persistence::PgEventStore::new(pool.clone())),
         restaurants: Arc::new(crate::persistence::PgRestaurantRepository::new(pool.clone())),
@@ -174,9 +199,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         probe: Arc::new(crate::UnverifiedGbpOrderLinkProbe),
         prospection: Arc::new(crate::persistence::PgProspectionRepository::new(pool.clone())),
         catalogs: Arc::new(crate::persistence::PgCatalogRepository::new(pool.clone())),
-        auth: Arc::new(crate::FailClosedIdentityService) as Arc<dyn IdentityService>,
+        auth,
         customers: Arc::new(crate::persistence::PgCustomerRepository::new(pool.clone())),
-        sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
+        sessions,
         payments,
         pm_state: Arc::new(crate::persistence::PgPaymentProcessState::new(pool.clone())),
         refund_state: Arc::new(crate::persistence::PgRefundProcessState::new(pool.clone())),
@@ -202,11 +227,28 @@ pub fn spawn_standalone_workers(
     nudges: Arc<MailboxNudges>,
     reminder_windows: std::collections::HashMap<&'static str, i64>,
 ) {
+    spawn_standalone_workers_with(pool, adapter, actor_types, payments, nudges, reminder_windows, None)
+}
+
+/// [`spawn_standalone_workers`] with an explicit [`actor_runtime::WorkerConfig`] — the per-actor
+/// bins (#385) build it from their GENERATED configuration (the declared `MAILBOX_*` keys),
+/// exactly like the monolith composition root does, so cadence/lease/poison-cap tuning reaches a
+/// bin the same way it reaches the monolith. `None` keeps the adapter behaviour: spec defaults
+/// with the `MAILBOX_MAX_DELIVERY_ATTEMPTS` env override (an adapter binary has no Config reader).
+pub fn spawn_standalone_workers_with(
+    pool: PgPool,
+    adapter: &'static str,
+    actor_types: &'static [&'static str],
+    payments: Arc<dyn PaymentService>,
+    nudges: Arc<MailboxNudges>,
+    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    worker_config: Option<actor_runtime::WorkerConfig>,
+) {
     // The whole fleet spawn rides ONE task: the money posture is a database read (#318), and
     // NOTHING spawns until it resolves — spawning the non-money lanes early would only race the
     // answer, and a fleet that cannot reach the database has nothing to deliver anyway.
     tokio::spawn(async move {
-        run_standalone_workers(pool, adapter, actor_types, payments, nudges, reminder_windows)
+        run_standalone_workers(pool, adapter, actor_types, payments, nudges, reminder_windows, worker_config)
             .await;
     });
 }
@@ -218,6 +260,7 @@ async fn run_standalone_workers(
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
     mut reminder_windows: std::collections::HashMap<&'static str, i64>,
+    worker_config: Option<actor_runtime::WorkerConfig>,
 ) {
     // MONEY-LANE POSTURE CHECK: the posture comes from the shared RuntimePosture row (#318,
     // ADR-20260803-104819) — the SAME row the monolith reads, so a fleet can no longer
@@ -225,7 +268,7 @@ async fn run_standalone_workers(
     // monolith running `true` records captures without chaining, and the hop is lost until a
     // monolith restart. UNPROVABLE (row/table missing — deterministic for every reader of the
     // same state) refuses those lanes; a transient read error retries above, never guesses.
-    let posture = pm_gate_posture(&pool, adapter).await;
+    let posture = pm_mailbox_delivery_posture(&pool, adapter).await;
     let actor_types = filter_lanes_by_posture(actor_types, posture, adapter);
     // Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when
     // the caller wired none (the monolith reads Config; an adapter fleet has no Config reader) —
@@ -341,14 +384,14 @@ async fn run_standalone_workers(
         tracing::warn!(adapter, toggle = "RUN_MAILBOX_PUSH", "mailbox push OFF -- workers poll at the heartbeat cadence");
         None
     };
-    let worker_config = actor_runtime::WorkerConfig {
+    let worker_config = worker_config.unwrap_or_else(|| actor_runtime::WorkerConfig {
         max_delivery_attempts: std::env::var("MAILBOX_MAX_DELIVERY_ATTEMPTS")
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
             .map(|v| v.clamp(0, i16::MAX as i64) as i16)
             .unwrap_or(actor_runtime::WorkerConfig::default().max_delivery_attempts),
         ..actor_runtime::WorkerConfig::default()
-    };
+    });
     let worker_count = actor_types.len();
     for actor_type in actor_types {
         let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {

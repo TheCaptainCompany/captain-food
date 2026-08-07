@@ -53,6 +53,15 @@ pub(crate) struct BinSpec {
     pub(crate) role: Option<String>,
     /// Domain-scope crates the bin's manifest links, by scope name (⊆ emitted scope crates).
     pub(crate) domain_scopes: BTreeSet<String>,
+    /// The outbound service ports the realized actor/PM DECLARES (`ports:` in actors.yaml /
+    /// processmanager.yaml, union across both defs) — what decides which integration-adapter
+    /// crates the wired main links (#385): `payment` ⇒ the Stripe adapter, `delivery` ⇒ the
+    /// delivery-partner composite. Derived, never a hand-curated money-bin list.
+    pub(crate) ports: BTreeSet<String>,
+    /// The realized actor declares a durable mailbox (`mailbox.partitions`) — its bin hosts the
+    /// lane's worker fleet. All 15 aggregates and the two money PMs; the three state-table PMs
+    /// host only the restricted saga runner.
+    pub(crate) mailboxed: bool,
 }
 
 /// `RESTAURANT_ACCOUNT` → `restaurant-account`: the role's path segment (`/{path}/graphql`,
@@ -71,6 +80,27 @@ pub(crate) fn user_type_roles(model: &Model) -> Vec<String> {
         .and_then(|e| e.as_sequence())
         .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
         .unwrap_or_default()
+}
+
+/// The declared `ports:` and `mailbox:` of one actor/PM, unioned across its actors.yaml and
+/// processmanager.yaml defs (a PM may carry orchestration in one and the mailbox in the other).
+fn actor_meta(model: &Model, actor: &str) -> (BTreeSet<String>, bool) {
+    let mut ports = BTreeSet::new();
+    let mut mailboxed = false;
+    for file in ["actors.yaml", "processmanager.yaml"] {
+        let Some(def) = model.defs.get(file).and_then(|d| d.get(actor)) else { continue };
+        if let Some(p) = def.get("ports").and_then(|p| p.as_mapping()) {
+            for (k, _) in p {
+                if let Some(k) = k.as_str() {
+                    ports.insert(k.to_string());
+                }
+            }
+        }
+        if def.get("mailbox").and_then(|m| m.get("partitions")).is_some() {
+            mailboxed = true;
+        }
+    }
+    (ports, mailboxed)
 }
 
 /// The c4-l2 container ids that are SURFACE bins (`fo-*`, `bo-*`, `adapters`) or the `bam`
@@ -104,6 +134,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
     let mut out: Vec<BinSpec> = Vec::new();
     // actor-* / pm-*: deps are the spec-declared reach (the PM's refs ARE its dependency list).
     for (actor, is_pm, scopes) in actor_scope_links(model) {
+        let (ports, mailboxed) = actor_meta(model, &actor);
         out.push(BinSpec {
             name: actor_bin_name(&actor, is_pm),
             family: if is_pm { "pm" } else { "actor" },
@@ -111,6 +142,8 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             scope: None,
             role: None,
             domain_scopes: scopes.intersection(&emitted).cloned().collect(),
+            ports,
+            mailboxed,
         });
     }
     // projector-{scope}: every non-kernel scope projects its own views schema (D4). The kernel
@@ -128,6 +161,8 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
                 scope: Some(scope.clone()),
                 role: None,
                 domain_scopes: BTreeSet::from([scope.clone()]),
+                ports: BTreeSet::new(),
+                mailboxed: false,
             });
         }
         out.push(BinSpec {
@@ -137,6 +172,8 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             scope: Some(scope.clone()),
             role: None,
             domain_scopes: BTreeSet::from([scope.clone()]),
+            ports: BTreeSet::new(),
+            mailboxed: false,
         });
     }
     // gateway-{role}: thin generated routing per role path — NO domain crates, no DB, no state
@@ -149,6 +186,8 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             scope: None,
             role: Some(role),
             domain_scopes: BTreeSet::new(),
+            ports: BTreeSet::new(),
+            mailboxed: false,
         });
     }
     // Surface bins (assets/SSR/webhooks — speak to their role gateway, hold no domain
@@ -163,6 +202,8 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             scope: None,
             role: None,
             domain_scopes: BTreeSet::new(),
+            ports: BTreeSet::new(),
+            mailboxed: false,
         });
     }
     if bam {
@@ -173,19 +214,23 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             scope: None,
             role: None,
             domain_scopes: emitted.clone(),
+            ports: BTreeSet::new(),
+            mailboxed: false,
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
 }
 
-/// One generated bin crate: directory, manifest, `src/main.rs`.
+/// One generated bin crate: directory, manifest, `src/main.rs` (+ `src/config.rs` when wired).
 pub(crate) struct BinCrate {
     pub(crate) name: String,
     /// Directory relative to the repo root, e.g. `crates/bins/actor-order`.
     pub(crate) dir: String,
     pub(crate) manifest: String,
     pub(crate) main: String,
+    /// The scope-filtered generated Config reader (#374 Q4) — `Some` for wired families only.
+    pub(crate) config: Option<String>,
 }
 
 /// One line of purpose per family, for the manifest description and the main.rs doc.
@@ -217,10 +262,18 @@ fn family_purpose(b: &BinSpec) -> String {
     }
 }
 
+/// Is this family WIRED as a business runtime (#385: the CQRS spine — actor/pm fleets over the
+/// standalone mailbox runtime, the restricted saga runner, the scope-filtered projector)?
+/// `subgraph`/`gateway`/`surface`/`worker` remain probe shells: their wiring is the recorded
+/// remainder on #385.
+pub(crate) fn wired(b: &BinSpec) -> bool {
+    matches!(b.family, "actor" | "pm" | "projector")
+}
+
 /// The manifest of one bin crate. The domain `[dependencies]` are the bin's SCOPE ASSERTION —
-/// exactly the crate-graph entry; the ONLY additions are the probe-shell runtime (axum + tokio,
-/// step 4's /health + /ping contract). No sqlx, no reqwest, no application/infrastructure until
-/// the business wiring lands (tracked on #349).
+/// exactly the crate-graph entry. WIRED families (#385) additionally link the composition kit
+/// (`bin_runtime`) and — ONLY where the spec declares the port — the matching integration
+/// adapters; shell families keep the step-4 probe runtime (axum + tokio) and nothing else.
 fn bin_manifest(b: &BinSpec) -> String {
     let mut deps = String::new();
     for s in &b.domain_scopes {
@@ -231,27 +284,47 @@ fn bin_manifest(b: &BinSpec) -> String {
             "# (no domain crates -- this family holds NO domain vocabulary; an added domain crate\n#  here is a boundary violation to review, not a convenience)\n",
         );
     }
-    deps.push_str(
-        "# The probe shell (step 4, #349): serves the /health + /ping the generated Deployment probes.\naxum = { workspace = true }\ntokio = { workspace = true }\n",
-    );
+    if wired(b) {
+        deps.push_str(
+            "# The business runtime (#385): the shared composition kit -- probe server, telemetry,\n# declared-size pool, and the family spawn helpers over application/infrastructure.\nbin_runtime = { path = \"../../bin_runtime\" }\ntokio = { workspace = true }\nserde_json = { workspace = true }\ntracing = \"0.1\"\n# The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values\n# against their scalars' regexes at startup.\nregex = \"1\"\n",
+        );
+        if b.ports.contains("payment") {
+            deps.push_str(
+                "# DECLARED `payment` port (actors/processmanager.yaml `ports:`): this host drives Stripe.\nstripe-adapter = { path = \"../../adapters/stripe\" }\n",
+            );
+        }
+        if b.ports.contains("delivery") {
+            deps.push_str(
+                "# DECLARED `delivery` port: the composite delivery-partner gateway and its channel adapters.\napplication = { path = \"../../application\" }\ninfrastructure = { path = \"../../infrastructure\" }\navelo37-adapter = { path = \"../../adapters/avelo37\" }\ncoopcycle-adapter = { path = \"../../adapters/coopcycle\" }\nuber-direct-adapter = { path = \"../../adapters/uber_direct\" }\n",
+            );
+        }
+    } else {
+        deps.push_str(
+            "# The probe shell (step 4, #349): serves the /health + /ping the generated Deployment probes.\naxum = { workspace = true }\ntokio = { workspace = true }\n",
+        );
+    }
+    let posture = if wired(b) {
+        "# BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith\n# `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358\n# cutover) point traffic and the mailbox at these pods."
+    } else {
+        "# PROBE-SERVING SHELL (gate-then-stabilize): the monolith `server` bin remains the deployed\n# runtime; this family's business wiring is the recorded remainder on #385."
+    };
     format!(
         r#"# GENERATED by the Captain.Food codegen -- do not edit by hand
-# (ADR-20260807-183024 steps 3+4, #382/#349; container list per PROP-20260806-223656 s2b D5 addendum).
+# (ADR-20260807-183024 steps 3+4 and #385; container list per PROP-20260806-223656 s2b D5 addendum).
 #
 # PER-DEPLOYABLE BIN CRATE: `{name}` ({family}). The domain [dependencies] below are this bin's
 # SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json -- linking
 # a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
 # coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
 #
-# PROBE-SERVING SHELL (gate-then-stabilize): the monolith `server` bin remains the deployed
-# runtime; the business wiring is tracked on #349 and flips with steps (6)-(7) (#358 cutover).
+{posture}
 [package]
 name = "{name}"
 version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Captain.Food `{name}` deployable: {desc} (ADR-20260807-183024 steps 3+4)."
+description = "Captain.Food `{name}` deployable: {desc} (ADR-20260807-183024)."
 
 [dependencies]
 {deps}
@@ -263,6 +336,221 @@ workspace = true
         family = b.family,
         desc = family_purpose(b),
         deps = deps,
+        posture = posture,
+    )
+}
+
+/// The `src/main.rs` of a WIRED bin (#385): a thin parameter list over `bin_runtime` — config
+/// gate, telemetry, pool, the family spawn, the probe server. No business logic: every helper
+/// assembles existing application/infrastructure code (dispatch non-negotiable (a)).
+fn wired_main(b: &BinSpec) -> String {
+    let mut uses = String::new();
+    if !b.domain_scopes.is_empty() {
+        uses.push_str(
+            "// The manifest is the scope assertion; these imports make each declared domain-crate\n// link a compile-checked fact (the linker cannot silently strip it).\n",
+        );
+        for s in &b.domain_scopes {
+            uses.push_str(&format!("use {} as _;\n", domain_crate_ident(s)));
+        }
+        uses.push('\n');
+    }
+    let hosting = match b.family {
+        "actor" => format!(
+            "hosts the `{}` mailbox lane's supervised worker fleet (the SAME `infrastructure::mailbox::standalone` runtime the adapter binaries use: leases, fencing, head-of-line, posture-gated money lanes, graceful drain)",
+            b.actor.as_deref().unwrap_or("?")
+        ),
+        "pm" if b.mailboxed => format!(
+            "hosts the `{}` saga runner (restricted to this PM, flip-time backfill sequenced first) AND its mailbox lane's worker fleet",
+            b.actor.as_deref().unwrap_or("?")
+        ),
+        "pm" => format!(
+            "hosts the `{}` saga runner, restricted to this PM over its own `pm:` checkpoint",
+            b.actor.as_deref().unwrap_or("?")
+        ),
+        "projector" => format!(
+            "hosts the `{}`-scope projection worker: the shared registry filtered to this scope's groups, on their shared per-group checkpoints (monolith handover needs no re-projection)",
+            b.scope.as_deref().unwrap_or("?")
+        ),
+        f => unreachable!("wired_main called for unwired family '{f}'"),
+    };
+    let payments_expr = if b.ports.contains("payment") {
+        "bin_runtime::payment_binding(|key| {\n            std::sync::Arc::new(stripe_adapter::StripePaymentGateway::new(key))\n        })"
+    } else {
+        "bin_runtime::fail_closed_payments()"
+    };
+    let body = match b.family {
+        "actor" | "pm" => {
+            let mut body = String::new();
+            body.push_str(
+                "    // Without a database this runtime cannot host its slice: stay a viable pod that says\n    // so (readiness 503) rather than crash-loop -- the config gate already stopped prod/staging.\n    let db_ready = !config.database_url.is_empty();\n",
+            );
+            if b.family == "pm" {
+                body.push_str("    let mut saga_status = None;\n");
+            }
+            body.push_str("    if db_ready {\n        let pool = bin_runtime::pg_pool(&config.database_url, config.database_pool_max_connections)\n            .unwrap_or_else(|e| panic!(\"{BIN}: pg pool init: {e}\"));\n");
+            if b.family == "pm" {
+                let pm = b.actor.as_deref().unwrap_or("?");
+                let lane = if b.mailboxed { format!("Some(\"{pm}\")") } else { "None".to_string() };
+                let partner = if b.ports.contains("delivery") {
+                    "Some(delivery_partner_binding())"
+                } else {
+                    "None"
+                };
+                let payments_opt = if b.ports.contains("payment") {
+                    format!("let payments = {payments_expr};\n        ")
+                } else {
+                    String::new()
+                };
+                let payments_field = if b.ports.contains("payment") {
+                    "Some(payments.clone())"
+                } else {
+                    "None"
+                };
+                body.push_str(&format!(
+                    "        {payments_opt}let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        let (status, posture) = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {{\n            pool: pool.clone(),\n            bin: BIN,\n            pm: PM,\n            mailbox_lane: {lane},\n            partner: {partner},\n            payments: {payments_field},\n            waiter,\n        }})\n        .await;\n        tracing::info!(pm = PM, posture = ?posture, \"saga runner spawned (restricted to this PM)\");\n        saga_status = Some(status);\n",
+                ));
+                if b.mailboxed {
+                    body.push_str(
+                        "        // The PM's OWN mailbox lane (Runtime D1): the gate-on delivery path. The fleet\n        // reads the money posture itself and refuses the lane when it is unprovable.\n        bin_runtime::spawn_actor_fleet(\n            pool.clone(),\n            BIN,\n            LANES,\n            payments,\n            config.reminder_windows(),\n            bin_runtime::MailboxSettings {\n                lease_seconds: config.mailbox_lease_seconds,\n                heartbeat_seconds: config.mailbox_heartbeat_seconds,\n                max_delivery_attempts: config.mailbox_max_delivery_attempts,\n            },\n        );\n",
+                    );
+                }
+                if b.ports.contains("delivery") {
+                    body.push_str(
+                        "        // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next\n        // ranked channel -- it belongs to the dispatch PM, so its bin hosts it.\n        if config.run_delivery_offer_timeout {\n            let timeout_worker = std::sync::Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(\n                pool.clone(),\n                config.delivery_offer_max_ttl_seconds,\n            ));\n            tokio::spawn(timeout_worker.run_loop());\n            tracing::info!(worker = \"delivery_offer_timeout\", running = true, toggle = \"RUN_DELIVERY_OFFER_TIMEOUT\", \"worker running\");\n        } else {\n            tracing::warn!(worker = \"delivery_offer_timeout\", running = false, toggle = \"RUN_DELIVERY_OFFER_TIMEOUT\", \"worker NOT started -- an unanswered offer is never expired\");\n        }\n",
+                    );
+                }
+            } else {
+                body.push_str(&format!(
+                    "        bin_runtime::spawn_actor_fleet(\n            pool,\n            BIN,\n            LANES,\n            {payments_expr},\n            config.reminder_windows(),\n            bin_runtime::MailboxSettings {{\n                lease_seconds: config.mailbox_lease_seconds,\n                heartbeat_seconds: config.mailbox_heartbeat_seconds,\n                max_delivery_attempts: config.mailbox_max_delivery_attempts,\n            }},\n        );\n",
+                ));
+            }
+            body.push_str("    } else {\n        tracing::warn!(bin = BIN, \"DATABASE_URL unset -- no workers hosted, readiness stays 503\");\n    }\n");
+            match b.family {
+                "pm" => {
+                    let lanes_line = if b.mailboxed {
+                        "                obj.insert(\"lanes\".into(), serde_json::json!(LANES));\n"
+                    } else {
+                        ""
+                    };
+                    body.push_str(&format!(
+                        "    // Readiness = the restricted saga runner is running; the body carries its\n    // checkpoint/head/lag snapshot (the monolith's /saga shape) plus the hosted PM.\n    let health: bin_runtime::HealthFn = std::sync::Arc::new(move || match &saga_status {{\n        Some(handle) => {{\n            let st = handle.lock().unwrap_or_else(|p| p.into_inner()).clone();\n            let running = st.running;\n            let mut body = serde_json::to_value(&st).unwrap_or_else(|_| serde_json::json!({{ \"running\": false }}));\n            if let Some(obj) = body.as_object_mut() {{\n                obj.insert(\"pm\".into(), serde_json::json!(PM));\n{lanes_line}            }}\n            (running, body)\n        }}\n        None => (false, serde_json::json!({{ \"running\": false, \"reason\": \"database_not_configured\" }})),\n    }});\n",
+                    ));
+                }
+                _ => body.push_str(
+                    "    // Readiness = the fleet's host has its database; the fleet supervises itself (respawn\n    // with backoff) and reports per-lane state through the mailbox rows, not this probe.\n    let health: bin_runtime::HealthFn = std::sync::Arc::new(move || {\n        (\n            db_ready,\n            serde_json::json!({\n                \"lanes\": LANES,\n                \"db\": if db_ready { \"configured\" } else { \"not_configured\" },\n            }),\n        )\n    });\n",
+                ),
+            }
+            body
+        }
+        "projector" => {
+            let mut body = String::new();
+            body.push_str(
+                "    // Without a database this runtime cannot project: stay a viable pod that says so\n    // (readiness 503) rather than crash-loop -- the config gate already stopped prod/staging.\n    let db_ready = !config.database_url.is_empty();\n    let mut proj_status = None;\n    if db_ready {\n        let pool = bin_runtime::pg_pool(&config.database_url, config.database_pool_max_connections)\n            .unwrap_or_else(|e| panic!(\"{BIN}: pg pool init: {e}\"));\n        let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        proj_status = Some(bin_runtime::spawn_scope_projector(pool, SCOPE, waiter));\n    } else {\n        tracing::warn!(bin = BIN, \"DATABASE_URL unset -- no projection worker hosted, readiness stays 503\");\n    }\n",
+            );
+            body.push_str(
+                "    // Readiness = the scoped worker is running; the body carries its checkpoint/head/lag\n    // snapshot (the monolith's /projector shape) plus the owned scope.\n    let health: bin_runtime::HealthFn = std::sync::Arc::new(move || match &proj_status {\n        Some(handle) => {\n            let st = handle.lock().unwrap_or_else(|p| p.into_inner()).clone();\n            let running = st.running;\n            let mut body = serde_json::to_value(&st).unwrap_or_else(|_| serde_json::json!({ \"running\": false }));\n            if let Some(obj) = body.as_object_mut() {\n                obj.insert(\"scope\".into(), serde_json::json!(SCOPE));\n            }\n            (running, body)\n        }\n        None => (false, serde_json::json!({ \"running\": false, \"reason\": \"database_not_configured\" })),\n    });\n",
+            );
+            body
+        }
+        f => unreachable!("wired_main body for unwired family '{f}'"),
+    };
+    let mut consts = format!(
+        "/// The c4-l2 container this binary realizes.\nconst BIN: &str = \"{}\";\n/// The bin's family in the deploy topology.\nconst FAMILY: &str = \"{}\";\n",
+        b.name, b.family
+    );
+    match b.family {
+        "actor" => consts.push_str(&format!(
+            "/// The mailbox lane(s) this deployable drains -- the scoping is the linker AND this list.\nconst LANES: &[&str] = &[\"{}\"];\n",
+            b.actor.as_deref().unwrap_or("?")
+        )),
+        "pm" => {
+            consts.push_str(&format!(
+                "/// The process manager this deployable realizes (its `pm:` checkpoint slice).\nconst PM: &str = \"{}\";\n",
+                b.actor.as_deref().unwrap_or("?")
+            ));
+            if b.mailboxed {
+                consts.push_str(&format!(
+                    "/// The PM's own mailbox lane (Runtime D1 gate-on delivery path).\nconst LANES: &[&str] = &[\"{}\"];\n",
+                    b.actor.as_deref().unwrap_or("?")
+                ));
+            }
+        }
+        "projector" => consts.push_str(&format!(
+            "/// The scope whose projection groups this deployable drains (D4).\nconst SCOPE: &str = \"{}\";\n",
+            b.scope.as_deref().unwrap_or("?")
+        )),
+        _ => {}
+    }
+    let partner_fn = if b.ports.contains("delivery") {
+        "\n/// The composite delivery gateway (#60), resolved through the GENERATED `delivery` service\n/// binding -- the SAME construction the monolith composition root performs: `independent` is the\n/// rider pool (deliberate no-op), partner channels join when their credentials are configured,\n/// and an unwired channel falls through via offer timeout.\nfn delivery_partner_binding() -> std::sync::Arc<dyn application::generated::services::DeliveryService> {\n    infrastructure::generated::service_bindings::delivery_service(|| {\n        let mut gateway = infrastructure::CompositeDeliveryGateway::new().with_channel(\n            \"independent\",\n            std::sync::Arc::new(application::ports::NoopDeliveryService),\n        );\n        if let Some(avelo) = avelo37_adapter::Avelo37DeliveryGateway::from_env() {\n            gateway = gateway.with_channel(\"avelo37\", std::sync::Arc::new(avelo));\n        }\n        let coopcycle_registry = coopcycle_adapter::CoopCycleRegistry::from_env()\n            .unwrap_or_else(|e| {\n                tracing::warn!(error = %e, key = \"COOPCYCLE_INSTANCES\", \"misconfigured, treating as unset\");\n                None\n            })\n            .unwrap_or_default();\n        if !coopcycle_registry.is_empty() {\n            gateway = gateway.with_channel(\n                \"coopcycle\",\n                std::sync::Arc::new(coopcycle_adapter::CoopCycleDeliveryGateway::new(coopcycle_registry)),\n            );\n        }\n        if let Some(config) = uber_direct_adapter::UberDirectConfig::from_env().unwrap_or_else(|e| {\n            tracing::warn!(error = %e, key = \"UBER_DIRECT_*\", \"misconfigured, treating as unset\");\n            None\n        }) {\n            gateway = gateway.with_channel(\n                \"uber_direct\",\n                std::sync::Arc::new(uber_direct_adapter::UberDirectDeliveryGateway::new(config)),\n            );\n        }\n        tracing::info!(\n            binding = \"delivery\",\n            impl_ = \"composite\",\n            wired_channels = ?gateway.wired_channels(),\n            \"delivery gateway wired (unwired channels fall through via offer timeout)\"\n        );\n        std::sync::Arc::new(gateway)\n    })\n    .expect(\"delivery service binding (services.yaml)\")\n}\n"
+    } else {
+        ""
+    };
+    format!(
+        r#"// GENERATED by the Captain.Food codegen from the derived bin topology — do not edit by hand
+// (ADR-20260807-183024 steps 3+4 and #385).
+
+//! `{name}` — {desc}.
+//!
+//! BUSINESS RUNTIME (#385): {hosting}. Serves the `/health` + `/ping` probes its generated
+//! Deployment (deploy/generated/manifests/bins/{name}.yaml) declares (`wired:true`, readiness
+//! 503 until the hosted runtime is up), draining on SIGTERM.
+//!
+//! GATE-THEN-STABILIZE: runnable end-to-end, but the monolith `server` bin remains the DEPLOYED
+//! production runtime until ADR-20260807-183024 steps (6)–(7) (#358 cutover) point traffic and
+//! the mailbox at these pods.
+
+{uses}/// The bin's scope-filtered typed configuration (#374 Q4): the declared keys of its linked
+/// scopes + `common`, read once at startup — the same generated reader the monolith uses,
+/// emitted over this bin's key subset.
+mod config;
+
+{consts}
+#[tokio::main]
+async fn main() {{
+    // Identity FIRST, before any fallible startup (ADR-20260721-175411): a boot that never binds
+    // still names its version in the logs.
+    println!("{{BIN}} ({{FAMILY}}) starting -- version {{}}, business runtime (#385)", bin_runtime::build_version());
+
+    // Configuration gate (PROP-20260729-004500): every problem reported at once; production and
+    // staging refuse to start on a broken configuration, development reports and continues.
+    let (config, problems) = config::Config::resolve();
+
+    // Telemetry SECOND -- after config (it needs LOG_LEVEL and the ingest key), before every
+    // worker, so their startup lines are structured and correlated (issue #191).
+    let mut telemetry_guard = bin_runtime::init_telemetry(bin_runtime::TelemetrySettings {{
+        api_key: config.honeycomb_api_key.clone(),
+        endpoint: config.honeycomb_api_endpoint.clone(),
+        dataset: config.honeycomb_dataset.clone(),
+        sample_ratio: config.otel_traces_sample_ratio.clone(),
+        log_level: config.log_level.clone(),
+        profile: config.profile.to_string(),
+    }});
+    if !problems.is_empty() {{
+        let report = config::MissingConfig {{ profile: config.profile, problems }};
+        tracing::error!(profile = %config.profile, "{{report}}");
+        if config.must_stop_on_problems() {{
+            // Flush before exiting, or the error explaining the failed deploy never leaves the box.
+            telemetry_guard.shutdown();
+            // 78 = EX_CONFIG (sysexits.h): a configuration error, not a crash.
+            std::process::exit(78);
+        }}
+        tracing::warn!(profile = %config.profile, "starting anyway -- production and staging STOP here");
+    }}
+    tracing::info!("{{}}", config.boot_report());
+
+{body}
+    bin_runtime::serve_probes(BIN, FAMILY, &config.port.to_string(), health).await;
+    telemetry_guard.shutdown();
+}}
+{partner_fn}"#,
+        name = b.name,
+        desc = family_purpose(b),
+        hosting = hosting,
+        uses = uses,
+        consts = consts,
+        body = body,
+        partner_fn = partner_fn,
     )
 }
 
@@ -271,6 +559,9 @@ workspace = true
 /// a dependency the source never names is an assertion nobody verifies (and cargo-machete's D6
 /// gate would rightly flag it).
 fn bin_main(b: &BinSpec) -> String {
+    if wired(b) {
+        return wired_main(b);
+    }
     let mut uses = String::new();
     if !b.domain_scopes.is_empty() {
         uses.push_str(
@@ -370,6 +661,34 @@ pub(crate) fn emit_bin_crates(model: &Model) -> Vec<BinCrate> {
             dir: format!("crates/bins/{}", b.name),
             manifest: bin_manifest(b),
             main: bin_main(b),
+            config: wired(b).then(|| {
+                // The bin's key subset = the SAME scope routing the deploy emitter uses for its
+                // pod's env (#374 Q4 closed by #385): its linked scopes + owning scope + common.
+                let keys = scoped_config_keys(model, &bin_config_scopes(b));
+                emit_config_module(model, &keys, /* strict_windows */ false)
+            }),
         })
         .collect()
+}
+
+/// Emit `crates/infrastructure/src/generated/scopes.rs` — every actor/PM with its OWNING scope
+/// (the `specs/{scope}/` folder its definition lives in, #375). The hand-written projection and
+/// saga registries carry per-group scope labels for the per-scope bins (D4/#385); their unit
+/// tests assert each label against THIS table, so a registry label cannot drift from spec
+/// placement without a red test.
+pub(crate) fn emit_actor_scopes(model: &Model) -> String {
+    let mut rows = String::new();
+    for (actor, is_pm, _) in actor_scope_links(model) {
+        let file = if is_pm { "processmanager.yaml" } else { "actors.yaml" };
+        let scope = model
+            .origins
+            .get(&(file.to_string(), actor.clone()))
+            .or_else(|| model.origins.get(&("actors.yaml".to_string(), actor.clone())))
+            .map(|s| s.as_str())
+            .unwrap_or(KERNEL_SCOPE);
+        rows.push_str(&format!("    (\"{actor}\", \"{scope}\"),\n"));
+    }
+    format!(
+        "// GENERATED by the Captain.Food codegen from specs/{{scope}}/ placement (#375, #385) — do not\n// edit by hand. Every actor/PM with the scope folder that OWNS its definition: the executable\n// tie between the hand-written runtime registries' scope labels and the spec's screaming\n// architecture, consumed by tests (a wrong label is a red test, not a mis-routed projector).\n\n/// `(actor_or_pm, owning scope folder)`, sorted by actor name.\npub const ACTOR_SCOPES: &[(&str, &str)] = &[\n{rows}];\n\n/// The owning scope of one actor/PM, if declared.\npub fn actor_scope(actor: &str) -> Option<&'static str> {{\n    ACTOR_SCOPES.iter().find(|(a, _)| *a == actor).map(|(_, s)| *s)\n}}\n"
+    )
 }

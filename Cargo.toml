@@ -43,6 +43,11 @@ members = [
                                # workspace by being generated, so the members list cannot drift from
                                # the spec. Depending on one is the permission to address that actor.
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
+    "crates/bin_runtime",      # the per-bin COMPOSITION KIT (#385, ADR-20260807-183024): telemetry
+                               # init, declared-size pg pool, probe server, and the fleet/runner/
+                               # projector spawn helpers the GENERATED bin mains call — hand-written
+                               # composition-root machinery shared by the 49 deployables, so a wired
+                               # main stays a parameter list instead of a copied monolith
     "crates/adapters/stripe",  # Stripe partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/avelo37",  # Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28) — ACL + webhook shell + outbound + standalone bin

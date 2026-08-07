@@ -118,6 +118,16 @@ keys:
         production: DATABASE_URL
         staging: DATABASE_URL
 
+  DATABASE_POOL_MAX_CONNECTIONS:
+    type: int
+    default: 5
+    gates: >
+      sqlx pool ceiling per PROCESS (ADR-20260807-183024 realization, issue #385): the monolith and
+      every wired bin size their PgPool from this DECLARED value instead of a per-main constant.
+      Matters at bin granularity: 49 pods x this ceiling is the CNPG cluster's connection budget,
+      so the number must be reviewable in one place. Per-bin tuning is an env override on the
+      pod (env > baked > default), not a code change.
+
 
   # ===================================================================
   # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only

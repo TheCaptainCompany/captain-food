@@ -1,0 +1,33 @@
+# The per-bin COMPOSITION KIT (#385, ADR-20260807-183024, between realization steps (5) and (6)).
+#
+# Hand-written composition-root machinery shared by the GENERATED bin mains under crates/bins/:
+# telemetry init, the declared-size pg pool, the probe server (health/ping + graceful drain), and
+# the spawn helpers for the three wired families (actor/pm fleets over the SAME
+# infrastructure::mailbox::standalone runtime the adapters use; the scope-filtered saga runner;
+# the scope-filtered projection worker). NO business logic lives here — every helper assembles
+# EXISTING application/infrastructure code, exactly like crates/server's composition root does,
+# so a bin main stays a parameter list instead of a copied monolith.
+[package]
+name = "bin_runtime"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food per-bin composition kit: the shared runtime assembly the generated bin mains call (#385, ADR-20260807-183024)."
+
+[dependencies]
+application = { path = "../application" }
+infrastructure = { path = "../infrastructure" }
+# PM-lane seeding for the money backfill sequencing (the same call the monolith composition root
+# makes before its saga runner's first tick) and the WorkerConfig the fleets run under.
+actor_runtime = { path = "../actor_runtime" }
+telemetry = { path = "../telemetry" }
+axum = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

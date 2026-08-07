@@ -177,6 +177,13 @@ ReclamationProcess:
     + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's
     hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch
     decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
+  ports:
+    # The refund arm (#207) drives the Stripe refund itself (approve_refund runs INSIDE this
+    # saga's reaction — RefundProcess's leg, but executed here), so the payment service is a real
+    # runtime dependency of this PM's host. Declared so the bin wiring (#385) derives the Stripe
+    # adapter link from the spec instead of a hand-curated money-PM list; it was undeclared while
+    # the monolith hosted every PM, which hid the dependency from the deploy topology.
+    payment: { $ref: 'services.yaml#/payment' }
   receives:
     - message: { $ref: 'events.yaml#/ReclamationResolved' }
       description: >
