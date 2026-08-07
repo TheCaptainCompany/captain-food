@@ -4,9 +4,23 @@ version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Captain.Food pure domain (DDD): aggregates, commands, events, policies, value objects, typed IDs. Depends on NO other workspace crate (ADR-0035). serde derives are allowed on events/value objects (decision 1); serialization logic stays in the ACL."
+description = "Captain.Food pure domain (DDD): aggregates, policies, folds — and since #373 the re-exporting FACADE over the per-scope generated domain crates (crates/domains/*), so `domain::generated::*` paths keep the same type identity. Depends on no workspace crate outside the domains ring (ADR-0035 + ADR-20260807-183024 step 2)."
 
 [dependencies]
+# The per-scope generated domain crates + kernel (#373, ADR-20260807-183024 step 2). The facade
+# re-exports every scope's generated types (crates/domains/{scope} — see the generated modules in
+# src/generated/), and keeps the cross-scope artifacts: the DomainEvent union over the single
+# event log (D3), the global error catalog, and the states/lifecycles folds. A NEW scope's crate
+# must be added here (the generated re-export files fail to compile otherwise — the compiler is
+# the drift gate).
+domain-catalog = { path = "../domains/catalog" }
+domain-comms = { path = "../domains/comms" }
+domain-common = { path = "../domains/common" }
+domain-customer = { path = "../domains/customer" }
+domain-delivery = { path = "../domains/delivery" }
+domain-network = { path = "../domains/network" }
+domain-ordering = { path = "../domains/ordering" }
+domain-payments = { path = "../domains/payments" }
 serde = { workspace = true }
 # serde_json carries the structured rejection CONTEXT (`DomainError::Rejected`) — data, not
 # serialization logic; the errors.yaml catalog module generated into `generated/errors.rs`

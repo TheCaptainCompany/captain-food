@@ -24,7 +24,9 @@ one catalog is a validation error (`scope-duplicate-item`).
     cross-scope contract); a WRONG scope is not; multi-scope derivation REQUIRES common.
   - *Cross-scope `$ref` DAG* (`scope-cycle`): non-PM-sourced cross-scope refs must be acyclic.
     **Process managers are declared bridges** — an orchestrator legitimately closes loops between
-    scopes; its refs become the pm-crate dependency list at #373 instead.
+    scopes; its refs ARE its dependency list, realized by #373 in the generated
+    `specs/generated/crate-graph.generated.json` `bins` map (e.g. `pm-place-order` →
+    ordering+payments+common), which step (3)'s bin emitter turns into the pm bins' Cargo deps.
   - *Kernel purity* (`scope-kernel-purity`): a `common/` item references only `common/` items.
   - *API nesting* (`api-nested-cross-scope`, D8): an api type nests only its own scope's or
     kernel types — cross-scope data appears at top level or pre-joined in a projector-owned view.

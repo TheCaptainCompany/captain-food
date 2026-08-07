@@ -8,7 +8,15 @@
 resolver = "2"
 members = [
     "tools/codegen-rs",        # spec validator + generator (ADR-0034) — tooling, not part of the app graph
-    "crates/domain",           # ★ pure DDD — depends on nothing else
+    "crates/domains/*",        # PER-SCOPE GENERATED domain crates + the `domain-common` kernel (#373,
+                               # ADR-20260807-183024 step 2): one crate per specs/{scope}/, manifest
+                               # included, [dependencies] DERIVED from the spec's cross-scope $ref
+                               # edges (validator-proved DAG). A GLOB on purpose: a new scope's crate
+                               # joins the workspace by being generated, so the members list cannot
+                               # drift from the spec.
+    "crates/domain",           # ★ pure DDD facade — re-exports the scope crates' generated types
+                               # (same type identity) + hand-written aggregates, DomainEvent union,
+                               # states/lifecycles folds; depends only on crates/domains/*
     "crates/application",      # use cases + ports (traits) — depends on domain
     "crates/sirene_ingest",    # SIRENE raw-ingestion client + CI bin (ADR-0045) — NO domain crates (thin CI build)
     "crates/actor_runtime",    # durable-mailbox actor machinery (ADR-20260730-234918) — EXTRACTION-READY:

@@ -14,6 +14,10 @@ pub(crate) use std::path::PathBuf;
 
 pub(crate) use serde_yaml::Value;
 
+// Since #373 (ADR-20260807-183024 step 2) the Rust domain-type emitters write PER-SCOPE crates
+// under crates/domains/ (manifests included, deps derived from the spec's $ref edges) and
+// crates/domain re-exporting facades — see emit/domain_scopes.rs for the doctrine.
+//
 // Module map (#277 split — pure code motion out of the former single-file main.rs). Everything is
 // re-exported pub(crate) at the crate root, so modules share one flat namespace via `use crate::*;`
 // exactly as they did when this was one file.
@@ -157,10 +161,14 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 9] = [
+    let artifacts: [(&str, String); 10] = [
         // The CI env-sync manifest (PROP-20260729-014500): which repo secret supplies which service
         // env key, per profile. Baked values are NOT here — they ride the image (D5).
         ("render-config-sync.json", emit_render_sync_manifest(&model)),
+        // The derived crate topology (#373, ADR-20260807-183024 step 2): scope crate → deps,
+        // actor/PM bin → domain crates — the reviewable face of the $ref→dependency derivation
+        // and the input contract for step (3)'s bin emitter.
+        ("crate-graph.generated.json", emit_crate_graph(&model)),
         ("translations.generated.json", emit_translations_json(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
         ("schema.generated.sql", emit_schema_sql(&model, &specs)),
@@ -194,8 +202,58 @@ fn main() {
             std::process::exit(1);
         }
     }
-    // crates/domain/src/generated/{scalars,entities,events,commands}.rs: Rust domain types from
-    // scalars.yaml + entities.yaml + events.yaml + commands.yaml (ADR-0034 #3 / 0035). mod.rs lists them.
+    // crates/domains/{scope}/: PER-SCOPE GENERATED domain crates + the kernel (#373,
+    // ADR-20260807-183024 step 2). Manifest AND code are generated, so "which scopes exist" and
+    // "which crates exist" cannot drift. STALE crates are REMOVED (a crate for a scope the spec no
+    // longer declares is a door to nothing that still compiles — same rule as crates/clients).
+    // Guarded on a non-empty emission so a degenerate flat-layout model can never mass-delete.
+    let scope_crates = emit_domain_scope_crates(&model);
+    if !scope_crates.is_empty() {
+        let domains_root = repo_root(&specs).join("crates/domains");
+        let keep: std::collections::BTreeSet<String> = scope_crates
+            .iter()
+            .filter_map(|c| c.dir.rsplit('/').next().map(|s| s.to_string()))
+            .collect();
+        if let Ok(rd) = fs::read_dir(&domains_root) {
+            for e in rd.flatten() {
+                let p = e.path();
+                let stale = p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| !keep.contains(n));
+                if stale {
+                    if let Err(e) = fs::remove_dir_all(&p) {
+                        eprintln!("✗ remove stale domain scope crate {}: {}", p.display(), e);
+                        std::process::exit(1);
+                    }
+                    eprintln!("✓ removed stale domain scope crate {}", p.display());
+                }
+            }
+        }
+        for c in &scope_crates {
+            let dir = repo_root(&specs).join(&c.dir);
+            if let Err(e) = fs::create_dir_all(dir.join("src")) {
+                eprintln!("✗ create {}: {}", dir.display(), e);
+                std::process::exit(1);
+            }
+            let manifest_path = dir.join("Cargo.toml");
+            if let Err(e) = fs::write(&manifest_path, &c.manifest) {
+                eprintln!("✗ write {}: {}", manifest_path.display(), e);
+                std::process::exit(1);
+            }
+            for (name, content) in &c.files {
+                let path = dir.join(name);
+                if let Err(e) = fs::write(&path, content) {
+                    eprintln!("✗ write {}: {}", path.display(), e);
+                    std::process::exit(1);
+                }
+            }
+            eprintln!("✓ wrote {}", c.dir);
+        }
+    }
+    // crates/domain/src/generated/{scalars,entities,events,commands}.rs: since #373 RE-EXPORT
+    // facades over the per-scope crates (+ the cross-scope DomainEvent union, global error
+    // catalog, states and lifecycles). mod.rs lists them.
     let gen_dir = repo_root(&specs).join("crates/domain/src/generated");
     if let Err(e) = fs::create_dir_all(&gen_dir) {
         eprintln!("✗ create {}: {}", gen_dir.display(), e);

@@ -85,8 +85,10 @@ delivery-partner reports — marked 📥 in the story map). Full doctrine + exam
 
 ## Architecture (summary)
 
-**Full-stack Rust** (ADR-0034/0035), Cargo workspace in Clean-Architecture layers — `domain`
-(pure DDD, no outward imports) · `application` (ports, handlers, PMs, write-side Repository) ·
+**Full-stack Rust** (ADR-0034/0035), Cargo workspace in Clean-Architecture layers — `domains/*`
+(per-scope GENERATED type crates + the `domain-common` kernel, deps derived from spec `$ref`s —
+ADR-20260807-183024/#373) · `domain` (pure DDD facade re-exporting them + hand-written aggregates,
+no outward imports) · `application` (ports, handlers, PMs, write-side Repository) ·
 `infrastructure` (event store, `View_*` repos, integration ACLs, the mailbox) · `server` (Axum
 BFF: GraphQL, SDUI, tenant middleware) · `actor_runtime` (generic mailbox: leases, fencing,
 head-of-line) · `shared_types`/`core`/`web`/`desktop` (UniFFI/Crux/Leptos/Tauri). Frontend =

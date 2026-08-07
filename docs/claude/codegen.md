@@ -33,7 +33,16 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
 - **emitters** — `emit_translations_json`, `emit_views_sql` + `emit_views_markdown` (the `database.md` §2
   injection), `emit_structurizr` + `emit_mermaid` (C4), `emit_schema` (GraphQL SDL), `emit_documentation`
   (md) + `emit_documentation_html` (html); `build_context_map` is the bounded-context engine. Rust-code
-  emitters target `crates/**/generated`: domain types (scalars/entities/events/commands/errors/lifecycles),
+  emitters target `crates/**/generated` — and, since #373 (ADR-20260807-183024 step 2), WHOLE crates:
+  `emit_domain_scope_crates` writes one `domain-{scope}` crate per `specs/{scope}/` under
+  `crates/domains/` (kernel = `domain-common`; manifest included, `[dependencies]` DERIVED from the
+  fragments' cross-scope `$ref` edges — the §14 DAG makes them acyclic by construction; stale crates
+  pruned; workspace membership via the `crates/domains/*` glob), `crates/domain`'s generated modules
+  become re-exporting FACADES (same paths, same type identity) keeping the cross-scope artifacts
+  (DomainEvent union, global error catalog, states/lifecycles), and `emit_crate_graph` commits the
+  derived topology to `specs/generated/crate-graph.generated.json` (`bins` = each actor/PM → the
+  domain crates its refs reach — the input contract for the step-(3) bin emitter). Other Rust
+  emitters: domain types (scalars/entities/events/commands/errors/lifecycles),
   projection rows/projectors + PM state stores (app + Pg, item 5), the service catalog (item 4, issue #26:
   `emit_services_application` traits, `emit_services_http_clients` + `emit_service_bindings`
   (infrastructure), expose-gated `emit_services_routes` (server)), and the async-graphql layer.
