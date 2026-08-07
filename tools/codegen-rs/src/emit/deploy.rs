@@ -119,7 +119,7 @@ pub(crate) fn needs_db(b: &BinSpec, model: &Model) -> bool {
 /// The configuration scopes whose keys a bin's pod receives: its linked domain scopes, its
 /// owning scope (projector/subgraph), plus `common` (platform keys — DB, telemetry, identity —
 /// per ADR-20260807-183024 D5 every bin reads its own scope's + common's keys).
-fn bin_config_scopes(b: &BinSpec) -> BTreeSet<String> {
+pub(crate) fn bin_config_scopes(b: &BinSpec) -> BTreeSet<String> {
     let mut s: BTreeSet<String> = b.domain_scopes.clone();
     if let Some(scope) = &b.scope {
         s.insert(scope.clone());

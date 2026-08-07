@@ -16,7 +16,8 @@ mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
 pub use standalone::{
-    shutdown_signal, spawn_standalone_workers, standalone_deps, standalone_workers_enabled,
+    pm_mailbox_delivery_posture, shutdown_signal, spawn_standalone_workers,
+    spawn_standalone_workers_with, standalone_deps, standalone_workers_enabled,
 };
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;

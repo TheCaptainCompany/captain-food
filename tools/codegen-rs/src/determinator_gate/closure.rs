@@ -297,19 +297,35 @@ mod tests {
         assert!(!lines.iter().any(|l| l.starts_with("crates/bins/actor-order-x/")));
     }
 
-    /// Real-tree spot check: actor-order's closure covers its own crate, its domain crates and
-    /// the globals — and the domain coupling is visible in the hash (a domain-ordering blob
-    /// change moves actor-order's hash but not actor-rider's; asserted indirectly via dirs).
+    /// Real-tree spot check. Since #385 wired the CQRS-spine families over the (monolithic)
+    /// `infrastructure` crate, a WIRED bin's closure honestly includes the runtime spine — and
+    /// through the `domain` facade, every scope crate: its sources really do shape the binary,
+    /// so the hash must move with them (silent-stale is the failure mode this gate exists to
+    /// prevent). The per-scope SHARPNESS therefore now lives in two places: the manifest-level
+    /// vocabulary assertion (actor-order still cannot SPELL a catalog type — `domain` is a
+    /// transitive dep, not nameable), and the still-shell families below, whose closures stay
+    /// exactly their own domain slice. Re-sharpening the wired families' build closure is the
+    /// recorded follow-up of splitting `infrastructure` per scope.
     #[test]
     fn real_closure_covers_bin_domains_and_globals() {
         let dirs = closure_dirs(graph(), "actor-order").expect("closure resolves");
         assert!(dirs.contains("crates/bins/actor-order"));
         assert!(dirs.contains("crates/domains/ordering"));
         assert!(dirs.contains("crates/domains/common"));
-        assert!(!dirs.iter().any(|d| d.contains("domains/delivery")), "no unlinked scope leaks in");
+        assert!(dirs.contains("crates/bin_runtime"), "wired bins ride the composition kit");
+        assert!(dirs.contains("crates/infrastructure"), "the runtime spine is a real build input");
 
-        let rider = closure_dirs(graph(), "actor-rider").expect("closure resolves");
-        assert!(!rider.contains("crates/domains/ordering"), "rider must not couple to ordering");
+        // A SHELL subgraph keeps the sharp slice: one domain, nothing else's.
+        let subgraph = closure_dirs(graph(), "graphql-ordering").expect("closure resolves");
+        assert!(subgraph.contains("crates/domains/ordering"));
+        assert!(
+            !subgraph.iter().any(|d| d.contains("domains/delivery")),
+            "no unlinked scope leaks into a shell subgraph"
+        );
+        assert!(
+            !subgraph.contains("crates/infrastructure"),
+            "shells carry no runtime spine until their #385 wiring lands"
+        );
 
         let surface = closure_dirs(graph(), "fo-storefront").expect("closure resolves");
         assert_eq!(

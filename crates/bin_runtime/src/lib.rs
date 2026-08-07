@@ -1,0 +1,368 @@
+//! The per-bin COMPOSITION KIT (#385, ADR-20260807-183024 — between realization steps (5) and (6)).
+//!
+//! The GENERATED bin mains under `crates/bins/` call into here: telemetry init, the declared-size
+//! pg pool, the probe server, and the family spawn helpers. Everything is ASSEMBLY of existing
+//! `application`/`infrastructure` code — the same composition the monolith `server` crate performs
+//! in `router()`, factored so 27 wired mains share one reviewed implementation instead of 27
+//! copies (non-negotiable (a) of the #385 dispatch: no logic forks).
+//!
+//! GATE-THEN-STABILIZE: a bin being *runnable* changes nothing about what *runs* — the monolith
+//! stays the deployed runtime until ADR-20260807-183024 steps (6)–(7) flip deployment. What this
+//! crate makes true today is that each bin's pod is the real business runtime for its slice the
+//! moment the cutover points traffic (and the mailbox/log at) it.
+//!
+//! HONEST LIMITS (recorded, not hidden):
+//! - Linking `infrastructure` couples every wired bin to the full `domain` facade transitively —
+//!   the per-scope containment stays a MANIFEST assertion (the `domain-*` links + `use … as _;`)
+//!   until infrastructure itself splits per scope. Same recorded limit the monolith carries.
+//! - The operation-status bus and GraphQL-subscription event bus are in-process: a delivery
+//!   completed by a bin's fleet reaches pollers (`operationStatus` reads the mailbox row) but not
+//!   another process's push subscribers. Cross-process fan-out is the recorded follow-up on #385,
+//!   same trade-off `infrastructure::mailbox::standalone` documents for adapter-owned fleets.
+
+use std::sync::Arc;
+
+use application::generated::services::{DeliveryService, PaymentService};
+use infrastructure::persistence::mailbox_store::MailboxNudges;
+use sqlx::PgPool;
+
+/// The precise build identity, for diagnostics (ADR-20260721-175411): CI bakes
+/// `CAPTAIN_BUILD_VERSION` (short git SHA) into the image; `dev-…` covers uncontainerized runs.
+/// Read once and cached — the value never changes for a process.
+pub fn build_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        std::env::var("CAPTAIN_BUILD_VERSION")
+            .unwrap_or_else(|_| format!("dev-{}", env!("CARGO_PKG_VERSION")))
+    })
+}
+
+/// What telemetry needs from a bin's GENERATED Config — the same translation the monolith's
+/// `server::init_telemetry` performs, kept here as plain owned data because every bin's `Config`
+/// is its own generated type (scope-filtered keys, #374 Q4) and this crate must not know any of
+/// them.
+pub struct TelemetrySettings {
+    pub api_key: Option<String>,
+    pub endpoint: String,
+    pub dataset: String,
+    /// Parsed leniently to 1.0 (keep everything): a malformed ratio was already reported as a
+    /// configuration problem by the generated reader; degrading to ZERO here would turn one bad
+    /// value into total silent trace loss (the failure telemetry exists to end).
+    pub sample_ratio: String,
+    pub log_level: String,
+    pub profile: String,
+}
+
+/// Install telemetry for a bin process. The guard must be held for the process lifetime and
+/// `shutdown()` on exit — dropping it early silently loses every buffered span.
+pub fn init_telemetry(settings: TelemetrySettings) -> telemetry::TelemetryGuard {
+    let cfg = telemetry::TelemetryConfig {
+        api_key: settings.api_key,
+        endpoint: settings.endpoint,
+        dataset: settings.dataset,
+        sample_ratio: settings.sample_ratio.parse().unwrap_or(1.0),
+        log_level: settings.log_level,
+        service_version: build_version().to_string(),
+        profile: settings.profile,
+    };
+    let (guard, _emission) = telemetry::init(&cfg);
+    guard
+}
+
+/// The lazily-connecting pg pool every wired bin opens — the monolith `router()`'s options with
+/// the ceiling from the DECLARED `DATABASE_POOL_MAX_CONNECTIONS` (#385: 49 pods × this ceiling is
+/// the CNPG connection budget, so the number lives in configuration, not in 49 mains).
+pub fn pg_pool(url: &str, max_connections: i64) -> Result<PgPool, sqlx::Error> {
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(max_connections.clamp(1, 100) as u32)
+        .min_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .idle_timeout(std::time::Duration::from_secs(240))
+        .max_lifetime(std::time::Duration::from_secs(1800))
+        .connect_lazy(url)
+}
+
+/// Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection per
+/// process. `run_event_push=false` (the transaction-pooler escape hatch) or no database keeps the
+/// unassisted fast-poll cadence — losing push degrades to the previous behaviour, never past it.
+pub fn event_waiter(
+    database_url: &str,
+    run_event_push: bool,
+) -> Option<infrastructure::EventWaiter> {
+    if !run_event_push {
+        tracing::warn!(toggle = "RUN_EVENT_PUSH", "event push OFF -- drain loops poll unassisted");
+        return None;
+    }
+    let wake = infrastructure::EventWake::new();
+    infrastructure::spawn_event_listener(database_url.to_string(), wake.clone());
+    Some(wake.waiter())
+}
+
+/// The declared `MAILBOX_*` knobs, from the bin's generated Config — the same wiring the monolith
+/// composition root performs (retry spacing deliberately tracks the heartbeat, per the spec prose).
+pub struct MailboxSettings {
+    pub lease_seconds: i64,
+    pub heartbeat_seconds: i64,
+    pub max_delivery_attempts: i64,
+}
+
+impl MailboxSettings {
+    fn worker_config(&self) -> actor_runtime::WorkerConfig {
+        actor_runtime::WorkerConfig {
+            lease_seconds: self.lease_seconds,
+            heartbeat_seconds: self.heartbeat_seconds.max(1) as u64,
+            max_delivery_attempts: self.max_delivery_attempts.clamp(0, i16::MAX as i64) as i16,
+            retry_spacing_seconds: self.heartbeat_seconds.max(1) as u64,
+            ..actor_runtime::WorkerConfig::default()
+        }
+    }
+}
+
+/// The env-gated payment binding every money-lane host uses — the SAME resolution the monolith
+/// composition root performs at each of its three sites: the caller (a generated main whose spec
+/// declares the `payment` port) passes the real Stripe constructor; unset credentials fall back
+/// to the fail-closed stand-in (deliveries decline rather than move unverifiable money).
+pub fn payment_binding(
+    stripe: impl FnOnce(String) -> Arc<dyn PaymentService>,
+) -> Arc<dyn PaymentService> {
+    let factory = || match std::env::var("STRIPE_SECRET_KEY") {
+        Ok(key) if !key.is_empty() => {
+            tracing::info!(binding = "payments", impl_ = "StripePaymentGateway", "payment service wired (STRIPE_SECRET_KEY set)");
+            stripe(key)
+        }
+        _ => {
+            tracing::warn!(binding = "payments", impl_ = "FailClosedPaymentGateway", "STRIPE_SECRET_KEY unset -- payment-dependent deliveries decline");
+            Arc::new(infrastructure::FailClosedPaymentGateway)
+        }
+    };
+    infrastructure::generated::service_bindings::payment_service(factory)
+        .expect("payment service binding (services.yaml)")
+}
+
+/// The fail-closed payment stand-in for bins whose spec declares NO `payment` port: their lanes
+/// never call the service, and if a spec change ever routes a payment-dependent delivery here the
+/// decline is loud in logs and mailbox status rather than silently absorbed.
+pub fn fail_closed_payments() -> Arc<dyn PaymentService> {
+    infrastructure::generated::service_bindings::payment_service(|| {
+        Arc::new(infrastructure::FailClosedPaymentGateway)
+    })
+    .expect("payment service binding (services.yaml)")
+}
+
+/// Spawn the supervised mailbox-worker fleet for this bin's lanes — the SAME
+/// `infrastructure::mailbox::standalone` runtime the adapter binaries use (posture-gated money
+/// lanes, PM backfill, push listener, fenced completion, graceful drain), with the bin's declared
+/// `MAILBOX_*` configuration. Returns after spawning; the fleet supervises itself.
+pub fn spawn_actor_fleet(
+    pool: PgPool,
+    bin: &'static str,
+    lanes: &'static [&'static str],
+    payments: Arc<dyn PaymentService>,
+    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    mailbox: MailboxSettings,
+) {
+    let nudges = {
+        let mut n = MailboxNudges::default();
+        for lane in lanes {
+            n.register(lane);
+        }
+        Arc::new(n)
+    };
+    infrastructure::mailbox::spawn_standalone_workers_with(
+        pool,
+        bin,
+        lanes,
+        payments,
+        nudges,
+        reminder_windows,
+        Some(mailbox.worker_config()),
+    );
+}
+
+/// Everything a `pm-{name}` bin hosts besides its (optional) mailbox lane: the saga runner
+/// restricted to its OWN process manager, sequenced after the flip-time Stripe-fact backfill
+/// exactly like the monolith (#272 review MAJOR-2: the backfill must complete before the runner's
+/// first tick, or a fact past a frozen checkpoint is missed forever).
+pub struct PmRuntime {
+    pub pool: PgPool,
+    pub bin: &'static str,
+    /// The spec name of the hosted PM (e.g. `"CartBindingProcess"`).
+    pub pm: &'static str,
+    /// `Some` when this PM also has a mailbox lane (PlaceOrderProcess/RefundProcess): the money
+    /// backfill is sequenced before the runner and the caller ALSO spawns the lane fleet.
+    pub mailbox_lane: Option<&'static str>,
+    /// The delivery-partner port (only DeliveryDispatchProcess declares it).
+    pub partner: Option<Arc<dyn DeliveryService>>,
+    /// The payment port (PlaceOrder/Refund/Reclamation declare it).
+    pub payments: Option<Arc<dyn PaymentService>>,
+    pub waiter: Option<infrastructure::EventWaiter>,
+}
+
+/// Read the money posture and spawn the restricted saga runner. Returns the `/saga`-shaped status
+/// handle (the bin's health endpoint reports it) and the posture read (the caller logs it).
+///
+/// Posture mapping mirrors the monolith: `Unprovable` runs the legacy arm (gate off) —
+/// deterministic across every process reading the same missing row — and a TRANSIENT read error
+/// never reaches here (`pm_mailbox_delivery_posture` retries until the database answers, because
+/// a guessed money posture is the stall the row exists to remove).
+pub async fn spawn_pm_runtime(
+    rt: PmRuntime,
+) -> (Arc<std::sync::Mutex<infrastructure::ProcessManagerStatus>>, Option<bool>) {
+    let posture =
+        infrastructure::mailbox::pm_mailbox_delivery_posture(&rt.pool, rt.bin).await;
+    let gate_on = posture == Some(true);
+    let mut runner = infrastructure::ProcessManagerRunner::new(rt.pool.clone())
+        .with_only(rt.pm)
+        .with_pm_mailboxes(gate_on);
+    if let Some(partner) = rt.partner {
+        runner = runner.with_partner(partner);
+    }
+    if let Some(payments) = rt.payments {
+        runner = runner.with_payments(payments);
+    }
+    let status = runner.status();
+    // The flip-time backfill (monolith parity): only the money PMs (the mailbox-laned ones) need
+    // it, and only with the gate ON. Idempotent — the standalone fleet runs its own pass too; the
+    // point of THIS one is strictly-before the runner's first tick.
+    let backfill_pool = rt.mailbox_lane.filter(|_| gate_on).map(|_| rt.pool.clone());
+    let waiter = rt.waiter;
+    tokio::spawn(async move {
+        if let Some(pool) = backfill_pool {
+            run_pm_backfill(&pool).await;
+        }
+        runner.run_loop_with(waiter).await;
+    });
+    (status, posture)
+}
+
+/// The flip-time Stripe-fact backfill, sequenced by the caller before the runner's first tick —
+/// the monolith composition root's `pm_backfill` closure, shared. Seeds the PM lanes first so the
+/// width lookup can never race the workers' own seeding; retries transient errors; a final
+/// failure is LOUD and a restart retries (facts stay in the log — nothing is lost).
+async fn run_pm_backfill(pool: &PgPool) {
+    for (actor_type, width) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
+        if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
+            if let Err(e) = actor_runtime::seed_partitions(pool, actor_type, *width as i16).await {
+                tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry BEFORE relying on the flip");
+                return;
+            }
+        }
+    }
+    let pm_state = infrastructure::persistence::PgPaymentProcessState::new(pool.clone());
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(pool, &pm_state).await {
+            Ok(0) => {
+                tracing::info!(worker = "pm_backfill", enqueued = 0, "no un-reacted Stripe facts to backfill");
+                return;
+            }
+            Ok(n) => {
+                tracing::warn!(worker = "pm_backfill", enqueued = n, "backfilled un-reacted Stripe facts onto the PM lanes");
+                return;
+            }
+            Err(e) if attempt < 3 => {
+                tracing::warn!(worker = "pm_backfill", error = %e, attempt, "backfill failed -- retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            Err(e) => {
+                tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry BEFORE relying on the flip");
+                return;
+            }
+        }
+    }
+}
+
+/// Spawn the scope-restricted projection worker (D4): drains ONLY the registry groups the scope
+/// owns, on the shared per-group checkpoints — monolith and per-scope deployments hand over
+/// without a re-projection. Returns the `/projector`-shaped status handle.
+pub fn spawn_scope_projector(
+    pool: PgPool,
+    scope: &'static str,
+    waiter: Option<infrastructure::EventWaiter>,
+) -> Arc<std::sync::Mutex<infrastructure::ProjectionStatus>> {
+    let groups = infrastructure::ProjectionWorker::scope_group_count(scope);
+    if groups == 0 {
+        // Honest idle (e.g. `delivery`: its read models are saga state tables, not log folds):
+        // the bin stays a viable pod that truthfully reports nothing to drain, rather than a
+        // crash-looping deployable the topology declares.
+        tracing::warn!(scope, "scope projector: scope owns NO projection group -- worker will idle caught-up");
+    } else {
+        tracing::info!(scope, groups, "scope projector starting");
+    }
+    let worker = infrastructure::ProjectionWorker::new(pool).with_scope(scope);
+    let status = worker.status();
+    tokio::spawn(worker.run_loop_with(waiter));
+    status
+}
+
+/// One JSON health snapshot: `(ready, detail)`. `ready=false` renders 503 — the readiness probe
+/// holds the pod out until the runtime it hosts is actually running.
+pub type HealthFn = Arc<dyn Fn() -> (bool, serde_json::Value) + Send + Sync>;
+
+/// Serve the probe contract the generated Deployment declares (`/health` + `/ping`), draining on
+/// SIGTERM/ctrl-c, then return (the caller flushes telemetry). `wired:true` — this is the probe
+/// half of a BUSINESS runtime, not the step-4 shell.
+pub async fn serve_probes(bin: &'static str, family: &'static str, port: &str, health: HealthFn) {
+    let handler = move || {
+        let health = health.clone();
+        async move {
+            let (ready, detail) = health();
+            let mut body = serde_json::json!({
+                "bin": bin,
+                "family": family,
+                "version": build_version(),
+                "wired": true,
+            });
+            if let (Some(obj), Some(extra)) = (body.as_object_mut(), detail.as_object()) {
+                for (k, v) in extra {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+            let code = if ready {
+                axum::http::StatusCode::OK
+            } else {
+                axum::http::StatusCode::SERVICE_UNAVAILABLE
+            };
+            (
+                code,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                body.to_string(),
+            )
+        }
+    };
+    let app = axum::Router::new()
+        .route("/health", axum::routing::get(handler))
+        .route("/ping", axum::routing::get(|| async { "ok" }));
+    let addr = format!("0.0.0.0:{port}");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| panic!("{bin}: failed to bind {addr}: {e}"));
+    tracing::info!(bin, addr = %addr, version = build_version(), "listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(bin))
+        .await
+        .expect("server error");
+    tracing::info!(bin, "drained -- bye");
+}
+
+/// Resolve on Ctrl-C or SIGTERM (Kubernetes sends SIGTERM on every Recreate rollout) so in-flight
+/// requests drain instead of RSTing mid-deploy. The mailbox fleet installs its own watcher for
+/// the same signals (lane release), so both drains run concurrently.
+async fn shutdown_signal(bin: &'static str) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.expect("install Ctrl-C handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        signal(SignalKind::terminate()).expect("install SIGTERM handler").recv().await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    tracing::info!(bin, "shutdown signal received -- draining");
+}

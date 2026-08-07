@@ -12,146 +12,191 @@ checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 name = "actor-cart"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-catalog"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-catalog",
  "domain-common",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-conversation"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-comms",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-customer"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-customer",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-customer-credit"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-payments",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-delivery-job"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-delivery",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-delivery-partner-registration"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-delivery",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-mailbox-supervision"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-order"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-payment"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-prospect"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-network",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-reclamation"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-ordering",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-restaurant"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-network",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-restaurant-account"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-network",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "actor-rider"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-delivery",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -650,6 +695,21 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "bin_runtime"
+version = "0.1.0"
+dependencies = [
+ "actor_runtime",
+ "application",
+ "axum",
+ "infrastructure",
+ "serde_json",
+ "sqlx",
+ "telemetry",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "bitflags"
@@ -3609,53 +3669,76 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "pm-cart-binding"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-customer",
  "domain-ordering",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "pm-delivery-dispatch"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "application",
+ "avelo37-adapter",
+ "bin_runtime",
+ "coopcycle-adapter",
  "domain-delivery",
  "domain-ordering",
+ "infrastructure",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
+ "uber-direct-adapter",
 ]
 
 [[package]]
 name = "pm-place-order"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "regex",
+ "serde_json",
+ "stripe-adapter",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "pm-reclamation"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "regex",
+ "serde_json",
+ "stripe-adapter",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "pm-refund"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
  "domain-ordering",
  "domain-payments",
+ "regex",
+ "serde_json",
+ "stripe-adapter",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3801,63 +3884,84 @@ dependencies = [
 name = "projector-catalog"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-catalog",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-comms"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-comms",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-customer"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-customer",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-delivery"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-delivery",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-network"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-network",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-ordering"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-ordering",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "projector-payments"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-payments",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

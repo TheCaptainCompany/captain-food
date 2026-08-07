@@ -239,6 +239,12 @@ struct ProjectorGroup {
     stream_prefixes: &'static [&'static str],
     /// Every read model fed by these streams, folded in order for each event.
     projectors: &'static [ReadModelProjector],
+    /// The OWNING scope (ADR-20260807-183024 D4): the spec scope of the read models this group
+    /// maintains — which `projector-{scope}` bin drains it once the per-scope projectors host
+    /// projection (#385). Derived by hand from the primary stream category's owning aggregate;
+    /// the `registry_scopes_match_the_spec_placement` test below ties each label to the
+    /// GENERATED `ACTOR_SCOPES` table so it cannot drift from `specs/{scope}/` placement.
+    scope: &'static str,
 }
 
 /// The projector registry: one group per aggregate stream feeding materialized read models. The
@@ -248,21 +254,25 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "Restaurant",
         stream_prefixes: &["Restaurant-"],
         projectors: &[ReadModelProjector::Restaurant, ReadModelProjector::ProspectionPipeline],
+        scope: "network",
     },
     ProjectorGroup {
         checkpoint: "Customer",
         stream_prefixes: &["Customer-"],
         projectors: &[ReadModelProjector::Customer],
+        scope: "customer",
     },
     ProjectorGroup {
         checkpoint: "Catalog",
         stream_prefixes: &["Catalog-"],
         projectors: &[ReadModelProjector::Catalog],
+        scope: "catalog",
     },
     ProjectorGroup {
         checkpoint: "Cart",
         stream_prefixes: &["Cart-"],
         projectors: &[ReadModelProjector::Cart],
+        scope: "ordering",
     },
     // The Payment-% slice closes the OrderTracking.payment_status feed gap (docs/sagas.md;
     // ADR-20260719-193500): PaymentCaptured/PaymentRefunded live on Payment-{intentId} streams
@@ -271,6 +281,7 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "Order",
         stream_prefixes: &["Order-", "Payment-"],
         projectors: &[ReadModelProjector::OrderTracking],
+        scope: "ordering",
     },
     // The OrderConversation read model (#131, epic #129) folds the conversation's own messaging events
     // (`Conversation-{orderId}` streams), the order status lifecycle (`Order-%`), AND the claim lifecycle
@@ -282,6 +293,7 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "OrderConversation",
         stream_prefixes: &["Conversation-", "Order-", "Reclamation-"],
         projectors: &[ReadModelProjector::OrderConversation],
+        scope: "comms",
     },
     // The SlugAlias read model (ADR-20260728-011344): superseded storefront labels, so a renamed
     // restaurant's old host keeps resolving. Its own checkpoint on the Restaurant category, because the
@@ -291,6 +303,7 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "SlugAlias",
         stream_prefixes: &["Restaurant-"],
         projectors: &[ReadModelProjector::SlugAlias],
+        scope: "network",
     },
     // The CustomerCreditBalance read model (#158, Part B of #207): the per-customer store-credit
     // balance, folded from the ledger stream `CustomerCredit-{customerId}` (CustomerCreditGranted /
@@ -299,6 +312,7 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "CustomerCreditBalance",
         stream_prefixes: &["CustomerCredit-"],
         projectors: &[ReadModelProjector::CustomerCreditBalance],
+        scope: "payments",
     },
 ];
 
@@ -310,6 +324,12 @@ pub struct ProjectionWorker {
     /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY group.
     /// `-1` means nothing observed yet, so the first tick after start always drains.
     last_head: Arc<AtomicI64>,
+    /// Registry slice this worker drains: `None` = every group (the monolith's in-process worker);
+    /// `Some(scope)` = only the groups whose read models the scope owns — the `projector-{scope}`
+    /// bins (#385, ADR-20260807-183024 D4). Per-group checkpoints make the split free: a scoped
+    /// worker advances exactly the rows a full worker would for those groups, so monolith and
+    /// per-scope deployments can hand over without a re-projection.
+    scope: Option<&'static str>,
 }
 
 impl ProjectionWorker {
@@ -324,6 +344,7 @@ impl ProjectionWorker {
             status: Arc::new(Mutex::new(ProjectionStatus::default())),
             batch_size,
             last_head: Arc::new(AtomicI64::new(-1)),
+            scope: None,
         }
     }
 
@@ -331,6 +352,28 @@ impl ProjectionWorker {
     pub fn with_batch_size(mut self, batch_size: i64) -> Self {
         self.batch_size = batch_size.max(1);
         self
+    }
+
+    /// Restrict this worker to the registry groups OWNED by `scope` (the `projector-{scope}` bin
+    /// posture, D4). A scope owning no group today (e.g. `delivery`, whose read models are
+    /// maintained by the saga's state tables rather than log projection) yields an idle worker
+    /// that reports itself caught up — deliberately: the bin is honest about having nothing to
+    /// fold rather than crashing a deployable the topology declares.
+    pub fn with_scope(mut self, scope: &'static str) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    /// The registry groups this worker drains (scope-filtered when set).
+    fn groups(&self) -> impl Iterator<Item = &'static ProjectorGroup> {
+        let scope = self.scope;
+        REGISTRY.iter().filter(move |g| scope.is_none_or(|s| g.scope == s))
+    }
+
+    /// How many groups the given scope owns — the bins log this at boot so "idle because empty"
+    /// is distinguishable from "idle because caught up" without reading the registry source.
+    pub fn scope_group_count(scope: &str) -> usize {
+        REGISTRY.iter().filter(|g| g.scope == scope).count()
     }
 
     /// Shared status handle — the server reads this for its `/projector` health endpoint.
@@ -412,7 +455,7 @@ impl ProjectionWorker {
         if self.last_head.load(Ordering::Relaxed) == head {
             return Ok((head, head));
         }
-        for group in REGISTRY {
+        for group in self.groups() {
             self.drain_group(group).await?;
         }
         // Only a pass that drained EVERY group may arm the gate — a group that errored returns above
@@ -612,6 +655,37 @@ mod tests {
 
     fn money() -> Money {
         Money { amount_cents: MoneyCents(1000), currency: CurrencyCode("EUR".to_string()) }
+    }
+
+    /// The hand-written registry's scope labels are tied to the GENERATED spec-placement table
+    /// (`ACTOR_SCOPES`, from specs/{scope}/ folders): each group's scope must be the owning
+    /// scope of its PRIMARY stream category's aggregate. A label drifting from a spec move is a
+    /// red test here, not a projector silently draining under the wrong `projector-{scope}` bin.
+    #[test]
+    fn registry_scopes_match_the_spec_placement() {
+        for group in REGISTRY {
+            let category = group.stream_prefixes[0]
+                .strip_suffix('-')
+                .expect("stream prefixes are '<Category>-'");
+            let owning = crate::generated::scopes::actor_scope(category).unwrap_or_else(|| {
+                panic!("registry group '{}': primary category '{category}' is not a spec-declared actor", group.checkpoint)
+            });
+            assert_eq!(
+                group.scope, owning,
+                "registry group '{}' labels scope '{}' but specs/{{scope}}/ places its primary aggregate '{}' in '{}'",
+                group.checkpoint, group.scope, category, owning
+            );
+        }
+    }
+
+    /// Every non-kernel scope with registry groups is reachable through the scope filter, and
+    /// the filter partitions the registry (no group lost between the per-scope bins).
+    #[test]
+    fn scope_filter_partitions_the_registry() {
+        let scopes: std::collections::BTreeSet<&str> = REGISTRY.iter().map(|g| g.scope).collect();
+        let total: usize = scopes.iter().map(|s| ProjectionWorker::scope_group_count(s)).sum();
+        assert_eq!(total, REGISTRY.len(), "scope counts must partition the registry");
+        assert_eq!(ProjectionWorker::scope_group_count("no-such-scope"), 0);
     }
 
     /// A Payment-stream capture keys the Order row from the payload's `orderId`, not the stream.

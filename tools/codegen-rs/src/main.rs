@@ -290,6 +290,25 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            // The scope-filtered Config reader (#374 Q4): present exactly for WIRED bins; a
+            // family falling back to shell must not leave a stale module behind.
+            let config_path = dir.join("src/config.rs");
+            match &c.config {
+                Some(content) => {
+                    if let Err(e) = fs::write(&config_path, content) {
+                        eprintln!("✗ write {}: {}", config_path.display(), e);
+                        std::process::exit(1);
+                    }
+                }
+                None => {
+                    if config_path.exists() {
+                        if let Err(e) = fs::remove_file(&config_path) {
+                            eprintln!("✗ remove stale {}: {}", config_path.display(), e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
         }
         eprintln!("✓ wrote {} bin crates under crates/bins/", bin_crates.len());
     }
@@ -487,7 +506,7 @@ fn main() {
     // (ADR-20260731-214500) — absent, neither the file nor its mod.rs line is emitted (zero drift).
     let deletion_policy = emit_infra_deletion_policy(&model);
     let infra_mod = format!(
-        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\n{}",
+        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\npub mod scopes;\n{}",
         if deletion_policy.is_some() { "pub mod deletion_policy;\n" } else { "" }
     );
     let mut infra_files: Vec<(&str, String)> = vec![
@@ -495,6 +514,7 @@ fn main() {
         ("service_clients.rs", emit_services_http_clients(&model)),
         ("service_bindings.rs", emit_service_bindings(&model)),
         ("command_router.rs", emit_infra_command_router(&model)),
+        ("scopes.rs", emit_actor_scopes(&model)),
         ("mod.rs", infra_mod),
     ];
     if let Some(dp) = deletion_policy {

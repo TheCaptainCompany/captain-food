@@ -3,6 +3,31 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-07 — ADR-183024 BIN RUNTIME WIRING, CQRS SPINE IMPLEMENTED, PR IN REVIEW —
+> [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) "Bin runtime wiring:
+> business runtimes inside the 49 shells",
+> [ADR-20260807-231754](adr/ADR-20260807-231754-bin-runtimes-composition-kit-scoped-config.md).**
+> The 27 CQRS-spine bins (15 actor-* + 5 pm-* + 7 projector-*) are BUSINESS RUNTIMES: generated
+> mains (config gate → telemetry → declared-size pool → family spawn → probe server, readiness
+> 503 until the hosted runtime runs, `wired:true`) over the new hand-written
+> `crates/bin_runtime` composition kit — actor/pm fleets ride the SAME
+> `infrastructure::mailbox::standalone` runtime the adapters use (posture-gated money lanes,
+> flip-time backfill sequenced before the restricted saga runner, monolith parity); projector
+> bins drain the shared registry scope-filtered on SHARED checkpoints (handover needs no
+> re-projection; `delivery` owns no group and idles honestly). Per-bin generated Config =
+> scope-filtered key subset (#374 Q4 closed); `DATABASE_POOL_MAX_CONNECTIONS` declared (monolith
+> + bins); adapter links derive from spec `ports:` (which EXPOSED ReclamationProcess's
+> undeclared-but-used payment port — now declared). Registry scope labels are tied to the
+> generated `ACTOR_SCOPES` placement table by test. RECORDED COSTS: wired bins couple to the
+> full domain facade through `infrastructure` (blast radius honest in the determinator tests;
+> re-sharpening = the per-scope infrastructure split, follow-up on #385) and the in-process
+> status/event buses mean cross-process push subscribers go dark for bin-delivered completions
+> (poll paths unaffected). REMAINDER on #385 (issue stays open): graphql-* schema slices,
+> gateway-* composition + addresses, surface wasm/SDUI assets, bam aggregation, spec homes for
+> the bare-domain owner + integration host, sirene/retention/deletion/journal-sweep worker
+> hosting. GATE-THEN-STABILIZE: the monolith `server` remains the deployed runtime until steps
+> (6)–(7).
+>
 > 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (5) IMPLEMENTED, PR IN REVIEW — build matrix +
 > determinator gate ([#363](https://github.com/TheCaptainCompany/captain-food/issues/363)
 > "deploy.yml targets the GitOps path" realized as the build matrix per the settled protocol,

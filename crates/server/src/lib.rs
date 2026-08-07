@@ -354,8 +354,10 @@ pub async fn router() -> Router {
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
 
     match std::env::var("DATABASE_URL") {
+        // Pool ceiling from the DECLARED configuration (#385): the same key every wired bin
+        // reads, so the platform's total connection budget is reviewable in one spec place.
         Ok(url) if !url.is_empty() => match PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(config.database_pool_max_connections.clamp(1, 100) as u32)
             .min_connections(1)
             .acquire_timeout(Duration::from_secs(10))
             .idle_timeout(Duration::from_secs(240))

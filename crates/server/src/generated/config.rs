@@ -189,6 +189,8 @@ pub struct Config {
     pub hubrise_oauth_scope: Option<String>,
     /// Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all.
     pub database_url: String,
+    /// sqlx pool ceiling per PROCESS (ADR-20260807-183024 realization, issue #385): the monolith and every wired bin size their PgPool from this DECLARED value instead of a per-main constant. Matters at bin granularity: 49 pods x this ceiling is the CNPG cluster's connection budget, so the number must be reviewable in one place. Per-bin tuning is an env override on the pod (env > baked > default), not a code change.
+    pub database_pool_max_connections: i64,
     /// Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused.
     pub supabase_url: String,
     /// Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed (auth stays anonymous-only).
@@ -347,6 +349,7 @@ impl Config {
             problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
         }
         let database_url = database_url.unwrap_or_default();
+        let database_pool_max_connections = raw("DATABASE_POOL_MAX_CONNECTIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
         let supabase_url = raw("SUPABASE_URL").or_else(|| baked("SUPABASE_URL", profile).map(str::to_string));
         if supabase_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
@@ -540,6 +543,7 @@ impl Config {
                 hubrise_connect_redirect_url,
                 hubrise_oauth_scope,
                 database_url,
+                database_pool_max_connections,
                 supabase_url,
                 supabase_publishable_key,
                 supabase_jwks_url,
@@ -620,6 +624,7 @@ impl Config {
         out.push_str(&format!("  HUBRISE_CONNECT_REDIRECT_URL = {}\n", self.hubrise_connect_redirect_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  HUBRISE_OAUTH_SCOPE        = {}\n", self.hubrise_oauth_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  DATABASE_URL               = {}\n", if self.database_url.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  DATABASE_POOL_MAX_CONNECTIONS = {}\n", self.database_pool_max_connections));
         out.push_str(&format!("  SUPABASE_URL               = {}\n", self.supabase_url));
         out.push_str(&format!("  SUPABASE_PUBLISHABLE_KEY   = {}\n", self.supabase_publishable_key));
         out.push_str(&format!("  SUPABASE_JWKS_URL          = {}\n", self.supabase_jwks_url));
@@ -678,7 +683,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 59;
+pub const KEY_COUNT: usize = 60;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -689,6 +694,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "HUBRISE_OAUTH_SCOPE",
     "APP_PROFILE",
     "DATABASE_URL",
+    "DATABASE_POOL_MAX_CONNECTIONS",
     "SUPABASE_URL",
     "SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_JWKS_URL",
