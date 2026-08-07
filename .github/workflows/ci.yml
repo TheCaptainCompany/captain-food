@@ -20,6 +20,20 @@ name: ci
 # docs) is deliberately NOT in the docs-only list - spec markdown participates in drift checking.
 # Anything ambiguous (new branch's first push, unreachable force-push base, empty diff) fails open:
 # the full gate runs.
+#
+# PARALLEL JOBS (#356). The gate used to be ONE sequential job: machete -> build -> wasm -> unit
+# tests -> migrations -> DB suites -> validator -> drift. The validator runs in SECONDS but sat
+# behind the entire Rust build and both test suites, so the cheapest and most frequently failing
+# gate gave the slowest feedback. The work is now four independent jobs that start together; wall
+# clock becomes the slowest one instead of the sum. This costs nothing: GitHub Actions is free and
+# unlimited on this PUBLIC repo, which is exactly why ADR-20260721-175411 put the build here rather
+# than on the hosting platform. No hosting choice - PaaS, Kubernetes or an instance - changes this
+# workflow's duration by one second.
+#
+# `codegen` SURVIVES AS THE REQUIRED CHECK, and is now an aggregator. Read the comment on that job
+# before touching it: a `needs:` job that FAILS makes its dependents `skipped`, and (per the
+# docs-only note above) branch protection ACCEPTS `skipped`. An aggregator that relied on `needs:`
+# alone would therefore turn every red build green. It asserts the upstream results explicitly.
 on:
   push:
     # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)
@@ -69,78 +83,43 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only (base=$BASE_SHA head=$HEAD_SHA event=$EVENT_NAME)"
 
-  codegen:
+  lint:
+    # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
+    # someone can silently start using. cargo-machete is static analysis over manifests + source
+    # (NO compilation), so it is its own job now rather than a fail-fast step in front of the build —
+    # it reports in well under a minute instead of gating anything. False positives are excused per
+    # crate via `[package.metadata.cargo-machete] ignored = [...]` — a visible, reviewable manifest
+    # diff, in the same spirit as the D3 capability allowlist.
     needs: changes
-    # Skipped (not failed) on docs-only changes - branch protection accepts a skipped required check.
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    # A real Postgres for the DATABASE_URL-gated integration suites (#230). Without one they take
-    # their early-return branch and report ok — a green that covers nothing, which is how the #236
-    # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      # Cache ~/.cargo + target/ keyed on Cargo.lock + toolchain, so repeat runs only recompile the crates
-      # that actually changed (not the ~200 dependencies) — the main CI-duration win. (db-migrate needs no
-      # build cache: it runs a prebuilt sqlx-cli, so there is no artifact worth sharing between the two.)
-      - uses: Swatinem/rust-cache@v2
-
-      # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
-      # someone can silently start using. cargo-machete is static analysis over manifests + source
-      # (no compilation), so it runs BEFORE the expensive build and fails fast. False positives are
-      # excused per crate via `[package.metadata.cargo-machete] ignored = [...]` — a visible,
-      # reviewable manifest diff, in the same spirit as the D3 capability allowlist.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
       - name: Unused dependencies (cargo-machete — the D6 lint floor, #302)
         run: cargo machete
 
-      - name: Build the workspace (codegen + all layer crates — enforces the ADR-0035 dependency graph)
-        run: cargo build --workspace --verbose
-
-      - name: Compile-check the wasm32 hydrate build (split 4/4 of #21 — the bundle itself is built in build-image.yml's Docker step)
-        run: |
-          rustup target add wasm32-unknown-unknown
-          make wasm
-
-      # Kept WITHOUT a DATABASE_URL on purpose: this run proves the offline path (every DB-gated test
-      # must skip cleanly on a contributor machine with no Postgres). The DB suites run for real below.
-      - name: Unit tests (whole workspace)
-        run: cargo test --workspace --verbose
-
-      - uses: taiki-e/install-action@v2 # prebuilt sqlx-cli in seconds, same as db-migrate.yml
-        with:
-          tool: sqlx-cli
-      - name: Apply migrations to the CI Postgres (#230 — the DB suites assume the schema exists)
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-        run: sqlx migrate run --source migrations
-
-      # --test-threads=1 because the suites share one database and reset the same tables; the per-file
-      # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
-      # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
-      # actor_runtime carries the Proto.Actor port suites (ADR-20260730-234918: fencing, ordering,
-      # rebalance, discipline) — it was missing here until #275, so those suites only ever ran on
-      # developer machines.
-      - name: DB integration tests (previously these always skipped — no Postgres in CI)
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-          DB_TESTS_REQUIRED: '1'
-        run: >-
-          cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter
-          -p actor_runtime --tests --verbose -- --test-threads=1
+  specs:
+    # THE POINT OF THE SPLIT. The validator is the blocking gate and the one most likely to fail on
+    # a spec change, yet it only needs `tools/codegen-rs` — a separate manifest, not the workspace.
+    # On its own job it reports in seconds; it used to wait for the workspace build, the wasm check
+    # and both test suites first.
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Default config on purpose. `tools/codegen-rs` is a MEMBER of the root workspace (see the root
+      # Cargo.toml), so the workspace root is `.` and the target dir is the root `target/` — pointing
+      # rust-cache's `workspaces:` at the member directory would key a cache against a path that is
+      # not a workspace root. The cache still stays small because rust-cache keys per JOB, and this
+      # job only ever compiles the codegen package and its own dependency tree ("tooling, not part of
+      # the app graph"), never the layer crates.
+      - uses: Swatinem/rust-cache@v2
 
       - name: Validate the specs (full validator §1–§11 — the blocking gate)
         run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
@@ -165,3 +144,111 @@ jobs:
             exit 1
           fi
           echo "✓ generated artifacts match the specs"
+
+  build-test:
+    # Workspace build + wasm compile-check + the offline test pass. Runs concurrently with `db-test`,
+    # which needs the same crates compiled; on a cold cache both pay the build, but IN PARALLEL, so
+    # wall clock is one build rather than two. `Swatinem/rust-cache` keys per job, so each keeps its
+    # own warm cache and neither races the other's save.
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Cache ~/.cargo + target/ keyed on Cargo.lock + toolchain, so repeat runs only recompile the crates
+      # that actually changed (not the ~200 dependencies) — the main CI-duration win. (db-migrate needs no
+      # build cache: it runs a prebuilt sqlx-cli, so there is no artifact worth sharing between the two.)
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the workspace (codegen + all layer crates — enforces the ADR-0035 dependency graph)
+        run: cargo build --workspace --verbose
+
+      - name: Compile-check the wasm32 hydrate build (split 4/4 of #21 — the bundle itself is built in build-image.yml's Docker step)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          make wasm
+
+      # Kept WITHOUT a DATABASE_URL on purpose: this run proves the offline path (every DB-gated test
+      # must skip cleanly on a contributor machine with no Postgres). The DB suites run for real in `db-test`.
+      - name: Unit tests (whole workspace)
+        run: cargo test --workspace --verbose
+
+  db-test:
+    # A real Postgres for the DATABASE_URL-gated integration suites (#230). Without one they take
+    # their early-return branch and report ok — a green that covers nothing, which is how the #236
+    # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2 # prebuilt sqlx-cli in seconds, same as db-migrate.yml
+        with:
+          tool: sqlx-cli
+      - name: Apply migrations to the CI Postgres (#230 — the DB suites assume the schema exists)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: sqlx migrate run --source migrations
+
+      # --test-threads=1 because the suites share one database and reset the same tables; the per-file
+      # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
+      # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
+      # actor_runtime carries the Proto.Actor port suites (ADR-20260730-234918: fencing, ordering,
+      # rebalance, discipline) — it was missing here until #275, so those suites only ever ran on
+      # developer machines.
+      - name: DB integration tests (previously these always skipped — no Postgres in CI)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          DB_TESTS_REQUIRED: '1'
+        run: >-
+          cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter
+          -p actor_runtime --tests --verbose -- --test-threads=1
+
+  codegen:
+    # THE REQUIRED STATUS CHECK ON `main`. Keep this job id: branch protection matches on it, and a
+    # required check whose job never appears leaves every PR stuck on "Expected - waiting for status"
+    # (the same trap the docs-only note in the header describes).
+    #
+    # Since #356 this is an aggregator, and the assertion below is load-bearing. GitHub SKIPS a job
+    # whose `needs:` dependency failed — and branch protection ACCEPTS `skipped`, which is precisely
+    # why the docs-only design works. Relying on `needs:` alone would therefore report every red
+    # build as an acceptable skip and silently disable the entire gate. `if: always()` makes this job
+    # run whatever happened upstream, and the step fails unless every upstream result is `success`
+    # (normal run) or `skipped` (docs-only change). `cancelled` and `failure` both fail here.
+    needs: [changes, lint, specs, build-test, db-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every gate job must have succeeded (or been skipped as docs-only)
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "upstream gate results: $RESULTS"
+          status=0
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::a required gate job reported '$r'"; status=1 ;;
+            esac
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "::error::ci gate FAILED — see the failing job above."
+            exit 1
+          fi
+          echo "✓ every gate job passed"
