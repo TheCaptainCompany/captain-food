@@ -3,7 +3,29 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (4) IMPLEMENTED, PR IN REVIEW — codegen emits the
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (5) IMPLEMENTED, PR IN REVIEW — build matrix +
+> determinator gate ([#363](https://github.com/TheCaptainCompany/captain-food/issues/363)
+> "deploy.yml targets the GitOps path" realized as the build matrix per the settled protocol,
+> [PR #386](https://github.com/TheCaptainCompany/captain-food/pull/386),
+> [ADR-20260807-223428](adr/ADR-20260807-223428-build-matrix-determinator-gate.md)).** CI learns
+> to build/test/publish PER BIN with change-driven selection, fail-open to rebuilding: a second
+> `tools/codegen-rs` binary (`determinator`) wraps the guppy `determinator` library + repo path
+> rules for the PR-time affected set (spec-derived crate graph, never a hand list; 16 property
+> tests assert the bias — unknown file → all 49 bins, pin bump → nothing, one domain scope → its
+> linked bins only) and computes the per-bin SOURCE-CLOSURE hash (git blob shas of the crate
+> closure + global inputs + image name, `v1:`) that `deploy/pins/{bin}.json` records.
+> `build-bins.yml` (new, additive, non-required): PRs build+test exactly the affected bins; main
+> (after green ci) builds+pushes per-bin images ONLY where hash ≠ pin, one shared chef cook
+> (`Dockerfile.bin`'s `ARG BIN` moved AFTER the cook — the old placement keyed the cook cache
+> per-BIN = 49 cold cooks; `SOURCE_HASH` baked as the `food.captain.source-hash` forensic
+> label). `deploy-bins.yml` (manual dispatch, GATED — nothing applies manifests until Argo
+> #366): writes only hash-changed pins `{digest, source_hash}` + regenerated manifests as ONE
+> commit after verifying the published label matches; refuses missing tags/mismatches loudly.
+> Monolith `build-image.yml`/`deploy.yml` byte-identical and authoritative until cutover; Render
+> retirement + prod-smoke retarget move with steps (6)–(7) (#358/#366). Validate 0 errors / 43
+> warnings (kinds identical to baseline).
+>
+> ✅ **2026-08-07 — ADR-183024 REALIZATION STEP (4) MERGED — codegen emits the
 > deployment ([#349](https://github.com/TheCaptainCompany/captain-food/issues/349) "Derive
 > deployment artifacts from the existing specs", [PR #384](https://github.com/TheCaptainCompany/captain-food/pull/384),
 > [ADR-20260807-220528](adr/ADR-20260807-220528-deploy-emitter-pins-are-input.md)).** The emitter

@@ -10,6 +10,9 @@ set, verified by a differential harness), and the TypeScript codegen was then re
 Needs a local Rust toolchain (`cargo`, via `rustup`; pinned in `tools/codegen-rs/rust-toolchain.toml`).
 
 - `make validate` — `cargo run … -- --check --specs specs` (validate only, writes nothing).
+  (The package carries a SECOND binary since #363: `cargo run --bin determinator -- <affected|hash>`
+  — the build-matrix gate (ADR-20260807-223428); `default-run = "generate"` keeps bare
+  `cargo run` meaning the generator, so Makefile/hooks/ci.yml are unaffected.)
 - `make generate` — `cargo run … -- --specs specs` (validate + write artifacts) then fail on drift.
 - `make rust` — `cargo build` + `cargo test` + validate + generate (+ `git diff`) — the full gate.
 - `make typecheck` — `cargo build` (the compiler is the type gate).

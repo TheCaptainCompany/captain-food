@@ -2,6 +2,9 @@
 name = "captain-food-codegen"
 version = "0.1.0"
 edition = "2021"
+# Two binaries since #363 (`generate` + `determinator`); bare `cargo run` (Makefile, hooks,
+# ci.yml) keeps meaning the generator.
+default-run = "generate"
 description = "Captain.Food spec validator + artifact generator (ADR-0034) — the single codegen gate. Full validator (§1–§11) + all emitters. Began as a TypeScript tool (tools/codegen), ported to Rust at parity (byte-identical artifacts + identical validation issue set); the TypeScript codegen has since been retired."
 
 # The decision doc calls the entry `scripts/generate.rs`; here it is a proper Cargo binary named `generate`.
@@ -9,12 +12,24 @@ description = "Captain.Food spec validator + artifact generator (ADR-0034) — t
 name = "generate"
 path = "src/main.rs"
 
+# The #363 build-matrix gate (ADR-20260807-183024 step 5): affected-bin computation (the
+# `determinator` library over the workspace graph, fail-open to rebuilding) + the per-bin
+# source-closure hash that `deploy/pins/{bin}.json` records. Self-contained module tree — it reads
+# the generated deploy artifacts (images.json) and cargo metadata, not the spec model.
+[[bin]]
+name = "determinator"
+path = "src/determinator_gate/main.rs"
+
 [dependencies]
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 # preserve_order: JSON.stringify keeps object insertion order; match it (map/desc payloads in the HTML doc).
 serde_json = { version = "1", features = ["preserve_order"] }
+determinator = "0.12.0"
+guppy = "0.17"
+sha2 = "0.11.0"
+camino = "1.2.5"
 
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
 [lints]
