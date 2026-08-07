@@ -7,7 +7,7 @@
 - **Concerns**:
   - [ ] rolling-deploys-blocked-by-193: the headline benefit cannot be used until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases land — a rolling update runs two write-path instances at once, which is exactly what [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) forbids. Approving must state which deploy strategy V0 uses in the meantime.
   - [x] database-placement-unresolved: **resolved 2026-08-06** — the product owner chose in-cluster CNPG explicitly, with the operability conditions (≥3 nodes, required anti-affinity, WAL archiving, executed restore drills) carried as part of the answer, not inherited by default.
-  - [ ] prod-is-down: the cutover window is an outage. D6 must say whether the cluster is built now or after service is restored.
+  - [x] prod-is-down: **resolved 2026-08-07** — D6 is answered: the product owner explicitly accepts the outage window (*"it was a crash test"*); the cluster is built directly, with no interim restore. The remaining data question (restore the dump vs start clean) is carried in D6's note and §6.
   - [x] agent-access-shape: **resolved 2026-08-06** — the product owner chose the recommended mechanism (*"Of course gitops"*): GitOps as the only change path, read access for diagnostics, fixes as repo changes; practices in §2b.
 
 ---
@@ -50,6 +50,10 @@ none of them appeared in the original ADR:
 | Clever Cloud PaaS (the ADR-20260806-151122 decision) | Cheapest verified (EUR 9.75 for an under-specced pair), managed Postgres with backups + PITR, zero infrastructure to operate, **10 TB/month free egress** | Deepening ecosystem coupling (Tasks, Cellar, add-ons); no ingress layer of our own; deployment descriptors cannot be generated from the specs |
 | Defer — restore prod on the PaaS, decide later | Fastest path out of the current outage; the digest-pinned image runs unchanged on either, so moving later is a redeploy, not a migration | Two setups instead of one; risks becoming permanent by inertia |
 
+**D1 ANSWERED 2026-08-07 (product owner: *"MKS of course"*): OVH Managed Kubernetes** — the
+recommended option: GA (vs CKE's public beta), free control plane, free egress including object
+storage, same provider as the SMS hook and the vRack.
+
 ### D2 — Where does PostgreSQL live? (**the hard one**)
 
 | Option | Pros | Cons |
@@ -88,6 +92,15 @@ still work and are a real gain, but zero-downtime rollout is not.
 | **ingress-nginx + cert-manager, DNS-01 wildcard for `*.captain.food`** ✅ **recommended** | Standard, well-documented, provider-portable. Terminates TLS, routes by `Host` (multi-tenancy) and by path (`/{role}/graphql`), keeps pods unexposed. Solves wildcard TLS, which is required on **every** option including the PaaS | Another component to upgrade. DNS-01 needs a DNS-provider credential in-cluster |
 | Traefik | Ingress + gateway features in one, good defaults | A second config idiom to learn beside the manifests |
 | Cloud LB straight to the service | Fewest moving parts | No host/path routing, no central TLS, pods effectively exposed — loses the reason for wanting ingress |
+
+**D4 ANSWERED 2026-08-07 (product owner: *"Ingress yes!"*): ingress-nginx + cert-manager, DNS-01
+wildcard.** The queried con, unpacked (it had been stated too tersely): a `*.captain.food` wildcard
+certificate can only be issued via the DNS-01 challenge — Let's Encrypt demands a token written into
+a TXT record on the zone — and renewal is every ~60 days, done by cert-manager unattended, so
+**cert-manager must hold an OVH DNS API credential in-cluster**. Mitigations, now part of the answer:
+the token is **scoped to the `captain.food` zone only**, stored sealed (§2b practice 7), and OVH
+needs the community webhook solver (`cert-manager-webhook-ovh`) since it is not a built-in
+cert-manager solver — one more Helm chart on the practice-1 upgrade list.
 
 ### D5 — Are the manifests generated from the specs?
 
@@ -203,6 +216,16 @@ sequenceDiagram
 | **Restore service on the simplest path first, build the cluster deliberately after** ✅ **recommended** | The digest-pinned image runs unchanged on either, so this is a redeploy and not a second migration. Standing up a cluster, DNS, wildcard TLS, secrets and a database restore **simultaneously, under outage pressure** is where avoidable mistakes happen | Two setups; risk the interim becomes permanent (mitigated by this proposal + the tracking issue) |
 | Build the cluster now, cut over once | One destination, one setup, no throwaway work — defensible given real k8s fluency | Every unknown lands at once, while the store is shut |
 
+**D6 ANSWERED 2026-08-07 (product owner, AGAINST the recommendation — recorded as such): build the
+cluster now, cut over once.** *"I don't care about prod on Render and Supabase, it was a crash test —
+now I know better what I need and it's Kubernetes."* There is no interim restore; the MKS cluster IS
+the restoration path, and the outage window is explicitly accepted rather than raced.
+**One question this raises for the cutover plan** (PROP-20260731-061609 §D3 assumed final dump →
+restore): does *"crash test"* extend to the **data** — is the Supabase dump restored into CNPG, or
+does production start from an empty schema with all migrations applied fresh? Starting clean deletes
+the dump/restore/checksum work entirely, but it is a data-erasure decision only the product owner can
+make. Carried as an unresolved question.
+
 ## 3. Screen mockups
 
 **No end-user screens** — this proposal adds no command, query, `View_*` or screen, so there is nothing
@@ -291,10 +314,13 @@ sequenceDiagram
 
 Copied to the tracking issue's checklist on approval.
 
-1. **D2's real cost**: price OVH managed PostgreSQL with adequate disk against the cluster, and against
-   Clever Cloud's managed plan. This is the number that decides D1 as much as any architectural point.
-2. Node pool shape and count — one node is a single point of failure with a free control plane in front
-   of it; two changes the economics again.
+1. **Does "crash test" extend to the DATA?** (raised by D6's answer, 2026-08-07): restore the final
+   Supabase dump into CNPG per the old cutover plan, or start production from an empty schema with all
+   migrations applied fresh? Starting clean deletes the dump/restore/checksum steps — and the Supabase
+   database is emptied either way (GDPR posture) — but discarding the crash-test data is a decision
+   only the product owner can make explicitly.
+2. **Node pool sizing and price**: D2's answer requires ≥3 nodes; price the smallest MKS node trio that
+   holds the api, CNPG (3 instances), ingress, cert-manager, Argo CD and the OTel collector.
 3. Does the OTel collector run as a cluster DaemonSet/Deployment, or stay in the app process?
 4. Secret management: plain `Secret` objects, Sealed Secrets, or an external store? The GHCR image is
    public, so nothing may be baked (PROP-20260729-014500 D5 still binds).

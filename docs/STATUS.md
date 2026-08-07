@@ -30,8 +30,14 @@
 > cluster + Postgres READ access for diagnostics and repairs production through repo changes; the
 > operating practices are the proposal's §2b (generated manifests reconciled by Argo CD, CI commits
 > the digest, sealed secrets for the public repo, symptom alerts that wake sessions, weekly restore
-> drill). D1 (MKS vs CKE), D3–D6 and two concerns (rolling-deploys-blocked-by-193, prod-is-down)
-> remain open in [DECISIONS.md §17](proposals/DECISIONS.md).
+> drill). **2026-08-07, three more decided**: **D1 — OVH MKS** (*"MKS of course"*); **D4 — ingress-nginx
+> + cert-manager, DNS-01 wildcard** (the in-cluster DNS credential is zone-scoped and sealed; OVH
+> needs the community webhook solver); **D6 — build the cluster now, cut over once, AGAINST the
+> restore-first recommendation** (*"it was a crash test"*) — which opens one question only the product
+> owner can answer: does "crash test" extend to the **data** (restore the Supabase dump into CNPG, or
+> start production from an empty schema)? **Remaining: D3 (`Recreate` until #242) and D5 (generated
+> manifests)** plus the rolling-deploys concern that D3 resolves — one yes on each flips the proposal
+> to `Approved` in [DECISIONS.md §17](proposals/DECISIONS.md).
 
 > 🚨 **2026-08-06 — THE HOSTING DESTINATION IS CLEVER CLOUD, NOT OVH — ⚠️ REOPENED, see above
 > ([ADR-20260806-151122](adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
