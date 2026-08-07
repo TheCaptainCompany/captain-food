@@ -14,6 +14,10 @@ pub(crate) use std::path::PathBuf;
 
 pub(crate) use serde_yaml::Value;
 
+// Since #373 (ADR-20260807-183024 step 2) the Rust domain-type emitters write PER-SCOPE crates
+// under crates/domains/ (manifests included, deps derived from the spec's $ref edges) and
+// crates/domain re-exporting facades — see emit/domain_scopes.rs for the doctrine.
+//
 // Module map (#277 split — pure code motion out of the former single-file main.rs). Everything is
 // re-exported pub(crate) at the crate root, so modules share one flat namespace via `use crate::*;`
 // exactly as they did when this was one file.

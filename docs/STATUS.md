@@ -3,11 +3,28 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (1) IMPLEMENTED, PR IN REVIEW — the spec reorg
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (2) IMPLEMENTED, PR IN REVIEW — per-scope domain
+> crates + kernel ([#373](https://github.com/TheCaptainCompany/captain-food/issues/373) "Domain
+> splits into per-scope GENERATED crates; crate graph derived from spec $refs",
+> [PR #381](https://github.com/TheCaptainCompany/captain-food/pull/381)).** The codegen emits one
+> `domain-{scope}` crate per `specs/{scope}/` under `crates/domains/` (manifests GENERATED,
+> `[dependencies]` DERIVED from the fragments' cross-scope $ref edges — currently a clean star:
+> every scope → `domain-common`, the kernel, which depends on nothing); `crates/domain` became a
+> re-exporting FACADE (same `domain::generated::*` paths, same type identity — zero downstream
+> churn) keeping the cross-scope artifacts (DomainEvent union over the single log, global error
+> catalog, states/lifecycles folds); `specs/generated/crate-graph.generated.json` commits the
+> derived topology incl. each actor/PM bin's domain-crate links (PM bridges load-bearing:
+> `pm-place-order` → ordering+payments+common) — step (3)'s bin-emitter input contract. HONEST
+> LIMITS: kernel changes ripple every scope (correctly); cross-scope PMs rebuild on all their
+> linked scopes; and until step (3) splits the bins, the facade still couples the monolith
+> consumers to every scope — the pod-level blast-radius win lands with the bin crates + #363's
+> determinator. Validate 0 errors / 43 warnings (kinds identical to baseline).
+>
+> ✅ **2026-08-07 — ADR-183024 REALIZATION STEP (1) MERGED — the spec reorg
 > ([#375](https://github.com/TheCaptainCompany/captain-food/issues/375) "Spec reorg: specs/{scope}/
 > folders + common, api/config fragments, scope validator rules, c4-l2 container split",
-> [PR #376](https://github.com/TheCaptainCompany/captain-food/pull/376)).** Landed on the branch:
-> the loader merges `specs/{scope}/{kind}.yaml` fragments into the logical catalogs (refs stay
+> [PR #376](https://github.com/TheCaptainCompany/captain-food/pull/376)).**
+> The loader merges `specs/{scope}/{kind}.yaml` fragments into the logical catalogs (refs stay
 > KIND-logical — zero ref rewrites); ~826 items split into the 8 scope folders per the #374
 > membership map (semantic round-trip verified); validator §14 gates placement, the cross-scope
 > $ref DAG (PMs exempt bridges), kernel purity and api nesting; c4-l2's `api` container split into

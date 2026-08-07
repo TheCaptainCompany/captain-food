@@ -5039,3 +5039,282 @@ fn a_root_catalog_beside_scope_folders_is_forbidden() {
     let model = load_model(&specs).expect("loads");
     assert!(model.load_issues.is_empty());
 }
+
+// ─── Per-scope domain crates + kernel + crate graph (#373, ADR-20260807-183024 step 2) ──────────
+//
+// The emitter turns the spec's coupling into Cargo's: each scope's type fragments become a
+// generated crate whose [dependencies] are DERIVED from the cross-scope `$ref` edges, the kernel
+// (`common`) carries the shared error mechanics, the `domain` facade re-exports everything, and
+// the crate-graph artifact records the actor/PM → scope-crate links step (3)'s bin emitter
+// consumes. These tests pin every one of those derivations to a small on-disk fixture, plus one
+// whole-tree gate over the real specs.
+
+mod domain_scope_crates {
+    use super::super::*;
+    use super::scope_loader;
+
+    /// common: a uuid scalar + an entity; ordering: a scalar, an entity nesting the kernel's, an
+    /// event reaching both scopes' scalars, a command, an error.
+    fn fixture(tag: &str) -> PathBuf {
+        let specs = scope_loader::scaffold(tag);
+        fs::create_dir_all(specs.join("common")).expect("mkdir");
+        fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+        fs::write(
+            specs.join("common/scalars.yaml"),
+            "OrderId: { type: string, format: uuid }\nMoneyCents: { type: integer }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("common/entities.yaml"),
+            "Money:\n  type: object\n  properties:\n    amountCents: { $ref: 'scalars.yaml#/MoneyCents' }\n  required: [amountCents]\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("common/errors.yaml"),
+            "KernelBroke:\n  description: kernel-owned error\n  messages: { en: broke, fr: casse }\n",
+        )
+        .expect("write");
+        fs::write(specs.join("ordering/scalars.yaml"), "OrderStatus: { enum: [PLACED] }\n")
+            .expect("write");
+        fs::write(
+            specs.join("ordering/entities.yaml"),
+            "OrderLine:\n  type: object\n  properties:\n    price: { $ref: 'entities.yaml#/Money' }\n  required: [price]\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("ordering/events.yaml"),
+            "OrderPlaced:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n    status: { $ref: 'scalars.yaml#/OrderStatus' }\n  required: [orderId, status]\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("ordering/commands.yaml"),
+            "PlaceOrder:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n  required: [orderId]\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("ordering/errors.yaml"),
+            "OrderNotFound:\n  description: no such order\n  context: { orderId: { $ref: 'scalars.yaml#/OrderId' } }\n  messages: { en: 'Order {orderId} not found', fr: 'Commande {orderId} introuvable' }\n",
+        )
+        .expect("write");
+        specs
+    }
+
+    fn crate_of<'a>(crates: &'a [DomainScopeCrate], scope: &str) -> &'a DomainScopeCrate {
+        crates.iter().find(|c| c.scope == scope).unwrap_or_else(|| panic!("no {} crate", scope))
+    }
+    fn file_of<'a>(c: &'a DomainScopeCrate, name: &str) -> &'a str {
+        c.files
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, c)| c.as_str())
+            .unwrap_or_else(|| panic!("{}: no {}", c.scope, name))
+    }
+
+    #[test]
+    fn manifests_and_imports_derive_from_the_same_ref_reach() {
+        let specs = fixture("crates");
+        let model = load_model(&specs).expect("loads");
+        let crates = emit_domain_scope_crates(&model);
+        assert_eq!(
+            crates.iter().map(|c| c.scope.as_str()).collect::<Vec<_>>(),
+            vec!["common", "ordering"],
+        );
+        // Kernel: no domain deps at all; uuid earned by the uuid scalar; serde_json by interpolate.
+        let common = crate_of(&crates, "common");
+        assert!(
+            !common.manifest.contains("{ path = \"../"),
+            "kernel must depend on no scope:\n{}",
+            common.manifest
+        );
+        assert!(common.manifest.contains("uuid = { workspace = true }"), "{}", common.manifest);
+        assert!(common.manifest.contains("serde_json = { workspace = true }"), "{}", common.manifest);
+        // Scope: exactly the derived kernel edge, and NO unearned deps.
+        let ordering = crate_of(&crates, "ordering");
+        assert!(
+            ordering.manifest.contains("domain-common = { path = \"../common\" }"),
+            "{}",
+            ordering.manifest
+        );
+        assert!(!ordering.manifest.contains("uuid ="), "no uuid code emitted here:\n{}", ordering.manifest);
+        assert_eq!(ordering.dep_scopes.iter().collect::<Vec<_>>(), vec!["common"]);
+        // The SAME reach feeds the use lines: events reach kernel + own scalars; entities reach
+        // kernel entities; commands reach kernel scalars only.
+        let events = file_of(ordering, "src/events.rs");
+        assert!(events.contains("use crate::scalars::*;"), "{}", events);
+        assert!(events.contains("use domain_common::scalars::*;"), "{}", events);
+        let entities = file_of(ordering, "src/entities.rs");
+        assert!(entities.contains("use domain_common::entities::*;"), "{}", entities);
+        assert!(!entities.contains("use crate::scalars::*;"), "unearned import:\n{}", entities);
+        let commands = file_of(ordering, "src/commands.rs");
+        assert!(commands.contains("use domain_common::scalars::*;"), "{}", commands);
+        assert!(!commands.contains("use crate::"), "unearned import:\n{}", commands);
+        // lib.rs lists exactly the emitted modules, in kind order.
+        let lib = file_of(ordering, "src/lib.rs");
+        for m in ["scalars", "entities", "events", "commands", "errors"] {
+            assert!(lib.contains(&format!("pub mod {};", m)), "{}", lib);
+        }
+    }
+
+    #[test]
+    fn kernel_owns_error_def_and_scope_error_catalogs_build_on_it() {
+        let specs = fixture("errors");
+        let model = load_model(&specs).expect("loads");
+        let crates = emit_domain_scope_crates(&model);
+        let common_errors = file_of(crate_of(&crates, "common"), "src/errors.rs");
+        assert!(common_errors.contains("pub struct ErrorDef"), "{}", common_errors);
+        assert!(common_errors.contains("pub fn interpolate"), "{}", common_errors);
+        assert!(common_errors.contains("pub const KERNEL_BROKE: ErrorDef"), "{}", common_errors);
+        let ordering_errors = file_of(crate_of(&crates, "ordering"), "src/errors.rs");
+        assert!(
+            ordering_errors.contains("use domain_common::errors::ErrorDef;"),
+            "{}",
+            ordering_errors
+        );
+        assert!(ordering_errors.contains("pub const ORDER_NOT_FOUND: ErrorDef"), "{}", ordering_errors);
+        assert!(
+            !ordering_errors.contains("pub struct ErrorDef"),
+            "ErrorDef is defined ONCE, in the kernel:\n{}",
+            ordering_errors
+        );
+        // The context `$ref`s under errors are documentation, never imports (they would be unused).
+        assert!(!ordering_errors.contains("use crate::scalars"), "{}", ordering_errors);
+    }
+
+    #[test]
+    fn facade_reexports_every_scope_and_keeps_the_cross_scope_artifacts() {
+        let specs = fixture("facade");
+        let model = load_model(&specs).expect("loads");
+        let scalars = emit_domain_scalars(&model);
+        assert!(scalars.contains("pub use domain_common::scalars::*;"), "{}", scalars);
+        assert!(scalars.contains("pub use domain_ordering::scalars::*;"), "{}", scalars);
+        assert!(!scalars.contains("pub struct"), "facade defines nothing:\n{}", scalars);
+        // Events facade: re-exports + the ONE cross-scope union (the single log speaks every scope).
+        let events = emit_domain_events(&model);
+        assert!(events.contains("pub use domain_ordering::events::*;"), "{}", events);
+        assert!(events.contains("pub enum DomainEvent"), "{}", events);
+        assert!(events.contains("    OrderPlaced(OrderPlaced),"), "{}", events);
+        // Errors facade: the GLOBAL catalog + lookup stay here; the consts live in the scopes.
+        let errors = emit_domain_errors(&model);
+        assert!(errors.contains("pub use domain_common::errors::*;"), "{}", errors);
+        assert!(errors.contains("pub use domain_ordering::errors::*;"), "{}", errors);
+        assert!(errors.contains("pub const ERRORS: &[ErrorDef]"), "{}", errors);
+        assert!(errors.contains("    KERNEL_BROKE,"), "{}", errors);
+        assert!(errors.contains("    ORDER_NOT_FOUND,"), "{}", errors);
+        assert!(errors.contains("pub fn find(code: &str)"), "{}", errors);
+        // A scope with no items of a kind is NOT re-exported (no phantom module references).
+        let entities = emit_domain_entities(&model);
+        assert!(entities.contains("pub use domain_ordering::entities::*;"), "{}", entities);
+        let commands = emit_domain_commands(&model);
+        assert!(
+            !commands.contains("pub use domain_common::commands::*;"),
+            "common defines no command in this fixture:\n{}",
+            commands
+        );
+    }
+
+    #[test]
+    fn bin_links_union_actor_and_pm_declarations_and_name_mechanically() {
+        let specs = fixture("bins");
+        fs::create_dir_all(specs.join("payments")).expect("mkdir");
+        fs::write(specs.join("payments/events.yaml"), "PaymentCaptured: { type: object }\n")
+            .expect("write");
+        fs::write(
+            specs.join("ordering/actors.yaml"),
+            r#"
+Order:
+  type: aggregate
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+PlaceOrderProcess:
+  type: process-manager
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+"#,
+        )
+        .expect("write");
+        // The SAME PM also has a processmanager.yaml definition whose refs reach payments — the
+        // bin link is the UNION (one actor, one bin), the PM-bridge doctrine made load-bearing.
+        fs::write(
+            specs.join("ordering/processmanager.yaml"),
+            r#"
+PlaceOrderProcess:
+  type: process-manager
+  receives:
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+"#,
+        )
+        .expect("write");
+        let model = load_model(&specs).expect("loads");
+        let links = actor_scope_links(&model);
+        let of = |name: &str| {
+            links
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .unwrap_or_else(|| panic!("no link row for {}", name))
+        };
+        let (_, order_pm, order_scopes) = of("Order");
+        assert!(!order_pm);
+        assert_eq!(order_scopes.iter().collect::<Vec<_>>(), vec!["ordering"]);
+        let (_, pop_pm, pop_scopes) = of("PlaceOrderProcess");
+        assert!(*pop_pm);
+        assert_eq!(pop_scopes.iter().collect::<Vec<_>>(), vec!["ordering", "payments"]);
+        // Mechanical bin names (D5 addendum directive): actor-{kebab} / pm-{kebab minus Process}.
+        assert_eq!(actor_bin_name("Order", false), "actor-order");
+        assert_eq!(actor_bin_name("MailboxSupervision", false), "actor-mailbox-supervision");
+        assert_eq!(actor_bin_name("PlaceOrderProcess", true), "pm-place-order");
+        assert_eq!(actor_bin_name("RefundProcess", true), "pm-refund");
+        // The artifact carries both maps with crate names, JSON-parseable.
+        let graph: serde_json::Value =
+            serde_json::from_str(&emit_crate_graph(&model)).expect("valid JSON");
+        assert_eq!(
+            graph["bins"]["pm-place-order"]["domain_crates"],
+            serde_json::json!(["domain-ordering", "domain-payments"]),
+        );
+        assert_eq!(graph["domain_crates"]["domain-ordering"]["deps"], serde_json::json!(["domain-common"]));
+    }
+
+    #[test]
+    fn real_specs_crate_graph_is_a_dag_with_existing_targets() {
+        // The whole-tree gate: over the REAL specs, every derived manifest dependency must name an
+        // emitted crate, never itself, and the edges must be acyclic (the §14 validator proves the
+        // scope-level graph; this re-proves the DERIVED crate edges so the two derivations cannot
+        // drift apart). Also pins the kernel's position: no dependencies, ever.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let model = load_model(&root.join("specs")).expect("real specs load");
+        let crates = emit_domain_scope_crates(&model);
+        assert!(crates.len() >= 8, "expected the 8 ADR scopes, got {}", crates.len());
+        let scopes: BTreeSet<&str> = crates.iter().map(|c| c.scope.as_str()).collect();
+        for c in &crates {
+            for d in &c.dep_scopes {
+                assert!(scopes.contains(d.as_str()), "{} depends on unemitted scope {}", c.scope, d);
+                assert_ne!(d, &c.scope, "{} depends on itself", c.scope);
+            }
+        }
+        let common = crates.iter().find(|c| c.scope == KERNEL_SCOPE).expect("kernel crate");
+        assert!(common.dep_scopes.is_empty(), "the kernel depends on no scope: {:?}", common.dep_scopes);
+        // Kahn's algorithm over the derived edges: everything must peel.
+        let mut indeg: BTreeMap<&str, usize> = scopes.iter().map(|s| (*s, 0)).collect();
+        for c in &crates {
+            for _ in &c.dep_scopes {
+                *indeg.get_mut(c.scope.as_str()).unwrap() += 1;
+            }
+        }
+        let mut queue: Vec<&str> =
+            indeg.iter().filter(|(_, d)| **d == 0).map(|(s, _)| *s).collect();
+        let mut peeled = 0;
+        while let Some(s) = queue.pop() {
+            peeled += 1;
+            for c in &crates {
+                if c.dep_scopes.contains(s) {
+                    let d = indeg.get_mut(c.scope.as_str()).unwrap();
+                    *d -= 1;
+                    if *d == 0 {
+                        queue.push(c.scope.as_str());
+                    }
+                }
+            }
+        }
+        assert_eq!(peeled, scopes.len(), "derived crate edges contain a cycle");
+    }
+}
