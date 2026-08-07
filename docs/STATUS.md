@@ -3,6 +3,11 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (1) IN PROGRESS — the spec reorg
+> ([#375](https://github.com/TheCaptainCompany/captain-food/issues/375) "Spec reorg: specs/{scope}/
+> folders + common, api/config fragments, scope validator rules, c4-l2 container split", branch
+> `claude/saltstack-evaluation-v867w6`).**
+
 > ✅ **2026-08-07 — ONE DECOMPOSITION AXIS — APPROVED AS RECOMMENDED
 > ([ADR-20260807-183024](adr/ADR-20260807-183024-one-decomposition-axis.md), D1–D8 with D2/D8 in
 > their product-owner-revised forms; critical-path-growth accepted knowingly).** Final shape:
