@@ -427,6 +427,30 @@ D4's zone-host sub-decision is answered — **NS hosting moves to OVH DNS**. Rea
 
 ---
 
+## 18. One decomposition axis: spec folders, schemas, projectors — PROP-20260807-174246
+
+[PROP-20260807-174246](PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md)
+([#374](https://github.com/TheCaptainCompany/captain-food/issues/374)). Product-owner directive
+(screaming architecture): spec folders per business domain + common, per-domain storage, per-domain
+`configuration.yaml`, per-domain projectors, admin cross-scope queries preserved. Completes the
+one-axis chain begun in §17: `specs/{scope}/` → `domain-{scope}` crate → `actor-{scope}` image →
+`{scope}` schema → `projector-{scope}`.
+
+| # | Decision | Recommended | Answer |
+|---|---|---|---|
+| D1 | Spec folders per scope + `common/` | Yes — with placement, cross-scope-DAG and kernel-purity validator rules | _(open)_ |
+| D2 | **Storage level** | **Schema-per-scope in ONE CNPG database + per-scope GRANT roles** — NOT databases (cross-DB kills the admin SQL the product owner requires; FDW is the later rung); ladder: schema → own DB → own cluster, per scope, when measured | _(open)_ |
+| D3 | The event log | Stays SINGLE in a `core` schema — global ordering, PM causality, one PITR timeline, the GDPR erasure path | _(open)_ |
+| D4 | Projectors | Per scope over the single log, independent checkpoints; admin/BAM are consumer schemas — scope views never join across schemas | _(open)_ |
+| D5 | Configuration | Splits per scope + common; each bin's generated `Config` reads only its own keys | _(open)_ |
+| D6 | Admin cross-scope queries | `admin_ro` SELECT across schemas — plain SQL, because D2 chose schemas | _(open)_ |
+| D7 | Sequencing | Everything pre-cutover — **start-clean makes the storage split FREE** (schemas created, nothing migrated); this window does not recur | _(open)_ |
+
+Concern registered and unchecked: **critical-path-growth** — prod is down and this grows the
+pre-cutover program again; approving accepts that explicitly.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

@@ -1,7 +1,24 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-06. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 📋 **2026-08-07 — ONE DECOMPOSITION AXIS, top to bottom
+> ([PROP-20260807-174246](proposals/PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md),
+> [#374](https://github.com/TheCaptainCompany/captain-food/issues/374) — DECISION OPEN).** Product-owner
+> directive (screaming architecture): **spec folders per business domain + `common/`**, per-domain
+> storage, per-domain `configuration.yaml`, per-domain projectors. Completes the §17 chain:
+> `specs/{scope}/` → `domain-{scope}` crate ([#373](https://github.com/TheCaptainCompany/captain-food/issues/373))
+> → `actor-{scope}` image → `{scope}` schema → `projector-{scope}` — a boundary violation becomes
+> visible (folder), unspellable (crate link), undeployable (image) and unqueryable (GRANT), all
+> generated. **Recommended storage rung: schema-per-scope in ONE CNPG database with per-scope roles —
+> NOT database-per-scope** (Postgres cannot join across databases natively, which would kill the admin
+> cross-scope SQL the product owner explicitly requires; `admin_ro` across schemas is plain SQL). **The
+> event log stays single in `core`** (global ordering, PM causality, one PITR timeline, GDPR path);
+> projectors split per scope over it with independent checkpoints. Proposed scope list (8, from PM
+> coupling evidence): ordering · catalog · network · customer · delivery · payments · comms · common.
+> **Start-clean makes the storage split FREE at cutover** — the window that does not recur. Seven
+> decisions + a critical-path-growth concern open in [DECISIONS.md §18](proposals/DECISIONS.md).
 
 > ⏳ **2026-08-06 (later) — THE DESTINATION IS REOPENED FOR KUBERNETES
 > ([PROP-20260806-223656](proposals/PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md),
