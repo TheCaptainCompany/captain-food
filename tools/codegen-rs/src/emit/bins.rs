@@ -27,6 +27,11 @@
 //! gets a subgraph but no projector — it owns no `View_*`); gateway bins from the `UserType`
 //! role paths (role = path, ADR-0006); surface bins and `bam` from the c4-l2 container list
 //! itself (their existence is a deploy-topology decision, not derivable from any other spec).
+//! Projector/subgraph bins link ONLY their scope's crate — DELIBERATELY not `domain-common`:
+//! today's skeletons name no kernel type, and the assertion stays minimal so that when the
+//! runtime wiring (#349+) legitimately reaches kernel value objects (Money in a subgraph's
+//! outputs, say), the `domain-common` line lands as a LOUD manifest diff at that step, not as a
+//! pre-granted convenience nobody reviews.
 
 use crate::*;
 
@@ -203,7 +208,8 @@ fn family_purpose(b: &BinSpec) -> String {
             b.role.as_deref().map(role_path).unwrap_or_default()
         ),
         "surface" => "surface bin -- assets/SSR/webhooks; speaks to its role gateway, holds no domain vocabulary and no broad views access".to_string(),
-        _ => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
+        "worker" => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
+        f => unreachable!("unknown bin family '{f}' — every family added to bin_topology needs its purpose line here"),
     }
 }
 
