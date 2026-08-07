@@ -5017,3 +5017,25 @@ Order:
         );
     }
 }
+
+#[test]
+fn a_root_catalog_beside_scope_folders_is_forbidden() {
+    // A recreated flat specs/commands.yaml would carry no per-item origin and bypass every scope
+    // gate (placement, DAG, purity) — the loader flags it the moment scope folders exist.
+    let specs = tests::scope_loader::scaffold("rootforbid");
+    fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+    fs::write(specs.join("ordering/events.yaml"), "E: { type: object }\n").expect("write");
+    fs::write(specs.join("commands.yaml"), "SneakyCommand: { type: object }\n").expect("write");
+    let model = load_model(&specs).expect("loads");
+    assert!(
+        model.load_issues.iter().any(|i| i.rule == "scope-root-catalog-forbidden"
+            && i.location == "commands.yaml"
+            && i.level == Level::Error),
+        "{:?}",
+        model.load_issues.iter().map(|i| (&i.rule, &i.location)).collect::<Vec<_>>()
+    );
+    // Without scope folders (fully flat layout, e.g. unit fixtures) root catalogs stay legal.
+    fs::remove_dir_all(specs.join("ordering")).expect("rm");
+    let model = load_model(&specs).expect("loads");
+    assert!(model.load_issues.is_empty());
+}

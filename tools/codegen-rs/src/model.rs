@@ -117,13 +117,17 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
         defs.insert(key, v);
         Ok(())
     };
+    let mut root_scoped_files: Vec<&str> = Vec::new();
     for &f in SOURCE_FILES {
         let p = specs.join(f);
         // Splittable catalog kinds may live ENTIRELY in per-scope folders (ADR-20260807-183024 D1):
         // a missing root file starts the logical catalog empty and the fragments fill it.
-        if scoped_kind(f) && !p.exists() {
-            defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
-            continue;
+        if scoped_kind(f) {
+            if !p.exists() {
+                defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
+                continue;
+            }
+            root_scoped_files.push(f);
         }
         load(&mut defs, f.to_string(), &p)?;
     }
@@ -232,6 +236,21 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
             if has_any {
                 scopes.push(scope);
             }
+        }
+    }
+    // Once scope folders exist, a ROOT splittable catalog is forbidden: its items would carry no
+    // origin and silently bypass every scope gate (placement, DAG, purity) — a hole an agent adding
+    // "just one command" to a recreated flat file would walk straight through.
+    if !scopes.is_empty() {
+        for f in root_scoped_files {
+            load_issues.push(err(
+                "scope-root-catalog-forbidden",
+                f.to_string(),
+                format!(
+                    "flat root catalog specs/{} coexists with per-scope folders — its items have no origin scope and bypass the scope gates; move them into specs/{{scope}}/{}.",
+                    f, f
+                ),
+            ));
         }
     }
     // Generic: every `specs/database/tables/*.yaml` is a real-table spec (ADR-0037), keyed by its path —
