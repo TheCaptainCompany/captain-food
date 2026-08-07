@@ -143,6 +143,23 @@ own `admin` schema views (D4), not raw cross-schema joins. If a scope is later l
 database (D2's ladder), `postgres_fdw` restores admin SQL at that rung's cost — one more reason the
 lift happens only when measured contention pays for it.
 
+### D8 — GraphQL per domain: federation at CODEGEN time, not a runtime router
+
+Raised by the product owner (2026-08-07): *"creating a graphql per domain and merge them in one
+graphql that will use the others"* — the approach is **GraphQL federation** (subgraphs → supergraph;
+the older form was schema stitching) — *"it will remove the risk of AI making shortcuts because
+everything is accessible."*
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Per-scope `specs/{scope}/api.yaml` fragments, composed by the CODEGEN into the per-role schemas** ✅ recommended | The shortcut risk lives at the spec/resolver layer here (the schema is GENERATED — nobody hand-edits SDL), and this closes it with validator rules: a fragment exposes only its scope's types; cross-scope references only along the `$ref` DAG; every composed field resolves to the owning scope's views/commands. Zero new runtime: no router hop on the Friday-peak path, no composition failures at 20:30, no entity-resolution N+1. Role = path serving is unchanged — a role's schema legitimately composes domains, in the generator, with provenance | Not "real" federation: no independent schema cadences (irrelevant with one spec repo), no polyglot subgraphs (irrelevant in a one-workspace system) |
+| Runtime federation (async-graphql Federation v2 subgraph per scope + Apollo Router/Cosmo) | The industry-standard shape; independent deploy cadence per subgraph schema | Built for MANY TEAMS: a router on every query, N subgraph services on a €38/mo node budget, supergraph composition as a new CI failure class, N+1 entity resolution — all to enforce boundaries the spec/crate/GRANT walls already enforce. **Recorded trigger to adopt**: a second independent team, a polyglot service, or an external partner consuming a subgraph directly |
+| One flat api.yaml as today | No migration | The API layer stays the one layer whose scope membership is implicit — the scream stops at the schema |
+
+With D8 the AI-shortcut concern is closed by four walls at once: **visible** (fragment file),
+**unspellable** (crate link), **unqueryable** (schema GRANT), **un-declarable** (validator-rejected
+cross-scope field).
+
 ### D7 — Sequencing against the cutover (the registered concern)
 
 | Option | Pros | Cons |

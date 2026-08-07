@@ -445,6 +445,7 @@ one-axis chain begun in §17: `specs/{scope}/` → `domain-{scope}` crate → `a
 | D5 | Configuration | Splits per scope + common; each bin's generated `Config` reads only its own keys | _(open)_ |
 | D6 | Admin cross-scope queries | Via **projections + GraphQL composition** (the admin surface reads its own consumer schema); `admin_ro` cross-schema SQL demoted to INCIDENT tooling, never an application path | _(open)_ |
 | D7 | Sequencing | Everything pre-cutover — **start-clean makes the storage split FREE** (schemas created, nothing migrated); this window does not recur | _(open)_ |
+| D8 | GraphQL per domain (product owner: *"merge them in one graphql"* — **federation**) | **Federation at CODEGEN time**: per-scope `api.yaml` fragments composed by the generator into the per-role schemas, with fragment-ownership + cross-scope-DAG validator rules — no runtime router, no N+1 entity resolution, role=path unchanged. Runtime federation's recorded trigger: a second team, a polyglot service, or an external subgraph consumer | _(open)_ |
 
 Concern registered and unchecked: **critical-path-growth** — prod is down and this grows the
 pre-cutover program again; approving accepts that explicitly.
