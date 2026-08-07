@@ -108,6 +108,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
     let mut cov = Coverage::default();
 
+    // --- 0. Load-time issues (per-scope fragment merge, ADR-20260807-183024 D1): duplicate item
+    // names across files mapping to one logical catalog gate here like any other error.
+    issues.extend(model.load_issues.iter().cloned());
+
     // --- 1. Referential integrity: every `$ref` anywhere must resolve ---------------------------
     // Iterate every loaded file (incl. globbed database/tables/*.yaml), not just the fixed SOURCE_FILES.
     for (f, v) in &model.defs {

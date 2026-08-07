@@ -84,7 +84,7 @@ types:
 "#,
         );
         defs.insert("api.yaml".into(), y(&api));
-        Model { defs }
+        Model { defs, ..Default::default() }
     }
 
     #[test]
@@ -188,7 +188,7 @@ types:
         defs.insert("database/tables/referential.yaml".into(), y("ref_currency:\n  columns:\n    code: { type: text }\n"));
         defs.insert("commands.yaml".into(), y("PlaceOrder:\n  type: object\nCartLine:\n  type: object\n"));
         defs.insert("scalars.yaml".into(), y("OrderId:\n  type: string\nOrderStatus:\n  enum: [NEW, PAID]\n"));
-        Model { defs }
+        Model { defs, ..Default::default() }
     }
 
     #[test]
@@ -552,7 +552,7 @@ bottom_sheets:
             let parsed: Value = serde_yaml::from_str(content).expect("test yaml parses");
             defs.insert(path.to_string(), strip_meta(parsed));
         }
-        Model { defs }
+        Model { defs, ..Default::default() }
     }
 
     // #110 — translation hygiene gates. All run `validate_translations` on a minimal fixture.
@@ -807,6 +807,7 @@ keys:
                 "configuration.yaml".to_string(),
                 serde_yaml::from_str::<Value>(spec).expect("parses"),
             )]),
+            ..Default::default()
         };
         let mut issues = Vec::new();
         validate_configuration(&model, &mut issues);
@@ -834,6 +835,7 @@ keys:
                     "configuration.yaml".to_string(),
                     serde_yaml::from_str::<Value>(&spec).expect("parses"),
                 )]),
+                ..Default::default()
             };
             let mut issues = Vec::new();
             validate_configuration(&model, &mut issues);
@@ -869,6 +871,7 @@ keys:
                 "configuration.yaml".to_string(),
                 serde_yaml::from_str::<Value>(spec).expect("parses"),
             )]),
+            ..Default::default()
         };
         let emitted = emit_config(&model);
         assert!(
@@ -953,6 +956,7 @@ keys:
                 "configuration.yaml".to_string(),
                 serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
             )]),
+            ..Default::default()
         };
         let defaulted: BTreeSet<String> = parse_config_keys(&model)
             .into_iter()
@@ -1045,6 +1049,7 @@ keys:
                 "configuration.yaml".to_string(),
                 serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
             )]),
+            ..Default::default()
         };
         let declared: BTreeSet<String> =
             parse_config_keys(&model).into_iter().map(|k| k.name).collect();
@@ -4660,3 +4665,127 @@ Catalog:
             actors
         );
     }
+
+// ─── Per-scope spec folders: fragment merge (ADR-20260807-183024 D1, #375) ──────────────────────
+//
+// `$ref`s are KIND-logical, so the loader merges `specs/{scope}/{kind}.yaml` into the same logical
+// catalog keys with per-item origin tracking. These tests build a minimal specs tree on disk (the
+// loader is a filesystem walk, unlike the in-memory fixtures above).
+
+mod scope_loader {
+    use super::super::*;
+
+    /// A minimal on-disk specs tree: every REQUIRED (non-splittable) source file present, all
+    /// splittable catalogs absent — the per-scope fragments under test supply them.
+    fn scaffold(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("cf-scope-{}-{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let specs = root.join("specs");
+        for d in ["architecture", "database"] {
+            fs::create_dir_all(specs.join(d)).expect("mkdir");
+        }
+        for f in [
+            "services.yaml",
+            "database/projection_views.yaml",
+            "stories.yaml",
+            "tests.yaml",
+            "translations.yaml",
+            "translations.code_refs.yaml",
+            "observability.yaml",
+            "architecture/c4-l2.yaml",
+            "architecture/c4-l3.yaml",
+        ] {
+            fs::write(specs.join(f), "version: 1\n").expect("write");
+        }
+        specs
+    }
+
+    #[test]
+    fn fragments_merge_into_logical_catalogs_with_origin() {
+        let specs = scaffold("merge");
+        fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+        fs::create_dir_all(specs.join("common")).expect("mkdir");
+        fs::write(
+            specs.join("ordering/events.yaml"),
+            "version: 1\nOrderPlaced: { type: object }\n",
+        )
+        .expect("write");
+        fs::write(specs.join("common/scalars.yaml"), "version: 1\nOrderId: { type: string }\n")
+            .expect("write");
+        let model = load_model(&specs).expect("loads");
+        // Both fragments land under their LOGICAL catalog key — refs need no rewriting.
+        assert!(model.defs.get("events.yaml").and_then(|v| v.get("OrderPlaced")).is_some());
+        assert!(model.defs.get("scalars.yaml").and_then(|v| v.get("OrderId")).is_some());
+        // Origin scope recorded per item; scope folders discovered.
+        assert_eq!(
+            model.origins.get(&("events.yaml".into(), "OrderPlaced".into())).map(|s| s.as_str()),
+            Some("ordering")
+        );
+        assert_eq!(model.scopes, vec!["common".to_string(), "ordering".to_string()]);
+        assert!(model.load_issues.is_empty());
+    }
+
+    #[test]
+    fn duplicate_item_name_across_files_is_an_error() {
+        let specs = scaffold("dup");
+        fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+        fs::create_dir_all(specs.join("payments")).expect("mkdir");
+        fs::write(specs.join("ordering/events.yaml"), "OrderPlaced: { type: object }\n")
+            .expect("write");
+        fs::write(specs.join("payments/events.yaml"), "OrderPlaced: { type: object }\n")
+            .expect("write");
+        let model = load_model(&specs).expect("loads");
+        assert!(
+            model
+                .load_issues
+                .iter()
+                .any(|i| i.rule == "scope-duplicate-item" && i.level == Level::Error),
+            "a name defined in two files mapping to one catalog must be an error"
+        );
+    }
+
+    #[test]
+    fn section_kinds_merge_per_section() {
+        let specs = scaffold("sections");
+        fs::create_dir_all(specs.join("catalog")).expect("mkdir");
+        fs::write(
+            specs.join("catalog/api.yaml"),
+            "version: 1\nqueries:\n  menu: { description: q }\ntypes:\n  Menu: { properties: {} }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("catalog/configuration.yaml"),
+            "keys:\n  HUBRISE_API_KEY: { type: string }\n",
+        )
+        .expect("write");
+        let model = load_model(&specs).expect("loads");
+        let api = model.defs.get("api.yaml").expect("api catalog");
+        assert!(api.get("queries").and_then(|q| q.get("menu")).is_some());
+        assert!(api.get("types").and_then(|t| t.get("Menu")).is_some());
+        assert_eq!(
+            model.origins.get(&("api.yaml".into(), "queries/menu".into())).map(|s| s.as_str()),
+            Some("catalog")
+        );
+        assert_eq!(
+            model
+                .origins
+                .get(&("configuration.yaml".into(), "keys/HUBRISE_API_KEY".into()))
+                .map(|s| s.as_str()),
+            Some("catalog")
+        );
+        // An unknown section in a fragment is flagged, not silently merged.
+        fs::write(specs.join("catalog/api.yaml"), "bogus:\n  x: {}\n").expect("write");
+        let model = load_model(&specs).expect("loads");
+        assert!(model.load_issues.iter().any(|i| i.rule == "scope-unknown-section"));
+    }
+
+    #[test]
+    fn structural_dirs_are_not_scopes() {
+        let specs = scaffold("nonscope");
+        // `database/` and `architecture/` exist in the scaffold; neither may register as a scope,
+        // and a scope dir with NO scoped kind files is not a scope either.
+        fs::create_dir_all(specs.join("emptydir")).expect("mkdir");
+        let model = load_model(&specs).expect("loads");
+        assert!(model.scopes.is_empty(), "found scopes: {:?}", model.scopes);
+    }
+}

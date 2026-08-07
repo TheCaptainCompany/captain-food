@@ -34,9 +34,51 @@ pub(crate) const SOURCE_FILES: &[&str] = &[
 /// add it here, then the gate forces every key to gain that message before anything ships.
 pub(crate) const SUPPORTED_LOCALES: &[&str] = &["en", "fr"];
 
+// ─── Per-scope spec folders (ADR-20260807-183024 D1) ────────────────────────────────────────────
+//
+// `$ref`s are KIND-logical: `commands.yaml#/X` names a KIND (the ref path encodes kind — see
+// REF_CONTRACT in refs.rs), not a file location. The loader therefore merges every
+// `specs/{scope}/{kind}.yaml` fragment into the SAME logical catalog key (`commands.yaml`, …),
+// recording each item's ORIGIN scope, so no ref ever needs rewriting when an item moves folders.
+
+/// Catalog kinds whose fragments are flat `name → definition` mappings, mergeable per item.
+pub(crate) const SCOPED_FLAT_KINDS: &[&str] = &[
+    "scalars.yaml",
+    "entities.yaml",
+    "events.yaml",
+    "commands.yaml",
+    "errors.yaml",
+    "actors.yaml",
+    "processmanager.yaml",
+    "rules.yaml",
+];
+
+/// Catalog kinds structured as top-level SECTIONS (each section a `name → definition` mapping);
+/// fragments merge per section entry. Origin keys are `"{section}/{name}"`.
+pub(crate) const SCOPED_SECTION_KINDS: &[(&str, &[&str])] = &[
+    ("api.yaml", &["types", "inputs", "queries", "mutations", "subscriptions"]),
+    ("configuration.yaml", &["keys"]),
+];
+
+/// `specs/` subdirectories that are NOT scope folders (structural homes with their own loaders).
+pub(crate) const NON_SCOPE_DIRS: &[&str] =
+    &["architecture", "database", "screens", "generated", "integrations"];
+
 /// The loaded model: each source file parsed into its YAML `Value` (the full top-level mapping).
+/// Per-scope fragments (`specs/{scope}/{kind}.yaml`) are merged into the LOGICAL catalog keys, with
+/// `origins` recording each merged item's scope (items from a flat root catalog have no entry).
+#[derive(Default)]
 pub(crate) struct Model {
     pub(crate) defs: BTreeMap<String, Value>,
+    /// `(logical file, item key)` → origin scope folder. For section kinds the item key is
+    /// `"{section}/{name}"` (e.g. `("api.yaml", "queries/restaurant")`).
+    pub(crate) origins: BTreeMap<(String, String), String>,
+    /// Scope folders discovered under `specs/` (sorted). A directory is a scope iff it is not one
+    /// of `NON_SCOPE_DIRS` and holds at least one scoped kind file.
+    pub(crate) scopes: Vec<String>,
+    /// Issues raised while loading (duplicate item names across fragment files). Surfaced by
+    /// `validate()` so they gate like any other issue.
+    pub(crate) load_issues: Vec<Issue>,
 }
 
 /// Strip file-level meta (version/description) like load.ts META_KEYS, preserving key order.
@@ -56,16 +98,141 @@ pub(crate) fn strip_meta(parsed: Value) -> Value {
     }
 }
 
+/// Is this logical file a splittable catalog kind (flat or section-structured)?
+pub(crate) fn scoped_kind(f: &str) -> bool {
+    SCOPED_FLAT_KINDS.contains(&f) || SCOPED_SECTION_KINDS.iter().any(|(k, _)| *k == f)
+}
+
 pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
     let mut defs = BTreeMap::new();
-    let mut load = |key: String, p: &std::path::Path| -> Result<(), String> {
+    let mut origins: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut load_issues: Vec<Issue> = Vec::new();
+    fn read_spec(key: &str, p: &std::path::Path) -> Result<Value, String> {
         let s = fs::read_to_string(p).map_err(|e| format!("read {}: {}", p.display(), e))?;
         let parsed: Value = serde_yaml::from_str(&s).map_err(|e| format!("parse {}: {}", key, e))?;
-        defs.insert(key, strip_meta(parsed));
+        Ok(strip_meta(parsed))
+    }
+    let mut load = |defs: &mut BTreeMap<String, Value>, key: String, p: &std::path::Path| -> Result<(), String> {
+        let v = read_spec(&key, p)?;
+        defs.insert(key, v);
         Ok(())
     };
     for &f in SOURCE_FILES {
-        load(f.to_string(), &specs.join(f))?;
+        let p = specs.join(f);
+        // Splittable catalog kinds may live ENTIRELY in per-scope folders (ADR-20260807-183024 D1):
+        // a missing root file starts the logical catalog empty and the fragments fill it.
+        if scoped_kind(f) && !p.exists() {
+            defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
+            continue;
+        }
+        load(&mut defs, f.to_string(), &p)?;
+    }
+    // ── Per-scope fragments: specs/{scope}/{kind}.yaml merged into the logical catalogs ──────────
+    let mut scopes: Vec<String> = Vec::new();
+    if let Ok(rd) = fs::read_dir(specs) {
+        let mut dirs: Vec<String> = rd
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .filter(|n| !NON_SCOPE_DIRS.contains(&n.as_str()))
+            .collect();
+        dirs.sort();
+        for scope in dirs {
+            let sdir = specs.join(&scope);
+            let kind_files: Vec<&str> = SCOPED_FLAT_KINDS
+                .iter()
+                .copied()
+                .chain(SCOPED_SECTION_KINDS.iter().map(|(k, _)| *k))
+                .collect();
+            let mut has_any = false;
+            for kind in kind_files {
+                let fp = sdir.join(kind);
+                if !fp.exists() {
+                    continue;
+                }
+                has_any = true;
+                let s = fs::read_to_string(&fp).map_err(|e| format!("read {}: {}", fp.display(), e))?;
+                let parsed: Value = serde_yaml::from_str(&s)
+                    .map_err(|e| format!("parse {}/{}: {}", scope, kind, e))?;
+                let fragment = strip_meta(parsed);
+                let Value::Mapping(frag) = fragment else {
+                    return Err(format!("{}/{}: fragment must be a YAML mapping", scope, kind));
+                };
+                let target = defs
+                    .entry(kind.to_string())
+                    .or_insert_with(|| Value::Mapping(serde_yaml::Mapping::new()));
+                let Value::Mapping(tm) = target else {
+                    return Err(format!("{}: logical catalog is not a mapping", kind));
+                };
+                let sections = SCOPED_SECTION_KINDS
+                    .iter()
+                    .find(|(k, _)| *k == kind)
+                    .map(|(_, secs)| *secs);
+                match sections {
+                    None => {
+                        // Flat kind: every top-level key is one item.
+                        for (k, v) in frag {
+                            let name = k.as_str().unwrap_or("?").to_string();
+                            if tm.contains_key(&k) {
+                                load_issues.push(err(
+                                    "scope-duplicate-item",
+                                    format!("{}/{}", scope, kind),
+                                    format!(
+                                        "'{}' is already defined in another spec file mapping to {} — one name, one definition (first definition kept).",
+                                        name, kind
+                                    ),
+                                ));
+                                continue;
+                            }
+                            origins.insert((kind.to_string(), name), scope.clone());
+                            tm.insert(k, v);
+                        }
+                    }
+                    Some(secs) => {
+                        // Section kind: merge each declared section's entries.
+                        for (sk, sv) in frag {
+                            let sec = sk.as_str().unwrap_or("?").to_string();
+                            if !secs.contains(&sec.as_str()) {
+                                load_issues.push(err(
+                                    "scope-unknown-section",
+                                    format!("{}/{}", scope, kind),
+                                    format!("unknown section '{}' — expected one of {:?}.", sec, secs),
+                                ));
+                                continue;
+                            }
+                            let Value::Mapping(sm) = sv else {
+                                return Err(format!("{}/{}: section '{}' must be a mapping", scope, kind, sec));
+                            };
+                            let tsec = tm
+                                .entry(Value::String(sec.clone()))
+                                .or_insert_with(|| Value::Mapping(serde_yaml::Mapping::new()));
+                            let Value::Mapping(tsm) = tsec else {
+                                return Err(format!("{}: section '{}' is not a mapping", kind, sec));
+                            };
+                            for (k, v) in sm {
+                                let name = k.as_str().unwrap_or("?").to_string();
+                                if tsm.contains_key(&k) {
+                                    load_issues.push(err(
+                                        "scope-duplicate-item",
+                                        format!("{}/{}", scope, kind),
+                                        format!(
+                                            "'{}/{}' is already defined in another spec file mapping to {} — one name, one definition (first definition kept).",
+                                            sec, name, kind
+                                        ),
+                                    ));
+                                    continue;
+                                }
+                                origins.insert((kind.to_string(), format!("{}/{}", sec, name)), scope.clone());
+                                tsm.insert(k, v);
+                            }
+                        }
+                    }
+                }
+            }
+            if has_any {
+                scopes.push(scope);
+            }
+        }
     }
     // Generic: every `specs/database/tables/*.yaml` is a real-table spec (ADR-0037), keyed by its path —
     // drop a file in and it's picked up (eventstore.yaml, referential.yaml, …). Sorted for determinism.
@@ -81,7 +248,7 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            load(format!("database/tables/{}", name), &p)?;
+            load(&mut defs, format!("database/tables/{}", name), &p)?;
         }
     }
     // Generic: every `specs/screens/*.yaml` is auto-discovered (ADR-20260722-091500 / -075500), so a
@@ -105,13 +272,13 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
                 None => continue,
             };
             if name.ends_with(".translations.yaml") {
-                load(name, &p)?; // sidecar — keyed bare
+                load(&mut defs, name, &p)?; // sidecar — keyed bare
             } else {
-                load(format!("screens/{}", name), &p)?; // screen spec — keyed with `screens/` prefix
+                load(&mut defs, format!("screens/{}", name), &p)?; // screen spec — keyed with `screens/` prefix
             }
         }
     }
-    Ok(Model { defs })
+    Ok(Model { defs, origins, scopes, load_issues })
 }
 
 /// A parsed `<file>#/<a>/<b>` reference. `file` is empty for a local `#/…` ref (resolved against context).
