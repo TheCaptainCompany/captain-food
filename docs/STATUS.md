@@ -3,10 +3,16 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (1) IN PROGRESS — the spec reorg
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (1) IMPLEMENTED, PR IN REVIEW — the spec reorg
 > ([#375](https://github.com/TheCaptainCompany/captain-food/issues/375) "Spec reorg: specs/{scope}/
-> folders + common, api/config fragments, scope validator rules, c4-l2 container split", branch
-> `claude/saltstack-evaluation-v867w6`).**
+> folders + common, api/config fragments, scope validator rules, c4-l2 container split",
+> [PR #376](https://github.com/TheCaptainCompany/captain-food/pull/376)).** Landed on the branch:
+> the loader merges `specs/{scope}/{kind}.yaml` fragments into the logical catalogs (refs stay
+> KIND-logical — zero ref rewrites); ~826 items split into the 8 scope folders per the #374
+> membership map (semantic round-trip verified); validator §14 gates placement, the cross-scope
+> $ref DAG (PMs exempt bridges), kernel purity and api nesting; c4-l2's `api` container split into
+> the ~45-bin deploy topology with per-bin `realizes:`. Validate 0 errors / 43 warnings (baseline
+> kinds identical).
 
 > ✅ **2026-08-07 — ONE DECOMPOSITION AXIS — APPROVED AS RECOMMENDED
 > ([ADR-20260807-183024](adr/ADR-20260807-183024-one-decomposition-axis.md), D1–D8 with D2/D8 in

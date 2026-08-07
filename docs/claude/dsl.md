@@ -3,6 +3,38 @@
 The YAML DSL under `specs/` is the **functional source of truth**. Read the relevant file before
 changing anything (see `CLAUDE.md` for the index).
 
+## Per-scope spec folders (ADR-20260807-183024 D1/D5/D8, #375)
+
+The domain catalogs are split into **`specs/{scope}/{kind}.yaml`** fragments — scopes
+`ordering · catalog · network · customer · delivery · payments · comms · common` — for kinds
+`scalars/entities/events/commands/errors/actors/processmanager/rules` (flat, one item per
+top-level key) plus `api.yaml` (sections `types/inputs/queries/mutations/subscriptions`) and
+`configuration.yaml` (`keys`). The codegen **loader merges** every fragment into ONE logical
+catalog per kind, with per-item ORIGIN tracking; a duplicate item name across files mapping to
+one catalog is a validation error (`scope-duplicate-item`).
+
+- **`$ref`s are KIND-logical and never change**: `commands.yaml#/X` names the KIND (per
+  `REF_CONTRACT`), not a file path. Moving an item between scope folders rewrites no refs.
+- **The actor's folder is the scope declaration** everything else derives from. Validator §14:
+  - *Placement* (`scope-placement-*`): a command lives with its handling actor; an event with its
+    authoring actor (an aggregate re-emitting the event it received RECORDS it — echo-records do
+    not author; pure inbound facts fall back to the handling scope); an error with its throwing
+    actor; an api mutation with its command, a type with its read-model's aggregate, an operation
+    with its return type. `specs/common/` is ALWAYS a legal home (kernel promotion = a
+    cross-scope contract); a WRONG scope is not; multi-scope derivation REQUIRES common.
+  - *Cross-scope `$ref` DAG* (`scope-cycle`): non-PM-sourced cross-scope refs must be acyclic.
+    **Process managers are declared bridges** — an orchestrator legitimately closes loops between
+    scopes; its refs become the pm-crate dependency list at #373 instead.
+  - *Kernel purity* (`scope-kernel-purity`): a `common/` item references only `common/` items.
+  - *API nesting* (`api-nested-cross-scope`, D8): an api type nests only its own scope's or
+    kernel types — cross-scope data appears at top level or pre-joined in a projector-owned view.
+- `specs/common/{kind}.yaml` also carries each kind's original doctrine header (the catalog-wide
+  description); scope fragments carry a short generated header.
+- Structural dirs (`architecture/ database/ screens/ generated/ integrations/`) are never scopes.
+- **Moving/deleting a spec file? Grep `crates/` for `include_str!`/path reads FIRST** — the P2
+  split broke a compile-time `include_str!("../../../specs/configuration.yaml")` in
+  `crates/telemetry` (cost: one red CI round).
+
 ## Conventions
 
 - All content is **English** (identifiers, descriptions, comments). No French except user-facing
@@ -67,7 +99,7 @@ CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
   functions. Generated to `specs/generated/schema.generated.sql` + `views.generated.sql`; enum
   columns store the scalars.yaml TEXT value verbatim (ADR-20260728-170000 — no `ref_<enum>`
   lookups). `specs/database.md` is the narrative rationale; the query→read-model mapping is the
-  `@reads` binding in `specs/api.yaml`.
+  `@reads` binding in the api fragments (`specs/{scope}/api.yaml`).
 - **specs/screens/** (ADR-0033/0037, taxonomy ADR-20260722-091500) — Spec-Driven SDUI apps, one
   file per audience (folder conveys the `_screens` suffix). Customer-facing front offices split
   by host (ADR-20260722-160000): `captain_frontoffice.yaml` = the marketplace at
@@ -83,17 +115,17 @@ CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
   strings (`common.*`) + future backend text; surface-specific strings live in co-located
   sidecars `specs/screens/<surface>.translations.yaml` (keys globally unique across files); the
   codegen merges everything into one `translations.generated.json`.
-- **specs/api.yaml** — the GraphQL surface (output-type registry, queries, mutations, ACL
+- **specs/{scope}/api.yaml** — the GraphQL surface as per-scope fragments (output-type registry, queries, mutations, ACL
   `roles` → `@auth`/`@public`); SDL GENERATED to `specs/generated/schema.generated.graphql`.
   **Role = path**: one master schema served per-role under `/{role}/graphql` (PUBLIC, CUSTOMER,
   RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN, EXTERNAL).
 - **specs/stories.yaml** — the executable story map (personas → activities → steps, each step a
   $ref into api.yaml); the validator enforces completeness BOTH ways (steps resolve + persona
   authorized, and every mutation/query reached by ≥1 step, `op-uncovered-by-story`).
-- **specs/rules.yaml** (ADR-0032) — business rules/invariants; every behaviour test links ≥1
+- **specs/{scope}/rules.yaml** (ADR-0032) — business rules/invariants; every behaviour test links ≥1
   rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules = WHAT,
   `specs/tests.yaml` = HOW (Given/When/Then).
-- **specs/actors.yaml** — the actor-model catalog (codegen source): aggregates & process
+- **specs/{scope}/actors.yaml** — the actor-model catalog (codegen source): aggregates & process
   managers, each with typed `identity`, optional `mailbox`, `reminders:`/`deletion:`
   (ADR-20260731-214500), and an inbox of `{ message → emits, throws, schedules }` where every
   ref is kind-checked.
