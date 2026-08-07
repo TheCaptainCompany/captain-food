@@ -1,63 +1,51 @@
-# --- Identity & Slugs ---
-
-RestaurantAccountId:
-  type: string
-  format: uuid
-  description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."
-
 RestaurantId:
   type: string
   format: uuid
   description: "A single restaurant location (HubRise: location), belonging to a RestaurantAccount."
 
-CatalogId:
-  type: string
-  format: uuid
-  description: "Catalog id (HubRise: catalog)."
-
-ProductCategoryId:
-  type: string
-  format: uuid
 
 ProductId:
   type: string
   format: uuid
   description: "A product groups one or more offers (HubRise: product)."
 
+
 SessionId:
   type: string
   format: uuid
   description: "A session is a temporary auth token (ADR-0041) for a visitor or customer, used to bind carts and track the user across devices."
+
 
 OfferId:
   type: string
   format: uuid
   description: "A purchasable offer with its own price (HubRise: SKU)."
 
+
 OptionListId:
   type: string
   format: uuid
+
 
 OptionId:
   type: string
   format: uuid
 
+
 OrderId:
   type: string
   format: uuid
+
 
 CustomerId:
   type: string
   format: uuid
 
+
 CartId:
   type: string
   format: uuid
 
-CartLineId:
-  type: string
-  format: uuid
-  description: "Identifies a line within a cart, used to edit its quantity or remove it."
 
 CorrelationId:
   type: string
@@ -66,12 +54,14 @@ CorrelationId:
     Correlates a command with the events/state it produces. Returned by every mutation payload so the
     client can track the outcome via the read side (matches domain_events.correlation_id).
 
+
 CauseId:
   type: string
   format: uuid
   description: >
     Causation id: the id of the message/event that directly caused this one (matches
     domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.
+
 
 MessageId:
   type: string
@@ -83,6 +73,7 @@ MessageId:
     with a different payload is rejected (Conflict). Events emitted by the command carry it as
     domain_events.cause_id.
 
+
 TraceId:
   type: string
   pattern: '^[0-9a-f]{32}$'
@@ -90,43 +81,18 @@ TraceId:
     W3C trace-id (from the inbound `traceparent` header, or server-started). Response-only technical
     tracing identifier — never client-suppliable, never a substitute for correlationId (P-02).
 
-DeliveryJobId:
-  type: string
-  format: uuid
-  description: "Identifies one DeliveryJob (a single delivery of an order from restaurant to customer)."
 
 RiderId:
   type: string
   format: uuid
   description: "An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only)."
 
+
 PaymentIntentId:
   type: string
   maxLength: 255
   description: "Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'."
 
-RefundId:
-  type: string
-  maxLength: 255
-  description: "Stripe Refund id (provider reference). Example: 're_3Nabc...'."
-
-UserId:
-  type: string
-  format: uuid
-
-AddressId:
-  type: string
-  format: uuid
-  description: "Identifies a saved address in a customer's address book."
-
-PaymentMethodId:
-  type: string
-  maxLength: 255
-  description: "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'."
-
-ImageId:
-  type: string
-  format: uuid
 
 ExternalReference:
   type: string
@@ -136,43 +102,6 @@ ExternalReference:
     Used for idempotent import/sync and as a stable reference inside orders.
     Example: 'MARGHERITA', 'CAT-PIZZAS'.
 
-ExternalIdentifierKey:
-  type: string
-  maxLength: 64
-  description: >
-    Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier).
-    Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id',
-    'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands;
-    cross-reference sources (a google_place_id usually distinguishes them).
-
-GooglePlaceId:
-  type: string
-  maxLength: 255
-  description: "Google Maps Place id identifying the establishment (enrichment / Business Profile)."
-
-Latitude:
-  type: number
-  minimum: -90
-  maximum: 90
-  description: "WGS84 latitude in decimal degrees."
-
-Longitude:
-  type: number
-  minimum: -180
-  maximum: 180
-  description: "WGS84 longitude in decimal degrees."
-
-GoogleRating:
-  type: number
-  minimum: 0
-  maximum: 5
-  description: "Google Maps / Business Profile average rating (0–5), enrichment only."
-
-WebUrl:
-  type: string
-  pattern: "^https?://"
-  maxLength: 2048
-  description: "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link."
 
 Slug:
   type: string
@@ -181,6 +110,7 @@ Slug:
   description: >
     URL-safe identifier for restaurants. Lowercase, dash-separated.
     Example: 'chez-marco', 'tokyo-sushi'.
+
 
 # --- Names (strongly typed, no reuse) ---
 
@@ -191,36 +121,11 @@ RestaurantDisplayName:
     Public label shown to customers. Can be short and brand-oriented.
     Example: 'Chez Marco', 'Tokyo Sushi'.
 
-RestaurantLegalName:
-  type: string
-  maxLength: 255
-  description: >
-    Legal entity name used for invoices and contracts.
-    Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
-
-CatalogName:
-  type: string
-  maxLength: 140
-
-CatalogCategoryName:
-  type: string
-  maxLength: 80
 
 ProductName:
   type: string
   maxLength: 140
 
-ProductDescription:
-  type: string
-  maxLength: 2000
-
-RestaurantDescription:
-  type: string
-  maxLength: 2000
-  description: >
-    Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card.
-    Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject
-    (one name = one scalar), so the two can diverge without a migration.
 
 OfferName:
   type: string
@@ -229,13 +134,11 @@ OfferName:
     Offer label, unique within a product (HubRise SKU name).
     Example: 'Small', 'Large', 'Default'.
 
-OptionListName:
-  type: string
-  maxLength: 140
 
 OptionName:
   type: string
   maxLength: 140
+
 
 # --- Tags ---
 
@@ -244,12 +147,14 @@ Tag:
   maxLength: 80
   description: "Free-form label (HubRise: tags). Example: 'vegan', 'spicy', 'eco'."
 
+
 # --- Contact & Address ---
 
 EmailAddress:
   type: string
   format: email
   maxLength: 255
+
 
 PhoneNumber:
   type: string
@@ -258,54 +163,33 @@ PhoneNumber:
     Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber
     and stored on events/views. Validation enforced at application level.
 
-DialingCode:
-  type: string
-  pattern: "^\\+[0-9]{1,4}$"
-  description: >
-    Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker
-    emits and what the auth commands receive — NOT the ISO country code.
-
-NationalPhoneNumber:
-  type: string
-  maxLength: 24
-  description: "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'."
-
-OtpCode:
-  type: string
-  pattern: "^[0-9]{4,8}$"
-  description: "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev)."
-
-EmailVerificationToken:
-  type: string
-  maxLength: 512
-  description: "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim)."
 
 AddressLine:
   type: string
   maxLength: 255
 
+
 CityName:
   type: string
   maxLength: 120
 
-CityId:
-  type: string
-  format: uuid
-  description: "A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60)."
 
 PostalCode:
   type: string
   maxLength: 20
+
 
 CountryCode:
   type: string
   pattern: "^[A-Z]{2}$"
   description: "ISO 3166-1 alpha-2 country code. Example: 'FR'."
 
+
 TimeZone:
   type: string
   maxLength: 64
   description: "IANA timezone. Example: 'Europe/Paris'."
+
 
 Locale:
   type: string
@@ -314,6 +198,7 @@ Locale:
   description: >
     i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives
     the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).
+
 
 # --- Money & Currencies ---
 # We keep a stronger model than HubRise (which serialises "9.80 EUR" as a string):
@@ -325,10 +210,12 @@ CurrencyCode:
   pattern: "^[A-Z]{3}$"
   description: "ISO 4217 currency code. Example: 'EUR'."
 
+
 MoneyCents:
   type: integer
   minimum: 0
   description: "Monetary amount in minor units (e.g. cents)."
+
 
 PageLimit:
   type: integer
@@ -338,10 +225,6 @@ PageLimit:
     maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the
     query's default page size.
 
-PageOffset:
-  type: integer
-  minimum: 0
-  description: "Rows to skip before the page for a paginated list query (#113). Absent = 0."
 
 TaxRatePercent:
   type: number
@@ -349,13 +232,6 @@ TaxRatePercent:
   maximum: 100
   description: "Percentage tax rate. Example: 10.0 for 10%."
 
-MarginPercent:
-  type: number
-  minimum: 0
-  maximum: 100
-  description: >
-    A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017):
-    the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
 
 # --- Stock ---
 
@@ -366,67 +242,18 @@ Quantity:
     Stock quantity in units. Decimals allowed to match HubRise inventory.
     0 means out of stock.
 
+
 # --- Customer / Order ---
 
 CustomerDisplayName:
   type: string
   maxLength: 140
 
+
 OrderNote:
   type: string
   maxLength: 1000
 
-# --- Ratings ---
-
-StarRating:
-  type: integer
-  minimum: 0
-  maximum: 5
-  description: "Restaurant rating in stars (0–5), given by the customer on a delivered order."
-
-ThumbRating:
-  type: string
-  enum: [UP, DOWN]
-  description: "Rider rating: thumbs up or down."
-
-RatingComment:
-  type: string
-  maxLength: 1000
-  description: "Free-text comment accompanying a restaurant rating."
-
-DeliveryTimeliness:
-  type: string
-  enum:
-    - ON_TIME          # arrived within the promised window
-    - ACCEPTABLE_DELAY # late, but the customer was fine with it
-    - TOO_LATE         # unacceptably late
-  description: >
-    The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is
-    delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the
-    restaurant's self-dispatch-vs-Captain decision.
-
-DeliveryDissatisfactionReason:
-  type: string
-  maxLength: 300
-  description: "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62)."
-
-# --- Time ---
-
-Weekday:
-  type: string
-  enum:
-    - MONDAY
-    - TUESDAY
-    - WEDNESDAY
-    - THURSDAY
-    - FRIDAY
-    - SATURDAY
-    - SUNDAY
-
-TimeOfDay:
-  type: string
-  pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
-  description: "Local time of day, HH:mm (HubRise opening_hours format)."
 
 # --- Enums (logical, not tied to specific language) ---
 
@@ -436,6 +263,7 @@ ServiceType:
   description: >
     Aligned with HubRise service types. COLLECTION == customer pickup.
     (EAT_IN is not offered by Captain.Food but is kept in TaxRate for catalog fidelity.)
+
 
 OrderStatus:
   type: string
@@ -450,6 +278,7 @@ OrderStatus:
     - CANCELLED_BY_CUSTOMER
     - CANCELLED_BY_RESTAURANT
 
+
 # Lifecycle of a DeliveryJob, orthogonal to OrderStatus (a delivery is a separate aggregate).
 DeliveryStatus:
   type: string
@@ -463,101 +292,12 @@ DeliveryStatus:
     - CANCELLED         # cancelled before delivery — terminal
   description: "Status of one delivery, reported by the partner (inbound) or driven by an independent rider's commands."
 
-RiderStatus:
-  type: string
-  enum:
-    - OFFLINE        # not accepting jobs
-    - AVAILABLE      # online, can be offered jobs
-    - ON_DELIVERY    # currently fulfilling a delivery
-    - SUSPENDED      # blocked by admin — terminal until reinstated
-  description: "Availability/lifecycle status of an independent Captain rider."
-
-# Who fulfils a delivery: an external delivery PARTNER (e.g. Avelo37, with its own couriers) or an
-# INDEPENDENT Captain rider (RIDER role) accepting the job directly. Both converge on one DeliveryJob.
-DeliveryProvider:
-  type: string
-  enum: [PARTNER, INDEPENDENT]
-  description: "Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider)."
-
-RestaurantStatus:
-  type: string
-  enum:
-    - DRAFT
-    - ACTIVE
-    - INACTIVE
-
-RestaurantListingStatus:
-  type: string
-  enum:
-    - NON_PARTNER       # public listing seeded from open data (Sirene/Google); not orderable, no agreement
-    - PASSIVE_PARTNER   # menu synced (e.g. HubRise) but no signed contract; not orderable
-    - ACTIVE_PARTNER    # signed partner; orderable when also RestaurantStatus ACTIVE and not PAUSED
-  description: >
-    Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational
-    DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
-
-GbpLinkStatus:
-  type: string
-  enum: [UNSET, CONFIGURED, VERIFIED, BROKEN]
-  description: "State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1)."
-
-ProspectionScore:
-  type: integer
-  minimum: 0
-  maximum: 10
-  description: "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event."
-
-ProspectPipelineStatus:
-  type: string
-  enum: [NEW, CONTACTED, COLD, REPLIED, CONVERTED]
-  description: "Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER."
-
-OutreachChannel:
-  type: string
-  enum: [EMAIL, SLACK, PHONE]
-  description: "Channel of a prospection contact (email via Resend, Slack alert, or phone)."
-
-TipRecipient:
-  type: string
-  enum: [RIDER, RESTAURANT, CAPTAIN]
-  description: >
-    Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100%
-    passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.
-
-Tipper:
-  type: string
-  enum: [CUSTOMER, RESTAURANT]
-  description: >
-    Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/
-    Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.
-
-CartStatus:
-  type: string
-  enum:
-    - OPEN          # being built (possibly by a guest); persists indefinitely (Uber Eats style)
-    - CHECKED_OUT   # converted to an Order at checkout
-  description: >
-    Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never
-    abandoned/expired — they persist until checked out, so there is no abandonment state.
-
-OrderAcceptanceMode:
-  type: string
-  enum: [NORMAL, BUSY, PAUSED]
-  description: "Current order acceptance mode of a restaurant (HubRise: order_acceptance)."
 
 PaymentStatus:
   type: string
   enum: [PENDING, CAPTURED, FAILED, REFUNDED]
   description: "Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded)."
 
-RefundStatus:
-  type: string
-  enum: [REQUESTED, APPROVED, DENIED, REFUNDED]
-  description: >
-    Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds):
-    REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved
-    (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded).
-    Distinct from RefundProcessStatus, the RefundProcess state-table run status.
 
 OperationStatus:
   type: string
@@ -565,6 +305,7 @@ OperationStatus:
   description: >
     Live status of a command/operation streamed by the operationStatusChanged subscription:
     PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."
+
 
 # --- Write-path journal lifecycles (database/tables/journals.yaml, ADR-20260720-015300/-015400) ---
 # Enum $ref columns store the enum's TEXT value verbatim (ADR-20260728, superseding the ADR-0037
@@ -579,12 +320,14 @@ CommandJournalStatus:
     (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status —
     the journal row keeps the original's real state.
 
+
 CommandChannel:
   type: string
   enum: [GRAPHQL, WORKER, INTERNAL]
   description: >
     Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment
     worker (e.g. the HubRise enricher), or an internal trigger endpoint.
+
 
 InboundMessageKind:
   type: string
@@ -595,6 +338,7 @@ InboundMessageKind:
     surface); EVENT = an adapted external fact that already happened (nothing to reject — the
     aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self
     (§3.4) — neither rejectable nor a business fact.
+
 
 InboundMessageStatus:
   type: string
@@ -608,6 +352,7 @@ InboundMessageStatus:
     aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from
     the inbound-events inbox.
 
+
 InboundMessageChannel:
   type: string
   enum: [GRAPHQL, WORKER, EXTERNAL]
@@ -617,6 +362,7 @@ InboundMessageChannel:
     HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and
     which gains EXTERNAL for adapted facts).
 
+
 MailboxActorType:
   type: string
   maxLength: 80
@@ -625,6 +371,7 @@ MailboxActorType:
     `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type /
     mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader
     sees WHICH lane's row an operator requeued without dereferencing the id.
+
 
 # --- Process-manager state statuses (processmanager.yaml state tables) ---
 
@@ -636,6 +383,7 @@ PaymentProcessStatus:
     - FAILED                   # payment failed; cart stays OPEN — terminal (failure)
   description: "State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart)."
 
+
 RefundProcessStatus:
   type: string
   enum:
@@ -644,6 +392,7 @@ RefundProcessStatus:
     - DENIED                    # admin denied — terminal
     - REFUNDED                  # Stripe reported the settled refund — terminal (success)
   description: "State of one RefundProcess run (refund_process_manager row, keyed by order). Refunds are approved by the restaurant (own orders) or an admin."
+
 
 DeliveryDispatchProcessStatus:
   type: string
@@ -659,6 +408,7 @@ DeliveryDispatchProcessStatus:
     #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED was appended LAST to
     preserve the then-stored ordinals of the pre-#60 values (moot since ADR-20260728: enums persist as TEXT)."
 
+
 RestaurantDispatchMode:
   type: string
   enum:
@@ -666,11 +416,6 @@ RestaurantDispatchMode:
     - RESTAURANT        # the restaurant delivers itself (own couriers or its own partner deal); Captain tracks only, never offers a job
   description: "Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour."
 
-DeliveryChannelKey:
-  type: string
-  pattern: "^[a-z0-9]+(?:_[a-z0-9]+)*$"
-  maxLength: 40
-  description: "Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60)."
 
 DeliveryChannelKind:
   type: string
@@ -679,50 +424,6 @@ DeliveryChannelKind:
     - PARTNER           # an outbound delivery partner reached through a DeliveryService adapter
   description: "Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60)."
 
-# --- Delivery partner self-registration (#61) ---
-# A delivery partner declares its availability to serve a city on a known catalog channel through the
-# EXTERNAL GraphQL API; an admin reviews it. The approved set is the substrate the city dispatch
-# ranking (#60) consumes (dispatch wiring is a follow-up). Runtime write-path over domain_events.
-DeliveryPartnerRegistrationId:
-  type: string
-  format: uuid
-  description: "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration."
-
-DeliveryPartnerName:
-  type: string
-  maxLength: 200
-  description: "The delivery partner's display/legal name as stated on self-registration (#61)."
-
-CityAvailabilityStatus:
-  type: string
-  enum:
-    - PENDING           # self-registered, awaiting admin review
-    - APPROVED          # an admin approved it; eligible for the city's dispatch ranking (#60 consumption is a follow-up)
-    - REVOKED           # withdrawn by the partner or disabled by an admin; not eligible
-  description: "Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled."
-
-# Manual listing flag, set by the restaurant/admin. Useful for UI.
-# Orthogonal to StockStatus: an item is orderable when AVAILABLE *and* stock > 0.
-CatalogItemAvailability:
-  type: string
-  enum:
-    - AVAILABLE
-    - UNAVAILABLE
-
-# Derived from Stock.quantity vs Stock.lowStockThreshold.
-StockStatus:
-  type: string
-  enum:
-    - IN_STOCK
-    - LOW_STOCK      # quantity <= lowStockThreshold (risky level)
-    - OUT_OF_STOCK   # quantity == 0
-
-# --- Discovery / filtering ---
-
-PriceRange:
-  type: string
-  enum: [BUDGET, MODERATE, PREMIUM]
-  description: "Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$)."
 
 CuisineCategory:
   type: string
@@ -734,6 +435,7 @@ CuisineCategory:
     browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because
     the estimate needs a single coefficient.
 
+
 # Whether an Uber Eats comparison figure is the restaurant's real HubRise price (ADR-0023, opt-in)
 # or a labelled estimate derived from mark-up coefficients (ADR-0024). V0 shows ESTIMATED.
 ComparisonBasis:
@@ -743,17 +445,6 @@ ComparisonBasis:
     Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via
     HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).
 
-RestaurantListKey:
-  type: string
-  enum:
-    - ORDER_AGAIN      # restaurants the customer has ordered from before
-    - RECOMMENDED      # "Places you might like" / "Tailored to your taste"
-    - TOP_DEALS        # "Most loved deals on Captain.Food"
-    - GREEN_PACKAGING  # "Spots using Green Packaging"
-  description: >
-    Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model
-    resolves the actual member restaurants (editorial rules / customer history); the client just
-    asks for a list by key.
 
 # --- Test mode (ADR-0038) ---
 
@@ -765,6 +456,7 @@ Mode:
     (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated
     from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate
     the real receipt path.
+
 
 # --- Caller persona / user type ---
 
@@ -782,36 +474,6 @@ UserType:
     - ADMIN              # platform operator                       -> /admin/graphql
     - EXTERNAL           # third-party ACL (Stripe/HubRise/Avelo37) -> /external/graphql
 
-# --- Order conversations / messaging (#129) ---
-# In-app per-order message thread (aggregate `Conversation`, id = orderId; ADR-20260725-015921).
-
-ConversationMessageId:
-  type: string
-  format: uuid
-  description: >
-    Client-generated id of one posted conversation message — the idempotency key for PostMessage
-    (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId`
-    (the command_journal submission id); this identifies the business message itself (#129).
-
-MessageVisibility:
-  type: string
-  enum: [PUBLIC, INTERNAL]
-  description: >
-    Audience of a conversation message: PUBLIC = visible to the customer in the order thread;
-    INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
-
-ConversationAuthorRole:
-  type: string
-  enum: [CUSTOMER, RESTAURANT, RIDER, ADMIN]
-  description: >
-    Business role that authored a conversation message. A semantic role that changes the meaning of the
-    thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the
-    acting user stays on domain_events.user_id) (#129).
-
-MessageBody:
-  type: string
-  maxLength: 2000
-  description: "Free-text body of a conversation message (#129)."
 
 AttachmentRef:
   type: string
@@ -820,26 +482,6 @@ AttachmentRef:
     Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation
     and GDPR retention are handled generically by the framework, not by this aggregate (#129).
 
-MuteReason:
-  type: string
-  maxLength: 500
-  description: >
-    The REQUIRED justification recorded when a participant is muted in an order conversation; a mute
-    without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).
-
-EscalationReason:
-  type: string
-  maxLength: 500
-  description: >
-    Why an admin was pulled into an order conversation — the reason recorded when the restaurant or
-    rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
-
-TranslatedText:
-  type: string
-  maxLength: 2000
-  description: >
-    A conversation message body translated into one target locale — the cached (persisted) translation
-    reused across readers (translate once, reuse; #129).
 
 # --- Reclamations / customer claims (#151) ---
 # Customer claim/dispute over a delivered order (aggregate `Reclamation`, id = reclamationId; #153).
@@ -852,12 +494,14 @@ ReclamationId:
     OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per
     order, so the reclamation has its own identity, distinct from the orderId it is about (#151).
 
+
 ReclamationCategory:
   type: string
   enum: [MISSING_ITEM, WRONG_ITEM, QUALITY, LATE_DELIVERY, DAMAGED, NOT_DELIVERED, OTHER]
   description: >
     What the customer is claiming about the order: an item was missing, the wrong item was delivered,
     a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).
+
 
 ReclamationResolution:
   type: string
@@ -867,10 +511,6 @@ ReclamationResolution:
     a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund
     money-move, credit ledger and replacement orders are downstream slices (#151).
 
-ReclamationDescription:
-  type: string
-  maxLength: 1000
-  description: "Free-text description of the problem the customer is claiming about the order (#151)."
 
 ReclamationReason:
   type: string
@@ -879,24 +519,6 @@ ReclamationReason:
     Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined,
     or why it is being reopened after a decision (#151).
 
-ReclamationStatus:
-  type: string
-  enum: [OPEN, RESOLVED, REJECTED]
-  description: >
-    Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation):
-    OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on
-    ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in
-    `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
-
-ClaimTimelineEventKind:
-  type: string
-  enum: [OPENED, RESOLVED, REJECTED, REOPENED, EVIDENCE_ATTACHED]
-  description: >
-    Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order
-    conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED
-    (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached
-    — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's
-    status and evidence inline without copying the reclamation's own read model (§2.5, #155).
 
 # =====================================================================
 # CONFIGURATION scalars (PROP-20260729-004500, issue #246)
@@ -923,6 +545,7 @@ ConfigBoolean:
     meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours.
     Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.
 
+
 StripeSecretKey:
   type: string
   pattern: "^sk_(test|live)_[A-Za-z0-9]+$"
@@ -933,6 +556,7 @@ StripeSecretKey:
     swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup
     guarantee instead of a thing someone remembers to check.
 
+
 StripeSecretKeyTest:
   type: string
   pattern: "^sk_test_[A-Za-z0-9]+$"
@@ -942,12 +566,14 @@ StripeSecretKeyTest:
     (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the
     same rule declarative and checked at startup rather than only in one script).
 
+
 StripeSecretKeyLive:
   type: string
   pattern: "^sk_live_[A-Za-z0-9]+$"
   description: >
     A Stripe LIVE-mode secret key. The counterpart slot: it rejects a test key, so a go-live that
     silently kept test credentials cannot boot as if it were taking real payments.
+
 
 StripeWebhookSecret:
   type: string
@@ -957,6 +583,7 @@ StripeWebhookSecret:
     together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed —
     the customer is charged and the restaurant is never told.
 
+
 AuthSessionKey:
   type: string
   pattern: "^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$"
@@ -964,6 +591,7 @@ AuthSessionKey:
     The AES-256-GCM key encrypting parked auth sessions: exactly 32 bytes, as 64 hex chars or standard
     base64. A key of the wrong length currently makes the store fall back to the no-op, so login
     SILENTLY degrades to anonymous-only — the pattern turns that into a startup failure.
+
 
 PostgresUrl:
   type: string
@@ -973,6 +601,7 @@ PostgresUrl:
     `db.<ref>.supabase.co` host is IPv6-only and unreachable from Render — a distinction the URL shape
     cannot express, so it stays documented in the key's `gates`.
 
+
 HttpsUrl:
   type: string
   pattern: "^https?://"
@@ -980,12 +609,14 @@ HttpsUrl:
     An absolute HTTP(S) endpoint. Catches the common paste error of a bare host, which fails later as an
     opaque request error rather than at startup.
 
+
 DepartmentList:
   type: string
   pattern: "^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$"
   description: >
     A comma-separated INSEE department list for a scoped SIRENE sweep (e.g. `37`, `37,41`). Allows the
     Corsican `2A`/`2B` codes, which a naive numeric check would reject.
+
 
 HoneycombIngestKey:
   type: string
@@ -1007,6 +638,7 @@ HoneycombIngestKey:
     bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a
     `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.
 
+
 TraceSampleRatio:
   type: string
   pattern: "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
@@ -1015,6 +647,7 @@ TraceSampleRatio:
     keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data
     weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.
 
+
 LogLevel:
   type: string
   pattern: "^(?i)(trace|debug|info|warn|error)$"
@@ -1022,3 +655,8 @@ LogLevel:
     The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather
     than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the
     logs simply stop, which reads as a healthy quiet system.
+
+RestaurantAccountId:
+  type: string
+  format: uuid
+  description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."

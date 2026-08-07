@@ -33,29 +33,41 @@ procedure in `.claude/skills/architecture-review/`. The open-decision queue it f
 ## Specifications — read before any task
 
 The [specs/](specs/) folder is the **source of truth** for the domain and architecture.
-Read the relevant file before implementing or changing anything:
+Read the relevant file before implementing or changing anything.
+
+**Per-scope layout (ADR-20260807-183024, screaming architecture)**: the domain catalogs live in
+**`specs/{scope}/{kind}.yaml`** folders — scopes `ordering · catalog · network · customer ·
+delivery · payments · comms · common` — and the loader merges each kind's fragments into ONE
+logical catalog. **`$ref`s are KIND-logical**: `commands.yaml#/X` names a kind, never a file
+location, so moving an item between scope folders rewrites no refs. `specs/common/` is the kernel
+(shared contracts + each kind's doctrine header); the validator enforces placement, the
+cross-scope `$ref` DAG (process managers are exempt bridges), kernel purity, and api
+nested-intra-scope (see [docs/claude/dsl.md](docs/claude/dsl.md)).
 
 - [specs/PRODUCT_SPEC_WEB_CLIENT.md](specs/PRODUCT_SPEC_WEB_CLIENT.md) — web client product spec (user flows, checkout, Stripe payment, order tracking, NFRs, tech constraints).
 - [specs/database/](specs/database/) — the store schema as DSL: real tables, generated `View_*`
   fold views, event-store functions, journals (the `inbound_messages` mailbox). `View_*` = a SQL
   VIEW; unprefixed = a TABLE. Full taxonomy + generation detail: [docs/claude/dsl.md](docs/claude/dsl.md);
   narrative: [specs/database.md](specs/database.md).
-- [specs/scalars.yaml](specs/scalars.yaml) — domain scalar types (IDs, names, money, enums: `OrderStatus`, `RestaurantStatus`, `ServiceType`, `StockStatus`, etc.).
-- [specs/entities.yaml](specs/entities.yaml) — value objects and aggregates. HubRise-aligned catalog: `Restaurant`, `Catalog`, `CatalogCategory` (tree), `Product` → `Offer[]` (SKUs), `OptionList`/`Option`, `Cart`/`CartLineItem`, `Order`, `OrderLineItem`. Value objects `Money`, `Stock`, `TaxRate`, `Address`.
-- [specs/events.yaml](specs/events.yaml) — **business event** payloads (RestaurantRegistered, ProductAdded, CatalogImported, OrderPlaced...). `*Updated` events carry the full entity (replace semantics).
-- [specs/commands.yaml](specs/commands.yaml) — **command payload** catalog (CQRS write side): each command is just its input schema (description + type + properties + required), parallel to events.yaml. Emits/handler → actors.yaml; errors → errors.yaml; persona/use-case/slice → stories.yaml.
-- [specs/errors.yaml](specs/errors.yaml) — **anticipated errors** (the old command invariants): each with typed `context` and default `messages.en`/`messages.fr`. Mapped per command in actors.yaml `throws`.
-- [specs/actors.yaml](specs/actors.yaml) — **actor-model catalog** (codegen source): aggregates & process managers, each with its inbox of `{ message → emits, throws }`, where every message/event/error is a `$ref` into commands.yaml/events.yaml/errors.yaml (checkable; the ref path encodes kind). Personas/authz live elsewhere (GraphQL `@auth`, story map).
+- `specs/{scope}/scalars.yaml` — domain scalar types (IDs, names, money, enums: `OrderStatus`, `RestaurantStatus`, `ServiceType`, `StockStatus`, etc.).
+- `specs/{scope}/entities.yaml` — value objects and aggregates. HubRise-aligned catalog: `Restaurant`, `Catalog`, `CatalogCategory` (tree), `Product` → `Offer[]` (SKUs), `OptionList`/`Option`, `Cart`/`CartLineItem`, `Order`, `OrderLineItem`. Value objects `Money`, `Stock`, `TaxRate`, `Address`.
+- `specs/{scope}/events.yaml` — **business event** payloads (RestaurantRegistered, ProductAdded, CatalogImported, OrderPlaced...). `*Updated` events carry the full entity (replace semantics). An event lives with its AUTHORING actor's scope.
+- `specs/{scope}/commands.yaml` — **command payload** catalog (CQRS write side): each command is just its input schema (description + type + properties + required), parallel to events.yaml. Emits/handler → actors.yaml; errors → errors.yaml; persona/use-case/slice → stories.yaml. A command lives with its HANDLING actor's scope.
+- `specs/{scope}/errors.yaml` — **anticipated errors** (the old command invariants): each with typed `context` and default `messages.en`/`messages.fr`. Mapped per command in actors.yaml `throws`.
+- `specs/{scope}/actors.yaml` + `processmanager.yaml` — **actor-model catalog** (codegen source): aggregates & process managers, each with its inbox of `{ message → emits, throws }`, where every message/event/error is a `$ref` into commands.yaml/events.yaml/errors.yaml (checkable; the ref path encodes kind). The actor's FOLDER is the scope-membership declaration everything else derives from. Personas/authz live elsewhere (GraphQL `@auth`, story map).
 - [specs/stories.yaml](specs/stories.yaml) — the **executable story map** (codegen source): personas → activities → steps, each step a `$ref` into an api.yaml query/mutation. The validator enforces completeness BOTH ways: steps resolve + persona role authorized, AND every mutation/query is reached by ≥1 step (`op-uncovered-by-story`).
-- [specs/rules.yaml](specs/rules.yaml) — **business rules / invariants** (ADR-0032): each a readable guarantee. Every behaviour test links to ≥1 rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules say WHAT we guarantee; [specs/tests.yaml](specs/tests.yaml) says HOW (Given/When/Then). A rule may span several tests.
+- `specs/{scope}/rules.yaml` — **business rules / invariants** (ADR-0032): each a readable guarantee. Every behaviour test links to ≥1 rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules say WHAT we guarantee; [specs/tests.yaml](specs/tests.yaml) says HOW (Given/When/Then). A rule may span several tests.
 - [specs/screens/](specs/screens/) — Spec-Driven SDUI apps, one file per audience
   (marketplace / storefront front offices split by host, backoffice, rider, system); each file =
   screens + `resolvers`/`actions` allowlists into api.yaml, validator-proved, gaps explicit.
   Detail: [docs/claude/dsl.md](docs/claude/dsl.md).
 - [specs/translations.yaml](specs/translations.yaml) — shared UI i18n catalog + per-surface
   sidecars, merged into one generated JSON. Detail: [docs/claude/dsl.md](docs/claude/dsl.md).
-- [specs/api.yaml](specs/api.yaml) — the GraphQL surface (types, queries, mutations, ACL); SDL
-  generated. **Role = path**: one master schema served per-role under `/{role}/graphql`.
+- `specs/{scope}/api.yaml` — the GraphQL surface as PER-SCOPE FRAGMENTS (types, queries,
+  mutations, ACL; D8: one domain, one graph); SDL generated. **Role = path**: one composed schema
+  served per-role under `/{role}/graphql`, top-level routing from a generated composition table.
+- `specs/{scope}/configuration.yaml` — scope-owned runtime keys (D5); platform keys (DB,
+  telemetry, identity, mailbox/projector machinery) in `specs/common/configuration.yaml`.
 - [specs/integrations/hubrise.md](specs/integrations/hubrise.md) — HubRise integration: exposed data, mapping → domain, ACL, gaps, import path.
 
 For a single **navigable, fully detailed view of the whole product** (stories → api → actors → views →

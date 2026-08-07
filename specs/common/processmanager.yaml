@@ -1,0 +1,68 @@
+version: 3
+description: >
+  Captain.Food PROCESS MANAGER catalog — a CODE-GENERATION SOURCE (like actors.yaml for aggregates).
+  A process manager is a STATE-TABLE ORCHESTRATOR, not an event-sourced actor: it reacts to a message
+  (a command it handles, or an event already recorded in the log), runs an ORDERED list of TYPED STEPS
+  (read a read model, guard, call an outbound port, deliver an event / send a command to an aggregate,
+  read/update its own state row), and keeps its private state in a declared table. AGGREGATES OWN THE
+  FACTS — a process manager never appends to domain_events itself; it delivers events for the owning
+  aggregate to record, or sends commands the aggregate may reject.
+
+  Every semantic field is a $ref or a declared name — free text lives only in description/note. From
+  this file a generator scaffolds the orchestrator (steps → code) and the sequence diagrams (each step
+  kind maps to exactly one participant/layer), and the validator proves the wiring.
+
+  Fields:
+    - <PM>.type        : always process-manager.
+    - <PM>.state_table : $ref to the PM's private state table (database/tables/process_managers.yaml).
+                         Required when any leg has a `state` step.
+    - <PM>.ports       : outbound ports — each a `$ref` into the SERVICE CATALOG
+                         (services.yaml, ADR-20260719-214500): `payment: { $ref: 'services.yaml#/payment' }`.
+                         The port name is the service name; `call`/`from_port` reference
+                         `<service>.<operation>` against the catalog's declared operations.
+    - <PM>.receives    : the inbox. Each entry { message, description?, steps }:
+        * message : $ref to the command (commands.yaml) or event (events.yaml) received.
+                    COMMAND legs reject with the thrown error. EVENT legs never reject the FACT —
+                    but an error condition still `throws` (run aborts, error surfaced); only benign
+                    alternatives `skip`.
+        * steps   : ordered list; each step is one of:
+            - read    : { model, as, where?, note? } — read a read model. `model` is a $ref to a
+                        projection table (database/tables/projection_tables.yaml) or view
+                        (database/projection_views.yaml); `as` names the result for later steps;
+                        `where` maps its columns to values.
+            - guard   : { that?, throws | skip: true, note? } — a precondition, exactly one outcome:
+                        * throws ($ref errors.yaml) — the condition is an ERROR. On a COMMAND leg the
+                          command is REJECTED with the typed error. On an EVENT leg the recorded fact
+                          stands (facts are never rejected) but the run ABORTS and SURFACES the typed
+                          error (poison/ops flag, retry or manual attention) — never a silent skip.
+                        * skip: true — the condition is a BENIGN expected alternative (idempotent
+                          re-delivery, COLLECTION no-op): the run ends as a no-op. Never use skip for
+                          an error condition.
+                        A COMMAND leg may only `throws` (a command has no benign-skip path).
+                        `that` (optional, when structurally expressible) maps a subject
+                        (`message`, `state`, or a read alias) → field → { const: <ENUM> }.
+            - call    : { port, operation, note? } — invoke a declared outbound port operation
+                        (external system; not a domain message).
+            - deliver : { event, to, with?, for_each?, note? } — hand a fact to the aggregate that
+                        records it (births / facts the PM is authoritative for). `event` is a $ref to
+                        events.yaml; `to` a $ref to an actors.yaml aggregate whose inbox receives it.
+            - send    : { command, to, with?, for_each?, note? } — dispatch a command; the target
+                        aggregate validates and may reject (on an EVENT leg a rejection is logged and
+                        skipped, never re-thrown).
+            - state   : { by?, expect?, set?, note? } — the PM's own state row (state_table).
+                        `by` selects the row, `expect` asserts columns (on an EVENT leg a failed
+                        expect = skip), `set` writes columns explicitly.
+        * values (in where/with/by/expect/set) are one of:
+            - { const: <ENUM_MEMBER> }                        — literal of the field's enum scalar
+            - { from: { $ref: '<file>#/<Msg>/properties/<p>' } } — a message/event property (lineage
+                                                                  style, like projection `from`)
+            - { from_state: <column> }                        — the PM's own state row
+            - { from_read: <alias>.<column> }                 — a prior read step's result
+            - { from_port: <port>.<operation> }               — a prior call step's result
+            - { from_envelope: event_id | correlation_id | occurred_at } — the trigger's envelope
+                                                                  (ADR-0041; infrastructure metadata)
+
+  RUNTIME ENVELOPE (declared once, never repeated as steps — like the event envelope, ADR-0041):
+  single-flight per state row via optimistic concurrency (the old lock/unlock steps), trigger
+  checkpointing, correlation_id propagation + cause_id = trigger event id on everything delivered,
+  poison-message skip, and `last_update_utc` maintenance are the runner's contract, not business steps.

@@ -27,6 +27,9 @@ pub(crate) struct Container {
     pub(crate) id: String,
     pub(crate) technology: String,
     pub(crate) description: String,
+    /// Actor/PM names this container realizes (`realizes:` $refs) — the bin ↔ deployable binding
+    /// (ADR-20260807-183024; consumed by the #349 emitter chain).
+    pub(crate) realizes: Vec<String>,
 }
 pub(crate) struct External {
     pub(crate) id: String,
@@ -41,6 +44,9 @@ pub(crate) struct Comp {
     pub(crate) id: String,
     pub(crate) description: String,
     pub(crate) instrumented: bool,
+    /// The l2 container this component primarily runs in (`container:` — shared framework modules
+    /// ship in many bins and declare their money-path instance).
+    pub(crate) container: Option<String>,
 }
 pub(crate) struct C4 {
     pub(crate) system_name: String,
@@ -438,6 +444,7 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                     id: id.to_string(),
                     technology: c.get("technology").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    realizes: ref_names(c.get("realizes")),
                 });
             }
         }
@@ -471,6 +478,7 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                     id: id.to_string(),
                     description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     instrumented: c.get("instrumented").and_then(|x| x.as_bool()) == Some(true),
+                    container: c.get("container").and_then(|x| x.as_str()).map(|s| s.to_string()),
                 });
             }
         }
@@ -514,46 +522,46 @@ pub(crate) fn emit_structurizr(model: &Model) -> String {
             c4id("n_", key)
         }
     };
+    // Which bounded context (if any) owns each actor/PM — used to tag realized members.
+    let mut member_kind: HashMap<&str, &str> = HashMap::new();
+    for ctx in &c4.contexts {
+        for a in &ctx.aggregates {
+            member_kind.insert(a.as_str(), "Aggregate");
+        }
+        for p in &ctx.process_managers {
+            member_kind.insert(p.as_str(), "ProcessManager");
+        }
+    }
     let mut l: Vec<String> = Vec::new();
     l.push(format!("workspace {} {} {{", q(&c4.system_name), q(&c4.system_description)));
     l.push("  model {".into());
     l.push(format!("    ss = softwareSystem {} {} {{", q(&c4.system_name), q(&c4.system_description)));
+    // Containers with members (realized actors/PMs from l2 `realizes:`, plus l3 components homed
+    // here via `container:`) open a block; the rest are leaves. This replaced the pre-split shape
+    // where every component nested inside the single `api` container (ADR-20260807-183024).
     for c in &c4.containers {
+        let comps_here: Vec<&Comp> =
+            c4.components.iter().filter(|k| k.container.as_deref() == Some(c.id.as_str())).collect();
         let open = format!(
             "      {} = container {} {} {}",
             c4id("ct_", &c.id), q(&c.id), q(&c.description), q(&c.technology)
         );
-        if c.id != "api" {
+        if c.realizes.is_empty() && comps_here.is_empty() {
             l.push(open);
             continue;
         }
         l.push(format!("{} {{", open));
-        for ctx in &c4.contexts {
-            let mut members: Vec<(&str, &str)> = Vec::new();
-            for a in &ctx.aggregates {
-                members.push((a.as_str(), "Aggregate"));
-            }
-            for p in &ctx.process_managers {
-                members.push((p.as_str(), "ProcessManager"));
-            }
-            if members.is_empty() {
-                continue;
-            }
-            l.push(format!("        group {} {{", q(&ctx.id)));
-            for (n, tag) in &members {
-                l.push(format!("          {} = component {} {} {}", c4id("a_", n), q(n), q(&ctx.description), q(tag)));
-            }
-            l.push("        }".into());
+        for n in &c.realizes {
+            let tag = member_kind.get(n.as_str()).copied().unwrap_or("Aggregate");
+            l.push(format!("        {} = component {} {} {}", c4id("a_", n), q(n), q(""), q(tag)));
         }
-        l.push("        group \"Infrastructure\" {".into());
-        for comp in &c4.components {
+        for comp in comps_here {
             l.push(format!(
-                "          {} = component {} {} {}",
+                "        {} = component {} {} {}",
                 c4id("c_", &comp.id), q(&comp.id), q(&comp.description),
                 q(if comp.instrumented { "Instrumented" } else { "Domain" })
             ));
         }
-        l.push("        }".into());
         l.push("      }".into());
     }
     l.push("    }".into());
@@ -579,7 +587,24 @@ pub(crate) fn emit_structurizr(model: &Model) -> String {
     l.push("  views {".into());
     push_view(&mut l, "systemContext ss \"SystemContext\"");
     push_view(&mut l, "container ss \"Containers\"");
-    push_view(&mut l, &format!("component {} \"ApiComponents\"", c4id("ct_", "api")));
+    // One component view per container that has members (post-split there is no single `api`
+    // container to show — each bin's internals get their own view).
+    for c in &c4.containers {
+        let has_members = !c.realizes.is_empty()
+            || c4.components.iter().any(|k| k.container.as_deref() == Some(c.id.as_str()));
+        if has_members {
+            let key: String = c
+                .id
+                .split(|ch: char| !ch.is_ascii_alphanumeric())
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    let mut cs = s.chars();
+                    cs.next().map(|f| f.to_ascii_uppercase().to_string() + cs.as_str()).unwrap_or_default()
+                })
+                .collect();
+            push_view(&mut l, &format!("component {} \"{}Components\"", c4id("ct_", &c.id), key));
+        }
+    }
     l.push("    styles {".into());
     push_style(&mut l, "Element", &["color #ffffff"]);
     push_style(&mut l, "Software System", &["background #2d4f4a"]);

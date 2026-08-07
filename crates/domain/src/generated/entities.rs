@@ -3,65 +3,6 @@
 use serde::{Deserialize, Serialize};
 use super::scalars::*;
 
-/// Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the HubRise boundary (parse + x100), kept as integer minor units + currency internally.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Money {
-    pub amount_cents: MoneyCents,
-    pub currency: CurrencyCode,
-}
-
-/// The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles − restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food: restaurantContribution is a distinct service line, never a cut of the menu price.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentBreakdown {
-    pub articles: Money,
-    pub delivery: Money,
-    pub service_fee: Money,
-    pub total: Money,
-    pub restaurant_contribution: Money,
-    pub restaurant_payout: Money,
-    pub rider_payout: Money,
-    pub captain_net: Money,
-}
-
-/// What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UberComparison {
-    pub total: Money,
-    pub restaurant_share: Money,
-    pub rider_share: Money,
-    pub platform_share: Money,
-    pub basis: ComparisonBasis,
-}
-
-/// One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Tip {
-    pub recipient: TipRecipient,
-    pub amount: Money,
-}
-
-/// The person delivering an order. For an INDEPENDENT rider, `riderId` is set (a Captain RIDER); for a PARTNER courier (e.g. Avelo37) only `displayName`/`phone` are known, reported by the partner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Courier {
-    pub display_name: String,
-    pub phone: Option<PhoneNumber>,
-    pub rider_id: Option<RiderId>,
-}
-
-/// Per-service-mode VAT, mirroring HubRise product tax_rate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaxRate {
-    pub delivery: TaxRatePercent,
-    pub collection: Option<TaxRatePercent>,
-    pub eat_in: Option<TaxRatePercent>,
-}
-
 /// Inventory of a offer/option. status is DERIVED from quantity and lowStockThreshold (see scalars.yaml#/StockStatus).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,114 +11,6 @@ pub struct Stock {
     pub low_stock_threshold: Option<Quantity>,
     pub status: StockStatus,
     pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Address {
-    pub line1: AddressLine,
-    pub line2: Option<AddressLine>,
-    pub postal_code: PostalCode,
-    pub city: CityName,
-    pub country: CountryCode,
-}
-
-/// One opening time window for a given weekday (HubRise opening_hours).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpeningHoursSlot {
-    pub weekday: Weekday,
-    pub from: TimeOfDay,
-    pub to: TimeOfDay,
-}
-
-/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantContact {
-    pub email: Option<EmailAddress>,
-    pub phone: Option<PhoneNumber>,
-}
-
-/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeoPoint {
-    pub latitude: Latitude,
-    pub longitude: Longitude,
-}
-
-/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalIdentifier {
-    pub key: ExternalIdentifierKey,
-    pub value: String,
-}
-
-/// Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the ProspectionPipeline projection, never stored. This holds only the outreach state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Prospect {
-    pub restaurant_id: RestaurantId,
-    pub pipeline_status: ProspectPipelineStatus,
-    pub last_contacted_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomerContact {
-    pub display_name: CustomerDisplayName,
-    pub email: Option<EmailAddress>,
-    pub phone: PhoneNumber,
-}
-
-/// The business account that owns one or more restaurant locations (HubRise: restaurant).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAccount {
-    pub id: RestaurantAccountId,
-    pub r#ref: Option<ExternalReference>,
-    pub legal_name: RestaurantLegalName,
-    pub contact: RestaurantContact,
-    pub default_currency: CurrencyCode,
-    pub default_tax_rate: TaxRate,
-    pub timezone: Option<TimeZone>,
-    pub created_by: UserId,
-    pub created_at: String,
-}
-
-/// A single restaurant location (HubRise: location); belongs to a RestaurantAccount.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Restaurant {
-    pub mode: Option<Mode>,
-    pub id: RestaurantId,
-    pub account_id: Option<RestaurantAccountId>,
-    pub listing_status: RestaurantListingStatus,
-    pub r#ref: Option<ExternalReference>,
-    #[serde(default)]
-    pub external_identifiers: Vec<ExternalIdentifier>,
-    pub google_place_id: Option<GooglePlaceId>,
-    pub slug: Option<Slug>,
-    pub display_name: RestaurantDisplayName,
-    pub contact: Option<RestaurantContact>,
-    pub website: Option<WebUrl>,
-    #[serde(default)]
-    pub tags: Vec<Tag>,
-    pub margin_rate: Option<MarginPercent>,
-    pub cuisine_category: Option<CuisineCategory>,
-    pub uber_prices_opt_in: Option<bool>,
-    pub address: Address,
-    pub location: Option<GeoPoint>,
-    pub status: RestaurantStatus,
-    pub order_acceptance: OrderAcceptanceMode,
-    pub timezone: Option<TimeZone>,
-    pub preparation_time_minutes: Option<i64>,
-    #[serde(default)]
-    pub opening_hours: Vec<OpeningHoursSlot>,
-    pub created_by: UserId,
-    pub created_at: String,
 }
 
 /// A catalog (HubRise: catalog).
@@ -265,26 +98,62 @@ pub struct ProductItemOption {
     pub stock: Option<Stock>,
 }
 
-/// A line stored in a cart: the customer's selection by id (no prices stored).
+/// Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the HubRise boundary (parse + x100), kept as integer minor units + currency internally.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CartLineItem {
-    pub cart_line_id: CartLineId,
-    pub offer_id: OfferId,
-    pub quantity: i64,
-    #[serde(default)]
-    pub selected_option_ids: Vec<OptionId>,
+pub struct Money {
+    pub amount_cents: MoneyCents,
+    pub currency: CurrencyCode,
 }
 
-/// A customer's in-progress selection for a SINGLE restaurant. customerId is null while the visitor is still a guest; it is bound at checkout once the phone is verified.
+/// The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles − restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food: restaurantContribution is a distinct service line, never a cut of the menu price.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Cart {
-    pub id: CartId,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub status: CartStatus,
-    pub lines: Vec<CartLineItem>,
+pub struct PaymentBreakdown {
+    pub articles: Money,
+    pub delivery: Money,
+    pub service_fee: Money,
+    pub total: Money,
+    pub restaurant_contribution: Money,
+    pub restaurant_payout: Money,
+    pub rider_payout: Money,
+    pub captain_net: Money,
+}
+
+/// The person delivering an order. For an INDEPENDENT rider, `riderId` is set (a Captain RIDER); for a PARTNER courier (e.g. Avelo37) only `displayName`/`phone` are known, reported by the partner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Courier {
+    pub display_name: String,
+    pub phone: Option<PhoneNumber>,
+    pub rider_id: Option<RiderId>,
+}
+
+/// Per-service-mode VAT, mirroring HubRise product tax_rate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxRate {
+    pub delivery: TaxRatePercent,
+    pub collection: Option<TaxRatePercent>,
+    pub eat_in: Option<TaxRatePercent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Address {
+    pub line1: AddressLine,
+    pub line2: Option<AddressLine>,
+    pub postal_code: PostalCode,
+    pub city: CityName,
+    pub country: CountryCode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerContact {
+    pub display_name: CustomerDisplayName,
+    pub email: Option<EmailAddress>,
+    pub phone: PhoneNumber,
 }
 
 /// An option chosen by the customer on a line item, priced at order time.
@@ -327,23 +196,6 @@ pub struct CheckoutSnapshot {
     pub items: Vec<OrderLineItem>,
     pub total_amount: Money,
     pub breakdown: PaymentBreakdown,
-    pub note: Option<OrderNote>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Order {
-    pub mode: Option<Mode>,
-    pub id: OrderId,
-    pub r#ref: Option<ExternalReference>,
-    pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
-    pub customer_contact: CustomerContact,
-    pub service_type: ServiceType,
-    pub delivery_address: Option<Address>,
-    pub items: Vec<OrderLineItem>,
-    pub total_amount: Money,
-    pub status: OrderStatus,
     pub note: Option<OrderNote>,
 }
 
@@ -393,4 +245,152 @@ pub struct ClaimTimelineEntry {
     pub reason: Option<ReclamationReason>,
     pub attachment_ref: Option<AttachmentRef>,
     pub at: String,
+}
+
+/// One opening time window for a given weekday (HubRise opening_hours).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpeningHoursSlot {
+    pub weekday: Weekday,
+    pub from: TimeOfDay,
+    pub to: TimeOfDay,
+}
+
+/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantContact {
+    pub email: Option<EmailAddress>,
+    pub phone: Option<PhoneNumber>,
+}
+
+/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoPoint {
+    pub latitude: Latitude,
+    pub longitude: Longitude,
+}
+
+/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalIdentifier {
+    pub key: ExternalIdentifierKey,
+    pub value: String,
+}
+
+/// Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the ProspectionPipeline projection, never stored. This holds only the outreach state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Prospect {
+    pub restaurant_id: RestaurantId,
+    pub pipeline_status: ProspectPipelineStatus,
+    pub last_contacted_at: Option<String>,
+}
+
+/// The business account that owns one or more restaurant locations (HubRise: restaurant).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccount {
+    pub id: RestaurantAccountId,
+    pub r#ref: Option<ExternalReference>,
+    pub legal_name: RestaurantLegalName,
+    pub contact: RestaurantContact,
+    pub default_currency: CurrencyCode,
+    pub default_tax_rate: TaxRate,
+    pub timezone: Option<TimeZone>,
+    pub created_by: UserId,
+    pub created_at: String,
+}
+
+/// A single restaurant location (HubRise: location); belongs to a RestaurantAccount.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Restaurant {
+    pub mode: Option<Mode>,
+    pub id: RestaurantId,
+    pub account_id: Option<RestaurantAccountId>,
+    pub listing_status: RestaurantListingStatus,
+    pub r#ref: Option<ExternalReference>,
+    #[serde(default)]
+    pub external_identifiers: Vec<ExternalIdentifier>,
+    pub google_place_id: Option<GooglePlaceId>,
+    pub slug: Option<Slug>,
+    pub display_name: RestaurantDisplayName,
+    pub contact: Option<RestaurantContact>,
+    pub website: Option<WebUrl>,
+    #[serde(default)]
+    pub tags: Vec<Tag>,
+    pub margin_rate: Option<MarginPercent>,
+    pub cuisine_category: Option<CuisineCategory>,
+    pub uber_prices_opt_in: Option<bool>,
+    pub address: Address,
+    pub location: Option<GeoPoint>,
+    pub status: RestaurantStatus,
+    pub order_acceptance: OrderAcceptanceMode,
+    pub timezone: Option<TimeZone>,
+    pub preparation_time_minutes: Option<i64>,
+    #[serde(default)]
+    pub opening_hours: Vec<OpeningHoursSlot>,
+    pub created_by: UserId,
+    pub created_at: String,
+}
+
+/// What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UberComparison {
+    pub total: Money,
+    pub restaurant_share: Money,
+    pub rider_share: Money,
+    pub platform_share: Money,
+    pub basis: ComparisonBasis,
+}
+
+/// One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tip {
+    pub recipient: TipRecipient,
+    pub amount: Money,
+}
+
+/// A line stored in a cart: the customer's selection by id (no prices stored).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineItem {
+    pub cart_line_id: CartLineId,
+    pub offer_id: OfferId,
+    pub quantity: i64,
+    #[serde(default)]
+    pub selected_option_ids: Vec<OptionId>,
+}
+
+/// A customer's in-progress selection for a SINGLE restaurant. customerId is null while the visitor is still a guest; it is bound at checkout once the phone is verified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cart {
+    pub id: CartId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub status: CartStatus,
+    pub lines: Vec<CartLineItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Order {
+    pub mode: Option<Mode>,
+    pub id: OrderId,
+    pub r#ref: Option<ExternalReference>,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub customer_contact: CustomerContact,
+    pub service_type: ServiceType,
+    pub delivery_address: Option<Address>,
+    pub items: Vec<OrderLineItem>,
+    pub total_amount: Money,
+    pub status: OrderStatus,
+    pub note: Option<OrderNote>,
 }

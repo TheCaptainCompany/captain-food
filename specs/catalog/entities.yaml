@@ -1,0 +1,213 @@
+version: 1
+description: >
+  catalog scope — entities fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `entities.yaml` catalog; $refs stay kind-logical
+  (`entities.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Stock:
+  type: object
+  description: >
+    Inventory of a offer/option. status is DERIVED from quantity and
+    lowStockThreshold (see scalars.yaml#/StockStatus).
+  properties:
+    quantity:
+      $ref: 'scalars.yaml#/Quantity'
+    lowStockThreshold:
+      $ref: 'scalars.yaml#/Quantity'
+      nullable: true
+      description: "If quantity <= threshold, status becomes LOW_STOCK."
+    status:
+      $ref: 'scalars.yaml#/StockStatus'
+      readOnly: true
+      description: "DERIVED server-side from quantity vs lowStockThreshold — never a client input."
+    expiresAt:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Restock/availability date for out-of-stock items (HubRise inventory expires_at)."
+  required: [quantity, status]
+
+
+# --- Catalog: Catalog / CatalogCategory / Product / Offer ---
+# Mirrors the HubRise catalog tree: categories form a tree (parentRef),
+# products belong to a category and hold one or more offers (SKUs).
+
+Catalog:
+  type: object
+  description: "A catalog (HubRise: catalog)."
+  properties:
+    id:
+      $ref: 'scalars.yaml#/CatalogId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    name:
+      $ref: 'scalars.yaml#/CatalogName'
+  required: [id, restaurantId, name]
+
+
+CatalogCategory:
+  type: object
+  description: "Catalog category, hierarchical via parentRef (HubRise categories tree)."
+  properties:
+    id:
+      $ref: 'scalars.yaml#/ProductCategoryId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    parentRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+      description: "Null for a top-level category."
+    name:
+      $ref: 'scalars.yaml#/CatalogCategoryName'
+    description:
+      $ref: 'scalars.yaml#/ProductDescription'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    imageIds:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/ImageId'
+  required: [id, catalogId, name]
+
+
+Product:
+  type: object
+  description: "A catalog product grouping one or more offers (HubRise: product + SKUs)."
+  properties:
+    id:
+      $ref: 'scalars.yaml#/ProductId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    categoryRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    name:
+      $ref: 'scalars.yaml#/ProductName'
+    description:
+      $ref: 'scalars.yaml#/ProductDescription'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    imageIds:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/ImageId'
+    taxRate:
+      $ref: '#/TaxRate'
+    offers:
+      type: array
+      items:
+        $ref: '#/Offer'
+      minItems: 1
+  required:
+    - id
+    - catalogId
+    - restaurantId
+    - name
+    - taxRate
+    - offers
+
+
+Offer:
+  type: object
+  description: "A purchasable offer of a product (HubRise: SKU)."
+  properties:
+    id:
+      $ref: 'scalars.yaml#/OfferId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    productId:
+      $ref: 'scalars.yaml#/ProductId'
+    name:
+      $ref: 'scalars.yaml#/OfferName'
+    price:
+      $ref: '#/Money'
+    availability:
+      $ref: 'scalars.yaml#/CatalogItemAvailability'
+    stock:
+      $ref: '#/Stock'
+      nullable: true
+      description: "Null when the offer is not stock-tracked."
+    optionListIds:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/OptionListId'
+  required:
+    - id
+    - productId
+    - name
+    - price
+    - availability
+
+
+# --- Options / Modifiers (HubRise option lists) ---
+
+OptionList:
+  type: object
+  properties:
+    id:
+      $ref: 'scalars.yaml#/OptionListId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    name:
+      $ref: 'scalars.yaml#/OptionListName'
+    minSelections:
+      type: integer
+      minimum: 0
+    maxSelections:
+      type: integer
+      minimum: 1
+      nullable: true
+      description: "Null means unlimited."
+    multipleSelection:
+      type: boolean
+      description: "Whether the same option can be selected more than once."
+    options:
+      type: array
+      items:
+        $ref: '#/ProductItemOption'
+      minItems: 1
+  required: [id, name, minSelections, multipleSelection, options]
+
+
+ProductItemOption:
+  type: object
+  properties:
+    id:
+      $ref: 'scalars.yaml#/OptionId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    optionListId:
+      $ref: 'scalars.yaml#/OptionListId'
+    name:
+      $ref: 'scalars.yaml#/OptionName'
+    price:
+      $ref: '#/Money'
+    default:
+      type: boolean
+    availability:
+      $ref: 'scalars.yaml#/CatalogItemAvailability'
+    stock:
+      $ref: '#/Stock'
+      nullable: true
+  required: [id, optionListId, name, price, default, availability]

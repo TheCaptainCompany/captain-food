@@ -320,7 +320,9 @@ mod tests {
     /// documented default" edit would move personal data to the US as a silent side effect.
     #[test]
     fn the_declared_default_endpoint_is_the_eu_region() {
-        let declared = include_str!("../../../specs/configuration.yaml");
+        // Telemetry keys are platform keys, so they live in the KERNEL configuration fragment
+        // (specs/common/configuration.yaml — ADR-20260807-183024 D5).
+        let declared = include_str!("../../../specs/common/configuration.yaml");
         let block = declared
             .split("HONEYCOMB_API_ENDPOINT:")
             .nth(1)

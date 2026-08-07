@@ -1,0 +1,221 @@
+version: 1
+description: >
+  network scope — entities fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `entities.yaml` catalog; $refs stay kind-logical
+  (`entities.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+OpeningHoursSlot:
+  type: object
+  description: "One opening time window for a given weekday (HubRise opening_hours)."
+  properties:
+    weekday:
+      $ref: 'scalars.yaml#/Weekday'
+    from:
+      $ref: 'scalars.yaml#/TimeOfDay'
+    to:
+      $ref: 'scalars.yaml#/TimeOfDay'
+  required: [weekday, from, to]
+
+
+RestaurantContact:
+  type: object
+  description: >
+    Both fields optional: HubRise locations do not expose email/phone, so an
+    imported restaurant starts without contact info, to be completed by the admin.
+  properties:
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+  required: []
+
+
+GeoPoint:
+  type: object
+  description: "WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance)."
+  properties:
+    latitude:
+      $ref: 'scalars.yaml#/Latitude'
+    longitude:
+      $ref: 'scalars.yaml#/Longitude'
+  required: [latitude, longitude]
+
+
+ExternalIdentifier:
+  type: object
+  description: >
+    A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value
+    (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and
+    multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+  properties:
+    key:
+      $ref: 'scalars.yaml#/ExternalIdentifierKey'
+    value:
+      type: string
+      maxLength: 255
+  required: [key, value]
+
+
+Prospect:
+  type: object
+  description: >
+    Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020).
+    Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the
+    ProspectionPipeline projection, never stored. This holds only the outreach state.
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    pipelineStatus:
+      $ref: 'scalars.yaml#/ProspectPipelineStatus'
+    lastContactedAt:
+      type: string
+      format: date-time
+      nullable: true
+  required: [restaurantId, pipelineStatus]
+
+
+# --- Restaurant account & location (HubRise-aligned) ---
+# A RestaurantAccount (HubRise *restaurant*) groups one or more Restaurant locations (HubRise
+# *location*). Account-level facts (legal entity, billing contact, currency, default tax, timezone)
+# live on the ACCOUNT; location-level facts (slug, display name, address, opening hours, live
+# status/acceptance) live on each LOCATION, which links to its account via `accountId`.
+# (A location may also hold multiple catalogs — one per service type — see Catalog; not modelled yet.)
+
+RestaurantAccount:
+  type: object
+  description: "The business account that owns one or more restaurant locations (HubRise: restaurant)."
+  properties:
+    id:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+      description: "HubRise restaurant (account) reference, when imported."
+    legalName:
+      $ref: 'scalars.yaml#/RestaurantLegalName'
+    contact:
+      $ref: '#/RestaurantContact'
+    defaultCurrency:
+      $ref: 'scalars.yaml#/CurrencyCode'
+    defaultTaxRate:
+      $ref: '#/TaxRate'
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+    createdBy:
+      $ref: 'scalars.yaml#/UserId'
+    createdAt:
+      type: string
+      format: date-time
+  required:
+    - id
+    - legalName
+    - contact
+    - defaultCurrency
+    - defaultTaxRate
+    - createdBy
+    - createdAt
+
+
+Restaurant:
+  type: object
+  description: "A single restaurant location (HubRise: location); belongs to a RestaurantAccount."
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    id:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+      description: "The owning RestaurantAccount; NULL for a non-partner listing (no account yet), set on claim/conversion."
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+      description: "Partnership funnel: NON_PARTNER (seeded from open data) → PASSIVE_PARTNER → ACTIVE_PARTNER."
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+      description: "HubRise location reference, when imported."
+    externalIdentifiers:
+      type: array
+      items:
+        $ref: '#/ExternalIdentifier'
+      description: "Source-agnostic identifiers preserving original keys (siret/naf/google_place_id/hubrise_ref…). Not unique."
+    googlePlaceId:
+      $ref: 'scalars.yaml#/GooglePlaceId'
+      nullable: true
+      description: "Google Place id, when known (enrichment / GBP)."
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      nullable: true
+      description: >
+        The storefront host label ({slug}.captain.food) — NULL until the owner configures one
+        (ADR-20260728-011344). An open-data listing has no storefront and therefore no slug; only a
+        claimed restaurant that has been through onboarding does. Unique across the non-NULL set.
+    displayName:
+      $ref: 'scalars.yaml#/RestaurantDisplayName'
+    contact:
+      $ref: '#/RestaurantContact'
+      nullable: true
+      description: "Location-specific contact; falls back to the account contact when absent."
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+      description: "Restaurant website (general restaurant info; any source may provide it)."
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+      description: "Cuisine/attribute tags (general restaurant info; source-agnostic)."
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
+      description: "Food margin %, input to the Captain service-fee split (ADR-0017); null → 0 restaurant contribution."
+    cuisineCategory:
+      $ref: 'scalars.yaml#/CuisineCategory'
+      nullable: true
+      description: "SINGLE primary cuisine, selects the Uber Eats estimate coefficient (ADR-0024); null → no estimate. Multi-cuisine discovery lives in `tags`."
+    uberPricesOptIn:
+      type: boolean
+      nullable: true
+      description: "The restaurant authorized showing its real Uber Eats prices for comparison (ADR-0023 opt-in). Null/false → estimate only."
+    address:
+      $ref: '#/Address'
+    location:
+      $ref: '#/GeoPoint'
+      nullable: true
+      description: "Geo coordinates (general restaurant info; typically from the Google Maps sync)."
+    status:
+      $ref: 'scalars.yaml#/RestaurantStatus'
+    orderAcceptance:
+      $ref: 'scalars.yaml#/OrderAcceptanceMode'
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+      description: "Location timezone (a chain may span zones); falls back to the account timezone when absent."
+    preparationTimeMinutes:
+      type: integer
+      minimum: 0
+      nullable: true
+      description: "Base preparation time (HubRise preparation_time)."
+    openingHours:
+      type: array
+      items:
+        $ref: '#/OpeningHoursSlot'
+    createdBy:
+      $ref: 'scalars.yaml#/UserId'
+    createdAt:
+      type: string
+      format: date-time
+  required:
+    - id
+    - listingStatus
+    - slug
+    - displayName
+    - address
+    - status
+    - orderAcceptance
+    - createdBy
+    - createdAt

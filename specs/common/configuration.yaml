@@ -90,6 +90,7 @@ description: >
 # =====================================================================
 
 keys:
+
   APP_PROFILE:
     type: enum
     values: [development, staging, production]
@@ -97,6 +98,7 @@ keys:
     gates: >
       Which keys are REQUIRED at startup. Defaults to `development` so a local run needs no production
       secrets; production must set it explicitly, or it inherits development's leniency.
+
 
   # ===================================================================
   # Persistence — without this nothing is durable
@@ -115,6 +117,7 @@ keys:
       from_secret:
         production: DATABASE_URL
         staging: DATABASE_URL
+
 
   # ===================================================================
   # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
@@ -144,6 +147,7 @@ keys:
       production: "https://zcshlzhiinwmpzujuiep.supabase.co"
       staging: "https://zcshlzhiinwmpzujuiep.supabase.co"
 
+
   SUPABASE_PUBLISHABLE_KEY:
     type: string
     required: [staging, production]
@@ -153,6 +157,7 @@ keys:
     deploy:
       production: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
       staging: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
+
 
   SUPABASE_JWKS_URL:
     type: string
@@ -165,6 +170,7 @@ keys:
     deploy:
       production: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
       staging: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
+
 
   AUTH_SESSION_KEY:
     type: string
@@ -181,6 +187,7 @@ keys:
         production: AUTH_SESSION_KEY
         staging: AUTH_SESSION_KEY
 
+
   SUPABASE_SMS_HOOK_SECRET:
     type: string
     secret: true
@@ -191,57 +198,6 @@ keys:
         production: SUPABASE_SMS_HOOK_SECRET
         staging: SUPABASE_SMS_HOOK_SECRET
 
-  # ===================================================================
-  # Payments (Stripe) — the money path
-  # ===================================================================
-
-  STRIPE_SECRET_KEY:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/StripeSecretKey'
-    secret: true
-    mode_of: stripe
-    required: [staging, production]
-    gates: >
-      Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no
-      checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported
-      (never the key) so "is production actually live?" is answerable.
-    deploy:
-      from_secret:
-        # Mode-suffixed by NAME on both sides (directive, 2026-07-29: "use the test key for test order
-        # and prod key for production order"). The unsuffixed STRIPE_SECRET_KEY repo secret is retired —
-        # a credential whose mode is not visible in its name is one nobody can audit. Its only consumer
-        # was prod-smoke, now reading STRIPE_SECRET_KEY_TEST explicitly.
-        #
-        # STRIPE_SECRET_KEY_PROD DOES NOT EXIST YET (V0 has not launched), so the sync reports production
-        # as SKIPPED and writes nothing: the service keeps what it has, today a test key, which the boot
-        # report renders `set [test mode]`. Declaration states the INTENT, report states the REALITY, and
-        # the two disagreeing IS the signal that go-live (issue #254) has not happened.
-        production: STRIPE_SECRET_KEY_PROD
-        staging: STRIPE_SECRET_KEY_TEST
-
-  STRIPE_WEBHOOK_SECRET:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/StripeWebhookSecret'
-    secret: true
-    required: [staging, production]
-    gates: >
-      HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails
-      closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the
-      restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched
-      together with STRIPE_SECRET_KEY.
-    deploy:
-      from_secret:
-        # ONE unsuffixed secret for both profiles (product-owner decision, 2026-07-29) — it is what
-        # exists, and it is correct while production is itself in test mode. NOT symmetric with the key
-        # above on purpose: this is the one place the two diverge, so it is the one place to look when
-        # go-live goes wrong. A webhook secret must match the MODE of the endpoint that signed the
-        # delivery, and Stripe issues a different `whsec_` per mode — so the day STRIPE_SECRET_KEY_PROD
-        # lands, this must become STRIPE_WEBHOOK_SECRET_PROD in the SAME change, or verification fails
-        # closed: the customer is charged and the restaurant is never told. Tracked as issue #254.
-        production: STRIPE_WEBHOOK_SECRET
-        staging: STRIPE_WEBHOOK_SECRET
 
   # ===================================================================
   # Telemetry (issue #191, PROP-170500 D1/D2) — without this, production is undiagnosable
@@ -279,6 +235,7 @@ keys:
         production: HONEYCOMB_API_KEY
         staging: HONEYCOMB_API_KEY
 
+
   HONEYCOMB_API_ENDPOINT:
     type: string
     scalar:
@@ -293,6 +250,7 @@ keys:
       production: https://api.eu1.honeycomb.io
       staging: https://api.eu1.honeycomb.io
 
+
   HONEYCOMB_DATASET:
     type: string
     default: captain-food-dev
@@ -303,6 +261,7 @@ keys:
     deploy:
       production: captain-food
       staging: captain-food-staging
+
 
   OTEL_TRACES_SAMPLE_RATIO:
     type: string
@@ -319,6 +278,7 @@ keys:
       production: "1.0"
       staging: "1.0"
 
+
   LOG_LEVEL:
     type: string
     scalar:
@@ -332,28 +292,6 @@ keys:
       production: info
       staging: info
 
-  # ===================================================================
-  # Integrations — feature-scoped, degrade to "unavailable", not "broken"
-  # ===================================================================
-
-  HUBRISE_CLIENT_ID:
-    type: string
-    gates: >
-      HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET —
-      we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already
-      connected locations are unaffected, since the worker uses their per-connection tokens. When a
-      client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets
-      literal per-profile `deploy` values here rather than a repo secret.
-
-  HUBRISE_WEBHOOK_SECRET:
-    type: string
-    secret: true
-    gates: >
-      HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
-    deploy:
-      from_secret:
-        production: HUBRISE_WEBHOOK_SECRET
-        staging: HUBRISE_WEBHOOK_SECRET
 
   EXTERNAL_API_TOKENS:
     type: string
@@ -365,6 +303,7 @@ keys:
       from_secret:
         production: EXTERNAL_API_TOKENS
         staging: EXTERNAL_API_TOKENS
+
 
   INTERNAL_TRIGGER_TOKEN:
     type: string
@@ -378,22 +317,6 @@ keys:
         production: INTERNAL_TRIGGER_TOKEN
         staging: INTERNAL_TRIGGER_TOKEN
 
-  DELIVERY_OFFER_MAX_TTL_SECONDS:
-    type: int
-    default: 900
-    gates: >
-      Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout
-      worker escalates to the next ranked channel. Set it too high and a channel that never answers
-      holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner
-      that would have accepted gets pulled off the job.
-
-      NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET
-      tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not
-      open this repo and learn what ceiling production applies, which is the whole failure this file
-      exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the
-      CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per
-      profile by adding a `deploy:` block, or in seconds during an incident by setting the env var.
-      Everything a repo secret would have given, minus the opacity.
 
   # ===================================================================
   # Actor mailbox + projection runtime (ADR-20260730-231500; PROP-20260728-152752 /
@@ -412,6 +335,7 @@ keys:
       unserved for that many seconds before takeover — at peak that is paid-order latency. Reader
       lands with the #242 slice-3 worker.
 
+
   MAILBOX_HEARTBEAT_SECONDS:
     type: int
     default: 10
@@ -420,6 +344,7 @@ keys:
       bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat,
       authority never — the ownership_version fence is commit-time). Keep at roughly a third of
       MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
+
 
   RUN_MAILBOX_WORKERS:
     type: bool
@@ -446,6 +371,7 @@ keys:
       Read by the adapter binaries only; the monolith ignores it (its composition root
       always runs the full fleet).
 
+
   ACTOR_ACTIVATIONS:
     type: bool
     scalar:
@@ -465,6 +391,7 @@ keys:
       way the delivery aborts, invalidates and refolds, out-of-band writers (saga-runner legs,
       peer-process fleets, the deletion engine) included.
 
+
   ACTOR_ACTIVATION_IDLE_SECONDS:
     type: int
     default: 300
@@ -475,6 +402,7 @@ keys:
       disable the cache; too high and idle aggregates hold memory the LRU bound must then evict.
       Read by the ACTOR_ACTIVATIONS-gated cache (#272 D3).
 
+
   ACTOR_ACTIVATION_MAX_MEMORY_MB:
     type: int
     default: 64
@@ -484,19 +412,6 @@ keys:
       payloads. Idle actors expire by the clock (ACTOR_ACTIVATION_IDLE_SECONDS); this bound is
       the backstop for a hot Friday-peak set larger than memory should carry.
 
-  ORDER_RETENTION_WINDOW_DAYS:
-    type: int
-    default: 3650
-    gates: >
-      The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal
-      order schedules its OrderExpired reminder this many days out; recording the delivered fact
-      starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE
-      window for now, set to the conservative accounting horizon (~10 years) because the
-      per-data-category split (personal vs financial retention, a legal/product input) is still
-      open — shortening it below the accounting horizon before that split lands would delete
-      financial facts French commercial law retains. Rescheduling is safe: changing this value
-      re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion
-      engine re-reads it at delivery.
 
   PROJECTION_BATCH_SIZE:
     type: int
@@ -507,6 +422,7 @@ keys:
       larger replay window after a crash and a bigger in-memory identity map. Reader lands with
       the #267 batched projector.
 
+
   PROJECTION_BATCH_MEMORY_MB:
     type: int
     default: 64
@@ -516,6 +432,7 @@ keys:
       rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched
       projector.
 
+
   PROJECTION_PARTITIONS:
     type: int
     default: 16
@@ -524,6 +441,7 @@ keys:
       per-key order preserved (PROP-20260730-230803 §3). Fixed-wide like the mailbox width:
       changing it re-maps lanes (a drain-then-resize operation), while worker scaling only
       re-divides lane ownership. Reader lands with the #267 batched projector.
+
 
   # ===================================================================
   # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
@@ -541,6 +459,7 @@ keys:
       production: "true"
       staging: "true"
 
+
   RUN_PROCESS_MANAGERS:
     type: bool
     scalar:
@@ -552,6 +471,7 @@ keys:
     deploy:
       production: "true"
       staging: "true"
+
 
   RUN_EVENT_PUSH:
     type: bool
@@ -568,6 +488,7 @@ keys:
     deploy:
       production: "true"
       staging: "true"
+
 
   RUN_MAILBOX_PUSH:
     type: bool
@@ -593,6 +514,7 @@ keys:
       production: "true"
       staging: "true"
 
+
   MAILBOX_MAX_DELIVERY_ATTEMPTS:
     type: int
     default: 5
@@ -612,6 +534,7 @@ keys:
       A poison flip is an OPERATOR EVENT: counted (mailbox_poison_failed_total{actor_type}) and
       surfaced per lane on the ADMIN mailboxLanes supervision query (retryingAttempts/poisoned).
 
+
   RUN_DELETION_ENGINE:
     type: bool
     scalar:
@@ -624,6 +547,7 @@ keys:
       data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams;
       the default flips by its own one-line ADR after the gated form is smoked in staging.
       Readiness at GET /deletion.
+
 
   # PM_MAILBOX_DELIVERY is NO LONGER an env key (#318, ADR-20260803-104819): the Runtime D1
   # money gate lives in its RuntimePosture database row (specs/database/tables/referential.yaml),
@@ -645,31 +569,6 @@ keys:
       production: "true"
       staging: "true"
 
-  RUN_SIRENE_WORKER:
-    type: bool
-    scalar:
-      $ref: 'scalars.yaml#/ConfigBoolean'
-    default: false
-    gates: >
-      SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
-      releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
-      staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
-      Readiness at GET /sirene.
-    deploy:
-      production: "true"
-      staging: "true"
-
-  RUN_DELIVERY_OFFER_TIMEOUT:
-    type: bool
-    scalar:
-      $ref: 'scalars.yaml#/ConfigBoolean'
-    default: true
-    gates: >
-      Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
-      a rider who is not coming.
-    deploy:
-      production: "true"
-      staging: "true"
 
   # ===================================================================
   # SMS delivery (OVH, #118 / ADR-20260722-174500) — the Supabase Send-SMS hook's sender
@@ -697,6 +596,7 @@ keys:
         production: OVH_APPLICATION_KEY
         staging: OVH_APPLICATION_KEY
 
+
   OVH_APPLICATION_SECRET:
     type: string
     secret: true
@@ -709,6 +609,7 @@ keys:
         production: OVH_APPLICATION_SECRET
         staging: OVH_APPLICATION_SECRET
 
+
   OVH_CONSUMER_KEY:
     type: string
     secret: true
@@ -720,6 +621,7 @@ keys:
       from_secret:
         production: OVH_CONSUMER_KEY
         staging: OVH_CONSUMER_KEY
+
 
   OVH_SMS_SERVICE_NAME:
     type: string
@@ -737,6 +639,7 @@ keys:
         production: OVH_SMS_SERVICE_NAME
         staging: OVH_SMS_SERVICE_NAME
 
+
   OVH_SMS_SENDER:
     type: string
     gates: >
@@ -744,6 +647,7 @@ keys:
       `default` deliberately: the fallback lives in `OvhSmsClient::from_env`, and a second copy here
       would be two sources of truth for one value. OVH requires a sender to be REGISTERED and approved
       before it can be used, so an unapproved name fails at send time, not at startup.
+
 
   OVH_ENDPOINT:
     type: string
@@ -753,50 +657,6 @@ keys:
       region the API credentials were created in. Declares NO `default` for the same reason as
       OVH_SMS_SENDER: the fallback is the client's.
 
-  # ===================================================================
-  # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
-  #
-  # Declared here so the drift gate and the docs cover them, but `consumer` keeps them OUT of the
-  # server's typed Config: the server never reads them, and a boot report listing settings the process
-  # ignores is noise that trains people to skim it.
-  # ===================================================================
-
-  INSEE_API_TOKEN:
-    type: string
-    secret: true
-    consumer: sirene_ingest
-    gates: >
-      INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal).
-      `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest
-      zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which
-      injects the repo secret of the same name directly; the Render sync (which only carries the server
-      service) has nothing to do with it.
-
-  INSEE_API_BASE_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    consumer: sirene_ingest
-    gates: >
-      Override of the version-pinned Sirene base URL. Exists because the version is IN the path
-      (`/api-sirene/3.11`): when INSEE bumps it, a sweep can be redirected without a release. Unset, the
-      client uses its own pinned constant -- so no `default` here, which would be a second copy of it.
-
-  SIRENE_DEPARTMENTS:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/DepartmentList'
-    consumer: sirene_ingest
-    gates: >
-      Comma-separated departments to sweep, honoured VERBATIM and in order (e.g. `37` for Tours only).
-      Blank = stalest-first across all of France (#218). Set per workflow_dispatch run, not persisted.
-
-  SIRENE_BUDGET_MINUTES:
-    type: string
-    consumer: sirene_ingest
-    gates: >
-      Wall-clock a sweep may spend before stopping cleanly at a department boundary. Blank = the binary
-      default (75 sweep / 60 compact); the run resumes where it stopped on the next invocation.
 
   INTERNAL_TRIGGER_URL:
     type: string
@@ -808,175 +668,6 @@ keys:
       instead of waiting for its hourly poll. Unset, the sweep logs that it skipped the ping — which is
       how department 37's 6,649 rows stayed PENDING after a successful ingestion.
 
-  # ===================================================================
-  # Integration adapters — read by the SERVER, in-process
-  #
-  # `crates/adapters/*` each ship a standalone webhook binary, but the SERVER links them all and is the
-  # deployable that actually runs them: `router()` calls `CoopCycleRegistry::from_env`,
-  # `UberDirectConfig::from_env` and `Avelo37DeliveryGateway::from_env`, then merges all four adapter
-  # route sets. So these are plain server keys — no `consumer:` — and they appear in the boot report,
-  # which is the point: "is the Uber Direct channel actually configured in production?" is a question an
-  # operator must be able to answer from one curl, not by reading the composition root.
-  #
-  # All 17 keys in this file's adapter + INSEE sections were invisible until the drift gate learned to
-  # follow a `*_ENV` const and a closure-wrapped read. That is a third of the inventory that no boot
-  # report, no manifest and no document would have mentioned.
-  #
-  # None is `required:`, in any profile: each adapter is fail-closed by construction. Unconfigured, the
-  # composition root keeps the no-op stand-in and delivery jobs stay open to the next ranked channel —
-  # which is the correct posture for a channel we have not signed. A PARTIAL config is the dangerous
-  # case, and the adapters already reject it (`UberDirectConfig::from_env` returns `Err`, not a silent
-  # no-op) rather than half-wiring a send path.
-  #
-  # MILESTONE (product-owner directive, 2026-07-29): Avelo37 and CoopCycle stay optional and unset until
-  # there is enough traffic in the area to justify a partner channel — a later milestone, not V0. They
-  # are declared now so that switching them on is a configuration change with a visible before/after,
-  # rather than a code change discovered during the first busy Friday.
-  # ===================================================================
-
-  AVELO37_API_KEY:
-    type: string
-    secret: true
-    gates: >
-      Static bearer key for the Avelo37 partner API. Unset, the outbound gateway is not built and jobs
-      reach independent riders only — no delivery is lost, but the partner channel is silently absent,
-      so an operator expecting Avelo37 coverage sees none.
-
-  AVELO37_API_BASE_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    gates: >
-      Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own
-      production constant -- hence no `default` here, which would duplicate it.
-
-  AVELO37_WEBHOOK_SECRET:
-    type: string
-    secret: true
-    gates: >
-      HMAC key verifying inbound Avelo37 delivery-status callbacks. Unset, the webhook route fails
-      closed: `DeliveryStatusUpdated` facts stop arriving and a delivery's tracking freezes at its last
-      known state while the courier is in fact moving.
-
-  # Uber Direct credentials, sourced per profile from mode-suffixed repo secrets exactly as Stripe is
-  # (product-owner directive, 2026-07-29: "do like for the stripe, have both environment keys").
-  #
-  # TODAY BOTH PROFILES POINT AT THE `_TEST` SECRETS, on purpose. The Uber app is a test app, and the
-  # directive is to exercise it WITH TEST KEYS ON PRODUCTION until a live app exists. This is a
-  # deliberate, recorded state, not an oversight: production genuinely runs the test credential, so the
-  # declaration says so rather than pointing at a `_PROD` secret that does not exist and silently
-  # SKIPping. When the live app arrives, production flips to `_PROD` here and nowhere else.
-  #
-  # Note the difference from Stripe: Stripe's mode is READABLE FROM THE KEY (`sk_test_` / `sk_live_`), so
-  # `mode_of: stripe` lets the boot report state which mode is live. Uber Direct credentials carry no
-  # such marker, so nothing can report it — which is exactly why the per-profile secret NAME has to
-  # carry the mode instead. Choosing the credential per ORDER (a test order on a live restaurant) is a
-  # different mechanism and is not built yet: that is issue #257, which needs both sets loaded at once.
-  UBER_DIRECT_CUSTOMER_ID:
-    type: string
-    secret: true
-    gates: >
-      Uber Direct customer/organization id — the `{customer_id}` path segment on every API call. Grants
-      nothing on its own, but it identifies our Uber account, so it is treated as a credential rather
-      than published in the repo (the same call made for OVH_SMS_SERVICE_NAME). One of the four the
-      adapter requires TOGETHER; missing any one of them is reported as a misconfiguration rather than
-      downgraded to a silent no-op.
-    deploy:
-      from_secret:
-        production: UBER_DIRECT_CUSTOMER_ID_TEST
-        staging: UBER_DIRECT_CUSTOMER_ID_TEST
-
-  UBER_DIRECT_CLIENT_ID:
-    type: string
-    secret: true
-    gates: >
-      OAuth2 client-credentials client id — Uber's dashboard also calls this the application id. Public
-      by construction, like any OAuth client id, but it is per-app and per-mode, so it travels with its
-      secret rather than being baked as a literal. Required with the other three; unset, no Uber Direct
-      channel and jobs fall through to the next ranked one.
-    deploy:
-      from_secret:
-        production: UBER_DIRECT_CLIENT_ID_TEST
-        staging: UBER_DIRECT_CLIENT_ID_TEST
-
-  UBER_DIRECT_CLIENT_SECRET:
-    type: string
-    secret: true
-    gates: >
-      OAuth2 client-credentials client secret — the token manager cannot mint an access token without
-      it, so every create-delivery call fails at authentication. This is the one value here that grants
-      the ability to dispatch deliveries and be billed for them.
-    deploy:
-      from_secret:
-        production: UBER_DIRECT_CLIENT_SECRET_TEST
-        staging: UBER_DIRECT_CLIENT_SECRET_TEST
-
-  UBER_DIRECT_WEBHOOK_SECRET:
-    type: string
-    secret: true
-    gates: >
-      Raw-body HMAC-SHA256 key verifying `X-Uber-Signature` on inbound callbacks. Unset, the webhook
-      fails closed and delivery progress stops updating mid-delivery — the customer watches a courier
-      that has in fact already arrived. Issued separately from the OAuth credentials, on Uber's webhook
-      configuration page, and it is per-app: a test app and a live app do not share it.
-    deploy:
-      from_secret:
-        production: UBER_DIRECT_WEBHOOK_SECRET_TEST
-        staging: UBER_DIRECT_WEBHOOK_SECRET_TEST
-
-  UBER_DIRECT_BASE_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    gates: >
-      API base-URL override (tests point this at a local mock). Unset, the adapter's own production
-      constant applies -- no `default` here for the same reason.
-
-  UBER_DIRECT_TOKEN_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    gates: >
-      OAuth2 token-endpoint override. Unset, the adapter's own constant applies.
-
-  UBER_DIRECT_SCOPE:
-    type: string
-    gates: >
-      OAuth2 scope override. Unset, the adapter requests its default delivery scope; too narrow a scope
-      here surfaces as an authorization failure on create-delivery, not at startup.
-
-  COOPCYCLE_INSTANCES:
-    type: string
-    gates: >
-      JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a
-      federation registry rather than one endpoint, which is why it is a JSON document and not a set of
-      scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the
-      operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop
-      a whole delivery channel.
-
-  HUBRISE_API_BASE_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    gates: >
-      HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
-
-  HUBRISE_CONNECT_REDIRECT_URL:
-    type: string
-    scalar:
-      $ref: 'scalars.yaml#/HttpsUrl'
-    gates: >
-      Public URL HubRise redirects back to after consent (this deployable's
-      `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an
-      OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app
-      EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
-
-  HUBRISE_OAUTH_SCOPE:
-    type: string
-    gates: >
-      Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so
-      one token covers every location of the account. Narrowing it means a connected restaurant's
-      catalog or stock silently stops syncing for the locations the scope no longer covers.
 
   # ===================================================================
   # Runtime / build identity
@@ -989,11 +680,13 @@ keys:
       TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check
       never reaches the app and the deploy fails.
 
+
   WEB_ASSETS_DIR:
     type: string
     default: /app/web-assets
     gates: >
       Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
+
 
   CAPTAIN_BUILD_VERSION:
     type: string

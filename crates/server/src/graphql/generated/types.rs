@@ -11,6 +11,44 @@ use domain::generated::scalars as ds;
 
 use super::scalars::*;
 
+/// Inventory of a offer/option. status is DERIVED from quantity and lowStockThreshold (see scalars.yaml#/StockStatus).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Stock {
+    #[graphql(name = "quantity")]
+    pub quantity: Quantity,
+    /// If quantity <= threshold, status becomes LOW_STOCK.
+    #[graphql(name = "lowStockThreshold")]
+    pub low_stock_threshold: Option<Quantity>,
+    /// DERIVED server-side from quantity vs lowStockThreshold — never a client input.
+    #[graphql(name = "status")]
+    pub status: StockStatus,
+    /// Restock/availability date for out-of-stock items (HubRise inventory expires_at).
+    #[graphql(name = "expiresAt")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductItemOption {
+    #[graphql(name = "id")]
+    pub id: OptionId,
+    #[graphql(name = "ref")]
+    pub r#ref: Option<ExternalReference>,
+    #[graphql(name = "optionListId")]
+    pub option_list_id: OptionListId,
+    #[graphql(name = "name")]
+    pub name: OptionName,
+    #[graphql(name = "price")]
+    pub price: Money,
+    #[graphql(name = "default")]
+    pub r#default: bool,
+    #[graphql(name = "availability")]
+    pub availability: CatalogItemAvailability,
+    #[graphql(name = "stock")]
+    pub stock: Option<Stock>,
+}
+
 /// Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the HubRise boundary (parse + x100), kept as integer minor units + currency internally.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -51,37 +89,6 @@ pub struct PaymentBreakdown {
     pub captain_net: Money,
 }
 
-/// What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UberComparison {
-    /// Estimated (or real) all-in Uber Eats price for the same order.
-    #[graphql(name = "total")]
-    pub total: Money,
-    /// What the restaurant would net on Uber (after its ~30% commission).
-    #[graphql(name = "restaurantShare")]
-    pub restaurant_share: Money,
-    /// What the courier would earn on Uber (base + per-km; per-km not modelled in V0).
-    #[graphql(name = "riderShare")]
-    pub rider_share: Money,
-    /// What Uber Eats would keep = total − restaurantShare − riderShare.
-    #[graphql(name = "platformShare")]
-    pub platform_share: Money,
-    /// REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED.
-    #[graphql(name = "basis")]
-    pub basis: ComparisonBasis,
-}
-
-/// One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct Tip {
-    #[graphql(name = "recipient")]
-    pub recipient: TipRecipient,
-    #[graphql(name = "amount")]
-    pub amount: Money,
-}
-
 /// The person delivering an order. For an INDEPENDENT rider, `riderId` is set (a Captain RIDER); for a PARTNER courier (e.g. Avelo37) only `displayName`/`phone` are known, reported by the partner.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -107,23 +114,6 @@ pub struct TaxRate {
     pub eat_in: Option<TaxRatePercent>,
 }
 
-/// Inventory of a offer/option. status is DERIVED from quantity and lowStockThreshold (see scalars.yaml#/StockStatus).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct Stock {
-    #[graphql(name = "quantity")]
-    pub quantity: Quantity,
-    /// If quantity <= threshold, status becomes LOW_STOCK.
-    #[graphql(name = "lowStockThreshold")]
-    pub low_stock_threshold: Option<Quantity>,
-    /// DERIVED server-side from quantity vs lowStockThreshold — never a client input.
-    #[graphql(name = "status")]
-    pub status: StockStatus,
-    /// Restock/availability date for out-of-stock items (HubRise inventory expires_at).
-    #[graphql(name = "expiresAt")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
@@ -139,48 +129,6 @@ pub struct Address {
     pub country: CountryCode,
 }
 
-/// One opening time window for a given weekday (HubRise opening_hours).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OpeningHoursSlot {
-    #[graphql(name = "weekday")]
-    pub weekday: Weekday,
-    #[graphql(name = "from")]
-    pub from: TimeOfDay,
-    #[graphql(name = "to")]
-    pub to: TimeOfDay,
-}
-
-/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantContact {
-    #[graphql(name = "email")]
-    pub email: Option<EmailAddress>,
-    #[graphql(name = "phone")]
-    pub phone: Option<PhoneNumber>,
-}
-
-/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct GeoPoint {
-    #[graphql(name = "latitude")]
-    pub latitude: Latitude,
-    #[graphql(name = "longitude")]
-    pub longitude: Longitude,
-}
-
-/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalIdentifier {
-    #[graphql(name = "key")]
-    pub key: ExternalIdentifierKey,
-    #[graphql(name = "value")]
-    pub value: String,
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomerContact {
@@ -190,67 +138,6 @@ pub struct CustomerContact {
     pub email: EmailAddress,
     #[graphql(name = "phone")]
     pub phone: PhoneNumber,
-}
-
-/// The business account that owns one or more restaurant locations (HubRise: restaurant).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantAccount {
-    #[graphql(name = "id")]
-    pub id: RestaurantAccountId,
-    /// HubRise restaurant (account) reference, when imported.
-    #[graphql(name = "ref")]
-    pub r#ref: Option<ExternalReference>,
-    #[graphql(name = "legalName")]
-    pub legal_name: RestaurantLegalName,
-    #[graphql(name = "contact")]
-    pub contact: RestaurantContact,
-    #[graphql(name = "defaultCurrency")]
-    pub default_currency: CurrencyCode,
-    #[graphql(name = "defaultTaxRate")]
-    pub default_tax_rate: TaxRate,
-    #[graphql(name = "timezone")]
-    pub timezone: Option<TimeZone>,
-    #[graphql(name = "createdBy")]
-    pub created_by: UserId,
-    #[graphql(name = "createdAt")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ProductItemOption {
-    #[graphql(name = "id")]
-    pub id: OptionId,
-    #[graphql(name = "ref")]
-    pub r#ref: Option<ExternalReference>,
-    #[graphql(name = "optionListId")]
-    pub option_list_id: OptionListId,
-    #[graphql(name = "name")]
-    pub name: OptionName,
-    #[graphql(name = "price")]
-    pub price: Money,
-    #[graphql(name = "default")]
-    pub r#default: bool,
-    #[graphql(name = "availability")]
-    pub availability: CatalogItemAvailability,
-    #[graphql(name = "stock")]
-    pub stock: Option<Stock>,
-}
-
-/// A line stored in a cart: the customer's selection by id (no prices stored).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct CartLineItem {
-    #[graphql(name = "cartLineId")]
-    pub cart_line_id: CartLineId,
-    #[graphql(name = "offerId")]
-    pub offer_id: OfferId,
-    #[graphql(name = "quantity")]
-    pub quantity: i64,
-    #[graphql(name = "selectedOptionIds")]
-    #[serde(default)]
-    pub selected_option_ids: Vec<OptionId>,
 }
 
 /// An option chosen by the customer on a line item, priced at order time.
@@ -392,76 +279,117 @@ pub struct ClaimTimelineEntry {
     pub at: chrono::DateTime<chrono::Utc>,
 }
 
-/// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
+/// One opening time window for a given weekday (HubRise opening_hours).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
-pub struct Restaurant {
+pub struct OpeningHoursSlot {
+    #[graphql(name = "weekday")]
+    pub weekday: Weekday,
+    #[graphql(name = "from")]
+    pub from: TimeOfDay,
+    #[graphql(name = "to")]
+    pub to: TimeOfDay,
+}
+
+/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantContact {
+    #[graphql(name = "email")]
+    pub email: Option<EmailAddress>,
+    #[graphql(name = "phone")]
+    pub phone: Option<PhoneNumber>,
+}
+
+/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoPoint {
+    #[graphql(name = "latitude")]
+    pub latitude: Latitude,
+    #[graphql(name = "longitude")]
+    pub longitude: Longitude,
+}
+
+/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalIdentifier {
+    #[graphql(name = "key")]
+    pub key: ExternalIdentifierKey,
+    #[graphql(name = "value")]
+    pub value: String,
+}
+
+/// The business account that owns one or more restaurant locations (HubRise: restaurant).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccount {
     #[graphql(name = "id")]
-    pub id: RestaurantId,
-    #[graphql(name = "accountId")]
-    pub account_id: Option<RestaurantAccountId>,
-    #[graphql(name = "listingStatus")]
-    pub listing_status: RestaurantListingStatus,
-    #[graphql(name = "orderable")]
-    pub orderable: bool,
-    #[graphql(name = "externalIdentifiers")]
-    #[serde(default)]
-    pub external_identifiers: Vec<ExternalIdentifier>,
-    #[graphql(name = "slug")]
-    pub slug: Option<Slug>,
-    #[graphql(name = "displayName")]
-    pub display_name: RestaurantDisplayName,
-    #[graphql(name = "description")]
-    pub description: Option<RestaurantDescription>,
-    #[graphql(name = "tags")]
-    #[serde(default)]
-    pub tags: Vec<Tag>,
-    #[graphql(name = "cuisineCategory")]
-    pub cuisine_category: Option<CuisineCategory>,
-    #[graphql(name = "rating")]
-    pub rating: Option<GoogleRating>,
-    #[graphql(name = "reviewsCount")]
-    pub reviews_count: Option<i64>,
-    #[graphql(name = "website")]
-    pub website: Option<WebUrl>,
-    #[graphql(name = "gbpOrderUrl")]
-    pub gbp_order_url: Option<WebUrl>,
-    #[graphql(name = "gbpLinkStatus")]
-    pub gbp_link_status: Option<GbpLinkStatus>,
-    #[graphql(name = "address")]
-    pub address: Address,
-    #[graphql(name = "location")]
-    pub location: Option<GeoPoint>,
-    #[graphql(name = "openingHours")]
-    #[serde(default)]
-    pub opening_hours: Vec<OpeningHoursSlot>,
-    #[graphql(name = "status")]
-    pub status: RestaurantStatus,
-    #[graphql(name = "orderAcceptance")]
-    pub order_acceptance: OrderAcceptanceMode,
+    pub id: RestaurantAccountId,
+    /// HubRise restaurant (account) reference, when imported.
+    #[graphql(name = "ref")]
+    pub r#ref: Option<ExternalReference>,
+    #[graphql(name = "legalName")]
+    pub legal_name: RestaurantLegalName,
+    #[graphql(name = "contact")]
+    pub contact: RestaurantContact,
     #[graphql(name = "defaultCurrency")]
     pub default_currency: CurrencyCode,
+    #[graphql(name = "defaultTaxRate")]
+    pub default_tax_rate: TaxRate,
     #[graphql(name = "timezone")]
     pub timezone: Option<TimeZone>,
-    #[graphql(name = "preparationTimeMinutes")]
-    pub preparation_time_minutes: Option<i64>,
-    #[graphql(name = "updatedAt")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "createdBy")]
+    pub created_by: UserId,
+    #[graphql(name = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UberComparison {
+    /// Estimated (or real) all-in Uber Eats price for the same order.
+    #[graphql(name = "total")]
+    pub total: Money,
+    /// What the restaurant would net on Uber (after its ~30% commission).
+    #[graphql(name = "restaurantShare")]
+    pub restaurant_share: Money,
+    /// What the courier would earn on Uber (base + per-km; per-km not modelled in V0).
+    #[graphql(name = "riderShare")]
+    pub rider_share: Money,
+    /// What Uber Eats would keep = total − restaurantShare − riderShare.
+    #[graphql(name = "platformShare")]
+    pub platform_share: Money,
+    /// REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED.
+    #[graphql(name = "basis")]
+    pub basis: ComparisonBasis,
+}
+
+/// One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Tip {
+    #[graphql(name = "recipient")]
+    pub recipient: TipRecipient,
+    #[graphql(name = "amount")]
+    pub amount: Money,
+}
+
+/// A line stored in a cart: the customer's selection by id (no prices stored).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineItem {
+    #[graphql(name = "cartLineId")]
+    pub cart_line_id: CartLineId,
+    #[graphql(name = "offerId")]
+    pub offer_id: OfferId,
+    #[graphql(name = "quantity")]
+    pub quantity: i64,
+    #[graphql(name = "selectedOptionIds")]
     #[serde(default)]
-    pub delivery_jobs: Vec<DeliveryJob>,
-    #[graphql(name = "prospects")]
-    #[serde(default)]
-    pub prospects: Vec<Prospect>,
-    #[graphql(name = "catalogs")]
-    #[serde(default)]
-    pub catalogs: Vec<Catalog>,
-    #[graphql(name = "carts", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_ADMIN)", visible = "super::acl::visible_admin")]
-    #[serde(default)]
-    pub carts: Vec<Cart>,
-    #[graphql(name = "orders", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_admin")]
-    #[serde(default)]
-    pub orders: Vec<Order>,
+    pub selected_option_ids: Vec<OptionId>,
 }
 
 /// A restaurant's catalog (categories → products → offers + option lists).
@@ -487,97 +415,6 @@ pub struct Catalog {
     pub option_lists: Vec<OptionList>,
     #[graphql(name = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "restaurant")]
-    pub restaurant: Restaurant,
-}
-
-/// A customer's in-progress selection for a single restaurant (priced by the projection).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct Cart {
-    #[graphql(name = "id")]
-    pub id: CartId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "customerId")]
-    pub customer_id: Option<CustomerId>,
-    #[graphql(name = "status")]
-    pub status: CartStatus,
-    #[graphql(name = "lines")]
-    #[serde(default)]
-    pub lines: Vec<OrderLineItem>,
-    #[graphql(name = "totalAmount")]
-    pub total_amount: Money,
-    #[graphql(name = "breakdown")]
-    pub breakdown: Option<PaymentBreakdown>,
-    #[graphql(name = "uberComparison")]
-    pub uber_comparison: Option<UberComparison>,
-    #[graphql(name = "updatedAt")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "restaurant")]
-    pub restaurant: Restaurant,
-}
-
-/// An order with its tracking status and payment state.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct Order {
-    #[graphql(name = "id")]
-    pub id: OrderId,
-    #[graphql(name = "ref")]
-    pub r#ref: ExternalReference,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "customerId")]
-    pub customer_id: Option<CustomerId>,
-    #[graphql(name = "status")]
-    pub status: OrderStatus,
-    #[graphql(name = "serviceType")]
-    pub service_type: ServiceType,
-    #[graphql(name = "items")]
-    #[serde(default)]
-    pub items: Vec<OrderLineItem>,
-    #[graphql(name = "totalAmount")]
-    pub total_amount: Money,
-    #[graphql(name = "breakdown")]
-    pub breakdown: PaymentBreakdown,
-    #[graphql(name = "deliveryAddress")]
-    pub delivery_address: Option<Address>,
-    #[graphql(name = "estimatedReadyAt")]
-    pub estimated_ready_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "placedAt")]
-    pub placed_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "statusChangedAt")]
-    pub status_changed_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "paymentStatus")]
-    pub payment_status: PaymentStatus,
-    #[graphql(name = "restaurantStars")]
-    pub restaurant_stars: Option<StarRating>,
-    #[graphql(name = "ratingComment")]
-    pub rating_comment: Option<RatingComment>,
-    #[graphql(name = "riderThumb")]
-    pub rider_thumb: Option<ThumbRating>,
-    #[graphql(name = "deliveryTimeliness")]
-    pub delivery_timeliness: Option<DeliveryTimeliness>,
-    #[graphql(name = "riderTip")]
-    pub rider_tip: Option<Money>,
-    #[graphql(name = "restaurantTip")]
-    pub restaurant_tip: Option<Money>,
-    #[graphql(name = "captainTip")]
-    pub captain_tip: Option<Money>,
-    #[graphql(name = "uberComparison")]
-    pub uber_comparison: Option<UberComparison>,
-    #[graphql(name = "deliveryStatus")]
-    pub delivery_status: Option<DeliveryStatus>,
-    #[graphql(name = "courier")]
-    pub courier: Option<Courier>,
-    #[graphql(name = "estimatedDropoffAt")]
-    pub estimated_dropoff_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "ratedAt")]
-    pub rated_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
-    #[serde(default)]
-    pub delivery_jobs: Vec<DeliveryJob>,
     #[graphql(name = "restaurant")]
     pub restaurant: Restaurant,
 }
@@ -688,38 +525,6 @@ pub struct Option_ {
     pub stock_status: Option<StockStatus>,
 }
 
-/// A customer's own profile (display name + contact). Backed by the identity read model; surfaced to the customer only (profile management is V1 — no V0 query yet).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomerProfile {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "displayName")]
-    pub display_name: Option<CustomerDisplayName>,
-    #[graphql(name = "email")]
-    pub email: Option<EmailAddress>,
-    #[graphql(name = "emailVerified")]
-    pub email_verified: bool,
-    #[graphql(name = "phone")]
-    pub phone: PhoneNumber,
-    #[graphql(name = "locale")]
-    pub locale: Option<Locale>,
-    #[graphql(name = "timezone")]
-    pub timezone: Option<TimeZone>,
-}
-
-/// Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` / `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient): resolver-served from the saga state row, never a View_* — hence no `reads`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentIntent {
-    #[graphql(name = "paymentIntentId")]
-    pub payment_intent_id: PaymentIntentId,
-    #[graphql(name = "clientSecret")]
-    pub client_secret: Option<String>,
-    #[graphql(name = "status")]
-    pub status: PaymentStatus,
-}
-
 /// The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-20260720-015500): the EFFECTIVE technical envelope echoed back (server-computed where the client supplied nothing) plus the journaled operation status. Business outcomes are never here — read them via queries/subscriptions (`operationStatus`, `paymentStatus`, the read models). NON-PROJECTED (transient) — built from the command_journal acceptance, no `reads`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -810,6 +615,64 @@ pub struct Operation {
     pub occurred_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderConversation {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "status")]
+    pub status: OrderStatus,
+    #[graphql(name = "customerChatEnabled")]
+    pub customer_chat_enabled: bool,
+    #[graphql(name = "openedAt")]
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "messages")]
+    #[serde(default)]
+    pub messages: Vec<ConversationMessage>,
+    #[graphql(name = "claimEvents")]
+    #[serde(default)]
+    pub claim_events: Vec<ClaimTimelineEntry>,
+}
+
+/// The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationInternalNotes {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "notes")]
+    #[serde(default)]
+    pub notes: Vec<ConversationMessage>,
+    #[graphql(name = "adminInvited")]
+    pub admin_invited: bool,
+    #[graphql(name = "mutedParticipants")]
+    #[serde(default)]
+    pub muted_participants: Vec<MutedParticipant>,
+}
+
+/// A customer's own profile (display name + contact). Backed by the identity read model; surfaced to the customer only (profile management is V1 — no V0 query yet).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerProfile {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "displayName")]
+    pub display_name: Option<CustomerDisplayName>,
+    #[graphql(name = "email")]
+    pub email: Option<EmailAddress>,
+    #[graphql(name = "emailVerified")]
+    pub email_verified: bool,
+    #[graphql(name = "phone")]
+    pub phone: PhoneNumber,
+    #[graphql(name = "locale")]
+    pub locale: Option<Locale>,
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+}
+
 /// One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves the rider job list, the restaurant delivery board and admin.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -846,22 +709,6 @@ pub struct DeliveryJob {
     pub restaurant: Restaurant,
 }
 
-/// One customer's delivery-delay satisfaction answer for an order (#62): the timeliness verdict and optional reason. Serves the restaurant's timeliness insight (self-dispatch-vs-Captain signal).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliverySatisfaction {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "timeliness")]
-    pub timeliness: DeliveryTimeliness,
-    #[graphql(name = "reason")]
-    pub reason: Option<DeliveryDissatisfactionReason>,
-    #[graphql(name = "recordedAt")]
-    pub recorded_at: chrono::DateTime<chrono::Utc>,
-}
-
 /// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -882,6 +729,205 @@ pub struct DeliveryPartnerAvailability {
     pub requested_at: chrono::DateTime<chrono::Utc>,
     #[graphql(name = "decidedAt")]
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Restaurant {
+    #[graphql(name = "id")]
+    pub id: RestaurantId,
+    #[graphql(name = "accountId")]
+    pub account_id: Option<RestaurantAccountId>,
+    #[graphql(name = "listingStatus")]
+    pub listing_status: RestaurantListingStatus,
+    #[graphql(name = "orderable")]
+    pub orderable: bool,
+    #[graphql(name = "externalIdentifiers")]
+    #[serde(default)]
+    pub external_identifiers: Vec<ExternalIdentifier>,
+    #[graphql(name = "slug")]
+    pub slug: Option<Slug>,
+    #[graphql(name = "displayName")]
+    pub display_name: RestaurantDisplayName,
+    #[graphql(name = "description")]
+    pub description: Option<RestaurantDescription>,
+    #[graphql(name = "tags")]
+    #[serde(default)]
+    pub tags: Vec<Tag>,
+    #[graphql(name = "cuisineCategory")]
+    pub cuisine_category: Option<CuisineCategory>,
+    #[graphql(name = "rating")]
+    pub rating: Option<GoogleRating>,
+    #[graphql(name = "reviewsCount")]
+    pub reviews_count: Option<i64>,
+    #[graphql(name = "website")]
+    pub website: Option<WebUrl>,
+    #[graphql(name = "gbpOrderUrl")]
+    pub gbp_order_url: Option<WebUrl>,
+    #[graphql(name = "gbpLinkStatus")]
+    pub gbp_link_status: Option<GbpLinkStatus>,
+    #[graphql(name = "address")]
+    pub address: Address,
+    #[graphql(name = "location")]
+    pub location: Option<GeoPoint>,
+    #[graphql(name = "openingHours")]
+    #[serde(default)]
+    pub opening_hours: Vec<OpeningHoursSlot>,
+    #[graphql(name = "status")]
+    pub status: RestaurantStatus,
+    #[graphql(name = "orderAcceptance")]
+    pub order_acceptance: OrderAcceptanceMode,
+    #[graphql(name = "defaultCurrency")]
+    pub default_currency: CurrencyCode,
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+    #[graphql(name = "preparationTimeMinutes")]
+    pub preparation_time_minutes: Option<i64>,
+    #[graphql(name = "updatedAt")]
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
+    #[serde(default)]
+    pub delivery_jobs: Vec<DeliveryJob>,
+    #[graphql(name = "prospects")]
+    #[serde(default)]
+    pub prospects: Vec<Prospect>,
+    #[graphql(name = "catalogs")]
+    #[serde(default)]
+    pub catalogs: Vec<Catalog>,
+    #[graphql(name = "carts", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_ADMIN)", visible = "super::acl::visible_admin")]
+    #[serde(default)]
+    pub carts: Vec<Cart>,
+    #[graphql(name = "orders", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_admin")]
+    #[serde(default)]
+    pub orders: Vec<Order>,
+}
+
+/// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Prospect {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "score")]
+    pub score: ProspectionScore,
+    #[graphql(name = "pipelineStatus")]
+    pub pipeline_status: ProspectPipelineStatus,
+    #[graphql(name = "contactsCount")]
+    pub contacts_count: i64,
+    #[graphql(name = "lastContactedAt")]
+    pub last_contacted_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "repliedAt")]
+    pub replied_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "restaurant")]
+    pub restaurant: Restaurant,
+}
+
+/// A customer's in-progress selection for a single restaurant (priced by the projection).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Cart {
+    #[graphql(name = "id")]
+    pub id: CartId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerId")]
+    pub customer_id: Option<CustomerId>,
+    #[graphql(name = "status")]
+    pub status: CartStatus,
+    #[graphql(name = "lines")]
+    #[serde(default)]
+    pub lines: Vec<OrderLineItem>,
+    #[graphql(name = "totalAmount")]
+    pub total_amount: Money,
+    #[graphql(name = "breakdown")]
+    pub breakdown: Option<PaymentBreakdown>,
+    #[graphql(name = "uberComparison")]
+    pub uber_comparison: Option<UberComparison>,
+    #[graphql(name = "updatedAt")]
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "restaurant")]
+    pub restaurant: Restaurant,
+}
+
+/// An order with its tracking status and payment state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Order {
+    #[graphql(name = "id")]
+    pub id: OrderId,
+    #[graphql(name = "ref")]
+    pub r#ref: ExternalReference,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerId")]
+    pub customer_id: Option<CustomerId>,
+    #[graphql(name = "status")]
+    pub status: OrderStatus,
+    #[graphql(name = "serviceType")]
+    pub service_type: ServiceType,
+    #[graphql(name = "items")]
+    #[serde(default)]
+    pub items: Vec<OrderLineItem>,
+    #[graphql(name = "totalAmount")]
+    pub total_amount: Money,
+    #[graphql(name = "breakdown")]
+    pub breakdown: PaymentBreakdown,
+    #[graphql(name = "deliveryAddress")]
+    pub delivery_address: Option<Address>,
+    #[graphql(name = "estimatedReadyAt")]
+    pub estimated_ready_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "placedAt")]
+    pub placed_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "statusChangedAt")]
+    pub status_changed_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "paymentStatus")]
+    pub payment_status: PaymentStatus,
+    #[graphql(name = "restaurantStars")]
+    pub restaurant_stars: Option<StarRating>,
+    #[graphql(name = "ratingComment")]
+    pub rating_comment: Option<RatingComment>,
+    #[graphql(name = "riderThumb")]
+    pub rider_thumb: Option<ThumbRating>,
+    #[graphql(name = "deliveryTimeliness")]
+    pub delivery_timeliness: Option<DeliveryTimeliness>,
+    #[graphql(name = "riderTip")]
+    pub rider_tip: Option<Money>,
+    #[graphql(name = "restaurantTip")]
+    pub restaurant_tip: Option<Money>,
+    #[graphql(name = "captainTip")]
+    pub captain_tip: Option<Money>,
+    #[graphql(name = "uberComparison")]
+    pub uber_comparison: Option<UberComparison>,
+    #[graphql(name = "deliveryStatus")]
+    pub delivery_status: Option<DeliveryStatus>,
+    #[graphql(name = "courier")]
+    pub courier: Option<Courier>,
+    #[graphql(name = "estimatedDropoffAt")]
+    pub estimated_dropoff_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "ratedAt")]
+    pub rated_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
+    #[serde(default)]
+    pub delivery_jobs: Vec<DeliveryJob>,
+    #[graphql(name = "restaurant")]
+    pub restaurant: Restaurant,
+}
+
+/// One customer's delivery-delay satisfaction answer for an order (#62): the timeliness verdict and optional reason. Serves the restaurant's timeliness insight (self-dispatch-vs-Captain signal).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverySatisfaction {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "timeliness")]
+    pub timeliness: DeliveryTimeliness,
+    #[graphql(name = "reason")]
+    pub reason: Option<DeliveryDissatisfactionReason>,
+    #[graphql(name = "recordedAt")]
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// A customer claim/dispute over a delivered order (aggregate Reclamation, id = reclamationId; #154). Serves the customer's "my claims" list + claim detail and the restaurant's/admin's claims queue. `status` is derived from the lifecycle facts (OPEN → RESOLVED/REJECTED → OPEN on reopen); the decision fields (`resolution`, `refundAmount`, `rejectReason`, `decidedAt`) are null while OPEN.
@@ -918,6 +964,18 @@ pub struct Reclamation {
     pub overdue: bool,
 }
 
+/// Checkout payment state for one order (ADR-20260720-015500): the read-side home of the values placeOrder used to return, served from the PlaceOrderProcess run row by `paymentStatus` / `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient): resolver-served from the saga state row, never a View_* — hence no `reads`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentIntent {
+    #[graphql(name = "paymentIntentId")]
+    pub payment_intent_id: PaymentIntentId,
+    #[graphql(name = "clientSecret")]
+    pub client_secret: Option<String>,
+    #[graphql(name = "status")]
+    pub status: PaymentStatus,
+}
+
 /// The authenticated customer's store-credit balance (#158, Part B of #207): the spendable goodwill credit (from resolved claims) the customer can apply at checkout. One row per customer with a ledger; `balanceCents` is the projector's running SUM (Σ granted − Σ consumed), never negative.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -952,26 +1010,6 @@ pub struct Refund {
     pub requested_at: chrono::DateTime<chrono::Utc>,
     #[graphql(name = "decidedAt")]
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct Prospect {
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "score")]
-    pub score: ProspectionScore,
-    #[graphql(name = "pipelineStatus")]
-    pub pipeline_status: ProspectPipelineStatus,
-    #[graphql(name = "contactsCount")]
-    pub contacts_count: i64,
-    #[graphql(name = "lastContactedAt")]
-    pub last_contacted_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "repliedAt")]
-    pub replied_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "restaurant")]
-    pub restaurant: Restaurant,
 }
 
 /// The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency.
@@ -1022,44 +1060,6 @@ pub struct UberSplitPolicy {
     pub platform_fee_pct: f64,
     #[graphql(name = "effectiveFrom")]
     pub effective_from: chrono::DateTime<chrono::Utc>,
-}
-
-/// The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderConversation {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "status")]
-    pub status: OrderStatus,
-    #[graphql(name = "customerChatEnabled")]
-    pub customer_chat_enabled: bool,
-    #[graphql(name = "openedAt")]
-    pub opened_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "messages")]
-    #[serde(default)]
-    pub messages: Vec<ConversationMessage>,
-    #[graphql(name = "claimEvents")]
-    #[serde(default)]
-    pub claim_events: Vec<ClaimTimelineEntry>,
-}
-
-/// The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ConversationInternalNotes {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "notes")]
-    #[serde(default)]
-    pub notes: Vec<ConversationMessage>,
-    #[graphql(name = "adminInvited")]
-    pub admin_invited: bool,
-    #[graphql(name = "mutedParticipants")]
-    #[serde(default)]
-    pub muted_participants: Vec<MutedParticipant>,
 }
 
 /// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed

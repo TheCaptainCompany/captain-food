@@ -1,0 +1,183 @@
+version: 1
+description: >
+  catalog scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
+# =====================================================================
+
+CatalogNotFound:
+  description: "No catalog with this id (or it does not belong to the restaurant)."
+  context:
+    catalogId: { $ref: 'scalars.yaml#/CatalogId' }
+  messages:
+    en: "Catalog not found."
+    fr: "Catalog introuvable."
+
+
+CatalogSlugAlreadyTaken:
+  description: >
+    Another catalog of the SAME restaurant already uses this label. Scoped per restaurant, not global:
+    a catalog slug is a path inside one storefront, so two restaurants may both have a 'midi'.
+    Distinct from SlugAlreadyTaken, which guards the cross-restaurant storefront HOST.
+  context:
+    catalogId: { $ref: 'scalars.yaml#/CatalogId' }
+    slug: { $ref: 'scalars.yaml#/Slug' }
+  messages:
+    en: "The label '{slug}' is already used by another of your catalogs."
+    fr: "Le libellé '{slug}' est déjà utilisé par un autre de vos catalogues."
+
+
+CurrencyMismatch:
+  description: "A offer price currency differs from the restaurant default currency."
+  context:
+    restaurantName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+    currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+  messages:
+    en: "Prices must use the currency of '{restaurantName}' ('{currency}')."
+    fr: "Les prix doivent utiliser la devise de '{restaurantName}' ('{currency}')."
+
+
+RefNotUnique:
+  description: "The ref is not unique within the catalog."
+  context:
+    ref: { $ref: 'scalars.yaml#/ExternalReference' }
+    catalogId: { $ref: 'scalars.yaml#/CatalogId' }
+  messages:
+    en: "The reference '{ref}' is already used in this catalog."
+    fr: "La référence '{ref}' est déjà utilisée dans ce catalog."
+
+
+CatalogCategoryNotFound:
+  description: "No category with this id in the catalog."
+  context:
+    productCategoryId: { $ref: 'scalars.yaml#/ProductCategoryId' }
+  messages:
+    en: "CatalogCategory not found."
+    fr: "Catégorie introuvable."
+
+
+CatalogCategoryRefNotFound:
+  description: "Referenced category ref does not exist in the catalog."
+  context:
+    ref: { $ref: 'scalars.yaml#/ExternalReference' }
+  messages:
+    en: "No category with reference '{ref}'."
+    fr: "Aucune catégorie avec la référence '{ref}'."
+
+
+ParentCatalogCategoryNotFound:
+  description: "parentRef points to a category that does not exist in the catalog."
+  context:
+    parentRef: { $ref: 'scalars.yaml#/ExternalReference' }
+  messages:
+    en: "The parent category '{parentRef}' does not exist."
+    fr: "La catégorie parente '{parentRef}' n'existe pas."
+
+
+CatalogCategoryCycle:
+  description: "parentRef would introduce a cycle in the category tree."
+  context:
+    productCategoryId: { $ref: 'scalars.yaml#/ProductCategoryId' }
+    categoryName: { $ref: 'scalars.yaml#/CatalogCategoryName' }
+  messages:
+    en: "Moving '{categoryName}' there would create a category loop."
+    fr: "Déplacer '{categoryName}' ici créerait une boucle de catégories."
+
+
+CatalogCategoryNotEmpty:
+  description: "CatalogCategory has child categories or products referencing it."
+  context:
+    productCategoryId: { $ref: 'scalars.yaml#/ProductCategoryId' }
+    categoryName: { $ref: 'scalars.yaml#/CatalogCategoryName' }
+  messages:
+    en: "Empty the category '{categoryName}' before removing it."
+    fr: "Videz la catégorie '{categoryName}' avant de la supprimer."
+
+
+ProductNotFound:
+  description: "No product with this id in the catalog."
+  context:
+    productId: { $ref: 'scalars.yaml#/ProductId' }
+  messages:
+    en: "Product not found."
+    fr: "Produit introuvable."
+
+
+ProductMustHaveOffer:
+  description: "A product must keep at least one offer."
+  context:
+    productId: { $ref: 'scalars.yaml#/ProductId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+  messages:
+    en: "'{productName}' must keep at least one offer."
+    fr: "'{productName}' doit conserver au moins une offere."
+
+
+OptionListNotFound:
+  description: "No option list with this id in the catalog."
+  context:
+    optionListId: { $ref: 'scalars.yaml#/OptionListId' }
+  messages:
+    en: "Option list not found."
+    fr: "Liste d'options introuvable."
+
+
+OptionListMustHaveOption:
+  description: "An option list must keep at least one option."
+  context:
+    optionListId: { $ref: 'scalars.yaml#/OptionListId' }
+    optionListName: { $ref: 'scalars.yaml#/OptionListName' }
+  messages:
+    en: "The option list '{optionListName}' must have at least one option."
+    fr: "La liste d'options '{optionListName}' doit contenir au moins une option."
+
+
+InvalidSelectionBounds:
+  description: "minSelections is greater than maxSelections."
+  context:
+    optionListId: { $ref: 'scalars.yaml#/OptionListId' }
+    optionListName: { $ref: 'scalars.yaml#/OptionListName' }
+  messages:
+    en: "In '{optionListName}', the minimum cannot exceed the maximum number of selections."
+    fr: "Dans '{optionListName}', le minimum ne peut pas dépasser le maximum de sélections."
+
+
+OptionListInUse:
+  description: "Option list is still referenced by a offer and cannot be removed."
+  context:
+    optionListId: { $ref: 'scalars.yaml#/OptionListId' }
+    optionListName: { $ref: 'scalars.yaml#/OptionListName' }
+  messages:
+    en: "The option list '{optionListName}' is still used by a product."
+    fr: "La liste d'options '{optionListName}' est encore utilisée par un produit."
+
+
+OfferNotStockTracked:
+  description: "Offer is not stock-tracked, so its stock cannot be set."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+    productName: { $ref: 'scalars.yaml#/ProductName' }
+    offerName: { $ref: 'scalars.yaml#/OfferName' }
+  messages:
+    en: "'{productName}' ({offerName}) does not track stock."
+    fr: "'{productName}' ({offerName}) ne suit pas de stock."
+
+
+CatalogTranslationFailed:
+  description: "The ACL could not map external (HubRise) shapes to domain types on import."
+  context: {}
+  messages:
+    en: "The imported catalog could not be processed."
+    fr: "Le catalogue importé n'a pas pu être traité."
+
+
+MissingRef:
+  description: "An imported entity is missing its ref (idempotency key)."
+  context: {}
+  messages:
+    en: "Every imported item must have a reference."
+    fr: "Chaque élément importé doit avoir une référence."

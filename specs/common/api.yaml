@@ -1,0 +1,221 @@
+version: 3
+description: >
+  Captain.Food API surface (GraphQL ports) — SOURCE OF TRUTH for operations, payloads and the ACL.
+  Reuses scalars.yaml (scalars/enums), entities.yaml (output-type shapes), commands.yaml (mutation
+  inputs, derived from the dispatched command) and views.yaml (read models + FK navigation).
+  The GraphQL SDL is GENERATED from this file to specs/generated/schema.generated.graphql
+  (the hand-written schema.graphql has been removed) — do not hand-edit the SDL.
+
+  Conventions:
+    - vocabulary : JSON-Schema standard — a type lists its `properties`; a field is `array: true`
+                   (not `list`), `required: true` (non-null arg) or `nullable: true` (optional field).
+                   Cross-references ALWAYS use `$ref`, never a bare name string.
+    - types      : the GraphQL OUTPUT-TYPE REGISTRY. Each entry is a resolver:
+                     · shape : declared INLINE via `properties` — the read/API shape, DECOUPLED from
+                               entities.yaml (the write/domain shape, which may differ); the bound view
+                               is its source of truth. Fields reference scalars/value-objects by `$ref`;
+                               shared value objects with no API divergence are emitted from entities.yaml
+                               and referenced, not re-declared.
+                     · reads : `reads: [{ $ref: 'database/projection_views.yaml#/View_* }]` is the view(s) that populate the
+                               type (→ @reads). Omitted for boundary types returned via a mutation
+                               payload. FK navigation (e.g. Restaurant.catalogs) is derived from views.yaml.
+    - queries    : `returns` is `{ $ref: '#/types/<Type>' }`. The query's `@reads` is INHERITED from the
+                   return type's binding — reads are declared on the TYPE, never on the query.
+    - mutations  : `command` is `{ $ref: 'commands.yaml#/<Command>' }` (→ @command, must be handled by an
+                   actor). The input type is GENERATED from that command's payload (`<Command>Input`);
+                   only the GraphQL-specific bits live here (roles, slice). Mutations are
+                   ACCEPTANCE-FIRST (ADR-20260720-015500): every mutation takes an optional
+                   `metadata: MetadataInput` argument (#/inputs/MetadataInput) and returns the ONE
+                   shared `#/types/MutationAcceptance` (the effective technical envelope +
+                   operationStatus) — a mutation declares NO per-operation payload; business
+                   outcomes are served by queries/subscriptions (results ARE reads).
+    - inputs     : the few GENERATOR-INJECTED input types that are not command payloads
+                   (MetadataInput today). Command inputs stay generated from commands.yaml.
+    - roles      : LITERAL list of scalars.yaml#/UserType values (ADR-20260720-191500). OMITTED →
+                   open to every role path (@public). Present → exactly those role paths
+                   (@auth(requires: [...])); PUBLIC in the list is just the anonymous path
+                   (/public/graphql), e.g. [PUBLIC, CUSTOMER] = anonymous-or-customer only.
+    - navRoles   : OPTIONAL per-type map `edgeField: [roles]` for FK-DERIVED navigation edges (#22,
+                   ADR-20260720-230000). Same LITERAL semantics as `roles`: an edge absent from the
+                   map is OPEN (inherits the parent type's reachability); a listed edge is traversable
+                   only on those role paths (same @auth + generated guard/visible pair as operations —
+                   the field is hidden from other roles' introspection and FORBIDDEN on execution).
+    - slice      : V0 | V1.
+
+# --- Output-type registry (GraphQL types → INLINE shape + backing read model) ---------------------
+# Each entry is a resolver. Its shape is declared INLINE via `properties` — the READ/API shape, which
+# the bound View_* is the source of truth for — DECOUPLED from entities.yaml (the write/domain shape,
+# which may differ: the read shape adds presentation fields like images and derived status, and drops
+# write-only internals). Catalog domain types (CatalogCategory/Product/Offer/OptionList/Option) are dedicated
+# API types here, NOT entities.yaml refs. Only true value objects with no read/write divergence
+# (Address, Money, TaxRate, OpeningHoursSlot, OrderLineItem, SelectedOption) are emitted from
+# entities.yaml and referenced by `$ref`. FK navigation (e.g. Restaurant.catalogs) is derived from views.yaml.
+
+types:
+
+  MutationAcceptance:
+    description: >
+      The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-20260720-015500):
+      the EFFECTIVE technical envelope echoed back (server-computed where the client supplied
+      nothing) plus the journaled operation status. Business outcomes are never here — read them via
+      queries/subscriptions (`operationStatus`, `paymentStatus`, the read models). NON-PROJECTED
+      (transient) — built from the command_journal acceptance, no `reads`.
+    properties:
+      messageId: { $ref: 'scalars.yaml#/MessageId' }
+      correlationId: { $ref: 'scalars.yaml#/CorrelationId' }
+      causeId: { $ref: 'scalars.yaml#/CauseId', nullable: true }
+      sessionId: { $ref: 'scalars.yaml#/SessionId', nullable: true }   # echo of X-SESSION-ID; null when the header is absent
+      traceId: { $ref: 'scalars.yaml#/TraceId', nullable: true }       # traceparent-derived; null until tracing lands on the request
+      operationStatus: { $ref: 'scalars.yaml#/OperationStatus' }       # PENDING on first acceptance; the original's status on a duplicate
+      duplicate: { type: boolean }                                     # true when this messageId was already journaled (idempotent replay)
+
+  MailboxLane:
+    description: >
+      One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a
+      (actorType, partition) row from the mailbox_partitions registry joined with live
+      pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT
+      rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest
+      attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being
+      re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap
+      (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) —
+      write-path infrastructure, no backing View_*; lanes show zero traffic until the #242
+      worker flip.
+    properties:
+      actorType: { type: string }
+      partition: { type: integer }
+      ownershipVersion: { type: string }
+      claimedBy: { type: string, nullable: true }
+      leaseUntil: { type: string, format: date-time, nullable: true }
+      checkpoint: { type: string }
+      pending: { type: integer }
+      scheduled: { type: integer }
+      oldestPendingAt: { type: string, format: date-time, nullable: true }
+      retryingAttempts: { type: integer }
+      poisoned: { type: integer }
+
+  PoisonedMailboxMessage:
+    description: >
+      One cap-poisoned mailbox row (#315): an inbound_messages row the delivery-attempts cap
+      flipped to terminal FAILED with error code DeliveryInfrastructureError
+      (PROP-20260802-223522 D4). The ADMIN supervision detail behind MailboxLane.poisoned's bare
+      count — carries the messageId an operator needs to requeue it (requeueMailboxMessage)
+      after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED
+      (transient) — write-path infrastructure, no backing View_*.
+    properties:
+      messageId: { type: string }
+      actorType: { type: string }
+      partition: { type: integer }
+      messageType: { type: string }
+      attempts: { type: integer }
+      errorCode: { type: string, nullable: true }
+      correlationId: { type: string, nullable: true }
+      receivedAt: { type: string, format: date-time }
+      completedAt: { type: string, format: date-time, nullable: true }
+
+  Operation:
+    description: >
+      Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance
+      handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the
+      stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of
+      the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership-
+      scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or
+      ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
+    properties:
+      messageId: { $ref: 'scalars.yaml#/MessageId' }
+      correlationId: { $ref: 'scalars.yaml#/CorrelationId' }
+      status: { $ref: 'scalars.yaml#/OperationStatus' }
+      errorCode: { type: string, nullable: true }
+      message: { type: string, nullable: true }
+      occurredAt: { type: string, format: date-time }
+
+inputs:
+
+
+  MetadataInput:
+    description: >
+      Optional client-suppliable technical envelope for ANY mutation (ADR-0041: envelope, never
+      payload; ADR-20260720-015500). The server computes anything missing (UUIDv7), validates what
+      is provided (ValidationError on shape; reusing a messageId with a DIFFERENT payload is a
+      Conflict), and echoes the effective values in MutationAcceptance. `sessionId` travels as the
+      X-SESSION-ID header and `traceId` derives from `traceparent` — neither is accepted here.
+    properties:
+      messageId: { $ref: 'scalars.yaml#/MessageId', nullable: true }
+      correlationId: { $ref: 'scalars.yaml#/CorrelationId', nullable: true }
+      causeId: { $ref: 'scalars.yaml#/CauseId', nullable: true }
+
+# --- Reads (queries) ------------------------------------------------------------------------------
+# A query declares only its args, return type (`$ref` into `#/types`), roles and slice. `@reads` is
+# INHERITED from the return type's binding above (reads live on the type, not the query).
+# --- Reads (queries) ------------------------------------------------------------------------------
+# CONVENTION: a query that takes arguments is generated to accept a SINGLE input class
+# `<Query>QueryInput` (args are never inlined on the field) — parallel to mutations' `<Command>Input`.
+# The input is non-null when any arg is required, nullable when all args are optional filters. Declare
+# args here as usual; the codegen produces the input type + value-object inputs for any entity-typed arg.
+
+queries:
+
+
+  mailboxLanes:
+    description: >
+      Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and
+      live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient —
+      served from mailbox_partitions + inbound_messages directly, no View_* (write-path
+      infrastructure, not a business read model).
+    args: {}
+    returns: { $ref: '#/types/MailboxLane', array: true }
+    roles: [ADMIN]
+    slice: V0
+
+
+  poisonedMailboxMessages:
+    description: >
+      Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED
+      with error code DeliveryInfrastructureError — newest first, with the messageId the
+      requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is
+      fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from
+      inbound_messages directly, no View_* (write-path infrastructure, not a business read
+      model). Server clamps the page to 200.
+    args:
+      actorType: { $ref: 'scalars.yaml#/MailboxActorType' }   # optional lane filter
+      limit: { $ref: 'scalars.yaml#/PageLimit' }
+    returns: { $ref: '#/types/PoisonedMailboxMessage', array: true }
+    roles: [ADMIN]
+    slice: V0
+
+
+  operationStatus:
+    description: >
+      Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of
+      the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in
+      the resolver: the row is returned only to the journaling actor (JWT subject match), the
+      journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves
+      null (no existence oracle). Transient — served from the command_journal, no View_*.
+    args:
+      messageId: { $ref: 'scalars.yaml#/MessageId', required: true }
+    returns: { $ref: '#/types/Operation', nullable: true }
+    slice: V0
+
+mutations:
+
+
+  # --- Mailbox supervision (#315) ---
+  requeueMailboxMessage:
+    command: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+    roles: [ADMIN]
+    slice: V0
+
+
+subscriptions:
+
+
+  operationStatusChanged:
+    description: >
+      Live status of one journaled command, keyed by its messageId acceptance handle (the push
+      counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state
+      first (no subscribe/complete race), then every transition. Open to every role path (roles
+      omitted) but ownership-scoped like
+      the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
+    args:
+      messageId: { $ref: 'scalars.yaml#/MessageId', required: true }
+    returns: { $ref: '#/types/Operation' }
+    slice: V0

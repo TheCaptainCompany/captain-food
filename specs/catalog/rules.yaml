@@ -1,0 +1,31 @@
+version: 1
+description: >
+  catalog scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Catalog ---
+CatalogCreationForRestaurant:
+  description: "A catalog is created for a restaurant; creation is rejected when invalid/duplicate."
+
+CatalogRouteChosenByOwner:
+  description: >
+    A catalog's route label is chosen by its owner after creation, never derived at creation, and is
+    unique within the restaurant; a label already used by another of that restaurant's catalogs is
+    rejected. Re-submitting the current label changes nothing.
+
+CatalogProductManagement:
+  description: "Products can be added, updated and removed in a catalog, with rejection on invalid operations."
+
+CatalogCategoryTreeManagement:
+  description: "Catalog categories (the tree) can be added, updated and removed, with rejection on invalid operations."
+
+CatalogOptionListManagement:
+  description: "Option lists can be added, updated and removed, with rejection on invalid operations."
+
+OfferStockManualOrSynced:
+  description: "Offer stock can be updated manually or synced from HubRise; an invalid update is rejected."
+
+CatalogImportReplacesContent:
+  description: "A HubRise catalog import replaces the catalog content (idempotent on ref); an invalid import is rejected."

@@ -1,0 +1,84 @@
+version: 1
+description: >
+  network scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- RestaurantAccount ---
+AccountRegistrationValidCurrencyUniqueRef:
+  description: "A restaurant account is registered only with a valid ISO currency and a not-already-used external ref."
+
+AccountUpdateRequiresExistingAccountAndField:
+  description: "Account-level fields update only for an existing account and when at least one editable field is provided."
+
+AccountDeletion:
+  description: "A restaurant account can be deleted."
+
+
+# --- Restaurant ---
+LocationRegistrationUnderAccount:
+  description: "A location is registered under an existing account with a not-already-used external ref."
+
+# --- Storefront address (ADR-20260728-011344) ---
+StorefrontSlugChosenByOwner:
+  description: "The storefront address is chosen by the owner, never derived at registration; re-submitting the current one is a no-op."
+
+StorefrontSlugRenameKeepsThePreviousAddress:
+  description: "Renaming a storefront records the previous address, so old links, menus and QR codes keep resolving to it."
+
+StorefrontSlugUniqueAndNeverReused:
+  description: "A storefront address belongs to at most one restaurant, and an address released by a rename is never handed to another."
+
+RegistryReportAppliesOnlyRealChanges:
+  description: "An open-data registry report updates a restaurant only where it genuinely differs, never clears fields the registry knows nothing about, and produces no event at all when nothing changed."
+
+ActivationRequiresStorefrontSlug:
+  description: "A restaurant cannot go live without a storefront address — there would be no host for customers to reach it on."
+
+RestaurantActivationVisibility:
+  description: "Activating a restaurant makes it visible/orderable; activation is rejected from an invalid state."
+
+RestaurantActivationIdempotent:
+  description: "Re-activating an already-active restaurant is a no-op (idempotent)."
+
+RestaurantLocationFieldsUpdate:
+  description: "Editable location fields can be updated; an update to a missing location or with no field is rejected."
+
+RestaurantDeactivation:
+  description: "A restaurant can be deactivated (hidden from customers)."
+
+OrderAcceptanceModeManagement:
+  description: "The order-acceptance mode reflects kitchen capacity and is rejected from an invalid state."
+
+RestaurantRemoval:
+  description: "A restaurant location can be removed."
+
+ListingSeededFromOpenData:
+  description: "A public NON_PARTNER listing can be seeded from open data (Sirene/Google) with no account, preserving source identifiers."
+
+GoogleBusinessProfileEnrichment:
+  description: "Google Business Profile data (rating/reviews/hours…) is stored separately from the restaurant's own info."
+
+ClosedListingSyncedFromSource:
+  description: "A listing reported closed by the source is marked closed."
+
+ListingClaimRequiresVerifiedOwnership:
+  description: "A listing can be claimed only with verified ownership, and only once."
+
+ListingOptOut:
+  description: "A restaurant can opt a listing out."
+
+ListingFunnelProgression:
+  description: "A listing progresses through the partnership funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER)."
+
+GbpOrderLinkSetupAndVerification:
+  description: "The Google 'Order online' link can be configured and verified; verification is rejected when it fails."
+
+
+# --- Prospect ---
+ProspectContactScheduleAndLimit:
+  description: "A prospect contact is recorded only within the outreach schedule and under the contact limit."
+
+ProspectOutreachStateTransitions:
+  description: "A prospect can be marked cold or replied; acting on a missing prospect is rejected."

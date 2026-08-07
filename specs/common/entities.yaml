@@ -1,0 +1,218 @@
+# --- Value Objects ---
+
+Money:
+  type: object
+  description: >
+    Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the
+    HubRise boundary (parse + x100), kept as integer minor units + currency internally.
+  properties:
+    amountCents:
+      $ref: 'scalars.yaml#/MoneyCents'
+    currency:
+      $ref: 'scalars.yaml#/CurrencyCode'
+  required: [amountCents, currency]
+
+
+PaymentBreakdown:
+  type: object
+  description: >
+    The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries
+    BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't
+    diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles −
+    restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution
+    (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food:
+    restaurantContribution is a distinct service line, never a cut of the menu price.
+  properties:
+    # buyer-facing (checkout display, ADR-0018)
+    articles:
+      $ref: '#/Money'
+      description: "Food sub-total TTC (100% to the restaurant, minus its service contribution)."
+    delivery:
+      $ref: '#/Money'
+      description: "Delivery fee (→ rider); zero for collection. Delivery integration is post-V0."
+    serviceFee:
+      $ref: '#/Money'
+      description: "Captain service fee shown to the buyer (the buyer part of the fee)."
+    total:
+      $ref: '#/Money'
+      description: "What the buyer pays = articles + delivery + serviceFee (the PaymentIntent amount)."
+    # 3-way split (ADR-0017)
+    restaurantContribution:
+      $ref: '#/Money'
+      description: "Restaurant's variable service part (margin-proportional); deducted from its payout."
+    restaurantPayout:
+      $ref: '#/Money'
+      description: "Transfer to the restaurant Connect account = articles − restaurantContribution."
+    riderPayout:
+      $ref: '#/Money'
+      description: "Transfer to the rider Connect account = delivery."
+    captainNet:
+      $ref: '#/Money'
+      description: "Kept on the Captain platform account = serviceFee + restaurantContribution (gross of Stripe)."
+  required: [articles, delivery, serviceFee, total, restaurantContribution, restaurantPayout, riderPayout, captainNet]
+
+
+Courier:
+  type: object
+  description: >
+    The person delivering an order. For an INDEPENDENT rider, `riderId` is set (a Captain RIDER);
+    for a PARTNER courier (e.g. Avelo37) only `displayName`/`phone` are known, reported by the partner.
+  properties:
+    displayName:
+      type: string
+      maxLength: 140
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+      nullable: true
+      description: "Set when the courier is an independent Captain rider; null for a partner courier."
+  required: [displayName]
+
+
+TaxRate:
+  type: object
+  description: "Per-service-mode VAT, mirroring HubRise product tax_rate."
+  properties:
+    delivery:
+      $ref: 'scalars.yaml#/TaxRatePercent'
+    collection:
+      $ref: 'scalars.yaml#/TaxRatePercent'
+      nullable: true
+    eatIn:
+      $ref: 'scalars.yaml#/TaxRatePercent'
+      nullable: true
+  required: [delivery]
+
+
+Address:
+  type: object
+  properties:
+    line1:
+      $ref: 'scalars.yaml#/AddressLine'
+    line2:
+      $ref: 'scalars.yaml#/AddressLine'
+      nullable: true
+    postalCode:
+      $ref: 'scalars.yaml#/PostalCode'
+    city:
+      $ref: 'scalars.yaml#/CityName'
+    country:
+      $ref: 'scalars.yaml#/CountryCode'
+  required: [line1, postalCode, city, country]
+
+
+CustomerContact:
+  type: object
+  properties:
+    displayName:
+      $ref: 'scalars.yaml#/CustomerDisplayName'
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+  required: [displayName, phone]
+
+
+# --- Orders ---
+
+SelectedOption:
+  type: object
+  description: "An option chosen by the customer on a line item, priced at order time."
+  properties:
+    optionId:
+      $ref: 'scalars.yaml#/OptionId'
+    optionListId:
+      $ref: 'scalars.yaml#/OptionListId'
+    name:
+      $ref: 'scalars.yaml#/OptionName'
+    price:
+      $ref: '#/Money'
+  required: [optionId, name, price]
+
+
+OrderLineItem:
+  type: object
+  properties:
+    offerId:
+      $ref: 'scalars.yaml#/OfferId'
+    productId:
+      $ref: 'scalars.yaml#/ProductId'
+    name:
+      $ref: 'scalars.yaml#/ProductName'
+    offerName:
+      $ref: 'scalars.yaml#/OfferName'
+      nullable: true
+    quantity:
+      type: integer
+      minimum: 1
+    unitPrice:
+      $ref: '#/Money'
+    selectedOptions:
+      type: array
+      items:
+        $ref: '#/SelectedOption'
+    lineTotal:
+      $ref: '#/Money'
+      description: "(unitPrice + sum(selectedOptions.price)) * quantity, computed server-side."
+  required:
+    - offerId
+    - name
+    - quantity
+    - unitPrice
+    - lineTotal
+
+
+CheckoutSnapshot:
+  type: object
+  description: >
+    The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated
+    when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced +
+    events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is
+    reconstructable from the event log alone (no out-of-log store). Mirrors the application
+    `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    mode:
+      $ref: 'scalars.yaml#/Mode'
+      nullable: true
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    customerContact:
+      $ref: '#/CustomerContact'
+    serviceType:
+      $ref: 'scalars.yaml#/ServiceType'
+    deliveryAddress:
+      $ref: '#/Address'
+      nullable: true
+    items:
+      type: array
+      items:
+        $ref: '#/OrderLineItem'
+      description: "Priced order lines frozen at checkout — recomputed server-side from the live catalog (rules.yaml#/ServerPriceAuthority)."
+    totalAmount:
+      $ref: '#/Money'
+    breakdown:
+      $ref: '#/PaymentBreakdown'
+    note:
+      $ref: 'scalars.yaml#/OrderNote'
+      nullable: true
+  required:
+    - orderId
+    - cartId
+    - restaurantId
+    - customerContact
+    - serviceType
+    - items
+    - totalAmount
+    - breakdown

@@ -1,0 +1,225 @@
+version: 1
+description: >
+  network scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+
+  Restaurant:
+    description: "A restaurant (public discovery + single-restaurant header). Navigates to its catalogs."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Restaurant' }]
+    navRoles:   # #22: reverse-FK edges off the PUBLIC-reachable Restaurant carry customer PII / ops data
+      carts: [ADMIN]                                        # every cart of a restaurant — support only
+      orders: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]       # the restaurant's own order board + support
+      deliveryJobs: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]   # dispatch board, not public
+    properties:
+      id: { $ref: 'scalars.yaml#/RestaurantId' }
+      accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', nullable: true }   # null for a non-partner listing
+      listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
+      orderable: { type: boolean }   # derived: ACTIVE_PARTNER + status ACTIVE + acceptance ≠ PAUSED
+      externalIdentifiers: { $ref: 'entities.yaml#/ExternalIdentifier', array: true }
+      # NULL for a listing with no storefront yet (ADR-20260728-011344): an open-data prospect has no
+      # {slug}.captain.food host, and a claimed restaurant only gets one once the owner chooses it
+      # during onboarding. Clients must therefore not assume a storefront link exists.
+      slug: { $ref: 'scalars.yaml#/Slug', nullable: true }
+      displayName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+      description: { $ref: 'scalars.yaml#/RestaurantDescription', nullable: true }
+      tags: { $ref: 'scalars.yaml#/Tag', array: true }
+      cuisineCategory: { $ref: 'scalars.yaml#/CuisineCategory', nullable: true }   # single primary cuisine (Uber estimate coefficient); multi-cuisine discovery is `tags`
+      rating: { $ref: 'scalars.yaml#/GoogleRating', nullable: true }
+      reviewsCount: { type: integer, nullable: true }
+      website: { $ref: 'scalars.yaml#/WebUrl', nullable: true }
+      gbpOrderUrl: { $ref: 'scalars.yaml#/WebUrl', nullable: true }
+      gbpLinkStatus: { $ref: 'scalars.yaml#/GbpLinkStatus', nullable: true }
+      address: { $ref: 'entities.yaml#/Address' }
+      location: { $ref: 'entities.yaml#/GeoPoint', nullable: true }
+      openingHours: { $ref: 'entities.yaml#/OpeningHoursSlot', array: true }
+      status: { $ref: 'scalars.yaml#/RestaurantStatus' }
+      orderAcceptance: { $ref: 'scalars.yaml#/OrderAcceptanceMode' }
+      defaultCurrency: { $ref: 'scalars.yaml#/CurrencyCode' }
+      timezone: { $ref: 'scalars.yaml#/TimeZone', nullable: true }
+      preparationTimeMinutes: { type: integer, nullable: true }
+      updatedAt: { type: string, format: date-time }
+
+  Prospect:
+    description: "A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline)."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/ProspectionPipeline' }]
+    properties:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      score: { $ref: 'scalars.yaml#/ProspectionScore' }
+      pipelineStatus: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
+      contactsCount: { type: integer }
+      lastContactedAt: { type: string, format: date-time, nullable: true }
+      repliedAt: { type: string, format: date-time, nullable: true }
+
+queries:
+
+  favoriteRestaurants:
+    description: "The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant)."
+    args:
+      customerId: { $ref: 'scalars.yaml#/CustomerId', required: true }
+    returns: { $ref: '#/types/Restaurant', array: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+
+  restaurants:
+    description: >
+      Discover: public list of restaurants. All args are optional filters resolved by the read side
+      (Restaurant); the query returns only matching restaurants. `list` selects a curated/
+      personalized shelf (the read model resolves its members).
+    args:
+      search: { type: string }                              # free-text name match
+      tags: { $ref: 'scalars.yaml#/Tag', array: true }      # cuisine/attribute tags (ALL must match)
+      serviceType: { $ref: 'scalars.yaml#/ServiceType' }    # offers DELIVERY or COLLECTION
+      openNow: { type: boolean }                            # currently within opening hours
+      city: { $ref: 'scalars.yaml#/CityName' }
+      priceRange: { $ref: 'scalars.yaml#/PriceRange' }
+      list: { $ref: 'scalars.yaml#/RestaurantListKey' }     # curated/personalized shelf (e.g. ORDER_AGAIN)
+      listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }   # filter by partnership funnel
+      orderableOnly: { type: boolean }                      # only orderable (active partner) restaurants; non-partner cards show by default
+      limit: { $ref: 'scalars.yaml#/PageLimit' }            # page size; server clamps to 200 (#113)
+      offset: { $ref: 'scalars.yaml#/PageOffset' }          # rows to skip (#113)
+    returns: { $ref: '#/types/Restaurant', array: true }
+    slice: V0
+
+  restaurant:
+    description: "A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug})."
+    args:
+      slug: { $ref: 'scalars.yaml#/Slug', required: true }
+    returns: { $ref: '#/types/Restaurant', nullable: true }
+    slice: V0
+
+
+  restaurantLocationsByAccount:
+    description: "All restaurant locations under an account (back-office; ownership enforced server-side)."
+    args:
+      accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', required: true }
+    returns: { $ref: '#/types/Restaurant', array: true }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+
+  prospectionPipeline:
+    description: "B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status."
+    args:
+      minScore: { $ref: 'scalars.yaml#/ProspectionScore' }
+      status: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
+    returns: { $ref: '#/types/Prospect', array: true }
+    roles: [ADMIN]
+    slice: V1
+
+mutations:
+
+
+  registerRestaurantAccount:
+    command: { $ref: 'commands.yaml#/RegisterRestaurantAccount' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]   # platform onboarding OR owner self-signup
+    slice: V0
+
+  updateRestaurantAccount:
+    command: { $ref: 'commands.yaml#/UpdateRestaurantAccount' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  deleteRestaurantAccount:
+    command: { $ref: 'commands.yaml#/DeleteRestaurantAccount' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  registerRestaurant:
+    command: { $ref: 'commands.yaml#/RegisterRestaurant' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]   # EXTERNAL = the Sirene/Google sync ACL seeding a listing
+    slice: V0
+
+  configureRestaurantSlug:
+    description: >
+      Choose (or change) the restaurant's storefront address — the {slug}.captain.food host
+      (ADR-20260728-011344). Issued during onboarding after ownership is verified and before activation,
+      and again later from the back office to rename. The aggregate decides which fact it is; a rename
+      keeps the previous address resolving via a 301, and re-submitting the current address is an
+      idempotent no-op.
+    command: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  activateRestaurant:
+    command: { $ref: 'commands.yaml#/ActivateRestaurant' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  updateRestaurant:
+    command: { $ref: 'commands.yaml#/UpdateRestaurant' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  deactivateRestaurant:
+    command: { $ref: 'commands.yaml#/DeactivateRestaurant' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  removeRestaurant:
+    command: { $ref: 'commands.yaml#/RemoveRestaurant' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V1
+
+  changeOrderAcceptanceMode:
+    command: { $ref: 'commands.yaml#/ChangeOrderAcceptanceMode' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    slice: V1
+
+
+  # --- Restaurant listing & pre-registration (ADR-0019/0021) ---
+  updateRestaurantGoogleBusinessProfile:
+    command: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
+    roles: [EXTERNAL, ADMIN]   # the Sirene/Google sync ACL (or admin)
+    slice: V0
+
+  markRestaurantClosed:
+    command: { $ref: 'commands.yaml#/MarkRestaurantClosed' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V0
+
+  claimRestaurantListing:
+    command: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+    roles: [PUBLIC, RESTAURANT_ACCOUNT]   # an owner proves ownership via Google Business Profile
+    slice: V0
+
+  optOutRestaurantListing:
+    command: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+    roles: [PUBLIC, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  changeRestaurantListingStatus:
+    command: { $ref: 'commands.yaml#/ChangeRestaurantListingStatus' }
+    roles: [ADMIN]
+    slice: V0
+
+  configureGbpOrderLink:
+    command: { $ref: 'commands.yaml#/ConfigureGoogleBusinessProfileOrderLink' }
+    roles: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]
+    slice: V1
+
+  verifyGbpOrderLink:
+    command: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+    roles: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]
+    slice: V1
+
+
+  # --- Prospection (ADR-0020); contact/cold issued by the prospection-acl worker (EXTERNAL) ---
+  recordProspectContact:
+    command: { $ref: 'commands.yaml#/RecordProspectContact' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
+
+  markProspectCold:
+    command: { $ref: 'commands.yaml#/MarkProspectCold' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
+
+  recordProspectReply:
+    command: { $ref: 'commands.yaml#/RecordProspectReply' }
+    roles: [ADMIN, EXTERNAL]
+    slice: V1

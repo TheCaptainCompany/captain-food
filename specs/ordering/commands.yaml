@@ -1,0 +1,454 @@
+version: 1
+description: >
+  ordering scope — commands fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `commands.yaml` catalog; $refs stay kind-logical
+  (`commands.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Command value objects
+# (Intent-level types; distinct from entities.yaml read/aggregate shapes.
+#  No `Input` suffix here — that is a GraphQL-layer convention only.)
+# =====================================================================
+
+CartLine:
+  type: object
+  description: >
+    A single cart line as expressed by the customer. References the catalog by id;
+    the handler resolves names/prices/tax from the current catalog and computes totals.
+    Client-supplied prices are NEVER trusted.
+  properties:
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+      description: "Client-generated id for this line (lets the client edit/remove it immediately)."
+    offerId:
+      $ref: 'scalars.yaml#/OfferId'
+    quantity:
+      type: integer
+      minimum: 1
+    selectedOptionIds:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/OptionId'
+  required: [cartLineId, offerId, quantity]
+
+
+# =====================================================================
+# 4. Build the cart  (persona: anonymous)  — story-map activity 4
+# =====================================================================
+# The cart is a server-side aggregate so each line edit is validated against the live catalog
+# and can be rejected (out of stock, illegal option, mixed restaurant). Built by a guest;
+# customerId is bound at checkout (see PlaceOrder). Carts are high-churn — see the note on
+# event-log churn in story-map.md.
+
+AddCartLine:
+  description: >
+    Visitor adds a line to a cart, validated against the live catalog. The client generates the
+    cartId and sends it on every add; the first add for a new cartId creates the cart (idempotently),
+    binding it to the restaurant.
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+      description: "Client-generated cart id; the first add for it creates the cart (session-owned)."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    line:
+      $ref: '#/CartLine'
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, restaurantId, line, sessionId]
+
+
+RemoveCartLine:
+  description: "Visitor removes a line from a cart."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, cartLineId, sessionId]
+
+
+ChangeCartLineQuantity:
+  description: "Visitor changes the quantity of an existing cart line."
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+    quantity:
+      type: integer
+      minimum: 1
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, cartLineId, quantity, sessionId]
+
+
+# =====================================================================
+# 6. Pay & place order  (persona: customer)  — story-map activity 6
+# =====================================================================
+
+PlaceOrder:
+  description: >
+    SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it against the live
+    catalog, prices it server-side, takes payment via Stripe, records the order, then closes the
+    cart. This is the V0 risk point: it depends on an external actor (Stripe) and must be a saga
+    with a failure branch. Now that the customer has verified their phone, customerId is bound here.
+  type: object
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "Client-generated id for the order the saga will materialize on payment capture."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+      description: "The OPEN cart to check out; its lines become the order's line items."
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+      description: "Resolved from the now-authenticated session; bound onto the cart at checkout."
+    customerContact:
+      $ref: 'entities.yaml#/CustomerContact'
+    serviceType:
+      $ref: 'scalars.yaml#/ServiceType'
+    deliveryAddress:
+      $ref: 'entities.yaml#/Address'
+      nullable: true
+    note:
+      $ref: 'scalars.yaml#/OrderNote'
+      nullable: true
+    paymentMethodId:
+      type: string
+      maxLength: 255
+      description: >
+        Stripe PaymentMethod / client secret reference for the payment step. The wallet behind
+        it (card, Apple Pay, Google Pay) is a client-side/Stripe concern and does not change the
+        domain: every method yields a standard Stripe PaymentMethod and the same saga.
+    expectedTotal:
+      $ref: 'entities.yaml#/Money'
+      nullable: true
+      description: >
+        OPTIONAL confirmation of the total the client displayed at checkout. NEVER used to price
+        anything — the server recomputes the total from the live catalog (the only price authority)
+        and rejects with errors.yaml#/PriceMismatch when the two diverge, so a customer is never
+        charged an amount other than the one they were shown.
+  required: [orderId, restaurantId, cartId, customerContact, serviceType, paymentMethodId]
+
+
+# =====================================================================
+# 7. Fulfil  (persona: restaurant)  — story-map activity 7
+# =====================================================================
+
+AcceptOrder:
+  description: "Restaurant accepts an order and commits to preparing it."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    estimatedReadyAt:
+      type: string
+      format: date-time
+      nullable: true
+  required: [orderId, restaurantId]
+
+
+RejectOrder:
+  description: "Restaurant rejects a placed order; the captured payment is refunded."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+  required: [orderId, restaurantId, reason]
+
+
+StartPreparation:
+  description: "Restaurant starts preparing an accepted order (moves to PREPARING)."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [orderId, restaurantId]
+
+
+# =====================================================================
+# 8. Deliver / hand over  (persona: restaurant / courier)  — story-map activity 8
+# =====================================================================
+
+MarkOrderReady:
+  description: "Restaurant marks an order as ready for pickup/delivery."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [orderId, restaurantId]
+
+
+MarkOrderDelivered:
+  description: "Restaurant/courier records that the order has been delivered or handed over."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [orderId, restaurantId]
+
+
+# =====================================================================
+# 9. Track & complete  (persona: customer / restaurant)  — story-map activity 9
+# =====================================================================
+
+CancelOrderByCustomer:
+  description: "Customer cancels their order before the restaurant has accepted it; payment is refunded."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, restaurantId]
+
+
+CancelOrderByRestaurant:
+  description: "Restaurant cancels an order it had already accepted; payment is refunded."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+  required: [orderId, restaurantId, reason]
+
+
+# =====================================================================
+# 10. Rate the order  (persona: customer)  — story-map activity 9
+# =====================================================================
+
+# Three independent post-delivery feedback actions, all on the Order aggregate (no separate aggregate):
+# rate the delivery (rider thumb), rate the restaurant (stars + comment), tip the rider.
+
+RateOrder:
+  description: "Customer rates the delivery of a completed order with a rider thumbs up/down."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    riderThumb:
+      $ref: 'scalars.yaml#/ThumbRating'
+  required: [orderId, restaurantId, riderThumb]
+
+
+RateRestaurant:
+  description: "Customer rates the restaurant of a completed order (0–5 stars + optional comment)."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    stars:
+      $ref: 'scalars.yaml#/StarRating'
+    comment:
+      $ref: 'scalars.yaml#/RatingComment'
+      nullable: true
+  required: [orderId, restaurantId, stars]
+
+
+RecordDeliverySatisfaction:
+  description: >
+    Customer answers the post-delivery delay-satisfaction survey on a delivered DELIVERY order (#62):
+    was the delivery on time? Optional and recorded once per order (final). Beside the rider/restaurant
+    ratings; the subjective signal the restaurant reads to decide self-dispatch vs Captain routing.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    timeliness:
+      $ref: 'scalars.yaml#/DeliveryTimeliness'
+    reason:
+      $ref: 'scalars.yaml#/DeliveryDissatisfactionReason'
+      nullable: true
+  required: [orderId, restaurantId, timeliness]
+
+
+TipOrder:
+  description: >
+    Customer tips one or more of the rider / restaurant / Captain on an order (ADR-012). Optional and
+    SEPARATE from the price — Captain keeps 0% (100% passes through). Additive: may be sent at checkout or
+    post-delivery; multiple tips accumulate.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    tips:
+      type: array
+      minItems: 1
+      items:
+        $ref: 'entities.yaml#/Tip'
+  required: [orderId, restaurantId, tips]
+
+
+RequestRefund:
+  description: "Customer requests a refund for an order; the RefundProcess decides and drives Stripe."
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, restaurantId]
+
+
+
+BindCartToCustomer:
+  description: >
+    Bind a cart to a customer (after phone verification). The cart is then owned by the customer and can be retrieved across sessions. This is a one-time operation per cart.
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+  required: [cartId, customerId]
+
+
+PlaceReplacementOrder:
+  description: >
+    Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResolved REPLACEMENT,
+    ADR-20260726-171736 / #159). Dispatched by the ReclamationProcess saga; NOT a public GraphQL mutation.
+    The handler reads the ORIGINAL order (by originalOrderId) and remakes it as a new Order carrying the
+    SAME line items, a $0 buyer total and NO paymentIntentId (no Stripe), linked via OrderPlaced.replacementOf.
+    It then enters the normal fulfilment/dispatch flow (the restaurant remakes it, the rider redelivers).
+    Idempotent per reclamationId: the saga derives a deterministic orderId from reclamationId, so a
+    re-delivered ReclamationResolved re-targets the same new-order stream and is absorbed as a no-op — never
+    a second replacement.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "Saga-generated id for the new replacement order (deterministic from reclamationId — the idempotency key)."
+    originalOrderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "The original order to remake; its line items and delivery details are copied verbatim."
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  required: [orderId, originalOrderId, reclamationId]
+
+
+# --- Reclamations / customer claims (#151) ---
+
+OpenReclamation:
+  description: >
+    Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open
+    with the same id is rejected). Records the category, description and optionally the requested
+    resolution. The client supplies `customerId` (whose claim) and `restaurantId` (whose restaurant's
+    order), mirroring how placeOrder supplies them — they scope the read model (#154). The 14-day window
+    and order-eligibility are enforced in the application layer, not here (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+    description: { $ref: 'scalars.yaml#/ReclamationDescription' }
+    requestedResolution:
+      $ref: 'scalars.yaml#/ReclamationResolution'
+      nullable: true
+  required: [reclamationId, orderId, customerId, restaurantId, category, description]
+
+
+ResolveReclamation:
+  description: >
+    Resolve (decide) an OPEN reclamation with a `resolution`. A PARTIAL_REFUND requires a `refundAmount`
+    (enforced by the write model as errors.yaml#/PartialRefundAmountRequired, not by the schema). The
+    aggregate records the decision only; the refund/credit/replacement automation is downstream (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    resolution: { $ref: 'scalars.yaml#/ReclamationResolution' }
+    note:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+    refundAmount:
+      $ref: 'entities.yaml#/Money'
+      nullable: true
+  required: [reclamationId, resolution]
+
+
+RejectReclamation:
+  description: >
+    Reject an OPEN reclamation. A `reason` is REQUIRED, but is left OUT of `required` on purpose: the
+    "reasoned" invariant is enforced by the write model as an anticipated error
+    (errors.yaml#/RejectionReasonRequired), not by the schema (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+  required: [reclamationId]
+
+
+ReopenReclamation:
+  description: >
+    Reopen a previously decided (resolved or rejected) reclamation for another look. The reclamation must
+    exist and be in a decided state (errors.yaml#/ReclamationNotReopenable) (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+  required: [reclamationId]
+
+
+AttachReclamationEvidence:
+  description: >
+    Attach an evidence photo (opaque, framework-managed attachment ref) to an existing claim. The only
+    guard is that the reclamation exists (errors.yaml#/ReclamationNotFound) — evidence may be attached in
+    any lifecycle state. `orderId` is NOT supplied: the handler stamps it from the aggregate's fold state
+    (established at ReclamationOpened), like the #155 decision events. The file upload/storage is out of
+    scope here (#134) — this models the domain fact with the opaque ref only (#156).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    attachmentRef: { $ref: 'scalars.yaml#/AttachmentRef' }
+  required: [reclamationId, attachmentRef]

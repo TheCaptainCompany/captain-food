@@ -1,0 +1,246 @@
+version: 1
+description: >
+  delivery scope — commands fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `commands.yaml` catalog; $refs stay kind-logical
+  (`commands.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Delivery (bounded context: delivery) — ADR-0031 -----------------------
+# Independent-rider commands on the DeliveryJob (the partner path is inbound events instead).
+
+AcceptDelivery:
+  description: "An independent Captain rider accepts a pending delivery job."
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+  required: [deliveryJobId, riderId]
+
+
+ConfirmPickup:
+  description: "The assigned rider confirms they collected the order from the restaurant."
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+  required: [deliveryJobId, riderId]
+
+
+
+
+CancelDelivery:
+  description: "Restaurant/admin cancels a delivery job before it completes."
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+
+EscalateDelivery:
+  description: >
+    Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now
+    (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next
+    ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion
+    are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+
+# =====================================================================
+# Delivery — operational commands (DeliveryJob aggregate)
+# =====================================================================
+
+CompleteDelivery:
+  description: "The assigned rider marks the delivery complete (handed to the customer)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  required: [deliveryJobId, riderId]
+
+
+DeclineDelivery:
+  description: "An independent rider declines a pending delivery job (it stays PENDING, re-offerable)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId, riderId]
+
+
+ReportDeliveryIssue:
+  description: "Report an issue on a delivery job (rider/partner/support)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+      nullable: true
+    issue:
+      type: string
+      maxLength: 1000
+  required: [deliveryJobId, issue]
+
+
+ResolveDeliveryIssue:
+  description: "Resolve a previously reported delivery issue."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    resolution:
+      type: string
+      maxLength: 1000
+  required: [deliveryJobId, resolution]
+
+
+UpdateDeliveryStatus:
+  description: "Drive a delivery job's status (independent-rider path / admin correction)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+  required: [deliveryJobId, status]
+
+
+AssignDeliveryToPartner:
+  description: "Assign a pending delivery job to a delivery partner for fulfilment."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef: { $ref: 'scalars.yaml#/ExternalReference' }
+  required: [deliveryJobId, partnerRef]
+
+
+UnassignDeliveryFromPartner:
+  description: "Unassign a delivery job from its partner (to re-offer it)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+
+UpdateDeliveryPartnerStatus:
+  description: "Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+  required: [deliveryJobId, status]
+
+
+# =====================================================================
+# Delivery partner self-registration (#61)
+# =====================================================================
+# A delivery partner (already integrated: a known catalog channel) declares availability to serve a city
+# through the EXTERNAL API; an admin approves. Derived from the story-map "partner self-registers" use case.
+
+RegisterDeliveryPartnerAvailability:
+  description: >
+    A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth
+    of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is
+    client-generated (idempotent).
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+      description: "Client-generated id for the new availability registration."
+    channel:
+      $ref: 'scalars.yaml#/DeliveryChannelKey'
+      description: "The catalog channel this partner operates (e.g. 'uber_direct')."
+    cityId:
+      $ref: 'scalars.yaml#/CityId'
+    partnerName:
+      $ref: 'scalars.yaml#/DeliveryPartnerName'
+    contactEmail:
+      $ref: 'scalars.yaml#/EmailAddress'
+  required: [registrationId, channel, cityId, partnerName, contactEmail]
+
+
+ApproveDeliveryPartnerAvailability:
+  description: "An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking."
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+  required: [registrationId]
+
+
+RevokeDeliveryPartnerAvailability:
+  description: "Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it."
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [registrationId]
+
+
+# =====================================================================
+# Rider (independent Captain courier)
+# =====================================================================
+
+RegisterRider:
+  description: "Register as an independent Captain rider (linked to the auth provider user)."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+    displayName:
+      type: string
+      maxLength: 200
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+  required: [riderId, authRef, displayName, phone]
+
+
+UpdateRiderInfo:
+  description: "Update editable rider profile fields."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    displayName:
+      type: string
+      maxLength: 200
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+  required: [riderId]
+
+
+ChangeRiderStatus:
+  description: "Change a rider's availability/lifecycle status."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+  required: [riderId, status]

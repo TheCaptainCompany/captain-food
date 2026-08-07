@@ -1,0 +1,61 @@
+version: 1
+description: >
+  payments scope — configuration fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `configuration.yaml` catalog; $refs stay kind-logical
+  (`configuration.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+keys:
+
+
+  # ===================================================================
+  # Payments (Stripe) — the money path
+  # ===================================================================
+
+  STRIPE_SECRET_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeSecretKey'
+    secret: true
+    mode_of: stripe
+    required: [staging, production]
+    gates: >
+      Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no
+      checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported
+      (never the key) so "is production actually live?" is answerable.
+    deploy:
+      from_secret:
+        # Mode-suffixed by NAME on both sides (directive, 2026-07-29: "use the test key for test order
+        # and prod key for production order"). The unsuffixed STRIPE_SECRET_KEY repo secret is retired —
+        # a credential whose mode is not visible in its name is one nobody can audit. Its only consumer
+        # was prod-smoke, now reading STRIPE_SECRET_KEY_TEST explicitly.
+        #
+        # STRIPE_SECRET_KEY_PROD DOES NOT EXIST YET (V0 has not launched), so the sync reports production
+        # as SKIPPED and writes nothing: the service keeps what it has, today a test key, which the boot
+        # report renders `set [test mode]`. Declaration states the INTENT, report states the REALITY, and
+        # the two disagreeing IS the signal that go-live (issue #254) has not happened.
+        production: STRIPE_SECRET_KEY_PROD
+        staging: STRIPE_SECRET_KEY_TEST
+
+
+  STRIPE_WEBHOOK_SECRET:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeWebhookSecret'
+    secret: true
+    required: [staging, production]
+    gates: >
+      HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails
+      closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the
+      restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched
+      together with STRIPE_SECRET_KEY.
+    deploy:
+      from_secret:
+        # ONE unsuffixed secret for both profiles (product-owner decision, 2026-07-29) — it is what
+        # exists, and it is correct while production is itself in test mode. NOT symmetric with the key
+        # above on purpose: this is the one place the two diverge, so it is the one place to look when
+        # go-live goes wrong. A webhook secret must match the MODE of the endpoint that signed the
+        # delivery, and Stripe issues a different `whsec_` per mode — so the day STRIPE_SECRET_KEY_PROD
+        # lands, this must become STRIPE_WEBHOOK_SECRET_PROD in the SAME change, or verification fails
+        # closed: the customer is charged and the restaurant is never told. Tracked as issue #254.
+        production: STRIPE_WEBHOOK_SECRET
+        staging: STRIPE_WEBHOOK_SECRET

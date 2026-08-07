@@ -5,48 +5,552 @@
 
 use super::scalars::*;
 
-/// Visitor adds a line to a cart, validated against the live catalog. The client generates the cartId and sends it on every add; the first add for a new cartId creates the cart (idempotently), binding it to the restaurant.
+/// Admin creates a catalog for a restaurant.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct AddCartLineInput {
-    /// Client-generated cart id; the first add for it creates the cart (session-owned).
-    #[graphql(name = "cartId")]
-    pub cart_id: CartId,
+pub struct CreateCatalogInput {
+    /// Client-generated id for the new catalog.
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
-    #[graphql(name = "line")]
-    pub line: CartLineInput,
-    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
-    #[graphql(name = "sessionId")]
-    pub session_id: SessionId,
+    #[graphql(name = "name")]
+    pub name: CatalogName,
+    #[graphql(name = "ref")]
+    pub r#ref: Option<ExternalReference>,
 }
 
-/// Visitor removes a line from a cart.
+/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoveCartLineInput {
-    #[graphql(name = "cartId")]
-    pub cart_id: CartId,
-    #[graphql(name = "cartLineId")]
-    pub cart_line_id: CartLineId,
-    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
-    #[graphql(name = "sessionId")]
-    pub session_id: SessionId,
+pub struct ConfigureCatalogSlugInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    /// URL-safe catalog label, unique within its restaurant.
+    #[graphql(name = "slug")]
+    pub slug: Slug,
 }
 
-/// Visitor changes the quantity of an existing cart line.
+/// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct ChangeCartLineQuantityInput {
-    #[graphql(name = "cartId")]
-    pub cart_id: CartId,
-    #[graphql(name = "cartLineId")]
-    pub cart_line_id: CartLineId,
+pub struct AddProductInput {
+    /// Client-generated id for the new product.
+    #[graphql(name = "productId")]
+    pub product_id: ProductId,
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "categoryRef")]
+    pub category_ref: Option<ExternalReference>,
+    #[graphql(name = "name")]
+    pub name: ProductName,
+    #[graphql(name = "description")]
+    pub description: Option<ProductDescription>,
+    #[graphql(name = "tags")]
+    pub tags: Option<Vec<Tag>>,
+    #[graphql(name = "taxRate")]
+    pub tax_rate: TaxRateInput,
+    #[graphql(name = "offers")]
+    #[serde(default)]
+    pub offers: Vec<OfferInput>,
+    #[graphql(name = "ref")]
+    pub r#ref: Option<ExternalReference>,
+}
+
+/// Admin updates an existing product (full replace, including offers).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProductInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "product")]
+    pub product: ProductInput,
+}
+
+/// Admin removes a product from a catalog.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveProductInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "productId")]
+    pub product_id: ProductId,
+}
+
+/// Admin adds a category to a catalog (categories form a tree via parentRef).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct AddCatalogCategoryInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "category")]
+    pub category: CatalogCategoryInput,
+}
+
+/// Admin updates a category (full replace).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCatalogCategoryInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "category")]
+    pub category: CatalogCategoryInput,
+}
+
+/// Admin removes a category from a catalog.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveCatalogCategoryInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "productCategoryId")]
+    pub product_category_id: ProductCategoryId,
+}
+
+/// Admin adds an option list (modifier group) to a catalog.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct AddOptionListInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "optionList")]
+    pub option_list: OptionListInput,
+}
+
+/// Admin updates an option list (full replace).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOptionListInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "optionList")]
+    pub option_list: OptionListInput,
+}
+
+/// Admin removes an option list from a catalog.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveOptionListInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "optionListId")]
+    pub option_list_id: OptionListId,
+}
+
+/// Admin (or inventory sync) sets the stock level of a offer. The StockStatus is derived server-side from quantity vs lowStockThreshold.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOfferStockInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "offerId")]
+    pub offer_id: OfferId,
     #[graphql(name = "quantity")]
-    pub quantity: i64,
-    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
+    pub quantity: Quantity,
+    #[graphql(name = "lowStockThreshold")]
+    pub low_stock_threshold: Option<Quantity>,
+    #[graphql(name = "expiresAt")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Admin/system imports or re-syncs a full catalog from an external source (HubRise), replacing the current catalog content. Idempotent via entity `ref`s (HubRise import key).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCatalogInput {
+    #[graphql(name = "catalogId")]
+    pub catalog_id: CatalogId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "source")]
+    pub source: String,
+    #[graphql(name = "categories")]
+    #[serde(default)]
+    pub categories: Vec<CatalogCategoryInput>,
+    #[graphql(name = "products")]
+    #[serde(default)]
+    pub products: Vec<ProductInput>,
+    #[graphql(name = "optionLists")]
+    #[serde(default)]
+    pub option_lists: Vec<OptionListInput>,
+}
+
+/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RequeueMailboxMessageInput {
+    #[graphql(name = "targetMessageId")]
+    pub target_message_id: MessageId,
+}
+
+/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenConversationInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerId")]
+    pub customer_id: Option<CustomerId>,
+    #[graphql(name = "customerChatEnabled")]
+    pub customer_chat_enabled: bool,
+}
+
+/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PostMessageInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "messageId")]
+    pub message_id: ConversationMessageId,
+    #[graphql(name = "authorRole")]
+    pub author_role: ConversationAuthorRole,
+    #[graphql(name = "visibility")]
+    pub visibility: MessageVisibility,
+    #[graphql(name = "body")]
+    pub body: MessageBody,
+    #[graphql(name = "originalLocale")]
+    pub original_locale: Locale,
+    #[graphql(name = "attachmentRefs")]
+    pub attachment_refs: Option<Vec<AttachmentRef>>,
+}
+
+/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMessageTranslationInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "messageId")]
+    pub message_id: ConversationMessageId,
+    #[graphql(name = "locale")]
+    pub locale: Locale,
+    #[graphql(name = "text")]
+    pub text: TranslatedText,
+}
+
+/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateToAdminInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "reason")]
+    pub reason: EscalationReason,
+}
+
+/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteParticipantInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "mutedRole")]
+    pub muted_role: ConversationAuthorRole,
+    #[graphql(name = "reason")]
+    pub reason: Option<MuteReason>,
+    #[graphql(name = "until")]
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmuteParticipantInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "mutedRole")]
+    pub muted_role: ConversationAuthorRole,
+}
+
+/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPhoneVerificationInput {
+    #[graphql(name = "dialingCode")]
+    pub dialing_code: DialingCode,
+    #[graphql(name = "nationalNumber")]
+    pub national_number: NationalPhoneNumber,
+    /// SMS language; defaults from the dialing code's country when absent.
+    #[graphql(name = "locale")]
+    pub locale: Option<Locale>,
+}
+
+/// Verify the SMS OTP with Supabase Auth, then register-or-identify: a first verified phone CREATES the Customer (CustomerRegistered), a returning phone RESOLVES + signs in (CustomerIdentified). The backend decides new-vs-returning; the client never calls register/identify directly.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyPhoneInput {
+    /// Client-generated id, used only when the phone is new; ignored for a returning phone.
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "dialingCode")]
+    pub dialing_code: DialingCode,
+    #[graphql(name = "nationalNumber")]
+    pub national_number: NationalPhoneNumber,
+    #[graphql(name = "code")]
+    pub code: OtpCode,
+    /// The visitor session verifying the phone — carried onto CustomerIdentified so CartBindingProcess binds this session's open carts.
     #[graphql(name = "sessionId")]
     pub session_id: SessionId,
+    #[graphql(name = "displayName")]
+    pub display_name: Option<CustomerDisplayName>,
+    /// Persisted on registration; defaults from the dialing code when absent.
+    #[graphql(name = "locale")]
+    pub locale: Option<Locale>,
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+}
+
+/// Ask Supabase Auth to email a magic link to verify/link an email for the signed-in customer. Emits no event; the message is localized via the customer's STORED locale (no per-call language param).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestEmailVerificationInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "email")]
+    pub email: EmailAddress,
+}
+
+/// Confirm an email magic link: the client returns the Supabase token, we VERIFY it server-side and link the now-verified email to the Customer. Used for both the initial email and later changes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmEmailVerificationInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "token")]
+    pub token: EmailVerificationToken,
+}
+
+/// Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored locale). Emits no event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPhoneChangeInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "newDialingCode")]
+    pub new_dialing_code: DialingCode,
+    #[graphql(name = "newNationalNumber")]
+    pub new_national_number: NationalPhoneNumber,
+}
+
+/// Verify the OTP on the new phone and change the customer's phone (→ canonical E.164 PhoneNumber).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPhoneChangeInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "newDialingCode")]
+    pub new_dialing_code: DialingCode,
+    #[graphql(name = "newNationalNumber")]
+    pub new_national_number: NationalPhoneNumber,
+    #[graphql(name = "code")]
+    pub code: OtpCode,
+}
+
+/// Persist the customer's preferred language (the single locale setter). The stored locale then localizes subsequent authenticated SMS/email sends — so they need no per-call language param.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeLanguageInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "locale")]
+    pub locale: Locale,
+}
+
+/// Customer marks a restaurant as a favorite for quick access.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkRestaurantAsFavoriteInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+}
+
+/// Customer removes a restaurant from their favorites.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmarkRestaurantAsFavoriteInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+}
+
+/// Customer updates their display name. (Email is verified-only — set via ConfirmEmailVerification.)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCustomerInfoInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "displayName")]
+    pub display_name: Option<CustomerDisplayName>,
+}
+
+/// Customer sets discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is set via ChangeLanguage.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerPreferencesInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+    #[graphql(name = "dietaryTags")]
+    pub dietary_tags: Option<Vec<Tag>>,
+    #[graphql(name = "favoriteCuisines")]
+    pub favorite_cuisines: Option<Vec<Tag>>,
+}
+
+/// Customer adds or updates a saved delivery address in their address book.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerAddressInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    /// Client-generated id; re-using it updates that address.
+    #[graphql(name = "addressId")]
+    pub address_id: AddressId,
+    #[graphql(name = "label")]
+    pub label: Option<String>,
+    #[graphql(name = "address")]
+    pub address: AddressInput,
+}
+
+/// Customer removes a saved address from their address book.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveCustomerAddressInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "addressId")]
+    pub address_id: AddressId,
+}
+
+/// Customer sets or updates their preferred Stripe payment method.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCustomerPaymentMethodInput {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "paymentMethodId")]
+    pub payment_method_id: PaymentMethodId,
+}
+
+/// Change a rider's availability/lifecycle status.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeRiderStatusInput {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+    #[graphql(name = "status")]
+    pub status: RiderStatus,
+}
+
+/// An independent Captain rider accepts a pending delivery job.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+}
+
+/// The assigned rider confirms they collected the order from the restaurant.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPickupInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+}
+
+/// The assigned rider marks the delivery complete (handed to the customer).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+}
+
+/// Restaurant/admin cancels a delivery job before it completes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
+/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
+/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeliveryPartnerAvailabilityInput {
+    /// Client-generated id for the new availability registration.
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+    /// The catalog channel this partner operates (e.g. 'uber_direct').
+    #[graphql(name = "channel")]
+    pub channel: DeliveryChannelKey,
+    #[graphql(name = "cityId")]
+    pub city_id: CityId,
+    #[graphql(name = "partnerName")]
+    pub partner_name: DeliveryPartnerName,
+    #[graphql(name = "contactEmail")]
+    pub contact_email: EmailAddress,
+}
+
+/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDeliveryPartnerAvailabilityInput {
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+}
+
+/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDeliveryPartnerAvailabilityInput {
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
 }
 
 /// Admin creates a restaurant ACCOUNT (HubRise: restaurant) that will own one or more locations. Account-level facts (legal entity, billing contact, currency, default tax, timezone) live here.
@@ -353,366 +857,48 @@ pub struct RecordProspectReplyInput {
     pub note: Option<String>,
 }
 
-/// Admin creates a catalog for a restaurant.
+/// Visitor adds a line to a cart, validated against the live catalog. The client generates the cartId and sends it on every add; the first add for a new cartId creates the cart (idempotently), binding it to the restaurant.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateCatalogInput {
-    /// Client-generated id for the new catalog.
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
+pub struct AddCartLineInput {
+    /// Client-generated cart id; the first add for it creates the cart (session-owned).
+    #[graphql(name = "cartId")]
+    pub cart_id: CartId,
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
-    #[graphql(name = "name")]
-    pub name: CatalogName,
-    #[graphql(name = "ref")]
-    pub r#ref: Option<ExternalReference>,
-}
-
-/// The owner chooses (or changes) the catalog's ROUTE -- the label that addresses it inside the restaurant's storefront. A real command precisely because it CAN be refused: the label may already belong to another catalog of the same restaurant, and the person asking is a human who can pick again. Re-submitting the CURRENT label is an idempotent no-op (no event, no error). Unlike the restaurant slug this is a PATH, not a host: it carries no cross-restaurant uniqueness and no redirect obligation, so there is no reserved-label alias and no Reconfigured variant -- a rename simply replaces the label.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigureCatalogSlugInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    /// URL-safe catalog label, unique within its restaurant.
-    #[graphql(name = "slug")]
-    pub slug: Slug,
-}
-
-/// Admin adds a product (with its one-or-more offers) to a catalog. The client supplies the product id and each offer id (client-generated).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct AddProductInput {
-    /// Client-generated id for the new product.
-    #[graphql(name = "productId")]
-    pub product_id: ProductId,
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "categoryRef")]
-    pub category_ref: Option<ExternalReference>,
-    #[graphql(name = "name")]
-    pub name: ProductName,
-    #[graphql(name = "description")]
-    pub description: Option<ProductDescription>,
-    #[graphql(name = "tags")]
-    pub tags: Option<Vec<Tag>>,
-    #[graphql(name = "taxRate")]
-    pub tax_rate: TaxRateInput,
-    #[graphql(name = "offers")]
-    #[serde(default)]
-    pub offers: Vec<OfferInput>,
-    #[graphql(name = "ref")]
-    pub r#ref: Option<ExternalReference>,
-}
-
-/// Admin updates an existing product (full replace, including offers).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateProductInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "product")]
-    pub product: ProductInput,
-}
-
-/// Admin removes a product from a catalog.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveProductInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "productId")]
-    pub product_id: ProductId,
-}
-
-/// Admin adds a category to a catalog (categories form a tree via parentRef).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct AddCatalogCategoryInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "category")]
-    pub category: CatalogCategoryInput,
-}
-
-/// Admin updates a category (full replace).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateCatalogCategoryInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "category")]
-    pub category: CatalogCategoryInput,
-}
-
-/// Admin removes a category from a catalog.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveCatalogCategoryInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "productCategoryId")]
-    pub product_category_id: ProductCategoryId,
-}
-
-/// Admin adds an option list (modifier group) to a catalog.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct AddOptionListInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "optionList")]
-    pub option_list: OptionListInput,
-}
-
-/// Admin updates an option list (full replace).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateOptionListInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "optionList")]
-    pub option_list: OptionListInput,
-}
-
-/// Admin removes an option list from a catalog.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveOptionListInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "optionListId")]
-    pub option_list_id: OptionListId,
-}
-
-/// Admin (or inventory sync) sets the stock level of a offer. The StockStatus is derived server-side from quantity vs lowStockThreshold.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateOfferStockInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "offerId")]
-    pub offer_id: OfferId,
-    #[graphql(name = "quantity")]
-    pub quantity: Quantity,
-    #[graphql(name = "lowStockThreshold")]
-    pub low_stock_threshold: Option<Quantity>,
-    #[graphql(name = "expiresAt")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Admin/system imports or re-syncs a full catalog from an external source (HubRise), replacing the current catalog content. Idempotent via entity `ref`s (HubRise import key).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportCatalogInput {
-    #[graphql(name = "catalogId")]
-    pub catalog_id: CatalogId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "source")]
-    pub source: String,
-    #[graphql(name = "categories")]
-    #[serde(default)]
-    pub categories: Vec<CatalogCategoryInput>,
-    #[graphql(name = "products")]
-    #[serde(default)]
-    pub products: Vec<ProductInput>,
-    #[graphql(name = "optionLists")]
-    #[serde(default)]
-    pub option_lists: Vec<OptionListInput>,
-}
-
-/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestPhoneVerificationInput {
-    #[graphql(name = "dialingCode")]
-    pub dialing_code: DialingCode,
-    #[graphql(name = "nationalNumber")]
-    pub national_number: NationalPhoneNumber,
-    /// SMS language; defaults from the dialing code's country when absent.
-    #[graphql(name = "locale")]
-    pub locale: Option<Locale>,
-}
-
-/// Verify the SMS OTP with Supabase Auth, then register-or-identify: a first verified phone CREATES the Customer (CustomerRegistered), a returning phone RESOLVES + signs in (CustomerIdentified). The backend decides new-vs-returning; the client never calls register/identify directly.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyPhoneInput {
-    /// Client-generated id, used only when the phone is new; ignored for a returning phone.
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "dialingCode")]
-    pub dialing_code: DialingCode,
-    #[graphql(name = "nationalNumber")]
-    pub national_number: NationalPhoneNumber,
-    #[graphql(name = "code")]
-    pub code: OtpCode,
-    /// The visitor session verifying the phone — carried onto CustomerIdentified so CartBindingProcess binds this session's open carts.
+    #[graphql(name = "line")]
+    pub line: CartLineInput,
+    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
     #[graphql(name = "sessionId")]
     pub session_id: SessionId,
-    #[graphql(name = "displayName")]
-    pub display_name: Option<CustomerDisplayName>,
-    /// Persisted on registration; defaults from the dialing code when absent.
-    #[graphql(name = "locale")]
-    pub locale: Option<Locale>,
-    #[graphql(name = "timezone")]
-    pub timezone: Option<TimeZone>,
 }
 
-/// Ask Supabase Auth to email a magic link to verify/link an email for the signed-in customer. Emits no event; the message is localized via the customer's STORED locale (no per-call language param).
+/// Visitor removes a line from a cart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct RequestEmailVerificationInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "email")]
-    pub email: EmailAddress,
+pub struct RemoveCartLineInput {
+    #[graphql(name = "cartId")]
+    pub cart_id: CartId,
+    #[graphql(name = "cartLineId")]
+    pub cart_line_id: CartLineId,
+    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
+    #[graphql(name = "sessionId")]
+    pub session_id: SessionId,
 }
 
-/// Confirm an email magic link: the client returns the Supabase token, we VERIFY it server-side and link the now-verified email to the Customer. Used for both the initial email and later changes.
+/// Visitor changes the quantity of an existing cart line.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct ConfirmEmailVerificationInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "token")]
-    pub token: EmailVerificationToken,
-}
-
-/// Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored locale). Emits no event.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestPhoneChangeInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "newDialingCode")]
-    pub new_dialing_code: DialingCode,
-    #[graphql(name = "newNationalNumber")]
-    pub new_national_number: NationalPhoneNumber,
-}
-
-/// Verify the OTP on the new phone and change the customer's phone (→ canonical E.164 PhoneNumber).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmPhoneChangeInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "newDialingCode")]
-    pub new_dialing_code: DialingCode,
-    #[graphql(name = "newNationalNumber")]
-    pub new_national_number: NationalPhoneNumber,
-    #[graphql(name = "code")]
-    pub code: OtpCode,
-}
-
-/// Persist the customer's preferred language (the single locale setter). The stored locale then localizes subsequent authenticated SMS/email sends — so they need no per-call language param.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeLanguageInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "locale")]
-    pub locale: Locale,
-}
-
-/// Customer marks a restaurant as a favorite for quick access.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkRestaurantAsFavoriteInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-}
-
-/// Customer removes a restaurant from their favorites.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UnmarkRestaurantAsFavoriteInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-}
-
-/// Customer updates their display name. (Email is verified-only — set via ConfirmEmailVerification.)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateCustomerInfoInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "displayName")]
-    pub display_name: Option<CustomerDisplayName>,
-}
-
-/// Customer sets discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is set via ChangeLanguage.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerPreferencesInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "timezone")]
-    pub timezone: Option<TimeZone>,
-    #[graphql(name = "dietaryTags")]
-    pub dietary_tags: Option<Vec<Tag>>,
-    #[graphql(name = "favoriteCuisines")]
-    pub favorite_cuisines: Option<Vec<Tag>>,
-}
-
-/// Customer adds or updates a saved delivery address in their address book.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerAddressInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    /// Client-generated id; re-using it updates that address.
-    #[graphql(name = "addressId")]
-    pub address_id: AddressId,
-    #[graphql(name = "label")]
-    pub label: Option<String>,
-    #[graphql(name = "address")]
-    pub address: AddressInput,
-}
-
-/// Customer removes a saved address from their address book.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveCustomerAddressInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "addressId")]
-    pub address_id: AddressId,
-}
-
-/// Customer sets or updates their preferred Stripe payment method.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCustomerPaymentMethodInput {
-    #[graphql(name = "customerId")]
-    pub customer_id: CustomerId,
-    #[graphql(name = "paymentMethodId")]
-    pub payment_method_id: PaymentMethodId,
+pub struct ChangeCartLineQuantityInput {
+    #[graphql(name = "cartId")]
+    pub cart_id: CartId,
+    #[graphql(name = "cartLineId")]
+    pub cart_line_id: CartLineId,
+    #[graphql(name = "quantity")]
+    pub quantity: i64,
+    /// Optional session id (ADR-0038) to bind the cart to a session for test-mode carts.
+    #[graphql(name = "sessionId")]
+    pub session_id: SessionId,
 }
 
 /// SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it against the live catalog, prices it server-side, takes payment via Stripe, records the order, then closes the cart. This is the V0 risk point: it depends on an external actor (Stripe) and must be a saga with a failure branch. Now that the customer has verified their phone, customerId is bound here.
@@ -891,207 +1077,6 @@ pub struct RequestRefundInput {
     pub reason: Option<String>,
 }
 
-/// The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ApproveRefundInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    /// Approved refund amount (may be partial).
-    #[graphql(name = "amount")]
-    pub amount: MoneyInput,
-    #[graphql(name = "reason")]
-    pub reason: Option<String>,
-}
-
-/// The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct DenyRefundInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "reason")]
-    pub reason: String,
-}
-
-/// Change a rider's availability/lifecycle status.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeRiderStatusInput {
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
-    #[graphql(name = "status")]
-    pub status: RiderStatus,
-}
-
-/// An independent Captain rider accepts a pending delivery job.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct AcceptDeliveryInput {
-    #[graphql(name = "deliveryJobId")]
-    pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
-}
-
-/// The assigned rider confirms they collected the order from the restaurant.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmPickupInput {
-    #[graphql(name = "deliveryJobId")]
-    pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
-}
-
-/// The assigned rider marks the delivery complete (handed to the customer).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct CompleteDeliveryInput {
-    #[graphql(name = "deliveryJobId")]
-    pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
-}
-
-/// Restaurant/admin cancels a delivery job before it completes.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct CancelDeliveryInput {
-    #[graphql(name = "deliveryJobId")]
-    pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "reason")]
-    pub reason: Option<String>,
-}
-
-/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct EscalateDeliveryInput {
-    #[graphql(name = "deliveryJobId")]
-    pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "reason")]
-    pub reason: Option<String>,
-}
-
-/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterDeliveryPartnerAvailabilityInput {
-    /// Client-generated id for the new availability registration.
-    #[graphql(name = "registrationId")]
-    pub registration_id: DeliveryPartnerRegistrationId,
-    /// The catalog channel this partner operates (e.g. 'uber_direct').
-    #[graphql(name = "channel")]
-    pub channel: DeliveryChannelKey,
-    #[graphql(name = "cityId")]
-    pub city_id: CityId,
-    #[graphql(name = "partnerName")]
-    pub partner_name: DeliveryPartnerName,
-    #[graphql(name = "contactEmail")]
-    pub contact_email: EmailAddress,
-}
-
-/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ApproveDeliveryPartnerAvailabilityInput {
-    #[graphql(name = "registrationId")]
-    pub registration_id: DeliveryPartnerRegistrationId,
-}
-
-/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RevokeDeliveryPartnerAvailabilityInput {
-    #[graphql(name = "registrationId")]
-    pub registration_id: DeliveryPartnerRegistrationId,
-    #[graphql(name = "reason")]
-    pub reason: Option<String>,
-}
-
-/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenConversationInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "customerId")]
-    pub customer_id: Option<CustomerId>,
-    #[graphql(name = "customerChatEnabled")]
-    pub customer_chat_enabled: bool,
-}
-
-/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct PostMessageInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "messageId")]
-    pub message_id: ConversationMessageId,
-    #[graphql(name = "authorRole")]
-    pub author_role: ConversationAuthorRole,
-    #[graphql(name = "visibility")]
-    pub visibility: MessageVisibility,
-    #[graphql(name = "body")]
-    pub body: MessageBody,
-    #[graphql(name = "originalLocale")]
-    pub original_locale: Locale,
-    #[graphql(name = "attachmentRefs")]
-    pub attachment_refs: Option<Vec<AttachmentRef>>,
-}
-
-/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordMessageTranslationInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "messageId")]
-    pub message_id: ConversationMessageId,
-    #[graphql(name = "locale")]
-    pub locale: Locale,
-    #[graphql(name = "text")]
-    pub text: TranslatedText,
-}
-
-/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct EscalateToAdminInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "reason")]
-    pub reason: EscalationReason,
-}
-
-/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct MuteParticipantInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "mutedRole")]
-    pub muted_role: ConversationAuthorRole,
-    #[graphql(name = "reason")]
-    pub reason: Option<MuteReason>,
-    #[graphql(name = "until")]
-    pub until: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct UnmuteParticipantInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-    #[graphql(name = "mutedRole")]
-    pub muted_role: ConversationAuthorRole,
-}
-
 /// Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The client supplies `customerId` (whose claim) and `restaurantId` (whose restaurant's order), mirroring how placeOrder supplies them — they scope the read model (#154). The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
@@ -1156,12 +1141,41 @@ pub struct AttachReclamationEvidenceInput {
     pub attachment_ref: AttachmentRef,
 }
 
-/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+/// The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct RequeueMailboxMessageInput {
-    #[graphql(name = "targetMessageId")]
-    pub target_message_id: MessageId,
+pub struct ApproveRefundInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    /// Approved refund amount (may be partial).
+    #[graphql(name = "amount")]
+    pub amount: MoneyInput,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
+/// The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DenyRefundInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "reason")]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoriesQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
@@ -1182,9 +1196,50 @@ pub struct OperationStatusQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct PaymentStatusQueryInput {
+pub struct OrderConversationQueryInput {
     #[graphql(name = "orderId")]
     pub order_id: OrderId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderConversationInternalNotesQueryInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryQueryInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MyDeliveriesQueryInput {
+    #[graphql(name = "status")]
+    pub status: Option<DeliveryStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantDeliveriesQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "status")]
+    pub status: Option<DeliveryStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailabilitiesQueryInput {
+    #[graphql(name = "cityId")]
+    pub city_id: Option<CityId>,
+    #[graphql(name = "channel")]
+    pub channel: Option<DeliveryChannelKey>,
+    #[graphql(name = "status")]
+    pub status: Option<CityAvailabilityStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
@@ -1223,23 +1278,25 @@ pub struct RestaurantsQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct CatalogQueryInput {
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct CategoriesQueryInput {
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
 pub struct RestaurantQueryInput {
     #[graphql(name = "slug")]
     pub slug: Slug,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantLocationsByAccountQueryInput {
+    #[graphql(name = "accountId")]
+    pub account_id: RestaurantAccountId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ProspectionPipelineQueryInput {
+    #[graphql(name = "minScore")]
+    pub min_score: Option<ProspectionScore>,
+    #[graphql(name = "status")]
+    pub status: Option<ProspectPipelineStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
@@ -1276,68 +1333,11 @@ pub struct OrderQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct DeliveryQueryInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct MyDeliveriesQueryInput {
-    #[graphql(name = "status")]
-    pub status: Option<DeliveryStatus>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantDeliveriesQueryInput {
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
-    #[graphql(name = "status")]
-    pub status: Option<DeliveryStatus>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
 pub struct RestaurantDeliverySatisfactionQueryInput {
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
     #[graphql(name = "timeliness")]
     pub timeliness: Option<DeliveryTimeliness>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderConversationQueryInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OrderConversationInternalNotesQueryInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct PendingRefundsQueryInput {
-    #[graphql(name = "restaurantId")]
-    pub restaurant_id: Option<RestaurantId>,
-    #[graphql(name = "status")]
-    pub status: Option<RefundStatus>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliveryPartnerAvailabilitiesQueryInput {
-    #[graphql(name = "cityId")]
-    pub city_id: Option<CityId>,
-    #[graphql(name = "channel")]
-    pub channel: Option<DeliveryChannelKey>,
-    #[graphql(name = "status")]
-    pub status: Option<CityAvailabilityStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
@@ -1360,18 +1360,18 @@ pub struct ReclamationQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct RestaurantLocationsByAccountQueryInput {
-    #[graphql(name = "accountId")]
-    pub account_id: RestaurantAccountId,
+pub struct PaymentStatusQueryInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct ProspectionPipelineQueryInput {
-    #[graphql(name = "minScore")]
-    pub min_score: Option<ProspectionScore>,
+pub struct PendingRefundsQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: Option<RestaurantId>,
     #[graphql(name = "status")]
-    pub status: Option<ProspectPipelineStatus>,
+    pub status: Option<RefundStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
@@ -1383,41 +1383,16 @@ pub struct OperationStatusChangedSubscriptionInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct PaymentStatusChangedSubscriptionInput {
-    #[graphql(name = "orderId")]
-    pub order_id: OrderId,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
 pub struct OrderStatusChangedSubscriptionInput {
     #[graphql(name = "orderId")]
     pub order_id: OrderId,
 }
 
-/// A single cart line as expressed by the customer. References the catalog by id; the handler resolves names/prices/tax from the current catalog and computes totals. Client-supplied prices are NEVER trusted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
-pub struct CartLineInput {
-    /// Client-generated id for this line (lets the client edit/remove it immediately).
-    #[graphql(name = "cartLineId")]
-    pub cart_line_id: CartLineId,
-    #[graphql(name = "offerId")]
-    pub offer_id: OfferId,
-    #[graphql(name = "quantity")]
-    pub quantity: i64,
-    #[graphql(name = "selectedOptionIds")]
-    pub selected_option_ids: Option<Vec<OptionId>>,
-}
-
-/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct RestaurantContactInput {
-    #[graphql(name = "email")]
-    pub email: Option<EmailAddress>,
-    #[graphql(name = "phone")]
-    pub phone: Option<PhoneNumber>,
+pub struct PaymentStatusChangedSubscriptionInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
 }
 
 /// Per-service-mode VAT, mirroring HubRise product tax_rate.
@@ -1430,53 +1405,6 @@ pub struct TaxRateInput {
     pub collection: Option<TaxRatePercent>,
     #[graphql(name = "eatIn")]
     pub eat_in: Option<TaxRatePercent>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct AddressInput {
-    #[graphql(name = "line1")]
-    pub line1: AddressLine,
-    #[graphql(name = "line2")]
-    pub line2: Option<AddressLine>,
-    #[graphql(name = "postalCode")]
-    pub postal_code: PostalCode,
-    #[graphql(name = "city")]
-    pub city: CityName,
-    #[graphql(name = "country")]
-    pub country: CountryCode,
-}
-
-/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct GeoPointInput {
-    #[graphql(name = "latitude")]
-    pub latitude: Latitude,
-    #[graphql(name = "longitude")]
-    pub longitude: Longitude,
-}
-
-/// One opening time window for a given weekday (HubRise opening_hours).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct OpeningHoursSlotInput {
-    #[graphql(name = "weekday")]
-    pub weekday: Weekday,
-    #[graphql(name = "from")]
-    pub from: TimeOfDay,
-    #[graphql(name = "to")]
-    pub to: TimeOfDay,
-}
-
-/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalIdentifierInput {
-    #[graphql(name = "key")]
-    pub key: ExternalIdentifierKey,
-    #[graphql(name = "value")]
-    pub value: String,
 }
 
 /// A purchasable offer of a product (HubRise: SKU).
@@ -1619,6 +1547,78 @@ pub struct ProductItemOptionInput {
     pub availability: CatalogItemAvailability,
     #[graphql(name = "stock")]
     pub stock: Option<StockInput>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressInput {
+    #[graphql(name = "line1")]
+    pub line1: AddressLine,
+    #[graphql(name = "line2")]
+    pub line2: Option<AddressLine>,
+    #[graphql(name = "postalCode")]
+    pub postal_code: PostalCode,
+    #[graphql(name = "city")]
+    pub city: CityName,
+    #[graphql(name = "country")]
+    pub country: CountryCode,
+}
+
+/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantContactInput {
+    #[graphql(name = "email")]
+    pub email: Option<EmailAddress>,
+    #[graphql(name = "phone")]
+    pub phone: Option<PhoneNumber>,
+}
+
+/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoPointInput {
+    #[graphql(name = "latitude")]
+    pub latitude: Latitude,
+    #[graphql(name = "longitude")]
+    pub longitude: Longitude,
+}
+
+/// One opening time window for a given weekday (HubRise opening_hours).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OpeningHoursSlotInput {
+    #[graphql(name = "weekday")]
+    pub weekday: Weekday,
+    #[graphql(name = "from")]
+    pub from: TimeOfDay,
+    #[graphql(name = "to")]
+    pub to: TimeOfDay,
+}
+
+/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalIdentifierInput {
+    #[graphql(name = "key")]
+    pub key: ExternalIdentifierKey,
+    #[graphql(name = "value")]
+    pub value: String,
+}
+
+/// A single cart line as expressed by the customer. References the catalog by id; the handler resolves names/prices/tax from the current catalog and computes totals. Client-supplied prices are NEVER trusted.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CartLineInput {
+    /// Client-generated id for this line (lets the client edit/remove it immediately).
+    #[graphql(name = "cartLineId")]
+    pub cart_line_id: CartLineId,
+    #[graphql(name = "offerId")]
+    pub offer_id: OfferId,
+    #[graphql(name = "quantity")]
+    pub quantity: i64,
+    #[graphql(name = "selectedOptionIds")]
+    pub selected_option_ids: Option<Vec<OptionId>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

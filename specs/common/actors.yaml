@@ -1,0 +1,101 @@
+version: 8
+description: >
+  Captain.Food ACTOR catalog (actor-model). Its goal is to be a CODE-GENERATION SOURCE: from it a
+  generator can scaffold the in-domain message handlers — aggregates with command handlers that emit
+  events, and process managers that react to events. It does not redefine names: every message,
+  event and error is a `$ref` into commands.yaml / events.yaml / errors.yaml, so a validator (or
+  codegen) can confirm the referenced type EXISTS, exactly as scalars/entities are referenced.
+
+  ACTOR (actor model) — an in-domain entity that RECEIVES MESSAGES, holds private state, and EMITS
+  events in response. Two types:
+    - aggregate        : a consistency boundary that handles commands and emits events
+                         (Restaurant, Catalog, Customer, Cart, Order).
+    - process-manager  : a saga that reacts to events and coordinates aggregates/externals
+                         (PlaceOrderProcess, RefundProcess).
+
+  Example: the Restaurant aggregate RECEIVES commands.yaml#/RegisterRestaurant, EMITS
+  events.yaml#/RestaurantRegistered, and may THROW errors.yaml#/SlugAlreadyTaken.
+
+  WHAT IS DELIBERATELY NOT HERE:
+    - PERSONAS (story-mapping senders): who may send a command is an authorization concern in the
+      GraphQL layer (api.yaml `@auth` path-role) + story-map.md + traceability.md.
+    - KIND (command vs event) and SLICE: kind is explicit in the $ref target (commands.yaml = command,
+      events.yaml = event); slice lives in story-map.md.
+
+  NAME-COLLISION WARNING: the actor `Restaurant`/`Customer` (PascalCase aggregates, matching
+  entities.yaml) are NOT the personas `restaurant`/`customer` (the staff/end-user who send commands).
+
+  Field meaning:
+    - <Actor>.type       : aggregate | process-manager (selects the generated base class).
+    - <Actor>.lifecycle  : OPTIONAL declared status machine (ADR-20260720-004419). The aggregate's
+      status lifecycle as explicit, validated data — generated into
+      crates/domain/src/generated/lifecycles.rs (fold + handlers consult the table) and a mermaid
+      state diagram in the generated documentation. Shape:
+        * status      : $ref to the scalars.yaml ENUM the machine runs over (e.g. OrderStatus).
+        * initial     : list of { event, to } — the birth event(s) and the state each enters.
+        * transitions : list of { from: [states], event, to } — the legal moves, keyed by the EVENT
+                        that effects them (events, not commands: inbound facts have no command, and
+                        command→event wiring already lives in `receives`). Every event must be
+                        emitted by THIS aggregate. Events not listed do not touch the status.
+        * terminal    : states with no outgoing transitions.
+      Validated by the lc-* rules; an aggregate with a <Name>Status scalar but no lifecycle warns
+      (lc-missing) so adoption is incremental.
+    - <Actor>.receives   : the actor's inbox. Each entry { message, emits[, throws][, effect] }:
+        * message : $ref to the command (commands.yaml) or event (events.yaml) received.
+        * emits   : list of $refs to events (events.yaml) appended in response (may be empty).
+        * throws  : list of $refs to errors (errors.yaml) this command may raise on rejection
+                    (these are the old command `invariants`). DOMAIN-specific only — cross-cutting
+                    errors (Unauthorized/Forbidden/ValidationError/Conflict/RateLimited/Internal)
+                    apply to every command and are not repeated. Received EVENTS are facts and are
+                    NOT rejected, so they carry no `throws`.
+        * effect  : optional note when emits is empty or the reaction is non-obvious.
+
+
+# --- Mailbox addressing (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4) ---
+# `principals` maps each authenticated role to the SCALAR of its resolved domain identity — what
+# `requires.acting` compares `actor.id` against (type-checked end to end). Roles without a domain
+# identity (PUBLIC, ADMIN, EXTERNAL) are deliberately absent: they can never satisfy an `acting`
+# entry except the explicit keyword `any`.
+# Each aggregate declares `identity` as a TYPED same-actor state-field $ref
+# (`identity: { $ref: '#/<Actor>/state/<field>' }`, ADR-20260731-214500 consequences): the field
+# names the payload property that IS the instance id — the mailbox's actor_id and the stream id.
+# The identity field is the STREAM KEY, implicitly declared by this ref (it exists before any fold),
+# so it needs no explicit `state:` entry. `mailbox.partitions` is the FIXED keyspace width; worker
+# scaling leases ranges of it and never changes it. An optional `mailbox.activations` block
+# (`false`, or `{ enabled, idle_seconds }`) tunes the ACTOR_ACTIVATIONS-gated held-state cache
+# per actor (#272 D3). Validated by pr-*/identity-*/id-*/mb-*. Id-minting is RESOLVED at both
+# enqueue doors (#272 D3: a declared identity property that fails to parse errors at the door);
+# the surviving identity-property-not-on-command / id-not-in-payload WARNS name the known
+# non-payload identities — Payment's surrogate `Payment-<intentId>` lanes (facts keyed by the
+# gateway's intent id, lane id = UUIDv5 surrogate) and Customer's RequestPhoneVerification
+# (a side-effect command with no instance yet: any lane serializes it).
+
+principals:
+  CUSTOMER:           { id: { $ref: 'scalars.yaml#/CustomerId' } }
+  RESTAURANT:         { id: { $ref: 'scalars.yaml#/RestaurantId' } }
+  RESTAURANT_ACCOUNT: { id: { $ref: 'scalars.yaml#/RestaurantAccountId' } }
+  RIDER:              { id: { $ref: 'scalars.yaml#/RiderId' } }
+
+MailboxSupervision:
+  type: aggregate
+  identity: { $ref: '#/MailboxSupervision/state/targetMessageId' }   # one supervision stream per supervised mailbox row
+  mailbox:
+    partitions: 1             # operator actions are rare and human-paced; one lane is plenty
+  description: >
+    Operator supervision actions over the actor mailbox itself (#315, ADR-20260803-002712 Q1) —
+    the write-side counterpart of the ADMIN mailboxLanes/poisonedMailboxMessages reads. Keyed by
+    the SUPERVISED row's messageId: every operator intervention on that row accumulates on one
+    stream (`MailboxSupervision-{targetMessageId}`), which is the audit trail SQL runbooks never
+    leave. RequeueMailboxMessage flips a cap-poisoned FAILED row back to RECEIVED through the
+    application MailboxRequeue port (attempts reset, error + backoff schedule cleared, lane
+    nudged); the port write is idempotent (an already-deliverable row is a recorded no-op), so a
+    redelivered requeue command converges instead of erroring. The command itself rides this
+    actor's own mailbox lane like any other command — acceptance-first, pollable via
+    operationStatus. No lifecycle: a supervision stream is a ledger of interventions, not a
+    state machine.
+  receives:
+    - message: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+      emits: [{ $ref: 'events.yaml#/MailboxMessageRequeued' }]
+      throws:
+        - { $ref: 'errors.yaml#/MailboxMessageNotFound' }
+        - { $ref: 'errors.yaml#/MailboxMessageNotRequeueable' }

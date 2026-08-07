@@ -1,0 +1,112 @@
+version: 1
+description: >
+  payments scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+PaymentCaptured:
+  description: "Payment was successfully authorized/captured for an order."
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: "Null when captured before the Order aggregate is created in the saga."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    amount:
+      $ref: 'entities.yaml#/Money'
+  required:
+    - paymentIntentId
+    - restaurantId
+    - amount
+
+
+PaymentFailed:
+  description: "Payment authorization/capture failed; no order is placed."
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+  required:
+    - paymentIntentId
+    - restaurantId
+    - reason
+
+
+PaymentRefunded:
+  description: "A captured payment was refunded (e.g. after rejection or cancellation)."
+  type: object
+  properties:
+    refundId:
+      $ref: 'scalars.yaml#/RefundId'
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    amount:
+      $ref: 'entities.yaml#/Money'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - refundId
+    - paymentIntentId
+    - orderId
+    - restaurantId
+    - amount
+
+
+RefundDenied:
+  description: "The restaurant or an admin denied a pending refund request."
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+      description: "Identity of the Payment aggregate this fact is delivered to (the stream is Payment-{paymentIntentId})."
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason:
+      type: string
+      maxLength: 500
+  required: [paymentIntentId, orderId, reason]
+
+
+# --- Customer store-credit ledger (CustomerCredit aggregate, ADR-20260726-163737, #158) ---
+
+CustomerCreditGranted:
+  description: >
+    Goodwill store credit was granted to a customer (id = customerId). Emitted by the CustomerCredit
+    aggregate when the ReclamationProcess saga resolves a claim as GOODWILL_CREDIT. `reclamationId` is the
+    idempotent grant key: at most one grant per resolved claim, so a re-delivered ReclamationResolved never
+    double-grants. `amount` (Money) increases the customer's available balance.
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount: { $ref: 'entities.yaml#/Money' }
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  required: [customerId, amount, reclamationId]
+
+
+CustomerCreditConsumed:
+  description: >
+    Store credit was spent by a customer at checkout (id = customerId). `amount` (Money) decreases the
+    available balance; `orderId` is the order the credit was applied to. Consuming more than the available
+    balance is rejected (errors.yaml#/InsufficientCustomerCredit) — the balance never goes negative. Driven
+    by the checkout flow (a flagged follow-up, ADR-20260726-163737 §checkout-consume); recorded as a fact.
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount: { $ref: 'entities.yaml#/Money' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  required: [customerId, amount, orderId]

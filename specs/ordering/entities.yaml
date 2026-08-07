@@ -1,0 +1,139 @@
+version: 1
+description: >
+  ordering scope — entities fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `entities.yaml` catalog; $refs stay kind-logical
+  (`entities.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+UberComparison:
+  type: object
+  description: >
+    What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical
+    comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared
+    via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split:
+    restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0);
+    platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
+  properties:
+    total:
+      $ref: '#/Money'
+      description: "Estimated (or real) all-in Uber Eats price for the same order."
+    restaurantShare:
+      $ref: '#/Money'
+      description: "What the restaurant would net on Uber (after its ~30% commission)."
+    riderShare:
+      $ref: '#/Money'
+      description: "What the courier would earn on Uber (base + per-km; per-km not modelled in V0)."
+    platformShare:
+      $ref: '#/Money'
+      description: "What Uber Eats would keep = total − restaurantShare − riderShare."
+    basis:
+      $ref: 'scalars.yaml#/ComparisonBasis'
+      description: "REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED."
+  required: [total, restaurantShare, riderShare, platformShare, basis]
+
+
+Tip:
+  type: object
+  description: "One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%."
+  properties:
+    recipient:
+      $ref: 'scalars.yaml#/TipRecipient'
+    amount:
+      $ref: '#/Money'
+  required: [recipient, amount]
+
+
+# --- Cart ---
+# Pre-checkout selection, built (possibly by a guest) before a Customer exists. Stored as
+# intent (ids + quantity) only; display prices/totals are computed by the read projection from
+# the live catalog, never stored on the cart — same rule as orders (client prices not trusted).
+# Converted to an Order at checkout (CartCheckedOut); Cart and Order stay distinct aggregates.
+
+CartLineItem:
+  type: object
+  description: "A line stored in a cart: the customer's selection by id (no prices stored)."
+  properties:
+    cartLineId:
+      $ref: 'scalars.yaml#/CartLineId'
+    offerId:
+      $ref: 'scalars.yaml#/OfferId'
+    quantity:
+      type: integer
+      minimum: 1
+    selectedOptionIds:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/OptionId'
+  required: [cartLineId, offerId, quantity]
+
+
+Cart:
+  type: object
+  description: >
+    A customer's in-progress selection for a SINGLE restaurant. customerId is null while the
+    visitor is still a guest; it is bound at checkout once the phone is verified.
+  properties:
+    id:
+      $ref: 'scalars.yaml#/CartId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    status:
+      $ref: 'scalars.yaml#/CartStatus'
+    lines:
+      type: array
+      items:
+        $ref: '#/CartLineItem'
+  required: [id, restaurantId, status, lines]
+
+
+# In-app order conversations (ADR-20260725-015921 / PROP-20260725-013008, epic #129): the aggregate
+# `Conversation` is keyed by `orderId` — a conversation's identity IS its order. Its read model
+# (the projection TABLE `OrderConversation`) folds BOTH this Order's status events AND the conversation's
+# own message events for that `orderId`, so "order status participates in the thread" is free (no status
+# copied into a message). The first API-only slice (OpenConversation/PostMessage + the read model) is
+# modelled below and in events/commands/actors; further slices (translation/mute/quick-replies) follow
+# per the sub-issues of #129. The per-message value object is `ConversationMessage` (end of this file).
+Order:
+  type: object
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    id:
+      $ref: 'scalars.yaml#/OrderId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    customerContact:
+      $ref: '#/CustomerContact'
+    serviceType:
+      $ref: 'scalars.yaml#/ServiceType'
+    deliveryAddress:
+      $ref: '#/Address'
+      nullable: true
+    items:
+      type: array
+      items:
+        $ref: '#/OrderLineItem'
+      minItems: 1
+    totalAmount:
+      $ref: '#/Money'
+    status:
+      $ref: 'scalars.yaml#/OrderStatus'
+    note:
+      $ref: 'scalars.yaml#/OrderNote'
+      nullable: true
+  required:
+    - id
+    - restaurantId
+    - customerContact
+    - serviceType
+    - items
+    - totalAmount
+    - status

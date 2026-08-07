@@ -1,0 +1,131 @@
+version: 1
+description: >
+  delivery scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+  DeliveryJob:
+    description: "One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves the rider job list, the restaurant delivery board and admin."
+    reads: [{ $ref: 'database/projection_views.yaml#/View_DeliveryJob' }]
+    properties:
+      id: { $ref: 'scalars.yaml#/DeliveryJobId' }
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+      provider: { $ref: 'scalars.yaml#/DeliveryProvider', nullable: true }
+      courier: { $ref: 'entities.yaml#/Courier', nullable: true }
+      pickupAddress: { $ref: 'entities.yaml#/Address' }
+      dropoffAddress: { $ref: 'entities.yaml#/Address' }
+      estimatedPickupAt: { type: string, format: date-time, nullable: true }
+      estimatedDropoffAt: { type: string, format: date-time, nullable: true }
+      requestedAt: { type: string, format: date-time }
+      pickedUpAt: { type: string, format: date-time, nullable: true }
+      deliveredAt: { type: string, format: date-time, nullable: true }
+
+
+  DeliveryPartnerAvailability:
+    description: "A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue."
+    reads: [{ $ref: 'database/projection_views.yaml#/View_DeliveryPartnerAvailability' }]
+    properties:
+      registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+      channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }
+      cityId: { $ref: 'scalars.yaml#/CityId' }
+      partnerName: { $ref: 'scalars.yaml#/DeliveryPartnerName' }
+      contactEmail: { $ref: 'scalars.yaml#/EmailAddress' }
+      status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+      requestedAt: { type: string, format: date-time }
+      decidedAt: { type: string, format: date-time, nullable: true }
+
+queries:
+
+
+  delivery:
+    description: "The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side."
+    args:
+      orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
+    returns: { $ref: '#/types/DeliveryJob', nullable: true }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+  myDeliveries:
+    description: "The independent rider's assigned/available delivery jobs (rider app)."
+    args:
+      status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    returns: { $ref: '#/types/DeliveryJob', array: true }
+    roles: [RIDER]
+    slice: V0
+
+  restaurantDeliveries:
+    description: "A restaurant's active delivery jobs (delivery board; ownership enforced server-side)."
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
+      status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    returns: { $ref: '#/types/DeliveryJob', array: true }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    slice: V0
+
+
+  deliveryPartnerAvailabilities:
+    description: >
+      Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of
+      its own submissions and an admin works the review queue. Optional filters by city, channel and
+      status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no
+      per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
+    args:
+      cityId: { $ref: 'scalars.yaml#/CityId' }
+      channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }
+      status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+    returns: { $ref: '#/types/DeliveryPartnerAvailability', array: true }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
+
+mutations:
+
+  changeRiderStatus:
+    command: { $ref: 'commands.yaml#/ChangeRiderStatus' }
+    roles: [RIDER, ADMIN]   # the rider's own online/offline toggle; admin manages lifecycle (#95)
+    slice: V0
+
+  acceptDelivery:
+    command: { $ref: 'commands.yaml#/AcceptDelivery' }
+    roles: [RIDER]
+    slice: V0
+
+  confirmPickup:
+    command: { $ref: 'commands.yaml#/ConfirmPickup' }
+    roles: [RIDER]
+    slice: V0
+
+  completeDelivery:
+    command: { $ref: 'commands.yaml#/CompleteDelivery' }
+    roles: [RIDER]
+    slice: V0
+
+  cancelDelivery:
+    command: { $ref: 'commands.yaml#/CancelDelivery' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+
+  escalateDelivery:
+    command: { $ref: 'commands.yaml#/EscalateDelivery' }
+    roles: [RESTAURANT, ADMIN]   # restaurant/operator skips the current channel and advances the ranked dispatch walk (#60)
+    slice: V0
+
+
+  # Delivery partner self-registration (#61)
+  registerDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+    roles: [EXTERNAL, ADMIN]   # the partner self-registers (EXTERNAL partner-ACL); admin may register on their behalf
+    slice: V1
+
+  approveDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+    roles: [ADMIN]             # admin-only review gate
+    slice: V1
+
+  revokeDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+    roles: [EXTERNAL, ADMIN]   # partner withdraws (EXTERNAL) or admin disables
+    slice: V1

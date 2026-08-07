@@ -123,89 +123,6 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. Literal roles like the query (#31), ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
-    #[graphql(name = "paymentStatusChanged", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
-    async fn payment_status_changed(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<PaymentIntent>>> {
-        let bus = ctx.data::<infrastructure::EventBus>()?.clone();
-        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
-        let order_id: domain::generated::scalars::OrderId = input.order_id.into();
-        let admin = matches!(
-            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-            Some(crate::graphql::acl::RequestRole::Admin)
-        );
-        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
-        // Resolve the caller's Customer identity ONCE at setup (same path as queries/paymentStatus).
-        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
-            .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.clone())
-        {
-            Some(auth_ref) => {
-                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
-                customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|c| c.customer_id)
-            }
-            None => None,
-        };
-        let mut rx = bus.subscribe();
-        Ok(async_stream::stream! {
-            use domain::generated::scalars as ds;
-            let owned = |row: &application::pm_state::PaymentProcessRow| {
-                admin
-                    || (caller_customer.is_some() && caller_customer == row.customer_id)
-                    || (session.is_some() && session == row.session_id.as_ref().map(|s| s.0))
-            };
-            // (payment_status, clientSecret presence): dedupe key + what the checkout cares about.
-            let mut last: Option<(ds::PaymentStatus, bool)> = None;
-            if let Ok(Some(row)) = pm.by_order(order_id).await {
-                if !owned(&row) {
-                    return;
-                }
-                let terminal = row.process_status != ds::PaymentProcessStatus::AWAITING_PAYMENT_RESULT;
-                last = Some((row.payment_status, row.client_secret.is_some()));
-                yield Ok(PaymentIntent {
-                    payment_intent_id: row.payment_intent_id.into(),
-                    client_secret: row.client_secret,
-                    status: row.payment_status.into(),
-                });
-                if terminal {
-                    return;
-                }
-            }
-            loop {
-                let evt = match rx.recv().await {
-                    Ok(evt) => evt,
-                    // Lagged: the next Payment envelope re-resolves the CURRENT row anyway.
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                };
-                if !evt.stream_name.starts_with("Payment-") {
-                    continue;
-                }
-                let Ok(Some(row)) = pm.by_order(order_id).await else { continue };
-                if !owned(&row) {
-                    continue;
-                }
-                let key = (row.payment_status, row.client_secret.is_some());
-                if last.as_ref() == Some(&key) {
-                    continue;
-                }
-                last = Some(key);
-                let terminal = row.process_status != ds::PaymentProcessStatus::AWAITING_PAYMENT_RESULT;
-                yield Ok(PaymentIntent {
-                    payment_intent_id: row.payment_intent_id.into(),
-                    client_secret: row.client_secret,
-                    status: row.payment_status.into(),
-                });
-                if terminal {
-                    break;
-                }
-            }
-        })
-    }
     /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
     #[graphql(name = "orderStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OrderStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Order>>> {
@@ -308,6 +225,89 @@ impl SubscriptionRoot {
                         break 'events; // terminal status — complete the subscription
                     }
                     continue 'events;
+                }
+            }
+        })
+    }
+    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. Literal roles like the query (#31), ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
+    #[graphql(name = "paymentStatusChanged", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
+    async fn payment_status_changed(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<PaymentIntent>>> {
+        let bus = ctx.data::<infrastructure::EventBus>()?.clone();
+        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
+        let order_id: domain::generated::scalars::OrderId = input.order_id.into();
+        let admin = matches!(
+            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
+            Some(crate::graphql::acl::RequestRole::Admin)
+        );
+        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
+        // Resolve the caller's Customer identity ONCE at setup (same path as queries/paymentStatus).
+        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
+            .data_opt::<crate::auth::Principal>()
+            .and_then(|p| p.user_id.clone())
+        {
+            Some(auth_ref) => {
+                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
+                customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|c| c.customer_id)
+            }
+            None => None,
+        };
+        let mut rx = bus.subscribe();
+        Ok(async_stream::stream! {
+            use domain::generated::scalars as ds;
+            let owned = |row: &application::pm_state::PaymentProcessRow| {
+                admin
+                    || (caller_customer.is_some() && caller_customer == row.customer_id)
+                    || (session.is_some() && session == row.session_id.as_ref().map(|s| s.0))
+            };
+            // (payment_status, clientSecret presence): dedupe key + what the checkout cares about.
+            let mut last: Option<(ds::PaymentStatus, bool)> = None;
+            if let Ok(Some(row)) = pm.by_order(order_id).await {
+                if !owned(&row) {
+                    return;
+                }
+                let terminal = row.process_status != ds::PaymentProcessStatus::AWAITING_PAYMENT_RESULT;
+                last = Some((row.payment_status, row.client_secret.is_some()));
+                yield Ok(PaymentIntent {
+                    payment_intent_id: row.payment_intent_id.into(),
+                    client_secret: row.client_secret,
+                    status: row.payment_status.into(),
+                });
+                if terminal {
+                    return;
+                }
+            }
+            loop {
+                let evt = match rx.recv().await {
+                    Ok(evt) => evt,
+                    // Lagged: the next Payment envelope re-resolves the CURRENT row anyway.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                if !evt.stream_name.starts_with("Payment-") {
+                    continue;
+                }
+                let Ok(Some(row)) = pm.by_order(order_id).await else { continue };
+                if !owned(&row) {
+                    continue;
+                }
+                let key = (row.payment_status, row.client_secret.is_some());
+                if last.as_ref() == Some(&key) {
+                    continue;
+                }
+                last = Some(key);
+                let terminal = row.process_status != ds::PaymentProcessStatus::AWAITING_PAYMENT_RESULT;
+                yield Ok(PaymentIntent {
+                    payment_intent_id: row.payment_intent_id.into(),
+                    client_secret: row.client_secret,
+                    status: row.payment_status.into(),
+                });
+                if terminal {
+                    break;
                 }
             }
         })

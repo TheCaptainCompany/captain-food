@@ -1,0 +1,47 @@
+version: 2
+description: >
+  Captain.Food command PAYLOAD spec. A command is a request to change state that the system can
+  reject. This file defines ONLY each command's input payload — strongly typed, with exactly the
+  same shape as an event or a value object (description + type + properties + required). It is a
+  pure catalog, parallel to events.yaml.
+
+  Everything ABOUT a command lives where it is owned, not here:
+  - the PERSONA that may send it, the USE CASE it derives from, its release SLICE
+      -> story-map.md (+ api.yaml `@auth` path-role + traceability.md)
+  - the aggregate that HANDLES it and the events it EMITS / reacts to
+      -> actors.yaml
+  - the ERRORS it may raise when rejected (what were `invariants`)
+      -> errors.yaml, mapped per message in actors.yaml `throws`
+
+  Conventions:
+  - Properties carry the caller's INTENT. Aggregate IDs are CLIENT-GENERATED (UUIDs) and supplied IN
+    the command, so creates are idempotent (retry-safe) and the client can read the projection by that
+    id without a round-trip. Two ids are NOT client-minted: `paymentIntentId` (assigned by Stripe), and
+    `customerId` may be re-resolved to an existing Customer on a returning phone — so
+    RegisterCustomerPayload returns the authoritative `customerId` + `created`.
+  - Money (lineTotal, totalAmount) and StockStatus are computed server-side, never trusted from the client.
+
+
+# --- Mailbox supervision (#315, ADR-20260803-002712 Q1) ---
+
+RequeueMailboxMessage:
+  description: >
+    ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an
+    inbound_messages row that the delivery-attempts cap flipped to terminal FAILED
+    (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts
+    reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only
+    cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions,
+    not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId`
+    names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from
+    the envelope's own messageId, which identifies THIS requeue submission.
+  type: object
+  properties:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+  required: [targetMessageId]
+
+# =====================================================================
+# Where the rest lives
+# =====================================================================
+# - Which events each command emits / the saga reacts to:  actors.yaml (`receives` → `emits`).
+# - Which errors each command may raise on rejection:      errors.yaml, mapped in actors.yaml `throws`.
+# - Who may send each command, and its use case / slice:   story-map.md + api.yaml `@auth`.

@@ -108,6 +108,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
     let mut cov = Coverage::default();
 
+    // --- 0. Load-time issues (per-scope fragment merge, ADR-20260807-183024 D1): duplicate item
+    // names across files mapping to one logical catalog gate here like any other error.
+    issues.extend(model.load_issues.iter().cloned());
+
     // --- 1. Referential integrity: every `$ref` anywhere must resolve ---------------------------
     // Iterate every loaded file (incl. globbed database/tables/*.yaml), not just the fixed SOURCE_FILES.
     for (f, v) in &model.defs {
@@ -1172,6 +1176,52 @@ pub(crate) fn validate(model: &Model) -> Report {
                     ));
                 }
             }
+            // Container split (ADR-20260807-183024): every actor/PM is REALIZED by exactly one
+            // container (the bin ↔ deployable binding the #349 emitter chain consumes), and every
+            // l3 component's `container:` names a real l2 container.
+            let c4m = read_c4(model);
+            let container_ids: BTreeSet<&str> = c4m.containers.iter().map(|c| c.id.as_str()).collect();
+            let mut realized_by: HashMap<&str, &str> = HashMap::new();
+            for c in &c4m.containers {
+                for n in &c.realizes {
+                    match realized_by.get(n.as_str()) {
+                        Some(prev) => issues.push(err(
+                            "c4-actor-realized-twice",
+                            format!("architecture/c4-l2.yaml/{}", c.id),
+                            format!(
+                                "'{}' is realized by both '{}' and '{}' — one actor, one bin (the realizes binding becomes the image/Deployment mapping).",
+                                n, prev, c.id
+                            ),
+                        )),
+                        None => {
+                            realized_by.insert(n.as_str(), c.id.as_str());
+                        }
+                    }
+                }
+            }
+            for a in &actors {
+                if !realized_by.contains_key(a.name.as_str()) {
+                    issues.push(warn(
+                        "c4-actor-unrealized",
+                        "architecture/c4-l2.yaml".into(),
+                        format!(
+                            "actor '{}' is realized by no container — it would build into no bin and deploy nowhere (add a realizes: entry).",
+                            a.name
+                        ),
+                    ));
+                }
+            }
+            for comp in &c4m.components {
+                if let Some(home) = &comp.container {
+                    if !container_ids.contains(home.as_str()) {
+                        issues.push(err(
+                            "c4-component-container-unknown",
+                            format!("architecture/c4-l3.yaml/components.{}", comp.id),
+                            format!("component '{}' declares container '{}' which is not an l2 container.", comp.id, home),
+                        ));
+                    }
+                }
+            }
             let mut role_owner: HashMap<String, String> = HashMap::new();
             for (ck, bc) in bcs {
                 let cid = ck.as_str().unwrap_or("");
@@ -1206,6 +1256,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     // exercise it on minimal fixtures without running the whole validator.
     cov.translations += translation_entries(model).len();
     validate_translations(model, &mut issues);
+
+    // --- 14. Per-scope spec folders (ADR-20260807-183024, #375): placement, cross-scope DAG,
+    // kernel purity, api nested-intra-scope. No-op on a flat layout (fixtures have no scope dirs).
+    validate_scopes(model, &mut issues);
 
     // --- 11. SDUI screens (screens/*.yaml, one file per app/audience): each app's spec is bound to the
     // API (ADR-0033/0037). Generic over all screens files — no hard-coded screens filename. Each screen

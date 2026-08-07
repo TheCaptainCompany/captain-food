@@ -1,0 +1,108 @@
+version: 1
+description: >
+  customer scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+
+  # Boundary / projection types with no dedicated entity OR view (shape is fully inline).
+  CustomerProfile:
+    description: >
+      A customer's own profile (display name + contact). Backed by the identity read model; surfaced
+      to the customer only (profile management is V1 — no V0 query yet).
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Customer' }]
+    properties:
+      customerId: { $ref: 'scalars.yaml#/CustomerId' }
+      displayName: { $ref: 'scalars.yaml#/CustomerDisplayName', nullable: true }
+      email: { $ref: 'scalars.yaml#/EmailAddress', nullable: true }
+      emailVerified: { type: boolean }
+      phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+      locale: { $ref: 'scalars.yaml#/Locale', nullable: true }
+      timezone: { $ref: 'scalars.yaml#/TimeZone', nullable: true }
+
+queries:
+
+
+  me:
+    description: "The signed-in customer's own profile (resolves the session authRef → Customer via Customer)."
+    returns: { $ref: '#/types/CustomerProfile', nullable: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+mutations:
+
+
+  # Identity — Supabase Auth wrapped behind GraphQL (ADR-0015). The client never calls Supabase directly.
+  requestPhoneVerification:
+    command: { $ref: 'commands.yaml#/RequestPhoneVerification' }
+    roles: [PUBLIC, CUSTOMER]   # anonymous visitor starts phone sign-in
+    slice: V0
+
+  verifyPhone:
+    command: { $ref: 'commands.yaml#/VerifyPhone' }
+    roles: [PUBLIC, CUSTOMER]   # verify OTP → register (new) or identify (returning)
+    slice: V0
+    # Returning phone => the SAME customerId is re-resolved (idempotent identify); the client reads
+    # its identity via `me` once the operation SUCCEEDs (acceptance-first, ADR-20260720-015500).
+
+  requestEmailVerification:
+    command: { $ref: 'commands.yaml#/RequestEmailVerification' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  confirmEmailVerification:
+    command: { $ref: 'commands.yaml#/ConfirmEmailVerification' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  requestPhoneChange:
+    command: { $ref: 'commands.yaml#/RequestPhoneChange' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  confirmPhoneChange:
+    command: { $ref: 'commands.yaml#/ConfirmPhoneChange' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  changeLanguage:
+    command: { $ref: 'commands.yaml#/ChangeLanguage' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  markRestaurantAsFavorite:
+    command: { $ref: 'commands.yaml#/MarkRestaurantAsFavorite' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  unmarkRestaurantAsFavorite:
+    command: { $ref: 'commands.yaml#/UnmarkRestaurantAsFavorite' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  updateCustomerInfo:
+    command: { $ref: 'commands.yaml#/UpdateCustomerInfo' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  setCustomerPreferences:
+    command: { $ref: 'commands.yaml#/SetCustomerPreferences' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  setCustomerAddress:
+    command: { $ref: 'commands.yaml#/SetCustomerAddress' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  removeCustomerAddress:
+    command: { $ref: 'commands.yaml#/RemoveCustomerAddress' }
+    roles: [CUSTOMER]
+    slice: V1
+
+  setCustomerPaymentMethod:
+    command: { $ref: 'commands.yaml#/SetCustomerPaymentMethod' }
+    roles: [CUSTOMER]
+    slice: V1

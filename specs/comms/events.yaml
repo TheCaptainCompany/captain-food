@@ -1,0 +1,92 @@
+version: 1
+description: >
+  comms scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Order conversations (#129) ---
+
+ConversationOpened:
+  description: >
+    Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether
+    customer<->restaurant direct chat is enabled for this order (default true).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true   # guest orders have no customer participant (#235 consequence A: the aggregate folds the participants it authorizes against)
+    customerChatEnabled: { type: boolean }
+  required: [orderId, restaurantId, customerChatEnabled]
+
+
+MessagePosted:
+  description: >
+    A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC)
+    from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    authorRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    visibility: { $ref: 'scalars.yaml#/MessageVisibility' }
+    body: { $ref: 'scalars.yaml#/MessageBody' }
+    originalLocale: { $ref: 'scalars.yaml#/Locale' }
+    attachmentRefs:
+      type: array
+      items: { $ref: 'scalars.yaml#/AttachmentRef' }
+      nullable: true
+  required: [orderId, messageId, authorRole, visibility, body, originalLocale]
+
+
+MessageTranslationAdded:
+  description: >
+    A posted conversation message was translated into a target locale and the result cached (persisted)
+    for reuse (translate once, reuse; #129). Idempotent per (message, locale).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    locale: { $ref: 'scalars.yaml#/Locale' }
+    text: { $ref: 'scalars.yaml#/TranslatedText' }
+  required: [orderId, messageId, locale, text]
+
+
+AdminInvitedToConversation:
+  description: >
+    An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or
+    rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason: { $ref: 'scalars.yaml#/EscalationReason' }
+  required: [orderId, reason]
+
+
+ParticipantMuted:
+  description: >
+    A participant role was muted in an order's conversation, with a recorded justification
+    (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    reason: { $ref: 'scalars.yaml#/MuteReason' }
+    until:
+      type: string
+      format: date-time
+      nullable: true
+  required: [orderId, mutedRole, reason]
+
+
+ParticipantUnmuted:
+  description: >
+    A previously muted participant role was unmuted in an order's conversation
+    (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+  required: [orderId, mutedRole]

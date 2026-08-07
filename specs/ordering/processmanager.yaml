@@ -1,0 +1,207 @@
+version: 1
+description: >
+  ordering scope — processmanager fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `processmanager.yaml` catalog; $refs stay kind-logical
+  (`processmanager.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Process managers (state-table orchestrators) ---
+
+PlaceOrderProcess:
+  type: process-manager
+  description: >
+    The checkout saga. On PlaceOrder: reads the OPEN cart, re-validates and prices it server-side
+    against the live catalog, creates the Stripe PaymentIntent, and freezes the full priced checkout
+    onto PaymentIntentCreated (ADR-20260719-014434) — the state row (one live run per cart) is what
+    prevents concurrent checkouts of the same cart. On PaymentCaptured: materializes the Order and
+    closes the cart from the frozen snapshot alone. On PaymentFailed: resolves the run; the cart
+    stays OPEN.
+  state_table: { $ref: 'database/tables/process_managers.yaml#/payment_process_manager' }
+  ports:
+    payment: { $ref: 'services.yaml#/payment' }
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      description: >
+        Validate the checkout, price the cart server-side (never trusting client amounts), create the
+        Stripe PaymentIntent, and open the run AWAITING_PAYMENT_RESULT.
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+            as: cart
+            where: { cart_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/cartId' } } }
+            note: "The cart to check out, with its projection-priced lines."
+        - guard: { throws: { $ref: 'errors.yaml#/CartNotFound' }, note: "The cart exists." }
+        - guard:
+            that: { cart: { status: { const: OPEN } } }
+            throws: { $ref: 'errors.yaml#/CartNotOpen' }
+        - guard: { throws: { $ref: 'errors.yaml#/CartEmpty' }, note: "The cart has at least one line." }
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+            as: restaurant
+            where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
+        - guard: { throws: { $ref: 'errors.yaml#/RestaurantPaused' }, note: "restaurant.order_acceptance is not PAUSED." }
+        - guard: { throws: { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }, note: "A LIVE order never targets a TEST restaurant (ADR-0038)." }
+        - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
+        - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
+        - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }
+        - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
+        - call:
+            port: payment
+            operation: request
+            note: "Server-side pricing feeds the intent amount; the priced checkout is frozen for the snapshot."
+        - guard: { throws: { $ref: 'errors.yaml#/PaymentDeclined' }, note: "The gateway accepted the intent creation." }
+        - deliver:
+            event: { $ref: 'events.yaml#/PaymentIntentCreated' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              paymentIntentId: { from_port: payment.request }
+            note: "Birth of the Payment; carries the frozen checkout snapshot (ADR-20260719-014434)."
+        - state:
+            set:
+              cart_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/cartId' } }
+              order_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/orderId' } }
+              payment_intent_id: { from_port: payment.request }
+              process_status: { const: AWAITING_PAYMENT_RESULT }
+              payment_status: { const: PENDING }
+
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      description: >
+        The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the
+        cart from the checkout snapshot frozen on PaymentIntentCreated.
+      steps:
+        - state:
+            by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' } } }
+            note: "Load the checkout run this capture belongs to."
+        - guard:
+            throws: { $ref: 'errors.yaml#/PaymentEventOrphaned' }
+            note: "ERROR — a capture matching no run means money was taken with no order to materialize; abort and surface (the fact stays recorded on the Payment)."
+        - state:
+            expect: { process_status: { const: AWAITING_PAYMENT_RESULT } }
+            note: "Already-resolved run → skip (benign Stripe re-delivery)."
+        - deliver:
+            event: { $ref: 'events.yaml#/OrderPlaced' }
+            to: { $ref: 'actors.yaml#/Order' }
+            with:
+              orderId: { from_state: order_id }
+            note: "Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently."
+        - deliver:
+            event: { $ref: 'events.yaml#/CartCheckedOut' }
+            to: { $ref: 'actors.yaml#/Cart' }
+            with:
+              cartId: { from_state: cart_id }
+              orderId: { from_state: order_id }
+        - state:
+            set:
+              payment_status: { const: CAPTURED }
+              process_status: { const: ORDER_PLACED }
+              last_processed_stripe_event_id: { from_envelope: event_id }
+
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      description: "Payment failed: resolve the run; no order is placed and the cart stays OPEN."
+      steps:
+        - state:
+            by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentFailed/properties/paymentIntentId' } } }
+            note: "Load the checkout run this failure belongs to."
+        - guard:
+            throws: { $ref: 'errors.yaml#/PaymentEventOrphaned' }
+            note: "ERROR — a failure matching no run is the same anomaly class as an orphan capture; abort and surface."
+        - state:
+            expect: { process_status: { const: AWAITING_PAYMENT_RESULT } }
+            note: "Already-resolved run → skip (benign Stripe re-delivery)."
+        - state:
+            set:
+              payment_status: { const: FAILED }
+              process_status: { const: FAILED }
+              last_processed_stripe_event_id: { from_envelope: event_id }
+            note: "No domain event — the cart stays OPEN for the customer to retry."
+
+
+CartBindingProcess:
+  type: process-manager
+  description: >
+    Binds a returning visitor's OPEN guest carts to their Customer. Reacts to CustomerIdentified
+    (authRef → customerId) by sending BindCartToCustomer for each OPEN cart of the session — the Cart
+    aggregate owns the bind fact (CartBoundToCustomer); the state row makes a re-delivered
+    CustomerIdentified a no-op.
+  state_table: { $ref: 'database/tables/process_managers.yaml#/cart_binding_process_manager' }
+  receives:
+    - message: { $ref: 'events.yaml#/CustomerIdentified' }
+      description: "Bind every OPEN cart of the identified session to the customer."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+            as: open_carts
+            where:
+              session_id: { from: { $ref: 'events.yaml#/CustomerIdentified/properties/sessionId' } }
+              status: { const: OPEN }
+        - send:
+            command: { $ref: 'commands.yaml#/BindCartToCustomer' }
+            to: { $ref: 'actors.yaml#/Cart' }
+            for_each: open_carts
+            with:
+              cartId: { from_read: open_carts.cart_id }
+              customerId: { from: { $ref: 'events.yaml#/CustomerIdentified/properties/customerId' } }
+            note: "One command per open cart; the Cart validates (one-time bind) and emits CartBoundToCustomer."
+        - state:
+            set:
+              session_id: { from: { $ref: 'events.yaml#/CustomerIdentified/properties/sessionId' } }
+              customer_id: { from: { $ref: 'events.yaml#/CustomerIdentified/properties/customerId' } }
+
+
+ReclamationProcess:
+  type: process-manager
+  description: >
+    Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit
+    automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by
+    sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger
+    dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). REFUND arm (WIRED, ADR-20260727-090000 / #207): on a FULL_REFUND / PARTIAL_REFUND resolution the saga
+    drives the EXISTING refund path (RefundProcess) to a SETTLED Stripe refund -- the restaurant's
+    resolution IS the approval, so the refund settles WITHOUT a separate manual ApproveRefund. In one
+    reaction the saga reads the order (cross-aggregate, by orderId) for the captured total + payment
+    intent, then drives RefundProcess's two application legs in order: on_refund_requested OPENS the
+    PENDING_APPROVAL run (delivering RefundOpened to the Payment so View_PendingRefunds folds it) and then,
+    because the resolution IS the approval, approve_refund drives the Stripe refund (delivering
+    RefundApproved, run -> APPROVED_AWAITING_SETTLEMENT); the inbound PaymentRefunded later settles it via
+    the normal RefundProcess leg. RefundProcess stays the ONE Stripe-driving mechanism -- nothing is
+    duplicated. FULL_REFUND refunds the captured total; PARTIAL_REFUND the recorded amount, rejected with
+    errors.yaml#/RefundExceedsCaptured when it exceeds the captured total
+    (rules.yaml#/RefundResolutionCappedAtCaptured). Idempotent per reclamationId: a re-delivered
+    resolution finds the run already APPROVED/settled (the RefundProcess state-row admission guard) and
+    RefundOpened/RefundApproved already recorded (the Payment's own fold), so it never opens or settles a
+    second refund.
+    REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a
+    NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends
+    PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a
+    $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below
+    still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read
+    + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's
+    hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch
+    decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
+  receives:
+    - message: { $ref: 'events.yaml#/ReclamationResolved' }
+      description: >
+        On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when
+        resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign
+        no-op (the refund arm, #207, and the replacement arm, #159, are handled by the wrapper seam before this pipeline runs).
+      emits:
+        # Wrapper-seam REFUND arm (#207, ADR-20260727-090000): a FULL_REFUND / PARTIAL_REFUND
+        # resolution drives RefundProcess to a settled refund, delivering these to the Payment
+        # (RefundProcess stays the one Stripe-driving mechanism). Not step-derived -- carried in
+        # the hand-written wrapper seam, declared here so behaviour-test coverage sees them.
+        - { $ref: 'events.yaml#/RefundOpened' }
+        - { $ref: 'events.yaml#/RefundApproved' }
+      throws:
+        # Amount safety (rules.yaml#/RefundResolutionCappedAtCaptured): a PARTIAL over the captured total.
+        - { $ref: 'errors.yaml#/RefundExceedsCaptured' }
+      steps:
+        - send:
+            command: { $ref: 'commands.yaml#/GrantCustomerCredit' }
+            to: { $ref: 'actors.yaml#/CustomerCredit' }
+            with:
+              customerId: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/customerId' } }
+              amount: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/refundAmount' } }
+              reclamationId: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/reclamationId' } }
+            note: "GOODWILL_CREDIT arm: the CustomerCredit ledger records CustomerCreditGranted (idempotent per reclamationId)."
+        - guard:
+            skip: true
+            note: "branch: GOODWILL_CREDIT (with a recorded amount) grants credit via the generated linear branch; FULL_REFUND / PARTIAL_REFUND (refund arm, #207) and REPLACEMENT (#159) are driven by the hand-written wrapper seam BEFORE this pipeline runs, so they never reach this branch; any other resolution is a benign no-op."

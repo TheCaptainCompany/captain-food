@@ -8,10 +8,14 @@
 # Custom scalars
 # ==============================================================================
 scalar DateTime
-scalar RestaurantAccountId
-scalar RestaurantId
 scalar CatalogId
 scalar ProductCategoryId
+scalar ImageId
+scalar CatalogName
+scalar CatalogCategoryName
+scalar ProductDescription
+scalar OptionListName
+scalar RestaurantId
 scalar ProductId
 scalar SessionId
 scalar OfferId
@@ -20,47 +24,23 @@ scalar OptionId
 scalar OrderId
 scalar CustomerId
 scalar CartId
-scalar CartLineId
 scalar CorrelationId
 scalar CauseId
 scalar MessageId
 scalar TraceId
-scalar DeliveryJobId
 scalar RiderId
 scalar PaymentIntentId
-scalar RefundId
-scalar UserId
-scalar AddressId
-scalar PaymentMethodId
-scalar ImageId
 scalar ExternalReference
-scalar ExternalIdentifierKey
-scalar GooglePlaceId
-scalar Latitude
-scalar Longitude
-scalar GoogleRating
-scalar WebUrl
 scalar Slug
 scalar RestaurantDisplayName
-scalar RestaurantLegalName
-scalar CatalogName
-scalar CatalogCategoryName
 scalar ProductName
-scalar ProductDescription
-scalar RestaurantDescription
 scalar OfferName
-scalar OptionListName
 scalar OptionName
 scalar Tag
 scalar EmailAddress
 scalar PhoneNumber
-scalar DialingCode
-scalar NationalPhoneNumber
-scalar OtpCode
-scalar EmailVerificationToken
 scalar AddressLine
 scalar CityName
-scalar CityId
 scalar PostalCode
 scalar CountryCode
 scalar TimeZone
@@ -68,29 +48,13 @@ scalar Locale
 scalar CurrencyCode
 scalar MoneyCents
 scalar PageLimit
-scalar PageOffset
 scalar TaxRatePercent
-scalar MarginPercent
 scalar Quantity
 scalar CustomerDisplayName
 scalar OrderNote
-scalar StarRating
-scalar RatingComment
-scalar DeliveryDissatisfactionReason
-scalar TimeOfDay
-scalar ProspectionScore
 scalar MailboxActorType
-scalar DeliveryChannelKey
-scalar DeliveryPartnerRegistrationId
-scalar DeliveryPartnerName
-scalar ConversationMessageId
-scalar MessageBody
 scalar AttachmentRef
-scalar MuteReason
-scalar EscalationReason
-scalar TranslatedText
 scalar ReclamationId
-scalar ReclamationDescription
 scalar ReclamationReason
 scalar ConfigBoolean
 scalar StripeSecretKey
@@ -104,29 +68,55 @@ scalar DepartmentList
 scalar HoneycombIngestKey
 scalar TraceSampleRatio
 scalar LogLevel
+scalar RestaurantAccountId
+scalar ConversationMessageId
+scalar MessageBody
+scalar MuteReason
+scalar EscalationReason
+scalar TranslatedText
+scalar AddressId
+scalar PaymentMethodId
+scalar DialingCode
+scalar NationalPhoneNumber
+scalar OtpCode
+scalar EmailVerificationToken
+scalar DeliveryJobId
+scalar CityId
+scalar DeliveryChannelKey
+scalar DeliveryPartnerRegistrationId
+scalar DeliveryPartnerName
+scalar UserId
+scalar ExternalIdentifierKey
+scalar GooglePlaceId
+scalar Latitude
+scalar Longitude
+scalar GoogleRating
+scalar WebUrl
+scalar RestaurantLegalName
+scalar RestaurantDescription
+scalar PageOffset
+scalar MarginPercent
+scalar TimeOfDay
+scalar ProspectionScore
+scalar CartLineId
+scalar StarRating
+scalar RatingComment
+scalar DeliveryDissatisfactionReason
+scalar ReclamationDescription
+scalar RefundId
 
 # ==============================================================================
 # Enums
 # ==============================================================================
-enum ThumbRating {
-  UP
-  DOWN
+enum CatalogItemAvailability {
+  AVAILABLE
+  UNAVAILABLE
 }
 
-enum DeliveryTimeliness {
-  ON_TIME
-  ACCEPTABLE_DELAY
-  TOO_LATE
-}
-
-enum Weekday {
-  MONDAY
-  TUESDAY
-  WEDNESDAY
-  THURSDAY
-  FRIDAY
-  SATURDAY
-  SUNDAY
+enum StockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
 }
 
 enum ServiceType {
@@ -156,84 +146,10 @@ enum DeliveryStatus {
   CANCELLED
 }
 
-enum RiderStatus {
-  OFFLINE
-  AVAILABLE
-  ON_DELIVERY
-  SUSPENDED
-}
-
-enum DeliveryProvider {
-  PARTNER
-  INDEPENDENT
-}
-
-enum RestaurantStatus {
-  DRAFT
-  ACTIVE
-  INACTIVE
-}
-
-enum RestaurantListingStatus {
-  NON_PARTNER
-  PASSIVE_PARTNER
-  ACTIVE_PARTNER
-}
-
-enum GbpLinkStatus {
-  UNSET
-  CONFIGURED
-  VERIFIED
-  BROKEN
-}
-
-enum ProspectPipelineStatus {
-  NEW
-  CONTACTED
-  COLD
-  REPLIED
-  CONVERTED
-}
-
-enum OutreachChannel {
-  EMAIL
-  SLACK
-  PHONE
-}
-
-enum TipRecipient {
-  RIDER
-  RESTAURANT
-  CAPTAIN
-}
-
-enum Tipper {
-  CUSTOMER
-  RESTAURANT
-}
-
-enum CartStatus {
-  OPEN
-  CHECKED_OUT
-}
-
-enum OrderAcceptanceMode {
-  NORMAL
-  BUSY
-  PAUSED
-}
-
 enum PaymentStatus {
   PENDING
   CAPTURED
   FAILED
-  REFUNDED
-}
-
-enum RefundStatus {
-  REQUESTED
-  APPROVED
-  DENIED
   REFUNDED
 }
 
@@ -311,29 +227,6 @@ enum DeliveryChannelKind {
   PARTNER
 }
 
-enum CityAvailabilityStatus {
-  PENDING
-  APPROVED
-  REVOKED
-}
-
-enum CatalogItemAvailability {
-  AVAILABLE
-  UNAVAILABLE
-}
-
-enum StockStatus {
-  IN_STOCK
-  LOW_STOCK
-  OUT_OF_STOCK
-}
-
-enum PriceRange {
-  BUDGET
-  MODERATE
-  PREMIUM
-}
-
 enum CuisineCategory {
   FAST_FOOD
   PIZZA
@@ -345,13 +238,6 @@ enum CuisineCategory {
 enum ComparisonBasis {
   ESTIMATED
   REAL
-}
-
-enum RestaurantListKey {
-  ORDER_AGAIN
-  RECOMMENDED
-  TOP_DEALS
-  GREEN_PACKAGING
 }
 
 enum Mode {
@@ -367,18 +253,6 @@ enum UserType {
   RIDER
   ADMIN
   EXTERNAL
-}
-
-enum MessageVisibility {
-  PUBLIC
-  INTERNAL
-}
-
-enum ConversationAuthorRole {
-  CUSTOMER
-  RESTAURANT
-  RIDER
-  ADMIN
 }
 
 enum ReclamationCategory {
@@ -399,10 +273,16 @@ enum ReclamationResolution {
   REJECTED
 }
 
-enum ReclamationStatus {
-  OPEN
-  RESOLVED
-  REJECTED
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum ConversationAuthorRole {
+  CUSTOMER
+  RESTAURANT
+  RIDER
+  ADMIN
 }
 
 enum ClaimTimelineEventKind {
@@ -411,6 +291,126 @@ enum ClaimTimelineEventKind {
   REJECTED
   REOPENED
   EVIDENCE_ATTACHED
+}
+
+enum RiderStatus {
+  OFFLINE
+  AVAILABLE
+  ON_DELIVERY
+  SUSPENDED
+}
+
+enum DeliveryProvider {
+  PARTNER
+  INDEPENDENT
+}
+
+enum CityAvailabilityStatus {
+  PENDING
+  APPROVED
+  REVOKED
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum RestaurantStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+enum RestaurantListingStatus {
+  NON_PARTNER
+  PASSIVE_PARTNER
+  ACTIVE_PARTNER
+}
+
+enum GbpLinkStatus {
+  UNSET
+  CONFIGURED
+  VERIFIED
+  BROKEN
+}
+
+enum ProspectPipelineStatus {
+  NEW
+  CONTACTED
+  COLD
+  REPLIED
+  CONVERTED
+}
+
+enum OutreachChannel {
+  EMAIL
+  SLACK
+  PHONE
+}
+
+enum OrderAcceptanceMode {
+  NORMAL
+  BUSY
+  PAUSED
+}
+
+enum PriceRange {
+  BUDGET
+  MODERATE
+  PREMIUM
+}
+
+enum RestaurantListKey {
+  ORDER_AGAIN
+  RECOMMENDED
+  TOP_DEALS
+  GREEN_PACKAGING
+}
+
+enum ThumbRating {
+  UP
+  DOWN
+}
+
+enum DeliveryTimeliness {
+  ON_TIME
+  ACCEPTABLE_DELAY
+  TOO_LATE
+}
+
+enum TipRecipient {
+  RIDER
+  RESTAURANT
+  CAPTAIN
+}
+
+enum Tipper {
+  CUSTOMER
+  RESTAURANT
+}
+
+enum CartStatus {
+  OPEN
+  CHECKED_OUT
+}
+
+enum ReclamationStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  DENIED
+  REFUNDED
 }
 
 # ==============================================================================
@@ -424,6 +424,24 @@ directive @reads(views: [String!]!) on FIELD_DEFINITION
 # ==============================================================================
 # Output types (entities.yaml + FK-derived navigation + projections)
 # ==============================================================================
+type Stock {
+  quantity: Quantity!
+  lowStockThreshold: Quantity
+  status: StockStatus!
+  expiresAt: DateTime
+}
+
+type ProductItemOption {
+  id: OptionId!
+  ref: ExternalReference
+  optionListId: OptionListId!
+  name: OptionName!
+  price: Money!
+  default: Boolean!
+  availability: CatalogItemAvailability!
+  stock: Stock
+}
+
 type Money {
   amountCents: MoneyCents!
   currency: CurrencyCode!
@@ -440,19 +458,6 @@ type PaymentBreakdown {
   captainNet: Money!
 }
 
-type UberComparison {
-  total: Money!
-  restaurantShare: Money!
-  riderShare: Money!
-  platformShare: Money!
-  basis: ComparisonBasis!
-}
-
-type Tip {
-  recipient: TipRecipient!
-  amount: Money!
-}
-
 type Courier {
   displayName: String!
   phone: PhoneNumber
@@ -465,13 +470,6 @@ type TaxRate {
   eatIn: TaxRatePercent
 }
 
-type Stock {
-  quantity: Quantity!
-  lowStockThreshold: Quantity
-  status: StockStatus!
-  expiresAt: DateTime
-}
-
 type Address {
   line1: AddressLine!
   line2: AddressLine
@@ -480,61 +478,10 @@ type Address {
   country: CountryCode!
 }
 
-type OpeningHoursSlot {
-  weekday: Weekday!
-  from: TimeOfDay!
-  to: TimeOfDay!
-}
-
-type RestaurantContact {
-  email: EmailAddress
-  phone: PhoneNumber
-}
-
-type GeoPoint {
-  latitude: Latitude!
-  longitude: Longitude!
-}
-
-type ExternalIdentifier {
-  key: ExternalIdentifierKey!
-  value: String!
-}
-
 type CustomerContact {
   displayName: CustomerDisplayName!
   email: EmailAddress!
   phone: PhoneNumber!
-}
-
-type RestaurantAccount {
-  id: RestaurantAccountId!
-  ref: ExternalReference
-  legalName: RestaurantLegalName!
-  contact: RestaurantContact!
-  defaultCurrency: CurrencyCode!
-  defaultTaxRate: TaxRate!
-  timezone: TimeZone
-  createdBy: UserId!
-  createdAt: DateTime!
-}
-
-type ProductItemOption {
-  id: OptionId!
-  ref: ExternalReference
-  optionListId: OptionListId!
-  name: OptionName!
-  price: Money!
-  default: Boolean!
-  availability: CatalogItemAvailability!
-  stock: Stock
-}
-
-type CartLineItem {
-  cartLineId: CartLineId!
-  offerId: OfferId!
-  quantity: Int!
-  selectedOptionIds: [OptionId!]!
 }
 
 type SelectedOption {
@@ -605,36 +552,57 @@ type ClaimTimelineEntry {
   at: DateTime!
 }
 
-type Restaurant {
-  id: RestaurantId!
-  accountId: RestaurantAccountId
-  listingStatus: RestaurantListingStatus!
-  orderable: Boolean!
-  externalIdentifiers: [ExternalIdentifier!]!
-  slug: Slug
-  displayName: RestaurantDisplayName!
-  description: RestaurantDescription
-  tags: [Tag!]!
-  cuisineCategory: CuisineCategory
-  rating: GoogleRating
-  reviewsCount: Int
-  website: WebUrl
-  gbpOrderUrl: WebUrl
-  gbpLinkStatus: GbpLinkStatus
-  address: Address!
-  location: GeoPoint
-  openingHours: [OpeningHoursSlot!]!
-  status: RestaurantStatus!
-  orderAcceptance: OrderAcceptanceMode!
+type OpeningHoursSlot {
+  weekday: Weekday!
+  from: TimeOfDay!
+  to: TimeOfDay!
+}
+
+type RestaurantContact {
+  email: EmailAddress
+  phone: PhoneNumber
+}
+
+type GeoPoint {
+  latitude: Latitude!
+  longitude: Longitude!
+}
+
+type ExternalIdentifier {
+  key: ExternalIdentifierKey!
+  value: String!
+}
+
+type RestaurantAccount {
+  id: RestaurantAccountId!
+  ref: ExternalReference
+  legalName: RestaurantLegalName!
+  contact: RestaurantContact!
   defaultCurrency: CurrencyCode!
+  defaultTaxRate: TaxRate!
   timezone: TimeZone
-  preparationTimeMinutes: Int
-  updatedAt: DateTime!
-  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
-  prospects: [Prospect!]!
-  catalogs: [Catalog!]!
-  carts: [Cart!]! @auth(requires: [ADMIN])
-  orders: [Order!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
+  createdBy: UserId!
+  createdAt: DateTime!
+}
+
+type UberComparison {
+  total: Money!
+  restaurantShare: Money!
+  riderShare: Money!
+  platformShare: Money!
+  basis: ComparisonBasis!
+}
+
+type Tip {
+  recipient: TipRecipient!
+  amount: Money!
+}
+
+type CartLineItem {
+  cartLineId: CartLineId!
+  offerId: OfferId!
+  quantity: Int!
+  selectedOptionIds: [OptionId!]!
 }
 
 type Catalog {
@@ -646,50 +614,6 @@ type Catalog {
   products: [Product!]!
   optionLists: [OptionList!]!
   updatedAt: DateTime!
-  restaurant: Restaurant!
-}
-
-type Cart {
-  id: CartId!
-  restaurantId: RestaurantId!
-  customerId: CustomerId
-  status: CartStatus!
-  lines: [OrderLineItem!]!
-  totalAmount: Money!
-  breakdown: PaymentBreakdown
-  uberComparison: UberComparison
-  updatedAt: DateTime!
-  restaurant: Restaurant!
-}
-
-type Order {
-  id: OrderId!
-  ref: ExternalReference!
-  restaurantId: RestaurantId!
-  customerId: CustomerId
-  status: OrderStatus!
-  serviceType: ServiceType!
-  items: [OrderLineItem!]!
-  totalAmount: Money!
-  breakdown: PaymentBreakdown!
-  deliveryAddress: Address
-  estimatedReadyAt: DateTime
-  placedAt: DateTime!
-  statusChangedAt: DateTime!
-  paymentStatus: PaymentStatus!
-  restaurantStars: StarRating
-  ratingComment: RatingComment
-  riderThumb: ThumbRating
-  deliveryTimeliness: DeliveryTimeliness
-  riderTip: Money
-  restaurantTip: Money
-  captainTip: Money
-  uberComparison: UberComparison
-  deliveryStatus: DeliveryStatus
-  courier: Courier
-  estimatedDropoffAt: DateTime
-  ratedAt: DateTime
-  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
   restaurant: Restaurant!
 }
 
@@ -742,22 +666,6 @@ type Option {
   stockStatus: StockStatus
 }
 
-type CustomerProfile {
-  customerId: CustomerId!
-  displayName: CustomerDisplayName
-  email: EmailAddress
-  emailVerified: Boolean!
-  phone: PhoneNumber!
-  locale: Locale
-  timezone: TimeZone
-}
-
-type PaymentIntent {
-  paymentIntentId: PaymentIntentId!
-  clientSecret: String
-  status: PaymentStatus!
-}
-
 type MutationAcceptance {
   messageId: MessageId!
   correlationId: CorrelationId!
@@ -803,6 +711,33 @@ type Operation {
   occurredAt: DateTime!
 }
 
+type OrderConversation {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  status: OrderStatus!
+  customerChatEnabled: Boolean!
+  openedAt: DateTime!
+  messages: [ConversationMessage!]!
+  claimEvents: [ClaimTimelineEntry!]!
+}
+
+type ConversationInternalNotes {
+  orderId: OrderId!
+  notes: [ConversationMessage!]!
+  adminInvited: Boolean!
+  mutedParticipants: [MutedParticipant!]!
+}
+
+type CustomerProfile {
+  customerId: CustomerId!
+  displayName: CustomerDisplayName
+  email: EmailAddress
+  emailVerified: Boolean!
+  phone: PhoneNumber!
+  locale: Locale
+  timezone: TimeZone
+}
+
 type DeliveryJob {
   id: DeliveryJobId!
   orderId: OrderId!
@@ -821,14 +756,6 @@ type DeliveryJob {
   restaurant: Restaurant!
 }
 
-type DeliverySatisfaction {
-  orderId: OrderId!
-  restaurantId: RestaurantId!
-  timeliness: DeliveryTimeliness!
-  reason: DeliveryDissatisfactionReason
-  recordedAt: DateTime!
-}
-
 type DeliveryPartnerAvailability {
   registrationId: DeliveryPartnerRegistrationId!
   channel: DeliveryChannelKey!
@@ -838,6 +765,100 @@ type DeliveryPartnerAvailability {
   status: CityAvailabilityStatus!
   requestedAt: DateTime!
   decidedAt: DateTime
+}
+
+type Restaurant {
+  id: RestaurantId!
+  accountId: RestaurantAccountId
+  listingStatus: RestaurantListingStatus!
+  orderable: Boolean!
+  externalIdentifiers: [ExternalIdentifier!]!
+  slug: Slug
+  displayName: RestaurantDisplayName!
+  description: RestaurantDescription
+  tags: [Tag!]!
+  cuisineCategory: CuisineCategory
+  rating: GoogleRating
+  reviewsCount: Int
+  website: WebUrl
+  gbpOrderUrl: WebUrl
+  gbpLinkStatus: GbpLinkStatus
+  address: Address!
+  location: GeoPoint
+  openingHours: [OpeningHoursSlot!]!
+  status: RestaurantStatus!
+  orderAcceptance: OrderAcceptanceMode!
+  defaultCurrency: CurrencyCode!
+  timezone: TimeZone
+  preparationTimeMinutes: Int
+  updatedAt: DateTime!
+  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
+  prospects: [Prospect!]!
+  catalogs: [Catalog!]!
+  carts: [Cart!]! @auth(requires: [ADMIN])
+  orders: [Order!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
+}
+
+type Prospect {
+  restaurantId: RestaurantId!
+  score: ProspectionScore!
+  pipelineStatus: ProspectPipelineStatus!
+  contactsCount: Int!
+  lastContactedAt: DateTime
+  repliedAt: DateTime
+  restaurant: Restaurant!
+}
+
+type Cart {
+  id: CartId!
+  restaurantId: RestaurantId!
+  customerId: CustomerId
+  status: CartStatus!
+  lines: [OrderLineItem!]!
+  totalAmount: Money!
+  breakdown: PaymentBreakdown
+  uberComparison: UberComparison
+  updatedAt: DateTime!
+  restaurant: Restaurant!
+}
+
+type Order {
+  id: OrderId!
+  ref: ExternalReference!
+  restaurantId: RestaurantId!
+  customerId: CustomerId
+  status: OrderStatus!
+  serviceType: ServiceType!
+  items: [OrderLineItem!]!
+  totalAmount: Money!
+  breakdown: PaymentBreakdown!
+  deliveryAddress: Address
+  estimatedReadyAt: DateTime
+  placedAt: DateTime!
+  statusChangedAt: DateTime!
+  paymentStatus: PaymentStatus!
+  restaurantStars: StarRating
+  ratingComment: RatingComment
+  riderThumb: ThumbRating
+  deliveryTimeliness: DeliveryTimeliness
+  riderTip: Money
+  restaurantTip: Money
+  captainTip: Money
+  uberComparison: UberComparison
+  deliveryStatus: DeliveryStatus
+  courier: Courier
+  estimatedDropoffAt: DateTime
+  ratedAt: DateTime
+  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
+  restaurant: Restaurant!
+}
+
+type DeliverySatisfaction {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  timeliness: DeliveryTimeliness!
+  reason: DeliveryDissatisfactionReason
+  recordedAt: DateTime!
 }
 
 type Reclamation {
@@ -857,6 +878,12 @@ type Reclamation {
   overdue: Boolean!
 }
 
+type PaymentIntent {
+  paymentIntentId: PaymentIntentId!
+  clientSecret: String
+  status: PaymentStatus!
+}
+
 type CustomerCredit {
   customerId: CustomerId!
   balanceCents: MoneyCents!
@@ -873,16 +900,6 @@ type Refund {
   refundId: RefundId
   requestedAt: DateTime!
   decidedAt: DateTime
-}
-
-type Prospect {
-  restaurantId: RestaurantId!
-  score: ProspectionScore!
-  pipelineStatus: ProspectPipelineStatus!
-  contactsCount: Int!
-  lastContactedAt: DateTime
-  repliedAt: DateTime
-  restaurant: Restaurant!
 }
 
 type PricingPolicy {
@@ -910,44 +927,274 @@ type UberSplitPolicy {
   effectiveFrom: DateTime!
 }
 
-type OrderConversation {
-  orderId: OrderId!
-  restaurantId: RestaurantId!
-  status: OrderStatus!
-  customerChatEnabled: Boolean!
-  openedAt: DateTime!
-  messages: [ConversationMessage!]!
-  claimEvents: [ClaimTimelineEntry!]!
-}
-
-type ConversationInternalNotes {
-  orderId: OrderId!
-  notes: [ConversationMessage!]!
-  adminInvited: Boolean!
-  mutedParticipants: [MutedParticipant!]!
-}
-
 # ==============================================================================
 # Input types (mutation command payloads + query args)
 # ==============================================================================
-input AddCartLineInput {
-  cartId: CartId!
+input CreateCatalogInput {
+  catalogId: CatalogId!
   restaurantId: RestaurantId!
-  line: CartLineInput!
-  sessionId: SessionId!
+  name: CatalogName!
+  ref: ExternalReference
 }
 
-input RemoveCartLineInput {
-  cartId: CartId!
-  cartLineId: CartLineId!
-  sessionId: SessionId!
+input ConfigureCatalogSlugInput {
+  catalogId: CatalogId!
+  slug: Slug!
 }
 
-input ChangeCartLineQuantityInput {
-  cartId: CartId!
-  cartLineId: CartLineId!
-  quantity: Int!
+input AddProductInput {
+  productId: ProductId!
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  categoryRef: ExternalReference
+  name: ProductName!
+  description: ProductDescription
+  tags: [Tag!]
+  taxRate: TaxRateInput!
+  offers: [OfferInput!]!
+  ref: ExternalReference
+}
+
+input UpdateProductInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  product: ProductInput!
+}
+
+input RemoveProductInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  productId: ProductId!
+}
+
+input AddCatalogCategoryInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  category: CatalogCategoryInput!
+}
+
+input UpdateCatalogCategoryInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  category: CatalogCategoryInput!
+}
+
+input RemoveCatalogCategoryInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  productCategoryId: ProductCategoryId!
+}
+
+input AddOptionListInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  optionList: OptionListInput!
+}
+
+input UpdateOptionListInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  optionList: OptionListInput!
+}
+
+input RemoveOptionListInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  optionListId: OptionListId!
+}
+
+input UpdateOfferStockInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  offerId: OfferId!
+  quantity: Quantity!
+  lowStockThreshold: Quantity
+  expiresAt: DateTime
+}
+
+input ImportCatalogInput {
+  catalogId: CatalogId!
+  restaurantId: RestaurantId!
+  source: String!
+  categories: [CatalogCategoryInput!]!
+  products: [ProductInput!]!
+  optionLists: [OptionListInput!]!
+}
+
+input RequeueMailboxMessageInput {
+  targetMessageId: MessageId!
+}
+
+input OpenConversationInput {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  customerId: CustomerId
+  customerChatEnabled: Boolean!
+}
+
+input PostMessageInput {
+  orderId: OrderId!
+  messageId: ConversationMessageId!
+  authorRole: ConversationAuthorRole!
+  visibility: MessageVisibility!
+  body: MessageBody!
+  originalLocale: Locale!
+  attachmentRefs: [AttachmentRef!]
+}
+
+input RecordMessageTranslationInput {
+  orderId: OrderId!
+  messageId: ConversationMessageId!
+  locale: Locale!
+  text: TranslatedText!
+}
+
+input EscalateToAdminInput {
+  orderId: OrderId!
+  reason: EscalationReason!
+}
+
+input MuteParticipantInput {
+  orderId: OrderId!
+  mutedRole: ConversationAuthorRole!
+  reason: MuteReason
+  until: DateTime
+}
+
+input UnmuteParticipantInput {
+  orderId: OrderId!
+  mutedRole: ConversationAuthorRole!
+}
+
+input RequestPhoneVerificationInput {
+  dialingCode: DialingCode!
+  nationalNumber: NationalPhoneNumber!
+  locale: Locale
+}
+
+input VerifyPhoneInput {
+  customerId: CustomerId!
+  dialingCode: DialingCode!
+  nationalNumber: NationalPhoneNumber!
+  code: OtpCode!
   sessionId: SessionId!
+  displayName: CustomerDisplayName
+  locale: Locale
+  timezone: TimeZone
+}
+
+input RequestEmailVerificationInput {
+  customerId: CustomerId!
+  email: EmailAddress!
+}
+
+input ConfirmEmailVerificationInput {
+  customerId: CustomerId!
+  token: EmailVerificationToken!
+}
+
+input RequestPhoneChangeInput {
+  customerId: CustomerId!
+  newDialingCode: DialingCode!
+  newNationalNumber: NationalPhoneNumber!
+}
+
+input ConfirmPhoneChangeInput {
+  customerId: CustomerId!
+  newDialingCode: DialingCode!
+  newNationalNumber: NationalPhoneNumber!
+  code: OtpCode!
+}
+
+input ChangeLanguageInput {
+  customerId: CustomerId!
+  locale: Locale!
+}
+
+input MarkRestaurantAsFavoriteInput {
+  customerId: CustomerId!
+  restaurantId: RestaurantId!
+}
+
+input UnmarkRestaurantAsFavoriteInput {
+  customerId: CustomerId!
+  restaurantId: RestaurantId!
+}
+
+input UpdateCustomerInfoInput {
+  customerId: CustomerId!
+  displayName: CustomerDisplayName
+}
+
+input SetCustomerPreferencesInput {
+  customerId: CustomerId!
+  timezone: TimeZone
+  dietaryTags: [Tag!]
+  favoriteCuisines: [Tag!]
+}
+
+input SetCustomerAddressInput {
+  customerId: CustomerId!
+  addressId: AddressId!
+  label: String
+  address: AddressInput!
+}
+
+input RemoveCustomerAddressInput {
+  customerId: CustomerId!
+  addressId: AddressId!
+}
+
+input SetCustomerPaymentMethodInput {
+  customerId: CustomerId!
+  paymentMethodId: PaymentMethodId!
+}
+
+input ChangeRiderStatusInput {
+  riderId: RiderId!
+  status: RiderStatus!
+}
+
+input AcceptDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  riderId: RiderId!
+}
+
+input ConfirmPickupInput {
+  deliveryJobId: DeliveryJobId!
+  riderId: RiderId!
+}
+
+input CompleteDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  riderId: RiderId!
+}
+
+input CancelDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  reason: String
+}
+
+input EscalateDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  reason: String
+}
+
+input RegisterDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+  channel: DeliveryChannelKey!
+  cityId: CityId!
+  partnerName: DeliveryPartnerName!
+  contactEmail: EmailAddress!
+}
+
+input ApproveDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+}
+
+input RevokeDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+  reason: String
 }
 
 input RegisterRestaurantAccountInput {
@@ -1092,179 +1339,24 @@ input RecordProspectReplyInput {
   note: String
 }
 
-input CreateCatalogInput {
-  catalogId: CatalogId!
+input AddCartLineInput {
+  cartId: CartId!
   restaurantId: RestaurantId!
-  name: CatalogName!
-  ref: ExternalReference
-}
-
-input ConfigureCatalogSlugInput {
-  catalogId: CatalogId!
-  slug: Slug!
-}
-
-input AddProductInput {
-  productId: ProductId!
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  categoryRef: ExternalReference
-  name: ProductName!
-  description: ProductDescription
-  tags: [Tag!]
-  taxRate: TaxRateInput!
-  offers: [OfferInput!]!
-  ref: ExternalReference
-}
-
-input UpdateProductInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  product: ProductInput!
-}
-
-input RemoveProductInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  productId: ProductId!
-}
-
-input AddCatalogCategoryInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  category: CatalogCategoryInput!
-}
-
-input UpdateCatalogCategoryInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  category: CatalogCategoryInput!
-}
-
-input RemoveCatalogCategoryInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  productCategoryId: ProductCategoryId!
-}
-
-input AddOptionListInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  optionList: OptionListInput!
-}
-
-input UpdateOptionListInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  optionList: OptionListInput!
-}
-
-input RemoveOptionListInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  optionListId: OptionListId!
-}
-
-input UpdateOfferStockInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  offerId: OfferId!
-  quantity: Quantity!
-  lowStockThreshold: Quantity
-  expiresAt: DateTime
-}
-
-input ImportCatalogInput {
-  catalogId: CatalogId!
-  restaurantId: RestaurantId!
-  source: String!
-  categories: [CatalogCategoryInput!]!
-  products: [ProductInput!]!
-  optionLists: [OptionListInput!]!
-}
-
-input RequestPhoneVerificationInput {
-  dialingCode: DialingCode!
-  nationalNumber: NationalPhoneNumber!
-  locale: Locale
-}
-
-input VerifyPhoneInput {
-  customerId: CustomerId!
-  dialingCode: DialingCode!
-  nationalNumber: NationalPhoneNumber!
-  code: OtpCode!
+  line: CartLineInput!
   sessionId: SessionId!
-  displayName: CustomerDisplayName
-  locale: Locale
-  timezone: TimeZone
 }
 
-input RequestEmailVerificationInput {
-  customerId: CustomerId!
-  email: EmailAddress!
+input RemoveCartLineInput {
+  cartId: CartId!
+  cartLineId: CartLineId!
+  sessionId: SessionId!
 }
 
-input ConfirmEmailVerificationInput {
-  customerId: CustomerId!
-  token: EmailVerificationToken!
-}
-
-input RequestPhoneChangeInput {
-  customerId: CustomerId!
-  newDialingCode: DialingCode!
-  newNationalNumber: NationalPhoneNumber!
-}
-
-input ConfirmPhoneChangeInput {
-  customerId: CustomerId!
-  newDialingCode: DialingCode!
-  newNationalNumber: NationalPhoneNumber!
-  code: OtpCode!
-}
-
-input ChangeLanguageInput {
-  customerId: CustomerId!
-  locale: Locale!
-}
-
-input MarkRestaurantAsFavoriteInput {
-  customerId: CustomerId!
-  restaurantId: RestaurantId!
-}
-
-input UnmarkRestaurantAsFavoriteInput {
-  customerId: CustomerId!
-  restaurantId: RestaurantId!
-}
-
-input UpdateCustomerInfoInput {
-  customerId: CustomerId!
-  displayName: CustomerDisplayName
-}
-
-input SetCustomerPreferencesInput {
-  customerId: CustomerId!
-  timezone: TimeZone
-  dietaryTags: [Tag!]
-  favoriteCuisines: [Tag!]
-}
-
-input SetCustomerAddressInput {
-  customerId: CustomerId!
-  addressId: AddressId!
-  label: String
-  address: AddressInput!
-}
-
-input RemoveCustomerAddressInput {
-  customerId: CustomerId!
-  addressId: AddressId!
-}
-
-input SetCustomerPaymentMethodInput {
-  customerId: CustomerId!
-  paymentMethodId: PaymentMethodId!
+input ChangeCartLineQuantityInput {
+  cartId: CartId!
+  cartLineId: CartLineId!
+  quantity: Int!
+  sessionId: SessionId!
 }
 
 input PlaceOrderInput {
@@ -1352,105 +1444,6 @@ input RequestRefundInput {
   reason: String
 }
 
-input ApproveRefundInput {
-  orderId: OrderId!
-  amount: MoneyInput!
-  reason: String
-}
-
-input DenyRefundInput {
-  orderId: OrderId!
-  reason: String!
-}
-
-input ChangeRiderStatusInput {
-  riderId: RiderId!
-  status: RiderStatus!
-}
-
-input AcceptDeliveryInput {
-  deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
-}
-
-input ConfirmPickupInput {
-  deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
-}
-
-input CompleteDeliveryInput {
-  deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
-}
-
-input CancelDeliveryInput {
-  deliveryJobId: DeliveryJobId!
-  reason: String
-}
-
-input EscalateDeliveryInput {
-  deliveryJobId: DeliveryJobId!
-  reason: String
-}
-
-input RegisterDeliveryPartnerAvailabilityInput {
-  registrationId: DeliveryPartnerRegistrationId!
-  channel: DeliveryChannelKey!
-  cityId: CityId!
-  partnerName: DeliveryPartnerName!
-  contactEmail: EmailAddress!
-}
-
-input ApproveDeliveryPartnerAvailabilityInput {
-  registrationId: DeliveryPartnerRegistrationId!
-}
-
-input RevokeDeliveryPartnerAvailabilityInput {
-  registrationId: DeliveryPartnerRegistrationId!
-  reason: String
-}
-
-input OpenConversationInput {
-  orderId: OrderId!
-  restaurantId: RestaurantId!
-  customerId: CustomerId
-  customerChatEnabled: Boolean!
-}
-
-input PostMessageInput {
-  orderId: OrderId!
-  messageId: ConversationMessageId!
-  authorRole: ConversationAuthorRole!
-  visibility: MessageVisibility!
-  body: MessageBody!
-  originalLocale: Locale!
-  attachmentRefs: [AttachmentRef!]
-}
-
-input RecordMessageTranslationInput {
-  orderId: OrderId!
-  messageId: ConversationMessageId!
-  locale: Locale!
-  text: TranslatedText!
-}
-
-input EscalateToAdminInput {
-  orderId: OrderId!
-  reason: EscalationReason!
-}
-
-input MuteParticipantInput {
-  orderId: OrderId!
-  mutedRole: ConversationAuthorRole!
-  reason: MuteReason
-  until: DateTime
-}
-
-input UnmuteParticipantInput {
-  orderId: OrderId!
-  mutedRole: ConversationAuthorRole!
-}
-
 input OpenReclamationInput {
   reclamationId: ReclamationId!
   orderId: OrderId!
@@ -1483,8 +1476,23 @@ input AttachReclamationEvidenceInput {
   attachmentRef: AttachmentRef!
 }
 
-input RequeueMailboxMessageInput {
-  targetMessageId: MessageId!
+input ApproveRefundInput {
+  orderId: OrderId!
+  amount: MoneyInput!
+  reason: String
+}
+
+input DenyRefundInput {
+  orderId: OrderId!
+  reason: String!
+}
+
+input CatalogQueryInput {
+  restaurantId: RestaurantId!
+}
+
+input CategoriesQueryInput {
+  restaurantId: RestaurantId!
 }
 
 input PoisonedMailboxMessagesQueryInput {
@@ -1496,8 +1504,31 @@ input OperationStatusQueryInput {
   messageId: MessageId!
 }
 
-input PaymentStatusQueryInput {
+input OrderConversationQueryInput {
   orderId: OrderId!
+}
+
+input OrderConversationInternalNotesQueryInput {
+  orderId: OrderId!
+}
+
+input DeliveryQueryInput {
+  orderId: OrderId!
+}
+
+input MyDeliveriesQueryInput {
+  status: DeliveryStatus
+}
+
+input RestaurantDeliveriesQueryInput {
+  restaurantId: RestaurantId!
+  status: DeliveryStatus
+}
+
+input DeliveryPartnerAvailabilitiesQueryInput {
+  cityId: CityId
+  channel: DeliveryChannelKey
+  status: CityAvailabilityStatus
 }
 
 input FavoriteRestaurantsQueryInput {
@@ -1518,16 +1549,17 @@ input RestaurantsQueryInput {
   offset: PageOffset
 }
 
-input CatalogQueryInput {
-  restaurantId: RestaurantId!
-}
-
-input CategoriesQueryInput {
-  restaurantId: RestaurantId!
-}
-
 input RestaurantQueryInput {
   slug: Slug!
+}
+
+input RestaurantLocationsByAccountQueryInput {
+  accountId: RestaurantAccountId!
+}
+
+input ProspectionPipelineQueryInput {
+  minScore: ProspectionScore
+  status: ProspectPipelineStatus
 }
 
 input CartsQueryInput {
@@ -1548,41 +1580,9 @@ input OrderQueryInput {
   id: OrderId!
 }
 
-input DeliveryQueryInput {
-  orderId: OrderId!
-}
-
-input MyDeliveriesQueryInput {
-  status: DeliveryStatus
-}
-
-input RestaurantDeliveriesQueryInput {
-  restaurantId: RestaurantId!
-  status: DeliveryStatus
-}
-
 input RestaurantDeliverySatisfactionQueryInput {
   restaurantId: RestaurantId!
   timeliness: DeliveryTimeliness
-}
-
-input OrderConversationQueryInput {
-  orderId: OrderId!
-}
-
-input OrderConversationInternalNotesQueryInput {
-  orderId: OrderId!
-}
-
-input PendingRefundsQueryInput {
-  restaurantId: RestaurantId
-  status: RefundStatus
-}
-
-input DeliveryPartnerAvailabilitiesQueryInput {
-  cityId: CityId
-  channel: DeliveryChannelKey
-  status: CityAvailabilityStatus
 }
 
 input RestaurantReclamationsQueryInput {
@@ -1595,67 +1595,31 @@ input ReclamationQueryInput {
   reclamationId: ReclamationId!
 }
 
-input RestaurantLocationsByAccountQueryInput {
-  accountId: RestaurantAccountId!
+input PaymentStatusQueryInput {
+  orderId: OrderId!
 }
 
-input ProspectionPipelineQueryInput {
-  minScore: ProspectionScore
-  status: ProspectPipelineStatus
+input PendingRefundsQueryInput {
+  restaurantId: RestaurantId
+  status: RefundStatus
 }
 
 input OperationStatusChangedSubscriptionInput {
   messageId: MessageId!
 }
 
-input PaymentStatusChangedSubscriptionInput {
-  orderId: OrderId!
-}
-
 input OrderStatusChangedSubscriptionInput {
   orderId: OrderId!
 }
 
-input CartLineInput {
-  cartLineId: CartLineId!
-  offerId: OfferId!
-  quantity: Int!
-  selectedOptionIds: [OptionId!]
-}
-
-input RestaurantContactInput {
-  email: EmailAddress
-  phone: PhoneNumber
+input PaymentStatusChangedSubscriptionInput {
+  orderId: OrderId!
 }
 
 input TaxRateInput {
   delivery: TaxRatePercent!
   collection: TaxRatePercent
   eatIn: TaxRatePercent
-}
-
-input AddressInput {
-  line1: AddressLine!
-  line2: AddressLine
-  postalCode: PostalCode!
-  city: CityName!
-  country: CountryCode!
-}
-
-input GeoPointInput {
-  latitude: Latitude!
-  longitude: Longitude!
-}
-
-input OpeningHoursSlotInput {
-  weekday: Weekday!
-  from: TimeOfDay!
-  to: TimeOfDay!
-}
-
-input ExternalIdentifierInput {
-  key: ExternalIdentifierKey!
-  value: String!
 }
 
 input OfferInput {
@@ -1726,6 +1690,42 @@ input ProductItemOptionInput {
   stock: StockInput
 }
 
+input AddressInput {
+  line1: AddressLine!
+  line2: AddressLine
+  postalCode: PostalCode!
+  city: CityName!
+  country: CountryCode!
+}
+
+input RestaurantContactInput {
+  email: EmailAddress
+  phone: PhoneNumber
+}
+
+input GeoPointInput {
+  latitude: Latitude!
+  longitude: Longitude!
+}
+
+input OpeningHoursSlotInput {
+  weekday: Weekday!
+  from: TimeOfDay!
+  to: TimeOfDay!
+}
+
+input ExternalIdentifierInput {
+  key: ExternalIdentifierKey!
+  value: String!
+}
+
+input CartLineInput {
+  cartLineId: CartLineId!
+  offerId: OfferId!
+  quantity: Int!
+  selectedOptionIds: [OptionId!]
+}
+
 input CustomerContactInput {
   displayName: CustomerDisplayName!
   email: EmailAddress
@@ -1747,34 +1747,34 @@ input MetadataInput {
 # Queries — read side
 # ==============================================================================
 type Query {
+  catalog(input: CatalogQueryInput!): Catalog @public @reads(views: ["Catalog"])
+  categories(input: CategoriesQueryInput!): [CatalogCategory!]! @public @reads(views: ["Catalog"])
   mailboxLanes: [MailboxLane!]! @auth(requires: [ADMIN])
   poisonedMailboxMessages(input: PoisonedMailboxMessagesQueryInput): [PoisonedMailboxMessage!]! @auth(requires: [ADMIN])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
-  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
+  orderConversation(input: OrderConversationQueryInput!): OrderConversation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
+  orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
+  delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
+  myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
+  restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
+  deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["Restaurant"])
   restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["Restaurant"])
-  catalog(input: CatalogQueryInput!): Catalog @public @reads(views: ["Catalog"])
-  categories(input: CategoriesQueryInput!): [CatalogCategory!]! @public @reads(views: ["Catalog"])
   restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["Restaurant"])
+  restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
+  prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   cart(input: CartQueryInput!): Cart @public @reads(views: ["Cart"])
   orders(input: OrdersQueryInput): [Order!]! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
   order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
-  delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
-  myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
-  restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliverySatisfaction(input: RestaurantDeliverySatisfactionQueryInput!): [DeliverySatisfaction!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_DeliverySatisfaction"])
-  orderConversation(input: OrderConversationQueryInput!): OrderConversation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
-  orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
-  pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
-  deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   myReclamations: [Reclamation!]! @auth(requires: [CUSTOMER]) @reads(views: ["View_Reclamation"])
-  customerCredit: CustomerCredit @auth(requires: [CUSTOMER]) @reads(views: ["CustomerCreditBalance"])
   restaurantReclamations(input: RestaurantReclamationsQueryInput): [Reclamation!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
   reclamation(input: ReclamationQueryInput!): Reclamation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
-  restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
-  prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
+  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
+  pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
+  customerCredit: CustomerCredit @auth(requires: [CUSTOMER]) @reads(views: ["CustomerCreditBalance"])
   pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["PricingPolicy"])
   uberEstimationPolicy: [UberEstimationPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["UberEstimationPolicy"])
   uberSplitPolicy: [UberSplitPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["UberSplitPolicy"])
@@ -1784,9 +1784,49 @@ type Query {
 # Mutations — write side
 # ==============================================================================
 type Mutation {
-  addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
-  removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
-  changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")
+  createCatalog(input: CreateCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "CreateCatalog")
+  configureCatalogSlug(input: ConfigureCatalogSlugInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ConfigureCatalogSlug")
+  addProduct(input: AddProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddProduct")
+  updateProduct(input: UpdateProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateProduct")
+  removeProduct(input: RemoveProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveProduct")
+  addCatalogCategory(input: AddCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddCatalogCategory")
+  updateCatalogCategory(input: UpdateCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateCatalogCategory")
+  removeCatalogCategory(input: RemoveCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveCatalogCategory")
+  addOptionList(input: AddOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddOptionList")
+  updateOptionList(input: UpdateOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOptionList")
+  removeOptionList(input: RemoveOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveOptionList")
+  updateOfferStock(input: UpdateOfferStockInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOfferStock")
+  importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
+  requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
+  openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
+  postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
+  recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")
+  escalateToAdmin(input: EscalateToAdminInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "EscalateToAdmin")
+  muteParticipant(input: MuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "MuteParticipant")
+  unmuteParticipant(input: UnmuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "UnmuteParticipant")
+  requestPhoneVerification(input: RequestPhoneVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "RequestPhoneVerification")
+  verifyPhone(input: VerifyPhoneInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "VerifyPhone")
+  requestEmailVerification(input: RequestEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestEmailVerification")
+  confirmEmailVerification(input: ConfirmEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmEmailVerification")
+  requestPhoneChange(input: RequestPhoneChangeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestPhoneChange")
+  confirmPhoneChange(input: ConfirmPhoneChangeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmPhoneChange")
+  changeLanguage(input: ChangeLanguageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ChangeLanguage")
+  markRestaurantAsFavorite(input: MarkRestaurantAsFavoriteInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "MarkRestaurantAsFavorite")
+  unmarkRestaurantAsFavorite(input: UnmarkRestaurantAsFavoriteInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "UnmarkRestaurantAsFavorite")
+  updateCustomerInfo(input: UpdateCustomerInfoInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "UpdateCustomerInfo")
+  setCustomerPreferences(input: SetCustomerPreferencesInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerPreferences")
+  setCustomerAddress(input: SetCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerAddress")
+  removeCustomerAddress(input: RemoveCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RemoveCustomerAddress")
+  setCustomerPaymentMethod(input: SetCustomerPaymentMethodInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerPaymentMethod")
+  changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ChangeRiderStatus")
+  acceptDelivery(input: AcceptDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
+  confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
+  completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
+  cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
+  escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
+  registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
+  approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
+  revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
   registerRestaurantAccount(input: RegisterRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RegisterRestaurantAccount")
   updateRestaurantAccount(input: UpdateRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurantAccount")
   deleteRestaurantAccount(input: DeleteRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeleteRestaurantAccount")
@@ -1807,33 +1847,9 @@ type Mutation {
   recordProspectContact(input: RecordProspectContactInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RecordProspectContact")
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
-  createCatalog(input: CreateCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "CreateCatalog")
-  configureCatalogSlug(input: ConfigureCatalogSlugInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ConfigureCatalogSlug")
-  addProduct(input: AddProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddProduct")
-  updateProduct(input: UpdateProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateProduct")
-  removeProduct(input: RemoveProductInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveProduct")
-  addCatalogCategory(input: AddCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddCatalogCategory")
-  updateCatalogCategory(input: UpdateCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateCatalogCategory")
-  removeCatalogCategory(input: RemoveCatalogCategoryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveCatalogCategory")
-  addOptionList(input: AddOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddOptionList")
-  updateOptionList(input: UpdateOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOptionList")
-  removeOptionList(input: RemoveOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveOptionList")
-  updateOfferStock(input: UpdateOfferStockInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOfferStock")
-  importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
-  requestPhoneVerification(input: RequestPhoneVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "RequestPhoneVerification")
-  verifyPhone(input: VerifyPhoneInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "VerifyPhone")
-  requestEmailVerification(input: RequestEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestEmailVerification")
-  confirmEmailVerification(input: ConfirmEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmEmailVerification")
-  requestPhoneChange(input: RequestPhoneChangeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestPhoneChange")
-  confirmPhoneChange(input: ConfirmPhoneChangeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmPhoneChange")
-  changeLanguage(input: ChangeLanguageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ChangeLanguage")
-  markRestaurantAsFavorite(input: MarkRestaurantAsFavoriteInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "MarkRestaurantAsFavorite")
-  unmarkRestaurantAsFavorite(input: UnmarkRestaurantAsFavoriteInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "UnmarkRestaurantAsFavorite")
-  updateCustomerInfo(input: UpdateCustomerInfoInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "UpdateCustomerInfo")
-  setCustomerPreferences(input: SetCustomerPreferencesInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerPreferences")
-  setCustomerAddress(input: SetCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerAddress")
-  removeCustomerAddress(input: RemoveCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RemoveCustomerAddress")
-  setCustomerPaymentMethod(input: SetCustomerPaymentMethodInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerPaymentMethod")
+  addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
+  removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
+  changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")
   placeOrder(input: PlaceOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "PlaceOrder")
   acceptOrder(input: AcceptOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "AcceptOrder")
   rejectOrder(input: RejectOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "RejectOrder")
@@ -1847,29 +1863,13 @@ type Mutation {
   recordDeliverySatisfaction(input: RecordDeliverySatisfactionInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RecordDeliverySatisfaction")
   tipOrder(input: TipOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "TipOrder")
   requestRefund(input: RequestRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestRefund")
-  approveRefund(input: ApproveRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "ApproveRefund")
-  denyRefund(input: DenyRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "DenyRefund")
-  changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ChangeRiderStatus")
-  acceptDelivery(input: AcceptDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
-  confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
-  completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
-  cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
-  escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
-  registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
-  approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
-  revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
-  openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
-  postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
-  recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")
-  escalateToAdmin(input: EscalateToAdminInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "EscalateToAdmin")
-  muteParticipant(input: MuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "MuteParticipant")
-  unmuteParticipant(input: UnmuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "UnmuteParticipant")
   openReclamation(input: OpenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "OpenReclamation")
   resolveReclamation(input: ResolveReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveReclamation")
   rejectReclamation(input: RejectReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "RejectReclamation")
   reopenReclamation(input: ReopenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ReopenReclamation")
   attachReclamationEvidence(input: AttachReclamationEvidenceInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "AttachReclamationEvidence")
-  requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
+  approveRefund(input: ApproveRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "ApproveRefund")
+  denyRefund(input: DenyRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "DenyRefund")
 }
 
 # ==============================================================================
@@ -1877,6 +1877,6 @@ type Mutation {
 # ==============================================================================
 type Subscription {
   operationStatusChanged(input: OperationStatusChangedSubscriptionInput!): Operation! @public
-  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
   orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
+  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
 }

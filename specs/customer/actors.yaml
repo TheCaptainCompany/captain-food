@@ -1,0 +1,81 @@
+version: 1
+description: >
+  customer scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Customer:
+  type: aggregate
+  identity: { $ref: '#/Customer/state/customerId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A customer identity, keyed by phone number and linked to the auth provider user (authRef)."
+  receives:
+    # Identity via phone OTP / email magic link — WRAPPED Supabase Auth (ADR-0015). The handler calls
+    # Supabase SYNCHRONOUSLY through the supabase-acl adapter; request/* emit nothing, verify/confirm
+    # emit the verified FACT. The aggregate stays free of the Supabase SDK (the ACL boundary does the call).
+    - message: { $ref: 'commands.yaml#/RequestPhoneVerification' }
+      emits: []
+      throws: []
+      effect: "Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev). No event."
+    - message: { $ref: 'commands.yaml#/VerifyPhone' }
+      emits:
+        - { $ref: 'events.yaml#/CustomerRegistered' }
+        - { $ref: 'events.yaml#/CustomerIdentified' }
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationCode' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+      effect: "Verify the OTP with Supabase, then register (first phone → CustomerRegistered) or identify (returning → CustomerIdentified); CartBindingProcess then binds the visitor's open carts."
+    - message: { $ref: 'commands.yaml#/RequestEmailVerification' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/EmailAlreadyInUse' }
+      effect: "Delegate to Supabase Auth: send an email magic link (localized via the stored locale). No event."
+    - message: { $ref: 'commands.yaml#/ConfirmEmailVerification' }
+      emits: [{ $ref: 'events.yaml#/CustomerEmailVerified' }]
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+      effect: "Verify the magic-link token server-side with Supabase, then link the email."
+    - message: { $ref: 'commands.yaml#/RequestPhoneChange' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/PhoneAlreadyInUse' }
+      effect: "Delegate to Supabase Auth: send an SMS OTP to the new phone. No event."
+    - message: { $ref: 'commands.yaml#/ConfirmPhoneChange' }
+      emits: [{ $ref: 'events.yaml#/CustomerPhoneChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationCode' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+        - { $ref: 'errors.yaml#/PhoneAlreadyInUse' }
+      effect: "Verify the OTP on the new phone, then change the phone (canonical E.164)."
+    - message: { $ref: 'commands.yaml#/ChangeLanguage' }
+      emits: [{ $ref: 'events.yaml#/CustomerLanguageChanged' }]
+      throws: []
+      effect: "Persist the preferred locale; later authenticated SMS/email sends use it."
+    - message: { $ref: 'commands.yaml#/MarkRestaurantAsFavorite' }
+      emits: [{ $ref: 'events.yaml#/RestaurantFavorited' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/UnmarkRestaurantAsFavorite' }
+      emits: [{ $ref: 'events.yaml#/RestaurantUnfavorited' }]
+      throws: []
+      effect: "Idempotent: unfavoriting a non-favorite is a no-op."
+    - message: { $ref: 'commands.yaml#/UpdateCustomerInfo' }
+      emits: [{ $ref: 'events.yaml#/CustomerInfoUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/NoEditableFieldProvided' }
+    - message: { $ref: 'commands.yaml#/SetCustomerPreferences' }
+      emits: [{ $ref: 'events.yaml#/CustomerPreferencesSet' }]
+      throws: []
+    - message: { $ref: 'commands.yaml#/SetCustomerAddress' }
+      emits: [{ $ref: 'events.yaml#/CustomerAddressSet' }]
+      throws: []
+    - message: { $ref: 'commands.yaml#/RemoveCustomerAddress' }
+      emits: [{ $ref: 'events.yaml#/CustomerAddressRemoved' }]
+      throws: []
+      effect: "Idempotent: removing an unknown address is a no-op."
+    - message: { $ref: 'commands.yaml#/SetCustomerPaymentMethod' }
+      emits: [{ $ref: 'events.yaml#/CustomerPaymentMethodSet' }]
+      throws: []

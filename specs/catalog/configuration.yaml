@@ -1,0 +1,59 @@
+version: 1
+description: >
+  catalog scope — configuration fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `configuration.yaml` catalog; $refs stay kind-logical
+  (`configuration.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+keys:
+
+
+  # ===================================================================
+  # Integrations — feature-scoped, degrade to "unavailable", not "broken"
+  # ===================================================================
+
+  HUBRISE_CLIENT_ID:
+    type: string
+    gates: >
+      HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET —
+      we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already
+      connected locations are unaffected, since the worker uses their per-connection tokens. When a
+      client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets
+      literal per-profile `deploy` values here rather than a repo secret.
+
+
+  HUBRISE_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
+    deploy:
+      from_secret:
+        production: HUBRISE_WEBHOOK_SECRET
+        staging: HUBRISE_WEBHOOK_SECRET
+
+
+  HUBRISE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
+
+
+  HUBRISE_CONNECT_REDIRECT_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      Public URL HubRise redirects back to after consent (this deployable's
+      `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an
+      OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app
+      EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
+
+
+  HUBRISE_OAUTH_SCOPE:
+    type: string
+    gates: >
+      Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so
+      one token covers every location of the account. Narrowing it means a connected restaurant's
+      catalog or stock silently stops syncing for the locations the scope no longer covers.

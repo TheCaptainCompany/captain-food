@@ -1,0 +1,52 @@
+version: 1
+description: >
+  customer scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Customer
+# =====================================================================
+
+InvalidVerificationCode:
+  description: "The SMS OTP code does not match (rejected by Supabase Auth)."
+  context:
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+  messages:
+    en: "The verification code is incorrect. Please try again."
+    fr: "Le code de vérification est incorrect. Veuillez réessayer."
+
+
+VerificationCodeExpired:
+  description: "The SMS OTP (or email link) has expired; request a new one."
+  context: {}
+  messages:
+    en: "The verification code has expired. Please request a new one."
+    fr: "Le code de vérification a expiré. Veuillez en demander un nouveau."
+
+
+InvalidVerificationToken:
+  description: "The email magic-link token failed server-side verification with Supabase Auth."
+  context: {}
+  messages:
+    en: "This email verification link is invalid or has already been used."
+    fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé."
+
+
+EmailAlreadyInUse:
+  description: "The email is already linked to another customer."
+  context:
+    email: { $ref: 'scalars.yaml#/EmailAddress' }
+  messages:
+    en: "The email '{email}' is already in use by another account."
+    fr: "L'e-mail '{email}' est déjà utilisé par un autre compte."
+
+
+PhoneAlreadyInUse:
+  description: "The phone number is already linked to another customer (on change)."
+  context:
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+  messages:
+    en: "The phone number '{phone}' is already in use by another account."
+    fr: "Le numéro '{phone}' est déjà utilisé par un autre compte."

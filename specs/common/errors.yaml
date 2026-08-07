@@ -1,0 +1,139 @@
+version: 1
+description: >
+  Captain.Food anticipated errors. A command handler rejects a request by raising one of these —
+  they are the old command `invariants`, now first-class. An error carries CONTEXT (typed data
+  identifying the failure) and a default, HUMAN-FRIENDLY MESSAGE in English and French. Which
+  errors each command can raise is mapped in actors.yaml (`throws`). Transport/HTTP-level failures
+  are out of scope.
+
+  Cross-cutting errors (Unauthorized, Forbidden, ValidationError, Conflict, RateLimited, Internal)
+  may occur on ANY command; they are NOT repeated in every actors.yaml `throws` list — only
+  domain-specific errors are listed there.
+
+  Convention:
+    - key      : PascalCase stable error code (also the wire `code`).
+    - context  : typed fields carried with the error ($ref to scalars where applicable); {} if none.
+                 Includes ids (for logging/handling) AND human names (for the message) when the
+                 offending entity is known. *NotFound errors omit the name (it is unknown).
+    - messages : default user-facing text; `en` and `fr` both required. They may contain
+                 `{placeholder}` tokens that reference a `context` field name; the server
+                 interpolates them (e.g. "The restaurant '{restaurantName}' is not active.").
+
+
+# =====================================================================
+# Cross-cutting (may occur on any command)
+# =====================================================================
+
+Unauthorized:
+  description: "No valid authentication for this path/role."
+  context: {}
+  messages:
+    en: "You must be signed in to do this."
+    fr: "Vous devez être connecté pour effectuer cette action."
+
+
+Forbidden:
+  description: "Authenticated, but not allowed to act on this resource (e.g. not the owner)."
+  context: {}
+  messages:
+    en: "You are not allowed to perform this action."
+    fr: "Vous n'êtes pas autorisé à effectuer cette action."
+
+
+ValidationError:
+  description: "Input failed schema validation (type, format, required, bounds)."
+  context:
+    field: { type: string }
+  messages:
+    en: "The field '{field}' is invalid."
+    fr: "Le champ '{field}' est invalide."
+
+
+Conflict:
+  description: "Concurrent modification (optimistic-concurrency version clash); retry."
+  context: {}
+  messages:
+    en: "This item was modified meanwhile. Please retry."
+    fr: "Cet élément a été modifié entre-temps. Veuillez réessayer."
+
+
+RateLimited:
+  description: "Too many requests on this path."
+  context: {}
+  messages:
+    en: "Too many requests. Please slow down."
+    fr: "Trop de requêtes. Veuillez patienter."
+
+
+Internal:
+  description: "Unexpected server error."
+  context: {}
+  messages:
+    en: "Something went wrong on our side."
+    fr: "Une erreur est survenue de notre côté."
+
+
+RestaurantNotFound:
+  description: "No restaurant with this id."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Restaurant not found."
+    fr: "Restaurant introuvable."
+
+
+NoEditableFieldProvided:
+  description: "Update command carried no editable field."
+  context: {}
+  messages:
+    en: "Provide at least one field to update."
+    fr: "Indiquez au moins un champ à modifier."
+
+
+OfferNotFound:
+  description: "No offer with this id in the catalog."
+  context:
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+  messages:
+    en: "Product offer not found."
+    fr: "Offere de produit introuvable."
+
+
+PaymentEventOrphaned:
+  description: >
+    A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known
+    checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and
+    surfaces this error for ops attention (money may have been taken with no order to materialize) —
+    an anomaly is never silently skipped.
+  context:
+    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
+  messages:
+    en: "Payment event received for an unknown checkout."
+    fr: "Événement de paiement reçu pour un checkout inconnu."
+
+
+# =====================================================================
+# Mailbox supervision (#315)
+# =====================================================================
+
+MailboxMessageNotFound:
+  description: "No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row)."
+  context:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+  messages:
+    en: "Mailbox message not found."
+    fr: "Message de boîte aux lettres introuvable."
+
+
+MailboxMessageNotRequeueable:
+  description: >
+    The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError):
+    handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/
+    DUPLICATE rows already ran — requeueing any of them would re-execute something the system
+    decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
+  context:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+    status: { $ref: 'scalars.yaml#/InboundMessageStatus' }
+  messages:
+    en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued."
+    fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file."

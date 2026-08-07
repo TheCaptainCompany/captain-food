@@ -1,0 +1,98 @@
+version: 1
+description: >
+  comms scope — api fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `api.yaml` catalog; $refs stay kind-logical
+  (`api.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+types:
+
+
+  # --- Order conversations / messaging (#129) ---
+  OrderConversation:
+    description: >
+      The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's
+      live status folded from its lifecycle events and whether customer chat is enabled (#129).
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/OrderConversation' }]
+    properties:
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/OrderStatus' }   # order status participates in the thread (no status copied into a message)
+      customerChatEnabled: { type: boolean }
+      openedAt: { type: string, format: date-time }
+      messages: { $ref: 'entities.yaml#/ConversationMessage', array: true }   # PUBLIC timeline
+      claimEvents: { $ref: 'entities.yaml#/ClaimTimelineEntry', array: true }   # reclamation lifecycle woven into the thread (§2.5, #155)
+
+
+  ConversationInternalNotes:
+    description: >
+      The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from
+      OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility
+      guarantee (#129).
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/OrderConversation' }]
+    properties:
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      notes: { $ref: 'entities.yaml#/ConversationMessage', array: true }   # INTERNAL staff notes
+      adminInvited: { type: boolean }   # an admin was pulled in by a reasoned escalation (#129)
+      mutedParticipants: { $ref: 'entities.yaml#/MutedParticipant', array: true }   # roles currently muted
+
+# --- Generator-injected inputs (not command payloads) ---------------------------------------------
+
+queries:
+
+
+  orderConversation:
+    description: >
+      The customer-visible (PUBLIC) message thread for one order, with the order's live status; the
+      customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the
+      conversation has not been opened.
+    args:
+      orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
+    returns: { $ref: '#/types/OrderConversation', nullable: true }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+
+  orderConversationInternalNotes:
+    description: >
+      The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on
+      the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the
+      conversation has not been opened.
+    args:
+      orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
+    returns: { $ref: '#/types/ConversationInternalNotes', nullable: true }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+mutations:
+
+
+  # Order conversations / messaging (#129)
+  openConversation:
+    command: { $ref: 'commands.yaml#/OpenConversation' }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+  postMessage:
+    command: { $ref: 'commands.yaml#/PostMessage' }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+  recordMessageTranslation:
+    command: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+  escalateToAdmin:
+    command: { $ref: 'commands.yaml#/EscalateToAdmin' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+
+  muteParticipant:
+    command: { $ref: 'commands.yaml#/MuteParticipant' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+
+  unmuteParticipant:
+    command: { $ref: 'commands.yaml#/UnmuteParticipant' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0

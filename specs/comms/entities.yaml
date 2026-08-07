@@ -1,0 +1,112 @@
+version: 1
+description: >
+  comms scope — entities fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `entities.yaml` catalog; $refs stay kind-logical
+  (`entities.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Order conversations / messaging (#129) ---
+
+ConversationMessage:
+  type: object
+  description: >
+    One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the
+    business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only
+    (INTERNAL); `originalLocale` records the language it was written in (for later translation).
+    Attachments are opaque framework-managed refs.
+  properties:
+    messageId:
+      $ref: 'scalars.yaml#/ConversationMessageId'
+    authorRole:
+      $ref: 'scalars.yaml#/ConversationAuthorRole'
+    visibility:
+      $ref: 'scalars.yaml#/MessageVisibility'
+    body:
+      $ref: 'scalars.yaml#/MessageBody'
+    originalLocale:
+      $ref: 'scalars.yaml#/Locale'
+    postedAt:
+      type: string
+      format: date-time
+    attachmentRefs:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/AttachmentRef'
+      nullable: true
+    translations:
+      type: array
+      items:
+        $ref: '#/MessageTranslation'
+      nullable: true
+  required: [messageId, authorRole, visibility, body, originalLocale, postedAt]
+
+
+MessageTranslation:
+  type: object
+  description: >
+    The cached translation of a conversation message into one target locale — persisted once and reused
+    across readers (translate once, reuse; #129). Rides along with each ConversationMessage in the read
+    model via its `translations` array.
+  properties:
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+    text:
+      $ref: 'scalars.yaml#/TranslatedText'
+  required: [locale, text]
+
+
+MutedParticipant:
+  type: object
+  description: >
+    A role currently muted in an order conversation (read-model array element; #129). `reason` is the
+    recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute
+    in time, or is null for an indefinite mute.
+  properties:
+    role:
+      $ref: 'scalars.yaml#/ConversationAuthorRole'
+    reason:
+      $ref: 'scalars.yaml#/MuteReason'
+    until:
+      type: string
+      format: date-time
+      nullable: true
+  required: [role, reason]
+
+
+ClaimTimelineEntry:
+  type: object
+  description: >
+    One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array
+    element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED);
+    `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The
+    remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/
+    `refundAmount` from a resolution, `reason` from a rejection or reopen, `attachmentRef` from an
+    EVIDENCE_ATTACHED (#156). `at` is the fact's occurred-at.
+    Customer-visible — it is the customer's own claim shown inline in their order thread.
+  properties:
+    kind:
+      $ref: 'scalars.yaml#/ClaimTimelineEventKind'
+    reclamationId:
+      $ref: 'scalars.yaml#/ReclamationId'
+    category:
+      $ref: 'scalars.yaml#/ReclamationCategory'
+      nullable: true
+    requestedResolution:
+      $ref: 'scalars.yaml#/ReclamationResolution'
+      nullable: true
+    resolution:
+      $ref: 'scalars.yaml#/ReclamationResolution'
+      nullable: true
+    refundAmount:
+      $ref: 'entities.yaml#/Money'
+      nullable: true
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+    attachmentRef:
+      $ref: 'scalars.yaml#/AttachmentRef'
+      nullable: true
+    at:
+      type: string
+      format: date-time
+  required: [kind, reclamationId, at]

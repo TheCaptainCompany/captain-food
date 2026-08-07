@@ -1,0 +1,59 @@
+version: 1
+description: >
+  catalog scope — scalars fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `scalars.yaml` catalog; $refs stay kind-logical
+  (`scalars.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+CatalogId:
+  type: string
+  format: uuid
+  description: "Catalog id (HubRise: catalog)."
+
+
+ProductCategoryId:
+  type: string
+  format: uuid
+
+
+ImageId:
+  type: string
+  format: uuid
+
+
+CatalogName:
+  type: string
+  maxLength: 140
+
+
+CatalogCategoryName:
+  type: string
+  maxLength: 80
+
+
+ProductDescription:
+  type: string
+  maxLength: 2000
+
+
+OptionListName:
+  type: string
+  maxLength: 140
+
+
+# Manual listing flag, set by the restaurant/admin. Useful for UI.
+# Orthogonal to StockStatus: an item is orderable when AVAILABLE *and* stock > 0.
+CatalogItemAvailability:
+  type: string
+  enum:
+    - AVAILABLE
+    - UNAVAILABLE
+
+
+# Derived from Stock.quantity vs Stock.lowStockThreshold.
+StockStatus:
+  type: string
+  enum:
+    - IN_STOCK
+    - LOW_STOCK      # quantity <= lowStockThreshold (risky level)
+    - OUT_OF_STOCK   # quantity == 0

@@ -1,10 +1,12 @@
-version: 1
+version: 2
 description: >
   C4 Level 2 (Containers) + the domain's bounded contexts for Captain.Food — a SOURCE-managed DSL
   artifact (not generated). Structurizr DSL is the GENERATED target (see docs/claude/c4.md). Bounded
   contexts bind to their aggregates via `$ref` into actors.yaml, so the codegen proves no phantom
   context references a missing aggregate and every aggregate has a home. L2 containers map to
-  deployable runtime units; bounded contexts map to consistency boundaries within them.
+  deployable runtime units (ADR-20260807-183024 / PROP-20260806-223656 D5 addendum: per-surface,
+  per-actor, per-PM, per-scope-subgraph, per-role-gateway and per-scope-projector bins); bounded
+  contexts map to consistency boundaries within them.
 
 system:
   name: Captain.Food
@@ -23,6 +25,8 @@ system:
 # The optional `roles` lists the UserType(s) that perform a context's read/discovery use-cases. Each
 # UserType maps to at most one context; ADMIN / EXTERNAL are neutral (no home → cross-cutting). RIDER
 # maps to `delivery` (its read/discovery home; ADR-0031).
+# NOTE: contexts are CONSISTENCY boundaries; the specs/{scope}/ folders are DEPLOY/ownership scopes
+# (ADR-20260807-183024). They mostly align but are not forced to be identical.
 boundedContexts:
   restaurant:
     description: "Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)."
@@ -70,7 +74,13 @@ boundedContexts:
       - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
 
 # --- Containers (deployable / runtime units) ---
+# The former single `api` container is SPLIT into the real deployable list (ADR-20260807-183024,
+# PROP-20260806-223656 D5 addendum): surface bins (fo-*/bo-*/adapters), one GraphQL subgraph per
+# scope, one thin generated gateway per role path, one bin per aggregate (actor-*) and per process
+# manager (pm-*), and one projector per scope. Every actor/PM is REALIZED by exactly one bin — the
+# `realizes:` binding is what the #349 emitter turns into bin crates ↔ images ↔ Deployments.
 containers:
+  # -- client apps (run on the user's device) --
   web-client:
     technology: "Leptos (Rust → WASM), Crux core, SSR+hydration"
     description: "Customer mobile-first web client (SDUI renderer, ADR-0033/0034); multi-tenant via {restaurantSlug}.captain.food."
@@ -92,37 +102,219 @@ containers:
   mobile-rider:
     technology: "SwiftUI / Jetpack Compose thin shells → Crux core via UniFFI (Rust)"
     description: "Delivery-rider mobile app (post-V0): assigned deliveries + status updates (/rider/graphql)."
-  api:
-    technology: "Rust — Axum + Tokio + SQLx + async-graphql (BFF over the Crux core)"
-    description: "CQRS-light write+read API (ADR-0034). Hosts command handlers, projections, GraphQL gateway. Role = path (/{role}/graphql)."
+
+  # -- surface bins (serve assets/SSR; speak to their role's gateway; no broad views access) --
+  fo-marketplace:
+    technology: "Rust — Axum bin (assets + SSR)"
+    description: "Marketplace front office at live.captain.food (captain_frontoffice screens); serves the customer SPA, speaks to gateway-public/gateway-customer."
+  fo-storefront:
+    technology: "Rust — Axum bin (assets + SSR + Host routing)"
+    description: "Per-restaurant storefront front office at {slug}.captain.food (restaurant_frontoffice screens); resolves the tenant from the Host header."
+  bo-restaurant:
+    technology: "Rust — Axum bin (assets + SSR)"
+    description: "Restaurant back office (restaurant_backoffice screens): order queue, catalog, refunds; speaks to gateway-restaurant/gateway-restaurant-account."
+  bo-rider:
+    technology: "Rust — Axum bin (assets + SSR)"
+    description: "Rider back office (rider screens): job list, pickup/deliver flow; speaks to gateway-rider."
+  bo-admin:
+    technology: "Rust — Axum bin (assets + SSR)"
+    description: "Platform admin back office (system screens): approvals, prospection, mailbox supervision; speaks to gateway-admin."
+  adapters:
+    technology: "Rust — Axum bin (webhooks + /external/graphql + integration ACLs)"
+    description: "The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only."
+
+  # -- GraphQL subgraphs (one per scope: one domain, one graph, one GRANT — D8) --
+  graphql-ordering:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Ordering subgraph: cart/checkout/order queries over the ordering views schema; mutations enqueue ordering commands on the mailbox."
+  graphql-catalog:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Catalog subgraph: menu/product/offer queries over the catalog views schema; catalog mutations."
+  graphql-network:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Network (supply-side) subgraph: restaurant accounts/locations/prospection over the network views schema."
+  graphql-customer:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Customer subgraph: identity, profile, favorites, addresses over the customer views schema."
+  graphql-delivery:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Delivery subgraph: jobs, riders, dispatch state over the delivery views schema."
+  graphql-payments:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Payments subgraph: payment intents, refunds, pricing policy over the payments views schema."
+  graphql-comms:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Comms subgraph: per-order conversations and messages over the comms views schema."
+  graphql-common:
+    technology: "Rust — async-graphql subgraph bin"
+    description: "Kernel subgraph: operation status + mailbox supervision (served from the write-path journals, no View_*)."
+
+  # -- role gateways (thin, generated; no DB access, no logic, no state — D8) --
+  gateway-public:
+    technology: "Rust — generated gateway bin"
+    description: "/public/graphql: routes top-level fields to the owning subgraphs from the codegen-emitted composition table."
+  gateway-customer:
+    technology: "Rust — generated gateway bin"
+    description: "/customer/graphql: top-level field routing per the generated composition table."
+  gateway-restaurant-account:
+    technology: "Rust — generated gateway bin"
+    description: "/restaurant-account/graphql: top-level field routing per the generated composition table."
+  gateway-restaurant:
+    technology: "Rust — generated gateway bin"
+    description: "/restaurant/graphql: top-level field routing per the generated composition table."
+  gateway-rider:
+    technology: "Rust — generated gateway bin"
+    description: "/rider/graphql: top-level field routing per the generated composition table."
+  gateway-admin:
+    technology: "Rust — generated gateway bin"
+    description: "/admin/graphql: top-level field routing per the generated composition table."
+  gateway-external:
+    technology: "Rust — generated gateway bin"
+    description: "/external/graphql: top-level field routing for the integration ACLs (token-authenticated)."
+
+  # -- actor bins (one per aggregate: drains ONLY its own mailbox lanes — the scoping is the linker) --
+  actor-restaurant-account:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains RestaurantAccount lanes; appends its domain events."
     realizes:
       - { $ref: 'actors.yaml#/RestaurantAccount' }
+  actor-restaurant:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Restaurant lanes; appends its domain events."
+    realizes:
       - { $ref: 'actors.yaml#/Restaurant' }
+  actor-prospect:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Prospect lanes; appends its domain events."
+    realizes:
       - { $ref: 'actors.yaml#/Prospect' }
+  actor-catalog:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Catalog lanes (incl. HubRise imports); appends its domain events."
+    realizes:
       - { $ref: 'actors.yaml#/Catalog' }
-      - { $ref: 'actors.yaml#/Cart' }
-      - { $ref: 'actors.yaml#/Order' }
+  actor-customer:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Customer lanes; appends its domain events."
+    realizes:
       - { $ref: 'actors.yaml#/Customer' }
-      - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
-      - { $ref: 'processmanager.yaml#/RefundProcess' }
-      - { $ref: 'processmanager.yaml#/CartBindingProcess' }
+  actor-cart:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Cart lanes; appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Cart' }
+  actor-order:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Order lanes (the Friday-peak hot type — #242's leases are the second-replica unlock); appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Order' }
+  actor-payment:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Payment lanes (inbound Stripe facts + refund decisions); appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Payment' }
+  actor-delivery-job:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains DeliveryJob lanes; appends its domain events."
+    realizes:
       - { $ref: 'actors.yaml#/DeliveryJob' }
+  actor-rider:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Rider lanes; appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Rider' }
+  actor-delivery-partner-registration:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains DeliveryPartnerRegistration lanes; appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+  actor-conversation:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Conversation lanes (per-order messaging); appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Conversation' }
+  actor-reclamation:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains Reclamation lanes; appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/Reclamation' }
+  actor-customer-credit:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains CustomerCredit lanes (goodwill-credit ledger); appends its domain events."
+    realizes:
+      - { $ref: 'actors.yaml#/CustomerCredit' }
+  actor-mailbox-supervision:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains MailboxSupervision lanes (operator interventions recorded as facts, #315)."
+    realizes:
+      - { $ref: 'actors.yaml#/MailboxSupervision' }
+
+  # -- process-manager bins (one per saga; a PM legitimately links several scopes' crates — #373) --
+  pm-place-order:
+    technology: "Rust — mailbox worker bin"
+    description: "The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact."
+    realizes:
+      - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+  pm-refund:
+    technology: "Rust — mailbox worker bin"
+    description: "The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded."
+    realizes:
+      - { $ref: 'processmanager.yaml#/RefundProcess' }
+  pm-cart-binding:
+    technology: "Rust — mailbox worker bin"
+    description: "Binds anonymous carts to identified customers."
+    realizes:
+      - { $ref: 'processmanager.yaml#/CartBindingProcess' }
+  pm-delivery-dispatch:
+    technology: "Rust — mailbox worker bin"
+    description: "Dispatches ready DELIVERY orders to partners/riders (ADR-0031)."
+    realizes:
       - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+  pm-reclamation:
+    technology: "Rust — mailbox worker bin"
+    description: "Drives reclamations to a resolution (refund / replacement / goodwill credit arms)."
+    realizes:
+      - { $ref: 'processmanager.yaml#/ReclamationProcess' }
+
+  # -- projectors (one per scope over the SINGLE log; independent checkpoints — D4) --
+  projector-ordering:
+    technology: "Rust — projection worker bin"
+    description: "Projects ordering-scope events into the ordering views schema; own checkpoint."
+  projector-catalog:
+    technology: "Rust — projection worker bin"
+    description: "Projects catalog-scope events into the catalog views schema; own checkpoint."
+  projector-network:
+    technology: "Rust — projection worker bin"
+    description: "Projects network-scope events into the network views schema; own checkpoint."
+  projector-customer:
+    technology: "Rust — projection worker bin"
+    description: "Projects customer-scope events into the customer views schema; own checkpoint."
+  projector-delivery:
+    technology: "Rust — projection worker bin"
+    description: "Projects delivery-scope events into the delivery views schema; own checkpoint."
+  projector-payments:
+    technology: "Rust — projection worker bin"
+    description: "Projects payments-scope events into the payments views schema; own checkpoint."
+  projector-comms:
+    technology: "Rust — projection worker bin"
+    description: "Projects comms-scope events into the comms views schema; own checkpoint."
+
+  # -- storage & cross-cutting workers --
   event-store:
-    technology: "Managed PostgreSQL (e.g. Supabase)"
-    description: "Append-only domain_events table (the write model / source of truth at runtime)."
+    technology: "PostgreSQL (CNPG) — captain-core"
+    description: "Append-only domain_events + the inbound_messages mailbox (the write model / source of truth; ALL backup/PITR budget — D2/D3)."
   read-models:
-    technology: "Managed PostgreSQL"
-    description: "Denormalized View_* projection tables fed from the event log; queries read here, never domain_events."
+    technology: "PostgreSQL (CNPG) — captain-views"
+    description: "Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2)."
   sync-worker:
     technology: "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)"
-    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step."
+    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the adapters surface. Prospection scoring/outreach is a later step."
   bam:
     technology: "Projection worker"
     description: "Business Activity Monitoring projector — consumes the same event stream to answer business questions."
   otel-collector:
     technology: "OpenTelemetry Collector"
-    description: "Receives traces/metrics/logs from the api and bam containers; exports to the backend(s)."
+    description: "Receives traces/metrics/logs from every service bin; exports to the backend(s)."
 
 # --- External systems ---
 externalSystems:
@@ -136,28 +328,92 @@ externalSystems:
   resend: { description: "Transactional email for prospection outreach sequences (ADR-0020); post-V0." }
   slack: { description: "Ops/prospection alerts (active-partner closures, sequence events); post-V0." }
 
-# --- Key relationships (integrations that MUST appear in the views) ---
+# --- Key relationships (integrations that MUST appear in the views; representative, not exhaustive) ---
 relationships:
-  - { from: web-client, to: api, description: "GraphQL over HTTPS (/customer/graphql, /public/graphql)" }
-  - { from: web-restaurant, to: api, description: "GraphQL (/restaurant-account/graphql, /restaurant/graphql)" }
-  - { from: web-admin, to: api, description: "GraphQL (/admin/graphql)" }
-  - { from: desktop-restaurant, to: api, description: "GraphQL (/restaurant-account/graphql, /restaurant/graphql) — Tauri shell" }
-  - { from: mobile-customer, to: api, description: "GraphQL (/customer/graphql, /public/graphql) — post-V0" }
-  - { from: mobile-restaurant, to: api, description: "GraphQL (/restaurant/graphql) — post-V0" }
-  - { from: mobile-rider, to: api, description: "GraphQL (/rider/graphql) — post-V0" }
-  - { from: api, to: event-store, description: "Append domain events (command side)" }
-  - { from: api, to: read-models, description: "Read projections (query side) + projection updates" }
-  - { from: api, to: stripe, description: "Create PaymentIntents, request refunds; receive webhooks (inbound facts)" }
-  - { from: api, to: hubrise, description: "Import catalog / sync inventory via ACL (inbound facts)" }
-  - { from: api, to: supabase-auth, description: "OTP verify / session (out of domain)" }
-  - { from: api, to: delivery-partner, description: "Dispatch delivery jobs; receive courier acceptance/status webhooks (inbound facts) — ADR-0031" }
+  # clients → their role gateways
+  - { from: web-client, to: gateway-customer, description: "GraphQL over HTTPS (/customer/graphql)" }
+  - { from: web-client, to: gateway-public, description: "GraphQL (/public/graphql, anonymous browse/cart)" }
+  - { from: web-restaurant, to: gateway-restaurant, description: "GraphQL (/restaurant/graphql)" }
+  - { from: web-restaurant, to: gateway-restaurant-account, description: "GraphQL (/restaurant-account/graphql)" }
+  - { from: web-admin, to: gateway-admin, description: "GraphQL (/admin/graphql)" }
+  - { from: desktop-restaurant, to: gateway-restaurant, description: "GraphQL (/restaurant/graphql) — Tauri shell" }
+  - { from: mobile-customer, to: gateway-customer, description: "GraphQL (/customer/graphql) — post-V0" }
+  - { from: mobile-restaurant, to: gateway-restaurant, description: "GraphQL (/restaurant/graphql) — post-V0" }
+  - { from: mobile-rider, to: gateway-rider, description: "GraphQL (/rider/graphql) — post-V0" }
+  # surface bins serve the client apps and speak to their role gateway
+  - { from: fo-marketplace, to: gateway-public, description: "Serves the marketplace SPA; SSR reads via the public gateway" }
+  - { from: fo-storefront, to: gateway-public, description: "Serves {slug}.captain.food; tenant-resolved SSR reads" }
+  - { from: bo-restaurant, to: gateway-restaurant, description: "Serves the restaurant back office" }
+  - { from: bo-rider, to: gateway-rider, description: "Serves the rider back office" }
+  - { from: bo-admin, to: gateway-admin, description: "Serves the platform back office" }
+  # gateways route top-level fields to owning subgraphs (composition table; representative edges)
+  - { from: gateway-public, to: graphql-network, description: "Top-level routing: restaurant discovery/browse" }
+  - { from: gateway-public, to: graphql-catalog, description: "Top-level routing: menus" }
+  - { from: gateway-public, to: graphql-ordering, description: "Top-level routing: anonymous cart + checkout" }
+  - { from: gateway-customer, to: graphql-ordering, description: "Top-level routing: cart/checkout/orders (money path)" }
+  - { from: gateway-customer, to: graphql-customer, description: "Top-level routing: identity/profile/favorites" }
+  - { from: gateway-restaurant, to: graphql-ordering, description: "Top-level routing: order queue, accept/ready" }
+  - { from: gateway-restaurant, to: graphql-catalog, description: "Top-level routing: catalog management" }
+  - { from: gateway-restaurant-account, to: graphql-network, description: "Top-level routing: account + locations" }
+  - { from: gateway-rider, to: graphql-delivery, description: "Top-level routing: jobs + status updates" }
+  - { from: gateway-admin, to: graphql-network, description: "Top-level routing: approvals + prospection" }
+  - { from: gateway-admin, to: graphql-common, description: "Top-level routing: mailbox supervision (#315)" }
+  - { from: gateway-external, to: graphql-network, description: "Top-level routing: SIRENE/Google listing sync writes" }
+  # subgraphs: read ONLY their scope's views schema; mutations enqueue on the mailbox
+  - { from: graphql-ordering, to: read-models, description: "SELECT on the ordering schema (GRANT-scoped role)" }
+  - { from: graphql-ordering, to: event-store, description: "Enqueue ordering commands on the actor mailbox (acceptance-first)" }
+  - { from: graphql-catalog, to: read-models, description: "SELECT on the catalog schema" }
+  - { from: graphql-catalog, to: event-store, description: "Enqueue catalog commands" }
+  - { from: graphql-network, to: read-models, description: "SELECT on the network schema" }
+  - { from: graphql-network, to: event-store, description: "Enqueue network commands" }
+  - { from: graphql-customer, to: read-models, description: "SELECT on the customer schema" }
+  - { from: graphql-customer, to: event-store, description: "Enqueue customer commands" }
+  - { from: graphql-delivery, to: read-models, description: "SELECT on the delivery schema" }
+  - { from: graphql-delivery, to: event-store, description: "Enqueue delivery commands" }
+  - { from: graphql-payments, to: read-models, description: "SELECT on the payments schema" }
+  - { from: graphql-payments, to: event-store, description: "Enqueue payment commands" }
+  - { from: graphql-comms, to: read-models, description: "SELECT on the comms schema" }
+  - { from: graphql-comms, to: event-store, description: "Enqueue comms commands" }
+  - { from: graphql-common, to: event-store, description: "Operation status + mailbox lanes from the write-path journals (no View_*)" }
+  # actor bins drain their lanes and append events (representative: the money-path actors; every
+  # actor-* bin has the same two edges to event-store)
+  - { from: actor-order, to: event-store, description: "Lease Order lanes; append Order events" }
+  - { from: actor-cart, to: event-store, description: "Lease Cart lanes; append Cart events" }
+  - { from: actor-payment, to: event-store, description: "Lease Payment lanes; append Payment events" }
+  - { from: actor-catalog, to: event-store, description: "Lease Catalog lanes; append Catalog events" }
+  - { from: actor-mailbox-supervision, to: event-store, description: "Lease supervision lanes; record operator facts" }
+  # PM bins: same drain/append + their outbound ports
+  - { from: pm-place-order, to: event-store, description: "Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced" }
+  - { from: pm-place-order, to: stripe, description: "Create PaymentIntents (outbound payment port)" }
+  - { from: pm-refund, to: event-store, description: "Drain RefundProcess lanes; append refund decision facts" }
+  - { from: pm-refund, to: stripe, description: "Request refunds (outbound payment port)" }
+  - { from: pm-delivery-dispatch, to: event-store, description: "Drain dispatch lanes; append dispatch facts" }
+  - { from: pm-delivery-dispatch, to: delivery-partner, description: "Dispatch delivery jobs to the partner API" }
+  # adapters: inbound webhooks + integration ACLs
+  - { from: adapters, to: event-store, description: "Record verified inbound facts idempotently through the mailbox" }
+  - { from: stripe, to: adapters, description: "Payment webhooks (PaymentCaptured/Failed/Refunded)" }
+  - { from: hubrise, to: adapters, description: "Catalog/inventory callbacks (inbound facts)" }
+  - { from: delivery-partner, to: adapters, description: "Courier acceptance/status webhooks (inbound facts) — ADR-0031" }
+  - { from: adapters, to: hubrise, description: "Import catalog / sync inventory via the ACL" }
+  - { from: adapters, to: supabase-auth, description: "OTP verify / session (out of domain)" }
+  - { from: adapters, to: google-maps, description: "Verify restaurant ownership (GBP) for claim/opt-out" }
+  # sync worker (SIRENE/Google) goes through the adapters surface
   - { from: sync-worker, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
   - { from: sync-worker, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
-  - { from: sync-worker, to: api, description: "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)" }
-  - { from: api, to: google-maps, description: "Verify restaurant ownership (GBP) for claim/opt-out" }
+  - { from: sync-worker, to: gateway-external, description: "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)" }
   - { from: sync-worker, to: hubspot, description: "Create/update prospection leads (ADR-0020)" }
   - { from: sync-worker, to: resend, description: "Send prospection outreach emails (ADR-0020)" }
   - { from: sync-worker, to: slack, description: "Prospection / ops alerts (ADR-0020)" }
+  # projectors: single log in, own schema out (representative: the money path; every projector-*
+  # bin has the same two edges)
+  - { from: projector-ordering, to: event-store, description: "Consume the single log filtered to ordering events; own checkpoint" }
+  - { from: projector-ordering, to: read-models, description: "Maintain the ordering schema's View_* (GRANT-scoped)" }
+  - { from: projector-catalog, to: event-store, description: "Consume catalog events; own checkpoint" }
+  - { from: projector-catalog, to: read-models, description: "Maintain the catalog schema's View_*" }
   - { from: bam, to: event-store, description: "Consume the event stream for business metrics" }
-  - { from: api, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }
+  # telemetry (representative: one edge per bin family; every service bin exports OTLP)
+  - { from: gateway-customer, to: otel-collector, description: "OTLP export (every gateway bin)" }
+  - { from: actor-order, to: otel-collector, description: "OTLP export (every actor/pm bin)" }
+  - { from: projector-ordering, to: otel-collector, description: "OTLP export (every projector bin)" }
+  - { from: adapters, to: otel-collector, description: "OTLP export" }
   - { from: bam, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }

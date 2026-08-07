@@ -1,0 +1,248 @@
+version: 1
+description: >
+  catalog scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
+# =====================================================================
+
+CatalogCreated:
+  description: "A new catalog has been created for a restaurant."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    name:
+      $ref: 'scalars.yaml#/CatalogName'
+  required:
+    - catalogId
+    - restaurantId
+    - name
+
+
+CatalogSlugConfigured:
+  description: >
+    The catalog's ROUTE has been chosen (or changed) -- the label that addresses it inside the
+    restaurant's storefront. Emitted from ConfigureCatalogSlug; a rename simply replaces the label.
+    Unlike RestaurantSlugConfigured there is no Reconfigured counterpart: a catalog slug is a PATH
+    inside an already-resolved host, so no previous label has to keep resolving and none is reserved.
+    The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at,
+    ADR-0041), never payload.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+      description: "The owning restaurant -- the scope the label is unique within."
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+  required:
+    - catalogId
+    - restaurantId
+    - slug
+
+
+CatalogCategoryAdded:
+  description: "A category has been added to a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    category:
+      $ref: 'entities.yaml#/CatalogCategory'
+  required:
+    - catalogId
+    - restaurantId
+    - category
+
+
+CatalogCategoryUpdated:
+  description: "An existing category has been updated (full replace)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    category:
+      $ref: 'entities.yaml#/CatalogCategory'
+  required:
+    - catalogId
+    - restaurantId
+    - category
+
+
+CatalogCategoryRemoved:
+  description: "A category has been removed from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    productCategoryId:
+      $ref: 'scalars.yaml#/ProductCategoryId'
+  required:
+    - catalogId
+    - restaurantId
+    - productCategoryId
+
+
+ProductAdded:
+  description: "A new product (with its offers) has been added to a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    product:
+      $ref: 'entities.yaml#/Product'
+  required:
+    - catalogId
+    - restaurantId
+    - product
+
+
+ProductUpdated:
+  description: "An existing product has been updated (full replace, including offers)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    product:
+      $ref: 'entities.yaml#/Product'
+  required:
+    - catalogId
+    - restaurantId
+    - product
+
+
+ProductRemoved:
+  description: "A product has been removed from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    productId:
+      $ref: 'scalars.yaml#/ProductId'
+  required:
+    - catalogId
+    - restaurantId
+    - productId
+
+
+OptionListAdded:
+  description: "An option list (modifier group) has been added to a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionList:
+      $ref: 'entities.yaml#/OptionList'
+  required:
+    - catalogId
+    - restaurantId
+    - optionList
+
+
+OptionListUpdated:
+  description: "An existing option list has been updated (full replace)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionList:
+      $ref: 'entities.yaml#/OptionList'
+  required:
+    - catalogId
+    - restaurantId
+    - optionList
+
+
+OptionListRemoved:
+  description: "An option list has been removed from a catalog."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    optionListId:
+      $ref: 'scalars.yaml#/OptionListId'
+  required:
+    - catalogId
+    - restaurantId
+    - optionListId
+
+
+OfferStockUpdated:
+  description: "Inventory level of a offer changed (e.g. HubRise inventory sync)."
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    offerId:
+      $ref: 'scalars.yaml#/OfferId'
+    stock:
+      $ref: 'entities.yaml#/Stock'
+  required:
+    - catalogId
+    - restaurantId
+    - offerId
+    - stock
+
+
+CatalogImported:
+  description: >
+    A full catalog was imported/synced from an external source (e.g. HubRise),
+    replacing the current catalog content for the restaurant.
+  type: object
+  properties:
+    catalogId:
+      $ref: 'scalars.yaml#/CatalogId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    source:
+      type: string
+      enum: [HUBRISE, MANUAL]
+    categories:
+      type: array
+      items:
+        $ref: 'entities.yaml#/CatalogCategory'
+    products:
+      type: array
+      items:
+        $ref: 'entities.yaml#/Product'
+    optionLists:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OptionList'
+  required:
+    - catalogId
+    - restaurantId
+    - source
+    - categories
+    - products
+    - optionLists

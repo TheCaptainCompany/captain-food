@@ -1,0 +1,181 @@
+version: 1
+description: >
+  network scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Aggregates (consistency boundaries) ---
+
+RestaurantAccount:
+  type: aggregate
+  identity: { $ref: '#/RestaurantAccount/state/restaurantAccountId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A restaurant account (HubRise: restaurant) that owns one or more Restaurant locations."
+  receives:
+    - message: { $ref: 'commands.yaml#/RegisterRestaurantAccount' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAccountRegistered' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefAlreadyUsed' }
+        - { $ref: 'errors.yaml#/InvalidCurrency' }
+    - message: { $ref: 'commands.yaml#/UpdateRestaurantAccount' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAccountUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
+        - { $ref: 'errors.yaml#/NoEditableFieldProvided' }
+    - message: { $ref: 'commands.yaml#/DeleteRestaurantAccount' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAccountDeleted' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
+
+
+Restaurant:
+  type: aggregate
+  identity: { $ref: '#/Restaurant/state/restaurantId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    A single restaurant location: profile, operational status (DRAFT/ACTIVE/INACTIVE), live acceptance
+    mode, and the partnership LISTING funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER). The
+    Sirene/Google sync is an EXTERNAL ACL that calls RegisterRestaurant /
+    UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed here AS THE OWNER — there is no dedicated
+    pre-registration command; an account-less registration with listingStatus NON_PARTNER is a seeded listing.
+  # Operational machine only (DRAFT → ACTIVE ⇄ INACTIVE): the LISTING funnel
+  # (RestaurantListingStatus) is an orthogonal dimension, not part of this machine. No terminal
+  # state — an INACTIVE restaurant can be re-activated. Activate/Deactivate are ensure-commands
+  # (already-there → idempotent no-op, no event), so the machine declares only the actual moves.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/RestaurantStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/RestaurantRegistered' }
+        to: DRAFT
+    transitions:
+      - { from: [DRAFT, INACTIVE], event: { $ref: 'events.yaml#/RestaurantActivated' }, to: ACTIVE }
+      - { from: [DRAFT, ACTIVE], event: { $ref: 'events.yaml#/RestaurantDeactivated' }, to: INACTIVE }
+      # Removal / reported closure (e.g. Sirene) force INACTIVE from anywhere — recording the fact
+      # on an already-INACTIVE restaurant is legal, the fact still lands.
+      - { from: [DRAFT, ACTIVE, INACTIVE], event: { $ref: 'events.yaml#/RestaurantRemoved' }, to: INACTIVE }
+      - { from: [DRAFT, ACTIVE, INACTIVE], event: { $ref: 'events.yaml#/RestaurantMarkedClosed' }, to: INACTIVE }
+    terminal: []
+  receives:
+    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantRegistered' }]
+      # No SlugAlreadyTaken any more: registration no longer carries a slug (ADR-20260728-011344), so
+      # it cannot collide. Uniqueness moved to ConfigureRestaurantSlug — where the asker is a human
+      # who can be told "no" and pick again.
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
+        - { $ref: 'errors.yaml#/RefAlreadyUsed' }
+    # INBOUND registry fact (ADR-20260728-011344 D4). Not a command: INSEE cannot be told "no" — there
+    # is nobody to reject to, which is why the old path's "rejections" were dropped to a log line. The
+    # ACL stages this UNCONDITIONALLY and never branches; the aggregate folds its own stream and decides
+    # which fact follows. Note the shape: an inbound event that may emit a DIFFERENT event than the one
+    # delivered — absent → RestaurantRegistered, changed → RestaurantUpdated, unchanged → no fact at all
+    # (the delivery is recorded IGNORED). Registry-inferred CLOSURE stays a command
+    # (MarkRestaurantClosed): absence is OUR inference, and it can be refused — partners are flagged for
+    # review, not closed.
+    - message: { $ref: 'events.yaml#/RestaurantRegistered' }
+      emits:
+        - { $ref: 'events.yaml#/RestaurantRegistered' }
+        - { $ref: 'events.yaml#/RestaurantUpdated' }
+      effect: "A registry (SIRENE) reported an établissement. The aggregate records it if unknown, emits RestaurantUpdated for whatever the report moves, or decides nothing changed and appends nothing."
+    - message: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      # ONE command, TWO possible facts — the aggregate folds its own stream and decides which:
+      # never configured → Configured; a different label → Reconfigured (carrying the previous one);
+      # the same label → no fact at all (idempotent no-op, no event, no error).
+      emits:
+        - { $ref: 'events.yaml#/RestaurantSlugConfigured' }
+        - { $ref: 'events.yaml#/RestaurantSlugReconfigured' }
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
+    - message: { $ref: 'commands.yaml#/ActivateRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantActivated' }]
+      # Idempotent: activating an already-ACTIVE restaurant is a no-op (no event, no error) — the command
+      # ensures the ACTIVE state, it is not a toggle.
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantNotReadyForActivation' }
+        # No storefront address means no host a customer could reach. Aggregate-local: the fold sees
+        # whether RestaurantSlugConfigured ever landed, so no read model is consulted.
+        - { $ref: 'errors.yaml#/SlugNotConfigured' }
+    - message: { $ref: 'commands.yaml#/UpdateRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/NoEditableFieldProvided' }
+    - message: { $ref: 'commands.yaml#/DeactivateRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantDeactivated' }]
+      # Idempotent: deactivating an already-INACTIVE restaurant is a no-op (no event, no error) — the
+      # command ensures the INACTIVE state, it is not a toggle.
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/ChangeOrderAcceptanceMode' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAcceptanceModeChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantNotActive' }
+        - { $ref: 'errors.yaml#/AcceptanceModeUnchanged' }
+    - message: { $ref: 'commands.yaml#/RemoveRestaurant' }
+      emits: [{ $ref: 'events.yaml#/RestaurantRemoved' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/MarkRestaurantClosed' }
+      emits: [{ $ref: 'events.yaml#/RestaurantMarkedClosed' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingClaimed' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/ListingOwnershipNotVerified' }
+        - { $ref: 'errors.yaml#/ListingAlreadyClaimed' }
+    - message: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingOptedOut' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/ListingOwnershipNotVerified' }
+    - message: { $ref: 'commands.yaml#/ChangeRestaurantListingStatus' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingStatusChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/ConfigureGoogleBusinessProfileOrderLink' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/GbpOrderLinkNotConfigured' }
+
+
+Prospect:
+  type: aggregate
+  identity: { $ref: '#/Prospect/state/restaurantId' }   # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId.
+    The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from ProspectionPipeline + the
+    schedule, fires HubSpot/Resend/Slack, then records the contact fact here. The score is never an input or
+    an emitted event. First RecordProspectContact is the prospect's birth; anti-spam invariants guard contacts.
+  receives:
+    - message: { $ref: 'commands.yaml#/RecordProspectContact' }
+      emits: [{ $ref: 'events.yaml#/ProspectContacted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ProspectContactLimitReached' }
+        - { $ref: 'errors.yaml#/ProspectContactedTooRecently' }
+    - message: { $ref: 'commands.yaml#/MarkProspectCold' }
+      emits: [{ $ref: 'events.yaml#/ProspectMarkedCold' }]
+      throws:
+        - { $ref: 'errors.yaml#/ProspectNotFound' }
+    - message: { $ref: 'commands.yaml#/RecordProspectReply' }
+      emits: [{ $ref: 'events.yaml#/ProspectReplied' }]
+      throws:
+        - { $ref: 'errors.yaml#/ProspectNotFound' }

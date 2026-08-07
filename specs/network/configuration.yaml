@@ -1,0 +1,71 @@
+version: 1
+description: >
+  network scope — configuration fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `configuration.yaml` catalog; $refs stay kind-logical
+  (`configuration.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+keys:
+
+
+  RUN_SIRENE_WORKER:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
+      releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
+      staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
+      Readiness at GET /sirene.
+    deploy:
+      production: "true"
+      staging: "true"
+
+
+  # ===================================================================
+  # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
+  #
+  # Declared here so the drift gate and the docs cover them, but `consumer` keeps them OUT of the
+  # server's typed Config: the server never reads them, and a boot report listing settings the process
+  # ignores is noise that trains people to skim it.
+  # ===================================================================
+
+  INSEE_API_TOKEN:
+    type: string
+    secret: true
+    consumer: sirene_ingest
+    gates: >
+      INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal).
+      `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest
+      zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which
+      injects the repo secret of the same name directly; the Render sync (which only carries the server
+      service) has nothing to do with it.
+
+
+  INSEE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: sirene_ingest
+    gates: >
+      Override of the version-pinned Sirene base URL. Exists because the version is IN the path
+      (`/api-sirene/3.11`): when INSEE bumps it, a sweep can be redirected without a release. Unset, the
+      client uses its own pinned constant -- so no `default` here, which would be a second copy of it.
+
+
+  SIRENE_DEPARTMENTS:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/DepartmentList'
+    consumer: sirene_ingest
+    gates: >
+      Comma-separated departments to sweep, honoured VERBATIM and in order (e.g. `37` for Tours only).
+      Blank = stalest-first across all of France (#218). Set per workflow_dispatch run, not persisted.
+
+
+  SIRENE_BUDGET_MINUTES:
+    type: string
+    consumer: sirene_ingest
+    gates: >
+      Wall-clock a sweep may spend before stopping cleanly at a department boundary. Blank = the binary
+      default (75 sweep / 60 compact); the run resumes where it stopped on the next invocation.

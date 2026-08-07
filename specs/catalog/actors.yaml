@@ -1,0 +1,89 @@
+version: 1
+description: >
+  catalog scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Catalog:
+  type: aggregate
+  identity: { $ref: '#/Catalog/state/catalogId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A restaurant catalog: catalog, category tree, products, offers (SKUs), option lists and per-offer stock."
+  receives:
+    - message: { $ref: 'commands.yaml#/CreateCatalog' }
+      emits: [{ $ref: 'events.yaml#/CatalogCreated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RefNotUnique' }
+    - message: { $ref: 'commands.yaml#/ConfigureCatalogSlug' }
+      # ONE fact, unlike the restaurant host: first configuration and a rename both emit
+      # CatalogSlugConfigured (the label replaces). Re-submitting the CURRENT label appends nothing.
+      emits: [{ $ref: 'events.yaml#/CatalogSlugConfigured' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/CatalogSlugAlreadyTaken' }
+    - message: { $ref: 'commands.yaml#/AddProduct' }
+      emits: [{ $ref: 'events.yaml#/ProductAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/CurrencyMismatch' }
+        - { $ref: 'errors.yaml#/CatalogCategoryRefNotFound' }
+        - { $ref: 'errors.yaml#/RefNotUnique' }
+    - message: { $ref: 'commands.yaml#/UpdateProduct' }
+      emits: [{ $ref: 'events.yaml#/ProductUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/ProductNotFound' }
+        - { $ref: 'errors.yaml#/ProductMustHaveOffer' }
+        - { $ref: 'errors.yaml#/CurrencyMismatch' }
+    - message: { $ref: 'commands.yaml#/RemoveProduct' }
+      emits: [{ $ref: 'events.yaml#/ProductRemoved' }]
+      throws:
+        - { $ref: 'errors.yaml#/ProductNotFound' }
+    - message: { $ref: 'commands.yaml#/AddCatalogCategory' }
+      emits: [{ $ref: 'events.yaml#/CatalogCategoryAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/ParentCatalogCategoryNotFound' }
+        - { $ref: 'errors.yaml#/RefNotUnique' }
+    - message: { $ref: 'commands.yaml#/UpdateCatalogCategory' }
+      emits: [{ $ref: 'events.yaml#/CatalogCategoryUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogCategoryNotFound' }
+        - { $ref: 'errors.yaml#/CatalogCategoryCycle' }
+    - message: { $ref: 'commands.yaml#/RemoveCatalogCategory' }
+      emits: [{ $ref: 'events.yaml#/CatalogCategoryRemoved' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogCategoryNotFound' }
+        - { $ref: 'errors.yaml#/CatalogCategoryNotEmpty' }
+    - message: { $ref: 'commands.yaml#/AddOptionList' }
+      emits: [{ $ref: 'events.yaml#/OptionListAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/OptionListMustHaveOption' }
+        - { $ref: 'errors.yaml#/InvalidSelectionBounds' }
+    - message: { $ref: 'commands.yaml#/UpdateOptionList' }
+      emits: [{ $ref: 'events.yaml#/OptionListUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/OptionListNotFound' }
+        - { $ref: 'errors.yaml#/OptionListMustHaveOption' }
+    - message: { $ref: 'commands.yaml#/RemoveOptionList' }
+      emits: [{ $ref: 'events.yaml#/OptionListRemoved' }]
+      throws:
+        - { $ref: 'errors.yaml#/OptionListNotFound' }
+        - { $ref: 'errors.yaml#/OptionListInUse' }
+    - message: { $ref: 'commands.yaml#/UpdateOfferStock' }
+      emits: [{ $ref: 'events.yaml#/OfferStockUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/OfferNotFound' }
+        - { $ref: 'errors.yaml#/OfferNotStockTracked' }
+    - message: { $ref: 'commands.yaml#/ImportCatalog' }
+      emits: [{ $ref: 'events.yaml#/CatalogImported' }]
+      throws:
+        - { $ref: 'errors.yaml#/CatalogNotFound' }
+        - { $ref: 'errors.yaml#/CatalogTranslationFailed' }
+        - { $ref: 'errors.yaml#/MissingRef' }
+    - message: { $ref: 'events.yaml#/OfferStockUpdated' }
+      emits: [{ $ref: 'events.yaml#/OfferStockUpdated' }]
+      effect: "Inbound HubRise inventory sync recorded via the ACL (no command, no rejection)."

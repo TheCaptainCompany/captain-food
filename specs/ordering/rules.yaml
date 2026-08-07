@@ -1,0 +1,131 @@
+version: 1
+description: >
+  ordering scope — rules fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `rules.yaml` catalog; $refs stay kind-logical
+  (`rules.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# --- Cart ---
+CartPricedFromLiveCatalog:
+  description: "Cart lines are added/changed/removed and priced by the projection from the live catalog, never trusted from the client."
+
+CartRejectsUnorderableOrInvalidLine:
+  description: "Adding an unorderable offer or operating on an invalid/absent line is rejected."
+
+
+# --- Order ---
+OrderLifecycleStatusMachine:
+  description: "An order advances accept → prepare → ready → delivered (or reject/cancel), each transition allowed only from the correct status."
+
+OrderLifecycleIsExplicit:
+  description: >
+    The Order status machine is the DECLARED lifecycle (actors.yaml#/Order/lifecycle,
+    ADR-20260720-004419), not implicit code: a move the declared transition table does not contain —
+    a skipped/repeated step, or any transition out of a terminal state (DELIVERED, REJECTED,
+    CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT) — is rejected with InvalidOrderStatus.
+
+OrderRatedOnceWhenDelivered:
+  description: "A delivered order can be rated (rider thumb) exactly once."
+
+RestaurantRatedOncePerOrder:
+  description: "The restaurant can be rated exactly once per order."
+
+DeliverySatisfactionRecordedOncePerDeliveredOrder:
+  description: "A delivered order's delivery-delay satisfaction survey can be answered exactly once (#62); a second answer, a missing order, or a not-delivered order is rejected."
+
+DeliverySatisfactionVisibleToRestaurant:
+  description: "A recorded delivery-delay verdict (DeliverySatisfactionRecorded) is projected into the restaurant-facing timeliness read model (restaurantDeliverySatisfaction) so the restaurant can weigh self-dispatch vs Captain routing (#62)."
+
+TipsAdditiveMultiRecipientSeparate:
+  description: "Tips (rider/restaurant/Captain, by customer or restaurant) are additive and separate from the split; an invalid recipient is rejected (ADR-0029)."
+
+RefundRequestByCustomer:
+  description: "A customer can request a refund for an order."
+
+
+# --- PlaceOrderProcess (checkout saga) ---
+ServerPriceAuthority:
+  description: >
+    The server is the only price authority on the write path: order line totals, the order total and
+    the payment-intent amount are recomputed at checkout from the live catalog (Offer prices, Option
+    prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a
+    confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line
+    whose price cannot be resolved from the live catalog rejects the checkout fail-closed
+    (PriceUnresolvable) — never a fallback to the client's number.
+
+CheckoutPricesCartCreatesPaymentIntent:
+  description: "Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
+
+OrderTestModeIsolation:
+  description: "Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics."
+
+
+# --- RefundProcess (restaurant- or admin-approved) ---
+RefundOnRejectionOrCancellation:
+  description: "When a paid order is rejected, cancelled, or a refund is requested, a refund is opened as PENDING_APPROVAL for a restaurant/admin decision; nothing is refunded without approval."
+
+PendingRefundVisibleUntilDecided:
+  description: "A refund opened for decision is recorded as a domain fact (RefundOpened on the Payment) and stays visible in the refund queue (pendingRefunds) as REQUESTED until an explicit decision resolves it; the decision and the Stripe settlement update its status (APPROVED/DENIED, then REFUNDED) instead of dropping it."
+
+RestaurantDispatchBypassesRouting:
+  description: "A RESTAURANT-dispatch order (RestaurantDispatchMode RESTAURANT) is never offered to a delivery channel: the dispatch run short-circuits to SELF_DISPATCHED and Captain only tracks the delivery, while the restaurant drives its progress and the customer still gets order tracking (#60)."
+
+
+# --- Reclamations / customer claims (#151) ---
+ReclamationIsUniquePerId:
+  description: "A reclamation is opened once per reclamationId; opening a claim with an already-used id is rejected (#151)."
+
+OnlyOpenReclamationsAreDecided:
+  description: "A reclamation can be resolved or rejected only while it is OPEN; deciding one that is not open is rejected (#151)."
+
+ReclamationRejectionCarriesAReason:
+  description: "Rejecting a reclamation requires a non-empty reason; a rejection without one is rejected (#151)."
+
+PartialRefundResolutionCarriesAnAmount:
+  description: "Resolving a reclamation as PARTIAL_REFUND requires a refund amount; a partial refund without one is rejected (#151)."
+
+OnlyDecidedReclamationsCanBeReopened:
+  description: "Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)."
+
+ReclamationEvidenceTargetsAnExistingClaim:
+  description: "Evidence (an attachment ref) can only be attached to an existing reclamation; attaching to a claim that was never opened is rejected (#156)."
+
+GoodwillCreditGrantedOnResolution:
+  description: "When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)."
+
+ReplacementOrderPlacedOnResolution:
+  description: >
+    When a reclamation is resolved as REPLACEMENT, a no-charge replacement order is placed with the SAME
+    line items as the original, a $0 buyer total and no payment (no Stripe PaymentIntent), linked to the
+    original via OrderPlaced.replacementOf — so it enters the normal fulfilment/dispatch flow. Idempotent
+    per reclamationId: a re-delivered resolution never places a second replacement (#159, ADR-20260726-171736).
+
+RefundSettledOnResolution:
+  description: >
+    When a reclamation is resolved as FULL_REFUND or PARTIAL_REFUND, the ReclamationProcess drives the
+    EXISTING refund path (RefundProcess) to a settled Stripe refund — the restaurant's resolution IS the
+    approval, so the refund settles without a separate manual ApproveRefund. FULL_REFUND refunds the
+    order's captured total; PARTIAL_REFUND refunds the recorded amount. RefundProcess remains the single
+    Stripe-driving mechanism (no parallel money path). Idempotent per reclamationId: a re-delivered
+    resolution never opens or settles a second refund (#207, ADR-20260727-090000).
+
+RefundResolutionCappedAtCaptured:
+  description: >
+    A refund resolution can never refund more than the order's captured total; a PARTIAL_REFUND amount
+    over the captured total is rejected before any Stripe refund is driven (#207).
+
+
+# --- Order retention & deletion (GDPR pilot: ADR-20260731-153000/-160000/-214500, #272) ---
+TerminalOrderSchedulesItsExpiry:
+  description: >
+    Every order reaching a terminal state (delivered, rejected or cancelled) schedules its
+    OrderExpired reminder ORDER_RETENTION_WINDOW_DAYS out. One pending expiry per order — the
+    deterministic reminder identity guarantees it: a later terminal fact postpones the SAME
+    scheduled row in place, it never duplicates it (ADR-20260731-150500, #272).
+
+OrderExpiryIsRecordedNeverRejected:
+  description: >
+    Delivering the due OrderExpired reminder records the fact with record semantics: Recorded the
+    first time, a benign no-op when the order is already expired — a retention deadline's passage
+    cannot be refused, so REJECTED is not a possible verdict for this delivery
+    (ADR-20260731-153000 §1a, #272).

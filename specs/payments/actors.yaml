@@ -1,0 +1,92 @@
+version: 1
+description: >
+  payments scope — actors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `actors.yaml` catalog; $refs stay kind-logical
+  (`actors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+Payment:
+  type: aggregate
+  identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
+  # The refund decision facts (RefundOpened/Approved/Denied) do not move the payment status —
+  # only the settled Stripe fact (PaymentRefunded) does.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/PaymentStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/PaymentIntentCreated' }
+        to: PENDING
+    transitions:
+      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentCaptured' }, to: CAPTURED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentFailed' }, to: FAILED }
+      - { from: [CAPTURED], event: { $ref: 'events.yaml#/PaymentRefunded' }, to: REFUNDED }
+    terminal: [FAILED, REFUNDED]
+  receives:
+    - message: 
+        $ref: 'events.yaml#/PaymentIntentCreated'
+      emits: [{ $ref: 'events.yaml#/PaymentIntentCreated' }]
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits: [{ $ref: 'events.yaml#/PaymentCaptured' }]
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: [{ $ref: 'events.yaml#/PaymentFailed' }]
+    - message:
+        $ref: 'events.yaml#/PaymentRefunded'
+      emits: [{ $ref: 'events.yaml#/PaymentRefunded' }]
+    - message: { $ref: 'events.yaml#/RefundOpened' }
+      emits: [{ $ref: 'events.yaml#/RefundOpened' }]
+      effect: "RefundProcess opened a refund on this captured payment for a restaurant/admin decision; the Payment records it (idempotent) so View_PendingRefunds folds the queue from the log."
+    - message: { $ref: 'events.yaml#/RefundApproved' }
+      emits: [{ $ref: 'events.yaml#/RefundApproved' }]
+      effect: "RefundProcess delivers the approval decision (restaurant or admin); the Payment records it (idempotent)."
+    - message: { $ref: 'events.yaml#/RefundDenied' }
+      emits: [{ $ref: 'events.yaml#/RefundDenied' }]
+      effect: "RefundProcess delivers the denial decision (restaurant or admin); the Payment records it (idempotent)."
+
+
+CustomerCredit:
+  type: aggregate
+  identity: { $ref: '#/CustomerCredit/state/customerId' }   # one credit ledger per customer (stream CustomerCredit-{customerId})
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a
+    Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at
+    checkout) are recorded as facts on the customer's ledger stream; the AVAILABLE BALANCE is a fold over
+    them (granted − consumed, never negative). No status lifecycle — a ledger has a balance, not a state.
+    GrantCustomerCredit is idempotent per reclamationId (at most one grant per resolved claim), so a
+    re-delivered ReclamationResolved from the ReclamationProcess saga never double-grants
+    (ADR-20260726-163737, #158). Both commands are saga-/checkout-driven (no public GraphQL mutation).
+  receives:
+    - message: { $ref: 'commands.yaml#/GrantCustomerCredit' }
+      emits: [{ $ref: 'events.yaml#/CustomerCreditGranted' }]
+    - message: { $ref: 'commands.yaml#/ConsumeCustomerCredit' }
+      emits: [{ $ref: 'events.yaml#/CustomerCreditConsumed' }]
+      throws:
+        - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
+
+
+RefundProcess:
+  type: process-manager
+  identity: { $ref: '#/RefundProcess/state/orderId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The refund saga: records the staff decision on an OPEN refund (RefundOpened is emitted by the
+    order-lifecycle commands -- RejectOrder, CancelOrder -- not by this saga's receives), drives
+    the Stripe refund on approval, and closes idempotently when Stripe reports the PaymentRefunded
+    fact. Approval and denial are restaurant/admin decisions on a pending refund; anything else is
+    RefundNotPending.
+  receives:
+    - message: { $ref: 'commands.yaml#/ApproveRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'commands.yaml#/DenyRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundDenied' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+      emits: []
+      effect: "Inbound Stripe fact: close the refund saga idempotently."

@@ -1,0 +1,96 @@
+version: 1
+description: >
+  delivery scope — errors fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `errors.yaml` catalog; $refs stay kind-logical
+  (`errors.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+DeliveryJobNotFound:
+  description: "No delivery job with this id."
+  context:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+  messages:
+    en: "Delivery job not found."
+    fr: "Livraison introuvable."
+
+
+InvalidDeliveryStatus:
+  description: "The delivery job is not in a status that allows this transition."
+  context:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    currentStatus: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    expectedStatus: { $ref: 'scalars.yaml#/DeliveryStatus' }
+  messages:
+    en: "This action is not allowed while the delivery is '{currentStatus}'."
+    fr: "Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'."
+
+
+DeliveryAlreadyAssigned:
+  description: "The delivery job has already been accepted by a courier/rider."
+  context:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+  messages:
+    en: "This delivery has already been taken."
+    fr: "Cette livraison a déjà été prise en charge."
+
+
+# --- Delivery partner self-registration (#61) ---
+DeliveryPartnerAvailabilityAlreadyRequested:
+  description: "A registration with this id already exists (idempotent self-registration guard)."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+  messages:
+    en: "This availability registration already exists."
+    fr: "Cette demande de disponibilité existe déjà."
+
+
+DeliveryPartnerAvailabilityNotFound:
+  description: "No delivery-partner availability registration with this id."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+  messages:
+    en: "Availability registration not found."
+    fr: "Demande de disponibilité introuvable."
+
+
+DeliveryPartnerAvailabilityNotPending:
+  description: "The availability registration is not PENDING, so it cannot be approved."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+    currentStatus: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+  messages:
+    en: "This availability registration is not awaiting review."
+    fr: "Cette demande de disponibilité n'est pas en attente de validation."
+
+
+# =====================================================================
+# Rider
+# =====================================================================
+
+RiderAlreadyRegistered:
+  description: "A rider is already registered for this identity (authRef/id)."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "You are already registered as a rider."
+    fr: "Vous êtes déjà inscrit en tant que livreur."
+
+
+RiderNotFound:
+  description: "No rider with this id."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "Rider not found."
+    fr: "Livreur introuvable."
+
+
+InvalidRiderStatusTransition:
+  description: "The rider is not in a status that allows this transition."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    currentStatus: { $ref: 'scalars.yaml#/RiderStatus' }
+    targetStatus: { $ref: 'scalars.yaml#/RiderStatus' }
+  messages:
+    en: "A rider cannot move from '{currentStatus}' to '{targetStatus}'."
+    fr: "Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'."

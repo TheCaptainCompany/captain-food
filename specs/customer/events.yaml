@@ -1,0 +1,195 @@
+version: 1
+description: >
+  customer scope — events fragment (ADR-20260807-183024 D1, #375). Merged by the
+  codegen loader into the logical `events.yaml` catalog; $refs stay kind-logical
+  (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
+
+
+# =====================================================================
+# Customer
+# =====================================================================
+# Identity/credentials are managed by the auth provider (Supabase Auth).
+# Only the creation of the domain Customer is an event. Sign-in, password
+# reset, token refresh and sessions are NOT domain events.
+
+CustomerRegistered:
+  description: >
+    A customer account was created on first phone verification (passwordless OTP,
+    identity managed by the auth provider). Phone number is the primary identifier.
+  type: object
+  properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    authRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+      description: "Auth provider user id (e.g. Supabase Auth), linking identity to this Customer."
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+    displayName:
+      $ref: 'scalars.yaml#/CustomerDisplayName'
+      nullable: true
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+      nullable: true
+      description: "Optional, e.g. captured later for receipts."
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+      nullable: true
+      description: "Preferred culture (language + date/time/number display)."
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+  required:
+    - customerId
+    - phone
+
+
+CustomerIdentified:
+  description: >
+    A returning visitor signed in and was resolved to an existing Customer (authRef → customerId).
+    NOT an auth event (OTP/session live in the auth provider): this records the DOMAIN fact so the
+    visitor's OPEN guest carts can be bound to the customerId — letting carts started on different
+    devices converge under one customer and be merged at checkout.
+    Thanks to the sessionId, the existing open cart(s) can be bound to the customerId and merged at checkout. This is a domain event, not an auth event.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    authRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      description: "Auth provider user id that was matched to this Customer (via Customer.auth_ref)."
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Session id (ADR-0041) for the sign-in event; not required for cart binding."
+  required:
+    - customerId
+    - authRef
+    - sessionId
+
+
+RestaurantFavorited:
+  description: "Customer marked a restaurant as a favorite."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [customerId, restaurantId]
+
+
+RestaurantUnfavorited:
+  description: "Customer removed a restaurant from their favorites."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [customerId, restaurantId]
+
+
+CustomerInfoUpdated:
+  description: "Customer updated their display name. (Email is verified-only — see CustomerEmailVerified.)"
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    displayName:
+      $ref: 'scalars.yaml#/CustomerDisplayName'
+      nullable: true
+  required: [customerId]
+
+
+CustomerEmailVerified:
+  description: "An email was verified (Supabase magic link) and linked to the Customer — initial set OR a later change."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+  required: [customerId, email]
+
+
+CustomerPhoneChanged:
+  description: "The Customer's phone was changed after re-verification (canonical E.164)."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+  required: [customerId, phone]
+
+
+CustomerLanguageChanged:
+  description: "The Customer's preferred language (locale) was set/changed; localizes later SMS/email sends."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+  required: [customerId, locale]
+
+
+CustomerPreferencesSet:
+  description: "Customer set their discovery + i18n preferences (timezone, dietary restrictions, favorite cuisines). Language is CustomerLanguageChanged."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+    dietaryTags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+    favoriteCuisines:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+  required: [customerId]
+
+
+CustomerAddressSet:
+  description: "Customer added or updated a saved delivery address."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    addressId:
+      $ref: 'scalars.yaml#/AddressId'
+    label:
+      type: string
+      maxLength: 80
+      nullable: true
+    address:
+      $ref: 'entities.yaml#/Address'
+  required: [customerId, addressId, address]
+
+
+CustomerAddressRemoved:
+  description: "Customer removed a saved address."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    addressId:
+      $ref: 'scalars.yaml#/AddressId'
+  required: [customerId, addressId]
+
+
+CustomerPaymentMethodSet:
+  description: "Customer set or updated their preferred Stripe payment method."
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    paymentMethodId:
+      $ref: 'scalars.yaml#/PaymentMethodId'
+  required: [customerId, paymentMethodId]
