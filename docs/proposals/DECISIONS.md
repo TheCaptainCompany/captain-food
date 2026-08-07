@@ -427,7 +427,14 @@ D4's zone-host sub-decision is answered — **NS hosting moves to OVH DNS**. Rea
 
 ---
 
-## 18. One decomposition axis: spec folders, schemas, projectors — PROP-20260807-174246
+## 18. One decomposition axis: spec folders, schemas, projectors — PROP-20260807-174246 — ✅ DECIDED 2026-08-07
+
+> **Approved as recommended** (product owner, 2026-08-07 — D1–D8, with D2 and D8 in their revised
+> forms; the critical-path-growth concern explicitly accepted), recorded by
+> [ADR-20260807-183024](../adr/ADR-20260807-183024-one-decomposition-axis.md). The rows below stand
+> as the record of the option space; every `_(open)_` cell reads **✅ as recommended (2026-08-07)**.
+> Realization order is the ADR's consequences list; unresolved questions live on
+> [#374](https://github.com/TheCaptainCompany/captain-food/issues/374)'s checklist.
 
 [PROP-20260807-174246](PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md)
 ([#374](https://github.com/TheCaptainCompany/captain-food/issues/374)). Product-owner directive

@@ -1,12 +1,15 @@
 # PROP-20260807-174246 — One decomposition axis: spec folders, per-scope storage, per-scope projectors (screaming architecture)
 
-- **Status**: Proposed
+- **Status**: **Approved** (product owner, 2026-08-07: *"Approved as recommended"* — D1–D8, with D2
+  and D8 in their revised forms) — recorded by
+  [ADR-20260807-183024](../adr/ADR-20260807-183024-one-decomposition-axis.md); unresolved questions
+  copied to [#374](https://github.com/TheCaptainCompany/captain-food/issues/374)'s checklist.
 - **Date**: 2026-08-07
 - **Tracking issue**: [#374 "One decomposition axis: spec folders per domain, schema-per-domain storage, per-domain projectors"](https://github.com/TheCaptainCompany/captain-food/issues/374)
 - **Realized by**: _(filled at completion)_
 - **Builds on**: PROP-20260806-223656 (Approved — per-surface/per-actor images, per-scope domain crates via [#373](https://github.com/TheCaptainCompany/captain-food/issues/373)) · ADR-20260807-002705 (MKS + CNPG + GitOps, **start clean**) · ADR-0032/0034 (the DSL is the source of truth)
 - **Concerns**:
-  - [ ] critical-path-growth: production is DOWN and every directive this week has grown the pre-cutover program. D7 exists to bound this; approving must accept its sequencing consequence explicitly.
+  - [x] critical-path-growth: **accepted with the approval, 2026-08-07** — the product owner approved after the concern was put in front of them explicitly; production stays down for the (1)–(7) program in ADR-20260807-183024's consequences, chosen knowingly.
 
 ---
 

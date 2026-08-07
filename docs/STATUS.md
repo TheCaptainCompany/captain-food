@@ -3,7 +3,17 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 📋 **2026-08-07 — ONE DECOMPOSITION AXIS, top to bottom
+> ✅ **2026-08-07 — ONE DECOMPOSITION AXIS — APPROVED AS RECOMMENDED
+> ([ADR-20260807-183024](adr/ADR-20260807-183024-one-decomposition-axis.md), D1–D8 with D2/D8 in
+> their product-owner-revised forms; critical-path-growth accepted knowingly).** Final shape:
+> `specs/{scope}/` folders + common (8 scopes) · **`captain-core`** (log+mailbox, ALL backup budget)
+> / **`captain-views`** (per-scope projection schemas, NO backups — restore is replay) ·
+> per-scope projectors over the single log · **`graphql-{scope}` services + a boring generated
+> gateway per role** (top-level routing from a codegen composition table; nested types intra-scope
+> by validator rule) · per-scope configuration. Three standing reviewers now exist: `architect`
+> (microservice/actor lens), `dba` (Postgres/food-service), `graphql-architect` (API composition).
+> **Realization order** (ADR consequences): spec reorg → #373 crates → bin crates → #349 emitter →
+> #363 build matrix → core/views in #360 → #358+#361 with the product owner live. Was:
 > ([PROP-20260807-174246](proposals/PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md),
 > [#374](https://github.com/TheCaptainCompany/captain-food/issues/374) — DECISION OPEN).** Product-owner
 > directive (screaming architecture): **spec folders per business domain + `common/`**, per-domain
