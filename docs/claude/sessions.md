@@ -431,6 +431,17 @@ unless the full payload is the point — a bare PR `get_diff` on a large PR retu
 (4) ONE SESSION PER WORK CHUNK (CLAUDE.md rigor rules) — the repo carries the state, so ending a
 session is free and long context measurably raises the staleness error rate.
 
+**Coordinator/executor split** (product-owner directive, 2026-08-07): a session that has planned a
+multi-step program NEVER executes the steps itself — it DISPATCHES each step to a fresh session
+(`create_session` with a complete standalone prompt naming the issue, the ADRs/proposal to read, the
+branch/PR to continue, and the gates), one step per session, sequentially — the next step is
+dispatched only when the previous step's PR is MERGED. This is the "one session per work chunk" rule
+made mechanical: the planning session's compacted memory has twice invented or duplicated work
+mid-program (a duplicate backlog issue; a claim it forgot it had made) — a fresh executor reading
+the repo's recorded state (claim comment, PR plan checklist, STATUS) has no such memory to corrupt.
+The dispatch prompt must ALWAYS include the hygiene preamble: check existing claims/branches/PR
+comments for the issue FIRST and continue what exists rather than re-create it.
+
 **The scratchpad's parent-directory permissions RESET between wakeups** — a local Postgres run
 under a dedicated user (`pguser`) inside the scratchpad dies mid-session with "Permission denied"
 on the data directory, and every DB-gated suite then fails with PoolTimedOut/Connection refused
