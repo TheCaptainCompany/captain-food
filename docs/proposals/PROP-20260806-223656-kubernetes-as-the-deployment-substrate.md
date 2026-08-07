@@ -97,10 +97,18 @@ still work and are a real gain, but zero-downtime rollout is not.
 wildcard.** The queried con, unpacked (it had been stated too tersely): a `*.captain.food` wildcard
 certificate can only be issued via the DNS-01 challenge — Let's Encrypt demands a token written into
 a TXT record on the zone — and renewal is every ~60 days, done by cert-manager unattended, so
-**cert-manager must hold an OVH DNS API credential in-cluster**. Mitigations, now part of the answer:
-the token is **scoped to the `captain.food` zone only**, stored sealed (§2b practice 7), and OVH
-needs the community webhook solver (`cert-manager-webhook-ovh`) since it is not a built-in
-cert-manager solver — one more Helm chart on the practice-1 upgrade list.
+**cert-manager must hold an API credential for whoever HOSTS the DNS zone**, in-cluster, sealed
+(§2b practice 7) and scoped as narrowly as the provider allows.
+
+**Zone-host correction (product owner, 2026-08-07): the DNS provider is DYNADOT, not OVH** — and
+**no Dynadot cert-manager solver exists**, built-in or community (checked 2026-08-07). Three ways
+through, one recommended:
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Move zone HOSTING to OVH DNS — nameserver change only, Dynadot stays the registrar** ✅ recommended | One provider and one EU jurisdiction for cluster + DNS (the sovereignty posture that has run through every hosting decision); the community `cert-manager-webhook-ovh` solver exists; the cutover must touch DNS anyway (`*.captain.food` → the MKS Load Balancer), so the NS change rides work already planned; DNS becomes API-drivable for D5-generated records later | An NS migration to sequence carefully (propagation, low TTLs first); the OVH solver is community-maintained, not core |
+| CNAME-delegate ONLY the challenge: `_acme-challenge.captain.food` → a zone at a solvable provider (cert-manager follows CNAMEs) | Smallest change — Dynadot keeps hosting everything else | A second, standing DNS dependency whose only job is the challenge; renewal now depends on two providers being correct |
+| Write a custom Dynadot webhook against their API | Everything stays at Dynadot | Bespoke certificate-critical infrastructure, maintained by us alone — the worst fit for this team, and renewal is the thing that fails at 4am two months after everyone forgot it exists |
 
 ### D5 — Are the manifests generated from the specs?
 
