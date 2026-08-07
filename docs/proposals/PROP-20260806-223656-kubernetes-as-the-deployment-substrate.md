@@ -142,12 +142,35 @@ per-pod attack surface.
   capability allowlist. This extends **PROP-20260802-130500 (isolation by construction) from crates
   to binaries**: the wrong coupling becomes unspellable, not just unrouted. One cargo-chef cook →
   N thin runtime images copying different binaries, so the build cost is marginal.
-- **Workers are the one honest exception: ONE worker image, ~13 Deployments via `DRAIN_ACTOR_TYPES`**
-  (new `specs/configuration.yaml` key + a small filter on the drain query — cutover-critical).
-  Not a shortcut: the aggregates genuinely share the `domain` crate, so per-type images would be
-  13 copies of identical code — split theater — and any domain change rebuilds the shared image
-  regardless. **`projector` and `bam` get their own bins** (distinct C4 containers, distinct
-  dependency slices).
+- **Every actor and process manager gets its own bin and image too** — named **`actor-{type}`**
+  (aggregates) and **`pm-{name}`** (process managers), the emitter deriving names from
+  `actors.yaml`/`processmanager.yaml` (product owner naming directive, 2026-08-07). *This replaces
+  the earlier "one worker image via `DRAIN_ACTOR_TYPES`" exception, whose premise the domain split
+  below removes*: with per-scope domain crates, `actor-order`'s closure genuinely differs from
+  `actor-catalog`'s, so per-actor images stop being split theater. **`DRAIN_ACTOR_TYPES` is
+  cancelled before it was built** — an `actor-order` bin that only LINKS the Order handler can only
+  drain Order lanes: the scoping moved from an env var to the linker (compiler-first,
+  ADR-20260803-234035); a runtime assertion (worker refuses a lane not its type) stays as belt.
+  **`projector` and `bam` keep their own bins** (distinct C4 containers).
+- **The domain layer splits into per-scope GENERATED crates** (product owner directive, 2026-08-07:
+  *"split the domain like events commands business entities scalars in different crates by business
+  scope to avoid updating every pods for a small change on an event or a command"*): the codegen
+  emits `domain-{scope}` crates (scope = the aggregate, per `actors.yaml`/`entities.yaml`
+  membership) plus a small **kernel** crate (Money, Address, shared scalars), with the crate
+  dependency graph **derived from the spec's `$ref` edges** — the spec's coupling becomes the
+  compile-and-deploy coupling, mechanically, never hand-designed. A **new validator rule fails on
+  cross-scope `$ref` CYCLES** (crates need a DAG), which doubles as spec hygiene. Honest limits,
+  recorded so they never surprise: **kernel changes still ripple everything** (correctly — Money
+  touches everyone), and **cross-scope PMs legitimately span scopes** (`pm-place-order` links
+  ordering + payment, so a payment event change rebuilds it — real coupling made visible is the
+  feature, not a leak). Combined with the determinator gate, blast radius drops from "all pods" to
+  "the pods whose scopes the change provably touches".
+- **The deploy LEDGER is git** (product owner, 2026-08-07: *"remember for easy rollback what has
+  been deployed"*): the pins path holds `{digest, source_hash}` per image, every deploy writes ONE
+  structured pin-bump commit (`deploy: actor-order=sha-abc123 fo-storefront=sha-def456`), so
+  `git log -- <pins path>` IS the deployment history — the role Render's deploy-event log used to
+  play (ADR-20260721-175411's "version-of-record"), now in the repository. **Per-image rollback =
+  `git revert` of that image's pin change**; Argo's own history is secondary, never authoritative.
 - **The safety boundary is unchanged by any of this**: surface pods scale freely NOW (mutations only
   INSERT into the mailbox); one worker per actor type is safe WITHOUT
   [#242](https://github.com/TheCaptainCompany/captain-food/issues/242) (disjoint types = disjoint
