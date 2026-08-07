@@ -60,11 +60,26 @@ su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -l $PGDATA/server.l
 # sqlx-cli is NOT installed (CI gets it prebuilt from taiki-e/install-action, and building it
 # here costs minutes). psql applies the migrations, but needs a per-file fallback: some
 # migrations require a transaction (LOCK TABLE) and others forbid one (VACUUM), which is why a
-# plain loop dies partway either way. Try -1 first, retry without it.
+# plain loop dies partway either way. Try -1 first — but ONLY fall back when the -1 failure is
+# the "cannot run inside a transaction block" class. A BLIND retry corrupts the schema
+# (2026-08-07): several migration files carry their own BEGIN/COMMIT, so a later statement
+# failing under -1 leaves the inner-committed half APPLIED; the blind rerun then hits "already
+# exists" on file after file and the enum int→text conversions run twice ("operator does not
+# exist: text = integer"). Recovery is DROP SCHEMA public CASCADE and a clean pass.
 for f in $(ls migrations/*.sql | sort); do
-  PGPASSWORD=postgres psql -q -1 -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" >/dev/null 2>&1 \
-    || PGPASSWORD=postgres psql -q -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  out=$(PGPASSWORD=postgres psql -q -1 -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" 2>&1) \
+    || { echo "$out" | grep -q "cannot run inside a transaction block" \
+           && PGPASSWORD=postgres psql -q -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f" >/dev/null \
+           || { echo "FAIL $f: $out"; break; }; }
 done
+# Migrations alone are NOT the whole schema: some projection tables (e.g. ProspectionPipeline)
+# exist only in specs/generated/schema.generated.sql — a projector that folds into one will
+# log-skip its events ("relation ... does not exist") while its checkpoint advances. Apply the
+# missing CREATE TABLE from schema.generated.sql if a smoke needs that read model.
+# Smoke-testing a worker with RAW SQL inserts: the app's INSERTs raise
+# pg_notify('inbound_messages', actor_type) / pg_notify('domain_events', ...) in-transaction;
+# a psql INSERT does not, and with push LIVE the poll safety net is 60 s — so notify manually
+# or your row sits RECEIVED long past any reasonable wait.
 
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
 export DB_TESTS_REQUIRED=1                              # ALWAYS set this -- see below
