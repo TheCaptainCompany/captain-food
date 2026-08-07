@@ -46,8 +46,11 @@
 > [#271](https://github.com/TheCaptainCompany/captain-food/issues/271)):
 > 🚧 [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) MKS bootstrap — **claimed,
 > draft PR [#365](https://github.com/TheCaptainCompany/captain-food/pull/365)**, OVH auth shape
-> established + node trio priced (MKS Free plan + d2-8 trio + LB S ≈ EUR 67.80/mo ex-VAT — d2-4 too
-> thin for the ~8.5 Gi request budget); console steps need the product owner live ·
+> established; **RE-SIZED on budget (ADR-20260807-114122): the EUR 67.80 trio is over budget — entry
+> is ONE d2-8 + LB S = EUR 26.60/mo ex-VAT**, CNPG `instances: 1` with WAL/PITR non-negotiable,
+> Prometheus dropped for Honeycomb triggers, ladder up (node-pool resize → `instances: 3`) when #242
+> lands or first paying restaurants; project id recorded in the runbook; console steps need the
+> product owner live ·
 > [#361](https://github.com/TheCaptainCompany/captain-food/issues/361) NS Dynadot→OVH DNS (**product
 > owner live — Dynadot login**) ·
 > [#359](https://github.com/TheCaptainCompany/captain-food/issues/359) Argo CD ·
