@@ -657,6 +657,37 @@ mod tests {
         Money { amount_cents: MoneyCents(1000), currency: CurrencyCode("EUR".to_string()) }
     }
 
+    /// The hand-written registry's scope labels are tied to the GENERATED spec-placement table
+    /// (`ACTOR_SCOPES`, from specs/{scope}/ folders): each group's scope must be the owning
+    /// scope of its PRIMARY stream category's aggregate. A label drifting from a spec move is a
+    /// red test here, not a projector silently draining under the wrong `projector-{scope}` bin.
+    #[test]
+    fn registry_scopes_match_the_spec_placement() {
+        for group in REGISTRY {
+            let category = group.stream_prefixes[0]
+                .strip_suffix('-')
+                .expect("stream prefixes are '<Category>-'");
+            let owning = crate::generated::scopes::actor_scope(category).unwrap_or_else(|| {
+                panic!("registry group '{}': primary category '{category}' is not a spec-declared actor", group.checkpoint)
+            });
+            assert_eq!(
+                group.scope, owning,
+                "registry group '{}' labels scope '{}' but specs/{{scope}}/ places its primary aggregate '{}' in '{}'",
+                group.checkpoint, group.scope, category, owning
+            );
+        }
+    }
+
+    /// Every non-kernel scope with registry groups is reachable through the scope filter, and
+    /// the filter partitions the registry (no group lost between the per-scope bins).
+    #[test]
+    fn scope_filter_partitions_the_registry() {
+        let scopes: std::collections::BTreeSet<&str> = REGISTRY.iter().map(|g| g.scope).collect();
+        let total: usize = scopes.iter().map(|s| ProjectionWorker::scope_group_count(s)).sum();
+        assert_eq!(total, REGISTRY.len(), "scope counts must partition the registry");
+        assert_eq!(ProjectionWorker::scope_group_count("no-such-scope"), 0);
+    }
+
     /// A Payment-stream capture keys the Order row from the payload's `orderId`, not the stream.
     #[test]
     fn payment_captured_row_id_comes_from_payload_order_id() {

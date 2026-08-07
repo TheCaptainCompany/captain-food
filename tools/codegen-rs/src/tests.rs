@@ -3017,6 +3017,8 @@ keys:
              "the adapter owns its webhook staging tables (ADR-0045 posture)"),
             ("crates/server/Cargo.toml", "sqlx",
              "composition root: constructs the PgPool it injects and runs the /health _sqlx_migrations schema probe (ADR-0042/0043) — moving pool construction behind a port still leaks sqlx types through every wiring signature, so the exception stays until that refactor is designed"),
+            ("crates/bin_runtime/Cargo.toml", "sqlx",
+             "the per-bin composition root (#385): constructs the declared-size PgPool each wired bin injects — same grant, same reason as crates/server above"),
             // ── reqwest — who may reach the network ──
             ("crates/infrastructure/Cargo.toml", "reqwest",
              "the generated /services/* HTTP clients (ADR-20260719-214500) + OVH SMS outbound"),

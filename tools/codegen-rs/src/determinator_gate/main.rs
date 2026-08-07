@@ -363,9 +363,14 @@ mod tests {
         );
     }
 
-    /// Blast radius is the spec-derived crate graph, not a hand list: a domain-scope change
-    /// affects exactly the bins whose closures link it (ADR-20260807-183024 — "the spec's
-    /// coupling becomes the compile-and-deploy coupling, mechanically").
+    /// Blast radius is the spec-derived crate graph, not a hand list (ADR-20260807-183024 —
+    /// "the spec's coupling becomes the compile-and-deploy coupling, mechanically"). Since #385
+    /// wired the CQRS-spine families over the monolithic `infrastructure` crate (which links the
+    /// `domain` facade, which links every scope), a domain-scope change honestly reaches EVERY
+    /// wired bin — the cost of "thin mains over the existing crates", recorded, with the
+    /// per-scope `infrastructure` split as the follow-up that re-sharpens it. The scope-sharp
+    /// radius survives where the closures are still sharp: the shell subgraphs, gateways and
+    /// surfaces.
     #[test]
     fn domain_scope_change_scopes_the_blast_radius() {
         let d = decide(&["crates/domains/ordering/src/lib.rs"]);
@@ -374,8 +379,15 @@ mod tests {
         for expected in ["actor-order", "projector-ordering", "graphql-ordering", "pm-place-order", "bam"] {
             assert!(hit.contains(expected), "{expected} links domain-ordering and must be affected");
         }
+        // Wired bins of OTHER scopes are hit through infrastructure -> domain facade: honest,
+        // not a hand-list — remove this arm when infrastructure splits per scope.
+        assert!(hit.contains("actor-rider"), "wired bins couple through the runtime spine (recorded #385 limit)");
         assert!(!hit.contains("fo-storefront"), "surfaces hold no domain vocabulary (D8)");
-        assert!(!hit.contains("actor-rider"), "rider links delivery/network, not ordering");
+        assert!(
+            !hit.contains("graphql-delivery"),
+            "a shell subgraph of another scope keeps the sharp radius"
+        );
+        assert!(!hit.contains("gateway-public"), "gateways hold no domain vocabulary (D8)");
     }
 
     /// The kernel honestly ripples every domain-linking bin (recorded limit, not a bug)…
