@@ -427,6 +427,61 @@ D4's zone-host sub-decision is answered — **NS hosting moves to OVH DNS**. Rea
 
 ---
 
+## 18. Where may a model act — PROP-20260807-202428 — 🆕 OPEN 2026-08-07
+
+[PROP-20260807-202428](PROP-20260807-202428-ai-inference-boundary.md)
+([#379](https://github.com/TheCaptainCompany/captain-food/issues/379)). Raised by the product owner
+after seeing OVHcloud's `AI & Machine Learning` menu. The hosting decision
+([ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)) put us on an
+account that also sells EU-resident, OpenAI-compatible inference at roughly **one cent per menu**, so
+the constraint on using it is no longer cost. It is: **where is a model allowed to be wrong?**
+
+**Why it is worth deciding before the first call, not after**: an inference call is a third-party
+dependency with a 99.5% SLA and a 400 req/min ceiling, in a system where a paid order nobody is told
+about is the worst failure mode there is. Three boundaries are load-bearing — the paid-order path, the
+FIC 1169/2011 allergen declaration (§1 **D**, [#184](https://github.com/TheCaptainCompany/captain-food/issues/184)),
+and the customer-facing ETA — and all three are cheaper to fence now, on an empty slate, than to
+retract later.
+
+| # | Decision | Recommended | Answer |
+|---|---|---|---|
+| D1 | Inference provider, or none at all | **OVHcloud AI Endpoints** — same account, same region as the cluster, OpenAI-compatible, zero data retention. Cheap to reverse because D2 confines it | _(open)_ |
+| D2 | Port shape | **A narrow capability port per use case** (`MenuExtraction`), vendor + prompt + model id confined to one `crates/adapters/*` ACL. Explicitly **not** a generic `LlmPort` — that is the `SKU`-leak failure in a new costume | _(open)_ |
+| D3 | The forbidden set, and how it is enforced | Nothing on the paid-order path, no ETA, no legal declaration, no generated food imagery — enforced by the **Cargo.toml capability allowlist** that PROP-20260802-130500 D3 already tests, not by prose or a scanner (ADR-20260803-234035) | _(open)_ |
+| D4 | Failure posture | **Best-effort**: every caller declares its no-answer behaviour, no command's success depends on a model. Never retry-until-it-answers | _(open)_ |
+| D5 | What is sent and retained | Restaurant catalog content only, never customer PII, shortest retention the use case allows | _(open)_ |
+
+**Two concerns unchecked**, both blocking `Approved`: `data-residency-in-writing` (the product page
+says *"worldwide availability (non-EU)"* for the base tier while the docs say Gravelines — the DPA
+settles it, not marketing copy) and `peak-blast-radius` (no inference reachable between "pay" and "the
+restaurant is told", provably).
+
+---
+
+## 19. Menu-to-catalog onboarding — PROP-20260807-202500 — 🆕 OPEN 2026-08-07
+
+[PROP-20260807-202500](PROP-20260807-202500-menu-to-catalog-onboarding.md)
+([#380](https://github.com/TheCaptainCompany/captain-food/issues/380)). The first use case of §18, and
+the one with a business case today: `ImportCatalog` already accepts `source: MANUAL`, but **nothing
+produces that payload except HubRise**, so a Tours restaurant without a POS onboards by typing 40–80
+dishes by hand — into an editor [#171](https://github.com/TheCaptainCompany/captain-food/issues/171)
+says does not exist yet either.
+
+| # | Decision | Recommended | Answer |
+|---|---|---|---|
+| D1 | Draft-for-review, or direct import? | **Draft, confirmed by the restaurateur** — the model drafts a command a human accepts, exactly as the HubRise ACL does. Confidence thresholds rejected: generative confidence is not calibrated probability | _(open)_ |
+| D2 | Where the file and the draft live | File in the `files` registry ([#134](https://github.com/TheCaptainCompany/captain-food/issues/134)); draft in a **transient** `catalog_import_drafts` table — a draft is staging, not a business fact (the PROP-20260728-120931 precedent) | _(open)_ |
+| D3 | What `ref` an extracted product carries | **Deterministic slug-derived ref**, so a re-upload updates in place instead of duplicating the menu. This is the decision that determines whether a price change is an update or a second catalog | _(open)_ |
+| D4 | How far the draft may go on allergens | **Nothing in slice 1** — "not declared", honestly. Pre-fill-and-confirm is the likely end state, but only after §1 **D** / [#184](https://github.com/TheCaptainCompany/captain-food/issues/184) lands the representation | ⛔ **blocked on §1 D** |
+| D5 | Who may run an extraction | `ADMIN` + `RESTAURANT_ACCOUNT`, rate-limited per restaurant with a hard monthly ceiling | _(open)_ |
+
+**Two concerns unchecked**: `vat-is-not-guessable` (French catering VAT is a fiscal determination —
+`taxRate` comes from a deterministic `(category, ServiceType)` table, never from a model, and
+`Product.taxRate` is `required`) and `allergen-precedence` (D4's blocker, stated as a concern so it
+cannot be resolved by whoever implements first).
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
