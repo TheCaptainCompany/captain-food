@@ -125,6 +125,29 @@ Load Balancer.
 
 **D5 ANSWERED 2026-08-07 (product owner: *"D5 yes"*): the manifests are generated.**
 
+**D5 addendum — deployment topology (product owner directive, 2026-08-07)**: *"1 replica per web app
+including the adapters, 1 replica per actor type, 1 replica per worker including the projector —
+depending on the workload I will scale the replica."* Adopted with the constraints the code imposes,
+phased:
+
+- **Everything is ONE image with role env** — the web surfaces are WASM+SSR served per `Host` and the
+  webhook adapters are routes in the same Axum server, so the split is configuration, not builds. The
+  per-actor split needs one small runtime feature: a `DRAIN_ACTOR_TYPES` filter (declared in
+  `specs/configuration.yaml`) selecting which types' lanes a worker drains.
+- **The safety boundary**: web/enqueue pods scale freely NOW (mutations only INSERT into the mailbox);
+  **one worker per actor type is safe WITHOUT [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)**
+  (disjoint types = disjoint lanes = no contention by construction); **two workers on the SAME type
+  requires #242's leases** — and the hot type at Friday peak is `Order`, which makes #242 the direct
+  unlock for the scaling actually wanted. Projector and BAM stay singletons (advisory lock,
+  PROP-20260726-170500 D3) until their own guard.
+- **Phases**: (1) cutover ships `api-web` (HTTP + adapters + enqueue, freely scalable) +
+  `api-worker` (all drains + projector, `replicas: 1`) — zero new code; (2) per-type worker
+  Deployments **generated from `actors.yaml`** by the [#349](https://github.com/TheCaptainCompany/captain-food/issues/349)
+  emitter + the drain filter; (3) after #242: within-type scaling and RollingUpdate.
+- **Bills this creates**: per-pod sqlx pools become small DECLARED values (2–3; pgbouncer is the later
+  escape hatch — ~20 pods × default pools would swamp a 1 Gi Postgres), and phase 2 realistically
+  adds the second d2-8 node (+€20.60/mo — the ADR-20260807-114122 ladder's first rung up).
+
 **Recommended: yes — this is the strongest argument for a cluster.** `specs/configuration.yaml` already
 declares every env var and its per-profile supplier, `specs/observability.yaml` declares the telemetry
 contract, and `c4-l2.yaml` declares the containers. Emitting Deployments, Services, the Ingress and the
