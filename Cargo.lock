@@ -1165,10 +1165,89 @@ dependencies = [
 name = "domain"
 version = "0.1.0"
 dependencies = [
+ "domain-catalog",
+ "domain-common",
+ "domain-comms",
+ "domain-customer",
+ "domain-delivery",
+ "domain-network",
+ "domain-ordering",
+ "domain-payments",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "domain-catalog"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "domain-comms"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-customer"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-delivery"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-network"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-ordering"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "domain-payments"
+version = "0.1.0"
+dependencies = [
+ "domain-common",
+ "serde",
 ]
 
 [[package]]
