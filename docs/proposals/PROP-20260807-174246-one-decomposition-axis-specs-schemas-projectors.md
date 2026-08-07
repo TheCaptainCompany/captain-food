@@ -160,6 +160,32 @@ With D8 the AI-shortcut concern is closed by four walls at once: **visible** (fr
 **unspellable** (crate link), **unqueryable** (schema GRANT), **un-declarable** (validator-rejected
 cross-scope field).
 
+**D8 REVISED after product-owner pushback (2026-08-07: *"if we don't create a graphql per domain we
+will over-responsible the graphql — too many entry points and access to many domains"*; the merge
+approach he recalled is closest to SCHEMA STITCHING — a gateway that "uses the others using
+graphql").** The responsibility argument is accepted — it is the integration-database antipattern at
+the API layer, the same axis that revised D2 — and a CQRS fact makes his version far cheaper here
+than classic federation costing suggested: **in this system, cross-domain composition already
+happens in the PROJECTOR** (denormalized `View_*` embed cross-scope data at projection time), so the
+query-time graph is a set of nearly flat per-domain trees, and **entity resolution / N+1 / dynamic
+query planning — federation's real costs — simply do not arise**. Revised shape:
+
+- **`graphql-{scope}` services, generated from `specs/{scope}/api.yaml`**: each single-purpose —
+  queries read ONLY its scope's `captain-views` schema (GRANT-scoped role), mutations ONLY enqueue
+  its scope's commands to the mailbox. One domain, one graph, one grant.
+- **A thin generated GATEWAY per role path** (serving `/{role}/graphql` unchanged): **no database
+  access, no business logic, no state** — it routes TOP-LEVEL fields to the owning subgraph from a
+  **composition table emitted at codegen** (static stitching: no runtime discovery, no query
+  planner; composition failures are build failures, not 20:30 incidents).
+- **New validator rule guarding the cheapness**: a role schema's nested types must be intra-scope —
+  cross-scope data appears only at top level or pre-joined in a projector-owned view. "Composition
+  happens in the projector, not the query" becomes a gate, not a convention.
+- The surface bins (`fo-*`, `bo-*`) serve assets/SSR and speak to their role's gateway; **no surface
+  binary holds broad views access any more** — the product owner's "too many entry points" concern
+  closed structurally.
+- Cost: ~8 subgraph pods + gateways are small Rust bins (~64–96 Mi each); fits the two-node budget.
+  The codegen-time-only option remains recorded above as the rejected-but-cheaper alternative.
+
 ### D7 — Sequencing against the cutover (the registered concern)
 
 | Option | Pros | Cons |
