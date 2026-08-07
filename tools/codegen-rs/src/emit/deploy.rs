@@ -95,12 +95,25 @@ fn has_service(family: &str) -> bool {
     matches!(family, "subgraph" | "gateway" | "surface")
 }
 
-/// Families with database access BY CONSTRUCTION (mailbox drain / log append / views): the only
-/// per-key routing rule encoded here. Gateways and surfaces hold no DB access (D8 — "no surface
-/// binary holds broad views access"), so DATABASE_URL never reaches their pods; every other
-/// secret key routes by scope membership until the per-bin Config reader (#374 Q4) narrows it.
-fn needs_db(family: &str) -> bool {
-    matches!(family, "actor" | "pm" | "projector" | "worker" | "subgraph")
+/// Does this bin's pod get DATABASE_URL? Two derivations, no hand-curated bin list:
+/// - FAMILY: actor/pm/projector/worker/subgraph touch the mailbox, the log or the views by
+///   construction. Gateways and surfaces hold no DB access (D8 — "no surface binary holds broad
+///   views access"), so the credential never reaches their pods.
+/// - DECLARED c4 EDGE: a bin with an explicit c4-l2 relationship to `event-store` or
+///   `read-models` gets it regardless of family — this is what routes `adapters` (family
+///   surface, but its ACLs record inbound facts through the mailbox: a declared edge). c4
+///   relationships are representative for the uniform families, which is why the family rule
+///   stays primary; the edge check only ever WIDENS.
+/// Every other secret key routes by scope membership until the per-bin Config reader (#374 Q4)
+/// narrows it.
+pub(crate) fn needs_db(b: &BinSpec, model: &Model) -> bool {
+    if matches!(b.family, "actor" | "pm" | "projector" | "worker" | "subgraph") {
+        return true;
+    }
+    read_c4(model)
+        .relationships
+        .iter()
+        .any(|r| r.from == b.name && matches!(r.to.as_str(), "event-store" | "read-models"))
 }
 
 /// The configuration scopes whose keys a bin's pod receives: its linked domain scopes, its
@@ -139,7 +152,7 @@ fn production_secret_keys(model: &Model) -> Vec<(String, String, String)> {
 
 /// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
 /// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
-fn env_yaml(b: &BinSpec, secret_keys: &[(String, String, String)]) -> String {
+fn env_yaml(b: &BinSpec, model: &Model, secret_keys: &[(String, String, String)]) -> String {
     let scopes = bin_config_scopes(b);
     let mut out = String::new();
     out.push_str(&format!(
@@ -149,7 +162,7 @@ fn env_yaml(b: &BinSpec, secret_keys: &[(String, String, String)]) -> String {
         if !scopes.contains(scope) {
             continue;
         }
-        if key == "DATABASE_URL" && !needs_db(b.family) {
+        if key == "DATABASE_URL" && !needs_db(b, model) {
             continue; // D8: gateways/surfaces hold no database access — the pod never sees the URL
         }
         out.push_str(&format!(
@@ -172,7 +185,7 @@ fn labels_yaml(b: &BinSpec, indent: &str) -> String {
 }
 
 /// One bin's manifest file: Deployment (+ Service for the HTTP families).
-fn bin_manifest_yaml(b: &BinSpec, pin: Option<&ImagePin>, secret_keys: &[(String, String, String)]) -> String {
+fn bin_manifest_yaml(b: &BinSpec, model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String)]) -> String {
     let image = image_ref(&b.name, pin);
     let unpinned_note = if pin.and_then(|p| p.digest.as_ref()).is_none() {
         "\n# UNPINNED: deploy/pins/{bin}.json has no digest yet -- CI's pin-bump (#363/#371) writes it\n# and regenerates this file; the :unpinned tag is deliberately undeployable, never a default."
@@ -237,7 +250,7 @@ metadata:
         tpl_labels = labels_yaml(b, "        "),
         image = image,
         port = HTTP_PORT,
-        env = env_yaml(b, secret_keys),
+        env = env_yaml(b, model, secret_keys),
         unpinned = unpinned_note,
     );
     if has_service(b.family) {
@@ -562,7 +575,7 @@ pub(crate) fn emit_deploy_tree(model: &Model, pins: &BTreeMap<String, ImagePin>)
     for b in &topology {
         out.push((
             format!("manifests/bins/{}.yaml", b.name),
-            bin_manifest_yaml(b, pins.get(&b.name), &secret_keys),
+            bin_manifest_yaml(b, model, pins.get(&b.name), &secret_keys),
         ));
     }
     out

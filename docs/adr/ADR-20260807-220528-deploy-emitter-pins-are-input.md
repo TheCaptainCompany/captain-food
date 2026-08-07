@@ -30,9 +30,12 @@ recorded here so the next session inherits them as choices, not accidents:
    `secretKeyRef` into the sealed `captain-secrets` (contract emitted as `secret-keys.json`).
    `DATABASE_URL` is additionally withheld from the `gateway`/`surface` families — D8 makes "no
    DB access" part of those families' definition, so the pod never holds the credential it must
-   not use. Everything finer (e.g. OVH SMS keys reaching bins that never send SMS) waits on the
-   per-bin generated `Config` reader — [#374](https://github.com/TheCaptainCompany/captain-food/issues/374)
-   unresolved question 4 — and is deliberately NOT hand-curated here.
+   not use — UNLESS the bin has a declared c4-l2 relationship to `event-store`/`read-models`
+   (the rule that routes `adapters`, whose ACLs record inbound facts through the mailbox; found
+   and fixed in the architect review pass). Everything finer (e.g. OVH SMS keys reaching bins
+   that never send SMS) waits on the per-bin generated `Config` reader —
+   [#374](https://github.com/TheCaptainCompany/captain-food/issues/374) unresolved question 4 —
+   and is deliberately NOT hand-curated here.
 3. **Ingress hosts and role paths are derived from the screens specs**: each surface's host is
    its screens file's `base_url`, its `/{role}/graphql` paths the union of its screens' `roles`
    (role = path, ADR-0006); `fo-storefront` serves the tenant wildcard `*.captain.food`. Two

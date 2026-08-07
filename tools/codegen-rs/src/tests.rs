@@ -5391,15 +5391,16 @@ fn deploy_tree_is_complete_both_ways() {
         assert!(manifest.contains("type: Recreate"), "{}: strategy must be Recreate until #242", b.name);
         assert!(manifest.contains("replicas: 1"), "{}: replicas pinned to 1 until #242", b.name);
         assert!(manifest.contains("#193"), "{}: the Recreate pin must cite #193 in place", b.name);
-        // D8: gateways and surfaces hold no database access -- the pod must never see the URL.
-        if matches!(b.family, "gateway" | "surface") {
-            assert!(
-                !manifest.contains("DATABASE_URL"),
-                "{}: a {} bin must not receive DATABASE_URL (D8 -- no DB access by construction)",
-                b.name,
-                b.family
-            );
-        }
+        // D8: a pod gets DATABASE_URL iff the derivation says it touches the stores -- gateways
+        // and surfaces never (no DB access by construction), EXCEPT a surface with a DECLARED
+        // c4 edge to event-store/read-models (adapters: its ACLs record inbound facts).
+        assert_eq!(
+            manifest.contains("DATABASE_URL"),
+            needs_db(b, &model),
+            "{}: DATABASE_URL presence must match the needs_db derivation ({} family)",
+            b.name,
+            b.family
+        );
         assert!(
             kustomization.contains(&format!("bins/{}.yaml", b.name)),
             "kustomization.yaml misses bins/{}.yaml",

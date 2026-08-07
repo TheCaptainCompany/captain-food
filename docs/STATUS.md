@@ -10,7 +10,8 @@
 > derives `deploy/generated/` from the SAME topology as the bin crates: per-bin Deployments
 > (`Recreate` + `replicas: 1` pinned with #193/#242 cited in place, /health + /ping probes,
 > resources, env = production secret-sourced keys of the bin's scopes + common as secretKeyRef
-> into the sealed `captain-secrets`; DATABASE_URL withheld from gateway/surface families per D8),
+> into the sealed `captain-secrets`; DATABASE_URL withheld from gateway/surface families per D8,
+> except bins with a DECLARED c4 edge to the stores — `adapters` records inbound facts),
 > Services for the HTTP families, an Ingress derived from the screens specs' `base_url` +
 > per-screen roles, `Dockerfile.bin` (ARG BIN, one shared chef cook), `images.json` (#363's
 > matrix input) and `secret-keys.json` (#358's sealing contract). **`deploy/pins/{bin}.json` is
