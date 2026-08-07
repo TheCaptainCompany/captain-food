@@ -5350,3 +5350,124 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
     assert!(facade.contains("pub use domain_common::errors::*;"), "{}", facade);
     assert!(facade.contains("pub use domain_ordering::errors::*;"), "{}", facade);
 }
+
+// ─── The generated deployment (#349, ADR-20260807-183024 step 4) ────────────────────────────────
+
+/// Every deployable maps to exactly one image, one pin file, one manifest — and back
+/// (PROP-20260806-223656 D5 addendum: "completeness is a codegen TEST" — a new bin without its
+/// mapping must be a build failure, never a workload that silently never deploys). Runs against
+/// the REAL specs + the REAL `deploy/pins/` ledger, style of `makefile_recipe_lines_are_ascii`:
+/// loud, never skips.
+#[test]
+fn deploy_tree_is_complete_both_ways() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let topology = bin_topology(&model);
+    assert!(!topology.is_empty(), "real specs must derive a non-empty bin topology");
+    let pins = read_image_pins(&root).expect("pins must parse -- a malformed pin would deploy a stale tag");
+    let tree = emit_deploy_tree(&model, &pins);
+    let files: BTreeMap<&str, &str> = tree.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let bins: BTreeSet<&str> = topology.iter().map(|b| b.name.as_str()).collect();
+
+    // Bin <-> image: one-to-one, both directions.
+    let images: serde_json::Value =
+        serde_json::from_str(files["images.json"]).expect("images.json is valid JSON");
+    let image_keys: BTreeSet<&str> = images["images"]
+        .as_object()
+        .expect("images map")
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
+    assert_eq!(image_keys, bins, "bin <-> image mapping must be one-to-one");
+
+    let kustomization = files["manifests/kustomization.yaml"];
+    for b in &topology {
+        let path = format!("manifests/bins/{}.yaml", b.name);
+        let manifest = files
+            .get(path.as_str())
+            .unwrap_or_else(|| panic!("bin '{}' has no generated Deployment manifest", b.name));
+        // The safety pins the emitter must encode (PROP-20260806-223656 D3 + D5 addendum):
+        // Recreate + one replica until #242's leases and fencing, with #193 named in place.
+        assert!(manifest.contains("type: Recreate"), "{}: strategy must be Recreate until #242", b.name);
+        assert!(manifest.contains("replicas: 1"), "{}: replicas pinned to 1 until #242", b.name);
+        assert!(manifest.contains("#193"), "{}: the Recreate pin must cite #193 in place", b.name);
+        // D8: a pod gets DATABASE_URL iff the derivation says it touches the stores -- gateways
+        // and surfaces never (no DB access by construction), EXCEPT a surface with a DECLARED
+        // c4 edge to event-store/read-models (adapters: its ACLs record inbound facts).
+        assert_eq!(
+            manifest.contains("DATABASE_URL"),
+            needs_db(b, &model),
+            "{}: DATABASE_URL presence must match the needs_db derivation ({} family)",
+            b.name,
+            b.family
+        );
+        assert!(
+            kustomization.contains(&format!("bins/{}.yaml", b.name)),
+            "kustomization.yaml misses bins/{}.yaml",
+            b.name
+        );
+        // The pin ledger: every bin has its pin file (seeded by `make generate`).
+        let pin = root.join("deploy/pins").join(format!("{}.json", b.name));
+        assert!(pin.exists(), "missing deploy/pins/{}.json -- run `make generate` and commit it", b.name);
+    }
+
+    // No stale pins: a pin for a bin the topology dropped is deploy history for a workload that
+    // no longer exists -- delete it in the same change that dropped the bin.
+    for entry in fs::read_dir(root.join("deploy/pins")).expect("deploy/pins exists").flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(bin) = name.strip_suffix(".json") else {
+            panic!("deploy/pins/{name}: only {{bin}}.json pin files belong here");
+        };
+        assert!(bins.contains(bin), "stale pin deploy/pins/{name}: no bin '{bin}' in the topology");
+    }
+
+    // Ingress derivation: every screens->surface binding names a real bin, and every fo-*/bo-*
+    // surface in the topology is bound to a screens file (adapters is the one surface with no
+    // screens -- it serves webhooks, not humans).
+    for (_, surface) in screens_surface_bindings() {
+        assert!(bins.contains(surface), "screens binding names unknown surface '{surface}'");
+    }
+    let bound: BTreeSet<&str> = screens_surface_bindings().iter().map(|(_, s)| *s).collect();
+    for b in topology.iter().filter(|b| b.family == "surface" && b.name != "adapters") {
+        assert!(
+            bound.contains(b.name.as_str()),
+            "surface bin '{}' has no screens->surface binding -- its host would be unroutable",
+            b.name
+        );
+    }
+    let ingress = files["manifests/ingress.yaml"];
+    for role_seg in ["customer", "public", "restaurant", "restaurant-account", "rider", "admin"] {
+        assert!(
+            ingress.contains(&format!("/{role_seg}/graphql")),
+            "ingress misses the /{role_seg}/graphql role path (role = path, ADR-0006)"
+        );
+    }
+}
+
+/// The pin ledger drives the Deployment image: a recorded digest is baked in (digest-pinned,
+/// ADR-20260730-051500 -- never a moving tag); a null pin renders the deliberately-undeployable
+/// `:unpinned` tag, so an unpinned bin can never silently deploy `latest`.
+#[test]
+fn pin_digest_resolves_into_the_deployment_image() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let mut pins: BTreeMap<String, ImagePin> = BTreeMap::new();
+    pins.insert(
+        "actor-order".into(),
+        ImagePin { digest: Some("sha256:deadbeef".into()), source_hash: Some("abc".into()) },
+    );
+    let tree = emit_deploy_tree(&model, &pins);
+    let get = |p: &str| tree.iter().find(|(path, _)| path == p).map(|(_, c)| c.as_str()).unwrap();
+    let pinned = get("manifests/bins/actor-order.yaml");
+    assert!(
+        pinned.contains("image: ghcr.io/thecaptaincompany/captain-food/actor-order@sha256:deadbeef"),
+        "digest must be baked into the image ref:\n{pinned}"
+    );
+    assert!(!pinned.contains("UNPINNED"), "a pinned bin must not carry the unpinned warning");
+    let unpinned = get("manifests/bins/actor-cart.yaml");
+    assert!(
+        unpinned.contains("image: ghcr.io/thecaptaincompany/captain-food/actor-cart:unpinned"),
+        "a null pin must render the :unpinned tag:\n{unpinned}"
+    );
+    assert!(unpinned.contains("UNPINNED"), "an unpinned bin must say so in the manifest header");
+}

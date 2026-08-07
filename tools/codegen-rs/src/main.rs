@@ -293,6 +293,79 @@ fn main() {
         }
         eprintln!("✓ wrote {} bin crates under crates/bins/", bin_crates.len());
     }
+    // deploy/: THE GENERATED DEPLOYMENT (#349, ADR-20260807-183024 step 4). `deploy/generated/`
+    // is emitter-owned (stale files pruned); `deploy/pins/` is the CI-owned deploy ledger — the
+    // emitter READS pins to bake image digests into the Deployments, SEEDS missing pin files
+    // with nulls, and never overwrites or prunes an existing pin (a stale pin is a codegen-test
+    // failure, not a silent deletion of deploy history). Guarded on a non-empty topology so a
+    // degenerate flat-layout model can never mass-delete the deploy tree.
+    if !bin_crates.is_empty() {
+        let root = repo_root(&specs);
+        let pins = match read_image_pins(&root) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("✗ deploy pins: {e}");
+                std::process::exit(1);
+            }
+        };
+        let tree = emit_deploy_tree(&model, &pins);
+        let gen_root = root.join("deploy/generated");
+        let keep: std::collections::BTreeSet<PathBuf> =
+            tree.iter().map(|(p, _)| gen_root.join(p)).collect();
+        // Prune: any file under deploy/generated/ the emitter no longer produces is stale (a
+        // manifest for a deployable the topology dropped would still be applied by GitOps).
+        let mut stack = vec![gen_root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if !keep.contains(&p) {
+                    if let Err(err) = fs::remove_file(&p) {
+                        eprintln!("✗ remove stale deploy file {}: {}", p.display(), err);
+                        std::process::exit(1);
+                    }
+                    eprintln!("✓ removed stale deploy file {}", p.display());
+                }
+            }
+        }
+        for (rel, content) in &tree {
+            let path = gen_root.join(rel);
+            if let Some(parent) = path.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    eprintln!("✗ create {}: {}", parent.display(), e);
+                    std::process::exit(1);
+                }
+            }
+            if let Err(e) = fs::write(&path, content) {
+                eprintln!("✗ write {}: {}", path.display(), e);
+                std::process::exit(1);
+            }
+        }
+        // Seed missing pins (never overwrite: pins are CI state, not spec-derived).
+        let pins_dir = root.join("deploy/pins");
+        if let Err(e) = fs::create_dir_all(&pins_dir) {
+            eprintln!("✗ create {}: {}", pins_dir.display(), e);
+            std::process::exit(1);
+        }
+        let mut seeded = 0usize;
+        for c in &bin_crates {
+            let p = pins_dir.join(format!("{}.json", c.name));
+            if !p.exists() {
+                if let Err(e) = fs::write(&p, pin_skeleton_json()) {
+                    eprintln!("✗ write {}: {}", p.display(), e);
+                    std::process::exit(1);
+                }
+                seeded += 1;
+            }
+        }
+        eprintln!(
+            "✓ wrote deploy/generated/ ({} files){}",
+            tree.len(),
+            if seeded > 0 { format!(", seeded {seeded} pin file(s)") } else { String::new() }
+        );
+    }
     // crates/domain/src/generated/{scalars,entities,events,commands}.rs: since #373 RE-EXPORT
     // facades over the per-scope crates (+ the cross-scope DomainEvent union, global error
     // catalog, states and lifecycles). mod.rs lists them.

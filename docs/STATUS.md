@@ -3,7 +3,31 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (3) IMPLEMENTED, PR IN REVIEW — the bin crates
+> 🚧 **2026-08-07 — ADR-183024 REALIZATION STEP (4) IMPLEMENTED, PR IN REVIEW — codegen emits the
+> deployment ([#349](https://github.com/TheCaptainCompany/captain-food/issues/349) "Derive
+> deployment artifacts from the existing specs", [PR #384](https://github.com/TheCaptainCompany/captain-food/pull/384),
+> [ADR-20260807-220528](adr/ADR-20260807-220528-deploy-emitter-pins-are-input.md)).** The emitter
+> derives `deploy/generated/` from the SAME topology as the bin crates: per-bin Deployments
+> (`Recreate` + `replicas: 1` pinned with #193/#242 cited in place, /health + /ping probes,
+> resources, env = production secret-sourced keys of the bin's scopes + common as secretKeyRef
+> into the sealed `captain-secrets`; DATABASE_URL withheld from gateway/surface families per D8,
+> except bins with a DECLARED c4 edge to the stores — `adapters` records inbound facts),
+> Services for the HTTP families, an Ingress derived from the screens specs' `base_url` +
+> per-screen roles, `Dockerfile.bin` (ARG BIN, one shared chef cook), `images.json` (#363's
+> matrix input) and `secret-keys.json` (#358's sealing contract). **`deploy/pins/{bin}.json` is
+> the CI-owned deploy ledger** (`{digest, source_hash}`): the emitter reads it, bakes digests
+> into Deployments, seeds nulls, never overwrites — a null pin renders `:unpinned` (visibly
+> undeployable). The 49 bins upgraded to PROBE-SERVING SHELLS (bind $PORT, serve the probes,
+> drain on SIGTERM, report `wired:false`). Completeness tests: bin ↔ image ↔ pin ↔ manifest both
+> ways + safety-pin assertions per manifest. GATE-THEN-STABILIZE: NOTHING applies the tree (no
+> Argo yet, #366); the monolith `server` deployment remains the runtime, and the bins' BUSINESS
+> wiring (mailbox hosting, per-scope projection filtering, subgraph slices, gateway composition)
+> is recorded on #349 as the remainder that blocks the steps (6)–(7) flip. Recorded gaps: bare
+> `captain.food` host unrouted (screens specs disagree on its owner); integration paths ride the
+> marketplace host pending a spec home; per-key env narrowing waits on #374 Q4 (per-bin Config).
+> Validate 0 errors / 43 warnings (kinds identical to baseline).
+>
+> ✅ **2026-08-07 — ADR-183024 REALIZATION STEP (3) MERGED — the bin crates
 > ([#382](https://github.com/TheCaptainCompany/captain-food/issues/382) "Bin crates:
 > per-actor/per-PM/per-projector/per-subgraph/per-gateway/per-surface binaries from the c4-l2
 > topology", [PR #383](https://github.com/TheCaptainCompany/captain-food/pull/383)).** The codegen
