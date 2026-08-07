@@ -39,22 +39,27 @@ mark-changed = "all"
 
 # The deploy LEDGER and its derived manifests are deploy OUTPUT, not build input: a pin-bump
 # commit (pins + regenerated manifests, ADR-20260807-220528) must not retrigger any build, or
-# deploy -> build -> deploy would cycle. Everything else under deploy/generated/ falls through
-# to fail-open on purpose -- new emitter output families get looked at before being ignored.
+# deploy -> build -> deploy would cycle. The two build INPUTS under deploy/generated/
+# (Dockerfile.bin, images.json) are carved out by the mark-all rule ABOVE -- first match wins.
 [[path-rule]]
 globs = [
     "deploy/pins/**/*",
-    "deploy/generated/manifests/**/*",
-    "deploy/generated/secret-keys.json",
+    "deploy/generated/**/*",
 ]
 mark-changed = []
 
 # Documentation and process surfaces: never inputs to any built artifact ("a docs commit builds
-# and restarts nothing"). specs/** is deliberately NOT here -- it is a mark-all above.
+# and restarts nothing"). specs/** is deliberately NOT here -- it is a mark-all above. NO broad
+# markdown glob: `Glob::new` does not treat `/` as a literal separator, so "*.md" would match a
+# CRATE-LOCAL .md too -- and those can be `include_str!`-ed into a binary, making an ignore an
+# under-build (the dangerous direction; caught by `crate_local_markdown_affects_its_package`).
+# Root markdown is therefore ENUMERATED: the library defaults already ignore
+# README*/LICENSE*/CONTRIBUTING*/CODE_OF_CONDUCT*/SECURITY* everywhere, leaving only CLAUDE.md;
+# a future root-level .md falls through to fail-open-ALL until someone adds it here, reviewed.
 [[path-rule]]
 globs = [
     "docs/**/*",
-    "**/*.md",
+    "CLAUDE.md",
     "LICENSES/**/*",
     ".claude/**/*",
     ".mcp.json",

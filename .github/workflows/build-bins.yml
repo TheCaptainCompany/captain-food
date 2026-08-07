@@ -67,6 +67,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -u
+          # Default FIRST, overwrite on a scoped decision: if this step somehow ended without
+          # reaching a decision, the empty output would read as "nothing affected" -- the exact
+          # silent-skip failure mode this design forbids. Last write to GITHUB_OUTPUT wins.
+          echo "affected=__all__" >> "$GITHUB_OUTPUT"
           decide_all() {
             echo "::warning::affected-set fallback to ALL bins: $1"
             echo "affected=__all__" >> "$GITHUB_OUTPUT"
@@ -115,7 +119,7 @@ jobs:
   publish:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 330 # worst case (Cargo.lock/kernel ripple) rebuilds all 49 bins sequentially
+    timeout-minutes: 350 # worst case (Cargo.lock/kernel ripple) rebuilds all 49 bins sequentially; fan-out over a pre-warmed cook is the recorded optimization path (ADR-20260807-223428)
     permissions:
       contents: read
       packages: write
@@ -155,9 +159,14 @@ jobs:
         run: |
           set -euo pipefail
           short="${SHA:0:7}"
+          # The GHA cache is EXPORTED once, on the first build (which warms the shared cook);
+          # later iterations reuse the builder's LOCAL layer state within this run -- exporting
+          # mode=max 49 times would re-upload multi-GB layers per bin for no cache benefit.
+          cache_to="--cache-to type=gha,mode=max,scope=bins"
           for b in $BINS; do
             h=$(jq -r --arg b "$b" '.hashes[$b]' /tmp/hashes.json)
             echo "::group::build+push $b (source_hash $h)"
+            # shellcheck disable=SC2086 # $cache_to is deliberately word-split (empty after 1st)
             docker buildx build \
               -f deploy/generated/Dockerfile.bin \
               --build-arg BIN="$b" \
@@ -167,8 +176,9 @@ jobs:
               --provenance=false \
               --push \
               --cache-from type=gha,scope=bins \
-              --cache-to type=gha,mode=max,scope=bins \
+              $cache_to \
               .
+            cache_to=""
             echo "::endgroup::"
           done
           echo "published $(echo "$BINS" | wc -w) image(s); the ledger is written ONLY by deploy-bins.yml (manual dispatch)"

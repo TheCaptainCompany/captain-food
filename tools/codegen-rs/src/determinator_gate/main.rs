@@ -342,9 +342,25 @@ mod tests {
             "deploy/pins/actor-order.json",
             "deploy/generated/manifests/bins/actor-order.yaml",
             "deploy/generated/manifests/kustomization.yaml",
+            "deploy/generated/README.md",
+            "deploy/generated/secret-keys.json",
         ]);
         assert!(!d.all);
         assert!(d.affected_bins.is_empty(), "affected: {:?}", d.affected_bins);
+    }
+
+    /// Markdown is ignored at the ROOT only: inside a package a .md file can be
+    /// `include_str!`-ed into the binary, so it must affect its package (under-building is the
+    /// dangerous direction; review finding on #386).
+    #[test]
+    fn crate_local_markdown_affects_its_package() {
+        let d = decide(&["crates/domains/ordering/NOTES.md"]);
+        assert!(!d.all);
+        assert!(
+            d.affected_bins.iter().any(|b| b == "actor-order"),
+            "a crate-local .md is package content: {:?}",
+            d.affected_bins
+        );
     }
 
     /// Blast radius is the spec-derived crate graph, not a hand list: a domain-scope change
