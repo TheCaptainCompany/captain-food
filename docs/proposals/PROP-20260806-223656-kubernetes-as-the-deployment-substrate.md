@@ -339,8 +339,23 @@ Copied to the tracking issue's checklist on approval.
    production starts from an empty schema with all migrations applied fresh — **no dump restore**. The
    crash-test data is discarded by explicit decision; the Supabase database is emptied at decommission
    (GDPR posture), with no copy made first. The dump/restore/checksum workstream is deleted.
-2. **Node pool sizing and price**: D2's answer requires ≥3 nodes; price the smallest MKS node trio that
-   holds the api, CNPG (3 instances), ingress, cert-manager, Argo CD and the OTel collector.
+2. **Node pool sizing and price** — PRICED 2026-08-07 (#358, from OVH's public order catalog,
+   monthly ex-VAT), with a fact the proposal did not know: **MKS now has two plans** — Free
+   (€0 control plane, 99.5% SLO, shared etcd capped at 400 MB) and Standard (€0.09/h ≈
+   €65.70/mo, 99.9% SLA 1-AZ / 99.99% 3-AZ, dedicated etcd 8 GB). The workload's request
+   budget is ≈8.5 Gi (CNPG ×3, Argo CD, ingress, cert-manager, OTel, api, system pods):
+
+   | Trio | vCPU/RAM per node | Nodes/mo | + LB S | Fit |
+   |---|---|---|---|---|
+   | d2-4 ×3 | 2 vCPU / 4 GB | €34.32 | €40.32 | ~9 Gi allocatable — no headroom for the database |
+   | **d2-8 ×3** ✅ | 4 vCPU / 8 GB | €61.80 | **€67.80** | ~19 Gi allocatable — comfortable |
+   | b3-8 ×3 | 2 vCPU / 8 GB (hourly-only) | ≈€112 | ≈€118 | dedicated-perf tier V0 does not need |
+
+   Recommendation: **Free plan + d2-8 trio + LB S ≈ €67.80/mo ex-VAT** — the paid orders live
+   on CNPG (worker nodes), not the control plane, and a control-plane pause does not stop
+   running pods. Standard adds €65.70/mo for control-plane SLA alone. Plan/region/flavor
+   chosen live by the product owner in the #358 session; execution record:
+   [docs/runbooks/mks-bootstrap.md](../runbooks/mks-bootstrap.md).
 3. Does the OTel collector run as a cluster DaemonSet/Deployment, or stay in the app process?
 4. Secret management: plain `Secret` objects, Sealed Secrets, or an external store? The GHCR image is
    public, so nothing may be baked (PROP-20260729-014500 D5 still binds).
