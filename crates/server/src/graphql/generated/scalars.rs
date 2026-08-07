@@ -1661,6 +1661,21 @@ impl From<LogLevel> for ds::LogLevel {
     }
 }
 
+/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RestaurantAccountId(pub uuid::Uuid);
+async_graphql::scalar!(RestaurantAccountId, "RestaurantAccountId", "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.");
+impl From<ds::RestaurantAccountId> for RestaurantAccountId {
+    fn from(v: ds::RestaurantAccountId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RestaurantAccountId> for ds::RestaurantAccountId {
+    fn from(v: RestaurantAccountId) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
@@ -2080,21 +2095,6 @@ impl From<CityAvailabilityStatus> for ds::CityAvailabilityStatus {
             CityAvailabilityStatus::APPROVED => Self::APPROVED,
             CityAvailabilityStatus::REVOKED => Self::REVOKED,
         }
-    }
-}
-
-/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RestaurantAccountId(pub uuid::Uuid);
-async_graphql::scalar!(RestaurantAccountId, "RestaurantAccountId", "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.");
-impl From<ds::RestaurantAccountId> for RestaurantAccountId {
-    fn from(v: ds::RestaurantAccountId) -> Self {
-        Self(v.0)
-    }
-}
-impl From<RestaurantAccountId> for ds::RestaurantAccountId {
-    fn from(v: RestaurantAccountId) -> Self {
-        Self(v.0)
     }
 }
 

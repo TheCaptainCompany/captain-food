@@ -1211,6 +1211,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     cov.translations += translation_entries(model).len();
     validate_translations(model, &mut issues);
 
+    // --- 14. Per-scope spec folders (ADR-20260807-183024, #375): placement, cross-scope DAG,
+    // kernel purity, api nested-intra-scope. No-op on a flat layout (fixtures have no scope dirs).
+    validate_scopes(model, &mut issues);
+
     // --- 11. SDUI screens (screens/*.yaml, one file per app/audience): each app's spec is bound to the
     // API (ADR-0033/0037). Generic over all screens files — no hard-coded screens filename. Each screen
     // declares `roles` (⊆ UserType) and the file declares `app_types` (⊆ web|ios|android|windows).

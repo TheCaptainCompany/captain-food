@@ -68,6 +68,7 @@ scalar DepartmentList
 scalar HoneycombIngestKey
 scalar TraceSampleRatio
 scalar LogLevel
+scalar RestaurantAccountId
 scalar ConversationMessageId
 scalar MessageBody
 scalar MuteReason
@@ -84,7 +85,6 @@ scalar CityId
 scalar DeliveryChannelKey
 scalar DeliveryPartnerRegistrationId
 scalar DeliveryPartnerName
-scalar RestaurantAccountId
 scalar UserId
 scalar ExternalIdentifierKey
 scalar GooglePlaceId

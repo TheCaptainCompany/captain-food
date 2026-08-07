@@ -6,12 +6,6 @@ description: >
 
 # --- Identity & Slugs ---
 
-RestaurantAccountId:
-  type: string
-  format: uuid
-  description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."
-
-
 UserId:
   type: string
   format: uuid

@@ -112,7 +112,7 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
         let parsed: Value = serde_yaml::from_str(&s).map_err(|e| format!("parse {}: {}", key, e))?;
         Ok(strip_meta(parsed))
     }
-    let mut load = |defs: &mut BTreeMap<String, Value>, key: String, p: &std::path::Path| -> Result<(), String> {
+    let load = |defs: &mut BTreeMap<String, Value>, key: String, p: &std::path::Path| -> Result<(), String> {
         let v = read_spec(&key, p)?;
         defs.insert(key, v);
         Ok(())

@@ -4665,7 +4665,7 @@ mod scope_loader {
 
     /// A minimal on-disk specs tree: every REQUIRED (non-splittable) source file present, all
     /// splittable catalogs absent — the per-scope fragments under test supply them.
-    fn scaffold(tag: &str) -> PathBuf {
+    pub(super) fn scaffold(tag: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("cf-scope-{}-{}", tag, std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let specs = root.join("specs");
@@ -4775,5 +4775,245 @@ mod scope_loader {
         fs::create_dir_all(specs.join("emptydir")).expect("mkdir");
         let model = load_model(&specs).expect("loads");
         assert!(model.scopes.is_empty(), "found scopes: {:?}", model.scopes);
+    }
+}
+
+// ─── §14 scope rules: placement, DAG, kernel purity, api nesting (#375) ─────────────────────────
+
+mod scope_rules {
+    use super::super::*;
+    use super::scope_loader;
+
+    fn issues_for(specs: &PathBuf) -> Vec<Issue> {
+        let model = load_model(specs).expect("loads");
+        let mut issues = Vec::new();
+        validate_scopes(&model, &mut issues);
+        issues
+    }
+    fn rules_of(issues: &[Issue]) -> Vec<&'static str> {
+        let mut v: Vec<&'static str> = issues.iter().map(|i| i.rule).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    #[test]
+    fn command_and_event_placement_follow_the_actor_wiring() {
+        let specs = scope_loader::scaffold("place");
+        fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+        fs::create_dir_all(specs.join("payments")).expect("mkdir");
+        fs::write(
+            specs.join("ordering/actors.yaml"),
+            r#"
+Order:
+  type: aggregate
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+"#,
+        )
+        .expect("write");
+        // WRONG folders: the handled command and the authored event both live in payments.
+        fs::write(
+            specs.join("payments/commands.yaml"),
+            "PlaceOrder: { type: object, properties: {} }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("payments/events.yaml"),
+            "OrderPlaced: { type: object, properties: {} }\n",
+        )
+        .expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            issues.iter().any(|i| i.rule == "scope-placement-command" && i.location.contains("PlaceOrder")),
+            "misplaced handled command must be flagged: {:?}",
+            rules_of(&issues)
+        );
+        assert!(
+            issues.iter().any(|i| i.rule == "scope-placement-event" && i.location.contains("OrderPlaced")),
+            "misplaced authored event must be flagged: {:?}",
+            rules_of(&issues)
+        );
+        // Correct folder: clean. Kernel PROMOTION: also clean (a legitimate design act).
+        for home in ["ordering", "common"] {
+            fs::remove_file(specs.join("payments/commands.yaml")).ok();
+            fs::remove_file(specs.join("payments/events.yaml")).ok();
+            fs::create_dir_all(specs.join(home)).expect("mkdir");
+            fs::write(
+                specs.join(format!("{}/commands.yaml", home)),
+                "PlaceOrder: { type: object, properties: {} }\n",
+            )
+            .expect("write");
+            fs::write(
+                specs.join(format!("{}/events.yaml", home)),
+                "OrderPlaced: { type: object, properties: {} }\n",
+            )
+            .expect("write");
+            let issues = issues_for(&specs);
+            assert!(
+                !issues.iter().any(|i| i.rule.starts_with("scope-placement")),
+                "{} placement must be clean: {:?}",
+                home,
+                issues.iter().map(|i| (&i.rule, &i.message)).collect::<Vec<_>>()
+            );
+            fs::remove_file(specs.join(format!("{}/commands.yaml", home))).ok();
+            fs::remove_file(specs.join(format!("{}/events.yaml", home))).ok();
+        }
+    }
+
+    #[test]
+    fn an_echo_record_does_not_author_and_multi_author_requires_common() {
+        let specs = scope_loader::scaffold("echo");
+        for d in ["ordering", "payments"] {
+            fs::create_dir_all(specs.join(d)).expect("mkdir");
+        }
+        // ordering AUTHORS Fact; payments only echo-records it (receives Fact, re-emits Fact):
+        // the event belongs to ordering, and payments' echo must NOT drag it to common.
+        fs::write(
+            specs.join("ordering/actors.yaml"),
+            "A:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/Do' }\n      emits: [{ $ref: 'events.yaml#/Fact' }]\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("payments/actors.yaml"),
+            "B:\n  type: aggregate\n  receives:\n    - message: { $ref: 'events.yaml#/Fact' }\n      emits: [{ $ref: 'events.yaml#/Fact' }]\n",
+        )
+        .expect("write");
+        fs::write(specs.join("ordering/commands.yaml"), "Do: { type: object }\n").expect("write");
+        fs::write(specs.join("ordering/events.yaml"), "Fact: { type: object }\n").expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            !issues.iter().any(|i| i.rule == "scope-placement-event"),
+            "echo-record must not count as authorship: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+        // Now payments genuinely AUTHORS Fact too (emits it on a command): common becomes the
+        // only legal home for the shared contract.
+        fs::write(
+            specs.join("payments/actors.yaml"),
+            "B:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/Pay' }\n      emits: [{ $ref: 'events.yaml#/Fact' }]\n",
+        )
+        .expect("write");
+        fs::write(specs.join("payments/commands.yaml"), "Pay: { type: object }\n").expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            issues.iter().any(|i| i.rule == "scope-placement-event" && i.message.contains("'common'")),
+            "multi-scope authorship must require specs/common/: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn cross_scope_refs_must_form_a_dag_with_pms_exempt() {
+        let specs = scope_loader::scaffold("dag");
+        for d in ["ordering", "payments"] {
+            fs::create_dir_all(specs.join(d)).expect("mkdir");
+        }
+        // entity-level mutual references = a scope cycle = error.
+        fs::write(
+            specs.join("ordering/entities.yaml"),
+            "OrderThing:\n  type: object\n  properties:\n    p: { $ref: 'entities.yaml#/PayThing' }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("payments/entities.yaml"),
+            "PayThing:\n  type: object\n  properties:\n    o: { $ref: 'entities.yaml#/OrderThing' }\n",
+        )
+        .expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            issues.iter().any(|i| i.rule == "scope-cycle"),
+            "mutual cross-scope refs must be a cycle error: {:?}",
+            rules_of(&issues)
+        );
+        // Break one direction: a DAG is fine (declared edges are allowed, only cycles are not).
+        fs::write(
+            specs.join("payments/entities.yaml"),
+            "PayThing:\n  type: object\n  properties: {}\n",
+        )
+        .expect("write");
+        assert!(!issues_for(&specs).iter().any(|i| i.rule == "scope-cycle"));
+        // The same mutual coupling expressed by PROCESS MANAGERS is a declared bridge (#373):
+        // orchestrators legitimately close loops between scopes.
+        fs::write(
+            specs.join("ordering/processmanager.yaml"),
+            "OrderSaga:\n  type: process-manager\n  receives:\n    - message: { $ref: 'events.yaml#/PayFact' }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("payments/processmanager.yaml"),
+            "PaySaga:\n  type: process-manager\n  receives:\n    - message: { $ref: 'events.yaml#/OrderFact' }\n",
+        )
+        .expect("write");
+        fs::write(specs.join("ordering/events.yaml"), "OrderFact: { type: object }\n").expect("write");
+        fs::write(specs.join("payments/events.yaml"), "PayFact: { type: object }\n").expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            !issues.iter().any(|i| i.rule == "scope-cycle"),
+            "PM bridges must be exempt from the acyclicity check: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_kernel_references_no_scope() {
+        let specs = scope_loader::scaffold("purity");
+        for d in ["common", "ordering"] {
+            fs::create_dir_all(specs.join(d)).expect("mkdir");
+        }
+        fs::write(specs.join("ordering/scalars.yaml"), "OrderId: { type: string }\n").expect("write");
+        fs::write(
+            specs.join("common/entities.yaml"),
+            "Shared:\n  type: object\n  properties:\n    id: { $ref: 'scalars.yaml#/OrderId' }\n",
+        )
+        .expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            issues.iter().any(|i| i.rule == "scope-kernel-purity"),
+            "a common item referencing a scoped item must fail: {:?}",
+            rules_of(&issues)
+        );
+        // Promote the scalar to common: purity restored.
+        fs::remove_file(specs.join("ordering/scalars.yaml")).expect("rm");
+        fs::write(specs.join("common/scalars.yaml"), "OrderId: { type: string }\n").expect("write");
+        assert!(!issues_for(&specs).iter().any(|i| i.rule == "scope-kernel-purity"));
+    }
+
+    #[test]
+    fn api_types_nest_only_intra_scope_or_kernel() {
+        let specs = scope_loader::scaffold("nest");
+        for d in ["catalog", "ordering", "common"] {
+            fs::create_dir_all(specs.join(d)).expect("mkdir");
+        }
+        fs::write(
+            specs.join("catalog/api.yaml"),
+            "types:\n  Menu:\n    properties:\n      line: { $ref: '#/types/OrderLine' }\n",
+        )
+        .expect("write");
+        fs::write(
+            specs.join("ordering/api.yaml"),
+            "types:\n  OrderLine:\n    properties: {}\n",
+        )
+        .expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            issues.iter().any(|i| i.rule == "api-nested-cross-scope"),
+            "a catalog type nesting an ordering type must fail (D8): {:?}",
+            rules_of(&issues)
+        );
+        // A KERNEL nested type is fine — cross-scope data pre-joined in views stays queryable.
+        fs::remove_file(specs.join("ordering/api.yaml")).expect("rm");
+        fs::write(
+            specs.join("common/api.yaml"),
+            "types:\n  OrderLine:\n    properties: {}\n",
+        )
+        .expect("write");
+        let issues = issues_for(&specs);
+        assert!(
+            !issues.iter().any(|i| i.rule == "api-nested-cross-scope"),
+            "kernel nesting must be allowed: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
     }
 }

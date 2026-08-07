@@ -655,3 +655,8 @@ LogLevel:
     The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather
     than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the
     logs simply stop, which reads as a healthy quiet system.
+
+RestaurantAccountId:
+  type: string
+  format: uuid
+  description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."

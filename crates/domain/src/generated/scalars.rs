@@ -455,6 +455,10 @@ pub struct TraceSampleRatio(pub String);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LogLevel(pub String);
 
+/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RestaurantAccountId(pub uuid::Uuid);
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
@@ -574,10 +578,6 @@ pub enum CityAvailabilityStatus {
     APPROVED,
     REVOKED,
 }
-
-/// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RestaurantAccountId(pub uuid::Uuid);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(pub uuid::Uuid);
