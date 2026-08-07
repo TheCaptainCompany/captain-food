@@ -11643,12 +11643,59 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `mobile-customer` | SwiftUI (iOS) / Jetpack Compose (Android) thin shells → Crux core via UniFFI (Rust) | Customer mobile app (post-V0); thin native UI over the shared Rust core (ADR-0034); same GraphQL API (/customer/graphql, /public/graphql). |
 | 🧱 `mobile-restaurant` | SwiftUI / Jetpack Compose thin shells → Crux core via UniFFI (Rust) | Restaurant-staff mobile app (post-V0): order queue, accept/ready (/restaurant/graphql). |
 | 🧱 `mobile-rider` | SwiftUI / Jetpack Compose thin shells → Crux core via UniFFI (Rust) | Delivery-rider mobile app (post-V0): assigned deliveries + status updates (/rider/graphql). |
-| 🧱 `api` | Rust — Axum + Tokio + SQLx + async-graphql (BFF over the Crux core) | CQRS-light write+read API (ADR-0034). Hosts command handlers, projections, GraphQL gateway. Role = path (/{role}/graphql).<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `CartBindingProcess`](#entity-cartbindingprocess), [🎭 `DeliveryJob`](#actor-deliveryjob), [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
-| 🧱 `event-store` | Managed PostgreSQL (e.g. Supabase) | Append-only domain_events table (the write model / source of truth at runtime). |
-| 🧱 `read-models` | Managed PostgreSQL | Denormalized View_* projection tables fed from the event log; queries read here, never domain_events. |
-| 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step. |
+| 🧱 `fo-marketplace` | Rust — Axum bin (assets + SSR) | Marketplace front office at live.captain.food (captain_frontoffice screens); serves the customer SPA, speaks to gateway-public/gateway-customer. |
+| 🧱 `fo-storefront` | Rust — Axum bin (assets + SSR + Host routing) | Per-restaurant storefront front office at {slug}.captain.food (restaurant_frontoffice screens); resolves the tenant from the Host header. |
+| 🧱 `bo-restaurant` | Rust — Axum bin (assets + SSR) | Restaurant back office (restaurant_backoffice screens): order queue, catalog, refunds; speaks to gateway-restaurant/gateway-restaurant-account. |
+| 🧱 `bo-rider` | Rust — Axum bin (assets + SSR) | Rider back office (rider screens): job list, pickup/deliver flow; speaks to gateway-rider. |
+| 🧱 `bo-admin` | Rust — Axum bin (assets + SSR) | Platform admin back office (system screens): approvals, prospection, mailbox supervision; speaks to gateway-admin. |
+| 🧱 `adapters` | Rust — Axum bin (webhooks + /external/graphql + integration ACLs) | The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only. |
+| 🧱 `graphql-ordering` | Rust — async-graphql subgraph bin | Ordering subgraph: cart/checkout/order queries over the ordering views schema; mutations enqueue ordering commands on the mailbox. |
+| 🧱 `graphql-catalog` | Rust — async-graphql subgraph bin | Catalog subgraph: menu/product/offer queries over the catalog views schema; catalog mutations. |
+| 🧱 `graphql-network` | Rust — async-graphql subgraph bin | Network (supply-side) subgraph: restaurant accounts/locations/prospection over the network views schema. |
+| 🧱 `graphql-customer` | Rust — async-graphql subgraph bin | Customer subgraph: identity, profile, favorites, addresses over the customer views schema. |
+| 🧱 `graphql-delivery` | Rust — async-graphql subgraph bin | Delivery subgraph: jobs, riders, dispatch state over the delivery views schema. |
+| 🧱 `graphql-payments` | Rust — async-graphql subgraph bin | Payments subgraph: payment intents, refunds, pricing policy over the payments views schema. |
+| 🧱 `graphql-comms` | Rust — async-graphql subgraph bin | Comms subgraph: per-order conversations and messages over the comms views schema. |
+| 🧱 `graphql-common` | Rust — async-graphql subgraph bin | Kernel subgraph: operation status + mailbox supervision (served from the write-path journals, no View_*). |
+| 🧱 `gateway-public` | Rust — generated gateway bin | /public/graphql: routes top-level fields to the owning subgraphs from the codegen-emitted composition table. |
+| 🧱 `gateway-customer` | Rust — generated gateway bin | /customer/graphql: top-level field routing per the generated composition table. |
+| 🧱 `gateway-restaurant-account` | Rust — generated gateway bin | /restaurant-account/graphql: top-level field routing per the generated composition table. |
+| 🧱 `gateway-restaurant` | Rust — generated gateway bin | /restaurant/graphql: top-level field routing per the generated composition table. |
+| 🧱 `gateway-rider` | Rust — generated gateway bin | /rider/graphql: top-level field routing per the generated composition table. |
+| 🧱 `gateway-admin` | Rust — generated gateway bin | /admin/graphql: top-level field routing per the generated composition table. |
+| 🧱 `gateway-external` | Rust — generated gateway bin | /external/graphql: top-level field routing for the integration ACLs (token-authenticated). |
+| 🧱 `actor-restaurant-account` | Rust — mailbox worker bin | Drains RestaurantAccount lanes; appends its domain events.<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount) |
+| 🧱 `actor-restaurant` | Rust — mailbox worker bin | Drains Restaurant lanes; appends its domain events.<br>realizes: [🎭 `Restaurant`](#actor-restaurant) |
+| 🧱 `actor-prospect` | Rust — mailbox worker bin | Drains Prospect lanes; appends its domain events.<br>realizes: [🎭 `Prospect`](#actor-prospect) |
+| 🧱 `actor-catalog` | Rust — mailbox worker bin | Drains Catalog lanes (incl. HubRise imports); appends its domain events.<br>realizes: [🎭 `Catalog`](#actor-catalog) |
+| 🧱 `actor-customer` | Rust — mailbox worker bin | Drains Customer lanes; appends its domain events.<br>realizes: [🎭 `Customer`](#actor-customer) |
+| 🧱 `actor-cart` | Rust — mailbox worker bin | Drains Cart lanes; appends its domain events.<br>realizes: [🎭 `Cart`](#actor-cart) |
+| 🧱 `actor-order` | Rust — mailbox worker bin | Drains Order lanes (the Friday-peak hot type — #242's leases are the second-replica unlock); appends its domain events.<br>realizes: [🎭 `Order`](#actor-order) |
+| 🧱 `actor-payment` | Rust — mailbox worker bin | Drains Payment lanes (inbound Stripe facts + refund decisions); appends its domain events.<br>realizes: [🎭 `Payment`](#actor-payment) |
+| 🧱 `actor-delivery-job` | Rust — mailbox worker bin | Drains DeliveryJob lanes; appends its domain events.<br>realizes: [🎭 `DeliveryJob`](#actor-deliveryjob) |
+| 🧱 `actor-rider` | Rust — mailbox worker bin | Drains Rider lanes; appends its domain events.<br>realizes: [🎭 `Rider`](#actor-rider) |
+| 🧱 `actor-delivery-partner-registration` | Rust — mailbox worker bin | Drains DeliveryPartnerRegistration lanes; appends its domain events.<br>realizes: [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) |
+| 🧱 `actor-conversation` | Rust — mailbox worker bin | Drains Conversation lanes (per-order messaging); appends its domain events.<br>realizes: [🎭 `Conversation`](#actor-conversation) |
+| 🧱 `actor-reclamation` | Rust — mailbox worker bin | Drains Reclamation lanes; appends its domain events.<br>realizes: [🎭 `Reclamation`](#actor-reclamation) |
+| 🧱 `actor-customer-credit` | Rust — mailbox worker bin | Drains CustomerCredit lanes (goodwill-credit ledger); appends its domain events.<br>realizes: [🎭 `CustomerCredit`](#actor-customercredit) |
+| 🧱 `actor-mailbox-supervision` | Rust — mailbox worker bin | Drains MailboxSupervision lanes (operator interventions recorded as facts, #315).<br>realizes: [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
+| 🧱 `pm-place-order` | Rust — mailbox worker bin | The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact.<br>realizes: [📦 `PlaceOrderProcess`](#entity-placeorderprocess) |
+| 🧱 `pm-refund` | Rust — mailbox worker bin | The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded.<br>realizes: [📦 `RefundProcess`](#entity-refundprocess) |
+| 🧱 `pm-cart-binding` | Rust — mailbox worker bin | Binds anonymous carts to identified customers.<br>realizes: [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
+| 🧱 `pm-delivery-dispatch` | Rust — mailbox worker bin | Dispatches ready DELIVERY orders to partners/riders (ADR-0031).<br>realizes: [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
+| 🧱 `pm-reclamation` | Rust — mailbox worker bin | Drives reclamations to a resolution (refund / replacement / goodwill credit arms).<br>realizes: [📦 `ReclamationProcess`](#entity-reclamationprocess) |
+| 🧱 `projector-ordering` | Rust — projection worker bin | Projects ordering-scope events into the ordering views schema; own checkpoint. |
+| 🧱 `projector-catalog` | Rust — projection worker bin | Projects catalog-scope events into the catalog views schema; own checkpoint. |
+| 🧱 `projector-network` | Rust — projection worker bin | Projects network-scope events into the network views schema; own checkpoint. |
+| 🧱 `projector-customer` | Rust — projection worker bin | Projects customer-scope events into the customer views schema; own checkpoint. |
+| 🧱 `projector-delivery` | Rust — projection worker bin | Projects delivery-scope events into the delivery views schema; own checkpoint. |
+| 🧱 `projector-payments` | Rust — projection worker bin | Projects payments-scope events into the payments views schema; own checkpoint. |
+| 🧱 `projector-comms` | Rust — projection worker bin | Projects comms-scope events into the comms views schema; own checkpoint. |
+| 🧱 `event-store` | PostgreSQL (CNPG) — captain-core | Append-only domain_events + the inbound_messages mailbox (the write model / source of truth; ALL backup/PITR budget — D2/D3). |
+| 🧱 `read-models` | PostgreSQL (CNPG) — captain-views | Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2). |
+| 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the adapters surface. Prospection scoring/outreach is a later step. |
 | 🧱 `bam` | Projection worker | Business Activity Monitoring projector — consumes the same event stream to answer business questions. |
-| 🧱 `otel-collector` | OpenTelemetry Collector | Receives traces/metrics/logs from the api and bam containers; exports to the backend(s). |
+| 🧱 `otel-collector` | OpenTelemetry Collector | Receives traces/metrics/logs from every service bin; exports to the backend(s). |
 
 ### 🔌 L2 — External systems
 
@@ -11668,28 +11715,80 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 
 | Edge | Description |
 | --- | --- |
-| `web-client` → `api` | GraphQL over HTTPS (/customer/graphql, /public/graphql) |
-| `web-restaurant` → `api` | GraphQL (/restaurant-account/graphql, /restaurant/graphql) |
-| `web-admin` → `api` | GraphQL (/admin/graphql) |
-| `desktop-restaurant` → `api` | GraphQL (/restaurant-account/graphql, /restaurant/graphql) — Tauri shell |
-| `mobile-customer` → `api` | GraphQL (/customer/graphql, /public/graphql) — post-V0 |
-| `mobile-restaurant` → `api` | GraphQL (/restaurant/graphql) — post-V0 |
-| `mobile-rider` → `api` | GraphQL (/rider/graphql) — post-V0 |
-| `api` → `event-store` | Append domain events (command side) |
-| `api` → `read-models` | Read projections (query side) + projection updates |
-| `api` → `stripe` | Create PaymentIntents, request refunds; receive webhooks (inbound facts) |
-| `api` → `hubrise` | Import catalog / sync inventory via ACL (inbound facts) |
-| `api` → `supabase-auth` | OTP verify / session (out of domain) |
-| `api` → `delivery-partner` | Dispatch delivery jobs; receive courier acceptance/status webhooks (inbound facts) — ADR-0031 |
+| `web-client` → `gateway-customer` | GraphQL over HTTPS (/customer/graphql) |
+| `web-client` → `gateway-public` | GraphQL (/public/graphql, anonymous browse/cart) |
+| `web-restaurant` → `gateway-restaurant` | GraphQL (/restaurant/graphql) |
+| `web-restaurant` → `gateway-restaurant-account` | GraphQL (/restaurant-account/graphql) |
+| `web-admin` → `gateway-admin` | GraphQL (/admin/graphql) |
+| `desktop-restaurant` → `gateway-restaurant` | GraphQL (/restaurant/graphql) — Tauri shell |
+| `mobile-customer` → `gateway-customer` | GraphQL (/customer/graphql) — post-V0 |
+| `mobile-restaurant` → `gateway-restaurant` | GraphQL (/restaurant/graphql) — post-V0 |
+| `mobile-rider` → `gateway-rider` | GraphQL (/rider/graphql) — post-V0 |
+| `fo-marketplace` → `gateway-public` | Serves the marketplace SPA; SSR reads via the public gateway |
+| `fo-storefront` → `gateway-public` | Serves {slug}.captain.food; tenant-resolved SSR reads |
+| `bo-restaurant` → `gateway-restaurant` | Serves the restaurant back office |
+| `bo-rider` → `gateway-rider` | Serves the rider back office |
+| `bo-admin` → `gateway-admin` | Serves the platform back office |
+| `gateway-public` → `graphql-network` | Top-level routing: restaurant discovery/browse |
+| `gateway-public` → `graphql-catalog` | Top-level routing: menus |
+| `gateway-public` → `graphql-ordering` | Top-level routing: anonymous cart + checkout |
+| `gateway-customer` → `graphql-ordering` | Top-level routing: cart/checkout/orders (money path) |
+| `gateway-customer` → `graphql-customer` | Top-level routing: identity/profile/favorites |
+| `gateway-restaurant` → `graphql-ordering` | Top-level routing: order queue, accept/ready |
+| `gateway-restaurant` → `graphql-catalog` | Top-level routing: catalog management |
+| `gateway-restaurant-account` → `graphql-network` | Top-level routing: account + locations |
+| `gateway-rider` → `graphql-delivery` | Top-level routing: jobs + status updates |
+| `gateway-admin` → `graphql-network` | Top-level routing: approvals + prospection |
+| `gateway-admin` → `graphql-common` | Top-level routing: mailbox supervision (#315) |
+| `gateway-external` → `graphql-network` | Top-level routing: SIRENE/Google listing sync writes |
+| `graphql-ordering` → `read-models` | SELECT on the ordering schema (GRANT-scoped role) |
+| `graphql-ordering` → `event-store` | Enqueue ordering commands on the actor mailbox (acceptance-first) |
+| `graphql-catalog` → `read-models` | SELECT on the catalog schema |
+| `graphql-catalog` → `event-store` | Enqueue catalog commands |
+| `graphql-network` → `read-models` | SELECT on the network schema |
+| `graphql-network` → `event-store` | Enqueue network commands |
+| `graphql-customer` → `read-models` | SELECT on the customer schema |
+| `graphql-customer` → `event-store` | Enqueue customer commands |
+| `graphql-delivery` → `read-models` | SELECT on the delivery schema |
+| `graphql-delivery` → `event-store` | Enqueue delivery commands |
+| `graphql-payments` → `read-models` | SELECT on the payments schema |
+| `graphql-payments` → `event-store` | Enqueue payment commands |
+| `graphql-comms` → `read-models` | SELECT on the comms schema |
+| `graphql-comms` → `event-store` | Enqueue comms commands |
+| `graphql-common` → `event-store` | Operation status + mailbox lanes from the write-path journals (no View_*) |
+| `actor-order` → `event-store` | Lease Order lanes; append Order events |
+| `actor-cart` → `event-store` | Lease Cart lanes; append Cart events |
+| `actor-payment` → `event-store` | Lease Payment lanes; append Payment events |
+| `actor-catalog` → `event-store` | Lease Catalog lanes; append Catalog events |
+| `actor-mailbox-supervision` → `event-store` | Lease supervision lanes; record operator facts |
+| `pm-place-order` → `event-store` | Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced |
+| `pm-place-order` → `stripe` | Create PaymentIntents (outbound payment port) |
+| `pm-refund` → `event-store` | Drain RefundProcess lanes; append refund decision facts |
+| `pm-refund` → `stripe` | Request refunds (outbound payment port) |
+| `pm-delivery-dispatch` → `event-store` | Drain dispatch lanes; append dispatch facts |
+| `pm-delivery-dispatch` → `delivery-partner` | Dispatch delivery jobs to the partner API |
+| `adapters` → `event-store` | Record verified inbound facts idempotently through the mailbox |
+| `stripe` → `adapters` | Payment webhooks (PaymentCaptured/Failed/Refunded) |
+| `hubrise` → `adapters` | Catalog/inventory callbacks (inbound facts) |
+| `delivery-partner` → `adapters` | Courier acceptance/status webhooks (inbound facts) — ADR-0031 |
+| `adapters` → `hubrise` | Import catalog / sync inventory via the ACL |
+| `adapters` → `supabase-auth` | OTP verify / session (out of domain) |
+| `adapters` → `google-maps` | Verify restaurant ownership (GBP) for claim/opt-out |
 | `sync-worker` → `sirene` | Poll establishments (SIRET/NAF/address/closures) |
 | `sync-worker` → `google-maps` | Fetch Business Profile data (rating/reviews/hours/website) |
-| `sync-worker` → `api` | Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql) |
-| `api` → `google-maps` | Verify restaurant ownership (GBP) for claim/opt-out |
+| `sync-worker` → `gateway-external` | Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql) |
 | `sync-worker` → `hubspot` | Create/update prospection leads (ADR-0020) |
 | `sync-worker` → `resend` | Send prospection outreach emails (ADR-0020) |
 | `sync-worker` → `slack` | Prospection / ops alerts (ADR-0020) |
+| `projector-ordering` → `event-store` | Consume the single log filtered to ordering events; own checkpoint |
+| `projector-ordering` → `read-models` | Maintain the ordering schema's View_* (GRANT-scoped) |
+| `projector-catalog` → `event-store` | Consume catalog events; own checkpoint |
+| `projector-catalog` → `read-models` | Maintain the catalog schema's View_* |
 | `bam` → `event-store` | Consume the event stream for business metrics |
-| `api` → `otel-collector` | Export traces/metrics/logs (OTLP) |
+| `gateway-customer` → `otel-collector` | OTLP export (every gateway bin) |
+| `actor-order` → `otel-collector` | OTLP export (every actor/pm bin) |
+| `projector-ordering` → `otel-collector` | OTLP export (every projector bin) |
+| `adapters` → `otel-collector` | OTLP export |
 | `bam` → `otel-collector` | Export traces/metrics/logs (OTLP) |
 
 ### ⚙️ L3 — Components of the `api` container
