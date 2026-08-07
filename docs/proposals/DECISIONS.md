@@ -388,7 +388,14 @@ D6 is the mechanism; checking the concern means confirming that ordering.
 
 ---
 
-## 17. Kubernetes as the deployment substrate — PROP-20260806-223656 — ⚠️ REOPENS a decided ADR
+## 17. Kubernetes as the deployment substrate — PROP-20260806-223656 — ✅ DECIDED 2026-08-07
+
+> **Fully approved** (product owner, D1–D7 across 2026-08-06/07, closed with *"D3 and D5 yes, start
+> clean, move the NS to OVH"*), recorded by
+> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md): **OVH MKS +
+> in-cluster CNPG + GitOps-only operations + generated manifests + `Recreate` until #242 + straight
+> to the cluster, starting from an EMPTY schema (no dump restore) + NS hosting → OVH DNS (Dynadot
+> stays registrar)**. All four concerns checked. The rows below record the option space as decided.
 
 [PROP-20260806-223656](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md)
 ([#271](https://github.com/TheCaptainCompany/captain-food/issues/271)). Reopens
@@ -408,17 +415,15 @@ this the best available home for PROP-20260805-181926's surviving D7.
 |---|---|---|---|
 | D1 | Kubernetes, or the PaaS decided yesterday? | **OVH MKS** if k8s (free control plane, **free egress**, GA — vs CKE still in public beta); Clever Cloud PaaS retained as the costed fallback | ✅ **OVH MKS** (product owner, 2026-08-07: *"MKS of course"*) |
 | D2 | **Where does PostgreSQL live?** — the hard one | Managed alongside the cluster was recommended; the option table also carries a vRack-instance shape and in-cluster CNPG | ✅ **In-cluster CNPG** (product owner, 2026-08-06: *"Postgres on Kubernetes"*) — with the operability conditions as part of the answer: ≥3 nodes, required anti-affinity, WAL archiving to object storage, scheduled executed restore drills |
-| D3 | Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance | **`Recreate`** — a RollingUpdate runs two write paths at once, exactly what [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing exist to prevent. **The headline benefit of k8s is unavailable until #242** | _(open)_ |
+| D3 | Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance | **`Recreate`** — a RollingUpdate runs two write paths at once, exactly what [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing exist to prevent | ✅ As recommended (2026-08-07) |
 | D4 | Ingress + wildcard TLS | ingress-nginx + cert-manager, DNS-01 for `*.captain.food` | ✅ **As recommended** (product owner, 2026-08-07: *"Ingress yes!"*) — with a zone-host correction: **DNS is at DYNADOT, which has NO cert-manager solver**. Sub-decision open: move zone hosting to OVH DNS (NS change only, Dynadot stays registrar — recommended), CNAME-delegate just the ACME challenge, or write a custom webhook |
-| D5 | Manifests generated from the specs? | **Yes** — the strongest argument for a cluster, and PROP-20260805-181926 D7 with a target that fits | _(open)_ |
+| D5 | Manifests generated from the specs? | **Yes** — the strongest argument for a cluster, and PROP-20260805-181926 D7 with a target that fits | ✅ As recommended (2026-08-07) |
 | D6 | Sequencing, with prod DOWN | Restore service on the simplest path first, build the cluster deliberately after — the digest-pinned image runs unchanged on either, so it is a redeploy, not a second migration | ✅ **Build the cluster now, cut over once** — AGAINST the recommendation (product owner, 2026-08-07: *"I don't care about prod on Render and Supabase, it was a crash test"*). Opens the data question: restore the dump into CNPG, or start clean? |
 | D7 | How does the agent operate the cluster? | GitOps as the only change path + read-mostly RBAC + per-incident break-glass; PVC/StatefulSet/namespace deletes outside every standing role | ✅ **GitOps** (product owner, 2026-08-06: *"Of course gitops"* — diagnostics via cluster + Postgres read access, fixes as repo changes). Practices in the proposal's §2b |
 
-Concerns: **database-placement-unresolved**, **agent-access-shape** and **prod-is-down** are ✅ checked
-(resolved by the D2/D7/D6 answers above); **rolling-deploys-blocked-by-193** remains unchecked — it
-resolves with D3 (`Recreate` until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)).
-**Remaining open: D3 and D5** — one yes on each and the proposal can flip to `Approved`, recorded by an
-ADR that supersedes ADR-20260806-151122's REOPENED state with the full decided set.
+All four concerns ✅ checked. D6's data question is answered — **start clean, no dump restore** — and
+D4's zone-host sub-decision is answered — **NS hosting moves to OVH DNS**. Realization proceeds under
+[#271](https://github.com/TheCaptainCompany/captain-food/issues/271) per the ADR's consequences.
 
 ---
 

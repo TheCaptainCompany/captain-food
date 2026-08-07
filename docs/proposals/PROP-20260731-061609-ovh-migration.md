@@ -1,14 +1,15 @@
 # PROP-20260731-061609 — Hosting migration: compute + PostgreSQL leave Render/Supabase, identity stays
 
-- **Status**: Proposed — **the DESTINATION CHANGED on 2026-08-06 to Clever Cloud**
-  ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
-  product owner: *"Instead of OVH"*), superseding ADR-20260731-061609's point 1 only. **What that
-  does to this file**: §2 D1/D2 become the record of why OVH's own shapes lost and why a PaaS won —
-  the Clever Cloud row in D1 is the chosen option, and the OVH rows stay as the costed fallback if
-  the egress question disqualifies it. **§3 D3 (cutover sequencing) and D4 (deploy pipeline) survive
-  with the target renamed**, as do §4–§6. The reasons for leaving Render/Supabase in §1 are unchanged.
-  This proposal is retitled from "OVH migration" accordingly.
-- **Date**: 2026-07-31 (destination revised 2026-08-06)
+- **Status**: **Superseded in its destination by
+  [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) / PROP-20260806-223656
+  (Approved)**: the destination is **OVH Managed Kubernetes + in-cluster CNPG**, after an interim
+  Clever Cloud decision (ADR-20260806-151122, 2026-08-06, itself now superseded). This file remains
+  the record of the instance-vs-PaaS-vs-VPS option space (§2 D1/D2 — the VPS/vRack findings, the
+  Clever Cloud pricing, the managed-PG trade-offs) and of the reasons for leaving Render/Supabase
+  (§1, unchanged). **The start-clean decision (ADR-20260807-002705 §6) deletes this file's
+  dump→restore cutover steps**; the deploy-pipeline shape (§3 D4) survives, retargeted at the GitOps
+  path.
+- **Date**: 2026-07-31 (destination revised 2026-08-06, final 2026-08-07)
 - **Tracking issue**: [#271 "Migrate hosting to OVH: app compute + PostgreSQL leave Render/Supabase; Supabase retained for identity only"](https://github.com/TheCaptainCompany/captain-food/issues/271)
 - **Realized by**: _(filled at completion)_
 

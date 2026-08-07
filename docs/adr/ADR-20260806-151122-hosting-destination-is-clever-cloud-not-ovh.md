@@ -1,8 +1,11 @@
 # ADR-20260806-151122 — The hosting destination is Clever Cloud, not OVH
 
-- **Status**: **REOPENED 2026-08-06** (product owner: *"Reopen the ADR for Kubernetes"*) — the decision
-  below is **not in force** pending
-  [PROP-20260806-223656 "Kubernetes as the deployment substrate"](../proposals/PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md).
+- **Status**: **Superseded by [ADR-20260807-002705](ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)**
+  (OVH Managed Kubernetes + CNPG + GitOps — the full decided set of PROP-20260806-223656). Was
+  REOPENED 2026-08-06 (product owner: *"Reopen the ADR for Kubernetes"*) pending
+  [PROP-20260806-223656 "Kubernetes as the deployment substrate"](../proposals/PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md);
+  the factual findings below (prices, egress, the Docker-runtime correction) remain valid reference,
+  and the PaaS remains the documented fallback.
   **What reopened it**: this ADR's decisive argument was operational capacity — *"a team of one product
   owner plus agents should not be operating a PostgreSQL server"* — and that rested on a premise about
   the operator which was **wrong**. The product owner has run Kubernetes professionally, so the largest

@@ -1,11 +1,15 @@
 # PROP-20260806-223656 — Kubernetes as the deployment substrate (reopening the destination)
 
-- **Status**: Proposed — reopens [ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md) (Clever Cloud), at the product owner's direction, 2026-08-06
+- **Status**: **Approved** (product owner, 2026-08-06/07, D1–D7 all answered in-session, closed with
+  *"D3 and D5 yes, start clean, move the NS to OVH"*) — recorded by
+  [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md), which supersedes
+  ADR-20260806-151122 (Clever Cloud, reopened). Unresolved questions copied to
+  [#271](https://github.com/TheCaptainCompany/captain-food/issues/271)'s checklist per the README.
 - **Date**: 2026-08-06
 - **Tracking issue**: [#271 "Migrate hosting to Clever Cloud: app compute + PostgreSQL leave Render/Supabase; Supabase retained for identity only"](https://github.com/TheCaptainCompany/captain-food/issues/271)
 - **Realized by**: _(filled at completion)_
 - **Concerns**:
-  - [ ] rolling-deploys-blocked-by-193: the headline benefit cannot be used until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases land — a rolling update runs two write-path instances at once, which is exactly what [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) forbids. Approving must state which deploy strategy V0 uses in the meantime.
+  - [x] rolling-deploys-blocked-by-193: **resolved 2026-08-07** — D3 is answered: `strategy: Recreate` until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242) lands, pinned in the generated Deployment with [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) linked.
   - [x] database-placement-unresolved: **resolved 2026-08-06** — the product owner chose in-cluster CNPG explicitly, with the operability conditions (≥3 nodes, required anti-affinity, WAL archiving, executed restore drills) carried as part of the answer, not inherited by default.
   - [x] prod-is-down: **resolved 2026-08-07** — D6 is answered: the product owner explicitly accepts the outage window (*"it was a crash test"*); the cluster is built directly, with no interim restore. The remaining data question (restore the dump vs start clean) is carried in D6's note and §6.
   - [x] agent-access-shape: **resolved 2026-08-06** — the product owner chose the recommended mechanism (*"Of course gitops"*): GitOps as the only change path, read access for diagnostics, fixes as repo changes; practices in §2b.
@@ -85,6 +89,8 @@ still work and are a real gain, but zero-downtime rollout is not.
 | `RollingUpdate` with `maxSurge: 0`, `maxUnavailable: 1` | Uses the native mechanism; one replica at a time | At **one** replica this degenerates to Recreate with extra ceremony |
 | `RollingUpdate` now, rely on the mailbox to be safe | The benefit immediately | **Unsafe**: it presumes the fencing #242 exists to build. This is precisely the "oversell and un-accepted orders" failure the domain lens warns about |
 
+**D3 ANSWERED 2026-08-07 (product owner: *"D3 … yes"*): `Recreate` until #242, as recommended.**
+
 ### D4 — Ingress and wildcard TLS
 
 | Option | Pros | Cons |
@@ -110,7 +116,14 @@ through, one recommended:
 | CNAME-delegate ONLY the challenge: `_acme-challenge.captain.food` → a zone at a solvable provider (cert-manager follows CNAMEs) | Smallest change — Dynadot keeps hosting everything else | A second, standing DNS dependency whose only job is the challenge; renewal now depends on two providers being correct |
 | Write a custom Dynadot webhook against their API | Everything stays at Dynadot | Bespoke certificate-critical infrastructure, maintained by us alone — the worst fit for this team, and renewal is the thing that fails at 4am two months after everyone forgot it exists |
 
+**Sub-decision ANSWERED 2026-08-07 (product owner: *"move the NS to OVH"*): zone hosting moves to
+OVH DNS**, Dynadot remains the registrar. Sequencing: drop the zone TTLs at Dynadot first, replicate
+the records at OVH, then switch the nameservers — before the wildcard record is pointed at the MKS
+Load Balancer.
+
 ### D5 — Are the manifests generated from the specs?
+
+**D5 ANSWERED 2026-08-07 (product owner: *"D5 yes"*): the manifests are generated.**
 
 **Recommended: yes — this is the strongest argument for a cluster.** `specs/configuration.yaml` already
 declares every env var and its per-profile supplier, `specs/observability.yaml` declares the telemetry
@@ -322,11 +335,10 @@ sequenceDiagram
 
 Copied to the tracking issue's checklist on approval.
 
-1. **Does "crash test" extend to the DATA?** (raised by D6's answer, 2026-08-07): restore the final
-   Supabase dump into CNPG per the old cutover plan, or start production from an empty schema with all
-   migrations applied fresh? Starting clean deletes the dump/restore/checksum steps — and the Supabase
-   database is emptied either way (GDPR posture) — but discarding the crash-test data is a decision
-   only the product owner can make explicitly.
+1. ~~Does "crash test" extend to the DATA?~~ **ANSWERED 2026-08-07 (product owner: *"start clean"*)**:
+   production starts from an empty schema with all migrations applied fresh — **no dump restore**. The
+   crash-test data is discarded by explicit decision; the Supabase database is emptied at decommission
+   (GDPR posture), with no copy made first. The dump/restore/checksum workstream is deleted.
 2. **Node pool sizing and price**: D2's answer requires ≥3 nodes; price the smallest MKS node trio that
    holds the api, CNPG (3 instances), ingress, cert-manager, Argo CD and the OTel collector.
 3. Does the OTel collector run as a cluster DaemonSet/Deployment, or stay in the app process?
