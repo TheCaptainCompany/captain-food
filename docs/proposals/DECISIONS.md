@@ -459,6 +459,23 @@ pre-cutover program again; approving accepts that explicitly.
 
 ---
 
+## 19. Build in public — PROP-20260807-190936
+
+[PROP-20260807-190936](PROP-20260807-190936-build-in-public-transparency.md)
+([#377](https://github.com/TheCaptainCompany/captain-food/issues/377)). Product-owner directive:
+platform transparency — *"Kubernetes completely open"* — for recruitment, press, marketing, branding.
+**The line: transparency exposes INFORMATION, never CONTROL** — "Kubernetes open" is a generated,
+sanitized public view OF the cluster (from the already-public GitOps state), never network reach INTO
+it. Most of L1 already exists as a side effect of the operating model (public repo, ADRs, the git
+deploy ledger, public CI). Decisions D1–D4 open (levels · initial aggregate-only metric set · L4 as a
+static generated page · L2–L4 after cutover); concerns **pii-and-gdpr** and **attack-surface**
+registered. Related, no decision needed: [#378](https://github.com/TheCaptainCompany/captain-food/issues/378)
+emits JSON Schemas FROM the validator model (generated, never hand-written) for authoring-time
+feedback — the validator stays the semantic authority (`REF_CONTRACT` already gates
+$ref-kind-appropriateness).
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

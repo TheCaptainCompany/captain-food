@@ -54,7 +54,15 @@
       "PowerShell(git restore:*)",
       "PowerShell(git branch:*)",
       "PowerShell(make:*)",
-      "PowerShell(rustup run stable cargo:*)"
+      "PowerShell(rustup run stable cargo:*)",
+      "mcp__claude-code-remote__create_session",
+      "mcp__claude-code-remote__get_session",
+      "mcp__claude-code-remote__send_message",
+      "mcp__claude-code-remote__list_sessions",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__create_session",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__get_session",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__send_message",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__list_sessions"
     ]
   }
 }
