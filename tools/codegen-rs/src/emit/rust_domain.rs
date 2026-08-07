@@ -407,6 +407,15 @@ pub(crate) fn emit_domain_errors(model: &Model) -> String {
         "errors",
         "The per-error `ErrorDef` consts (kernel: also `ErrorDef` + `interpolate`)",
     );
+    // The kernel's errors module exists whenever ANY scope declares errors (it owns `ErrorDef` +
+    // `interpolate`), so re-export it even when the kernel declares no error items of its own —
+    // the global catalog below is typed by it.
+    let kernel_line = format!("pub use {}::errors::*;\n", domain_crate_ident(KERNEL_SCOPE));
+    if !out.contains(&kernel_line)
+        && model.scopes.iter().any(|s| !scope_items(model, s, "errors.yaml").is_empty())
+    {
+        out.push_str(&kernel_line);
+    }
     let mut names: Vec<String> = Vec::new();
     if let Some(Value::Mapping(m)) = model.defs.get("errors.yaml") {
         for (k, _) in m {

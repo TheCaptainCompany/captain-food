@@ -5318,3 +5318,35 @@ PlaceOrderProcess:
         assert_eq!(peeled, scopes.len(), "derived crate edges contain a cycle");
     }
 }
+
+#[test]
+fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
+    // The kernel owns ErrorDef; a scope's error catalog must compile even when common/ declares
+    // no error items of its own — and the facade's global catalog must still see ErrorDef.
+    let specs = tests::scope_loader::scaffold("kernel-errs");
+    fs::create_dir_all(specs.join("common")).expect("mkdir");
+    fs::create_dir_all(specs.join("ordering")).expect("mkdir");
+    fs::write(specs.join("common/scalars.yaml"), "OrderId: { type: string }\n").expect("write");
+    fs::write(
+        specs.join("ordering/errors.yaml"),
+        "OrderNotFound:\n  messages: { en: nope, fr: non }\n",
+    )
+    .expect("write");
+    let model = load_model(&specs).expect("loads");
+    let crates = emit_domain_scope_crates(&model);
+    let common = crates.iter().find(|c| c.scope == "common").expect("kernel crate");
+    let errors = common
+        .files
+        .iter()
+        .find(|(n, _)| n == "src/errors.rs")
+        .map(|(_, c)| c.as_str())
+        .expect("kernel errors module exists without own error items");
+    assert!(errors.contains("pub struct ErrorDef"), "{}", errors);
+    assert!(!errors.contains("pub const "), "no consts to emit here:\n{}", errors);
+    let lib = common.files.iter().find(|(n, _)| n == "src/lib.rs").map(|(_, c)| c.as_str()).unwrap();
+    assert!(lib.contains("pub mod errors;"), "{}", lib);
+    // Facade: the kernel's errors module is re-exported even though common has no error ITEMS.
+    let facade = emit_domain_errors(&model);
+    assert!(facade.contains("pub use domain_common::errors::*;"), "{}", facade);
+    assert!(facade.contains("pub use domain_ordering::errors::*;"), "{}", facade);
+}

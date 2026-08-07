@@ -131,13 +131,32 @@ fn scope_banner(scope: &str, kind: &str) -> String {
 /// constants are built from.
 pub(crate) fn emit_domain_scope_crates(model: &Model) -> Vec<DomainScopeCrate> {
     let mut out = Vec::new();
+    // Any error ANYWHERE makes the kernel's `errors` module (ErrorDef + interpolate) load-bearing:
+    // every scope's constants are typed by it, whether or not the kernel declares errors of its
+    // own — so its existence follows the WHOLE catalog, not the kernel's fragment. A catalog with
+    // errors but no kernel scope cannot generate compiling code; fail here, loudly, rather than
+    // emit crates whose error modules reference a crate that does not exist.
+    let any_errors = model
+        .scopes
+        .iter()
+        .any(|s| !scope_items(model, s, "errors.yaml").is_empty());
+    assert!(
+        !any_errors || model.scopes.iter().any(|s| s == KERNEL_SCOPE),
+        "specs declare errors.yaml items but no specs/{}/ scope exists — the kernel crate owns \
+         ErrorDef, so error catalogs cannot be generated without it. Create specs/{}/ (it may \
+         hold only the shared contracts).",
+        KERNEL_SCOPE,
+        KERNEL_SCOPE
+    );
     for scope in &model.scopes {
         let mut files: Vec<(String, String)> = Vec::new();
         let mut modules: Vec<&str> = Vec::new();
         let mut dep_scopes: BTreeSet<String> = BTreeSet::new();
         for (kind, module) in TYPE_KINDS {
             let items = scope_items(model, scope, kind);
-            if items.is_empty() {
+            if items.is_empty()
+                && !(*kind == "errors.yaml" && scope == KERNEL_SCOPE && any_errors)
+            {
                 continue;
             }
             let mut body = scope_banner(scope, kind);
