@@ -173,15 +173,25 @@ per-pod attack surface.
   the single image — this generalizes it to a per-image matrix. Honest corollary: a `Cargo.lock`
   bump or a shared-crate (`domain`, generated code) change ripples every closure and legitimately
   rebuilds everything — that is correctness, not a bug in the detection.
-  **Detection protocol (settled with the product owner, 2026-08-07)** — *fail open to REBUILDING,
-  never to skipping* (a false "changed" costs one useless restart; a false "unchanged" ships stale
-  production silently): (1) per-bin hash = the `cargo metadata`-derived workspace-crate closure
-  (mechanically derived, never hand-listed) hashed via **git's own blob shas**
-  (`git ls-tree -r HEAD -- <crate dirs>`, sorted `(path, blob)` list — content-addressed, no file
-  reads, timestamp-immune) + the global inputs whose change rebuilds everything (`Cargo.lock`
-  wholesale in v1 — sound but coarse; per-bin `cargo tree` is the v2 refinement if lock churn
-  proves noisy — `rust-toolchain.toml`, the Dockerfile, `build-image.yml` itself) + the `web`
-  closure for surface images (wasm inputs); (2) the last-published hash lives **in the GitOps pin
+  **Detection protocol (settled with the product owner, 2026-08-07; refined same day — the
+  affected-set computation is a LIBRARY, not hand-rolled)** — *fail open to REBUILDING, never to
+  skipping* (a false "changed" costs one useless restart; a false "unchanged" ships stale
+  production silently): (1) **the affected-package set comes from the `determinator` crate**
+  (guppy project — built for Diem's monorepo, maintained by the cargo-nextest author): given the
+  file changes between two commits it computes which workspace packages are affected, **with our
+  fail-open rule built in** (a changed file belonging to no package ⇒ rebuild everything) and
+  **Cargo build simulations including feature sets** — catching feature-unification changes a
+  file-closure hash would miss. This answers the product owner's hand-maintained-list worry
+  directly: the file→package mapping is cargo's own resolver via a maintained library; our layer
+  adds only the bin-crate → image mapping (from the C4, completeness-tested) and the global inputs
+  (`rust-toolchain.toml`, the Dockerfile, `build-image.yml`, the `web` closure for surface
+  images). Per-bin hashing over **git blob shas** (`git ls-tree`) remains the recorded-state
+  format; (1b) **reproducibility hygiene is adopted as the complementary VERIFIER, not the gate**
+  (the product owner's C#-style timestamp normalization, in Rust form: `trim-paths` /
+  `--remap-path-prefix`, `SOURCE_DATE_EPOCH`, buildx `rewrite-timestamp`) — it stabilizes digests
+  only AFTER paying the build, so it cannot replace the source gate, but once digests are stable,
+  **a digest that drifts while the source hash did not is a nondeterminism alarm for free**;
+  (2) the last-published hash lives **in the GitOps pin
   file** — each pin becomes `{digest, source_hash}`, so the compare is repo-vs-repo, atomic with
   the pin and auditable in git log (the OCI annotation is kept as forensic belt); (3) the skip is
   **two-level**, preserving ADR-20260730-051500's isolation: `build-image` (auto) builds/publishes
