@@ -5276,6 +5276,39 @@ PlaceOrderProcess:
         assert_eq!(graph["domain_crates"]["domain-ordering"]["deps"], serde_json::json!(["domain-common"]));
     }
 
+    /// The per-bin Config filter (#374 Q4, ADR-20260807-183024 D5) must actually FILTER: a bin's
+    /// generated reader carries its scopes' + common's keys and NOTHING else — "a pod reading
+    /// another scope's key" is the drift D5 names, and this is its executable form. Over the
+    /// REAL specs because the failure that earned it was real: origins key section kinds as
+    /// `keys/{name}`, and a bare-name lookup silently matched nothing, defaulting every key to
+    /// `common` — every bin got the full config and the filter was inert.
+    #[test]
+    fn real_specs_per_bin_config_keys_are_scope_filtered() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let model = load_model(&root.join("specs")).expect("real specs load");
+        let ordering: BTreeSet<String> =
+            ["ordering".to_string(), "common".to_string()].into_iter().collect();
+        let names: BTreeSet<String> =
+            scoped_config_keys(&model, &ordering).into_iter().map(|k| k.name).collect();
+        for must in ["DATABASE_URL", "DATABASE_POOL_MAX_CONNECTIONS", "MAILBOX_LEASE_SECONDS", "PORT"] {
+            assert!(names.contains(must), "{must} is a common key every bin reads");
+        }
+        for must_not in ["STRIPE_SECRET_KEY", "DELIVERY_OFFER_MAX_TTL_SECONDS", "RUN_DELIVERY_OFFER_TIMEOUT"] {
+            assert!(
+                !names.contains(must_not),
+                "{must_not} belongs to another scope -- an ordering bin's Config must not carry it (D5)"
+            );
+        }
+        // And the FULL filter is strictly smaller than the server's key set — inert filtering is
+        // exactly the bug this test exists to catch.
+        let all: BTreeSet<String> = parse_config_keys(&model)
+            .into_iter()
+            .filter(|k| k.consumer == "server")
+            .map(|k| k.name)
+            .collect();
+        assert!(names.len() < all.len(), "the scope filter must exclude something");
+    }
+
     #[test]
     fn real_specs_crate_graph_is_a_dag_with_existing_targets() {
         // The whole-tree gate: over the REAL specs, every derived manifest dependency must name an

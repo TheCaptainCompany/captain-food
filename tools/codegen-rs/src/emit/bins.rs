@@ -665,7 +665,7 @@ pub(crate) fn emit_bin_crates(model: &Model) -> Vec<BinCrate> {
                 // The bin's key subset = the SAME scope routing the deploy emitter uses for its
                 // pod's env (#374 Q4 closed by #385): its linked scopes + owning scope + common.
                 let keys = scoped_config_keys(model, &bin_config_scopes(b));
-                emit_config_module(model, &keys, /* strict_windows */ false)
+                emit_config_module(model, &keys, /* is_server */ false)
             }),
         })
         .collect()

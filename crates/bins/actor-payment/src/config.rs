@@ -8,6 +8,11 @@
 // Secrets are never rendered: the boot report shows `set` / `unset`, and for a key declaring
 // `mode_of: stripe` the derived test/live mode — never the value.
 
+// Scope-filtered BIN reader (#374 Q4): which helpers a bin's key subset exercises varies
+// per bin, so the shared reader shape carries a module-level allow instead of per-bin
+// cfg surgery. The reader's behaviour is covered by the server-side config tests.
+#![allow(dead_code)]
+
 use std::fmt;
 
 /// Which keys are required. Declared via `APP_PROFILE`, never inferred from the host or from
@@ -177,16 +182,6 @@ impl fmt::Display for MissingConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub profile: Profile,
-    /// HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET — we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already connected locations are unaffected, since the worker uses their per-connection tokens. When a client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets literal per-profile `deploy` values here rather than a repo secret.
-    pub hubrise_client_id: Option<String>,
-    /// HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
-    pub hubrise_webhook_secret: Option<String>,
-    /// HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
-    pub hubrise_api_base_url: Option<String>,
-    /// Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
-    pub hubrise_connect_redirect_url: Option<String>,
-    /// Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so one token covers every location of the account. Narrowing it means a connected restaurant's catalog or stock silently stops syncing for the locations the scope no longer covers.
-    pub hubrise_oauth_scope: Option<String>,
     /// Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all.
     pub database_url: String,
     /// sqlx pool ceiling per PROCESS (ADR-20260807-183024 realization, issue #385): the monolith and every wired bin size their PgPool from this DECLARED value instead of a per-main constant. Matters at bin granularity: 49 pods x this ceiling is the CNPG cluster's connection budget, so the number must be reviewable in one place. Per-bin tuning is an env override on the pod (env > baked > default), not a code change.
@@ -263,34 +258,6 @@ pub struct Config {
     pub web_assets_dir: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
-    /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
-    pub delivery_offer_max_ttl_seconds: i64,
-    /// Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
-    pub run_delivery_offer_timeout: bool,
-    /// Static bearer key for the Avelo37 partner API. Unset, the outbound gateway is not built and jobs reach independent riders only — no delivery is lost, but the partner channel is silently absent, so an operator expecting Avelo37 coverage sees none.
-    pub avelo37_api_key: Option<String>,
-    /// Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own production constant -- hence no `default` here, which would duplicate it.
-    pub avelo37_api_base_url: Option<String>,
-    /// HMAC key verifying inbound Avelo37 delivery-status callbacks. Unset, the webhook route fails closed: `DeliveryStatusUpdated` facts stop arriving and a delivery's tracking freezes at its last known state while the courier is in fact moving.
-    pub avelo37_webhook_secret: Option<String>,
-    /// Uber Direct customer/organization id — the `{customer_id}` path segment on every API call. Grants nothing on its own, but it identifies our Uber account, so it is treated as a credential rather than published in the repo (the same call made for OVH_SMS_SERVICE_NAME). One of the four the adapter requires TOGETHER; missing any one of them is reported as a misconfiguration rather than downgraded to a silent no-op.
-    pub uber_direct_customer_id: Option<String>,
-    /// OAuth2 client-credentials client id — Uber's dashboard also calls this the application id. Public by construction, like any OAuth client id, but it is per-app and per-mode, so it travels with its secret rather than being baked as a literal. Required with the other three; unset, no Uber Direct channel and jobs fall through to the next ranked one.
-    pub uber_direct_client_id: Option<String>,
-    /// OAuth2 client-credentials client secret — the token manager cannot mint an access token without it, so every create-delivery call fails at authentication. This is the one value here that grants the ability to dispatch deliveries and be billed for them.
-    pub uber_direct_client_secret: Option<String>,
-    /// Raw-body HMAC-SHA256 key verifying `X-Uber-Signature` on inbound callbacks. Unset, the webhook fails closed and delivery progress stops updating mid-delivery — the customer watches a courier that has in fact already arrived. Issued separately from the OAuth credentials, on Uber's webhook configuration page, and it is per-app: a test app and a live app do not share it.
-    pub uber_direct_webhook_secret: Option<String>,
-    /// API base-URL override (tests point this at a local mock). Unset, the adapter's own production constant applies -- no `default` here for the same reason.
-    pub uber_direct_base_url: Option<String>,
-    /// OAuth2 token-endpoint override. Unset, the adapter's own constant applies.
-    pub uber_direct_token_url: Option<String>,
-    /// OAuth2 scope override. Unset, the adapter requests its default delivery scope; too narrow a scope here surfaces as an authorization failure on create-delivery, not at startup.
-    pub uber_direct_scope: Option<String>,
-    /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
-    pub coopcycle_instances: Option<String>,
-    /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
-    pub run_sirene_worker: bool,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
     /// Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so "is production actually live?" is answerable.
@@ -339,11 +306,6 @@ impl Config {
             }
         };
         let mut problems = ConfigProblems::default();
-        let hubrise_client_id = raw("HUBRISE_CLIENT_ID");
-        let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
-        let hubrise_api_base_url = raw("HUBRISE_API_BASE_URL");
-        let hubrise_connect_redirect_url = raw("HUBRISE_CONNECT_REDIRECT_URL");
-        let hubrise_oauth_scope = raw("HUBRISE_OAUTH_SCOPE");
         let database_url = raw("DATABASE_URL");
         if database_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -428,26 +390,6 @@ impl Config {
         let web_assets_dir = raw("WEB_ASSETS_DIR");
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
-        let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
-        let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT")
-            .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true))
-            .unwrap_or(true);
-        let avelo37_api_key = raw("AVELO37_API_KEY");
-        let avelo37_api_base_url = raw("AVELO37_API_BASE_URL");
-        let avelo37_webhook_secret = raw("AVELO37_WEBHOOK_SECRET");
-        let uber_direct_customer_id = raw("UBER_DIRECT_CUSTOMER_ID");
-        let uber_direct_client_id = raw("UBER_DIRECT_CLIENT_ID");
-        let uber_direct_client_secret = raw("UBER_DIRECT_CLIENT_SECRET");
-        let uber_direct_webhook_secret = raw("UBER_DIRECT_WEBHOOK_SECRET");
-        let uber_direct_base_url = raw("UBER_DIRECT_BASE_URL");
-        let uber_direct_token_url = raw("UBER_DIRECT_TOKEN_URL");
-        let uber_direct_scope = raw("UBER_DIRECT_SCOPE");
-        let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
-        let run_sirene_worker = raw("RUN_SIRENE_WORKER")
-            .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
-            .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         let stripe_secret_key = raw("STRIPE_SECRET_KEY");
         if stripe_secret_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
@@ -459,16 +401,6 @@ impl Config {
             problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
-        if let Some(v) = hubrise_api_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
-            }
-        }
-        if let Some(v) = hubrise_connect_redirect_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_CONNECT_REDIRECT_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent." });
-            }
-        }
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -509,21 +441,6 @@ impl Config {
                 problems.invalid.push(InvalidKey { name: "LOG_LEVEL", scalar: "LogLevel", pattern: "^(?i)(trace|debug|info|warn|error)$", gates: "Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default." });
             }
         }
-        if let Some(v) = avelo37_api_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "AVELO37_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own production constant -- hence no `default` here, which would duplicate it." });
-            }
-        }
-        if let Some(v) = uber_direct_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "API base-URL override (tests point this at a local mock). Unset, the adapter's own production constant applies -- no `default` here for the same reason." });
-            }
-        }
-        if let Some(v) = uber_direct_token_url.as_deref() {
-            if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_TOKEN_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "OAuth2 token-endpoint override. Unset, the adapter's own constant applies." });
-            }
-        }
         if let Some(v) = Some(stripe_secret_key.as_str()) {
             if !v.is_empty() && !matches_pattern("^sk_(test|live)_[A-Za-z0-9]+$", v) {
                 problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: "^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
@@ -537,11 +454,6 @@ impl Config {
         (
             Self {
                 profile,
-                hubrise_client_id,
-                hubrise_webhook_secret,
-                hubrise_api_base_url,
-                hubrise_connect_redirect_url,
-                hubrise_oauth_scope,
                 database_url,
                 database_pool_max_connections,
                 supabase_url,
@@ -580,20 +492,6 @@ impl Config {
                 port,
                 web_assets_dir,
                 captain_build_version,
-                delivery_offer_max_ttl_seconds,
-                run_delivery_offer_timeout,
-                avelo37_api_key,
-                avelo37_api_base_url,
-                avelo37_webhook_secret,
-                uber_direct_customer_id,
-                uber_direct_client_id,
-                uber_direct_client_secret,
-                uber_direct_webhook_secret,
-                uber_direct_base_url,
-                uber_direct_token_url,
-                uber_direct_scope,
-                coopcycle_instances,
-                run_sirene_worker,
                 order_retention_window_days,
                 stripe_secret_key,
                 stripe_webhook_secret,
@@ -618,11 +516,6 @@ impl Config {
     /// "is production actually live?" is answerable without reading a secret.
     pub fn boot_report(&self) -> String {
         let mut out = format!("config: profile={}, {} keys resolved\n", self.profile, KEY_COUNT);
-        out.push_str(&format!("  HUBRISE_CLIENT_ID          = {}\n", self.hubrise_client_id.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_WEBHOOK_SECRET     = {}\n", if self.hubrise_webhook_secret.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  HUBRISE_API_BASE_URL       = {}\n", self.hubrise_api_base_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_CONNECT_REDIRECT_URL = {}\n", self.hubrise_connect_redirect_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  HUBRISE_OAUTH_SCOPE        = {}\n", self.hubrise_oauth_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  DATABASE_URL               = {}\n", if self.database_url.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  DATABASE_POOL_MAX_CONNECTIONS = {}\n", self.database_pool_max_connections));
         out.push_str(&format!("  SUPABASE_URL               = {}\n", self.supabase_url));
@@ -661,20 +554,6 @@ impl Config {
         out.push_str(&format!("  PORT                       = {}\n", self.port));
         out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
-        out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
-        out.push_str(&format!("  AVELO37_API_KEY            = {}\n", if self.avelo37_api_key.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  AVELO37_API_BASE_URL       = {}\n", self.avelo37_api_base_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  AVELO37_WEBHOOK_SECRET     = {}\n", if self.avelo37_webhook_secret.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  UBER_DIRECT_CUSTOMER_ID    = {}\n", if self.uber_direct_customer_id.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  UBER_DIRECT_CLIENT_ID      = {}\n", if self.uber_direct_client_id.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  UBER_DIRECT_CLIENT_SECRET  = {}\n", if self.uber_direct_client_secret.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  UBER_DIRECT_WEBHOOK_SECRET = {}\n", if self.uber_direct_webhook_secret.is_some() { "set" } else { "unset" }));
-        out.push_str(&format!("  UBER_DIRECT_BASE_URL       = {}\n", self.uber_direct_base_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  UBER_DIRECT_TOKEN_URL      = {}\n", self.uber_direct_token_url.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  UBER_DIRECT_SCOPE          = {}\n", self.uber_direct_scope.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
-        out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
         out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
@@ -683,15 +562,10 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 60;
+pub const KEY_COUNT: usize = 41;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
-    "HUBRISE_CLIENT_ID",
-    "HUBRISE_WEBHOOK_SECRET",
-    "HUBRISE_API_BASE_URL",
-    "HUBRISE_CONNECT_REDIRECT_URL",
-    "HUBRISE_OAUTH_SCOPE",
     "APP_PROFILE",
     "DATABASE_URL",
     "DATABASE_POOL_MAX_CONNECTIONS",
@@ -731,20 +605,6 @@ pub const DECLARED_KEYS: &[&str] = &[
     "PORT",
     "WEB_ASSETS_DIR",
     "CAPTAIN_BUILD_VERSION",
-    "DELIVERY_OFFER_MAX_TTL_SECONDS",
-    "RUN_DELIVERY_OFFER_TIMEOUT",
-    "AVELO37_API_KEY",
-    "AVELO37_API_BASE_URL",
-    "AVELO37_WEBHOOK_SECRET",
-    "UBER_DIRECT_CUSTOMER_ID",
-    "UBER_DIRECT_CLIENT_ID",
-    "UBER_DIRECT_CLIENT_SECRET",
-    "UBER_DIRECT_WEBHOOK_SECRET",
-    "UBER_DIRECT_BASE_URL",
-    "UBER_DIRECT_TOKEN_URL",
-    "UBER_DIRECT_SCOPE",
-    "COOPCYCLE_INSTANCES",
-    "RUN_SIRENE_WORKER",
     "ORDER_RETENTION_WINDOW_DAYS",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
@@ -777,8 +637,4 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
-    ("RUN_DELIVERY_OFFER_TIMEOUT", "production", "true"),
-    ("RUN_DELIVERY_OFFER_TIMEOUT", "staging", "true"),
-    ("RUN_SIRENE_WORKER", "production", "true"),
-    ("RUN_SIRENE_WORKER", "staging", "true"),
 ];
