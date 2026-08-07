@@ -9,6 +9,13 @@
 Sections are filled in as the bootstrap proceeds; nothing here is aspirational — each step is
 recorded as actually performed, with the values chosen.
 
+## 0. Parameters
+
+- **Public Cloud project ID** (`serviceName` in every `/cloud/project/{serviceName}/…` API path):
+  `3a30516985b74c48a17f35d484c05fd5` — supplied by the product owner, 2026-08-07. An identifier,
+  not a credential: it names the tenant but grants nothing without auth, so it is safe here.
+- Region: EU/Paris family (exact region chosen at cluster creation, recorded in §4).
+
 ## 1. OVH API auth shape
 
 Established 2026-08-07 from OVH's own documentation and price catalog, before naming any
@@ -68,6 +75,20 @@ Facts that shaped it:
   ~0.5 Gi + cert-manager ~0.2 Gi + OTel collector ~0.3 Gi + api ~0.5 Gi + per-node system pods
   ~1.5 Gi total ≈ **8.5 Gi** — a d2-4 trio's ~9 Gi allocatable leaves no headroom for the
   database; a d2-8 trio (~19 Gi allocatable) is comfortable.
+
+**RE-SIZED 2026-08-07 (product owner: the €67.80 trio is over budget — ADR-20260807-114122
+start-small ladder): the shape at entry is ONE d2-8 + LB S =
+€26.60/mo ex-VAT.** What changes against the trio: CNPG runs `instances: 1` (WAL archiving/PITR
+to Object Storage stays NON-NEGOTIABLE — it is the only recovery path now); the Prometheus stack
+is dropped in favour of **Honeycomb triggers** for the [#364](https://github.com/TheCaptainCompany/captain-food/issues/364)
+alert loop (~1 Gi of requests saved; the observability contract already lives in Honeycomb EU).
+Single-node demand ≈ 5.5 Gi against ~6.3 Gi allocatable on one d2-8 — snug but real. The LB S is
+kept at €6/mo: a stable entry IP in front of the Stripe webhook path is worth more than the €6
+the NodePort variant saves. **Rationale**: [#193](https://github.com/TheCaptainCompany/captain-food/issues/193)
+caps the app at ONE instance until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242),
+so a 3-node HA database under a single-instance app was protection asymmetry. **The ladder up is
+config, not migration**: node-pool resize → `instances: 3` → anti-affinity satisfied; climb when
+#242 lands or the first paying restaurants arrive, whichever first.
 
 ## 3. vRack private network
 
