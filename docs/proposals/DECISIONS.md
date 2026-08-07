@@ -439,11 +439,11 @@ one-axis chain begun in §17: `specs/{scope}/` → `domain-{scope}` crate → `a
 | # | Decision | Recommended | Answer |
 |---|---|---|---|
 | D1 | Spec folders per scope + `common/` | Yes — with placement, cross-scope-DAG and kernel-purity validator rules | _(open)_ |
-| D2 | **Storage level** | **Schema-per-scope in ONE CNPG database + per-scope GRANT roles** — NOT databases (cross-DB kills the admin SQL the product owner requires; FDW is the later rung); ladder: schema → own DB → own cluster, per scope, when measured | _(open)_ |
+| D2 | **Storage level** | **REVISED after product-owner pushback** (*"I don't like too many responsibilities on one database"* — the integration-database antipattern): split by RESPONSIBILITY — **`captain-core`** (event log + mailbox only; all backup/PITR budget) and **`captain-views`** (per-scope schemas of projections; rebuildable by replay, EXCLUDED from backups) in the one CNPG cluster. No native cross-DB join is ever needed; cross-scope exposure via projections/GraphQL; per-scope lifts later are connection-string changes | _(open)_ |
 | D3 | The event log | Stays SINGLE in a `core` schema — global ordering, PM causality, one PITR timeline, the GDPR erasure path | _(open)_ |
 | D4 | Projectors | Per scope over the single log, independent checkpoints; admin/BAM are consumer schemas — scope views never join across schemas | _(open)_ |
 | D5 | Configuration | Splits per scope + common; each bin's generated `Config` reads only its own keys | _(open)_ |
-| D6 | Admin cross-scope queries | `admin_ro` SELECT across schemas — plain SQL, because D2 chose schemas | _(open)_ |
+| D6 | Admin cross-scope queries | Via **projections + GraphQL composition** (the admin surface reads its own consumer schema); `admin_ro` cross-schema SQL demoted to INCIDENT tooling, never an application path | _(open)_ |
 | D7 | Sequencing | Everything pre-cutover — **start-clean makes the storage split FREE** (schemas created, nothing migrated); this window does not recur | _(open)_ |
 
 Concern registered and unchecked: **critical-path-growth** — prod is down and this grows the

@@ -85,6 +85,29 @@ own database when contention is measured → own cluster when scale pays for it.
 per-scope, and the per-scope ROLES mean application code never notices a lift (the connection string
 changes, the SQL does not — provided cross-scope JOINs are confined to admin/BAM, which D4 enforces).
 
+**D2 REVISED after product-owner pushback (2026-08-07: *"I don't like heavy responsibility or too
+many responsibilities on one database… we will find a way to expose the data from graphql… I know
+from experience that having a database with multiple purposes [ends badly]"*).** The experience is
+the **integration-database antipattern** — and the subtler resource form of it (the money path and
+analytics sharing one buffer pool) is real even with clean ownership. The pushback is accepted, and
+it sharpens the design along a different axis than "one database per scope": **split by
+RESPONSIBILITY first, because the two responsibilities have opposite recovery postures**:
+
+| Database (same CNPG cluster) | Holds | Purpose — singular | Recovery posture |
+|---|---|---|---|
+| **`captain-core`** | `domain_events` + `inbound_messages` only | Be the truth | **Irreplaceable**: WAL archiving, PITR, the weekly rehearsed restore — all backup budget goes HERE, and only here, so backups are small and drills are fast |
+| **`captain-views`** | All per-scope schemas of `View_*` + `admin` + `bam` | Serve reads | **Rebuildable**: restore = REPLAY from core. Excluded from backups entirely — backing up derived state is spending recovery budget on what regenerates itself |
+
+**No native cross-database join is ever needed in this shape** — which is what makes it viable
+despite Postgres's cross-DB limitation: projectors read core and write views on two connections;
+GraphQL reads views only; **cross-scope exposure happens via projections and GraphQL composition**
+(the product owner's instinct, and D4's design) — the admin surface reads its own consumer schema,
+never joins across scopes. `admin_ro`/`claude_ro` cross-schema SQL is demoted from an application
+path to **incident tooling**. Because no SQL ever crosses a scope boundary, lifting any scope's
+schema — or all of `captain-views` — to its own database or cluster later is a connection-string
+change, not a code change: the product owner's target end-state stays reachable by pure config,
+paid for when measured contention or revenue says so.
+
 ### D3 — The event log stays SINGLE (in a `core` schema)
 
 The product owner's split instinct is right for read models and state; the **append-only log is the
