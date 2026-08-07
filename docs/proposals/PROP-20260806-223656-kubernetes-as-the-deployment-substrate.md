@@ -125,28 +125,46 @@ Load Balancer.
 
 **D5 ANSWERED 2026-08-07 (product owner: *"D5 yes"*): the manifests are generated.**
 
-**D5 addendum — deployment topology (product owner directive, 2026-08-07)**: *"1 replica per web app
-including the adapters, 1 replica per actor type, 1 replica per worker including the projector —
-depending on the workload I will scale the replica."* Adopted with the constraints the code imposes,
-phased:
+**D5 addendum — deployment topology (product owner directives, 2026-08-07, two rounds — this section
+is the CURRENT state per the living-document rule; the phased single-image version it replaces is in
+this file's git history)**: *"1 replica per web app including the adapters, 1 replica per actor type,
+1 replica per worker including the projector — depending on the workload I will scale the replica"*;
+front offices (live marketplace + `{slug}` storefronts) split from back offices (restaurants, riders,
+system); *"directly the most split possible, to avoid AI errors due to facility"* — and, on review,
+the product owner **rejected the same-image-everywhere design**: env vars gate routing, not
+capability, so one image would have kept runtime isolation while losing compile-time isolation,
+scoped deploys (under `Recreate`, one image means a rider-UI change restarts the Order drain), and
+per-pod attack surface.
 
-- **Everything is ONE image with role env** — the web surfaces are WASM+SSR served per `Host` and the
-  webhook adapters are routes in the same Axum server, so the split is configuration, not builds. The
-  per-actor split needs one small runtime feature: a `DRAIN_ACTOR_TYPES` filter (declared in
-  `specs/configuration.yaml`) selecting which types' lanes a worker drains.
-- **The safety boundary**: web/enqueue pods scale freely NOW (mutations only INSERT into the mailbox);
-  **one worker per actor type is safe WITHOUT [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)**
-  (disjoint types = disjoint lanes = no contention by construction); **two workers on the SAME type
-  requires #242's leases** — and the hot type at Friday peak is `Order`, which makes #242 the direct
-  unlock for the scaling actually wanted. Projector and BAM stay singletons (advisory lock,
-  PROP-20260726-170500 D3) until their own guard.
-- **Phases**: (1) cutover ships `api-web` (HTTP + adapters + enqueue, freely scalable) +
-  `api-worker` (all drains + projector, `replicas: 1`) — zero new code; (2) per-type worker
-  Deployments **generated from `actors.yaml`** by the [#349](https://github.com/TheCaptainCompany/captain-food/issues/349)
-  emitter + the drain filter; (3) after #242: within-type scaling and RollingUpdate.
-- **Bills this creates**: per-pod sqlx pools become small DECLARED values (2–3; pgbouncer is the later
-  escape hatch — ~20 pods × default pools would swamp a 1 Gi Postgres), and phase 2 realistically
-  adds the second d2-8 node (+€20.60/mo — the ADR-20260807-114122 ladder's first rung up).
+- **Surfaces get their own BIN CRATES and IMAGES** — `fo-marketplace` (captain.food), `fo-storefront`
+  (`{slug}.captain.food`), `bo-restaurant`, `bo-rider`, `bo-admin`, `adapters` (webhooks +
+  `/external`) — each linking ONLY the crates its surface needs, enforced by the cargo-deny
+  capability allowlist. This extends **PROP-20260802-130500 (isolation by construction) from crates
+  to binaries**: the wrong coupling becomes unspellable, not just unrouted. One cargo-chef cook →
+  N thin runtime images copying different binaries, so the build cost is marginal.
+- **Workers are the one honest exception: ONE worker image, ~13 Deployments via `DRAIN_ACTOR_TYPES`**
+  (new `specs/configuration.yaml` key + a small filter on the drain query — cutover-critical).
+  Not a shortcut: the aggregates genuinely share the `domain` crate, so per-type images would be
+  13 copies of identical code — split theater — and any domain change rebuilds the shared image
+  regardless. **`projector` and `bam` get their own bins** (distinct C4 containers, distinct
+  dependency slices).
+- **The safety boundary is unchanged by any of this**: surface pods scale freely NOW (mutations only
+  INSERT into the mailbox); one worker per actor type is safe WITHOUT
+  [#242](https://github.com/TheCaptainCompany/captain-food/issues/242) (disjoint types = disjoint
+  lanes, contention-free by construction); **two workers on the SAME type requires #242's leases** —
+  the hot type at Friday peak is `Order`, so #242 is the direct unlock for the scaling wanted.
+  Projector and BAM stay singletons (advisory lock, PROP-20260726-170500 D3).
+- **Structural consequence**: `c4-l2.yaml`'s single `api` container splits into the real container
+  list — a SOURCE-DSL change (the product-owner directive is the decision; mechanics via the normal
+  spec edit + validator, with the `realizes:` actor mappings moving to the worker container). The
+  [#349](https://github.com/TheCaptainCompany/captain-food/issues/349) emitter then derives bin
+  crates ↔ Dockerfile targets ↔ Deployments from C4 + `actors.yaml` as one chain; `deploy.yml`
+  becomes a matrix of per-surface digest pins, which also buys per-surface rollback.
+- **Bills**: per-pod sqlx pools become small DECLARED values (2–3; pgbouncer as the later escape
+  hatch); the full shape wants two nodes from day one — **d2-8 + d2-4 + LB S ≈ €38.04/mo ex-VAT**
+  (within ADR-20260807-114122's ladder; the single-d2-8 €26.60 rung is too snug for ~25 pods). The
+  bin/router split is real pre-cutover work and now PRECEDES cluster creation in the product owner's
+  ordering.
 
 **Recommended: yes — this is the strongest argument for a cluster.** `specs/configuration.yaml` already
 declares every env var and its per-profile supplier, `specs/observability.yaml` declares the telemetry
