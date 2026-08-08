@@ -1,6 +1,8 @@
 # Account-level erasure — "same behavior as Facebook" reconciled with GDPR Art. 17
 
-**Date-stamped 2026-08-08** · **Status**: In discussion with the customer · **Prepared by**: the
+**Date-stamped 2026-08-08** · **Status**: Two-path model CONFIRMED by the customer 2026-08-08
+([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md));
+E1–E8 pending counsel · **Prepared by**: the
 legal-specialist lens, session https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp ·
 **Decision thread**: [#404 "Decision thread: GDPR erasure depth"](https://github.com/TheCaptainCompany/captain-food/issues/404)
 · **Customer direction** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)):

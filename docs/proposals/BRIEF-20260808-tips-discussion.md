@@ -1,6 +1,12 @@
 # Tips discussion — the option grid the customer asked for (PROP-165000 D5, widened)
 
-**Date**: 2026-08-08 · **Status**: In discussion with the customer · **Prepared by**: the
+> **DECIDED 2026-08-08** ([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)):
+> rider tips as recommended below; restaurant tip becomes **per-restaurant opt-in**; the platform
+> surface becomes a **voluntary contribution (HelloAsso model)** with the public « pari » /
+> cascade-pricing / cagnotte machinery — see the ADR. This brief stays as the rider-surface
+> realization reference and the argument record.
+
+**Date**: 2026-08-08 · **Status**: Decided — see banner · **Prepared by**: the
 business-specialist and ux-designer lenses, session
 https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp · **Decision thread**:
 [#403 "Decision thread: money posture"](https://github.com/TheCaptainCompany/captain-food/issues/403)

@@ -77,4 +77,10 @@ Also note: the enum conflates the two legally distinct objections of Q1 (delist 
 - **E7 — Erasure-receipt minimality**: the completion record keeps pseudonymous references (`customerId` etc.) as the accountability proof — compatible with minimization, or does it need its own retention?
 - **E8 — Interface duties**: confirm the equal-prominence requirement between deactivate and delete under Art. 12(2) + DSA Art. 25 (dark patterns), so the UX spec can encode it as a hard rule.
 
+### Funding-model additions (F-series, 2026-08-08 — context: [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md))
+
+- **F1 — Voluntary contributions to a commercial SASU**: HelloAsso-style voluntary contributions collected by the SASU during and outside the order process — VAT treatment (taxable turnover vs outside-scope voluntary payment?), invoicing/receipt obligations, and whether any consumer-law framing constraints apply to the in-checkout ask (pre-ticked prohibition, DGCCRF drip-pricing rules).
+- **F2 — Cascade pricing clause**: the declared fallback (monthly `fixed platform cost ÷ restaurant count`, 0 € when contributions cover costs) as a term in restaurant contracts — P2B 2019/1150 transparency requirements, notice periods for price changes, and what cost-baseline evidence must be publishable to make "in advance, in total transparency" contractually safe.
+- **F3 — Public cagnotte**: displaying contributor names/amounts on per-contribution consent — confirm the consent artifact and any DSA/consumer-information duties on the public bet narrative ("le pari") so the claim "contributions cover the platform" is substantiated by the published accounting.
+
 *This brief maps the landscape; none of it is legal advice, and items graded (b)/(c) plus all VERIFY-FIRST cites must be confirmed by licensed French counsel before launch decisions rest on them.*

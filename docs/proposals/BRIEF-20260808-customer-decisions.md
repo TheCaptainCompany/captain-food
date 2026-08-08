@@ -1,9 +1,11 @@
 # The customer's decision brief — what only you can decide, and why
 
-> **ANSWERED 2026-08-08** — the customer answered all ten via the decision form:
-> [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) records the seven
-> decisions (1.1 · 1.2 · 1.3 · 1.5 · ch. 4 · ch. 5 · ch. 6); three moved to discussion
-> (1.4 tips · ch. 2 erasure · ch. 3 admin-on-behalf). This brief stays as the argument record.
+> **FULLY ANSWERED 2026-08-08** — [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)
+> records seven decisions (1.1 · 1.2 · 1.3 · 1.5 · ch. 4 · ch. 5 · ch. 6);
+> [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)
+> closes the last three (1.4 tips → the voluntary-contribution funding model · ch. 2 erasure →
+> two-path confirmed · ch. 3 → explicit act-as, superseding ADR-0037). This brief stays as the
+> argument record.
 
 **Date**: 2026-08-08 · **Prepared by**: the five-lens register sweep (architect classification;
 legal-specialist, business-specialist, graphql-architect, ux-designer, dba arguments), session

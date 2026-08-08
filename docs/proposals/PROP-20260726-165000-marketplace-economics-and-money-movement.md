@@ -1,6 +1,6 @@
 # PROP-20260726-165000 — Marketplace economics and money movement
 
-- **Status**: Partially approved — D1/D2 decided by the customer 2026-08-08 ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); D3/D4 by ensemble consent ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)); D5 in discussion ([BRIEF-20260808-tips-discussion.md](BRIEF-20260808-tips-discussion.md))
+- **Status**: Partially approved — D1/D2 decided by the customer 2026-08-08 ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); D3/D4 by ensemble consent ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)); D5 decided by the customer 2026-08-08 ([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md): rider tips per [BRIEF-20260808-tips-discussion.md](BRIEF-20260808-tips-discussion.md), restaurant tip opt-in, platform voluntary-contribution funding model)
 - **Date**: 2026-07-26
 - **Tracking issue**: [#199 "Epic: marketplace economics and money movement — fees, payouts, VAT, invoicing, capture timing"](https://github.com/TheCaptainCompany/captain-food/issues/199)
 - **Realized by**: _(filled at completion)_
