@@ -3,7 +3,19 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-08 — ONE BIN PER WORKER: THE CROSS-CUTTING WORKERS GET CRONJOB-SHAPED HOMES, PR IN
+> ⏳ **2026-08-08 (night) — #348 SLICES 1–2 SPEC DIFF PREPARED, AWAITING CUSTOMER APPROVAL —
+> [PROP-20260808-221424](proposals/PROP-20260808-221424-rider-delivery-slices-1-2-spec-diff.md)
+> (autonomous run; `specs/**` untouched).** The exact per-file diff realizing the approved
+> [PROP-20260808-141817](proposals/PROP-20260808-141817-rider-delivery-write-surface.md) slices 1–2:
+> retire the `AssignDeliveryToPartner`/`DeliveryAssignedToPartner` and
+> `UpdateDeliveryPartnerStatus`/`DeliveryPartnerStatusUpdated` families (6 source files, incl. the
+> forced `TestDeliveryUnassignedFromPartner` rewire + 2 prose rewords), declare
+> `PaymentFailed`/`CustomerIdentified` `nonProjectedEvents` (category a), and the D6 `sends:` YAML
+> (applies only WITH its validator mechanism, after
+> [#399 "Validator gap: a tombstone event absent from the view's fedBy silently never dispatches"](https://github.com/TheCaptainCompany/captain-food/issues/399)).
+> Expected delta 43 → 35 warnings, 0 errors, residue mapped one-to-one onto slices 3–7/D5/D6.
+> **The retirement window closes when production events exist** — flagged in every status until the
+> customer approves. Application = plan-mode session, per the document's §6.
 > REVIEW — [#393 "Cross-cutting worker hosting: one bin per worker"](https://github.com/TheCaptainCompany/captain-food/issues/393)
 > via [ADR-20260808-062933](adr/ADR-20260808-062933-one-bin-per-worker.md) (product-owner
 > decision; the FINAL repo work item of the ADR-20260807-183024 program).** c4-l2 replaces
