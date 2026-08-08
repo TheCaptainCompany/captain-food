@@ -6,8 +6,9 @@
 ## The weekly budget guard
 
 - State: `.claude/loop-budget.json` — `{ weeklyBudgetSeconds, week, secondsUsed, startedAt }`.
-  Default **1800s = 30 min/week**; edit `weeklyBudgetSeconds` to change. Resets automatically each ISO
-  week. It is **committed** so the budget persists across cloud-routine runs (each run reads/updates it).
+  Current value **43200s = 12 h/week** (customer directive 2026-08-08, all-day autonomous
+  operation — ADR-20260808-223000; the historical default was 1800s = 30 min/week); edit
+  `weeklyBudgetSeconds` to change. Resets automatically each ISO week. It is **committed** so the budget persists across cloud-routine runs (each run reads/updates it).
 - Guard: `.claude/hooks/loop-budget.sh check|start|stop`
   - `check` → exit 0 if budget remains, **exit 2 if spent** (skip the run).
   - `start` → check + stamp a start time.
