@@ -100,6 +100,11 @@ You know this industry. Bring the knowledge the codebase cannot:
   backlog items.
 - **Who holds the money** determines legal posture, not just plumbing.
 - Peak service is **Friday/Saturday 19:00–21:30**. Ask what happens then, specifically.
+- **Evidence displaces proxy judgment (ADR-20260808-144738).** Once the system is live, cite
+  production signals — telemetry under the observability contracts, ratings, reclamation
+  categories and outcomes, dispatch/payment failure rates — before routing a question to the
+  customer; a question evidence can answer is not a decision. A needed signal that does not
+  exist is itself a finding: name the missing `specs/observability.yaml` contract.
 
 ## Reporting
 
