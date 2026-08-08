@@ -3,6 +3,25 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-08 — ONE BIN PER ADAPTER: THE COMPOSED `adapters` POD IS SPLIT PER PARTNER, PR IN
+> REVIEW — [#391 "One bin per adapter"](https://github.com/TheCaptainCompany/captain-food/issues/391)
+> via [ADR-20260808-062432](adr/ADR-20260808-062432-one-bin-per-adapter.md) (product-owner
+> decision).** c4-l2 replaces `adapters` with `adapter-stripe`/`adapter-hubrise`/
+> `adapter-uber-direct`/`adapter-coopcycle`/`adapter-avelo37`; the emitter derives the family from
+> the adapter-crate list scanned at model load (`crates/adapters/*` — a sixth crate produces a
+> sixth bin, §15 then requires its container, both directions checked). Each pod env + generated
+> Config narrows to the partner's OWN env prefix within its declared `integration_scopes`
+> (UBER_DIRECT_* no longer reaches the Avelo37 pod; pairwise-asserted in the deploy completeness
+> test, per-partner closure sharpness in the determinator tests). `hooks.captain.food` carries one
+> `/adapters/{partner}` path per Service (no surface at `/`); marketplace-host per-partner
+> transition aliases kept, dead `/webhooks`|`/services` aliases dropped. Bin count 49 → 53.
+> STRUCTURALLY DISSOLVES the cross-partner half of the #385 secret-grant cutover precondition;
+> the remainder (bam's `domain_scopes` path + per-key consumer metadata, incl. boot-required
+> `STRIPE_SECRET_KEY` in `adapter-stripe` whose webhook code reads only the webhook secret) stays
+> recorded on #385. `adapter-avelo37` exists but stays unprovisioned/undeployed BY DESIGN
+> (pre-milestone; its keys still declare no `deploy:` source). GATE-THEN-STABILIZE: nothing
+> applies manifests; the monolith stays authoritative.
+>
 > 🚧 **2026-08-08 — ADR-183024 STEP (6) PREP: CNPG PLATFORM TREE IN REVIEW —
 > [#360 "CNPG: operator + 3-instance cluster, WAL archiving to Object Storage, weekly executed
 > restore drill"](https://github.com/TheCaptainCompany/captain-food/issues/360) repo-only slice via
