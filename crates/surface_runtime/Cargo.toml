@@ -19,7 +19,6 @@ description = "Captain.Food surface-bin runtime: audience host serving + gateway
 [dependencies]
 web = { path = "../web" }
 axum = { workspace = true }
-serde_json = { workspace = true }
 # Static /assets serving — the same tower-http ServeDir the monolith uses for the wasm bundle.
 tower-http = { version = "0.6", features = ["fs"] }
 

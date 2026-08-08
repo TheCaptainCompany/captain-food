@@ -5193,7 +5193,6 @@ name = "surface_runtime"
 version = "0.1.0"
 dependencies = [
  "axum",
- "serde_json",
  "tower-http",
  "web",
 ]
