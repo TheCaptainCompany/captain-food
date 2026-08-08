@@ -208,6 +208,16 @@ trust the numbers above if they look off.
   by [#329](https://github.com/TheCaptainCompany/captain-food/issues/329): seven review rounds and
   ~191 lines hardening a source-text scanner over a boundary the compiler already enforced, every
   gap in it found by a reviewer rather than by the scanner.
+- **Final vision first — no intermediate step where the final step can be built** (product-owner
+  directive, 2026-08-08, verbatim in
+  [ADR-20260808-235113](docs/adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)):
+  *"do not choose the easy path, choose the final clean vision … always put in place the final
+  step."* When an option space contains a cheap intermediate and the final clean shape, build the
+  final shape directly; recommendations present the final-vision option FIRST. Composes with
+  compiler-first (the type-level answer IS the final vision) and does NOT overturn
+  gate-then-stabilize — gating decides WHEN a finished thing takes over, never licenses a shim.
+  Where staging is externally forced, the intermediate ships only with the final step already
+  designed and recorded.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
