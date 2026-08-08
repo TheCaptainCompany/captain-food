@@ -516,6 +516,18 @@ Two rules: every suite's `reset_schema` must create EVERY table its delivery pat
 when a suite fails locally but CI is green, suspect suite-order leakage BEFORE code — prove it by
 running the one suite against a fresh database.
 
+**A worktree you push from must be EXCLUSIVELY yours, and commit with explicit pathspecs there
+anyway (2026-08-08):** a reviewer subagent, needing a pristine-`main` scratch for a
+negative-verification, found and used the coordinator's docs worktree — it copied the branch's
+`tools/codegen-rs/src/tests.rs` in, and the coordinator's next docs commit there carried the
+foreign +70-line hunk onto `main` (a test asserting a check `main` does not have → red codegen
+gate; caught after push, reverted within a minute, one intermediate `ci` run red). Two rules.
+Every agent dispatch names an EXCLUSIVE workspace and forbids using found checkouts — a clean
+worktree is 200 ms to create, and "scratch" is where collisions breed. And enumerated `git add`
+does NOT protect a shared tree: `git commit` commits the whole INDEX, so foreign staged content
+rides along silently — in any tree another agent may have touched, commit with explicit
+pathspecs (`git commit -F - -- <paths>`) or read `git diff --cached --stat` first.
+
 **While a background agent owns the branch checkout, edit `main` through a git WORKTREE**
 (`git worktree add <scratchpad>/main-wt origin/main -b <tmp>` → edit → push `<tmp>:main` →
 `git worktree remove`): switching branches under a running agent yanks its files; and when the
