@@ -98,6 +98,14 @@ variables set reproduced it locally in seconds. The number is not the evidence �
 Cost that earned it: a CI-only failure on a build-profile PR that could not possibly change
 behaviour, and an hour of diagnosis that a local DB run would have front-loaded.
 
+**Proposal-hygiene wants every tracking-issue link in the FIRST 40 LINES (2026-08-08):** the
+validator scans only the header window (`tools/codegen-rs/src/validate/proposals.rs:117`), so a
+multi-issue proposal with a long `Related`/`Concerns` header can push its second tracking link past
+line 40 and fail `proposal-tracking-issue-missing` for a link that IS in the file. Keep all
+tracking links high; read the validator source before debugging the message. Related fumble-saver:
+`make validate`'s summary line does not name warning kinds — diff kinds against baseline with
+`make validate 2>&1 | grep '\[warn ]' | awk '{print $3}' | sort | uniq -c`.
+
 **`check-drift` fails on ANY dirty file, and says the wrong thing about it (2026-08-04):** it diffs
 the whole working tree, not just generated paths, so an uncommitted hand edit — a `Cargo.toml`
 tweak, a doc fix — trips it with `generated artifacts drifted -- run 'make generate' and commit the
