@@ -145,7 +145,8 @@ GAP report to the **executor** agent for the green-lane realization (proposal do
 rules, tests — never `specs/**`, which waits for plan-mode approval of the proposal your report
 becomes); (3) fans out the independent review ensemble on the result — reviewer + architect +
 graphql-architect (+ dba when storage-shaped, + business-specialist when money, adoption or
-competitive consequences are in play), eyes that did not write it, in parallel; (4) keeps
+competitive consequences are in play, + legal-specialist when regulatory, data-protection or
+platform-work consequences are in play), eyes that did not write it, in parallel; (4) keeps
 the product owner updated on a fixed cadence (~5 min) while any stage runs, and supervises to a
 merged/landed outcome — never ending at "dispatched, pending". The #397 run is the reference
 shape: the review pass everyone doubted (graphql-architect on a validator fix) produced the most
