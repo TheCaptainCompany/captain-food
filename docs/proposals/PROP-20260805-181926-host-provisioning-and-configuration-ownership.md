@@ -1,6 +1,10 @@
 # PROP-20260805-181926 — Who owns the OVH host: provisioning IaC and host configuration (SaltStack evaluated)
 
-- **Status**: **Mostly MOOT as of 2026-08-06** — the destination became Clever Cloud, a PaaS
+- **Status**: Superseded — D7, the one surviving question, is answered by
+  [PROP-20260806-223656 D5](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md) /
+  [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) (manifests
+  generated from the specs, on OVH MKS); recorded in the 2026-08-08 register sweep
+  (ADR-20260808-171056). Previously mostly moot as of 2026-08-06 — the destination became Clever Cloud, a PaaS
   ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
   product owner: *"Instead of OVH"*). **There is no host OS of ours any more, so D1–D6 have no
   subject** and are retained as the costed record of the option space, not as live decisions.

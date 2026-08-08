@@ -7,7 +7,12 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **66 open decisions** (PROP-004616's six and PROP-120931's five both closed, both proposals `Approved`; PROP-032306 added 2026-07-30 with five open of seven — §11)
+Last reconciled: **2026-08-08** · **17 open decisions** — the customer's ten ([the brief](BRIEF-20260808-customer-decisions.md)), the five new sweep rows (§22), and two residual team rows (PROP-172500 D4 job-pool filtering · PROP-032306 D5 menu ownership/price parity). The 2026-08-08 five-lens sweep decided **30 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
+
+> **Customer decisions: see [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) (ten decisions).**
+> Everything only the product owner can decide — the five-decision money posture, account-level
+> erasure scope, admin act-as, the operating entity, transparency levels, and who funds promotions —
+> is argued there, lens by lens. Answers land back in this register.
 
 > **2026-07-30 — the actor-runtime set is `Approved`** (product owner, in-session:
 > *"we are at the same page, we can build it now"*; ADR-20260730-231500):
@@ -48,14 +53,17 @@ easy ones.
 
 Six decisions gate roughly two thirds of the backlog. Everything else can wait.
 
+**2026-08-08**: D and F are decided (rows below); A, B, the C remainder and E are the customer's —
+[the brief](BRIEF-20260808-customer-decisions.md), chapters 1–2.
+
 | # | Decision | Why it is first | Recommendation |
 |---|---|---|---|
-| **A** | [PROP-165000 D1](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **payout posture**: Stripe Connect vs merchant-of-record | Determines who the seller is, who invoices whom, how VAT is declared, and Captain's legal standing while holding customer funds. Gates [#173](https://github.com/TheCaptainCompany/captain-food/issues/173), [#172](https://github.com/TheCaptainCompany/captain-food/issues/172), [#174](https://github.com/TheCaptainCompany/captain-food/issues/174). **Gets more expensive with every real order.** | Connect, separate charges & transfers |
-| **B** | [PROP-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **capture timing**: authorize-then-capture vs capture-at-checkout | Changes what a rejection costs the customer, what the acceptance timeout releases ([#167](https://github.com/TheCaptainCompany/captain-food/issues/167)), and how far ahead orders can be scheduled ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197)) | Authorize at checkout, capture on acceptance |
-| **C** | [PROP-170000 D3](PROP-20260726-170000-event-log-integrity-evolution-and-erasure.md) — **GDPR erasure strategy** | **DECIDED for ORDERS 2026-07-31** ([ADR-20260731-160000](../adr/ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md), product owner, diverging from the crypto-shredding recommendation): `OrderExpired` = deletion from the system — projections tombstone the order's rows, a technical worker later deletes the streams, an `OrderErasureProcess` PM owns the journey. REMAINING open: customer-account-level erasure (identity, files, Supabase) + the per-phase retention windows. Gates [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) | Orders: tombstone + stream deletion (decided) · account scope: open |
-| **D** | [PROP-165500 D1](PROP-20260726-165500-catalog-compliance-and-merchandising.md) — **allergen representation** | EU FIC 1169/2011 is a launch blocker, and the model must exist before imports can carry it. Gates [#184](https://github.com/TheCaptainCompany/captain-food/issues/184) | Controlled 14-category enum + explicit "not declared" state |
-| **E** | [PROP-164500 D1+D2](PROP-20260726-164500-order-operational-safety.md) — **acceptance timeout policy and TTL** | Decides whether a customer can be left charged for an ignored order. Gates [#167](https://github.com/TheCaptainCompany/captain-food/issues/167); pairs with B | Auto-cancel + auto-approved refund; 5 min with per-restaurant override |
-| **F** | [PROP-172000 D1](PROP-20260726-172000-spec-to-ui-contract-integrity.md) — **how a screen declares a runtime input source** | The one DSL addition needed before the write-side validator gate can fail closed. Gates the required-field half of [#169](https://github.com/TheCaptainCompany/captain-food/issues/169) and the fix for [#168](https://github.com/TheCaptainCompany/captain-food/issues/168) | Name the input source explicitly (`from:`) |
+| **A** | [PROP-165000 D1](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **payout posture**: Stripe Connect vs merchant-of-record | Determines who the seller is, who invoices whom, how VAT is declared, and Captain's legal standing while holding customer funds. Gates [#173](https://github.com/TheCaptainCompany/captain-food/issues/173), [#172](https://github.com/TheCaptainCompany/captain-food/issues/172), [#174](https://github.com/TheCaptainCompany/captain-food/issues/174). **Gets more expensive with every real order.** | Connect, separate charges & transfers — **the customer's**: brief ch. 1.1 |
+| **B** | [PROP-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **capture timing**: authorize-then-capture vs capture-at-checkout | Changes what a rejection costs the customer, what the acceptance timeout releases ([#167](https://github.com/TheCaptainCompany/captain-food/issues/167)), and how far ahead orders can be scheduled ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197)) | Authorize at checkout, capture on acceptance — **the customer's**: brief ch. 1.2 |
+| **C** | [PROP-170000 D3](PROP-20260726-170000-event-log-integrity-evolution-and-erasure.md) — **GDPR erasure strategy** | **DECIDED for ORDERS 2026-07-31** ([ADR-20260731-160000](../adr/ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md), product owner, diverging from the crypto-shredding recommendation): `OrderExpired` = deletion from the system — projections tombstone the order's rows, a technical worker later deletes the streams, an `OrderErasureProcess` PM owns the journey. REMAINING open: customer-account-level erasure (identity, files, Supabase) + the per-phase retention windows. Gates [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) | Orders: tombstone + stream deletion (decided) · account scope: open — **the customer's**: brief ch. 2 |
+| **D** | [PROP-165500 D1](PROP-20260726-165500-catalog-compliance-and-merchandising.md) — **allergen representation** | EU FIC 1169/2011 is a launch blocker, and the model must exist before imports can carry it. Gates [#184](https://github.com/TheCaptainCompany/captain-food/issues/184) | Controlled 14-category enum + explicit "not declared" state — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): Annex II enum + explicit "not declared", and NOT_DECLARED **gates orderability** in the distance-selling UI (or, strict minimum, a specific functional contact means on the product sheet) — "required before publishing" is binding (legal evidence) |
+| **E** | [PROP-164500 D1+D2](PROP-20260726-164500-order-operational-safety.md) — **acceptance timeout policy and TTL** | Decides whether a customer can be left charged for an ignored order. Gates [#167](https://github.com/TheCaptainCompany/captain-food/issues/167); pairs with B | Auto-cancel + auto-approved refund; 5 min with per-restaurant override — **the customer's**: brief ch. 1.3 |
+| **F** | [PROP-172000 D1](PROP-20260726-172000-spec-to-ui-contract-integrity.md) — **how a screen declares a runtime input source** | The one DSL addition needed before the write-side validator gate can fail closed. Gates the required-field half of [#169](https://github.com/TheCaptainCompany/captain-food/issues/169) and the fix for [#168](https://github.com/TheCaptainCompany/captain-food/issues/168) | Name the input source explicitly (`from:`) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), with the `from:` naming-collision row in §22 |
 
 ---
 
@@ -64,23 +72,26 @@ Six decisions gate roughly two thirds of the backlog. Everything else can wait.
 These have a conventional right answer and little genuine trade-off. Reading the recommendation and
 saying "yes to all" is a reasonable use of five minutes.
 
+**2026-08-08**: every row here is now decided or retired EXCEPT PROP-172500 D4 (job-pool filtering) —
+see the per-row notes.
+
 | Decision | Question | Recommendation |
 |---|---|---|
-| PROP-170000 D1 | Preventing skipped events ([#189](https://github.com/TheCaptainCompany/captain-food/issues/189)) | Snapshot / `xmin` guard — the only option that is correct rather than probabilistic |
-| PROP-170000 D2 | Event evolution policy | Additive-only + validator gate; add `event_version` now (cheaper before the log grows) |
-| PROP-170000 D4 | `$maxAge` / `expired_at` | Implement or delete — a specified-but-inert control is worse than none |
-| PROP-170000 D5 | Spec-vs-code divergences (`version` 0- vs 1-based, `id` as idempotency key) | Correct the spec to match the code; the code is what has been running |
-| PROP-170500 D3 | Where the workers run | Advisory lock now (in-process), dedicated service later |
-| PROP-170500 D4 | GraphiQL / Voyager in production | Keep, gated to ADMIN |
-| PROP-170500 D5 | Subscription fan-out at >1 instance | Postgres `LISTEN`/`NOTIFY` |
-| PROP-171500 D1 | Where the write-side scope check runs | Dispatch layer, before journaling |
-| PROP-171500 D2 | Validate the supplied id, or derive it | Derive where the role implies one scope; validate otherwise |
-| PROP-171500 D3 | Sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) | Immediately after it lands |
-| PROP-172000 D3 | The drifted product spec | Rewrite §4–§5 to match ADR-0034 |
-| PROP-172000 D4 | Fix the four dead actions with the rule | Same PR — a rule landing red breaks "keep main green" |
+| PROP-170000 D1 | Preventing skipped events ([#189](https://github.com/TheCaptainCompany/captain-food/issues/189)) | Snapshot / `xmin` guard — the only option that is correct rather than probabilistic — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +xid8 safe-head, 3 adaptations (bounded scans + oldest-write-age alert · idle gate arms on the SAFE head, never `MAX(position)` · one shared safe-head helper across all FOUR readers) |
+| PROP-170000 D2 | Event evolution policy | Additive-only + validator gate; add `event_version` now (cheaper before the log grows) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): condition — the gate must also prove generated-serde tolerance (`#[serde(default)]`-safe), not only the YAML diff |
+| PROP-170000 D4 | `$maxAge` / `expired_at` | Implement or delete — a specified-but-inert control is worse than none — ✅ IMPLEMENTED: the retention sweep is live (design: [ADR-20260731-153000](../adr/ADR-20260731-153000-gdpr-expiry-as-scheduled-actor-message.md)); stale row retired 2026-08-08 (ADR-20260808-171056) |
+| PROP-170000 D5 | Spec-vs-code divergences (`version` 0- vs 1-based, `id` as idempotency key) | Correct the spec to match the code; the code is what has been running — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): `version` + `id` legs as recommended (the mailbox owns append idempotency); the `ce_events` leg REVERSED to code-to-spec — make the function sargable (`stream_name LIKE category \|\| '-%'`) rather than enshrine a full-log seq scan |
+| PROP-170500 D3 | Where the workers run | Advisory lock now (in-process), dedicated service later — ✅ decided by the bins ADRs ([ADR-20260808-062933](../adr/ADR-20260808-062933-one-bin-per-worker.md) one bin per worker · [ADR-20260808-062432](../adr/ADR-20260808-062432-one-bin-per-adapter.md) one bin per adapter); stale row retired 2026-08-08 (ADR-20260808-171056) |
+| PROP-170500 D4 | GraphiQL / Voyager in production | Keep, gated to ADMIN — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **and self-hosted** — a no-CSP CDN bundle on the authenticated admin origin is a script-injection surface in the worst place; self-host or drop Voyager |
+| PROP-170500 D5 | Subscription fan-out at >1 instance | Postgres `LISTEN`/`NOTIFY` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +reconcile-on-reconnect (NOTIFY has no delivery guarantee); the WS transport lands first — the gateway answers upgrades 501 today |
+| PROP-171500 D1 | Where the write-side scope check runs | Dispatch layer, before journaling — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), REWORDED before consent: the dispatch check is the fast-fail **pre-filter** (no mailbox row for an obviously-forbidden attempt, denial counter); the **authority is the actor's aggregate-state check** per PROP-20260728-135632's #235 correction |
+| PROP-171500 D2 | Validate the supplied id, or derive it | Derive where the role implies one scope; validate otherwise — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): timing note — the input-field deletions are breaking-but-free only while no client ships; land before first deploy. The actor-side `requires.acting` stays the final check |
+| PROP-171500 D3 | Sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) | Immediately after it lands — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open); note: [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) has NOT landed yet (the §4 register note was stale) |
+| PROP-172000 D3 | The drifted product spec | Rewrite §4–§5 to match ADR-0034 — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) |
+| PROP-172000 D4 | Fix the four dead actions with the rule | Same PR — a rule landing red breaks "keep main green" — ✅ OVERTAKEN: the rules landed as the two screen-action warning rules and the work is tracked in [#342](https://github.com/TheCaptainCompany/captain-food/issues/342) (the 17 screen-action↔command-input findings); stale row retired 2026-08-08 (ADR-20260808-171056) |
 | PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` — composes with [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) slice 4's per-rider decline exclusion on the same `myDeliveries` query (the rider write surface itself moved to that proposal, §20) |
-| PROP-172500 D5 | Rider↔customer contact | Route through the order conversation, not phone numbers |
-| PROP-165500 D6 | Menu scheduling | Defer, but record it — needed when combos land |
+| PROP-172500 D5 | Rider↔customer contact | Route through the order conversation, not phone numbers — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +masked/bridged call fallback and rider-side one-tap canned chips ("customer unreachable at the door" needs synchronous escalation; a keyboard on a bike violates the one-hand rule). **Customer-endorsed 2026-08-08** |
+| PROP-165500 D6 | Menu scheduling | Defer, but record it — needed when combos land — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): deferred until combos |
 
 ---
 
@@ -88,31 +99,31 @@ saying "yes to all" is a reasonable use of five minutes.
 
 | Decision | Question | Recommendation | The tension |
 |---|---|---|---|
-| PROP-165000 D3 | Rounding for fee splits | Buyer total first, residual cent to `captainNet` | Undefined today; any answer works, but it must be stated and tested or splits stop reconciling |
-| PROP-165000 D4 | Delivery-fee dimension | Per-zone | Pairs with PROP-172500 D1; distance-banded is fairer but needs geocoding you do not have |
-| PROP-165000 D5 | Do tips move money? | Yes, same transfer mechanism as D1 | Tips are recorded and displayed today but reach nobody |
-| PROP-165500 D2 | Does Captain own stock consumption? | Re-validate at checkout; decrement only Captain-managed offers | HubRise restaurants have a POS as stock authority — double-counting is worse than not counting |
-| PROP-165500 D3 | Per-service-type pricing | Optional price override on `Offer` | French practice prices delivery above counter; the model allows per-mode VAT but not per-mode price |
-| PROP-165500 D4 | Catalog images on the [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) framework | Confirm a **public** audience now, while it is on paper | #134 is designed around private per-order attachments; retrofitting public access later is the expensive version |
-| PROP-165500 D5 | Merchandising order | Promo codes first | Highest acquisition value for a single-city launch; loyalty must reuse [#158](https://github.com/TheCaptainCompany/captain-food/issues/158)'s balance, not a second one |
-| PROP-164500 D3 | V0 notification channel | In-app + sound, then SMS | Waiting for [#127](https://github.com/TheCaptainCompany/captain-food/issues/127)'s full cascade blocks the entire operational loop behind a post-V0 epic |
-| PROP-164500 D4/D5 | Timed pause; opening-hours exception days | Yes to both | Weekly recurrence alone is wrong on all eleven French public holidays |
-| PROP-164500 D6/D7 | Scheduling window; order modification scope | Same-day slots; address correction before `PREPARING` | Bounded by B — card authorizations expire in ~7 days |
-| PROP-171500 D4 | ADMIN acting on behalf of a tenant | Explicit, logged bypass | Revisits ADR-0037's impersonation-only stance |
-| PROP-172000 D2 | Rejection reasons: enum or free text | Controlled enum + optional note | Rejection reasons are the analytics that tell you which restaurants to coach |
-| PROP-172500 D1 | Delivery-area model | Postal-code sets now, geocoding next | Geocoding unlocks distance fees and honest ETAs — sequence it deliberately |
-| PROP-172500 D2 | Proof of delivery | Handover photo over [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) | `NOT_DELIVERED` claims are unadjudicable today, and [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) is already routing them |
-| PROP-172500 D3 | Reclaiming an abandoned run | Rider release + stall sweep | A stalled `PICKED_UP` job means the food is with the rider — re-offering is wrong, it needs re-cooking. **Dependency**: the sweep's release must emit the SAME event as the manual release, so this now depends on [PROP-20260808-141817 D3](PROP-20260808-141817-rider-delivery-write-surface.md)'s naming decision (§20) — never a twin event |
+| PROP-165000 D3 | Rounding for fee splits | Buyer total first, residual cent to `captainNet` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): buyer-total-first, residual cent to a stated leg, pinned by an odd-total test | Undefined today; any answer works, but it must be stated and tested or splits stop reconciling |
+| PROP-165000 D4 | Delivery-fee dimension | Per-zone — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business CONFIRM, fee LEVELS priced from rider economics upward | Pairs with PROP-172500 D1; distance-banded is fairer but needs geocoding you do not have |
+| PROP-165000 D5 | Do tips move money? | Yes, same transfer mechanism as D1 — **the customer's**: brief ch. 1.4 | Tips are recorded and displayed today but reach nobody |
+| PROP-165500 D2 | Does Captain own stock consumption? | Re-validate at checkout; decrement only Captain-managed offers — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business emphatic (POS double-decrement manufactures phantom oversell); rejection copy names the item, one-tap remove-and-continue | HubRise restaurants have a POS as stock authority — double-counting is worse than not counting |
+| PROP-165500 D3 | Per-service-type pricing | Optional price override on `Offer` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): resolve the `catalog(restaurantId)` ambiguity in the same change; watch the delta drift as a coaching signal | French practice prices delivery above counter; the model allows per-mode VAT but not per-mode price |
+| PROP-165500 D4 | Catalog images on the [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) framework | Confirm a **public** audience now, while it is on paper — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) | #134 is designed around private per-order attachments; retrofitting public access later is the expensive version |
+| PROP-165500 D5 | Merchandising order | Promo codes first — ⚠️ ESCALATED to the customer 2026-08-08 (ADR-20260808-171056): the recommendation never names WHO FUNDS the code, and on a 0%-commission platform that is the whole question — brief ch. 6 | Highest acquisition value for a single-city launch; loyalty must reuse [#158](https://github.com/TheCaptainCompany/captain-food/issues/158)'s balance, not a second one |
+| PROP-164500 D3 | V0 notification channel | In-app + sound, then SMS — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **+SMS in the same V0 slice** (never "then"), escalation SMS at ~60–90 s unacknowledged, visible sound-armed/blocked state on `orders_queue`; two lenses converged independently; **customer-endorsed 2026-08-08**. The supervised pilot on [#166](https://github.com/TheCaptainCompany/captain-food/issues/166) alone stays acceptable only while a human watches every order | Waiting for [#127](https://github.com/TheCaptainCompany/captain-food/issues/127)'s full cascade blocks the entire operational loop behind a post-V0 epic |
+| PROP-164500 D4/D5 | Timed pause; opening-hours exception days | Yes to both — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) | Weekly recurrence alone is wrong on all eleven French public holidays |
+| PROP-164500 D6/D7 | Scheduling window; order modification scope | Same-day slots; address correction before `PREPARING` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): D6 sequenced behind §1 B (authorization life bounds the window) | Bounded by B — card authorizations expire in ~7 days |
+| PROP-171500 D4 | ADMIN acting on behalf of a tenant | Explicit, logged bypass — **the customer's**: brief ch. 3 (it reverses the owner's own ADR-0037 stance; only the owner reverses the owner) | Revisits ADR-0037's impersonation-only stance |
+| PROP-172000 D2 | Rejection reasons: enum or free text | Controlled enum + optional note — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), cures folded: `OTHER` ships day one; the free-text note is declared in the erasure scope (restaurant-authored PII) | Rejection reasons are the analytics that tell you which restaurants to coach |
+| PROP-172500 D1 | Delivery-area model | Postal-code sets now, geocoding next — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business note — Tours river crossings make zones unusually truthful | Geocoding unlocks distance fees and honest ETAs — sequence it deliberately |
+| PROP-172500 D2 | Proof of delivery | Handover photo over [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), legal evidence: legitimate-interest basis with a recorded LIA; **dispute hold** (open reclamation/chargeback suspends expiry — card windows outrun 90 days); rider UI guidance: package/door, never a person | `NOT_DELIVERED` claims are unadjudicable today, and [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) is already routing them |
+| PROP-172500 D3 | Reclaiming an abandoned run | Rider release + stall sweep | A stalled `PICKED_UP` job means the food is with the rider — re-offering is wrong, it needs re-cooking. **Dependency**: the sweep's release must emit the SAME event as the manual release, so this now depends on [PROP-20260808-141817 D3](PROP-20260808-141817-rider-delivery-write-surface.md)'s naming decision (§20) — never a twin event. ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): the stall sweep emits `DeliveryAssignmentReleased` — the dependency is resolved by §20's D3 rename |
 
 ---
 
-## 4. Inherited — still `Proposed`, decisions still open
+## 4. Inherited — ✅ swept 2026-08-08 (what remains open moved to §22)
 
 | Proposal | Decisions | Note |
 |---|---|---|
-| [PROP-20260725-185140](PROP-20260725-185140-read-side-per-instance-authorization.md) read-side authz | **D1–D11** | [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) carries `status/in-progress`, so these are being answered in practice by the build. Worth reconciling the register with what was actually chosen when it lands |
-| [PROP-20260725-120055](PROP-20260725-120055-generic-file-attachment-framework.md) file framework | **D1–D5** (D2b decided) | Blocks [#134](https://github.com/TheCaptainCompany/captain-food/issues/134); D2 (GDPR retention windows) is the substantive one |
-| [PROP-20260724-133700](PROP-20260724-133700-runtime-screen-and-translation-delivery.md) · [PROP-20260724-144500](PROP-20260724-144500-admin-flag-translation-keys.md) | — | `Proposed` with no formal decision section; confirm whether they are still live or superseded |
+| [PROP-20260725-185140](PROP-20260725-185140-read-side-per-instance-authorization.md) read-side authz | **D1–D11** | ✅ decided WITH the graphql restatements 2026-08-08 (ADR-20260808-171056; veto open): intent stands end to end — scope predicates EMITTED into every generated subgraph resolver's SQL (unscoped resolver unspellable), `ScopeMembership` its own consumer-schema projector with one checkpoint and a declared cross-scope GRANT exception, the account-wide snapshot folds network events from the single log (event-carried), the guard mounts in each `graphql-{scope}` service and NEVER in the no-auth gateway, §3.3.4/§3.3.5 struck as moot. **§6.4 claim staleness STAYS OPEN** and the identity-bridge home is genuinely open — two new rows in §22. (Earlier register note was stale: [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) has NOT landed) |
+| [PROP-20260725-120055](PROP-20260725-120055-generic-file-attachment-framework.md) file framework | **D1–D5** (D2b decided) | ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **D1 RE-PREMISED** — object store = OVH Object Storage (EU), presigned S3 URLs (Supabase Storage references are historical); the `files` registry is IRREPLACEABLE state riding `captain-core`'s backup/PITR, never replay-restorable views; the weekly restore drill gains a bucket↔registry orphan reconciliation. **D2** per-kind retention windows with the dispute hold, tombstone `uploaded_by` anonymized after a stated horizon, and ZERO KYC documents under Connect. **D3/D4/D5** as proposed — dedupe must never share `storage_key` across rows |
+| [PROP-20260724-133700](PROP-20260724-133700-runtime-screen-and-translation-delivery.md) · [PROP-20260724-144500](PROP-20260724-144500-admin-flag-translation-keys.md) | — | ✅ 2026-08-08 (ADR-20260808-171056; veto open): PROP-133700 marked **Deferred (post-V0)**, [#96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing"](https://github.com/TheCaptainCompany/captain-food/issues/96) stays; PROP-144500 **Deferred** until live-translation work starts |
 
 ---
 
@@ -120,12 +131,18 @@ saying "yes to all" is a reasonable use of five minutes.
 
 | Date | Decision | Answer | Recorded in |
 |---|---|---|---|
+| 2026-08-08 | **The register sweep — 30 rows by ensemble consent** | The five-lens sweep decided 30 open rows with cures folded (per-row notes throughout §§1–4, 9, 11, 19), escalated one to the customer (PROP-165500 D5 → brief ch. 6), retired 7 stale blocks, and added the §22 rows. Customer veto window open on every consent decision | [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) + [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) |
 | 2026-08-02 | **PROP-20260802-130500 D1–D6** — isolation by construction | **All six answered** (D1 via PROP-20260728-152752 D9). D2 **(a) handler crates per actor** — aggregates AND process managers, domain value types stay one crate · D3 **cargo-deny capability allowlist in phase 1** (who may hold `sqlx`/`reqwest`) · D4 **one generic `ActorClient` with `get_operation_status(message_id)`** — operation status is generic to all operations, so neither a per-actor client method nor a separate `OperationStatusClient` type; per-actor typed clients stay write-side · D5 **`test-fixtures` feature + CI check** · D6 **later, separately — against the recommendation** (own change after phase 1). Scope directive: "per actor" includes the two process managers at every phase. | Product owner, this register (§14) + [PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md), realized by [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290) |
 | 2026-07-29 | **PROP-170500 D1 + D2** — telemetry backend and sampling | **D1 answered: Honeycomb**, over OTLP/HTTP, pinned to the **EU (`eu1`)** region — a GDPR constraint, not a default, since spans carry `customerId`/`orderId` and ADR-0042 pinned data to Frankfurt. `HONEYCOMB_API_KEY` supplied as a repo Actions secret and pushed to Render by CI. Telemetry **degrades, never gates**: no telemetry key is `required:`, so a missing ingest key drops the exporter and keeps structured logs rather than refusing to serve orders. **D2 answered but NARROWED — against the recommendation**: parent-based HEAD sampling at `1.0` (keep everything), not tail-based. Tail sampling needs Refinery, i.e. a service to run and pay for, which contradicts ADR-0042's minimal-ops-pre-PMF posture — and D2's own justification says the volume is not there yet. Revisit when ingest cost is measurable. | Product owner + [ADR-20260729-183000](../adr/ADR-20260729-183000-telemetry-is-honeycomb-eu-and-degrades-never-gates.md), realizing [#191](https://github.com/TheCaptainCompany/captain-food/issues/191) |
 | 2026-07-28 | **PROP-004616 D1–D6** — slug lifecycle + SIRENE inbound events | **All six answered.** D1 `RestaurantSlugConfigured` + `RestaurantSlugReconfigured` (in session) · D2 slug chosen **between claim and activation**, gated by "no activation without a configured slug" · D3 **write-side reservation table** with a real `UNIQUE` (also holds released slugs) · D4 the ACL stages **`RestaurantRegistered` only** — *against the recommendation*, and stricter: no registry-fact event, no ACL branching, the **aggregate** decides record/ignore/update · D5 **null the slug on `NON_PARTNER` rows** · D6 **both** `IGNORED` and `DUPLICATE`. Partially supersedes ADR-0045. | Product owner, this register + [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) |
 | 2026-07-26 | **PROP-193000 D1–D4** — continuous development loop | **Deferred.** The daily architecture-review routine is sufficient for now; the dev loop stays off until the proposals are under control. `dev-loop.yml` remains `workflow_dispatch`-only with `dry_run` defaulting true. | Product owner, this register |
 
-## 6. Newest — the daily cycle itself
+## 6. The daily decision cycle — ⚠️ SUPERSEDED 2026-08-08
+
+> **Superseded by [ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md)**
+> (product ownership lives in the team; consent-based ensemble decisions replace the daily ask
+> ritual) — recorded in the 2026-08-08 register sweep (ADR-20260808-171056). D1–D5 below stay as
+> the option-space record; none is owed an answer. The proposal's Status is `Superseded`.
 
 [PROP-20260726-201500](PROP-20260726-201500-daily-decision-cycle.md) ([#211](https://github.com/TheCaptainCompany/captain-food/issues/211))
 proposes closing the loop: audit → ask → record → implement, daily. Its **D5 is the one that decides
@@ -209,7 +226,13 @@ the audit trail; the reasoning is in
 
 ---
 
-## 9. Configuration is declared and validated at startup — PROP-20260729-004500
+## 9. Configuration is declared and validated at startup — PROP-20260729-004500 — ✅ DECIDED (D1–D3/D5 2026-07-29 · D4 2026-08-08)
+
+> **This block had gone stale**: D1/D2/D3/D5 were approved 2026-07-29 and realized
+> ([ADR-20260729-010500](../adr/ADR-20260729-010500-configuration-is-declared-and-fails-fast.md));
+> only D4 was still genuinely open, and it was ✅ decided by ensemble consent 2026-08-08
+> (ADR-20260808-171056; veto open): presence-only `/config` readiness endpoint, as a post-cutover
+> follow-up. Rows kept for the audit trail.
 
 Tracking issue: [#246 "Declare the app's configuration in specs/, validate it at startup, and refuse to boot when a required key is missing"](https://github.com/TheCaptainCompany/captain-food/issues/246).
 Product-owner directive of 2026-07-29 (the *what* is decided; these are the *how* questions it raises).
@@ -228,7 +251,15 @@ why `RUN_SIRENE_WORKER` had no home, `API_SECRET` is configured and read by noth
 
 ---
 
-## 10. CI owns the Render service configuration — PROP-20260729-014500
+## 10. CI owns the Render service configuration — PROP-20260729-014500 — ⚠️ SUPERSEDED 2026-08-08
+
+> **Superseded**: Render is no longer the target —
+> [ADR-20260805-070138](../adr/ADR-20260805-070138-render-status-reflects-service-suspension.md)
+> suspended the service, and
+> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) moved
+> configuration ownership to GitOps + generated manifests on OVH MKS. Recorded in the 2026-08-08
+> register sweep (ADR-20260808-171056). Rows kept as the option-space record; the proposal's
+> Status is `Superseded`.
 
 Tracking issue: [#248 "CI owns the Render service configuration: sync specs/configuration.yaml + repo secrets to the service, never the dashboard"](https://github.com/TheCaptainCompany/captain-food/issues/248).
 Product-owner directive of 2026-07-29 (*"the settings must be done by the CI itself not by my manual
@@ -256,14 +287,17 @@ Tracking issue [#260 "Epic: Uber Eats Marketplace integration (order centralizat
 [ADR-20260730-032306](../adr/ADR-20260730-032306-uber-integration-topology-two-orgs-and-asymmetric-app-auth.md).
 Three remain, and **D7 is not an engineering decision** — it needs whoever advises on company/tax law.
 
+**2026-08-08**: D1 ratified and D3 decided by ensemble consent (ADR-20260808-171056; veto open);
+D4 and D7 are the customer's (brief ch. 1.5 / ch. 4); **D5 remains open**.
+
 | Decision | Question | Recommendation |
 |---|---|---|
-| PROP-032306 D1 | Build the Eats integration directly, or layer on HubRise (which already syncs menus to Uber Eats and Deliveroo)? | **Direct** — effectively chosen by registering the app. Reaches restaurants with no POS at all, which is the segment Captain targets; and allergen relay is contractually ours whether or not we own the pipe |
+| PROP-032306 D1 | Build the Eats integration directly, or layer on HubRise (which already syncs menus to Uber Eats and Deliveroo)? | **Direct** — effectively chosen by registering the app. Reaches restaurants with no POS at all, which is the segment Captain targets; and allergen relay is contractually ours whether or not we own the pipe — ✅ RATIFIED by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) |
 | PROP-032306 D2 | Which Uber org is billed for a Direct dispatch? | ✅ **DECIDED 2026-07-30: two orgs, split by acquisition surface, storefront first.** (C — one org plus internal attribution — was recommended; A was chosen) |
-| PROP-032306 D3 | Where does the acquisition surface live? | **A field on `OrderPlaced`.** Not derivable at dispatch: acceptance-first (ADR-20260720-015500) means the saga runs long after the `Host` header is gone |
-| **PROP-032306 D4** | How is a marketplace-originated order represented, given it carries **no Captain PaymentIntent**? | **A distinct `ExternalOrderReceived` event.** Making the payment fields nullable on `OrderPlaced` would weaken a money invariant for every order to accommodate a minority. **Pairs with §1 A/B (payout posture, capture timing) — decide together** |
+| PROP-032306 D3 | Where does the acquisition surface live? | **A field on `OrderPlaced`.** Not derivable at dispatch: acceptance-first (ADR-20260720-015500) means the saga runs long after the `Host` header is gone — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), cure folded: the acquisition scalar is declared ONCE in `specs/common` so a future `ExternalOrderReceived` shares it |
+| **PROP-032306 D4** | How is a marketplace-originated order represented, given it carries **no Captain PaymentIntent**? | **A distinct `ExternalOrderReceived` event.** Making the payment fields nullable on `OrderPlaced` would weaken a money invariant for every order to accommodate a minority. **Pairs with §1 A/B (payout posture, capture timing) — decide together** — **the customer's**: brief ch. 1.5 |
 | **PROP-032306 D5** | Menu ownership across Captain / HubRise / Uber, and per-channel price parity | **HubRise authoritative when connected, else Captain**, one-way push. Parity is the sharp edge: restaurants mark Uber prices up to absorb Uber's commission, and ADR-0024's comparison coefficients are calibrated on that — pushing Captain prices unchanged undercuts the restaurant *and* invalidates `basis: REAL` |
-| **PROP-032306 D7** | Is the Provider entity on the signed Uber agreement (**Caring Hope Foundation**, RNA W372020229 — a loi-1901 association) the entity that will operate the platform? | **Needs legal input, not a recommendation.** An Uber API licence follows the entity; if the association holds it while another entity operates and earns commission, access sits outside the licence. Also interacts with the payout posture in §1 A |
+| **PROP-032306 D7** | Is the Provider entity on the signed Uber agreement (**Caring Hope Foundation**, RNA W372020229 — a loi-1901 association) the entity that will operate the platform? | **Needs legal input, not a recommendation.** An Uber API licence follows the entity; if the association holds it while another entity operates and earns commission, access sits outside the licence. Also interacts with the payout posture in §1 A — **the customer's**: brief ch. 4 (the operating entity) |
 
 
 ---
@@ -350,7 +384,7 @@ fleets default-off until DB-persisted posture ([#318](https://github.com/TheCapt
 
 ---
 
-## 16. Who owns the OVH host — PROP-20260805-181926 — ⚠️ MOSTLY MOOT 2026-08-06
+## 16. Who owns the OVH host — PROP-20260805-181926 — ⚠️ SUPERSEDED 2026-08-08
 
 > **The destination changed to Clever Cloud** ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
 > product owner: *"Instead of OVH"*). A PaaS means **no host OS of ours**, so **D1–D6 below have no
@@ -359,6 +393,13 @@ fleets default-off until DB-persisted posture ([#318](https://github.com/TheCapt
 > there is no machine for it to configure. The one live question moved to the ADR's follow-up —
 > **whether Clever Cloud meters egress the way Render did**, which gates any spend, because egress
 > exhaustion is one of the incidents that started this migration.
+>
+> **2026-08-08 — fully superseded**: D7, the one surviving question, is answered by
+> [PROP-20260806-223656 D5](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md) /
+> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) (manifests
+> generated from the specs, on OVH MKS — the destination moved again, from Clever Cloud to MKS,
+> per §17). Nothing here remains open; recorded in the 2026-08-08 register sweep
+> (ADR-20260808-171056). The proposal's Status is `Superseded`.
 
 [PROP-20260805-181926](PROP-20260805-181926-host-provisioning-and-configuration-ownership.md)
 ([#349 "Who owns the OVH host: provisioning IaC + host configuration (SaltStack evaluated)"](https://github.com/TheCaptainCompany/captain-food/issues/349)).
@@ -474,6 +515,14 @@ emits JSON Schemas FROM the validator model (generated, never hand-written) for 
 feedback — the validator stays the semantic authority (`REF_CONTRACT` already gates
 $ref-kind-appropriateness).
 
+**2026-08-08** (ADR-20260808-171056; veto open): **D2 decided** — platform-wide aggregates ONLY, no
+per-restaurant/per-postcode/per-rider dimension ever without consent (sole-trader metrics are
+personal data; a partner's published volume is an adoption killer), k ≥ 10 per cell when slicing
+ever starts. **D3 decided** — static generated status page, cure folded: the page renders its own
+generation timestamp and goes visibly stale (a frozen "all green" during the outage that killed its
+publisher is worse than no page). **D4 decided** — L2–L4 after cutover. **D1 (the levels) is the
+customer's** — brief ch. 5.
+
 ---
 
 ## 20. The rider/delivery write surface — PROP-20260808-141817 — ✅ FULLY DECIDED 2026-08-08
@@ -552,6 +601,22 @@ duty (behaviour test + `rules:` link) at realization.
 | D3 | [#347](https://github.com/TheCaptainCompany/captain-food/issues/347): tombstone vs `listing_status` fold vs vestigial removal | **Fold to a new `OPTED_OUT` value** — a tombstone is self-defeating under SIRENE re-import; also closes the live cold-email exposure (`ProspectionPipeline` does not fold the opt-out today) |
 | D4 | `OPTED_OUT` shape | **Enum value + BOTH write-side guards** (`OptOutRestaurantListing` rejected for ACTIVE_PARTNER, AND `ChangeRestaurantListingStatus` rejecting `OPTED_OUT` as source and target — the guard closes two doors, not one); the orthogonal `delisted` boolean is materially strengthened by the two-door finding and stands ready if the PO prefers unspellable over guarded |
 | D5 | Erased-restaurant storefront host | **Parked "closed" page** — never the claim-landing fall-through (invites resurrection of a dead business's address), better than a bare 404 |
+
+---
+
+## 22. New rows from the 2026-08-08 sweep
+
+Surfaced by the five-lens register sweep
+([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)) — added
+here instead of being improvised at realization.
+
+| Decision | Question | Status / owner |
+|---|---|---|
+| **Consumer-mediator registration** | France mandates médiation de la consommation registration before trading with consumers — a **launch precondition** that sat on no register row until now | Open — **customer/counsel** (counsel packet; surfaced by legal) |
+| **Identity-bridge home** | Where the role↔domain-id bridge lives: JWT claims for all roles vs common-schema bridge tables — must NOT invent a third mechanism beside `Actor.domain_id` | Open (from the PROP-185140 graphql restatements) |
+| **PROP-185140 §6.4 claim staleness** | How long a scope claim may be trusted before re-derivation — the one real policy question the authorization set leaves open | Open — stays open by explicit decision (ADR-20260808-171056) |
+| **`from:` naming collision** | `from:` is about to mean two things — the screens input-source key (§1 F) and api.yaml scope-binding; rename one before both DSLs ship the key | Open — **pre-realization** (graphql note) |
+| **Business-signal observability contracts** | Every "revisit with production data" clause (funnel conversion, cohort repeat rates, rider decline/utilization, baskets, notification-acknowledgement latency) has NO observability contract | Open — rides [#400](https://github.com/TheCaptainCompany/captain-food/issues/400) (the reality-sensing epic) |
 
 ---
 

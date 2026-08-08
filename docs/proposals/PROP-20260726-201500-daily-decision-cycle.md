@@ -1,6 +1,6 @@
 # PROP-20260726-201500 — Daily decision cycle: audit → ask → record → implement
 
-- **Status**: Proposed
+- **Status**: Superseded — the daily ask-cycle is replaced by the consent-based ensemble decision mechanism, [ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md) (recorded in the 2026-08-08 register sweep, ADR-20260808-171056)
 - **Date**: 2026-07-26
 - **Tracking issue**: [#211 "Daily decision cycle: audit → ask the blocking questions → implement what is unblocked"](https://github.com/TheCaptainCompany/captain-food/issues/211)
 - **Supersedes**: the always-on framing in [PROP-20260726-193000](PROP-20260726-193000-continuous-development-loop.md), whose D1–D4 are **deferred** (product owner, 2026-07-26)

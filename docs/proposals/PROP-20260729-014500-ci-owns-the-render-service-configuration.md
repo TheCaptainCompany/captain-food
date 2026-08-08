@@ -1,6 +1,6 @@
 # PROP-20260729-014500 — CI owns the Render service configuration
 
-- **Status**: Proposed
+- **Status**: Superseded — Render is no longer the target ([ADR-20260805-070138](../adr/ADR-20260805-070138-render-status-reflects-service-suspension.md)) and configuration ownership landed as GitOps + generated manifests on OVH MKS ([ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)); recorded in the 2026-08-08 register sweep (ADR-20260808-171056)
 - **Date**: 2026-07-29
 - **Tracking issue**: [#248 "CI owns the Render service configuration: sync specs/configuration.yaml + repo secrets to the service, never the dashboard"](https://github.com/TheCaptainCompany/captain-food/issues/248)
 - **Realized by**: _(filled at completion)_
