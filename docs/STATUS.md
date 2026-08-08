@@ -1,7 +1,29 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-07. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚧 **2026-08-08 — API TIER WIRED: ALL 49 BINS ARE BUSINESS RUNTIMES, PR #389 IN MERGE —
+> [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) remainder delivered by
+> [PR #389](https://github.com/TheCaptainCompany/captain-food/pull/389),
+> [ADR-20260808-060309](adr/ADR-20260808-060309-bare-apex-owner.md) (apex → marketplace,
+> hooks → adapters).** graphql-{scope} ×8 serve their SCOPE SLICE via `server::bin_support`
+> (same DI, same AuthContext/ACL as the monolith — auth stays at the schema boundary);
+> gateway-{role} ×7 are the pure `gateway_runtime` (no domain/db; routing and subgraph
+> acceptance share ONE `root_fields` walk, so they cannot disagree; forwards BOTH auth
+> carriers — httpOnly cookie + authorization — and `x-external-api-key`, pinned by test);
+> surfaces ×6 via `surface_runtime` (wasm assets a real image input; adapters composes the 5
+> webhook ingestors on `hooks.captain.food`); bam projects honestly. Config emitter now applies
+> deploy.rs's `needs_db` exclusion (db-less bins no longer boot-require `DATABASE_URL`).
+> COMPILER-SHARPNESS DEVIATION (conscious, tested): only gateways keep a sharp compile-time
+> closure — subgraphs link `server` (whole facade), surfaces reach domain via `web→core`; the
+> wall is the runtime scope slice + #360's GRANT wall until the per-scope infrastructure split.
+> Review: 3 independent lenses + required `claude-review`, 8 findings — 5 fixed on-branch,
+> CUTOVER PRECONDITIONS recorded on #385 (auth-session mint has no bin home; per-key secret
+> consumer metadata BEFORE #358 — `STRIPE_SECRET_KEY` must not reach the adapters pod;
+> Avelo37 `deploy:` block ships with partner-milestone secrets; apex TLS SAN; replicas
+> differentiation; WS reconnect backoff; `integration_scopes` validator rule).
+> GATE-THEN-STABILIZE: the monolith `server` remains the deployed runtime until steps (6)–(7).
 
 > 🚧 **2026-08-07 — ADR-183024 BIN RUNTIME WIRING, CQRS SPINE IMPLEMENTED, PR IN REVIEW —
 > [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) "Bin runtime wiring:

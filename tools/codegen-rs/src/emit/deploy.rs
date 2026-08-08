@@ -301,7 +301,7 @@ struct HostRule {
 /// complete against the topology by a codegen test. `fo-storefront` serves the TENANT hosts
 /// (`{slug}.captain.food`, CLAUDE.md multi-tenancy), so its rule is the wildcard under its
 /// base domain. The BARE domain is SETTLED (#385): captain_frontoffice.yaml declares it in
-/// `additional_hosts` (spec home; ADR-20260808) — the marketplace owns the apex, matching
+/// `additional_hosts` (spec home; ADR-20260808-060309) — the marketplace owns the apex, matching
 /// `web::router`'s host → surface mapping. The integration host is SETTLED the same way:
 /// c4-l2's `adapters.ingress_host` (`hooks.captain.food`) gets its own rule routing everything
 /// to the adapters Service; the marketplace-host webhook paths stay as the transition alias

@@ -36,7 +36,9 @@ pub(crate) struct Container {
     /// The domain scopes whose CONFIGURATION KEYS this container's runtime needs
     /// (`integration_scopes:`, #385): the adapters surface hosts every partner ACL, so its pod
     /// env + generated Config carry the integration scopes' keys (webhook secrets live in
-    /// payments/delivery/catalog). Validator-checked against the declared scopes.
+    /// payments/delivery/catalog). NOT yet validator-checked: a typo'd scope name silently
+    /// drops those keys from the pod's env — the rule is tracked on #385 with the per-key
+    /// consumer-metadata design (ADR-20260808-060309 consequences).
     pub(crate) integration_scopes: Vec<String>,
 }
 pub(crate) struct External {
