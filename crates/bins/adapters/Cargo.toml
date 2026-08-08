@@ -6,8 +6,9 @@
 # a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
 # coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
 #
-# PROBE-SERVING SHELL (gate-then-stabilize): the monolith `server` bin remains the deployed
-# runtime; this family's business wiring is the recorded remainder on #385.
+# BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
+# `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
+# cutover) point traffic and the mailbox at these pods.
 [package]
 name = "adapters"
 version = "0.1.0"
@@ -19,9 +20,25 @@ description = "Captain.Food `adapters` deployable: surface bin -- assets/SSR/web
 [dependencies]
 # (no domain crates -- this family holds NO domain vocabulary; an added domain crate
 #  here is a boundary violation to review, not a convenience)
-# The probe shell (step 4, #349): serves the /health + /ping the generated Deployment probes.
+# The ADAPTERS surface (#385): re-hosts the partner webhook ingestors the monolith
+# mounts (stripe/avelo37/coopcycle/uber_direct/hubrise) -- verify, mirror, ACL, ENQUEUE on
+# the shared mailbox; the owning actor bins deliver (woken by the INSERT's pg_notify).
+bin_runtime = { path = "../../bin_runtime" }
+application = { path = "../../application" }
+infrastructure = { path = "../../infrastructure" }
+actor_client = { path = "../../actor_client" }
+stripe-adapter = { path = "../../adapters/stripe" }
+avelo37-adapter = { path = "../../adapters/avelo37" }
+coopcycle-adapter = { path = "../../adapters/coopcycle" }
+uber-direct-adapter = { path = "../../adapters/uber_direct" }
+hubrise-adapter = { path = "../../adapters/hubrise" }
 axum = { workspace = true }
 tokio = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+# The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values
+# against their scalars' regexes at startup.
+regex = "1"
 
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
 [lints]

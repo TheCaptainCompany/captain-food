@@ -72,6 +72,9 @@ use graphql::schema::{ReadDeps, WriteDeps};
 
 mod auth;
 mod auth_routes;
+/// Composition support for the `graphql-{scope}` subgraph bins (#385 API-tier wiring, D8): the
+/// monolith's GraphQL surface, same DI ([`build_graphql_di`]), restricted to one scope's slice.
+pub mod bin_support;
 mod web_ssr;
 /// The expose-gated `/services/*` surface + module index, GENERATED from specs/services.yaml
 /// (issue #26, ADR-20260719-214500).
@@ -288,6 +291,177 @@ fn identity_service_impl() -> Arc<dyn application::generated::services::Identity
     }
 }
 
+/// The read/write dependency graph of the GraphQL surface, built over one pool — the ONE
+/// composition both the monolith `router()` and the `graphql-{scope}` subgraph bins (#385
+/// API-tier wiring, PROP-20260807-174246 D8) perform, extracted so a subgraph bin serves the
+/// SAME resolvers over the same adapters with no logic fork. The buses are process-local: a
+/// subgraph process only sees completions/events raised in-process (the recorded cross-process
+/// push gap on #385); poll reads are unaffected.
+pub struct GraphqlDi {
+    pub read: ReadDeps,
+    pub write: WriteDeps,
+    /// The host fallback's registered-vs-unclaimed tenant read (#98), sharing `restaurants`.
+    pub tenant_lookup: hosts::TenantLookup,
+    /// The cookie-pickup parking store (#112): the encrypted Pg store when AUTH_SESSION_KEY is
+    /// set, else the fail-closed no-op.
+    pub auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore>,
+    /// The restaurant read model, shared by the HubRise connect flow and the tenant lookup.
+    pub restaurants: Arc<dyn RestaurantReadRepository>,
+}
+
+/// Build [`GraphqlDi`] (ADR-0035 composition root). `pm_mailbox_delivery` is the money posture
+/// the caller resolved from its RuntimePosture row (#318) — never env, never a guess.
+pub fn build_graphql_di(
+    pool: &PgPool,
+    event_bus: &EventBus,
+    operation_status_bus: &actor_client::OperationStatusBus,
+    mailbox_nudges: &Arc<infrastructure::persistence::mailbox_store::MailboxNudges>,
+    pm_mailbox_delivery: bool,
+) -> GraphqlDi {
+    let pool = pool.clone();
+    // Read-model repositories injected into GraphQL resolvers.
+    let restaurants: Arc<dyn RestaurantReadRepository> =
+        Arc::new(PgRestaurantRepository::new(pool.clone()));
+    let tenant_lookup = hosts::TenantLookup(Some(restaurants.clone()));
+    // Mutated by the WriteDeps arm below when AUTH_SESSION_KEY wires the real store.
+    let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
+        Arc::new(application::auth_sessions::NoopAuthSessionStore);
+    let prospection: Arc<dyn ProspectionReadRepository> =
+        Arc::new(PgProspectionRepository::new(pool.clone()));
+    let pricing_policy: Arc<dyn PricingPolicyReadRepository> =
+        Arc::new(PgPricingPolicyRepository::new(pool.clone()));
+    let uber_estimation_policy: Arc<dyn UberEstimationPolicyReadRepository> =
+        Arc::new(PgUberEstimationPolicyRepository::new(pool.clone()));
+    let uber_split_policy: Arc<dyn UberSplitPolicyReadRepository> =
+        Arc::new(PgUberSplitPolicyRepository::new(pool.clone()));
+    let catalogs: Arc<dyn CatalogReadRepository> =
+        Arc::new(PgCatalogRepository::new(pool.clone()));
+    let carts: Arc<dyn CartReadRepository> =
+        Arc::new(PgCartRepository::new(pool.clone()));
+    let orders: Arc<dyn OrderReadRepository> =
+        Arc::new(PgOrderRepository::new(pool.clone()));
+    let order_conversations: Arc<dyn application::queries::OrderConversationReadRepository> =
+        Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
+    let customers: Arc<dyn CustomerReadRepository> =
+        Arc::new(PgCustomerRepository::new(pool.clone()));
+    let deliveries: Arc<dyn DeliveryReadRepository> =
+        Arc::new(PgDeliveryRepository::new(pool.clone()));
+    let refunds: Arc<dyn RefundReadRepository> =
+        Arc::new(PgRefundQueueRepository::new(pool.clone()));
+    let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
+        Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
+    let delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository> =
+        Arc::new(PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
+    let reclamations: Arc<dyn ReclamationReadRepository> =
+        Arc::new(PgReclamationRepository::new(pool.clone()));
+    let customer_credit: Arc<dyn CustomerCreditReadRepository> =
+        Arc::new(PgCustomerCreditRepository::new(pool.clone()));
+    let mailbox_lanes: Arc<dyn MailboxLaneRepository> = Arc::new(
+        infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(
+            pool.clone(),
+        ),
+    );
+    let read = ReadDeps {
+        restaurants: restaurants.clone(),
+        prospection,
+        pricing_policy,
+        uber_estimation_policy,
+        uber_split_policy,
+        catalogs,
+        carts,
+        orders,
+        order_conversations,
+        customers,
+        deliveries,
+        refunds,
+        delivery_satisfaction,
+        delivery_partner_availabilities,
+        reclamations,
+        customer_credit,
+        mailbox_lanes,
+    };
+
+    // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
+    // Google and Supabase Auth seam adapters (fail-closed stand-ins until the real
+    // integrations land).
+    let write = WriteDeps {
+        event_store: Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
+        ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
+        gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
+        // The `identity` service (services.yaml `binding: local`, #50): the REAL Supabase
+        // ACL adapter (#117) when SUPABASE_URL + PUBLISHABLE_KEY are set, else the
+        // fail-closed stand-in (auth stays anonymous-only — the Stripe env-gate pattern).
+        auth_provider: infrastructure::generated::service_bindings::identity_service(
+            || identity_service_impl(),
+        )
+        .expect("identity service binding (services.yaml)"),
+        // The `payment` service resolved through the GENERATED topology binding
+        // (services.yaml `binding: local`, issue #26): the composition root only supplies
+        // the in-process constructor — the real outbound Stripe adapter when
+        // STRIPE_SECRET_KEY is configured, otherwise the fail-closed stand-in (placeOrder
+        // stays wired end-to-end but declines every checkout).
+        payments: infrastructure::generated::service_bindings::payment_service(|| {
+            match std::env::var("STRIPE_SECRET_KEY") {
+                Ok(key) if !key.is_empty() => {
+                    tracing::info!(binding = "payments", impl_ = "StripePaymentGateway", "payment service wired (STRIPE_SECRET_KEY set)");
+                    Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                }
+                _ => {
+                    tracing::warn!(
+                        binding = "payments",
+                        impl_ = "FailClosedPaymentGateway",
+                        "STRIPE_SECRET_KEY unset -- EVERY checkout declines"
+                    );
+                    Arc::new(FailClosedPaymentGateway)
+                }
+            }
+        })
+        .expect("payment service binding (services.yaml)"),
+        // The payment_process_manager state rows placeOrder opens/single-flights on
+        // (ADR-20260719-193500).
+        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
+            pool.clone(),
+        )),
+        // The refund_process_manager rows the approveRefund/denyRefund decisions run on.
+        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
+            pool.clone(),
+        )),
+        // Acceptance-first dispatch (ADR-20260720-015300/-015500): the durable command
+        // journal + the journal-transition broadcast behind operationStatus(+Changed).
+        journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
+        // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
+        // the partitioned workers spawned below deliver.
+        mailbox: Arc::new(
+            infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                .with_nudges(mailbox_nudges.clone()),
+        ),
+        status_bus: operation_status_bus.clone(),
+        slug_reservations: Arc::new(
+            infrastructure::PgSlugReservationRepository::new(pool.clone()),
+        ),
+        // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
+        // gated PM resolvers pick mailbox-vs-legacy from this at request time —
+        // sourced from the RuntimePosture row read above (#318), never env.
+        pm_mailbox_delivery,
+        auth_sessions: {
+            // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
+            // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
+            match infrastructure::PgAuthSessionStore::from_env(pool.clone()) {
+                Some(store) => {
+                    auth_sessions = Arc::new(store);
+                    tracing::info!(binding = "auth_sessions", impl_ = "encrypted Pg store", "auth session store wired (AUTH_SESSION_KEY set)");
+                    auth_sessions.clone()
+                }
+                None => {
+                    tracing::warn!(binding = "auth_sessions", "AUTH_SESSION_KEY unset -- session cookies unavailable, auth stays anonymous-only");
+                    auth_sessions.clone()
+                }
+            }
+        },
+    };
+    GraphqlDi { read, write, tenant_lookup, auth_sessions, restaurants }
+}
+
 pub async fn router() -> Router {
     // The DECLARED configuration (specs/configuration.yaml), resolved once. Every value below comes
     // from here rather than a local `env::var` + inline fallback: a default that is declared in the
@@ -421,146 +595,25 @@ pub async fn router() -> Router {
                     }
                 };
 
-                // Read-model repositories injected into GraphQL resolvers (ADR-0035 composition root).
-                let restaurants: Arc<dyn RestaurantReadRepository> =
-                    Arc::new(PgRestaurantRepository::new(pool.clone()));
-                // The HubRise connect flow (wired below) shares the restaurant read model.
-                let hubrise_restaurants = restaurants.clone();
-                // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
-                tenant_lookup = hosts::TenantLookup(Some(restaurants.clone()));
-                let prospection: Arc<dyn ProspectionReadRepository> =
-                    Arc::new(PgProspectionRepository::new(pool.clone()));
-                let pricing_policy: Arc<dyn PricingPolicyReadRepository> =
-                    Arc::new(PgPricingPolicyRepository::new(pool.clone()));
-                let uber_estimation_policy: Arc<dyn UberEstimationPolicyReadRepository> =
-                    Arc::new(PgUberEstimationPolicyRepository::new(pool.clone()));
-                let uber_split_policy: Arc<dyn UberSplitPolicyReadRepository> =
-                    Arc::new(PgUberSplitPolicyRepository::new(pool.clone()));
-                let catalogs: Arc<dyn CatalogReadRepository> =
-                    Arc::new(PgCatalogRepository::new(pool.clone()));
-                let carts: Arc<dyn CartReadRepository> =
-                    Arc::new(PgCartRepository::new(pool.clone()));
-                let orders: Arc<dyn OrderReadRepository> =
-                    Arc::new(PgOrderRepository::new(pool.clone()));
-                let order_conversations: Arc<dyn application::queries::OrderConversationReadRepository> =
-                    Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
-                let customers: Arc<dyn CustomerReadRepository> =
-                    Arc::new(PgCustomerRepository::new(pool.clone()));
-                let deliveries: Arc<dyn DeliveryReadRepository> =
-                    Arc::new(PgDeliveryRepository::new(pool.clone()));
-                let refunds: Arc<dyn RefundReadRepository> =
-                    Arc::new(PgRefundQueueRepository::new(pool.clone()));
-                let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
-                    Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
-                let delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository> =
-                    Arc::new(PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
-                let reclamations: Arc<dyn ReclamationReadRepository> =
-                    Arc::new(PgReclamationRepository::new(pool.clone()));
-                let customer_credit: Arc<dyn CustomerCreditReadRepository> =
-                    Arc::new(PgCustomerCreditRepository::new(pool.clone()));
-                let mailbox_lanes: Arc<dyn MailboxLaneRepository> = Arc::new(
-                    infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(
-                        pool.clone(),
-                    ),
-                );
-                read_deps = Some(ReadDeps {
-                    restaurants,
-                    prospection,
-                    pricing_policy,
-                    uber_estimation_policy,
-                    uber_split_policy,
-                    catalogs,
-                    carts,
-                    orders,
-                    order_conversations,
-                    customers,
-                    deliveries,
-                    refunds,
-                    delivery_satisfaction,
-                    delivery_partner_availabilities,
-                    reclamations,
-                    customer_credit,
-                    mailbox_lanes,
-                });
-
-                // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
-                // Google and Supabase Auth seam adapters (fail-closed stand-ins until the real
-                // integrations land).
-                write_deps = Some(WriteDeps {
-                    event_store: Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
-                    ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
-                    gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
-                    // The `identity` service (services.yaml `binding: local`, #50): the REAL Supabase
-                    // ACL adapter (#117) when SUPABASE_URL + PUBLISHABLE_KEY are set, else the
-                    // fail-closed stand-in (auth stays anonymous-only — the Stripe env-gate pattern).
-                    auth_provider: infrastructure::generated::service_bindings::identity_service(
-                        || identity_service_impl(),
-                    )
-                    .expect("identity service binding (services.yaml)"),
-                    // The `payment` service resolved through the GENERATED topology binding
-                    // (services.yaml `binding: local`, issue #26): the composition root only supplies
-                    // the in-process constructor — the real outbound Stripe adapter when
-                    // STRIPE_SECRET_KEY is configured, otherwise the fail-closed stand-in (placeOrder
-                    // stays wired end-to-end but declines every checkout).
-                    payments: infrastructure::generated::service_bindings::payment_service(|| {
-                        match std::env::var("STRIPE_SECRET_KEY") {
-                            Ok(key) if !key.is_empty() => {
-                                tracing::info!(binding = "payments", impl_ = "StripePaymentGateway", "payment service wired (STRIPE_SECRET_KEY set)");
-                                Arc::new(stripe_adapter::StripePaymentGateway::new(key))
-                            }
-                            _ => {
-                                tracing::warn!(
-                                    binding = "payments",
-                                    impl_ = "FailClosedPaymentGateway",
-                                    "STRIPE_SECRET_KEY unset -- EVERY checkout declines"
-                                );
-                                Arc::new(FailClosedPaymentGateway)
-                            }
-                        }
-                    })
-                    .expect("payment service binding (services.yaml)"),
-                    // The payment_process_manager state rows placeOrder opens/single-flights on
-                    // (ADR-20260719-193500).
-                    pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
-                        pool.clone(),
-                    )),
-                    // The refund_process_manager rows the approveRefund/denyRefund decisions run on.
-                    refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
-                        pool.clone(),
-                    )),
-                    // Acceptance-first dispatch (ADR-20260720-015300/-015500): the durable command
-                    // journal + the journal-transition broadcast behind operationStatus(+Changed).
-                    journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
-                    // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
-                    // the partitioned workers spawned below deliver.
-                    mailbox: Arc::new(
-                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
-                            .with_nudges(mailbox_nudges.clone()),
-                    ),
-                    status_bus: operation_status_bus.clone(),
-                    slug_reservations: Arc::new(
-                        infrastructure::PgSlugReservationRepository::new(pool.clone()),
-                    ),
-                    // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
-                    // gated PM resolvers pick mailbox-vs-legacy from this at request time —
-                    // sourced from the RuntimePosture row read above (#318), never env.
+                // The read/write dependency graph of the GraphQL surface — ONE composition,
+                // shared with the graphql-{scope} subgraph bins (#385 API-tier wiring, D8):
+                // extracting it is what lets a subgraph bin serve the same resolvers without a
+                // logic fork. Everything below this call is monolith-only hosting (workers,
+                // ingestors, SSR) that the bins re-home family by family.
+                let di = build_graphql_di(
+                    &pool,
+                    &event_bus,
+                    &operation_status_bus,
+                    &mailbox_nudges,
                     pm_mailbox_delivery,
-                    auth_sessions: {
-                        // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
-                        // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
-                        match infrastructure::PgAuthSessionStore::from_env(pool.clone()) {
-                            Some(store) => {
-                                auth_sessions = Arc::new(store);
-                                tracing::info!(binding = "auth_sessions", impl_ = "encrypted Pg store", "auth session store wired (AUTH_SESSION_KEY set)");
-                                auth_sessions.clone()
-                            }
-                            None => {
-                                tracing::warn!(binding = "auth_sessions", "AUTH_SESSION_KEY unset -- session cookies unavailable, auth stays anonymous-only");
-                                auth_sessions.clone()
-                            }
-                        }
-                    },
-                });
+                );
+                // The HubRise connect flow (wired below) shares the restaurant read model.
+                let hubrise_restaurants = di.restaurants.clone();
+                // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
+                tenant_lookup = di.tenant_lookup;
+                auth_sessions = di.auth_sessions;
+                read_deps = Some(di.read);
+                write_deps = Some(di.write);
 
                 // Push wake for the drain loops (ADR-20260802-200416): ONE dedicated LISTEN
                 // connection feeds both the projector and the saga runner, so each append reaches

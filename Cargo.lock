@@ -233,8 +233,20 @@ dependencies = [
 name = "adapters"
 version = "0.1.0"
 dependencies = [
+ "actor_client",
+ "application",
+ "avelo37-adapter",
  "axum",
+ "bin_runtime",
+ "coopcycle-adapter",
+ "hubrise-adapter",
+ "infrastructure",
+ "regex",
+ "serde_json",
+ "stripe-adapter",
  "tokio",
+ "tracing",
+ "uber-direct-adapter",
 ]
 
 [[package]]
@@ -660,7 +672,7 @@ dependencies = [
 name = "bam"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-catalog",
  "domain-common",
  "domain-comms",
@@ -669,7 +681,10 @@ dependencies = [
  "domain-network",
  "domain-ordering",
  "domain-payments",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -697,16 +712,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bin_probes"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde_json",
+ "telemetry",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bin_runtime"
 version = "0.1.0"
 dependencies = [
  "actor_runtime",
  "application",
- "axum",
+ "bin_probes",
  "infrastructure",
- "serde_json",
  "sqlx",
- "telemetry",
  "tokio",
  "tracing",
 ]
@@ -742,24 +766,36 @@ dependencies = [
 name = "bo-admin"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "regex",
+ "serde_json",
+ "surface_runtime",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "bo-restaurant"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "regex",
+ "serde_json",
+ "surface_runtime",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "bo-rider"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "regex",
+ "serde_json",
+ "surface_runtime",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1886,16 +1922,24 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 name = "fo-marketplace"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "regex",
+ "serde_json",
+ "surface_runtime",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "fo-storefront"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "regex",
+ "serde_json",
+ "surface_runtime",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2041,56 +2085,96 @@ dependencies = [
 name = "gateway-admin"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-customer"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-external"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-public"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-restaurant"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-restaurant-account"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "gateway-rider"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_probes",
+ "gateway_runtime",
+ "regex",
+ "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gateway_runtime"
+version = "0.1.0"
+dependencies = [
+ "async-graphql",
+ "axum",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2213,72 +2297,104 @@ dependencies = [
 name = "graphql-catalog"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-catalog",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-common"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-common",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-comms"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-comms",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-customer"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-customer",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-delivery"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-delivery",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-network"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-network",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-ordering"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-ordering",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "graphql-payments"
 version = "0.1.0"
 dependencies = [
- "axum",
+ "bin_runtime",
  "domain-payments",
+ "regex",
+ "serde_json",
+ "server",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4551,6 +4667,7 @@ dependencies = [
  "client-rider",
  "coopcycle-adapter",
  "domain",
+ "gateway_runtime",
  "hubrise-adapter",
  "infrastructure",
  "jsonwebtoken",
@@ -4561,6 +4678,7 @@ dependencies = [
  "shared_types",
  "sqlx",
  "stripe-adapter",
+ "surface_runtime",
  "telemetry",
  "tokio",
  "tower-http",
@@ -5072,6 +5190,18 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "surface_runtime"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "web",
+]
 
 [[package]]
 name = "syn"

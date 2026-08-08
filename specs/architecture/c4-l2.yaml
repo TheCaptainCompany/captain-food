@@ -122,6 +122,16 @@ containers:
   adapters:
     technology: "Rust — Axum bin (webhooks + /external/graphql + integration ACLs)"
     description: "The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only."
+    # The dedicated integration host (#385 spec home, ADR-20260807-183024): the generated Ingress
+    # routes everything on it to this Service; the marketplace-host /webhooks|/adapters paths stay
+    # as the transition alias until every partner dashboard is re-registered. The `hooks` label is
+    # reserved in host classification so it can never be claimed as a storefront slug.
+    ingress_host: "hooks.captain.food"
+    # The scopes whose CONFIGURATION KEYS this runtime needs (#385): it hosts every partner ACL,
+    # and the webhook secrets are declared in the integrations' owning scopes. Routes both the
+    # pod env (deploy emitter) and the generated per-bin Config — one derivation, never a hand
+    # list in the emitter.
+    integration_scopes: [catalog, delivery, payments]
 
   # -- GraphQL subgraphs (one per scope: one domain, one graph, one GRANT — D8) --
   graphql-ordering:

@@ -698,6 +698,27 @@ keys:
       Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
 
 
+  GATEWAY_SUBGRAPH_URLS:
+    type: string
+    default: ""
+    gates: >
+      Subgraph address overrides for the gateway-{role} bins (#385, D8): comma-separated
+      `scope=url` pairs. Empty (the default), a gateway resolves each scope to its in-cluster
+      Service DNS (`http://graphql-{scope}`) — so in Kubernetes nothing sets this; a local or
+      off-cluster gateway that cannot resolve Service names routes nowhere without it.
+
+
+  SURFACE_GATEWAY_URL:
+    type: string
+    default: ""
+    gates: >
+      The role-gateway origin the fo-*/bo-* surface bins resolve SSR reads through (#385, D8 —
+      a surface holds no database credential; it reads only over GraphQL, always as the
+      anonymous PUBLIC role). Empty (the default) resolves the in-cluster
+      `http://gateway-public` Service; a local or off-cluster surface renders data-less shells
+      without it.
+
+
   CAPTAIN_BUILD_VERSION:
     type: string
     gates: >

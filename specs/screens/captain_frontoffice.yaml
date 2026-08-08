@@ -31,6 +31,12 @@ spec_version: "1.0.0"
 app_id: captain.food
 app_name: "Captain.Food"
 base_url: "https://live.captain.food"
+# The BARE APEX is owned by the marketplace (#385 spec home, ADR-20260807-183024): both this file
+# and restaurant_frontoffice.yaml said "then the bare captain.food" without naming an owner, which
+# left the host UNROUTED in the generated Ingress. Settled to the marketplace — the mapping
+# `web::router` already ships (captain.food → CaptainFrontoffice). The storefront's base_url stays
+# the tenant apex its `{slug}.` wildcard derives from; it never serves the bare host.
+additional_hosts: ["captain.food"]
 default_locale: en
 supported_locales: [en, fr]
 app_types: [web, ios, android]   # customer app target platforms (ADR-0037); `windows` is restaurant-only

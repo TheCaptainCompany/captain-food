@@ -256,6 +256,10 @@ pub struct Config {
     pub port: i64,
     /// Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
     pub web_assets_dir: String,
+    /// Subgraph address overrides for the gateway-{role} bins (#385, D8): comma-separated `scope=url` pairs. Empty (the default), a gateway resolves each scope to its in-cluster Service DNS (`http://graphql-{scope}`) — so in Kubernetes nothing sets this; a local or off-cluster gateway that cannot resolve Service names routes nowhere without it.
+    pub gateway_subgraph_urls: String,
+    /// The role-gateway origin the fo-*/bo-* surface bins resolve SSR reads through (#385, D8 — a surface holds no database credential; it reads only over GraphQL, always as the anonymous PUBLIC role). Empty (the default) resolves the in-cluster `http://gateway-public` Service; a local or off-cluster surface renders data-less shells without it.
+    pub surface_gateway_url: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
 }
@@ -383,6 +387,10 @@ impl Config {
         let port = raw("PORT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(8080);
         let web_assets_dir = raw("WEB_ASSETS_DIR");
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
+        let gateway_subgraph_urls = raw("GATEWAY_SUBGRAPH_URLS");
+        let gateway_subgraph_urls = gateway_subgraph_urls.unwrap_or_else(|| "".to_string());
+        let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
+        let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -464,6 +472,8 @@ impl Config {
                 ovh_endpoint,
                 port,
                 web_assets_dir,
+                gateway_subgraph_urls,
+                surface_gateway_url,
                 captain_build_version,
             },
             problems,
@@ -522,13 +532,15 @@ impl Config {
         out.push_str(&format!("  OVH_ENDPOINT               = {}\n", self.ovh_endpoint.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  PORT                       = {}\n", self.port));
         out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
+        out.push_str(&format!("  GATEWAY_SUBGRAPH_URLS      = {}\n", self.gateway_subgraph_urls));
+        out.push_str(&format!("  SURFACE_GATEWAY_URL        = {}\n", self.surface_gateway_url));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 38;
+pub const KEY_COUNT: usize = 40;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -570,6 +582,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "OVH_ENDPOINT",
     "PORT",
     "WEB_ASSETS_DIR",
+    "GATEWAY_SUBGRAPH_URLS",
+    "SURFACE_GATEWAY_URL",
     "CAPTAIN_BUILD_VERSION",
 ];
 

@@ -9,6 +9,12 @@ description = "Captain.Food Axum BFF: the composition root that injects infrastr
 [dependencies]
 regex = "1"
 application = { path = "../application" }
+# The role-gateway runtime's document walker (#385, D8): the subgraph scope slice checks EXACTLY
+# the fields the gateway routes on — one walk, two walls, no drift.
+gateway_runtime = { path = "../gateway_runtime" }
+# Host classification + tenant landings (#385): moved to the surface runtime (the surface bins
+# serve the same hosts); `hosts` re-exports them — one implementation, two hosts.
+surface_runtime = { path = "../surface_runtime" }
 # The actor-mailbox boundary crate (#290 phase 1, PROP-20260802-130500 D1/D4): the generated
 # resolvers send through its typed clients and read operation status through its ActorClient.
 actor_client = { path = "../actor_client" }

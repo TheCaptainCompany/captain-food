@@ -6,6 +6,9 @@ pub mod acl;
 pub mod generated;
 pub mod routes;
 pub mod schema;
+/// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the
+/// master schema restricted to its own scope's operations via the generated composition table.
+pub mod scope_slice;
 pub mod session;
 
 /// The Runtime D1 flip gate (`PM_MAILBOX_DELIVERY`, #272 / ADR-20260801-023000), injected as
