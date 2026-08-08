@@ -105,8 +105,9 @@ is a restaurant-facing decision, not an automatic re-offer.
 **Shared release vocabulary (2026-08-08)**: the automated stall sweep's `ASSIGNED → PENDING`
 release must emit **the SAME release event** as the manual "Libérer et relancer" action designed by
 [PROP-20260808-141817 §1b step 4 / decision D3](PROP-20260808-141817-rider-delivery-write-surface.md)
-— whatever name that decision settles on (`DeliveryAssignmentReleased` recommended there, vs keeping
-`DeliveryUnassignedFromPartner`) — **never a twin event** for the automated case. And the release
+— now decided (2026-08-08): `DeliveryAssignmentReleased`, command `ReleaseDeliveryAssignment` —
+**never a twin event** for the automated case: `DeliveryRunStalled` stays the sweep's distinct
+detector fact and TRIGGERS the release path, which emits `DeliveryAssignmentReleased`. And the release
 edge covers `ASSIGNED` only: it does not cover `PICKED_UP` and must not pretend to — once the food
 is with the courier, return-to-pool is wrong and re-preparation is the restaurant's decision.
 

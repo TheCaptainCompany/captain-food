@@ -256,14 +256,23 @@ offboarding and erasure are three different journeys.**
 
 **Fold into `listing_status`, adding an `OPTED_OUT` enum value (D3, option 2).** Three reasons:
 
-1. **Tombstone is self-defeating**: the SIRENE sync
-   (`crates/infrastructure/src/integrations/sirene.rs`, `sync_sirene_worker.rs`) continuously
-   imports the open-data universe keyed by external identifiers — delete the row and the next
-   sweep RE-CREATES the listing the owner asked to remove; the row must persist precisely to
-   remember the refusal (ACL skips/holds OPTED_OUT rows). Tombstone also amputates other
-   consumers (audit, do-not-contact, legacy joins) for a reversible business withdrawal — and the
-   population is legal-entity open data, not personal data under an erasure duty;
-   [#194](https://github.com/TheCaptainCompany/captain-food/issues/194)'s frame does not apply.
+1. **Tombstone is self-defeating — and deleting the refusal would itself be the violation**: the
+   SIRENE sync (`crates/infrastructure/src/integrations/sirene.rs`, `sync_sirene_worker.rs`)
+   continuously imports the open-data universe keyed by external identifiers — delete the row and
+   the next sweep RE-CREATES the listing the owner asked to remove, and would re-contact them.
+   The legal frame: SIRENE's *entrepreneurs-individuels* subset IS personal data (CJEU C-398/15
+   *Manni*, GDPR Art. 4(1)), so
+   [#194](https://github.com/TheCaptainCompany/captain-food/issues/194)'s GDPR frame — lawful
+   basis, transparency, objection, DPIA — DOES apply to storing, scoring and prospecting those
+   rows; what does NOT carry over is only the erasure-by-tombstone REMEDY. Post-objection
+   retention of the minimal suppression identifier is the lawful and REQUIRED shape
+   (suppression-list / *liste repoussoir* doctrine): the row must persist precisely to remember
+   the refusal (ACL skips/holds OPTED_OUT rows) — consistent with §B.2's admin row, which names
+   the opt-out an Art. 21-shaped objection. Tombstone also amputates other consumers (audit,
+   do-not-contact, legacy joins) for a reversible business withdrawal. Detail:
+   [BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md)
+   ·
+   [#401 "Legal exposures from the opt-out obligation brief"](https://github.com/TheCaptainCompany/captain-food/issues/401).
 2. **Vestigial is a broken promise**: an owner who proved GBP ownership still shows on the
    marketplace forever — the "I asked and nothing happened" support call with a regulator-shaped
    tail.
@@ -355,7 +364,7 @@ Each decision carries per-option trade-offs; the recommended option is marked.
 
 | Option | Pros | Cons |
 |---|---|---|
-| Tombstone the Restaurant row | Strongest "gone" semantics; matches a naive reading of "remove my listing" | **Self-defeating under SIRENE re-import**: the sync re-creates the deleted row on the next sweep — the row must persist to remember the refusal; amputates audit, do-not-contact and legacy joins for a reversible business withdrawal; wrong legal frame (legal-entity open data, no erasure duty) |
+| Tombstone the Restaurant row | Strongest "gone" semantics; matches a naive reading of "remove my listing" | **Self-defeating under SIRENE re-import**: the sync re-creates the deleted row on the next sweep — and post-objection retention of the minimal suppression identifier is the lawful and REQUIRED shape (suppression-list doctrine: the EI subset is personal data per *Manni*, the objection is real, and deleting the refusal would itself be the violation since re-import would re-contact); amputates audit, do-not-contact and legacy joins for a reversible business withdrawal |
 | **Fold into `listing_status` → new `OPTED_OUT` value; filter browse/search/shelves; add the event to `ProspectionPipeline.fedBy`; ACL skips OPTED_OUT rows** — **RECOMMENDED** | One column, zero new machinery (`listing_status` already folds `RestaurantListingStatusChanged`); reversible via the existing re-list/claim path; auditable; re-import-proof; stops prospection permanently with reason on record | Adds a visibility state to a partnership-funnel enum (the D4 caveat); browse/search/shelves queries each need the filter and a test |
 | Vestigial removal (delete the event/command as unused) | Deletes a warning and some spec surface | **A broken promise to an owner who proved GBP ownership**: they still show on the marketplace forever — the "I asked and nothing happened" support call with a regulator-shaped tail; the mutation and story step already exist and describe a real journey |
 
@@ -374,6 +383,14 @@ entered only via `OptOutRestaurantListing` and left only via the designed re-lis
 |---|---|---|
 | **`OPTED_OUT` enum value + guards: `OptOutRestaurantListing` rejected for ACTIVE_PARTNER with a new error (e.g. `ListingOptOutNotApplicable`), AND `ChangeRestaurantListingStatus` rejecting `OPTED_OUT` as source and target** — **RECOMMENDED** | The smaller change: one enum value, one fold arm, two write-side guards; a single column keeps every reader's filter trivial; the guards name the domain truths ("partner offboarding is a different journey"; "an objection is not an admin toggle") as designed rejections | Conflates marketplace visibility with partnership stage inside one enum — safe ONLY while BOTH doors stay guarded: the ACTIVE_PARTNER guard alone leaves `changeRestaurantListingStatus` a legal path into and out of `OPTED_OUT`; two new errors carry ADR-0032 completeness cost (tests + rules links — header Concern); every future writer to `listing_status` must respect the invariant, which is convention, not type |
 | Separate orthogonal `delisted` boolean | Clean separation of concerns: visibility and funnel stage never share a column; **no second door exists by construction** — `changeRestaurantListingStatus` cannot spell `OPTED_OUT` at all, so neither the unguarded entry nor the objection-clearing exit is representable. The two-door finding materially strengthens this option: what the enum buys with two guards, the boolean buys with the shape of the data | Second column every browse/search/shelf/prospection reader must remember to consult (a forgotten filter re-exposes the owner); more spec surface (column, fold, filters ×N) for the same journeys |
+
+**Legal-brief verdict**
+([BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md)
+Q3; [#401 "Legal exposures from the opt-out obligation brief"](https://github.com/TheCaptainCompany/captain-food/issues/401)):
+the orthogonal boolean is the more defensible shape under audit — the failure modes are asymmetric:
+a bypassed guard CLEARS the objection irreversibly and the event log then proves the violation
+against you, while a forgotten filter is a recoverable incident with the refusal intact. The
+customer decision remains open.
 
 The recommendation stands — enum + both guards remains the smaller change — but the tipping
 argument is real: if the guard set grows again, or the PO weighs "unspellable beats guarded"

@@ -8,9 +8,12 @@
   https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp — the persona journeys below are the
   evidence base; every EXISTS/GAP mark carries a `file:line` cite verified on current `main`.
 - **Concerns**:
-  - [ ] **D3 naming decision**: generalizing `UnassignDeliveryFromPartner`/`DeliveryUnassignedFromPartner`
-    to `DeliveryAssignmentReleased` renames an event — event vocabulary is a product-owner call, and
-    it is cheapest now (no production events exist yet); must be decided before slice 6 lands.
+  - [x] **D3 naming decision** — decided by the architect lens under customer delegation,
+    2026-08-08 — see [DECISIONS.md §20](DECISIONS.md). Verdict: event `DeliveryAssignmentReleased`,
+    command `ReleaseDeliveryAssignment`, mutation `releaseDeliveryAssignment` (the verdict OVERRODE
+    this proposal's `unassignDelivery` mutation name — an unassign-named mutation over a
+    release-named event would reintroduce the second vocabulary the rename kills). Rename now,
+    while zero production events exist; realization lands in slice 6.
   - [ ] **Slice-2 validator semantics**: crediting process-manager `send` steps as
     `command-no-mutation` coverage weakens the gate unless the credit REQUIRES the PM edge to
     actually exist and resolve in `actors.yaml`/`processmanager.yaml` (a checkable `$ref`, not a
@@ -35,7 +38,8 @@ missing product surface, and which are wrong vocabulary. Deriving the four perso
 restaurant, admin/dispatch, customer) answers it directly: **the wired offer/accept vocabulary is
 canonical** — "assign" as a user action does not exist, "accept" does. Two command/event families
 (`AssignDeliveryToPartner`, `UpdateDeliveryPartnerStatus`) are **retired**; one
-(`UnassignDeliveryFromPartner`) is **promoted** into a real assignment-failure recovery journey; three
+(`UnassignDeliveryFromPartner`, renamed `ReleaseDeliveryAssignment`/`DeliveryAssignmentReleased`
+per decided D3) is **promoted** into a real assignment-failure recovery journey; three
 strays (`BindCartToCustomer`, `GrantCustomerCredit`, `PlaceReplacementOrder`) are a **validator blind
 spot**, not missing surface — though the PM-send credit reaches only the first two:
 `PlaceReplacementOrder` is dispatched from a hand-written wrapper seam, not a PM step, and needs its
@@ -102,7 +106,7 @@ handover. Read at arm's length; every frequent action one tap on the card, zero 
 | 1 | Glance: cards colored by `DeliveryStatus`; PENDING shows age ("en attente depuis 6 min") and turns alarming past ~5 min; FAILED (dispatch exhausted) is the loudest state on the board | EXISTS board; **GAP** age/alarm treatment | EXISTS `restaurantDeliveries` (`api.yaml:60-67`) | fed by lifecycle events | EXISTS `View_DeliveryJob` |
 | 2 | Assign to a partner: **NOT a journey step.** The restaurant never pushes a job at a partner — the [#60](https://github.com/TheCaptainCompany/captain-food/issues/60) ranked walk offers channels and the partner's *acceptance* (inbound, ACL) is what assigns. The restaurant's lever over a stuck *offer* is exactly one tap: "Passer au suivant" | EXISTS escalate (`restaurant_backoffice.yaml:166`) — **fix variables** (passes `orderId`, command wants `deliveryJobId`, warning on main) | EXISTS `escalateDelivery` | EXISTS `EscalateDelivery` → `DeliveryEscalationRequested` → saga advances (`processmanager.yaml:130-172`) | non-projected by design (`projection_views.yaml:51`) |
 | 3 | Cancel a delivery (order refunded / customer collected) | **GAP** board control (story step exists, `stories.yaml:197`; the backoffice actions list has no `cancel_delivery`) | EXISTS `cancelDelivery` (`api.yaml:106-109`) | EXISTS `CancelDelivery` → `DeliveryCancelled` | EXISTS |
-| 4 | **Assignment failure**: partner accepted at 19:40, courier never shows by 20:10 (or the accepted rider's phone died). Escalate is useless — the saga only advances an *outstanding offer* (`expect: process_status OFFERED`, `processmanager.yaml:144`); once ACCEPTED it skips benignly. Cancel kills a job whose order still needs delivering. One tap: "Libérer et relancer" → job back to PENDING, courier cleared, re-offered | **GAP** board control | **GAP** `unassignDelivery` mutation | EXISTS `UnassignDeliveryFromPartner` → `DeliveryUnassignedFromPartner` (ASSIGNED→PENDING edge, `actors.yaml:61,147-151`); **GAP**: no saga receiver re-opens the walk on it | **GAP** — unprojected: today the board would keep showing ASSIGNED after an unassign; the projection needs the Unassigned→PENDING derive + courier/rider clear |
+| 4 | **Assignment failure**: partner accepted at 19:40, courier never shows by 20:10 (or the accepted rider's phone died). Escalate is useless — the saga only advances an *outstanding offer* (`expect: process_status OFFERED`, `processmanager.yaml:144`); once ACCEPTED it skips benignly. Cancel kills a job whose order still needs delivering. One tap: "Libérer et relancer" → job back to PENDING, courier cleared, re-offered | **GAP** board control | **GAP** `releaseDeliveryAssignment` mutation (name per decided D3) | EXISTS `UnassignDeliveryFromPartner` → `DeliveryUnassignedFromPartner` (ASSIGNED→PENDING edge, `actors.yaml:61,147-151`), renamed `ReleaseDeliveryAssignment` → `DeliveryAssignmentReleased` by decided D3 (slice 6); **GAP**: no saga receiver re-opens the walk on it | **GAP** — unprojected: today the board would keep showing ASSIGNED after a release; the projection needs the Released→PENDING derive + courier/rider clear |
 | 5 | Issue badge on a card ("Adresse introuvable — 4 min"); tap → resolve with a canned outcome + note | **GAP** badge + resolve control | **GAP** `reportDeliveryIssue` / `resolveDeliveryIssue` mutations | EXIST `ReportDeliveryIssue`/`ResolveDeliveryIssue` (`actors.yaml:124-133`) | **GAP** issue columns on `View_DeliveryJob` |
 | 6 | Self-dispatch handover confirm | EXISTS `mark_order_delivered` (`restaurant_backoffice.yaml:167`) | EXISTS | EXISTS | EXISTS |
 
@@ -122,7 +126,7 @@ orderId), no admin story activity for delivery ops.
 |---|---|---|---|---|---|
 | 1 | Stuck-jobs queue: jobs PENDING > N min, ASSIGNED with stale signal, FAILED — sorted by age; open-issue queue beside it | **GAP** `system.yaml` `delivery_ops` screen | **GAP** `deliveryJobs` query (ADMIN, filters: status, minAge, hasOpenIssue) | — | EXISTS `View_DeliveryJob` + **GAP** issue columns |
 | 2 | Repair a wedged job: force a status (e.g. rider forgot to tap LIVRÉ and went home — PICKED_UP→DELIVERED so the order closes and the customer stops watching a dead screen) | **GAP** control on `delivery_ops` | **GAP** `updateDeliveryStatus` mutation, **ADMIN-only** | EXISTS `UpdateDeliveryStatus` → `DeliveryStatusUpdated` (`actors.yaml:135-139`; the dynamic-target edges exist) | EXISTS — `DeliveryStatusUpdated` already projected (`projection_views.yaml:82,114`) |
-| 3 | Resolve an issue no restaurant resolved by 21:00; release a dead assignment; cancel | same **GAP** screen | `resolveDeliveryIssue` / `unassignDelivery` (GAPs above); `cancelDelivery` EXISTS with ADMIN role | exist | per above |
+| 3 | Resolve an issue no restaurant resolved by 21:00; release a dead assignment; cancel | same **GAP** screen | `resolveDeliveryIssue` / `releaseDeliveryAssignment` (GAPs above); `cancelDelivery` EXISTS with ADMIN role | exist | per above |
 
 **Unhappy path — issue with no resolver at 21:00:** `ResolveDeliveryIssue` is offered to restaurant
 *and* admin; the ops issue queue (sorted by age, with the reporter's phone) is the guarantee an
@@ -161,7 +165,7 @@ Per warned event:
 | Warned artifact | Verdict | Journey step (or why none) |
 |---|---|---|
 | `DeliveryAssignedToPartner` + cmd `AssignDeliveryToPartner` + edge `actors.yaml:60` | **RETIRE** (decision D1) | No journey pushes a job at a partner; offer = saga port call, commitment = `DeliveryAcceptedByPartner` (inbound). Manual phone-a-partner recovery is covered by ADMIN `UpdateDeliveryStatus` (PENDING→ASSIGNED edge exists, `actors.yaml:67`) |
-| `DeliveryUnassignedFromPartner` + cmd `UnassignDeliveryFromPartner` | **KEEP** (recommend generalizing name to `DeliveryAssignmentReleased` / `unassignDelivery` — the rider no-show needs the identical step and the payload is already provider-agnostic: `deliveryJobId` + `reason`; decision D3) | §1b step 4 / §1c step 3: courier accepted then failed; escalate can't touch an ACCEPTED run, cancel kills a needed delivery. Needs: mutation, board/ops control, projection derive (→PENDING, clear courier/rider/partner_ref), saga receiver to re-open the walk |
+| `DeliveryUnassignedFromPartner` + cmd `UnassignDeliveryFromPartner` | **KEEP, renamed** (decided D3): event `DeliveryAssignmentReleased`, command `ReleaseDeliveryAssignment`, mutation `releaseDeliveryAssignment` — the rider no-show needs the identical step and the payload is already provider-agnostic: `deliveryJobId` + `reason` | §1b step 4 / §1c step 3: courier accepted then failed; escalate can't touch an ACCEPTED run, cancel kills a needed delivery. Needs: mutation, board/ops control, projection derive (→PENDING, clear courier/rider/partner_ref), saga receiver to re-open the walk |
 | `DeliveryPartnerStatusUpdated` + cmd `UpdateDeliveryPartnerStatus` + 6 edges `actors.yaml:73-78` | **RETIRE** (decision D2) | A command wrapping an external fact — exactly what ADR-0004 forbids. The ACL already records the same fact directly as inbound `DeliveryStatusUpdated` (`actors.yaml:93-95` says so verbatim). Second vocabulary, zero journey |
 | `DeliveryDeclinedByRider` + cmd `DeclineDelivery` | **KEEP** — distinct from `DeliveryRejectedByPartner` and both are legitimate: rider decline keeps the job PENDING in the rider pool (`rules.yaml:42`); partner rejection advances the ranked walk (`processmanager.yaml:85-128`). Different actor, different consequence, different event — a mapping, not a retirement | Rider §1a step 5b. Needs: `declineDelivery` mutation, decline control, per-rider decline read model (offer filtering) |
 | `DeliveryIssueReported` / `DeliveryIssueResolved` | **KEEP** | §1a-8, §1b-5, §1c-3. Needs: two mutations, screens, projection |
@@ -186,9 +190,10 @@ spec deletion, journeys lose nothing.
 ## 4. Decisions surfaced
 
 Each decision carries per-option trade-offs, derived from the §1–§3 evidence; the recommended option
-is marked. D1/D2/D4 follow directly from the journey derivation; D3 and the slice-2 semantics are
-held as Concerns in the header. D6 closes the coverage hole the slice-2 safeguard itself exposes for
-`PlaceReplacementOrder` (§3).
+is marked. D1/D2/D4 follow directly from the journey derivation; D3 is DECIDED (2026-08-08,
+architect lens under customer delegation — [DECISIONS.md §20](DECISIONS.md)); the slice-2 semantics
+stay held as a Concern in the header. D6 closes the coverage hole the slice-2 safeguard itself
+exposes for `PlaceReplacementOrder` (§3).
 
 ### D1 — the `AssignDeliveryToPartner` family: retire vs keep for manual dispatch
 
@@ -204,12 +209,21 @@ held as Concerns in the header. D6 closes the coverage hole the slice-2 safeguar
 | **Retire** (command, `DeliveryPartnerStatusUpdated`, the 6 edges `actors.yaml:73-78`) — **RECOMMENDED** | A command wrapping an external fact is exactly what ADR-0004 forbids: a partner's status report already happened and cannot be rejected. The ACL already records the identical fact directly as inbound `DeliveryStatusUpdated` (`actors.yaml:93-95` says so verbatim). Deletes 6 lifecycle edges + warnings; one status vocabulary | If a human ever needs to transcribe a partner's phoned status, there is no partner-named command — but the ADMIN `updateDeliveryStatus` (slice 7) covers precisely that repair, with the acting user on the envelope (ADR-0041) as the audit trail |
 | Keep as command-wrapped fact | An operator-invocable, validated entry point for partner facts | Duplicates the ACL path with **contradictory semantics** (a rejectable command vs a recorded fact) for the same event family; zero journey references it; keeps the second vocabulary and the warnings |
 
-### D3 — `Unassign…` naming: keep as-is vs generalize to `DeliveryAssignmentReleased`
+### D3 — `Unassign…` naming: keep as-is vs generalize to `DeliveryAssignmentReleased` — DECIDED
+
+**DECIDED 2026-08-08** by the architect lens under customer delegation
+([DECISIONS.md §20](DECISIONS.md)): rename now, while zero production events exist — event
+`DeliveryAssignmentReleased`, command `ReleaseDeliveryAssignment`, mutation
+`releaseDeliveryAssignment`. The verdict OVERRODE this proposal's original `unassignDelivery`
+mutation name: an unassign-named mutation over a release-named event would reintroduce the second
+vocabulary the rename kills. The fact is actor-neutral by design — the manual board action, a
+future rider self-release and the PROP-172500 stall sweep share ONE event, with the releaser on
+the envelope (ADR-0041); the ASSIGNED→PENDING-only scope is part of the name's meaning.
 
 | Option | Pros | Cons |
 |---|---|---|
 | Keep `UnassignDeliveryFromPartner` / `DeliveryUnassignedFromPartner` as-is | Zero event-vocabulary churn; no actors/tests/errors rewiring; slice 6 ships sooner | The name lies for the rider no-show case — the identical release step is needed when the failed courier is an independent rider, and the payload is **already provider-agnostic** (`deliveryJobId` + `reason`); future readers will infer a partner-only path and be tempted to add a rider-flavoured twin event |
-| **Generalize/rename to `DeliveryAssignmentReleased` (mutation `unassignDelivery`)** — **RECOMMENDED** | One release step for both courier kinds; the name matches the journey it serves ("Libérer et relancer" — release-and-reoffer, §1b step 4); prevents a duplicate rider event later; the rename is cheapest **now**, while no production events exist in the log | Renames an existing event + command (spec, tests, errors mapping churn); event vocabulary is a product-owner call — held as an unchecked Concern, to be decided before slice 6 |
+| **Generalize/rename to `DeliveryAssignmentReleased` (command `ReleaseDeliveryAssignment`, mutation `releaseDeliveryAssignment`)** — **DECIDED** | One release step for both courier kinds; the name matches the journey it serves ("Libérer et relancer" — release-and-reoffer, §1b step 4); prevents a duplicate rider event later; the rename is cheapest **now**, while no production events exist in the log | Renames an existing event + command (spec, tests, errors mapping churn) — accepted; realization lands in slice 6 |
 
 ### D4 — issue model: one open issue per job (V0) vs issue entities with ids/history
 
@@ -289,8 +303,8 @@ sequenceDiagram
   PM->>M: (exhausted) DeliveryDispatchFailed
   P->>V: status=FAILED — loudest card on the board
   RM->>B: card "ASSIGNED, last signal 25 min" — courier no-show
-  B->>G: unassignDelivery(deliveryJobId, reason) [GAP]
-  G->>M: UnassignDeliveryFromPartner → DeliveryUnassignedFromPartner
+  B->>G: releaseDeliveryAssignment(deliveryJobId, reason) [GAP]
+  G->>M: ReleaseDeliveryAssignment → DeliveryAssignmentReleased
   M->>PM: [GAP] re-open walk, re-offer
   P->>V: [GAP] status=PENDING, courier cleared — board shows "re-offered"
 ```
@@ -443,12 +457,19 @@ Order tracking with the courier row (§1d `DeliveryAcceptedByRider`/`DeliveryPic
    carry no issueId, so one open issue per job is the honest V0 model, decision D4); rider issue
    sheet (canned chips), board badge + resolve control, story steps. NOT in it: multi-issue
    history, comms/notifications.
-6. **`assignment-failure-recovery`**. Completes §1b-4. DSL: `unassignDelivery` mutation
-   (RESTAURANT, ADMIN) — with the rename decision (`DeliveryAssignmentReleased`, decision D3)
-   surfaced as an option; projection derive `DeliveryUnassignedFromPartner → PENDING` + clear
-   courier/rider/partner_ref; **saga receiver** re-opening the walk; board control;
-   `cancel_delivery` board binding (existing mutation, missing action); story step. NOT in it:
-   automated partner-silence detection.
+6. **`assignment-failure-recovery`**. Completes §1b-4. DSL: the decided D3 rename
+   (`UnassignDeliveryFromPartner`/`DeliveryUnassignedFromPartner` →
+   `ReleaseDeliveryAssignment`/`DeliveryAssignmentReleased` — spec, tests, errors mapping);
+   `releaseDeliveryAssignment` mutation (RESTAURANT, ADMIN); projection derive
+   `DeliveryAssignmentReleased → PENDING` + clear courier/rider/partner_ref; **saga receiver**
+   re-opening the walk, keyed on `DeliveryAssignmentReleased`
+   ([PROP-20260726-172500](PROP-20260726-172500-delivery-execution.md)'s `DeliveryRunStalled`
+   stays a distinct detector fact that TRIGGERS the release path — never a twin appender of the
+   release event); the dedicated `DeliveryReleaseReason` scalar decision (free text vs canned
+   reasons — the rider issue chips of §1a-8 are the precedent for canned); board control;
+   `cancel_delivery` board binding (existing mutation, missing action); story step. Standing rule
+   from the verdict: a future rider self-release is the SAME `ReleaseDeliveryAssignment` command
+   role-gated to RIDER, never a sibling command. NOT in it: automated partner-silence detection.
 7. **`ops-delivery-surface`**. Completes §1c. DSL: `deliveryJobs` query (ADMIN;
    status/minAge/hasOpenIssue), `updateDeliveryStatus` mutation (ADMIN only), `system.yaml`
    `delivery_ops` screen (stuck queue + issue queue), admin story activity `SuperviseDeliveries`;
@@ -493,8 +514,9 @@ Rider slices 3/4/7 regenerate on top of it and are never dispatched concurrently
 ## 7. Sequencing and quick wins
 
 **Bottom line:** the wired vocabulary wins; two command/event families
-(`Assign…`/`PartnerStatus…`) are retired, one (`Unassign…`) is promoted into a real recovery
-journey, and the epic decomposes into 8 V0 slices of which **two (vocabulary cleanup, validator
+(`Assign…`/`PartnerStatus…`) are retired, one (`Unassign…`, renamed
+`ReleaseDeliveryAssignment`/`DeliveryAssignmentReleased` per decided D3) is promoted into a real
+recovery journey, and the epic decomposes into 8 V0 slices of which **two (vocabulary cleanup, validator
 PM-send credit) cost nothing** — pure spec deletion plus a validator refinement — **and clear ~9
 warnings: roughly a FIFTH of main's 43-warning baseline** (as of 2026-08-08; re-measure before
 comparing), **a third of the 24 epic-relevant warnings** — before any surface is built.
@@ -529,9 +551,10 @@ Why we might regret the whole thing, distinct from per-option cons:
 
 Copied to the tracking issue's checklist on approval (README convention):
 
-- The two header Concerns: the D3 rename (product-owner call on event vocabulary) and the slice-2
-  validator-credit semantics (PM-edge-required safeguard) — plus D6, the slice-2 safeguard's own
-  corollary: how `PlaceReplacementOrder`'s wrapper-seam dispatch gets spec-checkable coverage.
+- The remaining header Concern: the slice-2 validator-credit semantics (PM-edge-required
+  safeguard) — plus D6, the slice-2 safeguard's own corollary: how `PlaceReplacementOrder`'s
+  wrapper-seam dispatch gets spec-checkable coverage. (The D3 rename is decided — §4 D3,
+  [DECISIONS.md §20](DECISIONS.md).)
 - Board thresholds: PENDING alarm (~5 min) and courier-staleness (~25 min) — configuration keys
   (`specs/{scope}/configuration.yaml`, D5 doctrine) or fixed copy for V0?
 - Peak-hour offer latency: is the V0 poll interval acceptable until slice 11's subscription, and
