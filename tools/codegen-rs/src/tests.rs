@@ -5488,6 +5488,22 @@ fn deploy_tree_is_complete_both_ways() {
         "expected one bin per crates/adapters/* crate, got {:?}",
         adapters.iter().map(|b| &b.name).collect::<Vec<_>>()
     );
+    // The env-prefix narrowing is only sound while no partner's prefix is a prefix of
+    // another's (a future `crates/adapters/uber` would swallow UBER_DIRECT_*): assert the
+    // derivation's precondition so the sixth crate that breaks it fails HERE, not by silently
+    // leaking another partner's secrets into its pod.
+    for a in &adapters {
+        for b in &adapters {
+            let (pa, pb) = (
+                adapter_env_prefix(a.partner.as_deref().unwrap()),
+                adapter_env_prefix(b.partner.as_deref().unwrap()),
+            );
+            assert!(
+                pa == pb || !pa.starts_with(&pb),
+                "partner env prefixes must be disjoint: {pa} vs {pb} — the ADR-20260808-062432 narrowing cannot tell their keys apart"
+            );
+        }
+    }
     for a in &adapters {
         let dir = a.partner.as_deref().expect("adapter bin carries its partner");
         let slug = partner_slug(dir);

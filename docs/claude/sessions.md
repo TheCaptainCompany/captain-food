@@ -180,6 +180,13 @@ not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50
 costs a full recompile of ~200 crates. Two ENOSPC build failures in one session were both cured by
 this plus dropping `incremental/`.
 
+**After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
+`make rust` check-drift ran a STALE `generate` binary right after the deps sweep and mass-pruned
+the five freshly generated `crates/bins/adapter-*` crates (a diff of 4 775 deletions that looked
+exactly like an emitter bug); the immediate rerun rebuilt and passed with zero drift. Cost: ~30
+min of debugging a phantom. If check-drift fails with an implausible mass-deletion right after a
+`target/debug` cleanup, rerun it before touching the emitter.
+
 **Don't flip `CARGO_INCREMENTAL` mid-session (2026-08-01):** toggling it changes the crate
 metadata hashes, so the next build writes a SECOND full set of workspace artifacts next to the
 old one — flipping to `0` right after deleting `incremental/` re-exhausted the allowance during
