@@ -106,9 +106,20 @@ impl SupabaseIdentityService {
     /// Build from env: `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` (the anon key OTP flows use).
     /// `None` when either is unset — the composition root then falls back to the fail-closed stub
     /// (auth stays anonymous-only, never a half-configured surface — the Stripe env-gate pattern).
+    ///
+    /// Thin env-reading shell over [`Self::from_lookup`] — the `server/src/lib.rs`
+    /// `env_flag`/`parse_flag` pattern (#388): the gating logic is tested against an injected
+    /// lookup, so no test ever mutates process env (concurrent env mutation vs
+    /// `getenv` under the parallel libtest harness is glibc UB — the intermittent SIGSEGV class).
     pub fn from_env() -> Option<Self> {
-        let base_url = std::env::var("SUPABASE_URL").ok().filter(|s| !s.is_empty())?;
-        let apikey = std::env::var("SUPABASE_PUBLISHABLE_KEY").ok().filter(|s| !s.is_empty())?;
+        Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// The pure gating core of [`Self::from_env`]: both keys required (absent or empty ⇒ `None`),
+    /// trailing slash trimmed, with the environment injected as a lookup function.
+    fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        let base_url = lookup("SUPABASE_URL").filter(|s| !s.is_empty())?;
+        let apikey = lookup("SUPABASE_PUBLISHABLE_KEY").filter(|s| !s.is_empty())?;
         Some(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             apikey,
@@ -271,20 +282,35 @@ impl IdentityService for SupabaseIdentityService {
 mod tests {
     use super::*;
 
+    /// The pure core is exercised with an injected lookup — NEVER by mutating process env (#388:
+    /// mutating process env from parallel lib tests is the glibc-UB SIGSEGV class; clippy
+    /// `disallowed-methods` now gates it).
     #[test]
     fn from_env_gates_on_both_url_and_key() {
-        // Isolate: clear both, expect None; the composition root then falls back to fail-closed.
-        std::env::remove_var("SUPABASE_URL");
-        std::env::remove_var("SUPABASE_PUBLISHABLE_KEY");
-        assert!(SupabaseIdentityService::from_env().is_none());
-        std::env::set_var("SUPABASE_URL", "https://proj.supabase.co/");
-        assert!(SupabaseIdentityService::from_env().is_none(), "URL alone is not enough");
-        std::env::set_var("SUPABASE_PUBLISHABLE_KEY", "anon-key");
-        let svc = SupabaseIdentityService::from_env().expect("both set");
+        let from = |pairs: &[(&str, &str)]| {
+            let map: std::collections::HashMap<String, String> =
+                pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            SupabaseIdentityService::from_lookup(move |k| map.get(k).cloned())
+        };
+        // Neither set → None; the composition root then falls back to fail-closed.
+        assert!(from(&[]).is_none());
+        assert!(
+            from(&[("SUPABASE_URL", "https://proj.supabase.co/")]).is_none(),
+            "URL alone is not enough"
+        );
+        let svc = from(&[
+            ("SUPABASE_URL", "https://proj.supabase.co/"),
+            ("SUPABASE_PUBLISHABLE_KEY", "anon-key"),
+        ])
+        .expect("both set");
         // Trailing slash trimmed so `{base}/auth/v1/...` has no double slash.
         assert_eq!(svc.base_url, "https://proj.supabase.co");
-        std::env::remove_var("SUPABASE_URL");
-        std::env::remove_var("SUPABASE_PUBLISHABLE_KEY");
+        // An empty value is UNSET (fail-closed), same as absent.
+        assert!(
+            from(&[("SUPABASE_URL", "https://proj.supabase.co/"), ("SUPABASE_PUBLISHABLE_KEY", "")])
+                .is_none(),
+            "empty key is unset"
+        );
     }
 
     #[test]
