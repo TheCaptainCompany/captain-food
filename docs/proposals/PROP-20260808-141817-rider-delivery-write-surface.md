@@ -37,9 +37,12 @@ canonical** — "assign" as a user action does not exist, "accept" does. Two com
 (`AssignDeliveryToPartner`, `UpdateDeliveryPartnerStatus`) are **retired**; one
 (`UnassignDeliveryFromPartner`) is **promoted** into a real assignment-failure recovery journey; three
 strays (`BindCartToCustomer`, `GrantCustomerCredit`, `PlaceReplacementOrder`) are a **validator blind
-spot**, not missing surface. The epic decomposes into **8 value-ordered V0 slices** (+3 V1), of which
-the first two (vocabulary deletion, validator PM-send credit) cost nothing and clear roughly a third
-of `main`'s warning baseline before any surface is built. Two customer-anxiety one-liners hide inside
+spot**, not missing surface — though the PM-send credit reaches only the first two:
+`PlaceReplacementOrder` is dispatched from a hand-written wrapper seam, not a PM step, and needs its
+own coverage decision (D6). The epic decomposes into **8 value-ordered V0 slices** (+3 V1), of which
+the first two (vocabulary deletion, validator PM-send credit) cost nothing and clear ~9 warnings —
+roughly a **fifth** of `main`'s 43-warning baseline, a third of the 24 epic-relevant ones — before
+any surface is built. Two customer-anxiety one-liners hide inside
 the epic and must not wait for the rider slices (§7).
 
 **Basis (verified on current `main`, `make validate` = 0 errors / 43 warnings):** 13
@@ -73,7 +76,7 @@ Everything downstream inherits that hole.
 | 1 | First run: signs in (Supabase, identity-only), fills name + phone, taps "Devenir livreur". Sees "accepted — confirming…" then the empty job list | **GAP** `rider.yaml` `onboarding` screen | **GAP** `registerRider` mutation | EXISTS `RegisterRider` → `RiderRegistered` (`delivery/commands.yaml:212`, `actors.yaml:190-193`) | **GAP** `View_Rider` (`RiderRegistered` feeds nothing) |
 | 2 | Edits phone/display name | **GAP** `rider_profile` screen | **GAP** `updateRiderInfo` mutation | EXISTS `UpdateRiderInfo` → `RiderInfoUpdated` | **GAP** `View_Rider` |
 | 3 | Taps the top-bar toggle: "Passer en ligne" ⇄ "Hors ligne". The toggle must RENDER current state | EXISTS toggle (`rider.yaml:45,59-63`) — but state is unrenderable | EXISTS `changeRiderStatus` (`delivery/api.yaml:86-89`); **GAP** `myRiderProfile` query to read status back | EXISTS `ChangeRiderStatus` → `RiderStatusChanged` (lifecycle `actors.yaml:177-188`) | **GAP** `View_Rider.status` — today the toggle is a write with no readable state, a live control bound to a half-gap |
-| 4 | AVAILABLE, phone on handlebar: a new PENDING job appears — sound + full-screen card, pickup/dropoff/distance. Two buttons: ACCEPT (huge) / Decline (smaller) | EXISTS `jobs` screen (`rider.yaml:71-90`); **GAP** offer card layout + decline control | EXISTS `myDeliveries(status: PENDING)` (`api.yaml:52-58`); **GAP** push (subscription) — poll-only today, a 30 s poll at Friday 19:30 loses offers | — | EXISTS `View_DeliveryJob` (`[rider_id,status]` index, `projection_views.yaml:93`) |
+| 4 | AVAILABLE, phone on handlebar: a new PENDING job appears — sound + full-screen card, pickup/dropoff/distance. Two buttons: ACCEPT (huge) / Decline (smaller) | EXISTS `jobs` screen (`rider.yaml:71-90`); **GAP** offer card layout + decline control | EXISTS `myDeliveries(status: PENDING)` (`api.yaml:52-58`); **GAP** push (subscription) — poll-only today, a 30 s poll at Friday 19:30 loses offers | — | EXISTS `View_DeliveryJob` — but the spec's `[rider_id,status]` `indexes:` entry (`projection_views.yaml:93`) creates NO runtime index: `View_DeliveryJob` is a plain non-materialized VIEW (`specs/generated/views.generated.sql:6-46`) and spec `indexes:` on views emit no `CREATE INDEX`, so every `myDeliveries` poll is a full fold-scan + N+1 hydration. Acceptable at Tours V0 volume; materializing is slice 11's peak-growth precondition |
 | 5a | Taps ACCEPT → "accepted ✓ — confirming…" → job goes ASSIGNED, detail screen | EXISTS (`rider.yaml:90`) — **fix variables** | EXISTS `acceptDelivery` | EXISTS `AcceptDelivery` → `DeliveryAcceptedByRider` (`actors.yaml:99-104`) | EXISTS projected (`projection_views.yaml:83,111`) |
 | 5b | Taps Decline → job leaves *their* list, stays PENDING for others | **GAP** control | **GAP** `declineDelivery` mutation | EXISTS `DeclineDelivery` → `DeliveryDeclinedByRider` (`actors.yaml:158-163`) | **GAP** — unprojected; without a per-rider decline record the same job re-renders to the rider who refused it, forever |
 | 6 | At the restaurant, one thumb: "J'AI RÉCUPÉRÉ LA COMMANDE" (sticky bottom, full width) | EXISTS (`rider.yaml:107-109`) — **fix variables** | EXISTS `confirmPickup` | EXISTS `ConfirmPickup` → `DeliveryPickedUp` | EXISTS in View_DeliveryJob; **GAP in OrderTracking** — `DeliveryPickedUp` is absent from OrderTracking's fedBy (`projection_tables.yaml:497-501`), so the customer never sees the rider path move (see §1d) |
@@ -144,8 +147,9 @@ mandated emission:
 ## 2. Vocabulary verdict
 
 The journeys answer the epic's question directly: **"assign" as a user action does not exist;
-"accept" does.** Under [#60](https://github.com/TheCaptainCompany/captain-food/issues/60) the
-*offer* is a saga port call (not an event), and commitment is the acceptance fact — inbound for
+"accept" does.** Under
+[#60 "ranked-walk dispatch foundation"](https://github.com/TheCaptainCompany/captain-food/issues/60)
+the *offer* is a saga port call (not an event), and commitment is the acceptance fact — inbound for
 partners, command-driven for riders. A restaurant-pushed `AssignDeliveryToPartner` would mark a job
 ASSIGNED that no courier agreed to carry: an un-accepted assignment, the marketplace's oversell
 failure mode as an event type. **The wired vocabulary is canonical.** But "unassign" is NOT the
@@ -174,7 +178,7 @@ spec deletion, journeys lose nothing.
 |---|---|---|
 | `BindCartToCustomer` | Returning-customer sign-in: `CustomerIdentified` → `CartBindingProcess` sends it per open cart (`ordering/processmanager.yaml:120-148`) | PM-internal by design — needs **no mutation ever**. The warning is a validator blind spot: `command-no-mutation` does not credit process-manager `send`/`deliver` steps as coverage. Fix the validator (count PM sends, or an explicit `internal: true` command marker — see the slice-2 Concern for why the PM-send form is the safe one), don't invent a user action |
 | `GrantCustomerCredit` | Claim resolution GOODWILL_CREDIT: ReclamationProcess sends it (`ordering/processmanager.yaml:156,205`) | Same — PM-internal; validator fix |
-| `PlaceReplacementOrder` | Claim resolution REPLACEMENT ([#159](https://github.com/TheCaptainCompany/captain-food/issues/159)); its own description says "NOT a public GraphQL mutation" (`ordering/commands.yaml:356`) | Same — PM-internal; validator fix |
+| `PlaceReplacementOrder` | Claim resolution REPLACEMENT ([#159 "no-charge replacement order"](https://github.com/TheCaptainCompany/captain-food/issues/159)); its own description says "NOT a public GraphQL mutation" (`ordering/commands.yaml:356`) | PM-internal by design, but **NOT cleared by the slice-2 credit**: no PM `send` step exists for it — the dispatch lives in the ReclamationProcess's hand-written wrapper seam, whose own description says the 3-way credit/replacement/no-op branch is "not expressible in the current step DSL" (`ordering/processmanager.yaml:176-179`). Under this proposal's own Concern safeguard (credit only a command a resolvable PM step demonstrably sends), slice 2 clears **2 of the 3** strays; how this one gets spec-checkable dispatch coverage is decision **D6** |
 | `ConsumeCustomerCredit` | **Genuinely unreached**: checkout credit application ([#158 "Customer credit-balance ledger"](https://github.com/TheCaptainCompany/captain-food/issues/158), ADR-20260726-163737 §checkout-consume). The customer's tap is "use my 4,50 € credit" on checkout; the consume must be atomic with payment, so the right shape is a `PlaceOrder` payload flag + a `PlaceOrderProcess` step sending `ConsumeCustomerCredit` — it *becomes* PM-internal, not a raw mutation (decision D5). `customerCredit` query + checkout toggle are the visible half | Own slice (rides the checkout flow, but the option space — flag on PlaceOrder vs pre-checkout mutation — needs its own arbitration) |
 | `CustomerIdentified` | Sign-in/cart-binding (above) | `nonProjectedEvents` declaration, §2 |
 | `PaymentFailed` | **Whose screen: the CUSTOMER's checkout, nobody else's.** Pre-order, no restaurant is involved (no order was placed — `TestPlaceOrderPaymentFailedPlacesNothing`); ops watches rate via telemetry, not a queue. Read model implied: none — the transient PM-run-row `PaymentIntent` already carries FAILED to the checkout page; the money-path blind spot is the missing FAILED *screen state* (copy + retry + "your cart is intact"), which today leaves the customer on a spinner at the exact peak of the anxiety curve | `nonProjectedEvents` + checkout failure-state addition to `restaurant_frontoffice.yaml` |
@@ -183,7 +187,8 @@ spec deletion, journeys lose nothing.
 
 Each decision carries per-option trade-offs, derived from the §1–§3 evidence; the recommended option
 is marked. D1/D2/D4 follow directly from the journey derivation; D3 and the slice-2 semantics are
-held as Concerns in the header.
+held as Concerns in the header. D6 closes the coverage hole the slice-2 safeguard itself exposes for
+`PlaceReplacementOrder` (§3).
 
 ### D1 — the `AssignDeliveryToPartner` family: retire vs keep for manual dispatch
 
@@ -220,7 +225,18 @@ held as Concerns in the header.
 | **`PlaceOrder` payload flag + `PlaceOrderProcess` step sends `ConsumeCustomerCredit`** — **RECOMMENDED** (per ADR-20260726-163737 §checkout-consume) | Consume is **atomic with payment** — no credit burned on a failed or abandoned order; the customer's tap stays ONE tap ("use my 4,50 € credit" on checkout); the command becomes PM-internal, so slice 2's validator credit covers it honestly; no standalone money-adjacent mutation to authorize | Touches the `PlaceOrder` payload and the money-path saga — a high-stakes change (multi-lens review posture); the PM gains a step and its failure/compensation semantics must be specified |
 | Standalone pre-checkout mutation | Simpler wiring — no `PlaceOrder` payload change, no saga edit | **Not atomic with payment**: a failed payment leaves credit consumed (or demands a compensating credit-refund flow, i.e. a second money mechanism); two round-trips at the exact peak of the checkout anxiety curve; adds a public mutation for an operation that should never be independently invocable |
 
-## 5. Diagrams and mockups
+### D6 — How does `PlaceReplacementOrder` get spec-checkable dispatch coverage?
+
+The slice-2 PM-send credit cannot reach it: the ReclamationProcess dispatches it from the
+hand-written wrapper seam (`ordering/processmanager.yaml:176-179`), not from a step — the 3-way
+credit/replacement/no-op branch is, per the PM's own description, "not expressible in the current
+step DSL".
+
+| Option | Pros | Cons |
+|---|---|---|
+| Extend the step DSL to express the 3-way credit/replacement/no-op branch | The honest endpoint: the whole dispatch becomes step-derived, the wrapper seam shrinks, the credit applies with no special case | A real DSL extension (conditional branching over event payloads) — a much bigger change than this epic needs, with its own design/validator/emitter cost; the wrong tail to wag this dog |
+| **A declared `sends:` on the wrapper-seam receive** — parallel to the existing declared `emits:` precedent on the same receive (`ordering/processmanager.yaml:194-199`), checkable both ways: the `$ref` must resolve AND the target actor's inbox must accept the command — **RECOMMENDED** | Matches the established `emits:` precedent for wrapper-seam facts; more than an annotation (the validator proves the ref resolves and the target inbox accepts it), so it satisfies the slice-2 Concern safeguard's spirit; small, local change | Still a declaration about hand-written code, not a derivation from it — the seam could drift from the declaration (mitigated exactly as `emits:` is: behaviour-test coverage sees the declared send) |
+| Leave it in the warning baseline, documented | Zero work | A permanent, known-benign warning that every future session must re-derive as benign; erodes the "no NEW warning" diff discipline by normalizing an explained-away entry |
 
 ### 5a. Sequence diagrams (hexagonal-faithful; acceptance-first splits shown)
 
@@ -344,6 +360,39 @@ Ops issue/stuck queue (system.captain.food/delivery):
 | #B03 ASSIGNED 32min stale signal   |   [Resoudre…] [Appeler]      |
 ```
 
+Checkout FAILED state (§1d `PaymentFailed`, slice 8 — the missing screen state):
+
+```
++--------------------------------------+
+|  Paiement refuse            ✕        |
+|                                      |
+|  Votre carte n'a pas ete debitee.    |
+|  Votre panier est intact.            |
+|                                      |
+|  ██████████████████████████████████  |
+|  █        REESSAYER LE PAIEMENT   █  |
+|  ██████████████████████████████████  |
+|                                      |
+|  [ Changer de moyen de paiement ]    |
+|  [ Revenir au panier ]               |
++--------------------------------------+
+```
+
+Order tracking with the courier row (§1d `DeliveryAcceptedByRider`/`DeliveryPickedUp`, slice 8):
+
+```
++--------------------------------------+
+|  Votre commande — Chez Fatou         |
+|  ● ● ● ●-○   C'EST EN ROUTE 🚴       |
+|  Arrivee estimee : 19:52             |
+|--------------------------------------|
+|  Votre livreur : Karim               |
+|  [ 📞 Appeler ]  [ 💬 Message ]      |
+|--------------------------------------|
+|  Recuperee au restaurant 19:38 ✓     |
++--------------------------------------+
+```
+
 ## 6. Slices (value-ordered, one slice = one claimable issue)
 
 1. **`delivery-vocabulary-cleanup`** (foundation, deletion-only). Completes: nothing user-visible;
@@ -354,16 +403,36 @@ Ops issue/stuck queue (system.captain.food/delivery):
    it: any new surface. Removes ~6 warnings.
 2. **`validator-credits-pm-sent-commands`** (foundation, tools/codegen-rs). `command-no-mutation`
    counts PM `send` steps (or honors `internal: true` — subject to the slice-2 Concern: the credit
-   must require a resolvable PM edge, never an annotation alone). Clears `BindCartToCustomer`,
-   `GrantCustomerCredit`, `PlaceReplacementOrder` honestly. NOT in it: `ConsumeCustomerCredit`
-   (genuinely unreached).
+   must require a resolvable PM edge, never an annotation alone). Clears `BindCartToCustomer`
+   (CartBindingProcess send, `ordering/processmanager.yaml:137-144`) and `GrantCustomerCredit`
+   (ReclamationProcess send, `:204-211`) honestly — **2 of the 3 strays**. NOT in it:
+   `PlaceReplacementOrder` (no PM step sends it — wrapper-seam dispatch, decision **D6**; under D6's
+   recommended option this slice also implements the declared-`sends:` check) and
+   `ConsumeCustomerCredit` (genuinely unreached).
 3. **`rider-identity`** (foundation for every rider write). Completes §1a steps 1–3. DSL:
    `View_Rider` (fed by the 3 Rider events), `registerRider` + `updateRiderInfo` mutations,
    `myRiderProfile` query (RIDER; me-pattern), `rider.yaml` onboarding + profile screens,
    online-toggle state binding, story activity `rider.Onboard`, tests/rules links. **Also fixes the
-   6 rider `action-*` variable warnings** (riderId now resolvable; pass `deliveryJobId`). NOT in
-   it: admin rider roster/suspension UI
-   ([#95](https://github.com/TheCaptainCompany/captain-food/issues/95) follow-up), earnings.
+   6 rider `action-*` variable warnings** (riderId now resolvable; pass `deliveryJobId`). Plus
+   three items this slice must not ship without:
+   - **Drop `authRef` from the `RegisterRider` payload** (`delivery/commands.yaml:217`): mutation
+     inputs are GENERATED from command payloads (`specs/common/api.yaml:24-26`), so a
+     client-supplied `authRef` is an **impersonation vector** — it is the only command in the repo
+     with one. Derive it from the envelope per ADR-0041, matching every existing me-pattern.
+   - **Rewrite the `myDeliveries` Supabase-subject-as-RiderId shim in the SAME slice**
+     (`crates/server/src/graphql/generated/query.rs:144-154`, emitter
+     `tools/codegen-rs/src/emit/server_graphql.rs:688-690`): query by the projected `View_Rider`
+     `authRef` bridge instead — otherwise a rider's accepted job vanishes from their own list the
+     moment real rider ids exist.
+   - **`DeliveryDispatchProcess` receiver resolving the dispatch run on `DeliveryAcceptedByRider`**:
+     today NO receiver resolves the run on a rider accept, so it stays OFFERED and
+     `DeliveryOfferTimedOut` advances the ranked walk over a job someone already carries — a
+     spec-level **double-dispatch** path at Friday 19:30. (Slice 7 owns the twin receiver for the
+     admin-forced ASSIGNED path.)
+
+   NOT in it: admin rider roster/suspension UI
+   ([#95 "rider online/offline toggle"](https://github.com/TheCaptainCompany/captain-food/issues/95)
+   follow-up), earnings.
 4. **`rider-decline`**. Completes §1a-5b. DSL: `declineDelivery` mutation (RIDER), decline control
    on the offer card, `View_RiderDeclinedJobs` (delivery_job_id, rider_id, declined_at;
    `myDeliveries` excludes), story step. NOT in it: decline-cascade automation (TTL walk already
@@ -382,29 +451,54 @@ Ops issue/stuck queue (system.captain.food/delivery):
    automated partner-silence detection.
 7. **`ops-delivery-surface`**. Completes §1c. DSL: `deliveryJobs` query (ADMIN;
    status/minAge/hasOpenIssue), `updateDeliveryStatus` mutation (ADMIN only), `system.yaml`
-   `delivery_ops` screen (stuck queue + issue queue), admin story activity `SuperviseDeliveries`.
-   NOT in it: rider suspension UI.
+   `delivery_ops` screen (stuck queue + issue queue), admin story activity `SuperviseDeliveries`;
+   **plus the `DeliveryDispatchProcess` receiver resolving the dispatch run on an admin-forced
+   ASSIGNED via `UpdateDeliveryStatus`** — without it the run stays OFFERED and
+   `DeliveryOfferTimedOut` re-offers a job an admin already placed with a courier (the same
+   double-dispatch hazard slice 3 closes for the rider-accept path). NOT in it: rider suspension UI.
 8. **`customer-delivery-reassurance`**. Completes §1d. DSL: add `DeliveryPickedUp` to OrderTracking
    fedBy + `delivery_status` derive; bind `delivery.byOrder` on `order_tracking` (courier row,
-   delivery ETA); checkout FAILED state + copy; degraded-ETA copy for FAILED/issue. NOT in it: live
-   courier geolocation (post-V0).
+   delivery ETA); checkout FAILED state + copy; degraded-ETA copy for FAILED/issue; **and the
+   orphan binding**: `specs/screens/rider.yaml:106` already binds `delivery.restaurantName` /
+   `delivery.restaurantPhone` — fields that do not exist on the `DeliveryJob` type
+   (`delivery/api.yaml:9-25`). This slice owns the fix: carry name/phone onto the delivery read
+   model (`View_DeliveryJob`, fed by `DeliveryRequested`), or rebind the screen. Note that
+   [PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md) D2 carries
+   name/phone onto **OrderTracking**, which does NOT serve this screen — that decision does not
+   close this binding. NOT in it: live courier geolocation (post-V0).
 
 V1 (out of the epic's V0 scope, recorded so they are not lost):
 
 9. **`checkout-credit-consumption`** (V1). `ConsumeCustomerCredit` via PlaceOrder flag + PM step
    (decision D5); checkout toggle bound to `customerCredit`.
-10. **`rider-earnings-glance`** (V1): `riderEarnings` query folding delivered jobs +
-    `rider_tip_cents`.
-11. **`rider-job-push`** (V1, peak-hour quality): jobs subscription replacing poll.
+10. **`rider-earnings-glance`** (V1): `riderEarnings` query over a **delivery-scope earnings read
+    model fed by `DeliveryCompleted` + `OrderTipped` at PROJECTION time**. NOT a query-time join of
+    `View_DeliveryJob` (delivery scope) × `OrderTracking.rider_tip_cents` (ordering scope,
+    `projection_tables.yaml:648-652`) — that shape is a D8 violation (one domain, one graph, one
+    GRANT) the moment `graphql-delivery` has GRANT-scoped access; in CQRS the composition belongs
+    in the projector.
+11. **`rider-job-push`** (V1, peak-hour quality): jobs subscription replacing poll — **and the
+    peak-growth precondition**: materialize `View_DeliveryJob` as a projection table (or index
+    `domain_events`), because the plain view (§1a step 4) makes every `myDeliveries` read a full
+    fold-scan; poll→subscription and fold-scan→indexed-table travel together.
+
+**Coordination note (resolver join policy — shared with the disappearance proposal):** the
+generated resolver join policy (silent-drop `query.rs:162-169`/`:194`/`:349`, hard-errors
+`query.rs:191`/`:364` et al.) is owned ONCE, by
+[PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md) step 1 — an
+emitter-level change landing before the
+[#194 "GDPR Article 17…"](https://github.com/TheCaptainCompany/captain-food/issues/194) sweep.
+Rider slices 3/4/7 regenerate on top of it and are never dispatched concurrently with it.
 
 ## 7. Sequencing and quick wins
 
 **Bottom line:** the wired vocabulary wins; two command/event families
 (`Assign…`/`PartnerStatus…`) are retired, one (`Unassign…`) is promoted into a real recovery
 journey, and the epic decomposes into 8 V0 slices of which **two (vocabulary cleanup, validator
-PM-send credit) cost nothing** — pure spec deletion plus a validator refinement — **and clear
-roughly a third of main's warning baseline** (43 as of 2026-08-08; re-measure before comparing)
-before any surface is built.
+PM-send credit) cost nothing** — pure spec deletion plus a validator refinement — **and clear ~9
+warnings: roughly a FIFTH of main's 43-warning baseline** (as of 2026-08-08; re-measure before
+comparing), **a third of the 24 epic-relevant warnings** — before any surface is built.
+`PlaceReplacementOrder`'s warning survives slice 2 and clears with decision D6.
 
 **The two highest-anxiety customer facts must not wait for the rider slices:**
 
@@ -436,14 +530,15 @@ Why we might regret the whole thing, distinct from per-option cons:
 Copied to the tracking issue's checklist on approval (README convention):
 
 - The two header Concerns: the D3 rename (product-owner call on event vocabulary) and the slice-2
-  validator-credit semantics (PM-edge-required safeguard).
+  validator-credit semantics (PM-edge-required safeguard) — plus D6, the slice-2 safeguard's own
+  corollary: how `PlaceReplacementOrder`'s wrapper-seam dispatch gets spec-checkable coverage.
 - Board thresholds: PENDING alarm (~5 min) and courier-staleness (~25 min) — configuration keys
   (`specs/{scope}/configuration.yaml`, D5 doctrine) or fixed copy for V0?
 - Peak-hour offer latency: is the V0 poll interval acceptable until slice 11's subscription, and
   what interval loses the fewest offers at Friday 19:30?
 - Admin rider roster/suspension: stays a
-  [#95](https://github.com/TheCaptainCompany/captain-food/issues/95) follow-up — confirm it is
-  tracked there and not silently dropped from this epic.
+  [#95 "rider online/offline toggle"](https://github.com/TheCaptainCompany/captain-food/issues/95)
+  follow-up — confirm it is tracked there and not silently dropped from this epic.
 
 ## 10. Verification plan
 
@@ -451,8 +546,11 @@ Copied to the tracking issue's checklist on approval (README convention):
   warning count/kinds diffed against a re-measured `main` baseline (never the numbers pinned
   above), `make rust` green, ADR-0032 completeness (new mutations get story steps; new
   commands/events get behaviour tests with `rules:` links).
-- Slices 1–2 are measured by the warning delta itself: the retired families' and PM-internal
-  commands' warnings disappear with **zero** new ones.
+- Slices 1–2 are measured by the warning delta itself: the retired families' and PM-step-sent
+  commands' warnings disappear with **zero** new ones. `PlaceReplacementOrder`'s warning is
+  expected to SURVIVE slice 2 (wrapper-seam dispatch) until D6's mechanism lands — its
+  disappearance without D6 would mean the credit was granted on an annotation, i.e. the slice-2
+  Concern safeguard failed.
 - Slice 8's customer-facing fixes are verified by the OrderTracking projection test (rider-path
   status shows PICKED_UP between READY and DELIVERED) and the checkout screen's FAILED state
   binding.

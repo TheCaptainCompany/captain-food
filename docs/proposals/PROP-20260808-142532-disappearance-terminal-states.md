@@ -12,18 +12,35 @@
   https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp — every claim below carries a
   `file:line` cite verified on current `main`.
 - **Concerns**:
-  - [ ] **D2 touches `OrderPlaced`'s payload**: adding `restaurantName`/`restaurantPhone` is event
-    evolution — additive, no consumer breaks — but event vocabulary is a product-owner call and
-    must be signed off before the field lands.
+  - [ ] **D2 is THREE artifacts, not one**: (i) `OrderPlaced` gains `restaurantName`/`restaurantPhone`
+    (event evolution — additive/nullable, no consumer breaks); (ii) because `OrderPlaced` is
+    materialized at `PaymentCaptured` "from the frozen checkout snapshot alone"
+    (`ordering/processmanager.yaml:67-97`), `CheckoutSnapshot`
+    (`specs/common/entities.yaml:167-207`) and hence `PaymentIntentCreated`
+    (`specs/common/events.yaml:28-52`) must gain the fields too — a fresh Restaurant read at
+    capture time would break the log-alone invariant and reintroduce exactly the cross-stream
+    dependency D2's cons reject; (iii) `OrderPlaced`'s SECOND emitter — the Order aggregate on
+    `PlaceReplacementOrder` (`ordering/actors.yaml:112-116`) — sources them from the original
+    order, fields nullable. Event vocabulary is a product-owner call and must be signed off before
+    the fields land.
   - [ ] **The resolver policy change (banning silent-drop and join hard-errors) modifies GENERATED
     resolver behaviour** (`crates/server/src/graphql/generated/query.rs`): it must land through
     the emitter, coordinated with the resolver-touching slices of the
     [#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)
     proposal ([PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)) —
-    never as hand-edits to generated output.
-  - [ ] **Section B's OPTED_OUT guard adds a new error to the network scope**
-    (`ListingOptOutNotApplicable` or equivalent): ADR-0032 completeness applies — the realizing
-    change needs a behaviour test with its `rules:` link, not just the error definition.
+    never as hand-edits to generated output. **And there is NO generic seam to hook**: the
+    resolver bodies are a hand-authored string table (`wired_query_body`,
+    `tools/codegen-rs/src/emit/server_graphql.rs:609-744`), so "change the emitter" means
+    rewriting those bodies one by one. The enforcement mechanism is therefore the `Option<_>`
+    type flip making the hard-error join UNCOMPILABLE, plus ONE shared non-generated hydration
+    helper every body calls — **never a source-text scanner** over the generated output, which
+    would repeat the
+    [#329](https://github.com/TheCaptainCompany/captain-food/issues/329) lesson (seven review
+    rounds hardening a scanner over a boundary the compiler already enforced).
+  - [ ] **Section B's OPTED_OUT guards add new errors to the network scope**
+    (`ListingOptOutNotApplicable` or equivalent, plus the D4 second-door rejection on
+    `ChangeRestaurantListingStatus`): ADR-0032 completeness applies — the realizing change needs
+    behaviour tests with their `rules:` links, not just the error definitions.
 - **Related**:
   [#194 "GDPR Article 17 has no technical answer: PII lives in an immutable event log with no erasure path, and no DPIA/privacy policy/terms exist"](https://github.com/TheCaptainCompany/captain-food/issues/194)
   (the sweep this proposal must precede) ·
@@ -114,7 +131,7 @@ The reachable cases, which the contract must design for:
 | Customer order history (`order_history`, `restaurant_frontoffice.yaml:466-487`) | Absence IS the designed state: GDPR erasure means "not readable through any query"; a per-row "expired" marker would itself retain data. Inform generically: static footer "Orders older than {years} years are removed from your account" (translations GAP). Deep link to an expired order → designed expired screen, copy: "This order has expired and its details are no longer available." | Row MUST render: "Pizza Luigi (no longer on Captain.Food) — 24,90 € — Delivered 12 Jan". Today SILENTLY DROPPED (`query.rs:349`) — paid money history vanishing without explanation is the worst support-call generator on this list. Never-reachable requirement: a retained order absent from history because of someone ELSE's erasure. | May inform (i); must NEVER silently lose money history (ii). |
 | Cart (`query.rs:297-323`) | n/a | Open cart whose restaurant vanishes → designed dead-end, not a 500: "This restaurant is no longer available on Captain.Food — this cart can't be ordered." + CTA to browse. Checkout mutation rejects actionably, never accept-then-strand. | May inform — pre-payment, money hasn't moved. |
 | Storefront catalog (`{slug}.captain.food`, `query.rs:19-33`) | n/a | Erased restaurant's host currently falls through to the claim-your-subdomain landing (`crates/server/src/hosts.rs:40-44, 256-263`) — inviting the public to claim a dead business's address is worse than a 404. Designed state: parked "closed" page (D5). Slug-reservation rule ("released label never reused", `projection_tables.yaml:192`) is the residual marker making this renderable without retaining erased data. | Must inform; must never invite resurrection. |
-| `trackDelivery` (`query.rs:122-140`) | Never reachable live. Deep link post-expiry: null with pinned meaning → expired-order screen. Today: hard error "delivery references an unknown order" — must go. | Degrade restaurant-sourced fields, keep the job renderable. | MUST REASSURE while live; may inform historic. |
+| `delivery` query (`query.rs:122-140`; the story step is `TrackDelivery`) | Never reachable live. Deep link post-expiry: null with pinned meaning → expired-order screen. Today: hard error "delivery references an unknown order" — must go. | Degrade restaurant-sourced fields, keep the job renderable. | MUST REASSURE while live; may inform historic. |
 | Restaurant delivery board (`deliveries_board`, `restaurant_backoffice.yaml:147-167`) | NEVER REACHABLE — two independent guarantees: (1) design: live orders never expire; (2) engineering: a board row must not be droppable by a missing join (`query.rs:194` silent drop = the "paid order nobody is told about" mode wearing a resolver). If violated anyway: render degraded and LOUD — "⚠ Order data incomplete — contact support", never absent (`View_DeliveryJob` already carries pickup/dropoff addresses, `delivery/api.yaml:19-25`). Also: whole-board hard error when the restaurant row is missing (`query.rs:191`) turns one bad row into a dead board at Friday 19:30 — same ban. | Restaurant reading its own board cannot be erased mid-session; treat as infra error with retry state, not a blank board. | Never-reachable / fail-loud. |
 | Admin | Admin must see MORE after erasure: `order(id)` null + a queryable erasure receipt — "Order erased under policy {policy} on {date}, receipt {id}" from the `OrderDeleted` ledger (ADR-20260731-160000 §6). GAP(read-model)+GAP(api)+GAP(screen): the deletion ledger has no projection/query/screen — "is this order really gone?" designed answerable (`docs/adr/ADR-20260731-160000…md:36-38,49-57`) but no surface answers it. | Terminal state / receipt, never a join error. | Informs; audit surface. |
 
@@ -168,8 +185,10 @@ unpinned semantics on the remaining edges. So:
 
 | Requirement | Artifact | Status |
 |---|---|---|
-| `OrderTracking.restaurant_name` (+`restaurant_phone`) — `OrderPlaced` gains `restaurantName`/`restaurantPhone` (event-carried; survives rebuild after restaurant stream deletion per ADR-20260731-160000 §3) vs projector snapshot (D2) | `projection_tables.yaml#/OrderTracking` + `ordering/events.yaml#/OrderPlaced` | GAP |
+| `OrderTracking.restaurant_name` (+`restaurant_phone`) — `OrderPlaced` gains `restaurantName`/`restaurantPhone` (event-carried; survives rebuild after restaurant stream deletion per ADR-20260731-160000 §3) vs projector snapshot (D2). **Three artifacts** (header Concern): the fields ALSO land on `CheckoutSnapshot` + `PaymentIntentCreated` (OrderPlaced is materialized at `PaymentCaptured` from the frozen snapshot alone, `ordering/processmanager.yaml:67-97`), and on the replacement-order emitter path (`ordering/actors.yaml:112-116`, sourced from the original order, nullable) | `projection_tables.yaml#/OrderTracking` + `ordering/events.yaml#/OrderPlaced` + `common/entities.yaml#/CheckoutSnapshot` + `common/events.yaml#/PaymentIntentCreated` | GAP |
 | Pin `order(id)` null semantics: "null = no order readable to you: never existed, not yours, or erased. Just-placed window served by `operationStatus`/subscription, never by polling this to null." | `ordering/api.yaml:122-128` description | GAP |
+| **Five nullability flips**: `Order.restaurant`, `Cart.restaurant`, `DeliveryJob.order`, `DeliveryJob.restaurant`, `Catalog.restaurant` are non-null in the generated SDL (`schema.generated.graphql:617,755-756,822,853`) — the three-face contract is UNIMPLEMENTABLE without flipping them to nullable. Classification: **breaking under standard GraphQL rules** (non-null → nullable); survivable here ONLY because clients are co-generated and co-deployed with the schema — that co-deployment is the license, and it must be said, not assumed | `{scope}/api.yaml` type properties + generated SDL | GAP |
+| The `order_tracking` screen-binding row: the pin "never poll `order(id)` to null" requires `order_tracking`'s **bindings and window state** to change — the screen contract promises `paymentStatus`/`operationStatusChanged` that the screen never binds (`restaurant_frontoffice.yaml:422-438`); the acceptance-first "confirming…" window has no bound truth channel until it does | `specs/screens/restaurant_frontoffice.yaml` `order_tracking` | GAP |
 | Board rows never droppable: `View_DeliveryJob` self-sufficiency + resolver policy drop→degrade-loud | `projection_views.yaml#/View_DeliveryJob` + generator emitter | GAP (resolver policy) |
 | History silent-drop removed (`orders` resolver): degraded row instead | generator emitter for nav joins | GAP |
 | Erasure-receipt admin surface: `OrderDeleted` ledger projection + admin query + screen | `specs/database/` + `ordering/api.yaml` + screens | GAP ×3 |
@@ -258,8 +277,10 @@ offboarding and erasure are three different journeys.**
 partnership stage — wrong for ACTIVE_PARTNER (would flip orderable and kill their storefront
 ordering). Close with a write-side guard: `OptOutRestaurantListing` rejected for ACTIVE_PARTNER
 (new error, e.g. `ListingOptOutNotApplicable`: "partner offboarding is a different journey").
-Fallback: a separate orthogonal `delisted` boolean. Journeys satisfied by either; enum+guard is
-the smaller change.
+That guard closes only ONE of two doors — the enum value is also a legal payload of the ADMIN
+`changeRestaurantListingStatus`, so D4's guard set must also reject `OPTED_OUT` as source AND
+target there (see D4). Fallback: a separate orthogonal `delisted` boolean, which makes both doors
+unspellable by construction. Journeys satisfied by either; enum+guards is the smaller change.
 
 **Consequences under the recommendation**: storefront host unchanged; order history unchanged;
 marketplace hidden; prospection stopped permanently with reason on record. Also decide
@@ -340,10 +361,24 @@ Each decision carries per-option trade-offs; the recommended option is marked.
 
 ### D4 — `OPTED_OUT` shape: enum value + write-side guard vs a separate orthogonal `delisted` boolean
 
+**The guard closes one door of two.** Adding `OPTED_OUT` to `RestaurantListingStatus` makes it a
+legal payload value of the ADMIN `changeRestaurantListingStatus` mutation
+(`network/api.yaml:195-197`; `ChangeRestaurantListingStatus` accepts any enum value,
+`network/commands.yaml:359-367`) — which opens an unguarded path **INTO** opted-out (no GBP proof,
+no ACTIVE_PARTNER check) and, worse, **OUT of it**: an admin status flip silently clears a GDPR
+Art. 21-shaped objection and re-lists the owner. The enum option is honest only if the guard ALSO
+makes `ChangeRestaurantListingStatus` reject `OPTED_OUT` as **source AND target** — `OPTED_OUT` is
+entered only via `OptOutRestaurantListing` and left only via the designed re-list/claim path.
+
 | Option | Pros | Cons |
 |---|---|---|
-| **`OPTED_OUT` enum value + guard: `OptOutRestaurantListing` rejected for ACTIVE_PARTNER with a new error (e.g. `ListingOptOutNotApplicable`)** — **RECOMMENDED** | The smaller change: one enum value, one fold arm, one guard; a single column keeps every reader's filter trivial; the guard names the domain truth ("partner offboarding is a different journey") as a designed rejection | Conflates marketplace visibility with partnership stage inside one enum — safe ONLY because the guard makes OPTED_OUT unreachable for ACTIVE_PARTNER; new error carries ADR-0032 completeness cost (test + rules link — header Concern) |
-| Separate orthogonal `delisted` boolean | Clean separation of concerns: visibility and funnel stage never share a column; no guard needed | Second column every browse/search/shelf/prospection reader must remember to consult (a forgotten filter re-exposes the owner); more spec surface (column, fold, filters ×N) for the same journeys — the fallback if the PO rejects the enum conflation |
+| **`OPTED_OUT` enum value + guards: `OptOutRestaurantListing` rejected for ACTIVE_PARTNER with a new error (e.g. `ListingOptOutNotApplicable`), AND `ChangeRestaurantListingStatus` rejecting `OPTED_OUT` as source and target** — **RECOMMENDED** | The smaller change: one enum value, one fold arm, two write-side guards; a single column keeps every reader's filter trivial; the guards name the domain truths ("partner offboarding is a different journey"; "an objection is not an admin toggle") as designed rejections | Conflates marketplace visibility with partnership stage inside one enum — safe ONLY while BOTH doors stay guarded: the ACTIVE_PARTNER guard alone leaves `changeRestaurantListingStatus` a legal path into and out of `OPTED_OUT`; two new errors carry ADR-0032 completeness cost (tests + rules links — header Concern); every future writer to `listing_status` must respect the invariant, which is convention, not type |
+| Separate orthogonal `delisted` boolean | Clean separation of concerns: visibility and funnel stage never share a column; **no second door exists by construction** — `changeRestaurantListingStatus` cannot spell `OPTED_OUT` at all, so neither the unguarded entry nor the objection-clearing exit is representable. The two-door finding materially strengthens this option: what the enum buys with two guards, the boolean buys with the shape of the data | Second column every browse/search/shelf/prospection reader must remember to consult (a forgotten filter re-exposes the owner); more spec surface (column, fold, filters ×N) for the same journeys |
+
+The recommendation stands — enum + both guards remains the smaller change — but the tipping
+argument is real: if the guard set grows again, or the PO weighs "unspellable beats guarded"
+(compiler-first doctrine, ADR-20260803-234035, applied to the data shape), the orthogonal boolean
+is the stronger design, not merely the fallback.
 
 ### D5 — Erased-restaurant storefront host: claim-landing fall-through (current) vs parked "closed" page vs plain 404
 
@@ -364,7 +399,13 @@ siblings [#346](https://github.com/TheCaptainCompany/captain-food/issues/346) an
    silent-drop (`query.rs:194,349`) and hard-error (`query.rs:191,364` et al.) with the
    degrade-loud policy **in the emitter** (header Concern — coordinated with the
    [#348](https://github.com/TheCaptainCompany/captain-food/issues/348) slices); add the "live
-   orders never tombstone" test.
+   orders never tombstone" test. **In scope of the same rewrite — the peak hazard**: `orders`,
+   `carts` and `prospectionPipeline` currently load the ENTIRE Restaurant table into a
+   per-request HashMap (`query.rs:340-346`, `:298-304`, `:278-284`) — against the ~200k SIRENE
+   universe §B describes, that is a Friday-peak outage on the money-history path. Step 1 rewrites
+   exactly these bodies, so it scopes a by-id batch fetch (hydrate only the referenced
+   restaurants) — or names that follow-up explicitly rather than leaving the full-table load
+   behind the new policy.
 2. **BEFORE the sweep**: `OrderTracking.restaurant_name`/`phone` (event-carried preferred, D2) +
    expired-order screen, history footer copy, parked-storefront host behaviour (D5).
 3. **The sweep itself** ([#194](https://github.com/TheCaptainCompany/captain-food/issues/194)):
@@ -405,9 +446,14 @@ Copied to the tracking issues' checklists on approval (README convention):
 - The acceptance-first window copy and its timeout (when does "confirming…" become an error
   state?) — no pinned copy/spec exists (§A.3, row 1).
 - The history footer's `{years}` value: bind to `ORDER_RETENTION_WINDOW_DAYS` or fix the copy?
-- Does the rider `myDeliveries` silent drop (`query.rs:162-169`) land here (step 1) or ride the
-  [#348](https://github.com/TheCaptainCompany/captain-food/issues/348) rider slices? Same policy
-  either way; one owner must be named.
+- Not a question any more — the ownership answer, recorded here because both proposals share the
+  edge: the generated resolver join policy — silent-drop (`query.rs:162-169`, `:194`, `:349`,
+  including the rider `myDeliveries` instance) and hard-errors (`query.rs:191`, `:364` et al.) —
+  is owned ONCE, by **this proposal's step 1** (emitter-level, before the
+  [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) sweep). The
+  [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) rider slices 3/4/7
+  regenerate on top of it and are never dispatched concurrently with it (mirrored in that
+  proposal's §6 coordination note).
 
 ## H. Verification plan
 

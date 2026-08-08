@@ -4,6 +4,14 @@
 - **Date**: 2026-07-26
 - **Tracking issue**: [#204 "Epic: delivery execution — deliverability, the rider API surface, and run failure recovery"](https://github.com/TheCaptainCompany/captain-food/issues/204)
 - **Realized by**: _(filled at completion)_
+- **Scope split (2026-08-08)**: the rider/delivery **write surface** (the former #187 half) is now
+  designed and sliced by
+  [PROP-20260808-141817 "The rider/delivery write surface: journeys, vocabulary verdict, and V0 slices"](PROP-20260808-141817-rider-delivery-write-surface.md),
+  whose slices land under
+  [#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348).
+  This proposal and [#204](https://github.com/TheCaptainCompany/captain-food/issues/204) keep
+  **deliverability (D1), proof of delivery (D2), recovery automation (D3), pool filtering (D4) and
+  rider↔customer contact (D5)**. This proposal is NOT superseded.
 
 ---
 
@@ -43,9 +51,12 @@ an order permanently with no operator remedy.
 
 ## 2. Recommended approach
 
-1. **#187 — expose the missing mutations**, starting with `RegisterRider`/`UpdateRiderInfo`
-   (onboarding) and `DeclineDelivery`/`ReportDeliveryIssue` (the run-time paths). The domain work is
-   done and green; this is API surface plus screens, which makes it unusually cheap for its value.
+1. **The rider/delivery write surface — moved.** Its design now lives in
+   [PROP-20260808-141817 "The rider/delivery write surface: journeys, vocabulary verdict, and V0 slices"](PROP-20260808-141817-rider-delivery-write-surface.md):
+   four persona journeys, the vocabulary verdict (the wired offer/accept vocabulary is canonical)
+   and 8 value-ordered V0 slices covering onboarding, decline, issue lifecycle, assignment-failure
+   recovery, the ops surface and customer reassurance — replacing the former #187 scope of this
+   proposal only.
 2. **#181 — delivery area**, postal-code sets first (see D1), closing the `OutsideDeliveryArea` TODO.
 3. **#188 — run recovery**: an abandonment sweep, pool filtering, and proof of delivery.
 
@@ -91,12 +102,27 @@ Note the asymmetry worth designing around: a stalled `PICKED_UP` job means **the
 rider**. Returning that job to the pool is not enough — the order likely needs re-preparation, which
 is a restaurant-facing decision, not an automatic re-offer.
 
+**Shared release vocabulary (2026-08-08)**: the automated stall sweep's `ASSIGNED → PENDING`
+release must emit **the SAME release event** as the manual "Libérer et relancer" action designed by
+[PROP-20260808-141817 §1b step 4 / decision D3](PROP-20260808-141817-rider-delivery-write-surface.md)
+— whatever name that decision settles on (`DeliveryAssignmentReleased` recommended there, vs keeping
+`DeliveryUnassignedFromPartner`) — **never a twin event** for the automated case. And the release
+edge covers `ASSIGNED` only: it does not cover `PICKED_UP` and must not pretend to — once the food
+is with the courier, return-to-pool is wrong and re-preparation is the restaurant's decision.
+
 ### D4 — Job-pool filtering
 
 Recommended: **filter by city, by the restaurant's zone, and by `RiderStatus`**. Today a rider in
 Tours is offered work anywhere in France, and an `OFFLINE` or `SUSPENDED` rider still sees the pool —
-so the toggle shipped by [#95](https://github.com/TheCaptainCompany/captain-food/issues/95) does not
-do what its label says.
+so the toggle shipped by
+[#95 "rider online/offline toggle"](https://github.com/TheCaptainCompany/captain-food/issues/95)
+does not do what its label says.
+
+Note the interaction with
+[PROP-20260808-141817 slice 4](PROP-20260808-141817-rider-delivery-write-surface.md) (`rider-decline`):
+that slice adds a per-rider decline exclusion (`View_RiderDeclinedJobs`) to `myDeliveries`. Both
+filters shape the same query — the pool filter (city/zone/`RiderStatus`) and the decline exclusion
+must compose, not race each other in two separate changes.
 
 ### D5 — Rider↔customer contact
 
@@ -108,20 +134,11 @@ courier a customer's personal number.
 
 ## 4. Screen mockups
 
-### 4.1 Rider onboarding (#187) — does not exist today
+### 4.1 Rider onboarding — moved
 
-```
-+--------------------------------------------------+
-| Become a Captain courier                          |
-+--------------------------------------------------+
-| Phone      [ 06 __ __ __ __ ]   [ Send code ]     |
-| Name       [                               ]      |
-| City       [ Tours                       v ]      |
-| Vehicle    ( ) Bike  (o) Scooter  ( ) Car         |
-+--------------------------------------------------+
-|                        [ Create my account ]      |
-+--------------------------------------------------+
-```
+The rider onboarding journey, mockups and slices now live in
+[PROP-20260808-141817 §1a and §5b](PROP-20260808-141817-rider-delivery-write-surface.md)
+(`rider-identity`, slice 3).
 
 ### 4.2 Rider job list, filtered (#188, D4)
 
@@ -220,23 +237,11 @@ sequenceDiagram
     end
 ```
 
-### 5.3 Rider onboarding through the missing mutation (#187)
+### 5.3 Rider onboarding through the missing mutation — moved
 
-```mermaid
-sequenceDiagram
-    participant RD as Rider app
-    participant G as /rider/graphql
-    participant H as register_rider (exists at commands.rs:1501)
-    participant ES as PgEventStore
-    participant P as Rider read model (new, shared with #144)
-
-    RD->>G: registerRider(...)
-    Note over G: mutation MISSING on main - this is the gap
-    G->>H: RegisterRider
-    H->>ES: RiderRegistered { authRef, ... }
-    ES-->>P: project authRef -> riderId
-    Note over P: also fixes myDeliveries, which today parses the<br/>Supabase sub directly as a RiderId
-```
+The onboarding flow (including the `View_Rider` read model, the `authRef` envelope-derivation and
+the `myDeliveries` Supabase-subject shim fix) is now specified by
+[PROP-20260808-141817 slice 3 and §5a](PROP-20260808-141817-rider-delivery-write-surface.md).
 
 ## 6. Alternatives considered for the cluster
 
@@ -251,9 +256,9 @@ it would mean deleting `independent` from the Tours ranking, not leaving it seed
 
 ## 7. Verification plan
 
-- **#187** — each new mutation reached by ≥1 story step (the `op-uncovered-by-story` gate); a rider
-  can register, go online, see a job, decline it, and report an issue end to end; `myDeliveries`
-  scopes via the projected `authRef` rather than a coincidental UUID equality.
+- **Rider write surface** — verified under
+  [PROP-20260808-141817 §10](PROP-20260808-141817-rider-delivery-write-surface.md)'s plan (its
+  slices carry the story-step, `authRef`-bridge and end-to-end assertions that used to sit here).
 - **#181** — the TODO is gone and the guard is real; the behaviour test asserts `OutsideDeliveryArea`
   **specifically**, not as one of an allowed set; the storefront refuses out-of-area addresses at
   address entry.

@@ -78,7 +78,7 @@ saying "yes to all" is a reasonable use of five minutes.
 | PROP-171500 D3 | Sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) | Immediately after it lands |
 | PROP-172000 D3 | The drifted product spec | Rewrite §4–§5 to match ADR-0034 |
 | PROP-172000 D4 | Fix the four dead actions with the rule | Same PR — a rule landing red breaks "keep main green" |
-| PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` |
+| PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` — composes with [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) slice 4's per-rider decline exclusion on the same `myDeliveries` query (the rider write surface itself moved to that proposal, §20) |
 | PROP-172500 D5 | Rider↔customer contact | Route through the order conversation, not phone numbers |
 | PROP-165500 D6 | Menu scheduling | Defer, but record it — needed when combos land |
 
@@ -102,7 +102,7 @@ saying "yes to all" is a reasonable use of five minutes.
 | PROP-172000 D2 | Rejection reasons: enum or free text | Controlled enum + optional note | Rejection reasons are the analytics that tell you which restaurants to coach |
 | PROP-172500 D1 | Delivery-area model | Postal-code sets now, geocoding next | Geocoding unlocks distance fees and honest ETAs — sequence it deliberately |
 | PROP-172500 D2 | Proof of delivery | Handover photo over [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) | `NOT_DELIVERED` claims are unadjudicable today, and [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) is already routing them |
-| PROP-172500 D3 | Reclaiming an abandoned run | Rider release + stall sweep | A stalled `PICKED_UP` job means the food is with the rider — re-offering is wrong, it needs re-cooking |
+| PROP-172500 D3 | Reclaiming an abandoned run | Rider release + stall sweep | A stalled `PICKED_UP` job means the food is with the rider — re-offering is wrong, it needs re-cooking. **Dependency**: the sweep's release must emit the SAME event as the manual release, so this now depends on [PROP-20260808-141817 D3](PROP-20260808-141817-rider-delivery-write-surface.md)'s naming decision (§20) — never a twin event |
 
 ---
 
@@ -473,6 +473,50 @@ registered. Related, no decision needed: [#378](https://github.com/TheCaptainCom
 emits JSON Schemas FROM the validator model (generated, never hand-written) for authoring-time
 feedback — the validator stays the semantic authority (`REF_CONTRACT` already gates
 $ref-kind-appropriateness).
+
+---
+
+## 20. The rider/delivery write surface — PROP-20260808-141817
+
+[PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)
+([#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)).
+`Proposed`, all decisions **open**. Derives the four delivery persona journeys and answers the
+epic's vocabulary question (the wired offer/accept vocabulary is canonical); decomposes into 8 V0
+slices (+3 V1). Absorbs the rider-write-surface half of PROP-20260726-172500 (whose D1/D2/D3/D4/D5
+rows above remain that proposal's). **Two unchecked Concerns mechanically block `Approved`**: the
+D3 rename (event vocabulary is a PO call) and the slice-2 validator-credit semantics (a PM-send
+credit must require a resolvable PM edge, never an annotation).
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D1 | `AssignDeliveryToPartner` family: retire vs keep for manual dispatch | **Retire** — no journey pushes a job at a partner; an assignment no courier agreed to carry is the oversell failure mode as an event type |
+| D2 | `UpdateDeliveryPartnerStatus`: retire vs keep as a command-wrapped fact | **Retire** — a command wrapping an external fact (ADR-0004); the ACL already records it as inbound `DeliveryStatusUpdated` |
+| D3 | `Unassign…` naming: keep as-is vs generalize to `DeliveryAssignmentReleased` | **Generalize/rename** — one release step for both courier kinds; cheapest now, before production events exist (held as an unchecked Concern; decide before slice 6) |
+| D4 | Issue model | **One open issue per job** (V0) — the honest model for `issueId`-less commands; history stays in the log |
+| D5 | `ConsumeCustomerCredit` shape | **`PlaceOrder` payload flag + PM step** — consume atomic with payment (ADR-20260726-163737 §checkout-consume) |
+| D6 | How does `PlaceReplacementOrder` get spec-checkable dispatch coverage? (no PM step sends it — wrapper-seam dispatch) | **A declared `sends:` on the wrapper-seam receive** — parallel to the existing declared `emits:` precedent (`ordering/processmanager.yaml:194-199`), checkable both ways; alternatives: extend the step DSL (bigger), or leave it in the warning baseline (erodes the diff discipline) |
+
+---
+
+## 21. Disappearance is a designed state — PROP-20260808-142532
+
+[PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md)
+([#398 "Decide the API contract for tombstoned rows before the #194 projection sweep"](https://github.com/TheCaptainCompany/captain-food/issues/398)
++ [#347 "Decide the last annotated read-model hole: Restaurant fed by RestaurantListingOptedOut"](https://github.com/TheCaptainCompany/captain-food/issues/347)).
+`Proposed`, all decisions **open**. One principle, two faces: disappearance is always a designed
+state; physical row removal is reserved for legal erasure. **Three unchecked Concerns mechanically
+block `Approved`**: D2 is THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
++ the replacement-order emitter) needing PO event sign-off; the resolver-policy change lands in the
+emitter with NO generic seam (the `Option<_>` type flip + one shared hydration helper, never a
+source-text scanner); the OPTED_OUT guard errors carry ADR-0032 completeness.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D1 | API contract for dangling/tombstoned references | **The scoped mix** — projector-/event-carried composition for money-history surfaces + a thin pinned dangling policy (silent drop and join hard-errors banned) |
+| D2 | `OrderTracking` restaurant name/phone | **Event-carried on `OrderPlaced`** — survives projection rebuild after restaurant stream deletion; three artifacts, per the header Concern |
+| D3 | [#347](https://github.com/TheCaptainCompany/captain-food/issues/347): tombstone vs `listing_status` fold vs vestigial removal | **Fold to a new `OPTED_OUT` value** — a tombstone is self-defeating under SIRENE re-import; also closes the live cold-email exposure (`ProspectionPipeline` does not fold the opt-out today) |
+| D4 | `OPTED_OUT` shape | **Enum value + BOTH write-side guards** (`OptOutRestaurantListing` rejected for ACTIVE_PARTNER, AND `ChangeRestaurantListingStatus` rejecting `OPTED_OUT` as source and target — the guard closes two doors, not one); the orthogonal `delisted` boolean is materially strengthened by the two-door finding and stands ready if the PO prefers unspellable over guarded |
+| D5 | Erased-restaurant storefront host | **Parked "closed" page** — never the claim-landing fall-through (invites resurrection of a dead business's address), better than a bare 404 |
 
 ---
 
