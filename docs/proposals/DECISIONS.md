@@ -516,8 +516,15 @@ credit must require a resolvable PM edge, never an annotation).
 + [#347 "Decide the last annotated read-model hole: Restaurant fed by RestaurantListingOptedOut"](https://github.com/TheCaptainCompany/captain-food/issues/347)).
 `Proposed`. **D1 and D5 decided by ensemble consent** —
 [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
-customer veto window open. **D2, D3, D4 remain the customer's** (money-path event vocabulary;
-legal-shaded opt-out posture; the enum-vs-boolean guard). D3/D4 are now grounded by the
+customer veto window open. **D2 DECIDED by the customer, 2026-08-08: yes — and WIDENED into a
+principle**: the order copies ALL context needed to autonomously build the customer invoice
+(customer directive: "the order must copy all information about the context of the order to be
+autonomous to build invoice to be sent/displayed to the customer"). Restaurant name/phone are the
+floor, not the scope — the frozen checkout snapshot must carry the full invoicing context
+(restaurant legal identity incl. invoicing fields, per-line VAT context per the split French
+rates, fees, totals); the exact field inventory is enumerated in plan mode at realization, and the
+compliant-receipt legal precondition (CLAUDE.md) now binds the snapshot design. **D3, D4 remain
+the customer's** (legal-shaded opt-out posture; the guard shape). D3/D4 are now grounded by the
 legal-specialist's obligation brief ([docs/legal/BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md),
 exposures in [#401](https://github.com/TheCaptainCompany/captain-food/issues/401)): the fold's
 suppression-list shape is legally REQUIRED, and the brief's audit-defensibility verdict tips D4 to
