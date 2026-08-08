@@ -483,9 +483,15 @@ $ref-kind-appropriateness).
 `Proposed`. **D1, D2, D4, D6 decided by ensemble consent** —
 [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
 customer veto window open. **D5 decided by the customer, 2026-08-08: as recommended**
-(`PlaceOrder` payload flag + PM step). **D3 delegated by the customer to the architect lens**
-(Evans/Young — ubiquitous language is the specialty; "if we start with specialisation we finish
-with specialisation") — verdict pending, recorded when it lands. Derives the four delivery persona journeys and answers the
+(`PlaceOrder` payload flag + PM step). **D3 DECIDED by the architect lens, 2026-08-08** (customer
+delegation — "if we start with specialisation we finish with specialisation"): rename now, while
+zero events are emitted — event `DeliveryAssignmentReleased`, command `ReleaseDeliveryAssignment`,
+mutation `releaseDeliveryAssignment` (the verdict OVERRIDES the proposal's `unassignDelivery`
+mutation name: an `unassign`-named mutation over a release-named event reintroduces the second
+vocabulary the rename kills). Actor-neutral by design — manual board action, future rider
+self-release and the PROP-172500 stall sweep share ONE fact, releaser on the envelope (ADR-0041);
+the ASSIGNED→PENDING-only scope is part of the name's meaning (PICKED_UP is a different journey).
+Proposal-text reconciliation to `releaseDeliveryAssignment` rides the next docs batch. Derives the four delivery persona journeys and answers the
 epic's vocabulary question (the wired offer/accept vocabulary is canonical); decomposes into 8 V0
 slices (+3 V1). Absorbs the rider-write-surface half of PROP-20260726-172500 (whose D1/D2/D3/D4/D5
 rows above remain that proposal's). **Two unchecked Concerns mechanically block `Approved`**: the
