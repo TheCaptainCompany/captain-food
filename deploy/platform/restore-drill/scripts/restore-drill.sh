@@ -76,9 +76,14 @@ kubectl -n "${PROD_NS}" get secret cnpg-object-storage -o json \
   | kubectl -n "${DRILL_NS}" apply -f - \
   || fail "cnpg-object-storage secret missing or unreadable in ${PROD_NS} -- unprovisioned? (README checklist item 2)"
 # The copied credential is read+write to the ONLY backup of the event log; bound its lifetime
-# to THIS RUN whatever happens next — without the trap, a failure between here and teardown
-# leaves it in the scratch namespace until next Monday's cleanup-previous (7-day exposure).
+# to THIS RUN — without the trap, a failure between here and teardown leaves it in the scratch
+# namespace until next Monday's cleanup-previous (7-day exposure). INT/TERM convert to a normal
+# exit so the EXIT trap also fires when activeDeadlineSeconds SIGTERMs an overrunning drill
+# (POSIX EXIT traps do not run on untrapped signal death). SIGKILL/OOM remains uncoverable —
+# the same accepted blind spot the CronJob records for issue-filing; cleanup-previous is the
+# backstop for that path.
 trap 'kubectl -n "${DRILL_NS}" delete secret cnpg-object-storage --ignore-not-found' EXIT
+trap 'exit 143' INT TERM
 
 # ---- 3. recovery cluster: latest base backup + all archived WAL ----------------------------
 STEP="create-recovery-cluster"
