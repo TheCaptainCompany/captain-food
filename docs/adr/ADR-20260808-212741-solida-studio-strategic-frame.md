@@ -92,3 +92,31 @@ Consequences:
 - The studio frame **never outranks the first product's users**: reuse is harvested from
   working software, not designed speculatively ahead of it (the focus-coach lens exists to hold
   this line). Solida Food must succeed for the studio thesis to mean anything.
+
+## 6. Same-day addendum — the maintainer is the AI; mission-first restated
+
+Two customer clarifications the same evening, recorded verbatim because they recalibrate how
+every lens judges this repo:
+
+> "I'm not able to maintain myself Rust — I'm relying on Claude Code for it. I develop the
+> product the way I think, based on the sequence diagrams I see, and I realised that AI took
+> shortcuts and did not respect simple layer isolation, so I decided to design by structural
+> isolation to avoid this kind of risk."
+
+- **The structural-isolation program is the safety system of an AI-maintained codebase**, not
+  optional rigor: when the maintainer is an AI, the compiler, crate boundaries and validators
+  ARE the code review (this is the lived origin of the compiler-first doctrine,
+  ADR-20260803-234035). "Gold-plating" judgments must ask *what shortcut does this structure
+  make unspellable* before calling it waste.
+- **Sequence diagrams are the customer's review surface** — the existing proposal requirement
+  (per-flow mermaid diagrams, product-owner directive 2026-07-26) is how the product owner
+  reads the system; it is load-bearing, not documentation polish.
+
+> "The product is mission-oriented. We don't need restaurant validation to make the product —
+> we are making the product to resolve societal issues for the restaurants and the riders."
+
+- Restates the mission-first stance (epic
+  [#400 "Epic: reality-sensing infrastructure — agents closer to customers, mission metrics as contracts"](https://github.com/TheCaptainCompany/captain-food/issues/400)):
+  **validation is never a precondition for building**; working software in real hands is the
+  mission being served and a learning input, not permission. The near-term focus the customer
+  named: **go to production and make the happy paths work.**
