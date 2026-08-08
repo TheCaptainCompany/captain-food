@@ -66,10 +66,16 @@ executor dispatch pastes the exact issue titles it needs (executors cannot look 
   cold, and BATCH questions — the customer checks in periodically; one visit should clear the
   whole queue. For a batch of 3+ decisions, use the interactive decision form
   (DECISIONS.md "How to decide" way #4; recipe in sessions.md).
-- **Status discipline**: post a concise status as session text at every meaningful transition
-  (dispatched, PR opened, merged, blocked, question queued). The customer reads top-down on
-  check-in — the latest state must be findable in one screen. If push notifications are
-  available, use one only when the question queue goes from empty to non-empty or the run ends.
+- **Status discipline** (customer directive, 2026-08-08: *"inform me every 5 minutes"*): while
+  any work is in flight, post a concise status **every ~5 minutes** via a durable re-armed
+  wake-up chain (`send_later`, 1-minute floor) — a one-line heartbeat ("executor still
+  compiling, no transition") is the correct content when nothing changed — AND at every
+  meaningful transition (dispatched, PR opened, merged, blocked, question queued). Keep a
+  ~60-min fallback wake armed besides, so a broken 5-min chain cannot silently end supervision.
+  The customer reads top-down on check-in — the latest state must be findable in one screen.
+  This cadence spends the weekly budget markedly faster; the customer chose it knowingly
+  (2026-08-08) after the cost was stated. If push notifications are available, use one only when
+  the question queue goes from empty to non-empty or the run ends.
 
 ## Ending a run
 
