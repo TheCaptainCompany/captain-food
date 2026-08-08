@@ -31,13 +31,21 @@ Last reconciled: **2026-08-08 (night)** · **5 open decisions** — the five swe
 
 ## How to decide
 
-Three ways, in increasing formality. All three are fine; pick per decision.
+Four ways, in increasing formality. All are fine; pick per decision.
 
 1. **Answer in this file** — put the choice in the `Decision` column with the date. Cheapest, good for
    the batch-approvable set below.
 2. **Comment on the proposal's tracking issue** — better when the answer needs reasoning that future
    readers will want.
 3. **Write an ADR** — required for anything cross-cutting (`docs/adr/ADR-YYYYMMDD-HHMMSS-*.md`).
+4. **The interactive decision form** (product-owner directive, 2026-08-08: *"I liked what you did
+   with the html file to let me answer in my tempo… keep this approach for other sessions"*) —
+   when a BATCH of decisions goes to the customer, publish the brief as an interactive artifact:
+   one card per decision (question, per-lens arguments, recommendation) with tap-choices
+   **Approve as recommended / Different choice / Let's discuss** plus a free-text box, progress
+   saved locally, and a "Copy my answers" button producing a markdown answer sheet the customer
+   pastes back into the session. The 2026-08-08 ten-decision brief closed same-day this way.
+   Mechanics for rebuilding it: [docs/claude/sessions.md](../claude/sessions.md).
 
 Then flip the proposal's `Status` to `Approved`, naming what recorded the decision. **Do not rewrite
 the proposal to match the answer** — it is a historical record of what was on the table; the decision

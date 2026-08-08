@@ -719,3 +719,22 @@ yields an anonymous token whose `docker-content-digest` response header on
 Hub via `hub.docker.com/v2/repositories/{org}/{repo}/tags`). Vendor the manifest BYTE-IDENTICAL
 and record url+sha256 in a PIN.json a test recomputes — a header comment inside the vendored file
 would silently break the checksum.
+
+**The interactive decision form (2026-08-08, product-owner directive: keep this approach)** — when
+a batch of decisions goes to the customer, do NOT deliver a wall of markdown: publish the brief as
+an **interactive artifact** and let them answer at their own tempo. The ten-decision brief closed
+same-day this way where the register had been accumulating for weeks. Recipe (rebuildable in any
+session): one `<article>` per decision (question, per-lens arguments, recommendation, links into
+docs/proposals); per-card widgets = three radio chips ("Approve as recommended" / "Different
+choice" / "Let's discuss") + a free textarea for questions/counter-views; `localStorage`
+persistence so answering survives visits; a sticky bar with a live "N / M answered" count. The
+RETURN PATH must be honest about artifact capabilities — there is NO shared state, so the page
+cannot send answers back: build a "Copy my answers" button that serializes choices+notes to a
+markdown answer sheet in the clipboard (toast: "paste it to Claude in the session") plus a
+"Download .md" fallback via `window.claude.downloads.save` (declare `capabilities:
+{downloads:true}`). The pasted sheet is then processed like any customer answer: record in
+DECISIONS.md + ADR with VERBATIM quotes, run "Let's discuss" items through the relevant specialist
+lenses, and close the loop in the same session. Reference run: BRIEF-20260808-customer-decisions.md
+→ ADR-20260808-195315 + ADR-20260808-203443. Pair it with per-chapter GitHub decision-thread
+issues only if the customer wants an async back-and-forth channel too (issue comments do NOT wake
+a session — that channel needs a Routine or an explicit "check the threads").
