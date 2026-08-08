@@ -822,16 +822,22 @@ pub async fn router() -> Router {
                 // so operationStatus never reports a dead run as pending forever. Always-on with a
                 // DB, slow tick; retires WITH command_journal itself.
                 {
-                    let sweep_journal = infrastructure::PgCommandJournal::new(pool.clone());
+                    // ONE shared pass, two schedulers (ADR-20260808-062933): this loop and the
+                    // generated `worker-journal-sweep` CronJob bin both call
+                    // `integrations::journal_sweep` — window and cadence live there, never here.
+                    let sweep_pool = pool.clone();
                     tokio::spawn(async move {
-                        use application::journal::CommandJournal as _;
+                        use infrastructure::integrations::journal_sweep;
                         loop {
-                            match sweep_journal.sweep_stale_received(chrono::Duration::minutes(10)).await {
+                            match journal_sweep::sweep_stale_received_once(&sweep_pool).await {
                                 Ok(0) => {}
                                 Ok(n) => tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED"),
                                 Err(e) => tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed"),
                             }
-                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                            tokio::time::sleep(std::time::Duration::from_secs(
+                                journal_sweep::SWEEP_INTERVAL_SECONDS,
+                            ))
+                            .await;
                         }
                     });
                 }
