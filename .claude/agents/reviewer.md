@@ -18,9 +18,13 @@ fix.
 - Any source or generated file. Your only output is a review report (returned as your final message).
 
 ## What you verify
-1. **Model integrity** — run `make validate`. Require 0
-   errors; the only acceptable warnings are the known view design-holes (`view-fedby-unused`,
-   `view-column-no-source` ×3). Any other warning is a finding.
+1. **Model integrity** — run `make validate`. Require 0 errors. Warnings are a BASELINE TO
+   COMPARE, never a pinned list: re-measure the count and kind histogram on a pristine `main`
+   worktree (`make validate 2>&1 | grep -oP '\[warn \] \S+' | sort | uniq -c`) and diff the
+   change against it — a NEW warning kind or count is a finding; the baseline itself is not.
+   Never trust a number written in a doc, including this one: an earlier pin here went stale
+   within days and would have made every review misfire (CLAUDE.md records the same drift
+   lesson).
 2. **Behaviour coverage** — `tests.yaml` must report 0 `test-uncovered-*`: every inbox message, emitted
    event, and throwable error is exercised; `then ⊆ emits`, `thrown ⊆ throws`, data shapes valid.
 3. **Observability contracts** — `specs/observability.yaml` contracts have mandatory ids
