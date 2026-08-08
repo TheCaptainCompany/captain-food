@@ -1,0 +1,12 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# The STANDING scratch namespace (§2b practice 4). Standing rather than created-per-run so every
+# drill permission is a namespace-scoped Role here plus resourceNames-scoped gets in captain-prod
+# -- a job that mints namespaces needs cluster-wide create/delete, which is exactly the blast
+# radius D7 keeps outside every standing role. The drill wipes its RESOURCES (cluster, copied
+# secret) at start and end of each run; the namespace itself is desired state.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: captain-restore-drill
+  labels:
+    app.kubernetes.io/part-of: captain-food

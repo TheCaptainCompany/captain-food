@@ -1,0 +1,52 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# Everything the drill may do in ITS OWN scratch namespace. The production half of its access
+# (three named-secret gets + cluster-status get) lives in ../cnpg/rbac-drill-access.yaml.
+# Namespace stamped by the kustomization (captain-restore-drill).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: restore-drill
+  labels:
+    app.kubernetes.io/part-of: captain-food
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-drill
+  labels:
+    app.kubernetes.io/part-of: captain-food
+rules:
+  # The drill's whole vocabulary: create/inspect/delete the throwaway recovery Cluster ...
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  # ... place the copied object-storage credentials next to it (apply = create-or-patch) ...
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  # ... watch the recovery come up, and run the verification SQL inside the restored pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Diagnostics for the failure issue (scheduling/recovery events).
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-drill
+  labels:
+    app.kubernetes.io/part-of: captain-food
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: restore-drill
+    namespace: captain-restore-drill

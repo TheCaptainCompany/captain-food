@@ -1,0 +1,12 @@
+# PLATFORM SOURCE, hand-written (#360) -- see README.md in this directory.
+# The whole platform desired state. NOTHING APPLIES THIS TODAY (gate-then-stabilize): Argo CD
+# (#366) points here at cutover. First-ever apply is ordered by hand (README checklist item 4):
+# operator first with --server-side (CRD establishment races a single-shot client apply), then
+# the rest; Argo's retry loop makes the ordering moot afterwards. cnpg/ha/ is deliberately
+# absent -- it is the gated ladder overlay (ADR-20260807-114122).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cnpg-operator
+  - cnpg
+  - restore-drill

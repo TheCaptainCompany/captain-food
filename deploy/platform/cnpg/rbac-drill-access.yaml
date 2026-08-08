@@ -1,0 +1,39 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# What the restore drill may touch IN PRODUCTION, exhaustively: read three named secrets and
+# read the cluster status. No exec, no writes, no list (resourceNames-scoped gets only) -- the
+# drill rehearses recovery FROM THE ARCHIVE; production is compared against over the network as
+# the SELECT-only claude_ro role, never operated on (D7 posture). Lives in cnpg/ (not
+# restore-drill/) because these are grants ON production resources, and because the
+# restore-drill kustomization stamps everything with the scratch namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-drill-prod-read
+  namespace: captain-prod
+  labels:
+    app.kubernetes.io/part-of: captain-food
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["cnpg-object-storage", "claude-ro-credentials"]
+    verbs: ["get"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: ["captain-db"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-drill-prod-read
+  namespace: captain-prod
+  labels:
+    app.kubernetes.io/part-of: captain-food
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-drill-prod-read
+subjects:
+  - kind: ServiceAccount
+    name: restore-drill
+    namespace: captain-restore-drill

@@ -1,0 +1,61 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# Hourly WAL-archiving / backup-recency check (s2b practice 4's alert half): a status-only read
+# of the production Cluster resource, filing a deduplicated GitHub issue when the recovery path
+# degrades. Hourly because at instances: 1 the archive IS the recovery path (ADR-20260807-114122)
+# -- a broken archive discovered by next Monday's drill is up to a week of exposure; discovered
+# within the hour it is an evening's.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: wal-archive-age
+  labels:
+    app.kubernetes.io/part-of: captain-food
+spec:
+  schedule: "15 * * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry: an hourly check may hit a transient API blip; twice in a row is real.
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: captain-food
+            app.kubernetes.io/name: wal-archive-age
+        spec:
+          serviceAccountName: restore-drill
+          restartPolicy: Never
+          containers:
+            - name: check
+              image: docker.io/alpine/k8s:1.34.9@sha256:72c921a10c53ab749674e828ad12b776d006481c852bba7dd89e149ceed666f3
+              command: ["/scripts/wal-archive-age.sh"]
+              env:
+                - name: BACKUP_MAX_AGE_HOURS
+                  value: "28"
+                - name: GITHUB_REPO
+                  value: TheCaptainCompany/captain-food
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: restore-drill-github-token
+                      key: token
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: restore-drill-scripts
+                defaultMode: 0555

@@ -1,0 +1,22 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# Database volumes only: `reclaimPolicy: Retain` means deleting the Cluster (or the whole
+# namespace) leaves the Cinder volume RELEASED, never deleted -- the event log is the one asset
+# that cannot be re-derived (ADR-20260807-002705 D2). The price: a retained volume is reclaimed
+# manually (console session), so NOTHING TRANSIENT may use this class -- the restore drill pins
+# the default delete-reclaim class instead (a weekly drill on Retain leaks one volume per run).
+#
+# provisioner/parameters CLONE OVH MKS's stock `csi-cinder-high-speed` class; the console session
+# verifies them against `kubectl get sc csi-cinder-high-speed -o yaml` BEFORE first apply
+# (README checklist item 3) -- OVH may rename parameters between MKS versions.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: captain-db-retain
+  labels:
+    app.kubernetes.io/part-of: captain-food
+provisioner: cinder.csi.openstack.org
+parameters:
+  type: high-speed
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer

@@ -1,0 +1,20 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# Daily base backup at 02:30 UTC -- the deadest hour for a Tours food marketplace (peak is
+# Fri/Sat 19:00-21:30 Europe/Paris; 02:30 UTC is 03:30/04:30 local). A fresher base backup
+# shortens every restore: the drill (and a real recovery) replays only the WAL since the last
+# base. `immediate: true` fires one backup at first apply so `firstRecoverabilityPoint`
+# exists on day one (README checklist item 5 -- no recoverability point, no restorable cluster).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: captain-db-daily
+  namespace: captain-prod
+  labels:
+    app.kubernetes.io/part-of: captain-food
+spec:
+  # CNPG cron has SIX fields (leading seconds): 02:30:00 UTC daily.
+  schedule: "0 30 2 * * *"
+  cluster:
+    name: captain-db
+  backupOwnerReference: self
+  immediate: true

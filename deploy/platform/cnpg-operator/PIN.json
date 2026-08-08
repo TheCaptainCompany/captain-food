@@ -1,0 +1,9 @@
+{
+  "_comment": "CloudNativePG operator pin (#360, ADR-20260807-002705 D2). cnpg-1.27.4.yaml is vendored BYTE-IDENTICAL to the upstream release manifest so this sha256 is checkable offline; the codegen test platform_operator_vendor_matches_pin recomputes it. Re-vendoring = update the file AND this pin in one reviewed change (a silent re-vendor is a supply-chain event, not a diff).",
+  "name": "cloudnative-pg",
+  "version": "1.27.4",
+  "url": "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.27/releases/cnpg-1.27.4.yaml",
+  "sha256": "fc82d09ed96175eb603182267e340ec6d8c26688028e293facf4219aa2416f57",
+  "operator_image": "ghcr.io/cloudnative-pg/cloudnative-pg:1.27.4",
+  "postgres_image": "ghcr.io/cloudnative-pg/postgresql:17.10@sha256:405d29f68759fb823da5e378e99b68194bb9f93fa47f575f0a7ae95024910f38"
+}
