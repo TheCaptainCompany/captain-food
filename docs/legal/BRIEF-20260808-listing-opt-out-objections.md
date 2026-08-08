@@ -66,4 +66,15 @@ Also note: the enum conflates the two legally distinct objections of Q1 (delist 
 7. **SIRENE re-use**: what exactly do the diffusion-status rules require of us as re-users — exclude non-diffusible EIs from import entirely, or only from public display?
 8. **Lifting**: confirm a fresh ownership-proven re-claim suffices to lift the objection for re-listing, and that renewed marketing to a returned owner needs no separate consent once a contractual relationship exists.
 
+### Account-erasure additions (E-series, 2026-08-08 — context: [BRIEF-20260808-account-erasure-two-path.md](BRIEF-20260808-account-erasure-two-path.md))
+
+- **E1 — Two-path model**: we propose deactivate (recoverable, data kept, disclosed as not-deletion) + delete (Art. 17). Confirm the model, and set the dormant-account sunset for deactivated accounts that never return (CNIL inactivity benchmark applicable? what N?).
+- **E2 — Grace window**: is a ≤30-day recoverable window before executing a deletion request compatible with Art. 17(1)/12(3)? Must immediate execution be available on explicit demand? From when does the one-month clock run?
+- **E3 — Backup horizon**: acceptable lag for purging backups/replicas after production erasure (we would document a Meta-style ≤90-day backstop in the retention schedule); conditions on restore procedures.
+- **E4 — Retention schedule sign-off**: validate the per-category carve-out table — in particular which of our artifacts count as *pièces justificatives* under L123-22, and whether the event-stream financial skeleton or an exported bookkeeping record is the right 10-year carrier.
+- **E5 — Unspent credit**: a customer with wallet credit ([#158 "Customer credit-balance ledger (GOODWILL_CREDIT resolution) — own ADR"](https://github.com/TheCaptainCompany/captain-food/issues/158) machinery) requests deletion — must we refund before erasing, may the credit extinguish, and what does the accounting record of extinguishment look like?
+- **E6 — Processor erasure proof**: Supabase holds identity as a processor — what instruction/receipt artifact satisfies Art. 28(3)(g); a deletion attestation per request or per audit period?
+- **E7 — Erasure-receipt minimality**: the completion record keeps pseudonymous references (`customerId` etc.) as the accountability proof — compatible with minimization, or does it need its own retention?
+- **E8 — Interface duties**: confirm the equal-prominence requirement between deactivate and delete under Art. 12(2) + DSA Art. 25 (dark patterns), so the UX spec can encode it as a hard rule.
+
 *This brief maps the landscape; none of it is legal advice, and items graded (b)/(c) plus all VERIFY-FIRST cites must be confirmed by licensed French counsel before launch decisions rest on them.*

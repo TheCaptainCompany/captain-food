@@ -1,9 +1,17 @@
 # PROP-20260726-165000 — Marketplace economics and money movement
 
-- **Status**: Proposed
+- **Status**: Partially approved — D1/D2 decided by the customer 2026-08-08 ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); D3/D4 by ensemble consent ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)); D5 in discussion ([BRIEF-20260808-tips-discussion.md](BRIEF-20260808-tips-discussion.md))
 - **Date**: 2026-07-26
 - **Tracking issue**: [#199 "Epic: marketplace economics and money movement — fees, payouts, VAT, invoicing, capture timing"](https://github.com/TheCaptainCompany/captain-food/issues/199)
 - **Realized by**: _(filled at completion)_
+
+> **Decision note 2026-08-08 (ADR-20260808-195315)**: **D1** = Connect, separate charges &
+> transfers, as recommended. **D2 decided DIFFERENTLY from the recommendation**: authorize at
+> checkout, **capture on delivered / picked-up** (in advance for at-table) — capture is per
+> service type, NOT on acceptance. Where this document's flows (§5.1, §7) say "capture on
+> acceptance", the decided posture supersedes them; the acceptance timeout **releases the
+> authorization** (no refund on that path). Consequence carried into D5: an after-delivery tip is
+> a post-capture second payment.
 
 ---
 
