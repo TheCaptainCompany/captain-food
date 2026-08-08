@@ -4349,6 +4349,52 @@ Catalog:
     }
 
     #[test]
+    fn view_fedby_tombstone_counts_as_a_use() {
+        // #346 — `tombstone:` is a first-class fold output: the projector routes the event to row
+        // DELETION (emit/projectors.rs), so by construction it can never map to a column `from`.
+        // The rule used to count only column sources, so a correct spec using the feature warned
+        // `view-fedby-unused` spuriously — latent, because the reorg deleted the only declaring
+        // view. Fixture: the Restaurant projection table, whose `RestaurantListingOptedOut` fedBy
+        // entry is the committed catalog's one baseline instance of the warning.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let flagged = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "view-fedby-unused")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+
+        // Inverse guard: an event that is neither a column source NOR the tombstone still warns —
+        // the committed baseline (1 × view-fedby-unused, on views.yaml/Restaurant).
+        assert!(
+            flagged(&model).iter().any(|m| m.contains("RestaurantListingOptedOut")),
+            "baseline: RestaurantListingOptedOut is fed in but mapped by no column: {:?}",
+            flagged(&model)
+        );
+
+        // Declare that event as the view's tombstone (in memory only): row deletion is a use, so
+        // the warning must clear — and no other view may start warning.
+        model
+            .defs
+            .get_mut("database/tables/projection_tables.yaml")
+            .and_then(|v| v.get_mut("Restaurant"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("the Restaurant projection table exists")
+            .insert(
+                Value::from("tombstone"),
+                serde_yaml::from_str("{ $ref: 'events.yaml#/RestaurantListingOptedOut' }").unwrap(),
+            );
+        assert!(
+            flagged(&model).is_empty(),
+            "a fedBy event consumed as the tombstone is used, not a design hole: {:?}",
+            flagged(&model)
+        );
+    }
+
+    #[test]
     fn graphql_reached_read_models_are_not_re_declared_on_the_gateway() {
         // The whole gate rests on the two declarations NOT overlapping: a read model reached through
         // GraphQL is declared by its api.yaml type `reads:` binding, so re-listing it on
