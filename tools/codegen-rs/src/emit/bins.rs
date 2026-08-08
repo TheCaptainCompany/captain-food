@@ -1364,7 +1364,13 @@ fn worker_main(b: &BinSpec) -> String {
 /// DeletionEngine, sirene_ingest::sweep + SireneSyncWorker), never a fork.
 fn cron_worker_pass(b: &BinSpec) -> &'static str {
     match b.name.as_str() {
-        "worker-retention" => r#"    // One sweep_retention() call -- the windows and predicates live entirely in the SQL
+        "worker-retention" => r#"    // GATE PARITY with the monolith loop (RUN_RETENTION_SWEEP, default on): an operator who
+    // pauses the sweep pauses BOTH schedulers, not just the in-process one.
+    if !config.run_retention_sweep {
+        tracing::warn!(worker = "retention_sweep", running = false, toggle = "RUN_RETENTION_SWEEP", "gated off -- nothing expires and storage grows until re-enabled");
+        return true;
+    }
+    // One sweep_retention() call -- the windows and predicates live entirely in the SQL
     // function (specs/database/functions/sweep_retention.sql); this pod is the dumb caller.
     match infrastructure::RetentionSweepWorker::new(pool).run_once().await {
         Ok(s) => {
