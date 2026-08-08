@@ -158,7 +158,7 @@ restored_max=$(drill_sql "SELECT coalesce(max(position), 0) FROM domain_events")
 events_q="SELECT count(*) || '|' || coalesce(md5(string_agg(id::text, ',' ORDER BY position)), 'empty') FROM domain_events WHERE position <= ${restored_max}"
 migrations_q="SELECT count(*) || '|' || coalesce(md5(string_agg(version::text, ',' ORDER BY version)), 'empty') FROM (SELECT version FROM _sqlx_migrations ORDER BY version LIMIT ${mig_count}) m"
 restored_events=$(drill_sql "${events_q}") || fail "checksum query failed on the restored copy"
-restored_migrations=$(drill_sql "${migrations_q}")
+restored_migrations=$(drill_sql "${migrations_q}") || fail "checksum query failed on the restored copy (migrations)"
 
 STEP="verify-against-production"
 CLAUDE_RO_PASSWORD=$(kubectl -n "${PROD_NS}" get secret claude-ro-credentials \
@@ -172,7 +172,7 @@ prod_psql() {
 }
 prod_events=$(prod_psql "${events_q}") \
   || fail "could not query production as claude_ro (role unprovisioned, grants missing, or captain-db-rw unreachable)"
-prod_migrations=$(prod_psql "${migrations_q}")
+prod_migrations=$(prod_psql "${migrations_q}") || fail "could not query production migrations as claude_ro"
 
 [ "${restored_events}" = "${prod_events}" ] \
   || fail "event-log mismatch over positions <= ${restored_max}: restored='${restored_events}' production='${prod_events}' (count|md5)"
