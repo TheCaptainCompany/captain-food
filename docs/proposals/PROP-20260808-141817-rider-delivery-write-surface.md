@@ -1,6 +1,10 @@
 # PROP-20260808-141817 — The rider/delivery write surface: journeys, vocabulary verdict, and V0 slices
 
-- **Status**: Proposed (awaiting product-owner approval)
+- **Status**: Approved (2026-08-08 — all six decisions recorded in [DECISIONS.md §20](DECISIONS.md):
+  D1/D2/D4/D6 by ensemble consent per
+  [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md)
+  (customer veto window open), D3 by the architect lens under customer delegation, D5 by the
+  customer; realization via the 8 V0 slices remains plan-mode/backlog work)
 - **Date**: 2026-08-08
 - **Tracking issue**: [#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)
 - **Realized by**: _(filled at completion — the §6 slices land as claimable sub-issues)_
@@ -14,11 +18,14 @@
     this proposal's `unassignDelivery` mutation name — an unassign-named mutation over a
     release-named event would reintroduce the second vocabulary the rename kills). Rename now,
     while zero production events exist; realization lands in slice 6.
-  - [ ] **Slice-2 validator semantics**: crediting process-manager `send` steps as
-    `command-no-mutation` coverage weakens the gate unless the credit REQUIRES the PM edge to
-    actually exist and resolve in `actors.yaml`/`processmanager.yaml` (a checkable `$ref`, not a
-    self-declared `internal: true` exemption). The safeguard: a command is only credited when at
-    least one PM step demonstrably sends it; an annotation alone never suffices.
+  - [x] **Slice-2 validator semantics** — SATISFIED by the D6 decision (ensemble consent,
+    [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md)):
+    the coverage credit is a declared `sends:` on the wrapper-seam receive, checkable BOTH ways —
+    the `$ref` must resolve AND the target inbox must accept the command; an annotation alone
+    never suffices. That is exactly the safeguard this concern demanded: crediting process-manager
+    `send` steps as `command-no-mutation` coverage weakens the gate unless the credit REQUIRES the
+    PM edge to actually exist and resolve in `actors.yaml`/`processmanager.yaml` (a checkable
+    `$ref`, not a self-declared `internal: true` exemption).
 - **Related**: [PROP-20260726-172500 "Delivery execution: deliverability, the rider surface, run
   recovery"](PROP-20260726-172500-delivery-execution.md) (the earlier gap inventory this refines) ·
   the [#60 ranked-walk dispatch foundation](https://github.com/TheCaptainCompany/captain-food/issues/60)

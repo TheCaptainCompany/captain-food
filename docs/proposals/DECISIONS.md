@@ -476,11 +476,11 @@ $ref-kind-appropriateness).
 
 ---
 
-## 20. The rider/delivery write surface — PROP-20260808-141817
+## 20. The rider/delivery write surface — PROP-20260808-141817 — ✅ FULLY DECIDED 2026-08-08
 
 [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)
 ([#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)).
-`Proposed`. **D1, D2, D4, D6 decided by ensemble consent** —
+**`Approved` 2026-08-08 — fully decided, all six.** **D1, D2, D4, D6 decided by ensemble consent** —
 [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
 customer veto window open. **D5 decided by the customer, 2026-08-08: as recommended**
 (`PlaceOrder` payload flag + PM step). **D3 DECIDED by the architect lens, 2026-08-08** (customer
@@ -494,9 +494,10 @@ the ASSIGNED→PENDING-only scope is part of the name's meaning (PICKED_UP is a 
 Proposal-text reconciliation to `releaseDeliveryAssignment` rides the next docs batch. Derives the four delivery persona journeys and answers the
 epic's vocabulary question (the wired offer/accept vocabulary is canonical); decomposes into 8 V0
 slices (+3 V1). Absorbs the rider-write-surface half of PROP-20260726-172500 (whose D1/D2/D3/D4/D5
-rows above remain that proposal's). **Two unchecked Concerns mechanically block `Approved`**: the
-D3 rename (event vocabulary is a PO call) and the slice-2 validator-credit semantics (a PM-send
-credit must require a resolvable PM edge, never an annotation).
+rows above remain that proposal's). **Both Concerns are checked**: the D3 rename (resolved by the
+architect verdict above) and the slice-2 validator-credit semantics (SATISFIED by the D6 decision —
+a declared `sends:` is checkable both ways: the ref resolves AND the target inbox accepts; never
+an annotation alone). Realization via the 8 V0 slices remains plan-mode/backlog work.
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -509,12 +510,12 @@ credit must require a resolvable PM edge, never an annotation).
 
 ---
 
-## 21. Disappearance is a designed state — PROP-20260808-142532
+## 21. Disappearance is a designed state — PROP-20260808-142532 — ✅ FULLY DECIDED 2026-08-08
 
 [PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md)
 ([#398 "Decide the API contract for tombstoned rows before the #194 projection sweep"](https://github.com/TheCaptainCompany/captain-food/issues/398)
 + [#347 "Decide the last annotated read-model hole: Restaurant fed by RestaurantListingOptedOut"](https://github.com/TheCaptainCompany/captain-food/issues/347)).
-`Proposed`. **D1 and D5 decided by ensemble consent** —
+**`Approved` 2026-08-08 — fully decided, all five.** **D1 and D5 decided by ensemble consent** —
 [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
 customer veto window open. **D2 DECIDED by the customer, 2026-08-08: yes — and WIDENED into a
 principle**: the order copies ALL context needed to autonomously build the customer invoice
@@ -523,20 +524,26 @@ autonomous to build invoice to be sent/displayed to the customer"). Restaurant n
 floor, not the scope — the frozen checkout snapshot must carry the full invoicing context
 (restaurant legal identity incl. invoicing fields, per-line VAT context per the split French
 rates, fees, totals); the exact field inventory is enumerated in plan mode at realization, and the
-compliant-receipt legal precondition (CLAUDE.md) now binds the snapshot design. **D3, D4 remain
-the customer's** (legal-shaded opt-out posture; the guard shape). D3/D4 are now grounded by the
-legal-specialist's obligation brief ([docs/legal/BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md),
+compliant-receipt legal precondition (CLAUDE.md) now binds the snapshot design. **D3 DECIDED by
+the customer, 2026-08-08: FOLD to a hidden listing status** — grounded by the legal-specialist's
+obligation brief ([docs/legal/BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md),
 exposures in [#401](https://github.com/TheCaptainCompany/captain-food/issues/401)): the fold's
-suppression-list shape is legally REQUIRED, and the brief's audit-defensibility verdict tips D4 to
-the orthogonal boolean; the founder's Google-parity directive
+suppression-list shape is legally REQUIRED. **D4 DECIDED by the customer, 2026-08-08: the
+ORTHOGONAL `delisted` BOOLEAN** (only opt-out sets it; only the proven re-claim path clears it) —
+the brief's audit-defensibility asymmetry tips it (a bypassed guard clears the objection
+irreversibly; a forgotten filter is recoverable with the refusal intact), and the founder's
+Google-parity directive
 ([#402](https://github.com/TheCaptainCompany/captain-food/issues/402)) independently requires the
 same orthogonality. One
 principle, two faces: disappearance is always a designed
-state; physical row removal is reserved for legal erasure. **Three unchecked Concerns mechanically
-block `Approved`**: D2 is THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
-+ the replacement-order emitter) needing PO event sign-off; the resolver-policy change lands in the
-emitter with NO generic seam (the `Option<_>` type flip + one shared hydration helper, never a
-source-text scanner); the OPTED_OUT guard errors carry ADR-0032 completeness.
+state; physical row removal is reserved for legal erasure. **All three Concerns are checked** (see
+the proposal header): D2's THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
++ the replacement-order emitter) got their event sign-off via the customer's widened D2 decision;
+the resolver-policy change stands as a standing realization constraint — emitter-landed, the
+`Option<_>` type flip + one shared hydration helper, never a source-text scanner; and under D4 the
+`OPTED_OUT` enum value never exists, so the second-door guard is structurally unnecessary — the
+remaining `OptOutRestaurantListing` ACTIVE_PARTNER guard error keeps its ADR-0032 completeness
+duty (behaviour test + `rules:` link) at realization.
 
 | # | Decision | Recommendation |
 |---|---|---|

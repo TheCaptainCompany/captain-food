@@ -1,6 +1,9 @@
 # PROP-20260808-142532 — Disappearance is a designed state: the terminal-state contract and the opt-out fold
 
-- **Status**: Proposed (awaiting product-owner approval)
+- **Status**: Approved (2026-08-08 — all five decisions recorded in [DECISIONS.md §21](DECISIONS.md):
+  D1/D5 by ensemble consent per
+  [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md)
+  (customer veto window open), D2/D3/D4 by the customer in-session; realization sequenced per §E)
 - **Date**: 2026-08-08
 - **Tracking issues**:
   [#398 "Decide the API contract for tombstoned rows before the #194 projection sweep"](https://github.com/TheCaptainCompany/captain-food/issues/398)
@@ -12,7 +15,12 @@
   https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp — every claim below carries a
   `file:line` cite verified on current `main`.
 - **Concerns**:
-  - [ ] **D2 is THREE artifacts, not one**: (i) `OrderPlaced` gains `restaurantName`/`restaurantPhone`
+  - [x] **D2 is THREE artifacts, not one** — RESOLVED: the customer decided YES (2026-08-08) and
+    WIDENED the decision into the invoice-autonomy principle — the frozen checkout snapshot
+    carries the FULL invoicing context (restaurant legal identity incl. invoicing fields, per-line
+    VAT context, fees, totals), not just name/phone; the exact field inventory is enumerated in
+    plan mode at realization — see [DECISIONS.md §21](DECISIONS.md). The three-artifact shape
+    below stands as the realization map: (i) `OrderPlaced` gains `restaurantName`/`restaurantPhone`
     (event evolution — additive/nullable, no consumer breaks); (ii) because `OrderPlaced` is
     materialized at `PaymentCaptured` "from the frozen checkout snapshot alone"
     (`ordering/processmanager.yaml:67-97`), `CheckoutSnapshot`
@@ -23,8 +31,10 @@
     `PlaceReplacementOrder` (`ordering/actors.yaml:112-116`) — sources them from the original
     order, fields nullable. Event vocabulary is a product-owner call and must be signed off before
     the fields land.
-  - [ ] **The resolver policy change (banning silent-drop and join hard-errors) modifies GENERATED
-    resolver behaviour** (`crates/server/src/graphql/generated/query.rs`): it must land through
+  - [x] **The resolver policy change (banning silent-drop and join hard-errors) modifies GENERATED
+    resolver behaviour** — RESOLVED as a STANDING realization constraint (it binds every realizing
+    slice rather than blocking approval): the change lands through the emitter as the `Option<_>`
+    type flip plus ONE shared non-generated hydration helper — never a source-text scanner (`crates/server/src/graphql/generated/query.rs`): it must land through
     the emitter, coordinated with the resolver-touching slices of the
     [#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)
     proposal ([PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)) —
@@ -37,10 +47,13 @@
     would repeat the
     [#329](https://github.com/TheCaptainCompany/captain-food/issues/329) lesson (seven review
     rounds hardening a scanner over a boundary the compiler already enforced).
-  - [ ] **Section B's OPTED_OUT guards add new errors to the network scope**
-    (`ListingOptOutNotApplicable` or equivalent, plus the D4 second-door rejection on
-    `ChangeRestaurantListingStatus`): ADR-0032 completeness applies — the realizing change needs
-    behaviour tests with their `rules:` links, not just the error definitions.
+  - [x] **Section B's opt-out guard adds a new error to the network scope** — RESTATED under the
+    D4 decision (orthogonal `delisted` boolean, customer, 2026-08-08): the `OPTED_OUT` enum value
+    never exists, so the `ChangeRestaurantListingStatus` second-door guard is structurally
+    unnecessary — that mutation cannot spell the state at all. The remaining write-side guard is
+    `OptOutRestaurantListing` rejecting ACTIVE_PARTNER (`ListingOptOutNotApplicable` or
+    equivalent), and its new error keeps its ADR-0032 completeness duty: the realizing change
+    needs the behaviour test with its `rules:` link, not just the error definition.
 - **Related**:
   [#194 "GDPR Article 17 has no technical answer: PII lives in an immutable event log with no erasure path, and no DPIA/privacy policy/terms exist"](https://github.com/TheCaptainCompany/captain-food/issues/194)
   (the sweep this proposal must precede) ·
@@ -362,6 +375,11 @@ Each decision carries per-option trade-offs; the recommended option is marked.
 
 ### D3 — #347: tombstone vs `listing_status` fold `OPTED_OUT` vs vestigial removal
 
+> ✅ **DECIDED 2026-08-08 (customer): FOLD to a hidden listing status** — the row persists as the
+> designed, filtered-out state, grounded by the legal brief (the suppression-list shape is legally
+> REQUIRED); under the D4 decision the hidden state is carried by the orthogonal `delisted`
+> boolean rather than a new enum value.
+
 | Option | Pros | Cons |
 |---|---|---|
 | Tombstone the Restaurant row | Strongest "gone" semantics; matches a naive reading of "remove my listing" | **Self-defeating under SIRENE re-import**: the sync re-creates the deleted row on the next sweep — and post-objection retention of the minimal suppression identifier is the lawful and REQUIRED shape (suppression-list doctrine: the EI subset is personal data per *Manni*, the objection is real, and deleting the refusal would itself be the violation since re-import would re-contact); amputates audit, do-not-contact and legacy joins for a reversible business withdrawal |
@@ -369,6 +387,13 @@ Each decision carries per-option trade-offs; the recommended option is marked.
 | Vestigial removal (delete the event/command as unused) | Deletes a warning and some spec surface | **A broken promise to an owner who proved GBP ownership**: they still show on the marketplace forever — the "I asked and nothing happened" support call with a regulator-shaped tail; the mutation and story step already exist and describe a real journey |
 
 ### D4 — `OPTED_OUT` shape: enum value + write-side guard vs a separate orthogonal `delisted` boolean
+
+> ✅ **DECIDED 2026-08-08 (customer): the ORTHOGONAL `delisted` BOOLEAN** — only
+> `OptOutRestaurantListing` sets it, only the proven re-claim path clears it; the second door is
+> unspellable by construction. Decided against the recommendation on the legal brief's
+> audit-defensibility asymmetry (Q3) and the founder's Google-parity directive
+> ([#402](https://github.com/TheCaptainCompany/captain-food/issues/402)), which independently
+> requires the same orthogonality.
 
 **The guard closes one door of two.** Adding `OPTED_OUT` to `RestaurantListingStatus` makes it a
 legal payload value of the ADMIN `changeRestaurantListingStatus` mutation
@@ -390,7 +415,7 @@ Q3; [#401 "Legal exposures from the opt-out obligation brief"](https://github.co
 the orthogonal boolean is the more defensible shape under audit — the failure modes are asymmetric:
 a bypassed guard CLEARS the objection irreversibly and the event log then proves the violation
 against you, while a forgotten filter is a recoverable incident with the refusal intact. The
-customer decision remains open.
+customer decided 2026-08-08: the orthogonal boolean (see the DECIDED marker above).
 
 The recommendation stands — enum + both guards remains the smaller change — but the tipping
 argument is real: if the guard set grows again, or the PO weighs "unspellable beats guarded"
