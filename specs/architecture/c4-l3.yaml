@@ -120,11 +120,23 @@ components:
     description: "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates."
     instrumented: true
   sirene-google-acl:
-    container: sync-worker
-    description: "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate."
+    # SPLIT (#393, from the PR #395 review round): this component is the ENRICHMENT half only —
+    # the Google ownership-verification half lives in `google-ownership-verifier` below, homed
+    # where its port actually executes (mirroring how supabase-acl was rehomed to the subgraph).
+    container: worker-sirene-sync
+    description: "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner (infrastructure::integrations::sirene + the staged-row drain). Keeps Sirene/Google SDKs out of the aggregate."
+    instrumented: true
+  google-ownership-verifier:
+    # The OTHER half of the former sirene-google-acl (#393): ClaimRestaurantListing /
+    # OptOutRestaurantListing (ADR-0019/0021) verify Google Business Profile ownership proofs as
+    # a LIVE MUTATION PORT executed in the Restaurant aggregate's mailbox delivery path — the
+    # `GoogleOwnershipVerifier` port wired into the generated command router — so its home is the
+    # container that realizes the aggregate, not the sync worker.
+    container: actor-restaurant
+    description: "Google Business Profile ownership verification (ADR-0019/0021): validates claim/opt-out proofs for ClaimRestaurantListing / OptOutRestaurantListing via the GoogleOwnershipVerifier port in the Restaurant aggregate's command path (fail-closed binding until the live Google API is wired). Keeps the Google SDK out of the aggregate."
     instrumented: true
   prospection-acl:
-    container: sync-worker
+    container: worker-sirene-sync
     description: "B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description."
     instrumented: true
   avelo37-acl:

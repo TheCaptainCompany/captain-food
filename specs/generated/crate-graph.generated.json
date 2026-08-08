@@ -461,6 +461,26 @@
         "domain-payments"
       ],
       "path": "crates/bins/projector-payments"
+    },
+    "worker-erasure": {
+      "kind": "worker",
+      "domain_crates": [],
+      "path": "crates/bins/worker-erasure"
+    },
+    "worker-journal-sweep": {
+      "kind": "worker",
+      "domain_crates": [],
+      "path": "crates/bins/worker-journal-sweep"
+    },
+    "worker-retention": {
+      "kind": "worker",
+      "domain_crates": [],
+      "path": "crates/bins/worker-retention"
+    },
+    "worker-sirene-sync": {
+      "kind": "worker",
+      "domain_crates": [],
+      "path": "crates/bins/worker-sirene-sync"
     }
   }
 }

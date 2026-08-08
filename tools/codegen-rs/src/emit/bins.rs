@@ -70,6 +70,20 @@ pub(crate) struct BinSpec {
     /// adapter family only, ADR-20260808-062432): the one partner ACL this bin hosts, and the
     /// root of every per-partner derivation (bin name/slug, ingress path, env-key prefix).
     pub(crate) partner: Option<String>,
+    /// The declared cadence of a periodic worker (c4-l2 `schedule:`, 5-field cron in UTC —
+    /// ADR-20260808-062933 "shape follows cadence"): `Some` ⇒ the deploy emitter renders a
+    /// CronJob (the platform's scheduler is the scheduler — the bin main runs ONE pass and
+    /// exits); `None` ⇒ an always-on Deployment.
+    pub(crate) schedule: Option<String>,
+    /// CronJob `suspend:` (c4-l2 `suspended:`): lands the workload visibly OFF — used while an
+    /// external residence stays authoritative (sirene-sync.yml until the #358 cutover).
+    pub(crate) suspended: bool,
+    /// Extra configuration-key CONSUMERS this bin hosts beyond `server` (#393, the #395
+    /// narrowing pattern applied to workers): a worker bin that links a consumer crate reads
+    /// that consumer's declared keys — `worker-sirene-sync` hosts the `sirene_ingest` pass, so
+    /// its Config and pod env carry the `consumer: sirene_ingest` keys (scope-filtered like
+    /// every other key). Empty for every other family.
+    pub(crate) consumers: BTreeSet<String>,
 }
 
 /// `uber_direct` → `uber-direct`: the partner's SLUG (repo slug convention) — the bin name
@@ -100,6 +114,28 @@ pub(crate) fn adapter_key_allowed(b: &BinSpec, key: &str, origin_scope: &str) ->
     }
     let Some(dir) = b.partner.as_deref() else { return false };
     key.starts_with(&adapter_env_prefix(dir))
+}
+
+/// The #395 narrowing applied to the PERIODIC worker family (#393, ADR-20260808-062933 "each
+/// worker holds only its own grants"): a run-to-completion pass touches the database and exports
+/// telemetry — nothing else — so from the kernel scope it keeps only that SECRET floor
+/// (`DATABASE_URL`, `HONEYCOMB_API_KEY`). Everything else routes as usual: non-secret keys are
+/// baked per profile (never a grant), and the worker's own declared scopes'/consumers' keys pass
+/// scope routing. The GDPR erasure worker is the audit case this floor exists for: its pod must
+/// be able to answer "what could this process reach?" with the database and the telemetry
+/// backend, not the session-signing key or the SMS credentials the monolith's `common` grant
+/// would drag in. `bam` (always-on, `schedule: None`) keeps its recorded #385 posture — its
+/// per-key narrowing stays on that checklist. Applied identically by the deploy emitter (pod
+/// env) and the bin-crate emitter (Config) — one derivation, so the typed Config can never
+/// require a key the manifest withholds.
+pub(crate) fn worker_key_allowed(b: &BinSpec, key: &str, origin_scope: &str, secret: bool) -> bool {
+    if b.family != "worker" || b.schedule.is_none() {
+        return true;
+    }
+    if origin_scope != KERNEL_SCOPE || !secret {
+        return true;
+    }
+    matches!(key, "DATABASE_URL" | "HONEYCOMB_API_KEY")
 }
 
 /// `RESTAURANT_ACCOUNT` → `restaurant-account`: the role's path segment (`/{path}/graphql`,
@@ -141,23 +177,50 @@ fn actor_meta(model: &Model, actor: &str) -> (BTreeSet<String>, bool) {
     (ports, mailboxed)
 }
 
-/// The c4-l2 container ids that are SURFACE bins (`fo-*`, `bo-*`) or the `bam` worker. These
-/// two families exist only in the deploy topology — the container list is their source of
-/// truth, so they are read from it rather than re-derived. (The `adapter-*` family is NOT read
-/// from here: its source is the adapter-crate list on the Model, ADR-20260808-062432, and §15
-/// proves the container list against it.)
-fn c4_surface_and_worker_bins(model: &Model) -> (Vec<String>, bool) {
+/// One c4-l2 worker container (`bam` + the `worker-*` family, ADR-20260808-062933): the deploy
+/// shape follows the declared cadence — `schedule: Some` is a CronJob, `None` (bam) an
+/// always-on Deployment.
+pub(crate) struct WorkerContainer {
+    pub(crate) name: String,
+    pub(crate) schedule: Option<String>,
+    pub(crate) suspended: bool,
+}
+
+/// The c4-l2 container ids that are SURFACE bins (`fo-*`, `bo-*`) or WORKER bins (`bam` +
+/// `worker-*`, ADR-20260808-062933). These two families exist only in the deploy topology — the
+/// container list is their source of truth, so they are read from it rather than re-derived.
+/// (The `adapter-*` family is NOT read from here: its source is the adapter-crate list on the
+/// Model, ADR-20260808-062432, and §15 proves the container list against it.)
+fn c4_surface_and_worker_bins(model: &Model) -> (Vec<String>, Vec<WorkerContainer>) {
     let mut surfaces = Vec::new();
-    let mut bam = false;
+    let mut workers = Vec::new();
     for c in read_c4(model).containers {
         if c.id.starts_with("fo-") || c.id.starts_with("bo-") {
             surfaces.push(c.id);
-        } else if c.id == "bam" {
-            bam = true;
+        } else if c.id == "bam" || c.id.starts_with("worker-") {
+            workers.push(WorkerContainer {
+                name: c.id,
+                schedule: c.schedule,
+                suspended: c.suspended,
+            });
         }
     }
     surfaces.sort();
-    (surfaces, bam)
+    workers.sort_by(|a, b| a.name.cmp(&b.name));
+    (surfaces, workers)
+}
+
+/// Extra configuration-key consumers a worker bin hosts (#393): the WIRING of the worker family
+/// — like `adapter_main`'s per-partner arms, this is the per-worker knowledge the topology
+/// cannot derive, kept in ONE place and pinned by the deploy completeness test. A worker bin
+/// hosting a consumer crate's pass reads that consumer's declared keys.
+pub(crate) fn worker_config_consumers(name: &str) -> BTreeSet<String> {
+    match name {
+        // Hosts the `sirene_ingest` ingestion pass — its keys (INSEE_API_TOKEN, SIRENE_*) are
+        // declared `consumer: sirene_ingest` in specs/network/configuration.yaml.
+        "worker-sirene-sync" => BTreeSet::from(["sirene_ingest".to_string()]),
+        _ => BTreeSet::new(),
+    }
 }
 
 /// The full derived bin topology, sorted by name (stable output). Empty on a model with no
@@ -185,6 +248,9 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             ports,
             mailboxed,
             partner: None,
+            schedule: None,
+            suspended: false,
+            consumers: BTreeSet::new(),
         });
     }
     // projector-{scope}: every non-kernel scope projects its own views schema (D4). The kernel
@@ -205,6 +271,9 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
                 ports: BTreeSet::new(),
                 mailboxed: false,
                 partner: None,
+                schedule: None,
+                suspended: false,
+                consumers: BTreeSet::new(),
             });
         }
         out.push(BinSpec {
@@ -217,6 +286,9 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             ports: BTreeSet::new(),
             mailboxed: false,
             partner: None,
+            schedule: None,
+            suspended: false,
+            consumers: BTreeSet::new(),
         });
     }
     // gateway-{role}: thin generated routing per role path — NO domain crates, no DB, no state
@@ -232,12 +304,20 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             ports: BTreeSet::new(),
             mailboxed: false,
             partner: None,
+            schedule: None,
+            suspended: false,
+            consumers: BTreeSet::new(),
         });
     }
     // Surface bins (assets/SSR/webhooks — speak to their role gateway, hold no domain
-    // vocabulary) and the bam worker (cross-scope consumer BY DESIGN: it folds every scope's
-    // events into business-activity views, so it links every scope crate).
-    let (surfaces, bam) = c4_surface_and_worker_bins(model);
+    // vocabulary) and the worker bins (ONE BIN PER WORKER, ADR-20260808-062933): `bam` is the
+    // always-on business-activity projector (cross-scope consumer BY DESIGN: it folds every
+    // scope's events, so it links every scope crate); the `worker-*` containers are periodic
+    // passes whose declared `schedule:` becomes a generated CronJob. The periodic workers link
+    // NO domain crates — each is a thin pass over its implementation crate(s)
+    // (infrastructure / sirene_ingest), and its Config/env stay at DATABASE_URL + common + its
+    // declared scopes (minimal grants — the GDPR erasure worker is the audit case).
+    let (surfaces, workers) = c4_surface_and_worker_bins(model);
     for s in surfaces {
         out.push(BinSpec {
             name: s,
@@ -249,19 +329,26 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             ports: BTreeSet::new(),
             mailboxed: false,
             partner: None,
+            schedule: None,
+            suspended: false,
+            consumers: BTreeSet::new(),
         });
     }
-    if bam {
+    for w in workers {
+        let consumers = worker_config_consumers(&w.name);
         out.push(BinSpec {
-            name: "bam".to_string(),
+            domain_scopes: if w.name == "bam" { emitted.clone() } else { BTreeSet::new() },
+            name: w.name,
             family: "worker",
             actor: None,
             scope: None,
             role: None,
-            domain_scopes: emitted.clone(),
             ports: BTreeSet::new(),
             mailboxed: false,
             partner: None,
+            schedule: w.schedule,
+            suspended: w.suspended,
+            consumers,
         });
     }
     // adapter-{partner}: ONE BIN PER PARTNER ACL (ADR-20260808-062432), derived from the
@@ -280,6 +367,9 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             ports: BTreeSet::new(),
             mailboxed: false,
             partner: Some(dir.clone()),
+            schedule: None,
+            suspended: false,
+            consumers: BTreeSet::new(),
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -325,7 +415,18 @@ fn family_purpose(b: &BinSpec) -> String {
             "partner webhook ingestion bin for `{}` -- verify, mirror, ACL, ENQUEUE on the shared mailbox; holds ONLY this partner's secrets (one bin per adapter, ADR-20260808-062432)",
             b.partner.as_deref().map(partner_slug).unwrap_or_default()
         ),
-        "worker" => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
+        "worker" => match b.name.as_str() {
+            "bam" => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
+            "worker-sirene-sync" => "scheduled SIRENE listing sync -- one CronJob pass: raw INSEE ingestion (sirene_ingest::sweep) then the staged-row drain through the SIRENE ACL (one bin per worker, ADR-20260808-062933; sirene-sync.yml stays authoritative until the #358 cutover)".to_string(),
+            "worker-retention" => "scheduled retention sweep -- one sweep_retention() call per CronJob run; the windows live in the SQL function, never here (one bin per worker, ADR-20260808-062933)".to_string(),
+            "worker-journal-sweep" => "scheduled command_journal stale-RECEIVED sweep -- flips dead spawned runs to FAILED so operationStatus never lies (one bin per worker, ADR-20260808-062933)".to_string(),
+            "worker-erasure" => "the GDPR erasure worker -- the generic deletion engine as ONE NAMED minimal-grant pod, one bounded pass per CronJob run (one bin per worker, ADR-20260808-062933)".to_string(),
+            other => unreachable!(
+                "worker container '{other}' has no purpose line — the family derivation \
+                 (c4-l2 `worker-*`/bam containers) already emitted its crate; add its wiring \
+                 (purpose, manifest deps, main pass) in the same change"
+            ),
+        },
         f => unreachable!("unknown bin family '{f}' — every family added to bin_topology needs its purpose line here"),
     }
 }
@@ -358,10 +459,30 @@ fn bin_manifest(b: &BinSpec) -> String {
     if wired(b) {
         let common = "tokio = { workspace = true }\nserde_json = { workspace = true }\ntracing = \"0.1\"\n# The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values\n# against their scalars' regexes at startup.\nregex = \"1\"\n";
         match b.family {
-            "actor" | "pm" | "projector" | "worker" => {
+            "actor" | "pm" | "projector" => {
                 deps.push_str(
                     "# The business runtime (#385): the shared composition kit -- probe server, telemetry,\n# declared-size pool, and the family spawn helpers over application/infrastructure.\nbin_runtime = { path = \"../../bin_runtime\" }\n",
                 );
+                deps.push_str(common);
+            }
+            "worker" if b.schedule.is_none() => {
+                // bam: the always-on business-activity projector (Deployment).
+                deps.push_str(
+                    "# The business runtime (#385): the shared composition kit -- probe server, telemetry,\n# declared-size pool, and the family spawn helpers over application/infrastructure.\nbin_runtime = { path = \"../../bin_runtime\" }\n",
+                );
+                deps.push_str(common);
+            }
+            "worker" => {
+                // Periodic worker (ADR-20260808-062933): a thin RUN-TO-COMPLETION pass over the
+                // existing implementation crates — no logic forks, no domain crates.
+                deps.push_str(
+                    "# CRON WORKER (one bin per worker, ADR-20260808-062933): telemetry/config/pool from the\n# composition kit; the pass itself lives in the implementation crate below -- this bin adds\n# scheduling shape (one pass per Job), never logic.\nbin_runtime = { path = \"../../bin_runtime\" }\ninfrastructure = { path = \"../../infrastructure\" }\n",
+                );
+                if b.consumers.contains("sirene_ingest") {
+                    deps.push_str(
+                        "# Hosts the sirene_ingest ingestion pass (the shared sweep orchestration) -- the same\n# loop the scheduled GitHub Actions job runs, zero forks.\nsirene_ingest = { path = \"../../sirene_ingest\" }\n",
+                    );
+                }
                 deps.push_str(common);
             }
             "subgraph" => {
@@ -787,8 +908,13 @@ pub(crate) fn emit_bin_crates(model: &Model) -> Vec<BinCrate> {
                 // DATABASE_URL follows the SAME needs_db exclusion as deploy.rs::env_yaml — a
                 // db-less bin (gateway/surface) whose Config still required the key would
                 // exit(78) on boot while the manifest correctly never provides it.
-                let mut keys = scoped_config_keys(model, &bin_config_scopes(b, model));
+                let mut keys = scoped_config_keys_with_consumers(
+                    model,
+                    &bin_config_scopes(b, model),
+                    &b.consumers,
+                );
                 keys.retain(|k| adapter_key_allowed(b, &k.name, config_key_origin(model, &k.name)));
+                keys.retain(|k| worker_key_allowed(b, &k.name, config_key_origin(model, &k.name), k.secret));
                 keys.retain(|k| k.name != "DATABASE_URL" || super::deploy::needs_db(b, model));
                 emit_config_module(model, &keys, /* is_server */ false)
             }),
@@ -1215,11 +1341,251 @@ fn adapter_main(b: &BinSpec) -> String {
     out
 }
 
+/// The worker family's main (ADR-20260808-062933): shape follows cadence — a worker WITHOUT a
+/// declared schedule is the always-on `bam` Deployment; one WITH a schedule is a CronJob-shaped
+/// run-to-completion pass.
+fn worker_main(b: &BinSpec) -> String {
+    if b.schedule.is_some() {
+        return cron_worker_main(b);
+    }
+    bam_main(b)
+}
+
+/// The per-worker PASS of a periodic worker bin — the body of `run_pass` in its generated main.
+/// Like `adapter_main`'s per-partner arms, this match is the worker's WIRING, not a hand list of
+/// the family: the family (crate, manifest, CronJob, image, pin) derives from the c4-l2
+/// `worker-*` container list, and a new container without its arm here fails generation LOUDLY
+/// instead of shipping an empty pod. Every arm is ASSEMBLY of existing implementation code —
+/// the same passes the monolith's in-process loops run (journal_sweep, RetentionSweepWorker,
+/// DeletionEngine, sirene_ingest::sweep + SireneSyncWorker), never a fork.
+fn cron_worker_pass(b: &BinSpec) -> &'static str {
+    match b.name.as_str() {
+        "worker-retention" => r#"    // One sweep_retention() call -- the windows and predicates live entirely in the SQL
+    // function (specs/database/functions/sweep_retention.sql); this pod is the dumb caller.
+    match infrastructure::RetentionSweepWorker::new(pool).run_once().await {
+        Ok(s) => {
+            tracing::info!(
+                worker = "retention_sweep",
+                total = s.total(),
+                command_journal = s.command_journal,
+                inbound_messages = s.inbound_messages,
+                external_stripe_events = s.external_stripe_events,
+                external_hubrise_callbacks = s.external_hubrise_callbacks,
+                external_avelo37_events = s.external_avelo37_events,
+                external_uber_direct_events = s.external_uber_direct_events,
+                auth_sessions = s.auth_sessions,
+                "sweep pass complete"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::error!(worker = "retention_sweep", error = %e, "sweep pass failed -- storage keeps growing until a pass succeeds");
+            false
+        }
+    }
+"#,
+        "worker-journal-sweep" => r#"    // ONE shared pass (infrastructure::integrations::journal_sweep) -- the monolith loops the
+    // SAME function; the stale window and the cadence live there, never here.
+    match infrastructure::integrations::journal_sweep::sweep_stale_received_once(&pool).await {
+        Ok(0) => {
+            tracing::info!(worker = "journal_sweep", swept = 0u64, "no stale RECEIVED commands");
+            true
+        }
+        Ok(n) => {
+            tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED");
+            true
+        }
+        Err(e) => {
+            tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed");
+            false
+        }
+    }
+"#,
+        "worker-erasure" => r#"    // GATE (RUN_DELETION_ENGINE, default off until smoked -- gate-then-stabilize: this worker
+    // DELETES event streams): a gated-off run is a clean no-op -- recorded expiry facts
+    // accumulate; no stream is erased.
+    if !config.run_deletion_engine {
+        tracing::info!(worker = "deletion_engine", running = false, toggle = "RUN_DELETION_ENGINE", "gated off -- pass skipped");
+        return true;
+    }
+    // An engine that cannot serve a DECLARED deletion policy refuses to construct -- with the
+    // gate ON that is a FAILED Job, loudly (fail-fast, ADR-20260729-010500), never a silent
+    // skip of a declared erasure.
+    //
+    // CROSS-PROCESS LIMIT (recorded, mirrors the #385 in-process-bus limits): the monolith
+    // purges its own activation cache on erasure; the actor bins' caches converge through idle
+    // passivation instead. The two-tx journey (tombstone first) keeps the log authoritative
+    // regardless.
+    let engine = match infrastructure::DeletionEngine::new(pool) {
+        Ok(engine) => engine,
+        Err(reason) => {
+            tracing::error!(worker = "deletion_engine", %reason, "engine refused to start -- a declared deletion policy is unserved");
+            return false;
+        }
+    };
+    match engine.run_once().await {
+        Ok(deleted) => {
+            tracing::info!(worker = "deletion_engine", deleted_streams = deleted, "erasure pass complete");
+            true
+        }
+        Err(e) => {
+            tracing::error!(worker = "deletion_engine", error = %e, "erasure pass failed -- retried by the next scheduled run");
+            false
+        }
+    }
+"#,
+        "worker-sirene-sync" => r#"    // GATE (issue #220 -- BOTH halves pause together): RUN_SIRENE_WORKER=false skips the pass
+    // even when the CronJob is un-suspended; the suspend flag and this gate must both open.
+    if !config.run_sirene_worker {
+        tracing::warn!(worker = "sirene_sync", running = false, toggle = "RUN_SIRENE_WORKER", "worker PAUSED (issue #220) -- pass skipped");
+        return true;
+    }
+    // Phase 1 -- raw INSEE ingestion, the SAME orchestration the scheduled GitHub Actions job
+    // runs (sirene_ingest::sweep; the workflow residence stays authoritative until the #358
+    // cutover records the handover).
+    let ingest_ok = match sirene_ingest::sweep::sweep_from_env(&pool).await {
+        Ok(report) => {
+            tracing::info!(
+                worker = "sirene_sync",
+                phase = "ingest",
+                fetched = report.fetched,
+                upserted = report.upserted,
+                failed_rows = report.failed_rows,
+                covered = report.covered,
+                planned = report.planned,
+                budget_exhausted = report.budget_exhausted,
+                "ingestion pass done"
+            );
+            !report.is_failure()
+        }
+        Err(e) => {
+            tracing::error!(worker = "sirene_sync", phase = "ingest", error = %e, "ingestion refused (INSEE token/configuration)");
+            false
+        }
+    };
+    // Phase 2 -- drain staged rows through the SIRENE ACL on THIS deployed version (ADR-0045).
+    // Runs even after a failed ingest phase: rows staged by previous runs still deserve their
+    // translation, and the drain is checkpointed per row (processed_at) so re-runs are cheap.
+    let drain_ok = match infrastructure::SireneSyncWorker::new(pool).run_once().await {
+        Ok(summary) => {
+            tracing::info!(worker = "sirene_sync", phase = "drain", ?summary, "drain pass done");
+            true
+        }
+        Err(e) => {
+            tracing::error!(worker = "sirene_sync", phase = "drain", error = %e, "drain pass failed");
+            false
+        }
+    };
+    ingest_ok && drain_ok
+"#,
+        other => unreachable!(
+            "worker container '{other}' has no pass wiring — the family derivation (c4-l2 \
+             `worker-*` containers) already emitted its crate/manifest/CronJob; add its \
+             composition arm here (and only here) in the same change"
+        ),
+    }
+}
+
+/// The main of a PERIODIC worker bin (ADR-20260808-062933): a RUN-TO-COMPLETION pass, not a
+/// server — the generated CronJob is the scheduler (`concurrencyPolicy: Forbid`), so the main
+/// runs ONE pass and exits with the Job-visible verdict: 0 clean, 1 failed pass, 78 broken
+/// configuration. No probe server, no internal cron loop.
+fn cron_worker_main(b: &BinSpec) -> String {
+    let schedule = b.schedule.as_deref().unwrap_or("?");
+    format!(
+        r#"// GENERATED by the Captain.Food codegen from the derived bin topology — do not edit by hand
+// (ADR-20260808-062933 one bin per worker, #393).
+
+//! `{name}` — {desc}.
+//!
+//! CRON WORKER: a RUN-TO-COMPLETION pass over the existing implementation crates. The generated
+//! CronJob (deploy/generated/manifests/bins/{name}.yaml, declared cadence `{schedule}` UTC from
+//! c4-l2) is the scheduler — the platform's scheduler is the scheduler, so this main runs ONE
+//! pass and exits: 0 on a clean pass, 1 on a failed pass (the Job goes red), 78 on broken
+//! configuration (EX_CONFIG).
+//!
+//! GATE-THEN-STABILIZE: nothing applies the manifests yet; the monolith's in-process loops
+//! remain the running instance of this pass until the #358 cutover points the schedule here.
+
+/// The bin's scope-filtered typed configuration (#374 Q4): the declared keys of its linked
+/// scopes + `common` (+ its hosted consumers' keys, #393), read once at startup.
+mod config;
+
+/// The c4-l2 container this binary realizes.
+const BIN: &str = "{name}";
+/// The bin's family in the deploy topology.
+const FAMILY: &str = "worker";
+
+#[tokio::main]
+async fn main() {{
+    // Identity FIRST, before any fallible startup (ADR-20260721-175411): a boot that never runs
+    // its pass still names its version in the logs.
+    println!("{{BIN}} ({{FAMILY}}) starting -- version {{}}, cron worker pass (#393)", bin_runtime::build_version());
+
+    // Configuration gate (PROP-20260729-004500): every problem reported at once; production and
+    // staging refuse to start on a broken configuration, development reports and continues.
+    let (config, problems) = config::Config::resolve();
+
+    // Telemetry SECOND -- after config (it needs LOG_LEVEL and the ingest key), before the pass,
+    // so its lines are structured and correlated (issue #191).
+    let mut telemetry_guard = bin_runtime::init_telemetry(bin_runtime::TelemetrySettings {{
+        api_key: config.honeycomb_api_key.clone(),
+        endpoint: config.honeycomb_api_endpoint.clone(),
+        dataset: config.honeycomb_dataset.clone(),
+        sample_ratio: config.otel_traces_sample_ratio.clone(),
+        log_level: config.log_level.clone(),
+        profile: config.profile.to_string(),
+    }});
+    if !problems.is_empty() {{
+        let report = config::MissingConfig {{ profile: config.profile, problems }};
+        tracing::error!(profile = %config.profile, "{{report}}");
+        if config.must_stop_on_problems() {{
+            // Flush before exiting, or the error explaining the failed Job never leaves the pod.
+            telemetry_guard.shutdown();
+            // 78 = EX_CONFIG (sysexits.h): a configuration error, not a crash.
+            std::process::exit(78);
+        }}
+        tracing::warn!(profile = %config.profile, "starting anyway -- production and staging STOP here");
+    }}
+    tracing::info!("{{}}", config.boot_report());
+
+    let ok = run_pass(&config).await;
+    // Flush BEFORE the exit code: a failed pass whose telemetry never left the pod is invisible.
+    telemetry_guard.shutdown();
+    if !ok {{
+        std::process::exit(1);
+    }}
+}}
+
+/// One pass. `false` = the Job fails visibly (the next scheduled run is the retry — every pass
+/// here is idempotent/checkpointed by its implementation crate).
+async fn run_pass(config: &config::Config) -> bool {{
+    if config.database_url.is_empty() {{
+        // Only reachable in development (the config gate stops prod/staging): nothing to run.
+        tracing::error!(bin = BIN, "DATABASE_URL unset -- the pass has nothing to run against");
+        return false;
+    }}
+    let pool = match bin_runtime::pg_pool(&config.database_url, config.database_pool_max_connections) {{
+        Ok(pool) => pool,
+        Err(e) => {{
+            tracing::error!(bin = BIN, error = %e, "pg pool init failed");
+            return false;
+        }}
+    }};
+{pass}}}
+"#,
+        name = b.name,
+        desc = family_purpose(b),
+        schedule = schedule,
+        pass = cron_worker_pass(b),
+    )
+}
+
 /// `bam`: the business-activity worker — the scope-filtered projection runtime pointed at the
 /// `bam` label. HONEST TODAY: no projection group carries the `bam` scope yet (no bam View_* is
 /// specified), so the worker idles caught-up and says so — the moment a bam view lands in the
 /// specs, the registry gains its group and this bin drains it with no further wiring.
-fn worker_main(b: &BinSpec) -> String {
+fn bam_main(b: &BinSpec) -> String {
     let mut out = main_header(
         b,
         &"hosts the business-activity projection worker: the shared registry filtered to the `bam` scope label (no group carries it yet — the worker idles caught-up, honestly, until a bam view is specified)".to_string(),

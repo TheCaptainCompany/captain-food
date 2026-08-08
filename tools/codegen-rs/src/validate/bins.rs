@@ -17,10 +17,18 @@
 //!    the kernel owns no View_*; an `adapter-*` container without its `crates/adapters/` crate
 //!    names a partner ACL that does not exist — ADR-20260808-062432).
 //!
-//! Surfaces (`fo-*`/`bo-*`) and `bam` are exempt from 2–3 by construction: the container list
-//! IS their source (a deploy-topology decision, not derivable elsewhere). The `adapter-*`
-//! family is NOT exempt: its source is the adapter-crate list, so BOTH directions are checked —
-//! a crate without its container (2) and a container without its crate (3).
+//! Surfaces (`fo-*`/`bo-*`) and the worker family (`bam` + `worker-*`, ADR-20260808-062933) are
+//! exempt from 2–3 by construction: the container list IS their source (a deploy-topology
+//! decision, not derivable elsewhere). The `adapter-*` family is NOT exempt: its source is the
+//! adapter-crate list, so BOTH directions are checked — a crate without its container (2) and a
+//! container without its crate (3).
+//!
+//! 4. `c4-worker-no-schedule` / `c4-worker-bad-schedule` / `c4-schedule-on-non-worker`: shape
+//!    follows cadence (ADR-20260808-062933) — every periodic `worker-*` container declares a
+//!    5-field cron `schedule:` (the emitter renders its CronJob from it), and cadence fields on
+//!    any other container are refused rather than silently ignored. (A `worker-*` container
+//!    whose name has no wiring arm fails GENERATION loudly — `cron_worker_pass`'s unreachable —
+//!    same posture as an adapter crate without its composition arm.)
 
 use crate::*;
 
@@ -72,6 +80,45 @@ pub(crate) fn validate_bin_topology(model: &Model, issues: &mut Vec<Issue>) {
                 format!(
                     "derived bin '{}' ({}) has no c4-l2 container — it would build an image that deploys nowhere; add the container (ADR-20260807-183024 deploy topology).",
                     b.name, b.family
+                ),
+            ));
+        }
+    }
+
+    // 4. worker cadence (ADR-20260808-062933 "shape follows cadence"): every `worker-*`
+    //    container declares a 5-field cron `schedule:` (UTC) — absent, the emitter would render
+    //    an always-on Deployment for a pass-shaped main that exits immediately (a crash-loop);
+    //    and `schedule:`/`suspended:` on any NON-worker container is refused — on other
+    //    families they would be silently ignored, which is how a "scheduled" adapter would lie.
+    for c in &c4.containers {
+        let is_periodic_worker = c.id.starts_with("worker-");
+        if is_periodic_worker {
+            match c.schedule.as_deref() {
+                None => issues.push(err(
+                    "c4-worker-no-schedule",
+                    format!("architecture/c4-l2.yaml/containers.{}", c.id),
+                    format!(
+                        "worker container '{}' declares no `schedule:` — a periodic worker's cadence is spec-declared (5-field cron, UTC; ADR-20260808-062933).",
+                        c.id
+                    ),
+                )),
+                Some(s) if s.split_whitespace().count() != 5 => issues.push(err(
+                    "c4-worker-bad-schedule",
+                    format!("architecture/c4-l2.yaml/containers.{}", c.id),
+                    format!(
+                        "worker container '{}' schedule '{}' is not a 5-field cron expression (minute hour day-of-month month day-of-week).",
+                        c.id, s
+                    ),
+                )),
+                Some(_) => {}
+            }
+        } else if c.schedule.is_some() || c.suspended {
+            issues.push(err(
+                "c4-schedule-on-non-worker",
+                format!("architecture/c4-l2.yaml/containers.{}", c.id),
+                format!(
+                    "container '{}' declares `schedule:`/`suspended:` but is not a `worker-*` container — cadence shapes only the periodic worker family (ADR-20260808-062933).",
+                    c.id
                 ),
             ));
         }

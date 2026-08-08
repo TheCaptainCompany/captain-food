@@ -80,6 +80,10 @@ the moment to promote it to a spec — not before.
 6. **Fire the drill once, supervised** (practice 10: a runbook is trusted only after it has been
    executed): `kubectl -n captain-restore-drill create job --from=cronjob/restore-drill
    restore-drill-manual`, watch it end-to-end, record the date on #360.
+   Inspecting a FAILED drill: "secret not found"-style events/conditions on the orphaned
+   `drill-db` Cluster are EXPECTED fallout of the credential-cleanup trap (it deletes the copied
+   `cnpg-object-storage` secret while `drill-db` deliberately stays up for inspection until the
+   next run's cleanup) — not a second bug; the filed issue's event snapshot predates the trap.
 7. **Re-source DATABASE_URL at cutover** (#358/#366 sequencing): the app secret's `DATABASE_URL`
    flips to the CNPG `captain-db-app` credentials; the `db-migrate` retarget gate
    (`target: cnpg-port-forward` workflow input) is exercised then — flipping its DEFAULT is a

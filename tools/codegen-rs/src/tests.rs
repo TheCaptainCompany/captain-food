@@ -5311,6 +5311,50 @@ PlaceOrderProcess:
         assert!(names.len() < all.len(), "the scope filter must exclude something");
     }
 
+    /// The #393 consumer widening: a bin that declares it HOSTS a consumer (worker-sirene-sync
+    /// hosts `sirene_ingest`) reads that consumer's declared keys — scope-filtered like every
+    /// other key — while the plain scope filter keeps excluding them for everyone else. Inert
+    /// widening (keys appearing for bins that host nothing) is the bug the last assertion
+    /// catches.
+    #[test]
+    fn real_specs_worker_consumer_keys_widen_only_the_hosting_bin() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let model = load_model(&root.join("specs")).expect("real specs load");
+        let scopes: BTreeSet<String> =
+            ["network".to_string(), "common".to_string()].into_iter().collect();
+        let plain: BTreeSet<String> =
+            scoped_config_keys(&model, &scopes).into_iter().map(|k| k.name).collect();
+        assert!(
+            !plain.contains("INSEE_API_TOKEN"),
+            "a sirene_ingest-consumer key must stay out of the plain server filter"
+        );
+        let widened: BTreeSet<String> = scoped_config_keys_with_consumers(
+            &model,
+            &scopes,
+            &BTreeSet::from(["sirene_ingest".to_string()]),
+        )
+        .into_iter()
+        .map(|k| k.name)
+        .collect();
+        for must in ["INSEE_API_TOKEN", "SIRENE_DEPARTMENTS", "RUN_SIRENE_WORKER"] {
+            assert!(widened.contains(must), "{must} must reach the hosting worker's Config");
+        }
+        // Scope filtering still applies to consumer keys: the widening never reaches past the
+        // bin's own scopes.
+        let common_only: BTreeSet<String> = scoped_config_keys_with_consumers(
+            &model,
+            &BTreeSet::from(["common".to_string()]),
+            &BTreeSet::from(["sirene_ingest".to_string()]),
+        )
+        .into_iter()
+        .map(|k| k.name)
+        .collect();
+        assert!(
+            !common_only.contains("INSEE_API_TOKEN"),
+            "consumer keys must stay scope-filtered (network key, common-only scopes)"
+        );
+    }
+
     #[test]
     fn real_specs_crate_graph_is_a_dag_with_existing_targets() {
         // The whole-tree gate: over the REAL specs, every derived manifest dependency must name an
@@ -5423,11 +5467,43 @@ fn deploy_tree_is_complete_both_ways() {
         let manifest = files
             .get(path.as_str())
             .unwrap_or_else(|| panic!("bin '{}' has no generated Deployment manifest", b.name));
+        if let Some(schedule) = &b.schedule {
+            // PERIODIC WORKER (ADR-20260808-062933 "shape follows cadence"): a CronJob carrying
+            // the c4-DECLARED cadence, never overlapping itself, never a probe-served Deployment.
+            assert!(manifest.contains("kind: CronJob"), "{}: a scheduled worker must be a CronJob", b.name);
+            assert!(
+                manifest.contains(&format!("schedule: \"{schedule}\"")),
+                "{}: the CronJob must carry the c4-declared cadence '{schedule}'",
+                b.name
+            );
+            assert!(
+                manifest.contains("concurrencyPolicy: Forbid"),
+                "{}: passes must never overlap (Forbid)",
+                b.name
+            );
+            assert!(
+                manifest.contains("restartPolicy: Never"),
+                "{}: a pass is retried by its NEXT schedule, not by pod restarts",
+                b.name
+            );
+            assert_eq!(
+                manifest.contains("suspend: true"),
+                b.suspended,
+                "{}: CronJob suspend must mirror the c4-l2 `suspended:` declaration",
+                b.name
+            );
+            assert!(
+                !manifest.contains("kind: Service") && !manifest.contains("readinessProbe"),
+                "{}: a run-to-completion pass serves nothing — no Service, no probes",
+                b.name
+            );
+        } else {
         // The safety pins the emitter must encode (PROP-20260806-223656 D3 + D5 addendum):
         // Recreate + one replica until #242's leases and fencing, with #193 named in place.
         assert!(manifest.contains("type: Recreate"), "{}: strategy must be Recreate until #242", b.name);
         assert!(manifest.contains("replicas: 1"), "{}: replicas pinned to 1 until #242", b.name);
         assert!(manifest.contains("#193"), "{}: the Recreate pin must cite #193 in place", b.name);
+        }
         // D8: a pod gets DATABASE_URL iff the derivation says it touches the stores -- gateways
         // and surfaces never (no DB access by construction), EXCEPT a surface with a DECLARED
         // c4 edge to event-store/read-models (adapters: its ACLs record inbound facts).
@@ -5549,6 +5625,60 @@ fn deploy_tree_is_complete_both_ways() {
     );
     // The composed pod is gone for good: no `adapters` bin, no manifest, no pin.
     assert!(!bins.contains("adapters"), "the composed adapters bin must not come back");
+
+    // One bin per worker (ADR-20260808-062933), derived from the c4-l2 worker containers:
+    // bam (always-on Deployment) + the periodic `worker-*` CronJobs, shape following cadence.
+    let workers: Vec<&BinSpec> = topology.iter().filter(|b| b.family == "worker").collect();
+    assert!(
+        workers.iter().any(|b| b.name == "bam" && b.schedule.is_none()),
+        "bam stays the always-on worker Deployment (do not respawn it as a CronJob)"
+    );
+    for expected in ["worker-sirene-sync", "worker-retention", "worker-journal-sweep", "worker-erasure"] {
+        let w = workers
+            .iter()
+            .find(|b| b.name == expected)
+            .unwrap_or_else(|| panic!("worker bin '{expected}' missing from the topology"));
+        assert!(w.schedule.is_some(), "{expected}: a periodic worker carries its declared cadence");
+    }
+    // The GitHub-Actions residence stays authoritative until the #358 cutover — the SIRENE
+    // CronJob lands visibly suspended; the sweeps land live (nothing applies the tree yet).
+    assert!(
+        workers.iter().any(|b| b.name == "worker-sirene-sync" && b.suspended),
+        "worker-sirene-sync must land suspended (sirene-sync.yml residence + the #220 pause)"
+    );
+    // MINIMAL GRANTS — the auditable GDPR posture the ADR names: the erasure pod's env answers
+    // "what could this process reach?" with the database and the telemetry backend, nothing
+    // else. Checked against the FULL production secret catalog, not a hand list of offenders:
+    // every other secret key must be absent.
+    let erasure = files["manifests/bins/worker-erasure.yaml"];
+    assert!(
+        erasure.contains("name: DATABASE_URL") && erasure.contains("name: HONEYCOMB_API_KEY"),
+        "worker-erasure keeps the DB + telemetry floor"
+    );
+    for (key, _, _, _) in production_secret_keys(&model) {
+        if key != "DATABASE_URL" && key != "HONEYCOMB_API_KEY" {
+            assert!(
+                !erasure.contains(&format!("name: {key}")),
+                "worker-erasure's pod env carries '{key}' — the #393 worker floor narrowing broke (the GDPR pod must hold only its own grants)"
+            );
+        }
+    }
+    // The consumer widening is exactly as narrow as declared: only worker-sirene-sync hosts the
+    // sirene_ingest consumer — and since its keys declare no production from_secret (GitHub
+    // Actions injects them until the #358 cutover), even ITS pod env carries none of them yet.
+    for b in &topology {
+        assert_eq!(
+            b.consumers.contains("sirene_ingest"),
+            b.name == "worker-sirene-sync",
+            "{}: the sirene_ingest consumer belongs to worker-sirene-sync alone",
+            b.name
+        );
+    }
+    let sirene = files["manifests/bins/worker-sirene-sync.yaml"];
+    assert!(
+        !sirene.contains("name: INSEE_API_TOKEN"),
+        "INSEE_API_TOKEN has no production from_secret — it reaches the pod only when the #358 cutover gives it a deploy source"
+    );
 }
 
 /// The pin ledger drives the Deployment image: a recorded digest is baked in (digest-pinned,

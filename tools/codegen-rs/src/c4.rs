@@ -40,6 +40,14 @@ pub(crate) struct Container {
     /// drops those keys from the pod's env — the rule is tracked on #385 with the per-key
     /// consumer-metadata design (ADR-20260808-060309 consequences).
     pub(crate) integration_scopes: Vec<String>,
+    /// The declared cadence of a periodic `worker-*` container (`schedule:`, 5-field cron in
+    /// UTC — ADR-20260808-062933 "shape follows cadence"): present ⇒ the deploy emitter renders
+    /// a CronJob; absent ⇒ an always-on Deployment. §15 requires it on every `worker-*`
+    /// container and refuses it anywhere else.
+    pub(crate) schedule: Option<String>,
+    /// `suspended: true` renders the CronJob with `suspend: true` — visibly OFF (used while an
+    /// external residence stays authoritative, e.g. sirene-sync.yml until the #358 cutover).
+    pub(crate) suspended: bool,
 }
 pub(crate) struct External {
     pub(crate) id: String,
@@ -466,6 +474,8 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                             s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect()
                         })
                         .unwrap_or_default(),
+                    schedule: c.get("schedule").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    suspended: c.get("suspended").and_then(|x| x.as_bool()) == Some(true),
                 });
             }
         }

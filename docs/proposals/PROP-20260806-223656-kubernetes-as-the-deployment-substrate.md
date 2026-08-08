@@ -455,8 +455,12 @@ Copied to the tracking issue's checklist on approval.
 3. Does the OTel collector run as a cluster DaemonSet/Deployment, or stay in the app process?
 4. Secret management: plain `Secret` objects, Sealed Secrets, or an external store? The GHCR image is
    public, so nothing may be baked (PROP-20260729-014500 D5 still binds).
-5. Where does `sync-worker` run — a `CronJob`, or does it stay a GitHub Actions schedule as `c4-l2.yaml`
-   specifies? Domain deadlines stay in the actor runtime regardless (PROP-20260731-061609 D1 note).
+5. Where the SIRENE sync runs — SETTLED by
+   [ADR-20260808-062933 "One bin per worker"](../adr/ADR-20260808-062933-one-bin-per-worker.md)
+   ([#393 "Cross-cutting worker hosting: one bin per worker"](https://github.com/TheCaptainCompany/captain-food/issues/393)):
+   a generated `worker-sirene-sync` CronJob, landed suspended; the GitHub Actions schedule stays
+   authoritative until the #358 cutover records the handover. Domain deadlines stay in the actor
+   runtime regardless (PROP-20260731-061609 D1 note).
 6. Does D5's manifest generation land before or after the first cutover?
 
 ## 7. Alternatives considered

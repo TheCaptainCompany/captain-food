@@ -77,8 +77,9 @@ boundedContexts:
 # The former single `api` container is SPLIT into the real deployable list (ADR-20260807-183024,
 # PROP-20260806-223656 D5 addendum): surface bins (fo-*/bo-*), one adapter bin per partner ACL
 # (adapter-*, ADR-20260808-062432), one GraphQL subgraph per scope, one thin generated gateway per
-# role path, one bin per aggregate (actor-*) and per process manager (pm-*), and one projector per
-# scope. Every actor/PM is REALIZED by exactly one bin — the
+# role path, one bin per aggregate (actor-*) and per process manager (pm-*), one projector per
+# scope, and one bin per cross-cutting worker (worker-* + bam, CronJob-shaped where periodic —
+# ADR-20260808-062933). Every actor/PM is REALIZED by exactly one bin — the
 # `realizes:` binding is what the #349 emitter turns into bin crates ↔ images ↔ Deployments.
 containers:
   # -- client apps (run on the user's device) --
@@ -340,12 +341,35 @@ containers:
   read-models:
     technology: "PostgreSQL (CNPG) — captain-views"
     description: "Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2)."
-  sync-worker:
-    technology: "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)"
-    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the external gateway (/external/graphql). Prospection scoring/outreach is a later step."
+  # -- cross-cutting worker bins (ONE BIN PER WORKER, ADR-20260808-062933): each worker is its
+  #    own deployable holding only its own grants, and SHAPE FOLLOWS CADENCE — a `worker-*`
+  #    container declares `schedule:` (5-field cron, UTC) and the emitter renders a Kubernetes
+  #    CronJob (the platform's scheduler is the scheduler; no internal cron loops), while the
+  #    always-on `bam` stays a Deployment. `suspended: true` lands the CronJob visibly OFF
+  #    (kubectl shows SUSPEND=True) — used where an external residence stays authoritative or a
+  #    pipeline is deliberately paused. Every worker main is a thin run-to-completion pass over
+  #    the EXISTING implementation crates (sirene_ingest / infrastructure) — no logic forks.
+  worker-sirene-sync:
+    technology: "Rust — scheduled worker bin (CronJob)"
+    description: "Restaurant listing sync (ADR-0020/0045), one weekly pass in two phases: SIRENE raw ingestion (sirene_ingest::sweep — stalest-first departments within a wall-clock budget) then the staged-row drain through the SIRENE ACL (SireneSyncWorker) issuing RegisterRestaurant / MarkRestaurantClosed on THIS deployed version. SUSPENDED: the GitHub-Actions cron (sirene-sync.yml) stays the authoritative residence until the #358 cutover, and the pipeline itself is paused (issue #220) — the pass also honours RUN_SIRENE_WORKER, so un-suspending alone cannot bypass the pause. Google Maps enrichment + prospection outreach ride here when they land (ADR-0020/0021)."
+    schedule: "0 3 * * 1"
+    suspended: true
+    integration_scopes: [network]
+  worker-retention:
+    technology: "Rust — scheduled worker bin (CronJob)"
+    description: "Retention sweep (ADR-20260721-025159): one sweep_retention() call per run — the windows and predicates live entirely in the SQL function (specs/database/functions/sweep_retention.sql), so this pod is a dumb periodic caller and the policy can never drift between code sites. Sweeps terminal journal/mailbox rows, processed webhook-mirror rows and abandoned auth sessions; NEVER touches domain_events (the forever log)."
+    schedule: "0 */6 * * *"
+  worker-journal-sweep:
+    technology: "Rust — scheduled worker bin (CronJob)"
+    description: "command_journal stale-RECEIVED sweep (ADR-20260720-015300): flips commands whose spawned run died before a terminal row to FAILED, so operationStatus never reports a dead run as pending forever. Cadence = half the 10-minute stale window (infrastructure::integrations::journal_sweep owns both). Retires WITH command_journal itself (Runtime D)."
+    schedule: "*/5 * * * *"
+  worker-erasure:
+    technology: "Rust — scheduled worker bin (CronJob)"
+    description: "The GDPR erasure worker (ADR-20260731-214500 §4): the generic deletion engine as ONE NAMED, minimal-grant pod — an auditable legal-precondition posture ('the process that erases personal data' is this pod and nothing else). Each run executes the declared deletion journeys over the bounded scan window (tombstone → delete stream + receipt on the deletion ledger, restart-safe two-tx design); honours the RUN_DELETION_ENGINE gate (default off until smoked). Its env carries DATABASE_URL + telemetry ONLY — no partner or identity secrets."
+    schedule: "15 * * * *"
   bam:
     technology: "Projection worker"
-    description: "Business Activity Monitoring projector — consumes the same event stream to answer business questions."
+    description: "Business Activity Monitoring projector — consumes the same event stream to answer business questions. Always-on (a projector follows the log, not a clock): stays a single-bin Deployment (ADR-20260808-062933)."
   otel-collector:
     technology: "OpenTelemetry Collector"
     description: "Receives traces/metrics/logs from every service bin; exports to the backend(s)."
@@ -438,13 +462,19 @@ relationships:
   - { from: adapter-hubrise, to: hubrise, description: "Import catalog / sync inventory via the ACL" }
   # identity: the supabase ACL runs in the customer subgraph (auth lives at the subgraph — D8)
   - { from: graphql-customer, to: supabase-auth, description: "OTP verify / session (out of domain)" }
-  # sync worker (SIRENE/Google) goes through the external gateway
-  - { from: sync-worker, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
-  - { from: sync-worker, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
-  - { from: sync-worker, to: gateway-external, description: "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)" }
-  - { from: sync-worker, to: hubspot, description: "Create/update prospection leads (ADR-0020)" }
-  - { from: sync-worker, to: resend, description: "Send prospection outreach emails (ADR-0020)" }
-  - { from: sync-worker, to: slack, description: "Prospection / ops alerts (ADR-0020)" }
+  # the sirene-sync worker (SIRENE/Google): ingest + drain against the store; outreach externals
+  - { from: worker-sirene-sync, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
+  - { from: worker-sirene-sync, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
+  - { from: worker-sirene-sync, to: event-store, description: "UPSERT the raw SIRENE mirror, then drain staged rows through the ACL into the write path (journaled sends)" }
+  - { from: worker-sirene-sync, to: hubspot, description: "Create/update prospection leads (ADR-0020)" }
+  - { from: worker-sirene-sync, to: resend, description: "Send prospection outreach emails (ADR-0020)" }
+  - { from: worker-sirene-sync, to: slack, description: "Prospection / ops alerts (ADR-0020)" }
+  # periodic sweeps + the GDPR erasure worker (one bin per worker, ADR-20260808-062933)
+  - { from: worker-retention, to: event-store, description: "sweep_retention(): expire terminal journal/mailbox rows + processed webhook mirrors (windows live in the SQL function)" }
+  - { from: worker-journal-sweep, to: event-store, description: "Flip stale RECEIVED command_journal rows to FAILED (liveness backstop for operationStatus)" }
+  - { from: worker-erasure, to: event-store, description: "Tombstone + delete erased streams; record receipts on the per-actor deletion ledger (two-tx journeys)" }
+  - { from: worker-erasure, to: read-models, description: "Scan bound = the slowest projection checkpoint (a fact is acted on only after every read model folded it)" }
+  - { from: worker-erasure, to: otel-collector, description: "OTLP export (every worker bin)" }
   # projectors: single log in, own schema out (representative: the money path; every projector-*
   # bin has the same two edges)
   - { from: projector-ordering, to: event-store, description: "Consume the single log filtered to ordering events; own checkpoint" }

@@ -57,6 +57,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       }
       ct_actor_restaurant = container "actor-restaurant" "Drains Restaurant lanes; appends its domain events." "Rust — mailbox worker bin" {
         a_Restaurant = component "Restaurant" "" "Aggregate"
+        c_google_ownership_verifier = component "google-ownership-verifier" "Google Business Profile ownership verification (ADR-0019/0021): validates claim/opt-out proofs for ClaimRestaurantListing / OptOutRestaurantListing via the GoogleOwnershipVerifier port in the Restaurant aggregate's command path (fail-closed binding until the live Google API is wired). Keeps the Google SDK out of the aggregate." "Instrumented"
       }
       ct_actor_prospect = container "actor-prospect" "Drains Prospect lanes; appends its domain events." "Rust — mailbox worker bin" {
         a_Prospect = component "Prospect" "" "Aggregate"
@@ -129,11 +130,14 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_projector_comms = container "projector-comms" "Projects comms-scope events into the comms views schema; own checkpoint." "Rust — projection worker bin"
       ct_event_store = container "event-store" "Append-only domain_events + the inbound_messages mailbox (the write model / source of truth; ALL backup/PITR budget — D2/D3)." "PostgreSQL (CNPG) — captain-core"
       ct_read_models = container "read-models" "Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2)." "PostgreSQL (CNPG) — captain-views"
-      ct_sync_worker = container "sync-worker" "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the external gateway (/external/graphql). Prospection scoring/outreach is a later step." "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)" {
-        c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
+      ct_worker_sirene_sync = container "worker-sirene-sync" "Restaurant listing sync (ADR-0020/0045), one weekly pass in two phases: SIRENE raw ingestion (sirene_ingest::sweep — stalest-first departments within a wall-clock budget) then the staged-row drain through the SIRENE ACL (SireneSyncWorker) issuing RegisterRestaurant / MarkRestaurantClosed on THIS deployed version. SUSPENDED: the GitHub-Actions cron (sirene-sync.yml) stays the authoritative residence until the #358 cutover, and the pipeline itself is paused (issue #220) — the pass also honours RUN_SIRENE_WORKER, so un-suspending alone cannot bypass the pause. Google Maps enrichment + prospection outreach ride here when they land (ADR-0020/0021)." "Rust — scheduled worker bin (CronJob)" {
+        c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner (infrastructure::integrations::sirene + the staged-row drain). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
         c_prospection_acl = component "prospection-acl" "B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description." "Instrumented"
       }
-      ct_bam = container "bam" "Business Activity Monitoring projector — consumes the same event stream to answer business questions." "Projection worker" {
+      ct_worker_retention = container "worker-retention" "Retention sweep (ADR-20260721-025159): one sweep_retention() call per run — the windows and predicates live entirely in the SQL function (specs/database/functions/sweep_retention.sql), so this pod is a dumb periodic caller and the policy can never drift between code sites. Sweeps terminal journal/mailbox rows, processed webhook-mirror rows and abandoned auth sessions; NEVER touches domain_events (the forever log)." "Rust — scheduled worker bin (CronJob)"
+      ct_worker_journal_sweep = container "worker-journal-sweep" "command_journal stale-RECEIVED sweep (ADR-20260720-015300): flips commands whose spawned run died before a terminal row to FAILED, so operationStatus never reports a dead run as pending forever. Cadence = half the 10-minute stale window (infrastructure::integrations::journal_sweep owns both). Retires WITH command_journal itself (Runtime D)." "Rust — scheduled worker bin (CronJob)"
+      ct_worker_erasure = container "worker-erasure" "The GDPR erasure worker (ADR-20260731-214500 §4): the generic deletion engine as ONE NAMED, minimal-grant pod — an auditable legal-precondition posture ('the process that erases personal data' is this pod and nothing else). Each run executes the declared deletion journeys over the bounded scan window (tombstone → delete stream + receipt on the deletion ledger, restart-safe two-tx design); honours the RUN_DELETION_ENGINE gate (default off until smoked). Its env carries DATABASE_URL + telemetry ONLY — no partner or identity secrets." "Rust — scheduled worker bin (CronJob)"
+      ct_bam = container "bam" "Business Activity Monitoring projector — consumes the same event stream to answer business questions. Always-on (a projector follows the log, not a clock): stays a single-bin Deployment (ADR-20260808-062933)." "Projection worker" {
         c_bam_projector = component "bam-projector" "Business Activity Monitoring projection (runs in the bam container); business_metrics only." "Instrumented"
       }
       ct_otel_collector = container "otel-collector" "Receives traces/metrics/logs from every service bin; exports to the backend(s)." "OpenTelemetry Collector"
@@ -212,12 +216,17 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     x_delivery_partner -> ct_adapter_avelo37 "Courier acceptance/status webhooks (inbound facts) — ADR-0031"
     ct_adapter_hubrise -> x_hubrise "Import catalog / sync inventory via the ACL"
     ct_graphql_customer -> x_supabase_auth "OTP verify / session (out of domain)"
-    ct_sync_worker -> x_sirene "Poll establishments (SIRET/NAF/address/closures)"
-    ct_sync_worker -> x_google_maps "Fetch Business Profile data (rating/reviews/hours/website)"
-    ct_sync_worker -> ct_gateway_external "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)"
-    ct_sync_worker -> x_hubspot "Create/update prospection leads (ADR-0020)"
-    ct_sync_worker -> x_resend "Send prospection outreach emails (ADR-0020)"
-    ct_sync_worker -> x_slack "Prospection / ops alerts (ADR-0020)"
+    ct_worker_sirene_sync -> x_sirene "Poll establishments (SIRET/NAF/address/closures)"
+    ct_worker_sirene_sync -> x_google_maps "Fetch Business Profile data (rating/reviews/hours/website)"
+    ct_worker_sirene_sync -> ct_event_store "UPSERT the raw SIRENE mirror, then drain staged rows through the ACL into the write path (journaled sends)"
+    ct_worker_sirene_sync -> x_hubspot "Create/update prospection leads (ADR-0020)"
+    ct_worker_sirene_sync -> x_resend "Send prospection outreach emails (ADR-0020)"
+    ct_worker_sirene_sync -> x_slack "Prospection / ops alerts (ADR-0020)"
+    ct_worker_retention -> ct_event_store "sweep_retention(): expire terminal journal/mailbox rows + processed webhook mirrors (windows live in the SQL function)"
+    ct_worker_journal_sweep -> ct_event_store "Flip stale RECEIVED command_journal rows to FAILED (liveness backstop for operationStatus)"
+    ct_worker_erasure -> ct_event_store "Tombstone + delete erased streams; record receipts on the per-actor deletion ledger (two-tx journeys)"
+    ct_worker_erasure -> ct_read_models "Scan bound = the slowest projection checkpoint (a fact is acted on only after every read model folded it)"
+    ct_worker_erasure -> ct_otel_collector "OTLP export (every worker bin)"
     ct_projector_ordering -> ct_event_store "Consume the single log filtered to ordering events; own checkpoint"
     ct_projector_ordering -> ct_read_models "Maintain the ordering schema's View_* (GRANT-scoped)"
     ct_projector_catalog -> ct_event_store "Consume catalog events; own checkpoint"
@@ -367,7 +376,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       include *
       autolayout lr
     }
-    component ct_sync_worker "SyncWorkerComponents" {
+    component ct_worker_sirene_sync "WorkerSireneSyncComponents" {
       include *
       autolayout lr
     }

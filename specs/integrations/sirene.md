@@ -2,8 +2,10 @@
 
 Captain.Food **pre-registers** Touraine food establishments from public data so the marketplace launches
 with coverage and a B2B pipeline (ADR-0019). The source is the open **Recherche d'entreprises API**
-(`recherche-entreprises.api.gouv.fr`, Etalab) over INSEE **Sirene**. A scheduled **`sync-worker`**
-(c4-l2; ADR-0020) reads Sirene and goes through the **`sirene-google-acl`** adapter (c4-l3), which
+(`recherche-entreprises.api.gouv.fr`, Etalab) over INSEE **Sirene**. A scheduled worker — the
+**`worker-sirene-sync`** container (c4-l2; ADR-0020, one bin per worker ADR-20260808-062933; the
+GitHub-Actions cron `sirene-sync.yml` stays its authoritative residence until the #358 cutover) —
+reads Sirene and goes through the **`sirene-google-acl`** adapter (c4-l3), which
 **calls the `Restaurant` aggregate's normal commands at `/external/graphql` as if it were the owner** —
 there is no special pre-registration command. The Sirene SDK never leaks into the aggregate.
 
