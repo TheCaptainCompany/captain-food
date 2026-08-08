@@ -206,9 +206,19 @@ fn collect(
 }
 
 /// Headers forwarded to the subgraph — credentials and correlation, nothing else. The gateway
-/// never reads them (no auth here — the subgraph is the schema boundary).
-const FORWARDED_HEADERS: &[&str] =
-    &["authorization", "x-session-id", "traceparent", "tracestate", "accept-language"];
+/// never reads them (no auth here — the subgraph is the schema boundary). `cookie` carries the
+/// httpOnly `captain_auth` token, the ONLY credential a browser client has (crates/web/src/auth.rs
+/// never sees the token, so it cannot send `authorization`); dropping it 401s every
+/// authenticated browser request at the subgraph.
+const FORWARDED_HEADERS: &[&str] = &[
+    "authorization",
+    "cookie",
+    "x-external-api-key",
+    "x-session-id",
+    "traceparent",
+    "tracestate",
+    "accept-language",
+];
 
 async fn proxy_handler(
     State(gw): State<Gateway>,
@@ -381,5 +391,13 @@ mod tests {
         assert_eq!(gw.urls()["ordering"], "http://127.0.0.1:7101");
         assert_eq!(gw.urls()["network"], "http://graphql-network");
         assert!(!gw.urls().contains_key("bogus"));
+    }
+
+    #[test]
+    fn both_auth_carriers_are_forwarded() {
+        // The browser's ONLY credential is the httpOnly captain_auth cookie; wasm clients cannot
+        // send `authorization`. Dropping either carrier 401s a whole client class at the subgraph.
+        assert!(FORWARDED_HEADERS.contains(&"authorization"));
+        assert!(FORWARDED_HEADERS.contains(&"cookie"));
     }
 }

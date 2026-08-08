@@ -706,7 +706,11 @@ pub(crate) fn emit_bin_crates(model: &Model) -> Vec<BinCrate> {
             config: wired(b).then(|| {
                 // The bin's key subset = the SAME scope routing the deploy emitter uses for its
                 // pod's env (#374 Q4 closed by #385): its linked scopes + owning scope + common.
-                let keys = scoped_config_keys(model, &bin_config_scopes(b, model));
+                // DATABASE_URL follows the SAME needs_db exclusion as deploy.rs::env_yaml — a
+                // db-less bin (gateway/surface) whose Config still required the key would
+                // exit(78) on boot while the manifest correctly never provides it.
+                let mut keys = scoped_config_keys(model, &bin_config_scopes(b, model));
+                keys.retain(|k| k.name != "DATABASE_URL" || super::deploy::needs_db(b, model));
                 emit_config_module(model, &keys, /* is_server */ false)
             }),
         })

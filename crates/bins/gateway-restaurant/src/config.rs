@@ -182,8 +182,6 @@ impl fmt::Display for MissingConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub profile: Profile,
-    /// Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all.
-    pub database_url: String,
     /// sqlx pool ceiling per PROCESS (ADR-20260807-183024 realization, issue #385): the monolith and every wired bin size their PgPool from this DECLARED value instead of a per-main constant. Matters at bin granularity: 49 pods x this ceiling is the CNPG cluster's connection budget, so the number must be reviewable in one place. Per-bin tuning is an env override on the pod (env > baked > default), not a code change.
     pub database_pool_max_connections: i64,
     /// Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused.
@@ -304,11 +302,6 @@ impl Config {
             }
         };
         let mut problems = ConfigProblems::default();
-        let database_url = raw("DATABASE_URL");
-        if database_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
-        }
-        let database_url = database_url.unwrap_or_default();
         let database_pool_max_connections = raw("DATABASE_POOL_MAX_CONNECTIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
         let supabase_url = raw("SUPABASE_URL").or_else(|| baked("SUPABASE_URL", profile).map(str::to_string));
         if supabase_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
@@ -392,11 +385,6 @@ impl Config {
         let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
         let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
-        if let Some(v) = Some(database_url.as_str()) {
-            if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
-                problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
-            }
-        }
         if let Some(v) = Some(supabase_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^https?://", v) {
                 problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
@@ -435,7 +423,6 @@ impl Config {
         (
             Self {
                 profile,
-                database_url,
                 database_pool_max_connections,
                 supabase_url,
                 supabase_publishable_key,
@@ -495,7 +482,6 @@ impl Config {
     /// "is production actually live?" is answerable without reading a secret.
     pub fn boot_report(&self) -> String {
         let mut out = format!("config: profile={}, {} keys resolved\n", self.profile, KEY_COUNT);
-        out.push_str(&format!("  DATABASE_URL               = {}\n", if self.database_url.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  DATABASE_POOL_MAX_CONNECTIONS = {}\n", self.database_pool_max_connections));
         out.push_str(&format!("  SUPABASE_URL               = {}\n", self.supabase_url));
         out.push_str(&format!("  SUPABASE_PUBLISHABLE_KEY   = {}\n", self.supabase_publishable_key));
@@ -540,12 +526,11 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 40;
+pub const KEY_COUNT: usize = 39;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
     "APP_PROFILE",
-    "DATABASE_URL",
     "DATABASE_POOL_MAX_CONNECTIONS",
     "SUPABASE_URL",
     "SUPABASE_PUBLISHABLE_KEY",
