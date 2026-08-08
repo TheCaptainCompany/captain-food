@@ -3,6 +3,13 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-08 (night, follow-up) — #348 SLICES 1–2 APPROVED BY THE CUSTOMER LIVE; SLICE 1
+> APPLIED TO MAIN BY THE RUN ([ADR-20260808-230800](adr/ADR-20260808-230800-rider-delivery-slices-1-2-approved-and-applied.md)).**
+> All five answers were the recommended options: §2 as written (applied, full `make rust` gate,
+> expected 43 → 37 warnings), §3.2 `sends:` approved (lands with the D6 validator mechanism),
+> both customer-anxiety quick wins pulled forward (diff being prepared), slices 3–8 filed in the
+> parent proposal's value order, apply-now vehicle chosen explicitly over §6 plan-mode.
+>
 > ⏳ **2026-08-08 (night) — #348 SLICES 1–2 SPEC DIFF PREPARED, AWAITING CUSTOMER APPROVAL —
 > [PROP-20260808-221424](proposals/PROP-20260808-221424-rider-delivery-slices-1-2-spec-diff.md)
 > (autonomous run; `specs/**` untouched).** The exact per-file diff realizing the approved

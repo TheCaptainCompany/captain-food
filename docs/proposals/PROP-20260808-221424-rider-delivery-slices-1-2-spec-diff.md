@@ -1,6 +1,6 @@
 # PROP-20260808-221424 — Rider/delivery slices 1–2: the exact spec diff (vocabulary retirement + PM-send credit)
 
-- **Status**: Proposed (awaiting customer sign-off — this file is a spec DIFF for review; nothing has been applied)
+- **Status**: Approved (customer, 2026-08-08, live in session — §2 approved as written and applied to `main` by the run per [ADR-20260808-230800](../adr/ADR-20260808-230800-rider-delivery-slices-1-2-approved-and-applied.md); §3.2 approved, lands with the D6 validator mechanism)
 - **Date**: 2026-08-08
 - **Parent proposal**: [PROP-20260808-141817 "The rider/delivery write surface: journeys, vocabulary
   verdict, and V0 slices"](PROP-20260808-141817-rider-delivery-write-surface.md) (Approved 2026-08-08;
@@ -13,12 +13,14 @@
 
 ---
 
-> ## DO NOT APPLY WITHOUT CUSTOMER APPROVAL
+> ## APPROVED AND APPLIED (2026-08-08)
 >
-> `specs/**` is frozen for autonomous loops (CLAUDE.md, non-negotiable). This document is the
-> DELIVERABLE of an autonomous run: the exact before/after for every touched spec file, prepared so
-> the customer can approve the precise change. Application happens only in a plan-mode session,
-> after explicit customer approval, per §6 below.
+> `specs/**` is frozen for autonomous loops (CLAUDE.md, non-negotiable); this document was the
+> prepared exact diff, and the customer approved it **as written, live in session**, choosing
+> immediate application by the run over the §6 plan-mode vehicle — authorization recorded in
+> [ADR-20260808-230800](../adr/ADR-20260808-230800-rider-delivery-slices-1-2-approved-and-applied.md).
+> §2 is applied to `main`; §3.2 lands with the D6 validator mechanism. This exception rides an
+> exact-text approval and is no precedent for unapproved spec edits.
 
 **Why now — the retirement window is closing.** Every line deleted below describes an event type of
 which **zero instances exist in any production log**. Today, retiring
