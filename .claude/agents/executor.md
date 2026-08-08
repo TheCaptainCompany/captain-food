@@ -76,3 +76,14 @@ several sessions run concurrently; deviating from it is how two agents collide.
 
 End with: the issue, the PR link, the gate results, and one line on anything the architect should
 know — an adjacent problem you noticed, a scope surprise, or a dependency that turned out stale.
+
+**Then an "Operational learnings" section — mandatory to WRITE, not mandatory to fill** (PO
+directive 2026-08-08; ADR-20260730-034635 governs). Report only what met you in the environment and
+is not derivable from the code: a gate that failed for a misleading reason, a tool or hook behaving
+unexpectedly, an instruction in the dispatch that was wrong or missing, a cost (time, rebuild,
+retry) the next executor will pay again unless recorded. For each item name the concrete cost that
+earned it. `None` is a legitimate and common entry — a session diary is not a lesson, and padding
+buries the real rules. The coordinator triages your entries: executable gate/test > sessions.md or
+topic-file rule > ADR > discard; a near-duplicate of an existing rule sharpens that rule instead of
+appending. You never edit sessions.md or file the lesson yourself — you report it; the coordinator
+lands it in the same change-cycle as the work.
