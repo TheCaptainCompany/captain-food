@@ -11,48 +11,6 @@ use domain::generated::scalars::RestaurantAccountId;
 use infrastructure::PgRestaurantRepository;
 use sqlx::PgPool;
 
-/// Fresh copy of the `restaurant` projection table (mirrors migrations/20260717120000).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS restaurant CASCADE;
-        CREATE TABLE restaurant (
-          restaurant_id UUID PRIMARY KEY,
-          restaurant_account_id UUID,
-          listing_status TEXT NOT NULL,
-          external_identifiers JSONB,
-          google_place_id TEXT,
-          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
-          slug TEXT UNIQUE,
-          display_name TEXT NOT NULL,
-          description TEXT,
-          tags JSONB,
-          margin_rate TEXT,
-          cuisine_category TEXT,
-          uber_prices_opt_in BOOLEAN,
-          website TEXT,
-          rating TEXT,
-          reviews_count INTEGER,
-          gbp_order_url TEXT,
-          gbp_link_status TEXT,
-          address JSONB NOT NULL,
-          location JSONB,
-          opening_hours JSONB NOT NULL,
-          status TEXT NOT NULL,
-          order_acceptance TEXT NOT NULL,
-          default_currency TEXT NOT NULL,
-          timezone TEXT,
-          preparation_time_minutes INTEGER,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
-
 /// Insert a minimal projected restaurant row (only the NOT NULL columns + the account under test).
 async fn seed_restaurant(
     pool: &PgPool,
@@ -80,16 +38,8 @@ async fn seed_restaurant(
 
 #[tokio::test]
 async fn by_account_returns_only_the_accounts_locations() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP by_account_returns_only_the_accounts_locations: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("restaurant_locations_by_account").await else { return };
+    let pool = db.pool();
 
     let account = uuid::Uuid::new_v4();
     let other_account = uuid::Uuid::new_v4();

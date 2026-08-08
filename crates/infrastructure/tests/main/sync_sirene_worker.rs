@@ -31,111 +31,6 @@ use infrastructure::{
 };
 use sqlx::PgPool;
 
-/// The tests in this file share one DATABASE_URL and reset the same tables — serialize them.
-static DB_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-fn db_lock() -> &'static tokio::sync::Mutex<()> {
-    DB_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-/// Fresh copies of the tables the slice touches: the staging table (mirrors
-/// migrations/20260718100000) + the write path's `domain_events` + the `restaurant` projection table
-/// backing the close path's legacy-id adoption + the MAILBOX (the real migration DDL via
-/// include_str!, so this fixture and production cannot drift — every send lands there since
-/// ADR-20260731-122500).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, \
-                              command_journal, inbound_events, inbound_messages, mailbox_partitions CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-    sqlx::raw_sql(
-        r#"
-        CREATE TABLE external_sirene_restaurants (
-          siret TEXT PRIMARY KEY,
-          -- NULLable since #231: the payload is TRANSIENT, present only while the row is pending
-          -- (or when the record could not be mapped and it is kept as evidence).
-          payload JSONB NULL,
-          etat TEXT NOT NULL,
-          naf TEXT NOT NULL,
-          department TEXT NOT NULL,
-          first_seen_at TIMESTAMPTZ NOT NULL,
-          last_seen_at TIMESTAMPTZ NOT NULL,
-          sync_run_id UUID NOT NULL,
-          payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
-          processed_at TIMESTAMPTZ NULL,
-          status TEXT NOT NULL DEFAULT 'PENDING',
-          synced_at TIMESTAMPTZ NULL,
-          last_attempt_sync_at TIMESTAMPTZ NULL,
-          attempt_sync_retry_count INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE TABLE restaurant (
-          restaurant_id UUID PRIMARY KEY,
-          restaurant_account_id UUID,
-          listing_status TEXT NOT NULL,
-          external_identifiers JSONB,
-          google_place_id TEXT,
-          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
-          slug TEXT UNIQUE,
-          display_name TEXT NOT NULL,
-          description TEXT,
-          tags JSONB,
-          margin_rate TEXT,
-          cuisine_category TEXT,
-          uber_prices_opt_in BOOLEAN,
-          website TEXT,
-          rating TEXT,
-          reviews_count INTEGER,
-          gbp_order_url TEXT,
-          gbp_link_status TEXT,
-          address JSONB NOT NULL,
-          location JSONB,
-          opening_hours JSONB NOT NULL,
-          status TEXT NOT NULL,
-          order_acceptance TEXT NOT NULL,
-          default_currency TEXT NOT NULL,
-          timezone TEXT,
-          preparation_time_minutes INTEGER,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
-
 /// The same realistic Sirene 3.11 shape the ACL/ingestion tests use, with a parameterizable état.
 fn sample_payload(etat: &str) -> serde_json::Value {
     serde_json::json!({
@@ -161,15 +56,17 @@ fn sample_payload(etat: &str) -> serde_json::Value {
     })
 }
 
-/// Stage one row the way the ingestion does (fresh `last_seen_at`, untouched `processed_at`).
+/// Stage one row the way the ingestion does (fresh `last_seen_at`, untouched `processed_at`, and
+/// a content hash — the real migrated column is NOT NULL with its default deliberately dropped,
+/// so a hashless insert is unspellable in production and must be here too).
 async fn stage_row(pool: &PgPool, etat: &str) {
     sqlx::query(
         "INSERT INTO external_sirene_restaurants \
-           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, processed_at) \
-         VALUES ('85242109900021', $1, $2, '56.10A', '37', now(), now(), $3, NULL) \
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at) \
+         VALUES ('85242109900021', $1, $2, '56.10A', '37', now(), now(), $3, md5($1::text), NULL) \
          ON CONFLICT (siret) DO UPDATE SET \
            payload = EXCLUDED.payload, etat = EXCLUDED.etat, last_seen_at = EXCLUDED.last_seen_at, \
-           sync_run_id = EXCLUDED.sync_run_id",
+           sync_run_id = EXCLUDED.sync_run_id, payload_hash = EXCLUDED.payload_hash",
     )
     .bind(sample_payload(etat))
     .bind(etat)
@@ -183,11 +80,11 @@ async fn stage_row(pool: &PgPool, etat: &str) {
 async fn stage_row_with_payload(pool: &PgPool, siret: &str, payload: serde_json::Value) {
     sqlx::query(
         "INSERT INTO external_sirene_restaurants \
-           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, processed_at) \
-         VALUES ($1, $2, 'A', '56.10A', '37', now(), now(), $3, NULL) \
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at) \
+         VALUES ($1, $2, 'A', '56.10A', '37', now(), now(), $3, md5($2::text), NULL) \
          ON CONFLICT (siret) DO UPDATE SET \
            payload = EXCLUDED.payload, last_seen_at = EXCLUDED.last_seen_at, \
-           sync_run_id = EXCLUDED.sync_run_id",
+           sync_run_id = EXCLUDED.sync_run_id, payload_hash = EXCLUDED.payload_hash",
     )
     .bind(siret)
     .bind(payload)
@@ -206,17 +103,8 @@ async fn stage_row_with_payload(pool: &PgPool, siret: &str, payload: serde_json:
 /// unusable, and a silent unmappable row with no evidence is how a systematic mapping bug hides.
 #[tokio::test]
 async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     // A mappable record, and one that parses as an établissement but that the ACL rejects (no
@@ -328,19 +216,8 @@ async fn deliver_once(pool: &PgPool) -> u64 {
 
 #[tokio::test]
 async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_closes_prospects() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!(
-            "SKIP worker_drains_staging_rows_through_the_write_path_idempotently_and_closes_prospects: DATABASE_URL not set"
-        );
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let restaurant_id = restaurant_id_for_siret("85242109900021").0;
     let worker = SireneSyncWorker::new(pool.clone());
 
@@ -538,17 +415,8 @@ async fn seed_projection_row(pool: &PgPool, id: uuid::Uuid, slug: &str, identifi
 /// not exist — leaving the real, legacy-id listing open and orderable, which is the worse failure.
 #[tokio::test]
 async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_siret() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP worker_adopts_the_legacy_aggregate_id...: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let legacy_id = uuid::Uuid::new_v4();
     assert_ne!(legacy_id, restaurant_id_for_siret("85242109900021").0);
 
@@ -636,17 +504,8 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
 /// Recovery needs no operator action: a changed record from INSEE re-pends the row.
 #[tokio::test]
 async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP a_failed_delivery_leaves_a_durable_trace...: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     stage_row(&pool, "A").await;
@@ -716,17 +575,8 @@ async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
 /// `inbound_messages.external_id = '{siret}:{payload_hash}'`, and both halves are columns on the row.
 #[tokio::test]
 async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP staged_rows_resolve_to_synced_from_the_aggregates_verdict: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     stage_row(&pool, "A").await;
@@ -786,17 +636,8 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
 /// is what once made a sweep unable to tell 200,000 registrations from 200,000 no-ops.
 #[tokio::test]
 async fn an_ignored_verdict_still_counts_as_synced() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP an_ignored_verdict_still_counts_as_synced: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     stage_row(&pool, "A").await;
@@ -826,17 +667,8 @@ async fn an_ignored_verdict_still_counts_as_synced() {
 /// filters on `status <> 'POISON'`, and this pins it.
 #[tokio::test]
 async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     // A pending row that has already exhausted its attempts.
@@ -866,17 +698,8 @@ async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
 /// exactly what is suspect when a delivery fails.
 #[tokio::test]
 async fn a_failed_verdict_keeps_the_payload() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP a_failed_verdict_keeps_the_payload: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     stage_row(&pool, "A").await;
@@ -914,13 +737,8 @@ async fn a_failed_verdict_keeps_the_payload() {
 /// batch: the mailbox insert, the `UNNEST` staging update, and the correspondence between them.
 #[tokio::test]
 async fn a_mixed_batch_drains_in_one_pass_with_every_group_marked_correctly() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP a_mixed_batch_drains_in_one_pass_with_every_group_marked_correctly: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("sync_sirene_worker").await else { return };
+    let pool = db.pool();
     let worker = SireneSyncWorker::new(pool.clone());
 
     // 20 mappable active records, each a DIFFERENT SIRET — and therefore a different aggregate, which

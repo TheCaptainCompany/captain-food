@@ -16,45 +16,6 @@ use domain::generated::scalars::InboundMessageStatus;
 use infrastructure::persistence::mailbox_store::PgMailbox;
 use sqlx::{PgPool, Row};
 
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-}
-
-fn gated() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP mailbox schedule_pg test: DATABASE_URL not set");
-            None
-        }
-    }
-}
-
-/// Serialize the suite: every test resets the same tables.
-static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 fn tagged(window: &str) -> serde_json::Value {
     serde_json::json!({
         "eventType": "OrderExpired",
@@ -79,10 +40,8 @@ async fn row(pool: &PgPool, message_id: uuid::Uuid) -> sqlx::postgres::PgRow {
 /// re-declaring with a later time moves the SAME row in place.
 #[tokio::test]
 async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_schedule_pg").await else { return };
+    let pool = db.pool();
     let mailbox = PgMailbox::new(pool.clone());
 
     let order = uuid::Uuid::from_u128(0x0AD1);
@@ -147,10 +106,8 @@ async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
 /// the row is untouched either way.
 #[tokio::test]
 async fn redeclaring_a_promoted_reminder_is_a_duplicate_untouched() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_schedule_pg").await else { return };
+    let pool = db.pool();
     let mailbox = PgMailbox::new(pool.clone());
 
     let order = uuid::Uuid::from_u128(0x0AD2);
@@ -190,10 +147,8 @@ async fn redeclaring_a_promoted_reminder_is_a_duplicate_untouched() {
 /// promoted, and idempotently `false` on a second attempt (or after promotion won the race).
 #[tokio::test]
 async fn cancelled_reminder_is_never_promoted() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_schedule_pg").await else { return };
+    let pool = db.pool();
     let mailbox = PgMailbox::new(pool.clone());
 
     let order = uuid::Uuid::from_u128(0x0AD3);

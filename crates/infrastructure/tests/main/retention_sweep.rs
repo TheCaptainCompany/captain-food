@@ -23,120 +23,17 @@
 use infrastructure::RetentionSweepWorker;
 use sqlx::PgPool;
 
-/// Fresh copies of every table the policy involves (journals + the mailbox + mirrors + the
-/// untouchables), then THE REAL FUNCTION from the spec source.
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS domain_events, command_journal, inbound_messages, mailbox_partitions,
-          external_stripe_events, external_hubrise_callbacks, external_avelo37_events,
-          external_uber_direct_events, auth_sessions, external_sirene_restaurants CASCADE;
-        DROP SEQUENCE IF EXISTS inbound_messages_position_seq;
-        DROP FUNCTION IF EXISTS sweep_retention();
-
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE TABLE command_journal (
-          message_id UUID PRIMARY KEY,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          session_id UUID NULL,
-          trace_id TEXT NULL,
-          user_id UUID NULL,
-          user_type TEXT NOT NULL,
-          channel TEXT NOT NULL,
-          command_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          payload_hash TEXT NOT NULL,
-          status TEXT NOT NULL,
-          error JSONB NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          completed_at TIMESTAMPTZ NULL
-        );
-        CREATE TABLE external_stripe_events (
-          stripe_event_id TEXT PRIMARY KEY,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          processed_at TIMESTAMPTZ NULL
-        );
-        CREATE TABLE external_hubrise_callbacks (
-          callback_id TEXT PRIMARY KEY,
-          resource_type TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          location_id TEXT NULL,
-          payload JSONB NOT NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          processed_at TIMESTAMPTZ NULL
-        );
-        CREATE TABLE external_avelo37_events (
-          avelo37_event_id TEXT PRIMARY KEY,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          processed_at TIMESTAMPTZ NULL
-        );
-        CREATE TABLE external_uber_direct_events (
-          uber_direct_event_id TEXT PRIMARY KEY,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          processed_at TIMESTAMPTZ NULL
-        );
-        CREATE TABLE auth_sessions (
-          message_id UUID PRIMARY KEY,
-          session_id UUID NULL,
-          ciphertext BYTEA NOT NULL,
-          nonce BYTEA NOT NULL,
-          expires_at TIMESTAMPTZ NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL
-        );
-        CREATE TABLE external_sirene_restaurants (
-          siret TEXT PRIMARY KEY,
-          payload JSONB NOT NULL,
-          etat TEXT NOT NULL,
-          naf TEXT NOT NULL,
-          department TEXT NOT NULL,
-          first_seen_at TIMESTAMPTZ NOT NULL,
-          last_seen_at TIMESTAMPTZ NOT NULL,
-          sync_run_id UUID NOT NULL,
-          processed_at TIMESTAMPTZ NULL
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-    // The mailbox table, from the REAL migration DDL.
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
+/// The shared reset (`TestDb::acquire`) builds every table from the real migration chain; on top
+/// of it, re-apply THE REAL SPEC FUNCTION — the single source of the retention windows. The
+/// migrated copy and the spec copy are supposed to be identical, but this test's contract is the
+/// spec source AS IT IS NOW: a spec change the migrations have not caught up with must break this
+/// test, not hide behind the older migrated copy.
+async fn apply_spec_function(pool: &PgPool) {
+    sqlx::raw_sql("DROP FUNCTION IF EXISTS sweep_retention();")
         .execute(pool)
         .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-    sqlx::raw_sql("DROP TABLE IF EXISTS mailbox_partitions").execute(pool).await.expect("trim");
-    // THE REAL SPEC FUNCTION — the single source of the retention windows.
-    sqlx::raw_sql(include_str!("../../../specs/database/functions/sweep_retention.sql"))
+        .expect("drop the migrated copy");
+    sqlx::raw_sql(include_str!("../../../../specs/database/functions/sweep_retention.sql"))
         .execute(pool)
         .await
         .expect("apply the spec sweep_retention function");
@@ -204,7 +101,7 @@ async fn mirror_row(pool: &PgPool, table: &str, id: &str, received_days: i32, pr
                      CASE WHEN $3::int IS NULL THEN NULL ELSE now() - make_interval(days => $3) END)"
         }
         "external_uber_direct_events" => {
-            "INSERT INTO external_uber_direct_events (uber_direct_event_id, event_type, payload, received_at, processed_at)
+            "INSERT INTO external_uber_direct_events (uber_event_id, event_type, payload, received_at, processed_at)
              VALUES ($1, 'event.delivery_status', '{}', now() - make_interval(days => $2),
                      CASE WHEN $3::int IS NULL THEN NULL ELSE now() - make_interval(days => $3) END)"
         }
@@ -228,16 +125,9 @@ async fn count(pool: &PgPool, table: &str) -> i64 {
 
 #[tokio::test]
 async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP retention_sweep: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("retention_sweep").await else { return };
+    let pool = db.pool();
+    apply_spec_function(&pool).await;
 
     // domain_events: an ANCIENT fact — the forever log must survive any sweep untouched.
     sqlx::query(
@@ -294,9 +184,10 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     // SIRENE mirror: an ancient, long-processed row — exempt from retention entirely.
     sqlx::query(
         "INSERT INTO external_sirene_restaurants
-           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, processed_at)
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at)
          VALUES ('12345678900012', '{}', 'A', '56.10A', '37',
-                 now() - INTERVAL '400 days', now() - INTERVAL '400 days', $1, now() - INTERVAL '400 days')",
+                 now() - INTERVAL '400 days', now() - INTERVAL '400 days', $1, md5('{}'),
+                 now() - INTERVAL '400 days')",
     )
     .bind(uuid::Uuid::new_v4())
     .execute(&pool)

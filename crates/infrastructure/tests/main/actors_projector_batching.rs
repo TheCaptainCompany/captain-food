@@ -48,92 +48,6 @@ use sqlx::{PgPool, Row};
 const N_RESTAURANTS: usize = 12;
 const K_REVISIONS: usize = 5;
 
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events, restaurant,
-          prospectionpipeline, projection_checkpoint CASCADE;
-        DROP SEQUENCE IF EXISTS inbound_messages_position_seq;
-
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE TABLE restaurant (
-          restaurant_id UUID PRIMARY KEY,
-          restaurant_account_id UUID,
-          listing_status TEXT NOT NULL,
-          external_identifiers JSONB,
-          google_place_id TEXT,
-          slug TEXT UNIQUE,
-          display_name TEXT NOT NULL,
-          description TEXT,
-          tags JSONB,
-          margin_rate TEXT,
-          cuisine_category TEXT,
-          uber_prices_opt_in BOOLEAN,
-          website TEXT,
-          rating TEXT,
-          reviews_count INTEGER,
-          gbp_order_url TEXT,
-          gbp_link_status TEXT,
-          address JSONB NOT NULL,
-          location JSONB,
-          opening_hours JSONB NOT NULL,
-          status TEXT NOT NULL,
-          order_acceptance TEXT NOT NULL,
-          default_currency TEXT NOT NULL,
-          timezone TEXT,
-          preparation_time_minutes INTEGER,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        CREATE TABLE prospectionpipeline (
-          restaurant_id UUID PRIMARY KEY,
-          score INTEGER NOT NULL,
-          pipeline_status TEXT NOT NULL,
-          contacts_count INTEGER NOT NULL,
-          last_contacted_at TIMESTAMPTZ,
-          replied_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        CREATE TABLE projection_checkpoint (
-          projector  TEXT        PRIMARY KEY,
-          position   BIGINT      NOT NULL DEFAULT 0,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-}
-
 fn deps_over(pool: &PgPool) -> CommandDeps {
     CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
@@ -189,16 +103,8 @@ fn revision_fact(i: usize, k: usize) -> RestaurantRegistered {
 
 #[tokio::test]
 async fn actors_and_batching_projector_converge_concurrently() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP actors_projector_batching: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("actors_projector_batching").await else { return };
+    let pool = db.pool();
 
     // The typed clients are the only public door to the mailbox (#284 slice 3) — this suite
     // records through them, exactly as the SIRENE producer does.

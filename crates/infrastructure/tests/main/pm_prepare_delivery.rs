@@ -25,7 +25,7 @@ use application::generated::services::{
 use application::ports::{Actor, EventStore};
 use application::queries::{CatalogReadRepository, CatalogRow, OfferView};
 use async_trait::async_trait;
-use domain::generated::entities::{Address, CartLineItem, CustomerContact, Money};
+use domain::generated::entities::{Address, CartLineItem, Money};
 use domain::generated::events::{CartLineAdded, CartStarted, DomainEvent, RestaurantActivated, RestaurantRegistered};
 use domain::generated::scalars::*;
 use domain::shared::errors::DomainError;
@@ -33,7 +33,7 @@ use infrastructure::generated::command_router::CommandDeps;
 use infrastructure::mailbox::MailboxCommandHandler;
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
-    PgCatalogRepository, PgCustomerRepository, PgEventStore, PgProspectionRepository,
+    PgCustomerRepository, PgEventStore, PgProspectionRepository,
     PgRestaurantRepository, PgSlugReservationRepository, UnverifiedGbpOrderLinkProbe,
 };
 use sqlx::{PgPool, Row};
@@ -115,96 +115,6 @@ impl PaymentService for StubGateway {
         self.refunds.lock().unwrap().push(input);
         Ok(())
     }
-}
-
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events, customer, \
-           payment_process_manager, refund_process_manager, cart_binding_process_manager, \
-           delivery_dispatch_process_manager CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-    sqlx::raw_sql(include_str!(
-        "../../../migrations/20260719200000_process_manager_state_tables.sql"
-    ))
-    .execute(pool)
-    .await
-    .expect("pm state migration");
-    // The v3 expand columns (migration 20260720030000, ADR-20260720-015500) and the enum-TEXT
-    // conversion (migration 20260730043100) — those migrations also touch tables this suite
-    // does not create, so only their payment/refund slices are replayed here.
-    sqlx::raw_sql(
-        "ALTER TABLE payment_process_manager \
-           ADD COLUMN customer_id UUID NULL, \
-           ADD COLUMN session_id UUID NULL, \
-           ADD COLUMN client_secret TEXT NULL;\n\
-         ALTER TABLE payment_process_manager \
-           ALTER COLUMN process_status TYPE TEXT USING (process_status::text), \
-           ALTER COLUMN payment_status TYPE TEXT USING (payment_status::text);\n\
-         ALTER TABLE refund_process_manager \
-           ALTER COLUMN process_status TYPE TEXT USING (process_status::text);",
-    )
-    .execute(pool)
-    .await
-    .expect("pm expand + enum-text columns");
-    sqlx::raw_sql(
-        "CREATE TABLE domain_events (\n\
-           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
-           id UUID NOT NULL UNIQUE,\n\
-           stream_name TEXT NOT NULL,\n\
-           version INTEGER NOT NULL,\n\
-           user_id UUID NOT NULL,\n\
-           user_type TEXT NOT NULL,\n\
-           correlation_id UUID NOT NULL,\n\
-           cause_id UUID NULL,\n\
-           event_type TEXT NOT NULL,\n\
-           payload JSONB NOT NULL,\n\
-           metadata JSONB NULL,\n\
-           occurred_at TIMESTAMPTZ NOT NULL,\n\
-           expired_at TIMESTAMPTZ NULL,\n\
-           UNIQUE (stream_name, version)\n\
-         )",
-    )
-    .execute(pool)
-    .await
-    .expect("domain_events");
-    sqlx::raw_sql(
-        "CREATE TABLE customer (\n\
-           customer_id UUID PRIMARY KEY,\n\
-           phone TEXT NOT NULL UNIQUE,\n\
-           auth_ref TEXT,\n\
-           display_name TEXT,\n\
-           email TEXT,\n\
-           email_verified BOOLEAN NOT NULL,\n\
-           locale TEXT,\n\
-           timezone TEXT,\n\
-           ratings JSONB NOT NULL,\n\
-           favorite_restaurant_ids JSONB NOT NULL,\n\
-           preferences JSONB,\n\
-           addresses JSONB NOT NULL,\n\
-           payment_method_id TEXT,\n\
-           created_at TIMESTAMPTZ NOT NULL,\n\
-           updated_at TIMESTAMPTZ NOT NULL\n\
-         )",
-    )
-    .execute(pool)
-    .await
-    .expect("customer");
 }
 
 fn address() -> Address {
@@ -376,23 +286,6 @@ async fn drain_all(worker: &MailboxWorker) -> u64 {
     delivered
 }
 
-fn gated() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP pm_prepare_delivery: DATABASE_URL not set");
-            None
-        }
-    }
-}
-
-/// Serialize the suite: every test resets the same tables.
-static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 async fn verdict_of(pool: &PgPool, message_id: uuid::Uuid) -> (String, Option<serde_json::Value>) {
     let row = sqlx::query("SELECT status, error FROM inbound_messages WHERE message_id = $1")
         .bind(message_id)
@@ -404,10 +297,8 @@ async fn verdict_of(pool: &PgPool, message_id: uuid::Uuid) -> (String, Option<se
 
 #[tokio::test]
 async fn place_order_commits_intent_pm_row_and_verdict_in_one_transaction() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
     let gateway = Arc::new(StubGateway::default());
@@ -459,10 +350,8 @@ async fn place_order_commits_intent_pm_row_and_verdict_in_one_transaction() {
 
 #[tokio::test]
 async fn deterministic_rejection_commits_rejected_and_writes_nothing() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, false).await; // cart exists but is EMPTY
 
     let gateway = Arc::new(StubGateway::default());
@@ -505,10 +394,8 @@ async fn deterministic_rejection_commits_rejected_and_writes_nothing() {
 
 #[tokio::test]
 async fn sync_gateway_decline_commits_the_legacy_payment_declined_rejection() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
     // The fail-closed stand-in declines synchronously — the canonical PaymentDeclined.
@@ -544,10 +431,8 @@ async fn sync_gateway_decline_commits_the_legacy_payment_declined_rejection() {
 
 #[tokio::test]
 async fn approve_refund_flushes_fact_and_run_row_in_one_commit() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
 
     // GIVEN: a PENDING_APPROVAL refund run with a captured intent.
     use application::pm_state::{RefundProcessRow, RefundProcessStateStore as _};
@@ -616,10 +501,8 @@ async fn approve_refund_flushes_fact_and_run_row_in_one_commit() {
 /// lane then materializes the order from the frozen checkout — durable, fenced, cause-chained.
 #[tokio::test]
 async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
     let gateway = Arc::new(StubGateway::default());
@@ -781,10 +664,8 @@ impl PaymentService for RefusingGateway {
 
 #[tokio::test]
 async fn deterministic_gateway_refusal_is_terminal_never_a_wedged_lane() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
     let deps = deps_over(&pool, Arc::new(RefusingGateway));
@@ -817,10 +698,8 @@ async fn deterministic_gateway_refusal_is_terminal_never_a_wedged_lane() {
 /// with nobody told about it across the gate flip.
 #[tokio::test]
 async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
-    let Some(url) = gated() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
     // The pre-flip world: a checkout ran (intent + PM row), Stripe reported the capture, and the
