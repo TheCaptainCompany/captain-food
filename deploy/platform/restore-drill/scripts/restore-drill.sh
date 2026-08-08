@@ -75,6 +75,10 @@ kubectl -n "${PROD_NS}" get secret cnpg-object-storage -o json \
             .metadata.creationTimestamp, .metadata.ownerReferences, .metadata.managedFields)' \
   | kubectl -n "${DRILL_NS}" apply -f - \
   || fail "cnpg-object-storage secret missing or unreadable in ${PROD_NS} -- unprovisioned? (README checklist item 2)"
+# The copied credential is read+write to the ONLY backup of the event log; bound its lifetime
+# to THIS RUN whatever happens next — without the trap, a failure between here and teardown
+# leaves it in the scratch namespace until next Monday's cleanup-previous (7-day exposure).
+trap 'kubectl -n "${DRILL_NS}" delete secret cnpg-object-storage --ignore-not-found' EXIT
 
 # ---- 3. recovery cluster: latest base backup + all archived WAL ----------------------------
 STEP="create-recovery-cluster"
