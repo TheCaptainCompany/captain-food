@@ -4,7 +4,8 @@
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
 > 🚧 **2026-08-08 — ADR-183024 STEP (6) PREP: CNPG PLATFORM TREE IN REVIEW —
-> [#360](https://github.com/TheCaptainCompany/captain-food/issues/360) repo-only slice via
+> [#360 "CNPG: operator + 3-instance cluster, WAL archiving to Object Storage, weekly executed
+> restore drill"](https://github.com/TheCaptainCompany/captain-food/issues/360) repo-only slice via
 > [PR #392](https://github.com/TheCaptainCompany/captain-food/pull/392),
 > [ADR-20260808-063951](adr/ADR-20260808-063951-cnpg-platform-source-tree.md) (hand-written
 > platform SOURCE under `deploy/platform/`, invariants pinned by `platform_*` codegen tests —

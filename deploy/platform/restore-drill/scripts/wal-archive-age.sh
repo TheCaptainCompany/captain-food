@@ -51,7 +51,10 @@ fi
 
 last_backup=$(printf '%s' "${status}" | jq -r '.status.lastSuccessfulBackup // empty')
 if [ -n "${last_backup}" ]; then
-  last_epoch=$(date -u -d "${last_backup}" +%s 2>/dev/null || echo 0)
+  # busybox date (alpine/k8s) does not parse RFC3339's 'T'/'Z'; normalize to "YYYY-MM-DD HH:MM:SS"
+  # first. A parse failure falls through to epoch 0 and is REPORTED, never silently skipped.
+  normalized=$(printf '%s' "${last_backup}" | sed -e 's/T/ /' -e 's/Z$//' -e 's/\.[0-9]*//' -e 's/+00:00$//')
+  last_epoch=$(date -u -d "${normalized}" +%s 2>/dev/null || echo 0)
   now_epoch=$(date -u +%s)
   age_hours=$(( (now_epoch - last_epoch) / 3600 ))
   if [ "${last_epoch}" = "0" ]; then

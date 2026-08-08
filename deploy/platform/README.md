@@ -7,8 +7,8 @@ spec for the sole purpose of emitting it back out (decided at [#360 "CNPG: opera
 cluster, WAL archiving to Object Storage, weekly executed restore
 drill"](https://github.com/TheCaptainCompany/captain-food/issues/360)). What IS enforced by the
 codegen test-suite: every YAML document in this tree parses, the operator vendor file matches its
-recorded upstream sha256 pin, and the safety invariants below hold (see
-`platform_manifests_*` tests in `tools/codegen-rs/src/tests.rs`).
+recorded upstream sha256 pin, and the safety invariants below hold (see the
+`platform_*` tests in `tools/codegen-rs/src/tests.rs`).
 
 **GATE-THEN-STABILIZE: nothing applies this tree today.** Argo CD
 ([#366](https://github.com/TheCaptainCompany/captain-food/issues/366)) reconciles it when steps

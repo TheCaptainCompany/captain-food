@@ -8,7 +8,7 @@
 # LADDER shape is fully written in ha/ (unreferenced -- flipping it is a separate one-line ADR
 # when #242 lands or the first paying restaurants arrive).
 #
-# INVARIANTS PINNED BY CODEGEN TESTS (tools/codegen-rs/src/tests.rs, platform_manifests_*):
+# INVARIANTS PINNED BY CODEGEN TESTS (tools/codegen-rs/src/tests.rs, platform_*):
 #   - instances: 1 here => NO `synchronous` block (quorum-sync with zero replicas blocks
 #     every write -- the checkout path would freeze at the first order);
 #   - enableSuperuserAccess: false;
@@ -33,11 +33,12 @@ spec:
   # break-glass surface, governed by §2b practice 6 (time-boxed, backfilled the same day).
   enableSuperuserAccess: false
 
-  # CNPG's own PodDisruptionBudget (the #360 checklist's PDB item -- writing a second, hand PDB
-  # over the same pods would fight the operator's). With instances: 1 this blocks voluntary
-  # eviction of the ONLY instance: an MKS node upgrade will hang on the drain until the console
-  # session supervises it. Accepted: an unsupervised silent eviction of the write path is the
-  # worse failure (a paid order nobody is told about beats a paused upgrade).
+  # The #360 checklist's PDB item, satisfied by CNPG's OWN PodDisruptionBudgets (explicit here
+  # even though true is the default): the operator creates and retargets them across switchovers
+  # -- a second, hand-written PDB over the same pods would fight it. Consequence to expect at
+  # instances: 1: a node drain that wants to evict the only instance can be held by the PDB, so
+  # MKS node maintenance is a SUPERVISED event (console session), not a background one. Accepted:
+  # a silent eviction of the write path is the worse failure than a paused upgrade.
   enablePDB: true
 
   # REQUIRED anti-affinity is already in place at instances: 1 (vacuously true on one pod) so
