@@ -5290,7 +5290,7 @@ Payment authorization/capture failed; no order is placed.
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment)
 - **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
-- **Projected into**: —
+- **Projected into**: _non-projected (saga/transient)_
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7885,7 +7885,7 @@ A returning visitor signed in and was resolved to an existing Customer (authRef 
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: [🎭 `CartBindingProcess`](#actor-cartbindingprocess)
-- **Projected into**: —
+- **Projected into**: _non-projected (saga/transient)_
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8567,9 +8567,7 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue) | [⚡ `DeliveryIssueReported`](#event-deliveryissuereported) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue) | [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus) | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
-| [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner) | [⚡ `DeliveryAssignedToPartner`](#event-deliveryassignedtopartner) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 | [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner) | [⚡ `DeliveryUnassignedFromPartner`](#event-deliveryunassignedfrompartner) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
-| [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus) | [⚡ `DeliveryPartnerStatusUpdated`](#event-deliverypartnerstatusupdated) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `DeclineDelivery`](#command-declinedelivery) | [⚡ `DeliveryDeclinedByRider`](#event-deliverydeclinedbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 
 Lifecycle (generated from the declared state machine):
@@ -8579,7 +8577,6 @@ stateDiagram-v2
   [*] --> PENDING : DeliveryRequested
   PENDING --> ASSIGNED : DeliveryAcceptedByRider
   PENDING --> ASSIGNED : DeliveryAcceptedByPartner
-  PENDING --> ASSIGNED : DeliveryAssignedToPartner
   ASSIGNED --> PENDING : DeliveryUnassignedFromPartner
   ASSIGNED --> PICKED_UP : DeliveryPickedUp
   PICKED_UP --> DELIVERED : DeliveryCompleted
@@ -8603,19 +8600,6 @@ stateDiagram-v2
   ASSIGNED --> FAILED : DeliveryStatusUpdated(status)
   PICKED_UP --> FAILED : DeliveryStatusUpdated(status)
   OUT_FOR_DELIVERY --> FAILED : DeliveryStatusUpdated(status)
-  PENDING --> ASSIGNED : DeliveryPartnerStatusUpdated(status)
-  ASSIGNED --> PICKED_UP : DeliveryPartnerStatusUpdated(status)
-  PICKED_UP --> OUT_FOR_DELIVERY : DeliveryPartnerStatusUpdated(status)
-  PICKED_UP --> DELIVERED : DeliveryPartnerStatusUpdated(status)
-  OUT_FOR_DELIVERY --> DELIVERED : DeliveryPartnerStatusUpdated(status)
-  PENDING --> CANCELLED : DeliveryPartnerStatusUpdated(status)
-  ASSIGNED --> CANCELLED : DeliveryPartnerStatusUpdated(status)
-  PICKED_UP --> CANCELLED : DeliveryPartnerStatusUpdated(status)
-  OUT_FOR_DELIVERY --> CANCELLED : DeliveryPartnerStatusUpdated(status)
-  PENDING --> FAILED : DeliveryPartnerStatusUpdated(status)
-  ASSIGNED --> FAILED : DeliveryPartnerStatusUpdated(status)
-  PICKED_UP --> FAILED : DeliveryPartnerStatusUpdated(status)
-  OUT_FOR_DELIVERY --> FAILED : DeliveryPartnerStatusUpdated(status)
   DELIVERED --> [*]
   CANCELLED --> [*]
 ```
@@ -8792,7 +8776,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(18)_
+### 📩 Commands _(16)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -8922,20 +8906,6 @@ Drive a delivery job's status (independent-rider path / admin correction).
 | <a id="command-updatedeliverystatus--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-updatedeliverystatus--status"></a>`status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ✅ |  |
 
-<a id="command-assigndeliverytopartner"></a>
-#### 📩 Command: `AssignDeliveryToPartner`
-
-Assign a pending delivery job to a delivery partner for fulfilment.
-
-- **Dispatched by**: — · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Emits**: [⚡ `DeliveryAssignedToPartner`](#event-deliveryassignedtopartner)
-- **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-assigndeliverytopartner--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="command-assigndeliverytopartner--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ |  |
-
 <a id="command-unassigndeliveryfrompartner"></a>
 #### 📩 Command: `UnassignDeliveryFromPartner`
 
@@ -8949,21 +8919,6 @@ Unassign a delivery job from its partner (to re-offer it).
 | --- | --- | --- | --- |
 | <a id="command-unassigndeliveryfrompartner--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-unassigndeliveryfrompartner--reason"></a>`reason` | `string` | ⬜ |  |
-
-<a id="command-updatedeliverypartnerstatus"></a>
-#### 📩 Command: `UpdateDeliveryPartnerStatus`
-
-Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report).
-
-- **Dispatched by**: — · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Emits**: [⚡ `DeliveryPartnerStatusUpdated`](#event-deliverypartnerstatusupdated)
-- **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="command-updatedeliverypartnerstatus--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="command-updatedeliverypartnerstatus--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
-| <a id="command-updatedeliverypartnerstatus--status"></a>`status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ✅ |  |
 
 <a id="command-registerdeliverypartneravailability"></a>
 #### 📩 Command: `RegisterDeliveryPartnerAvailability`
@@ -9054,7 +9009,7 @@ Change a rider's availability/lifecycle status.
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### ⚡ Events _(23)_
+### ⚡ Events _(21)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -9228,20 +9183,6 @@ The delivery partner reported a status change for the job (inbound): PICKED_UP, 
 | <a id="event-deliverystatusupdated--occurredat"></a>`occurredAt` | `string` _date-time_ | ⬜ |  |
 | <a id="event-deliverystatusupdated--note"></a>`note` | `string` | ⬜ |  |
 
-<a id="event-deliveryassignedtopartner"></a>
-#### ⚡ Event: `DeliveryAssignedToPartner`
-
-A delivery job was assigned to a delivery partner (e.g. Avelo37) for fulfilment.
-
-- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Consumed by**: —
-- **Projected into**: —
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-deliveryassignedtopartner--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="event-deliveryassignedtopartner--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ | Partner-side delivery id; idempotent key for inbound updates. |
-
 <a id="event-deliveryunassignedfrompartner"></a>
 #### ⚡ Event: `DeliveryUnassignedFromPartner`
 
@@ -9255,22 +9196,6 @@ A delivery job was unassigned from its partner (e.g. to re-offer it elsewhere).
 | --- | --- | --- | --- |
 | <a id="event-deliveryunassignedfrompartner--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="event-deliveryunassignedfrompartner--reason"></a>`reason` | `string` | ⬜ |  |
-
-<a id="event-deliverypartnerstatusupdated"></a>
-#### ⚡ Event: `DeliveryPartnerStatusUpdated`
-
-A partner-driven status change applied to the job by the DeliveryJob aggregate (from the inbound partner report).
-
-- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Consumed by**: —
-- **Projected into**: —
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <a id="event-deliverypartnerstatusupdated--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="event-deliverypartnerstatusupdated--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
-| <a id="event-deliverypartnerstatusupdated--status"></a>`status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ✅ |  |
-| <a id="event-deliverypartnerstatusupdated--occurredat"></a>`occurredAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="event-deliverydeclinedbyrider"></a>
 #### ⚡ Event: `DeliveryDeclinedByRider`
@@ -9426,9 +9351,9 @@ A rider's availability/lifecycle status changed.
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
-| <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
-| <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-deliverypartneravailabilityalreadyrequested"></a>⛔ `DeliveryPartnerAvailabilityAlreadyRequested` | A registration with this id already exists (idempotent self-registration guard). | 🇬🇧 This availability registration already exists. | 🇫🇷 Cette demande de disponibilité existe déjà. | [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability) |
 | <a id="error-deliverypartneravailabilitynotfound"></a>⛔ `DeliveryPartnerAvailabilityNotFound` | No delivery-partner availability registration with this id. | 🇬🇧 Availability registration not found. | 🇫🇷 Demande de disponibilité introuvable. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability), [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) |
 | <a id="error-deliverypartneravailabilitynotpending"></a>⛔ `DeliveryPartnerAvailabilityNotPending` | The availability registration is not PENDING, so it cannot be approved. | 🇬🇧 This availability registration is not awaiting review. | 🇫🇷 Cette demande de disponibilité n'est pas en attente de validation. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) |
@@ -9518,9 +9443,9 @@ _The order is closed (OrderDelivered) when the partner reports DELIVERED or an i
 <a id="rule-deliverypartnerassignmentlifecycle"></a>
 #### 📐 Rule: `DeliveryPartnerAssignmentLifecycle`
 
-_A PENDING delivery job can be assigned to a delivery partner (once), unassigned to be re-offered, and partner-reported status changes apply only as valid transitions._
+_A delivery job ASSIGNED to a partner (by the partner's acceptance — the only assignment path) can be unassigned to be re-offered, and partner-reported status changes apply only as valid transitions._
 
-- **Verified by**: [🧪 `TestDeliveryJobRecordsPartnerStatusReport`](#test-testdeliveryjobrecordspartnerstatusreport), [🧪 `TestDeliveryAssignedToPartner`](#test-testdeliveryassignedtopartner), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner), [🧪 `TestDeliveryPartnerStatusUpdated`](#test-testdeliverypartnerstatusupdated)
+- **Verified by**: [🧪 `TestDeliveryJobRecordsPartnerStatusReport`](#test-testdeliveryjobrecordspartnerstatusreport), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner)
 
 <a id="rule-deliverydeclinekeepsjobpending"></a>
 #### 📐 Rule: `DeliveryDeclineKeepsJobPending`
@@ -9780,34 +9705,14 @@ _The delivery status is driven through valid transitions to DELIVERED_
 - **Then**: [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
 - **Verifies**: [📐 `DeliveryPickupAndCompletionByRider`](#rule-deliverypickupandcompletionbyrider)
 
-<a id="test-testdeliveryassignedtopartner"></a>
-#### 🧪 Test: `TestDeliveryAssignedToPartner`
-
-_A pending delivery job is assigned to a delivery partner_
-
-- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner)
-- **Then**: [⚡ `DeliveryAssignedToPartner`](#event-deliveryassignedtopartner)
-- **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
-
 <a id="test-testdeliveryunassignedfrompartner"></a>
 #### 🧪 Test: `TestDeliveryUnassignedFromPartner`
 
 _An assigned delivery job is unassigned from its partner to be re-offered_
 
-- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAssignedToPartner`](#event-deliveryassignedtopartner)
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
 - **When**: [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner)
 - **Then**: [⚡ `DeliveryUnassignedFromPartner`](#event-deliveryunassignedfrompartner)
-- **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
-
-<a id="test-testdeliverypartnerstatusupdated"></a>
-#### 🧪 Test: `TestDeliveryPartnerStatusUpdated`
-
-_A partner-reported status change applies to the job as a valid transition_
-
-- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
-- **When**: [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus)
-- **Then**: [⚡ `DeliveryPartnerStatusUpdated`](#event-deliverypartnerstatusupdated)
 - **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
 
 <a id="test-testdeliverydeclinedbyrider"></a>

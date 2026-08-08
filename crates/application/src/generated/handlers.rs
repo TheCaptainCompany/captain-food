@@ -8,8 +8,8 @@
 
 use serde_json::json;
 
-use domain::generated::commands::{AcceptOrder, CancelOrderByCustomer, CancelOrderByRestaurant, ChangeRiderStatus, MarkOrderDelivered, MarkOrderReady, RejectOrder, StartPreparation, UpdateDeliveryPartnerStatus, UpdateDeliveryStatus};
-use domain::generated::events::{DomainEvent, DeliveryPartnerStatusUpdated, DeliveryStatusUpdated, OrderAcceptedByRestaurant, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderDelivered, OrderMarkedReady, OrderPreparationStarted, OrderRejectedByRestaurant, RiderStatusChanged};
+use domain::generated::commands::{AcceptOrder, CancelOrderByCustomer, CancelOrderByRestaurant, ChangeRiderStatus, MarkOrderDelivered, MarkOrderReady, RejectOrder, StartPreparation, UpdateDeliveryStatus};
+use domain::generated::events::{DomainEvent, DeliveryStatusUpdated, OrderAcceptedByRestaurant, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderDelivered, OrderMarkedReady, OrderPreparationStarted, OrderRejectedByRestaurant, RiderStatusChanged};
 use domain::shared::errors::DomainError;
 
 use crate::commands::{
@@ -190,27 +190,6 @@ pub async fn update_delivery_status(
         status: cmd.status,
         occurred_at: None,
         note: None,
-    });
-    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
-        return Err(invalid_delivery_status(&cmd.delivery_job_id, state.status, canonical_predecessor(cmd.status)));
-    }
-    Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/UpdateDeliveryPartnerStatus` → emit `events.yaml#/DeliveryPartnerStatusUpdated` — require + guard + append over
-/// the declared machine (`domain::delivery_job::lifecycle::transition`); an illegal move rejects through the
-/// aggregate's seam (specs/actors.yaml#/DeliveryJob/lifecycle).
-pub async fn update_delivery_partner_status(
-    store: &dyn EventStore,
-    cmd: UpdateDeliveryPartnerStatus,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    let event = DomainEvent::DeliveryPartnerStatusUpdated(DeliveryPartnerStatusUpdated {
-        delivery_job_id: cmd.delivery_job_id,
-        partner_ref: cmd.partner_ref,
-        status: cmd.status,
-        occurred_at: None,
     });
     if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
         return Err(invalid_delivery_status(&cmd.delivery_job_id, state.status, canonical_predecessor(cmd.status)));

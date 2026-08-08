@@ -80,29 +80,12 @@ pub struct UpdateDeliveryStatus {
     pub status: DeliveryStatus,
 }
 
-/// Assign a pending delivery job to a delivery partner for fulfilment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssignDeliveryToPartner {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: ExternalReference,
-}
-
 /// Unassign a delivery job from its partner (to re-offer it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnassignDeliveryFromPartner {
     pub delivery_job_id: DeliveryJobId,
     pub reason: Option<String>,
-}
-
-/// Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateDeliveryPartnerStatus {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: Option<ExternalReference>,
-    pub status: DeliveryStatus,
 }
 
 /// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).

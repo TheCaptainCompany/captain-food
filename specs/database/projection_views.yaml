@@ -48,6 +48,8 @@ description: >
 nonProjectedEvents:
   - { $ref: 'events.yaml#/PaymentIntentCreated' }   # in-flight checkout; clientSecret returned in PlaceOrderPayload, order materializes on capture
   - { $ref: 'events.yaml#/RefundRequested' }        # saga trigger consumed by RefundProcess; the settled PaymentRefunded fact is what gets projected
+  - { $ref: 'events.yaml#/PaymentFailed' }          # (a) transient checkout fact: served to the customer from the PlaceOrderProcess run row via paymentStatus/paymentStatusChanged (the declared PM-table exception, payments/api.yaml); ops watches the failure RATE via the observability contracts, not a View_* — the real customer-facing gap is the checkout FAILED screen state (PROP-20260808-141817 §1d, slice 8)
+  - { $ref: 'events.yaml#/CustomerIdentified' }     # (a) saga trigger for CartBindingProcess (ordering/processmanager.yaml); the durable change lands via CartBoundToCustomer, which IS projected
   - { $ref: 'events.yaml#/DeliveryEscalationRequested' }   # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
   - { $ref: 'events.yaml#/DeliveryOfferTimedOut' }         # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
   # OrderExpired is TEMPORARILY non-projected: ADR-20260731-160000 §2 wants every Order-fed read

@@ -472,15 +472,9 @@ fixtures:
   deliveryStatusUpdatedPickedUp:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
-  deliveryAssignedToPartner:
-    type: { $ref: 'events.yaml#/DeliveryAssignedToPartner' }
-    data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77" }
   deliveryUnassignedFromPartner:
     type: { $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }
     data: { deliveryJobId: "deliv-1", reason: "Re-offering to another channel" }
-  deliveryPartnerStatusUpdated:
-    type: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }
-    data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
   deliveryDeclinedByRider:
     type: { $ref: 'events.yaml#/DeliveryDeclinedByRider' }
     data: { deliveryJobId: "deliv-1", riderId: "rider-1", reason: "Too far" }
@@ -2864,43 +2858,18 @@ tests:
     then:
       - { $ref: '#/fixtures/deliveryStatusUpdatedDelivered' }
 
-  TestDeliveryAssignedToPartner:
-    name: "A pending delivery job is assigned to a delivery partner"
-    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAssignmentLifecycle' }]
-    actor: { $ref: 'actors.yaml#/DeliveryJob' }
-    given:
-      - { $ref: '#/fixtures/deliveryRequested' }
-    when:
-      type: { $ref: 'commands.yaml#/AssignDeliveryToPartner' }
-      data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77" }
-    then:
-      - { $ref: '#/fixtures/deliveryAssignedToPartner' }
-
   TestDeliveryUnassignedFromPartner:
     name: "An assigned delivery job is unassigned from its partner to be re-offered"
     rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAssignmentLifecycle' }]
     actor: { $ref: 'actors.yaml#/DeliveryJob' }
     given:
       - { $ref: '#/fixtures/deliveryRequested' }
-      - { $ref: '#/fixtures/deliveryAssignedToPartner' }
+      - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
     when:
       type: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
       data: { deliveryJobId: "deliv-1", reason: "Re-offering to another channel" }
     then:
       - { $ref: '#/fixtures/deliveryUnassignedFromPartner' }
-
-  TestDeliveryPartnerStatusUpdated:
-    name: "A partner-reported status change applies to the job as a valid transition"
-    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAssignmentLifecycle' }]
-    actor: { $ref: 'actors.yaml#/DeliveryJob' }
-    given:
-      - { $ref: '#/fixtures/deliveryRequested' }
-      - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
-    when:
-      type: { $ref: 'commands.yaml#/UpdateDeliveryPartnerStatus' }
-      data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
-    then:
-      - { $ref: '#/fixtures/deliveryPartnerStatusUpdated' }
 
   TestDeliveryDeclinedByRider:
     name: "An independent rider declines a pending job; it stays PENDING and re-offerable"

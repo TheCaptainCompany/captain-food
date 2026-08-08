@@ -222,17 +222,6 @@ DeliveryStatusUpdated:
 # Delivery — operational facts (DeliveryJob aggregate)
 # =====================================================================
 
-DeliveryAssignedToPartner:
-  description: "A delivery job was assigned to a delivery partner (e.g. Avelo37) for fulfilment."
-  type: object
-  properties:
-    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
-    partnerRef:
-      $ref: 'scalars.yaml#/ExternalReference'
-      description: "Partner-side delivery id; idempotent key for inbound updates."
-  required: [deliveryJobId, partnerRef]
-
-
 DeliveryUnassignedFromPartner:
   description: "A delivery job was unassigned from its partner (e.g. to re-offer it elsewhere)."
   type: object
@@ -243,21 +232,6 @@ DeliveryUnassignedFromPartner:
       maxLength: 500
       nullable: true
   required: [deliveryJobId]
-
-
-DeliveryPartnerStatusUpdated:
-  description: "A partner-driven status change applied to the job by the DeliveryJob aggregate (from the inbound partner report)."
-  type: object
-  properties:
-    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
-    partnerRef:
-      $ref: 'scalars.yaml#/ExternalReference'
-      nullable: true
-    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
-    occurredAt:
-      type: string
-      format: date-time
-  required: [deliveryJobId, status]
 
 
 DeliveryDeclinedByRider:

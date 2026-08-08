@@ -37,7 +37,7 @@ OrderClosedOnDeliveryCompletion:
   description: "The order is closed (OrderDelivered) when the partner reports DELIVERED or an independent rider completes the delivery."
 
 DeliveryPartnerAssignmentLifecycle:
-  description: "A PENDING delivery job can be assigned to a delivery partner (once), unassigned to be re-offered, and partner-reported status changes apply only as valid transitions."
+  description: "A delivery job ASSIGNED to a partner (by the partner's acceptance — the only assignment path) can be unassigned to be re-offered, and partner-reported status changes apply only as valid transitions."
 
 DeliveryDeclineKeepsJobPending:
   description: "An independent rider may decline a pending delivery job; the job stays PENDING and re-offerable."

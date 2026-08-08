@@ -113,30 +113,12 @@ pub struct DeliveryStatusUpdated {
     pub note: Option<String>,
 }
 
-/// A delivery job was assigned to a delivery partner (e.g. Avelo37) for fulfilment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliveryAssignedToPartner {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: ExternalReference,
-}
-
 /// A delivery job was unassigned from its partner (e.g. to re-offer it elsewhere).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryUnassignedFromPartner {
     pub delivery_job_id: DeliveryJobId,
     pub reason: Option<String>,
-}
-
-/// A partner-driven status change applied to the job by the DeliveryJob aggregate (from the inbound partner report).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliveryPartnerStatusUpdated {
-    pub delivery_job_id: DeliveryJobId,
-    pub partner_ref: Option<ExternalReference>,
-    pub status: DeliveryStatus,
-    pub occurred_at: Option<String>,
 }
 
 /// An independent rider declined a pending delivery job (stays PENDING, re-offerable).

@@ -522,19 +522,9 @@ fn fx_delivery_status_updated_picked_up() -> DomainEvent {
     DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None, note: None })
 }
 
-/// tests.yaml#/fixtures/deliveryAssignedToPartner — events.yaml#/DeliveryAssignedToPartner
-fn fx_delivery_assigned_to_partner() -> DomainEvent {
-    DomainEvent::DeliveryAssignedToPartner(evs::DeliveryAssignedToPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: sc::ExternalReference("avelo-77".into()) })
-}
-
 /// tests.yaml#/fixtures/deliveryUnassignedFromPartner — events.yaml#/DeliveryUnassignedFromPartner
 fn fx_delivery_unassigned_from_partner() -> DomainEvent {
     DomainEvent::DeliveryUnassignedFromPartner(evs::DeliveryUnassignedFromPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Re-offering to another channel".to_string()) })
-}
-
-/// tests.yaml#/fixtures/deliveryPartnerStatusUpdated — events.yaml#/DeliveryPartnerStatusUpdated
-fn fx_delivery_partner_status_updated() -> DomainEvent {
-    DomainEvent::DeliveryPartnerStatusUpdated(evs::DeliveryPartnerStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None })
 }
 
 /// tests.yaml#/fixtures/deliveryDeclinedByRider — events.yaml#/DeliveryDeclinedByRider
@@ -3342,51 +3332,19 @@ async fn test_delivery_status_updated_by_command() {
     ]);
 }
 
-/// tests.yaml#/tests/TestDeliveryAssignedToPartner — "A pending delivery job is assigned to a delivery partner"
-/// rules: DeliveryPartnerAssignmentLifecycle
-#[tokio::test]
-async fn test_delivery_assigned_to_partner() {
-    let bed = TestBed::new();
-    spec_baseline(&bed).await;
-    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
-    let before = bed.snapshot();
-    let cmd = cmds::AssignDeliveryToPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: sc::ExternalReference("avelo-77".into()) };
-    let result = crate::commands::assign_delivery_to_partner(&bed.store, cmd, &support::actor()).await;
-    let _ = result.expect("TestDeliveryAssignedToPartner: the spec expects acceptance");
-    bed.assert_appended("TestDeliveryAssignedToPartner", &before, &[
-        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_assigned_to_partner()),
-    ]);
-}
-
 /// tests.yaml#/tests/TestDeliveryUnassignedFromPartner — "An assigned delivery job is unassigned from its partner to be re-offered"
 /// rules: DeliveryPartnerAssignmentLifecycle
 #[tokio::test]
 async fn test_delivery_unassigned_from_partner() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
-    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_assigned_to_partner()]).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_partner()]).await;
     let before = bed.snapshot();
     let cmd = cmds::UnassignDeliveryFromPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Re-offering to another channel".to_string()) };
     let result = crate::commands::unassign_delivery_from_partner(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestDeliveryUnassignedFromPartner: the spec expects acceptance");
     bed.assert_appended("TestDeliveryUnassignedFromPartner", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_unassigned_from_partner()),
-    ]);
-}
-
-/// tests.yaml#/tests/TestDeliveryPartnerStatusUpdated — "A partner-reported status change applies to the job as a valid transition"
-/// rules: DeliveryPartnerAssignmentLifecycle
-#[tokio::test]
-async fn test_delivery_partner_status_updated() {
-    let bed = TestBed::new();
-    spec_baseline(&bed).await;
-    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_partner()]).await;
-    let before = bed.snapshot();
-    let cmd = cmds::UpdateDeliveryPartnerStatus { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP };
-    let result = crate::commands::update_delivery_partner_status(&bed.store, cmd, &support::actor()).await;
-    let _ = result.expect("TestDeliveryPartnerStatusUpdated: the spec expects acceptance");
-    bed.assert_appended("TestDeliveryPartnerStatusUpdated", &before, &[
-        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_partner_status_updated()),
     ]);
 }
 

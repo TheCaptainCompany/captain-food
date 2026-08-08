@@ -11,8 +11,8 @@
 //!
 //! The status machine is the DECLARED lifecycle (`specs/actors.yaml#/DeliveryJob/lifecycle`,
 //! ADR-20260721-093027): static edges for the operational facts plus DYNAMIC (event-carried) edges
-//! for `DeliveryStatusUpdated`/`DeliveryPartnerStatusUpdated`, whose `status` payload field names
-//! the target state. The fold moves `status` exclusively through the GENERATED tables
+//! for `DeliveryStatusUpdated` — the ONE status vocabulary (rider/admin command AND inbound
+//! partner report via the avelo37 ACL) — whose `status` payload field names the target state. The fold moves `status` exclusively through the GENERATED tables
 //! ([`lifecycle::initial`] births it, [`lifecycle::target`] applies recorded facts) and the command
 //! handlers guard with [`lifecycle::transition`].
 
@@ -76,10 +76,6 @@ fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<Deliver
             s.assigned = true;
             s.partner_ref = Some(e.partner_ref.clone());
         }
-        DomainEvent::DeliveryAssignedToPartner(e) => {
-            s.assigned = true;
-            s.partner_ref = Some(e.partner_ref.clone());
-        }
         DomainEvent::DeliveryUnassignedFromPartner(_) => {
             // Back to PENDING (the lifecycle edge) so the job is re-offerable.
             s.assigned = false;
@@ -96,10 +92,11 @@ fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<Deliver
 mod tests {
     use super::*;
     use crate::generated::entities::Address;
+    use crate::generated::entities::Courier;
     use crate::generated::events::{
-        DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryDeclinedByRider,
-        DeliveryIssueReported, DeliveryIssueResolved, DeliveryPartnerStatusUpdated,
-        DeliveryRequested, DeliveryUnassignedFromPartner,
+        DeliveryAcceptedByPartner, DeliveryAcceptedByRider, DeliveryDeclinedByRider,
+        DeliveryIssueReported, DeliveryIssueResolved, DeliveryRequested, DeliveryStatusUpdated,
+        DeliveryUnassignedFromPartner,
     };
     use crate::generated::scalars::{
         AddressLine, CityName, CountryCode, DeliveryJobId, OrderId, PostalCode, RestaurantId,
@@ -129,9 +126,13 @@ mod tests {
         })
     }
     fn assigned_to_partner(partner_ref: &str) -> DomainEvent {
-        DomainEvent::DeliveryAssignedToPartner(DeliveryAssignedToPartner {
+        // After D1 (ADR-20260808-230800) the partner's ACCEPTANCE is the only assignment path.
+        DomainEvent::DeliveryAcceptedByPartner(DeliveryAcceptedByPartner {
             delivery_job_id: job_id(),
             partner_ref: ExternalReference(partner_ref.into()),
+            courier: Courier { display_name: "Ava Courier".into(), phone: None, rider_id: None },
+            estimated_pickup_at: None,
+            estimated_dropoff_at: None,
         })
     }
     fn unassigned() -> DomainEvent {
@@ -179,11 +180,12 @@ mod tests {
 
     #[test]
     fn partner_status_report_moves_the_status_machine() {
-        let report = DomainEvent::DeliveryPartnerStatusUpdated(DeliveryPartnerStatusUpdated {
+        let report = DomainEvent::DeliveryStatusUpdated(DeliveryStatusUpdated {
             delivery_job_id: job_id(),
             partner_ref: Some(ExternalReference("avelo37".into())),
             status: DeliveryStatus::PICKED_UP,
             occurred_at: None,
+            note: None,
         });
         let s = fold(&[requested(), assigned_to_partner("avelo37"), report]).unwrap();
         assert_eq!(s.status, DeliveryStatus::PICKED_UP);

@@ -122,15 +122,6 @@ UpdateDeliveryStatus:
   required: [deliveryJobId, status]
 
 
-AssignDeliveryToPartner:
-  description: "Assign a pending delivery job to a delivery partner for fulfilment."
-  type: object
-  properties:
-    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
-    partnerRef: { $ref: 'scalars.yaml#/ExternalReference' }
-  required: [deliveryJobId, partnerRef]
-
-
 UnassignDeliveryFromPartner:
   description: "Unassign a delivery job from its partner (to re-offer it)."
   type: object
@@ -141,18 +132,6 @@ UnassignDeliveryFromPartner:
       maxLength: 500
       nullable: true
   required: [deliveryJobId]
-
-
-UpdateDeliveryPartnerStatus:
-  description: "Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report)."
-  type: object
-  properties:
-    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
-    partnerRef:
-      $ref: 'scalars.yaml#/ExternalReference'
-      nullable: true
-    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
-  required: [deliveryJobId, status]
 
 
 # =====================================================================

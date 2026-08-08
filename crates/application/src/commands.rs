@@ -76,7 +76,7 @@ use crate::queries::{
 use domain::cart::{CartState, MAX_LINE_QUANTITY};
 use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
-    AcceptDelivery, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer, CancelDelivery,
+    AcceptDelivery, AddCartLine, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
     PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
     RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder,
@@ -85,7 +85,7 @@ use domain::generated::commands::{
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartBoundToCustomer, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
-    DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryCancelled, DeliveryCompleted,
+    DeliveryAcceptedByRider, DeliveryCancelled, DeliveryCompleted,
     DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryIssueReported, DeliveryIssueResolved,
     DeliveryPickedUp, DeliverySatisfactionRecorded,
     DeliveryUnassignedFromPartner, OrderPlaced, OrderRated, OrderTipped, PaymentIntentCreated,
@@ -156,7 +156,7 @@ use crate::repository::Repository;
 pub use crate::generated::handlers::{
     accept_order, cancel_order_by_customer, cancel_order_by_restaurant, change_rider_status,
     mark_order_delivered, mark_order_ready, reject_order, start_preparation,
-    update_delivery_partner_status, update_delivery_status,
+    update_delivery_status,
 };
 
 /// Did a creation command actually create the aggregate, or was it already there?
@@ -1535,36 +1535,6 @@ pub async fn resolve_delivery_issue(
         resolution: cmd.resolution,
         // Envelope-owned time (ADR-0041) — see reported_at above.
         resolved_at: None,
-    });
-    Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/AssignDeliveryToPartner` → emit `events.yaml#/DeliveryAssignedToPartner`.
-/// Only a PENDING job; a job already taken (rider or partner) rejects with `DeliveryAlreadyAssigned`
-/// (rules.yaml#/DeliveryPartnerAssignmentLifecycle).
-pub async fn assign_delivery_to_partner(
-    store: &dyn EventStore,
-    cmd: AssignDeliveryToPartner,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    match state.status {
-        DeliveryStatus::PENDING => {}
-        DeliveryStatus::ASSIGNED | DeliveryStatus::PICKED_UP | DeliveryStatus::OUT_FOR_DELIVERY
-            if state.assigned =>
-        {
-            return Err(reject(
-                "DeliveryAlreadyAssigned",
-                json!({ "deliveryJobId": cmd.delivery_job_id }),
-            ));
-        }
-        other => {
-            return Err(invalid_delivery_status(&cmd.delivery_job_id, other, DeliveryStatus::PENDING))
-        }
-    }
-    let event = DomainEvent::DeliveryAssignedToPartner(DeliveryAssignedToPartner {
-        delivery_job_id: cmd.delivery_job_id,
-        partner_ref: cmd.partner_ref,
     });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }

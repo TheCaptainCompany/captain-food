@@ -922,7 +922,6 @@ pub(crate) const LIFECYCLE_GENERATED_HANDLERS: &[(&str, &str)] = &[
     ("Order", "CancelOrderByRestaurant"),
     ("Rider", "ChangeRiderStatus"),
     ("DeliveryJob", "UpdateDeliveryStatus"),
-    ("DeliveryJob", "UpdateDeliveryPartnerStatus"),
 ];
 
 /// Emit `crates/application/src/generated/handlers.rs` — one require+guard+append command handler per

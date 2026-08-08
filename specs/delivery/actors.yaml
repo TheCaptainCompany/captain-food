@@ -44,10 +44,11 @@ DeliveryJob:
     delivery partner (inbound DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated, recorded via the
     avelo37-acl — no command). ADR-0031.
   # PENDING → ASSIGNED → PICKED_UP → OUT_FOR_DELIVERY → DELIVERED, with the PICKED_UP → DELIVERED
-  # hand-over shortcut; CANCELLED/FAILED close the job early. DeliveryStatusUpdated (rider/admin
-  # correction) and DeliveryPartnerStatusUpdated (partner report) carry their target state in the
-  # payload — the DSL's dynamic-target form (`via: status`, ADR-20260721-093027): one event, one
-  # declared edge per target. FAILED is NOT terminal: a failed dispatch can still be manually
+  # hand-over shortcut; CANCELLED/FAILED close the job early. DeliveryStatusUpdated — the ONE
+  # status vocabulary: emitted by the UpdateDeliveryStatus command (rider/admin correction) AND
+  # recorded directly as the inbound partner report via the avelo37 ACL — carries its target state
+  # in the payload — the DSL's dynamic-target form (`via: status`, ADR-20260721-093027): one event,
+  # one declared edge per target. FAILED is NOT terminal: a failed dispatch can still be manually
   # cancelled (rules.yaml#/DeliveryCancellableBeforeCompletion), but no status report leaves it.
   lifecycle:
     status: { $ref: 'scalars.yaml#/DeliveryStatus' }
@@ -57,7 +58,6 @@ DeliveryJob:
     transitions:
       - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }, to: ASSIGNED }
       - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }, to: ASSIGNED }
-      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAssignedToPartner' }, to: ASSIGNED }
       - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }, to: PENDING }
       - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPickedUp' }, to: PICKED_UP }
       - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryCompleted' }, to: DELIVERED }
@@ -70,12 +70,6 @@ DeliveryJob:
       - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: DELIVERED, via: status }
       - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: CANCELLED, via: status }
       - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: FAILED, via: status }
-      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: ASSIGNED, via: status }
-      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: PICKED_UP, via: status }
-      - { from: [PICKED_UP], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: OUT_FOR_DELIVERY, via: status }
-      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: DELIVERED, via: status }
-      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: CANCELLED, via: status }
-      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: FAILED, via: status }
     terminal: [DELIVERED, CANCELLED]
   receives:
     - message: { $ref: 'events.yaml#/DeliveryRequested' }
@@ -138,23 +132,11 @@ DeliveryJob:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
 
-    - message: { $ref: 'commands.yaml#/AssignDeliveryToPartner' }
-      emits: [{ $ref: 'events.yaml#/DeliveryAssignedToPartner' }]
-      throws:
-        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
-        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a PENDING job
-        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
     - message: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }]
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be an ASSIGNED job
-
-    - message: { $ref: 'commands.yaml#/UpdateDeliveryPartnerStatus' }
-      emits: [{ $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }]
-      throws:
-        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
-        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
     - message: { $ref: 'commands.yaml#/DeclineDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryDeclinedByRider' }]
       throws:

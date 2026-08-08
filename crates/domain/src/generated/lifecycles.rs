@@ -25,7 +25,6 @@ pub mod delivery_job {
         match (from, event) {
             (DeliveryStatus::PENDING, DomainEvent::DeliveryAcceptedByRider(_)) => Some(DeliveryStatus::ASSIGNED),
             (DeliveryStatus::PENDING, DomainEvent::DeliveryAcceptedByPartner(_)) => Some(DeliveryStatus::ASSIGNED),
-            (DeliveryStatus::PENDING, DomainEvent::DeliveryAssignedToPartner(_)) => Some(DeliveryStatus::ASSIGNED),
             (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryUnassignedFromPartner(_)) => Some(DeliveryStatus::PENDING),
             (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPickedUp(_)) => Some(DeliveryStatus::PICKED_UP),
             (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryCompleted(_)) => Some(DeliveryStatus::DELIVERED),
@@ -49,19 +48,6 @@ pub mod delivery_job {
             (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
             (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
             (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
-            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::ASSIGNED => Some(DeliveryStatus::ASSIGNED),
-            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::PICKED_UP => Some(DeliveryStatus::PICKED_UP),
-            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::OUT_FOR_DELIVERY => Some(DeliveryStatus::OUT_FOR_DELIVERY),
-            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
-            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
-            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
-            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
-            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
-            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
-            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
-            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
-            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
-            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
             _ => None,
         }
     }
@@ -74,14 +60,12 @@ pub mod delivery_job {
         match event {
             DomainEvent::DeliveryAcceptedByRider(_) => Some(DeliveryStatus::ASSIGNED),
             DomainEvent::DeliveryAcceptedByPartner(_) => Some(DeliveryStatus::ASSIGNED),
-            DomainEvent::DeliveryAssignedToPartner(_) => Some(DeliveryStatus::ASSIGNED),
             DomainEvent::DeliveryUnassignedFromPartner(_) => Some(DeliveryStatus::PENDING),
             DomainEvent::DeliveryPickedUp(_) => Some(DeliveryStatus::PICKED_UP),
             DomainEvent::DeliveryCompleted(_) => Some(DeliveryStatus::DELIVERED),
             DomainEvent::DeliveryCancelled(_) => Some(DeliveryStatus::CANCELLED),
             DomainEvent::DeliveryDispatchFailed(_) => Some(DeliveryStatus::FAILED),
             DomainEvent::DeliveryStatusUpdated(e) => Some(e.status),
-            DomainEvent::DeliveryPartnerStatusUpdated(e) => Some(e.status),
             _ => None,
         }
     }

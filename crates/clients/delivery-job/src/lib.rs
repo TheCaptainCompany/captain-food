@@ -31,7 +31,6 @@ mod sealed {
 }
 
 impl sealed::Sealed for domain::generated::commands::AcceptDelivery {}
-impl sealed::Sealed for domain::generated::commands::AssignDeliveryToPartner {}
 impl sealed::Sealed for domain::generated::commands::CancelDelivery {}
 impl sealed::Sealed for domain::generated::commands::CompleteDelivery {}
 impl sealed::Sealed for domain::generated::commands::ConfirmPickup {}
@@ -40,7 +39,6 @@ impl sealed::Sealed for domain::generated::commands::EscalateDelivery {}
 impl sealed::Sealed for domain::generated::commands::ReportDeliveryIssue {}
 impl sealed::Sealed for domain::generated::commands::ResolveDeliveryIssue {}
 impl sealed::Sealed for domain::generated::commands::UnassignDeliveryFromPartner {}
-impl sealed::Sealed for domain::generated::commands::UpdateDeliveryPartnerStatus {}
 impl sealed::Sealed for domain::generated::commands::UpdateDeliveryStatus {}
 impl sealed::Sealed for domain::generated::events::DeliveryAcceptedByPartner {}
 impl sealed::Sealed for domain::generated::events::DeliveryDispatchFailed {}
@@ -59,10 +57,6 @@ pub trait DeliveryJobCommand: sealed::Sealed + serde::Serialize + Send {
 
 impl DeliveryJobCommand for domain::generated::commands::AcceptDelivery {
     const MESSAGE_TYPE: &'static str = "AcceptDelivery";
-}
-
-impl DeliveryJobCommand for domain::generated::commands::AssignDeliveryToPartner {
-    const MESSAGE_TYPE: &'static str = "AssignDeliveryToPartner";
 }
 
 impl DeliveryJobCommand for domain::generated::commands::CancelDelivery {
@@ -95,10 +89,6 @@ impl DeliveryJobCommand for domain::generated::commands::ResolveDeliveryIssue {
 
 impl DeliveryJobCommand for domain::generated::commands::UnassignDeliveryFromPartner {
     const MESSAGE_TYPE: &'static str = "UnassignDeliveryFromPartner";
-}
-
-impl DeliveryJobCommand for domain::generated::commands::UpdateDeliveryPartnerStatus {
-    const MESSAGE_TYPE: &'static str = "UpdateDeliveryPartnerStatus";
 }
 
 impl DeliveryJobCommand for domain::generated::commands::UpdateDeliveryStatus {
