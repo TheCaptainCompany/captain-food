@@ -326,9 +326,22 @@ pub(crate) fn emit_config(model: &Model) -> String {
 /// exactly the set the deploy emitter routes to its pod. Keys merged from the flat root (no
 /// origin) count as `common` — the kernel is where placement-less platform keys live.
 pub(crate) fn scoped_config_keys(model: &Model, scopes: &BTreeSet<String>) -> Vec<ConfigKey> {
+    scoped_config_keys_with_consumers(model, scopes, &BTreeSet::new())
+}
+
+/// [`scoped_config_keys`] widened by a bin's HOSTED CONSUMERS (#393, ADR-20260808-062933): a
+/// worker bin that hosts another consumer's pass (worker-sirene-sync hosts `sirene_ingest`)
+/// reads that consumer's declared keys too — still scope-filtered, so the widening never
+/// reaches past the bin's own scopes. Every other bin passes the empty set and behaves exactly
+/// as before.
+pub(crate) fn scoped_config_keys_with_consumers(
+    model: &Model,
+    scopes: &BTreeSet<String>,
+    extra_consumers: &BTreeSet<String>,
+) -> Vec<ConfigKey> {
     parse_config_keys(model)
         .into_iter()
-        .filter(|k| k.consumer == "server")
+        .filter(|k| k.consumer == "server" || extra_consumers.contains(&k.consumer))
         .filter(|k| scopes.contains(config_key_origin(model, &k.name)))
         .collect()
 }

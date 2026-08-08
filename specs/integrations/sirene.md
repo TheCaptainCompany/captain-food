@@ -2,10 +2,14 @@
 
 Captain.Food **pre-registers** Touraine food establishments from public data so the marketplace launches
 with coverage and a B2B pipeline (ADR-0019). The source is the open **Recherche d'entreprises API**
-(`recherche-entreprises.api.gouv.fr`, Etalab) over INSEE **Sirene**. A scheduled **`sync-worker`**
-(c4-l2; ADR-0020) reads Sirene and goes through the **`sirene-google-acl`** adapter (c4-l3), which
-**calls the `Restaurant` aggregate's normal commands at `/external/graphql` as if it were the owner** —
-there is no special pre-registration command. The Sirene SDK never leaks into the aggregate.
+(`recherche-entreprises.api.gouv.fr`, Etalab) over INSEE **Sirene**. A scheduled worker — the
+**`worker-sirene-sync`** container (c4-l2; ADR-0020, one bin per worker ADR-20260808-062933; the
+GitHub-Actions cron `sirene-sync.yml` stays its authoritative residence until the #358 cutover) —
+reads Sirene and goes through the **`sirene-google-acl`** adapter (c4-l3), which
+**issues the `Restaurant` aggregate's normal commands as if it were the owner** (journaled sends
+through the ordinary write path — ADR-0045; `/external/graphql` is the external-partner surface,
+not this worker's door) — there is no special pre-registration command. The Sirene SDK never
+leaks into the aggregate.
 
 > Google Maps is a **separate, independent sync source** — see [google-maps.md](google-maps.md). Sirene
 > and Google run side-by-side and both feed the *same* generic `Restaurant` commands (the decoupling

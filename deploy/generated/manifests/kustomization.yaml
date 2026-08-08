@@ -59,3 +59,7 @@ resources:
   - bins/projector-network.yaml
   - bins/projector-ordering.yaml
   - bins/projector-payments.yaml
+  - bins/worker-erasure.yaml
+  - bins/worker-journal-sweep.yaml
+  - bins/worker-retention.yaml
+  - bins/worker-sirene-sync.yaml

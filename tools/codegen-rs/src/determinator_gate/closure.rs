@@ -367,6 +367,38 @@ mod tests {
             );
         }
 
+        // One bin per worker (ADR-20260808-062933): each periodic worker's closure rides
+        // `infrastructure` (the shared passes live there — no logic forks), and the SIRENE
+        // worker DIRECTLY links `sirene_ingest` (the shared sweep orchestration). HONEST, like
+        // the wired spine above: `infrastructure` itself depends on `sirene_ingest` for the
+        // wire types (ADR-0045), so every sweep worker carries it TRANSITIVELY too — the
+        // recorded blast-radius cost whose exit is the per-scope infrastructure split; the
+        // sharp assertion here is the manifest-level one (only worker-sirene-sync can SPELL
+        // sirene_ingest APIs), not a build-closure wall.
+        for bin in ["worker-retention", "worker-journal-sweep", "worker-erasure", "worker-sirene-sync"] {
+            let closure = closure_dirs(graph(), bin).expect("closure resolves");
+            assert!(
+                closure.contains("crates/infrastructure"),
+                "{bin} runs its pass out of infrastructure (no logic forks)"
+            );
+        }
+        let sirene_manifest =
+            std::fs::read_to_string(repo_root().join("crates/bins/worker-sirene-sync/Cargo.toml"))
+                .expect("worker-sirene-sync manifest");
+        assert!(
+            sirene_manifest.contains("sirene_ingest = { path"),
+            "worker-sirene-sync must link the shared sweep orchestration directly"
+        );
+        for bin in ["worker-retention", "worker-journal-sweep", "worker-erasure"] {
+            let manifest =
+                std::fs::read_to_string(repo_root().join(format!("crates/bins/{bin}/Cargo.toml")))
+                    .expect("worker bin manifest");
+            assert!(
+                !manifest.contains("sirene_ingest"),
+                "{bin}: only the SIRENE worker may NAME sirene_ingest (the manifest is the scope assertion)"
+            );
+        }
+
         // A gateway's closure is the ONE that stays sharp: no domain, no server, no web (D8).
         // ALL gateway bins are asserted, derived from the workspace — a gate that samples one of
         // seven instances is not a backstop for the other six (ADR-20260803-234035): a one-off

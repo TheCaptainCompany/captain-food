@@ -23,41 +23,10 @@
 //! - `INTERNAL_TRIGGER_TOKEN` (optional, required with the URL) — shared secret sent as the
 //!   `x-internal-token` header; the server rejects the ping without it.
 
-use sirene_ingest::{
-    compact_payloads, departments_by_staleness, french_departments, restauration_query,
-    upsert_staging_batch, SireneClient, SireneScope, MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
+use sirene_ingest::sweep::{
+    budget_from_env, sweep_from_env, DEFAULT_COMPACTION_BUDGET_MINUTES,
 };
-
-/// The new INSEE portal's public quota is ~30 requests/minute — pace page fetches accordingly.
-const PAGE_PAUSE: std::time::Duration = std::time::Duration::from_millis(2100);
-
-/// How long one run may spend fetching before it stops and leaves the rest to the next run (#218).
-///
-/// The bottleneck is INSEE's ~30 req/min quota, not our DB (that was #215/#216), so a full France
-/// sweep needs ~4 hours and CANNOT fit a single CI job — the previous behaviour was to run until the
-/// 90-minute `timeout-minutes` ceiling KILLED it, which loses the summary, the worker ping and the
-/// exit status, and reports a red job for working as designed.
-///
-/// So the run budgets itself and stops cleanly instead. Default 75 minutes, comfortably inside the
-/// workflow's 90, leaving room for the final drain ping and shutdown. Coverage completes across
-/// successive runs because [`departments_by_staleness`] resumes at the stalest partition.
-const DEFAULT_BUDGET_MINUTES: u64 = 75;
-
-/// Wall-clock budget for `--compact` (#231). Same self-limiting shape as the sweep's, and for the same
-/// reason: the pass is resumable (`payload IS NOT NULL` is its own progress marker), so stopping early
-/// costs nothing and being KILLED at the CI ceiling loses the summary.
-const DEFAULT_COMPACTION_BUDGET_MINUTES: u64 = 60;
-
-/// `SIRENE_BUDGET_MINUTES` or the given default, as a Duration.
-fn budget_from_env(default_minutes: u64) -> std::time::Duration {
-    std::time::Duration::from_secs(
-        std::env::var("SIRENE_BUDGET_MINUTES")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(default_minutes)
-            * 60,
-    )
-}
+use sirene_ingest::compact_payloads;
 
 #[tokio::main]
 async fn main() {
@@ -79,7 +48,7 @@ async fn main() {
         .expect("connect to DATABASE_URL");
 
     // The compaction pass (#231) touches no INSEE API at all — it only reads payloads already in the
-    // staging table — so it runs before the client is even constructed, and needs no INSEE_API_TOKEN.
+    // staging table — so it runs without an INSEE client, and needs no INSEE_API_TOKEN.
     if compact_only {
         let budget = budget_from_env(DEFAULT_COMPACTION_BUDGET_MINUTES);
         println!(
@@ -101,106 +70,23 @@ async fn main() {
         return;
     }
 
-    let client = SireneClient::from_env().unwrap_or_else(|e| {
-        eprintln!("sirene_ingest: {e}");
-        std::process::exit(2);
-    });
-
-    // One run id correlates every row this ingestion touched (staging column `sync_run_id`).
-    let sync_run_id = uuid::Uuid::new_v4();
-    let departments: Vec<String> = match std::env::var("SIRENE_DEPARTMENTS") {
-        // An explicit list is honoured verbatim and in the given order — debugging and the
-        // single-market V0 scope must stay predictable, not get reordered under the operator.
-        Ok(list) if !list.trim().is_empty() => {
-            list.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect()
+    // The sweep orchestration is SHARED with the generated worker-sirene-sync CronJob bin
+    // (sirene_ingest::sweep, ADR-20260808-062933 — one loop, two schedulers, zero forks); this
+    // main keeps only what is CI-specific: the exit codes and the deployed-worker drain ping.
+    let report = match sweep_from_env(&pool).await {
+        Ok(report) => report,
+        Err(e) => {
+            eprintln!("sirene_ingest: {e}");
+            std::process::exit(2);
         }
-        // Otherwise sweep stalest-first so successive runs converge on full coverage instead of
-        // restarting at department 01 every time and never passing 37 (#218).
-        _ => departments_by_staleness(&pool, &french_departments()).await,
     };
-    let budget = budget_from_env(DEFAULT_BUDGET_MINUTES);
-    let started = std::time::Instant::now();
-    println!(
-        "sirene_ingest: run {sync_run_id} — {} department partition(s), stalest first, \
-         budget {} min, active food-service scope",
-        departments.len(),
-        budget.as_secs() / 60
-    );
-
-    let (mut fetched, mut upserted, mut failed_rows) = (0usize, 0usize, 0usize);
-    let mut failed_departments: Vec<String> = Vec::new();
-
-    let mut covered: Vec<&str> = Vec::new();
-    let mut budget_exhausted = false;
-    for department in &departments {
-        // Stop BETWEEN departments, never mid-partition: a half-swept department would look fully
-        // swept to `departments_by_staleness` (its max(last_seen_at) is now), so the next run would
-        // deprioritise it and its unfetched tail would silently rot.
-        if started.elapsed() >= budget {
-            budget_exhausted = true;
-            println!(
-                "sirene_ingest: budget of {} min reached after {} department(s) — stopping cleanly, \
-                 the next run resumes at the stalest partition",
-                budget.as_secs() / 60,
-                covered.len()
-            );
-            break;
-        }
-        let query = restauration_query(&SireneScope::Department(department.clone()));
-        let mut cursor = "*".to_string();
-        let mut department_fetched = 0usize;
-        loop {
-            let page = match client.fetch_page(&query, &cursor, MAX_PAGE_SIZE).await {
-                Ok(page) => page,
-                Err(e) => {
-                    // A page-level failure (after the client's own retries) fails THIS department
-                    // only; the sweep continues — re-runs are idempotent UPSERTs anyway.
-                    eprintln!("sirene_ingest: department {department} failed at cursor {cursor}: {e}");
-                    failed_departments.push(department.clone());
-                    break;
-                }
-            };
-            department_fetched += page.records.len();
-            // Batch the staging write: each page is UPSERTed in chunks of STAGING_BATCH_SIZE in one
-            // round-trip each (with a row-by-row fallback inside `upsert_staging_batch` on batch error),
-            // instead of one round-trip per record — the fix for the throughput bottleneck (#215). The
-            // `upserted`/`failed_rows` tallies keep their exact meaning.
-            for chunk in page.records.chunks(STAGING_BATCH_SIZE) {
-                let counts = upsert_staging_batch(&pool, chunk, department, sync_run_id).await;
-                upserted += counts.upserted;
-                failed_rows += counts.failed_rows;
-            }
-            match page.next_cursor {
-                Some(next) => {
-                    cursor = next;
-                    tokio::time::sleep(PAGE_PAUSE).await; // stay under the INSEE rate limit
-                }
-                None => break,
-            }
-        }
-        fetched += department_fetched;
-        covered.push(department.as_str());
-        if department_fetched > 0 {
-            println!("sirene_ingest: department {department} — {department_fetched} établissements");
-        }
-        tokio::time::sleep(PAGE_PAUSE).await; // pace department-to-department requests too
-    }
-
-    println!(
-        "sirene_ingest: done — {} of {} department(s) this run, fetched {fetched}, upserted {upserted}, \
-         failed rows {failed_rows}, failed departments {:?}{}",
-        covered.len(),
-        departments.len(),
-        failed_departments,
-        if budget_exhausted { " (budget-limited — remaining partitions next run)" } else { "" }
-    );
 
     // Wake the on-app worker so staged rows are translated without waiting for its poll interval.
     // Best-effort: a ping failure never fails the run (the worker's own loop will catch up).
     ping_internal_trigger().await;
 
     // Surface partial sweeps in the Actions run: some data landed (and was pinged), but not all.
-    if !failed_departments.is_empty() || (failed_rows > 0 && upserted == 0 && fetched > 0) {
+    if report.is_failure() {
         std::process::exit(1);
     }
 }

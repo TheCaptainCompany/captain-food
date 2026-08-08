@@ -138,13 +138,17 @@ pub(crate) fn bin_config_scopes(b: &BinSpec, model: &Model) -> BTreeSet<String> 
     s
 }
 
-/// Every production secret-sourced env key: `(env key, origin scope, github repo secret)`.
-/// Non-secret keys are BAKED into the binary per profile (PROP-20260729-014500 D5) and never
-/// appear in manifests; keys with a non-`server` consumer (CI jobs) never reach a pod.
-fn production_secret_keys(model: &Model) -> Vec<(String, String, String)> {
+/// Every production secret-sourced env key: `(env key, origin scope, consumer, github repo
+/// secret)`. Non-secret keys are BAKED into the binary per profile (PROP-20260729-014500 D5)
+/// and never appear in manifests. The CONSUMER rides along since #393: a non-`server` consumer's
+/// key reaches ONLY the pod that declares it hosts that consumer (`BinSpec::consumers` — the
+/// worker bins' widening); a key nothing hosts reaches no pod, exactly as before. NOTE the
+/// SIRENE ingestion keys (`consumer: sirene_ingest`) deliberately declare NO production
+/// `from_secret` today — GitHub Actions injects them directly — so the worker-sirene-sync pod
+/// env stays without them until the #358 cutover gives them a deploy source (recorded there).
+pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, String, String)> {
     parse_config_keys(model)
         .into_iter()
-        .filter(|k| k.consumer == "server")
         .filter_map(|k| {
             let repo_secret = k.from_secret.get("production")?.clone();
             // configuration.yaml is a SECTION kind (`keys:`), so origins key it as
@@ -155,31 +159,42 @@ fn production_secret_keys(model: &Model) -> Vec<(String, String, String)> {
                 .or_else(|| model.origins.get(&("configuration.yaml".to_string(), k.name.clone())))
                 .cloned()
                 .unwrap_or_else(|| KERNEL_SCOPE.to_string());
-            Some((k.name, scope, repo_secret))
+            Some((k.name, scope, k.consumer, repo_secret))
         })
         .collect()
 }
 
 /// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
 /// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
-fn env_yaml(b: &BinSpec, model: &Model, secret_keys: &[(String, String, String)]) -> String {
+fn env_yaml(
+    b: &BinSpec,
+    model: &Model,
+    secret_keys: &[(String, String, String, String)],
+    indent: &str,
+) -> String {
     let scopes = bin_config_scopes(b, model);
     let mut out = String::new();
     out.push_str(&format!(
-        "            - name: APP_PROFILE\n              value: production\n            - name: PORT\n              value: \"{HTTP_PORT}\"\n"
+        "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
     ));
-    for (key, scope, _) in secret_keys {
+    for (key, scope, consumer, _) in secret_keys {
+        if consumer != "server" && !b.consumers.contains(consumer) {
+            continue; // #393: a non-server consumer's key reaches only its hosting worker's pod
+        }
         if !scopes.contains(scope) {
             continue;
         }
         if !adapter_key_allowed(b, key, scope) {
             continue; // ADR-20260808-062432: an adapter pod carries ONLY its partner's secrets
         }
+        if !worker_key_allowed(b, key, scope, /* secret */ true) {
+            continue; // #393: a periodic worker keeps only the DB + telemetry floor from common
+        }
         if key == "DATABASE_URL" && !needs_db(b, model) {
             continue; // D8: gateways/surfaces hold no database access — the pod never sees the URL
         }
         out.push_str(&format!(
-            "            - name: {key}\n              valueFrom:\n                secretKeyRef:\n                  name: {SECRETS_NAME}\n                  key: {key}\n"
+            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n"
         ));
     }
     out
@@ -197,8 +212,107 @@ fn labels_yaml(b: &BinSpec, indent: &str) -> String {
     out
 }
 
-/// One bin's manifest file: Deployment (+ Service for the HTTP families).
-fn bin_manifest_yaml(b: &BinSpec, model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String)]) -> String {
+/// A periodic worker's per-Job wall-clock ceiling, mirroring what its pass declares about
+/// itself: the SIRENE sweep self-budgets at 75 min (`sirene_ingest::sweep`), so its Job ceiling
+/// is 90 min — the same budget-vs-hang-catcher spacing sirene-sync.yml uses; every other pass is
+/// a few SQL statements, bounded at 10 min. Wiring detail (like the per-worker main arms), not
+/// topology — the DECLARED cadence lives in c4-l2.
+fn cron_active_deadline_seconds(b: &BinSpec) -> u32 {
+    match b.name.as_str() {
+        "worker-sirene-sync" => 5400,
+        _ => 600,
+    }
+}
+
+/// The CronJob manifest of a PERIODIC worker bin (ADR-20260808-062933 "shape follows cadence"):
+/// the platform's scheduler is the scheduler — no probes, no Service, no internal cron loop.
+/// The main runs one pass and exits; `concurrencyPolicy: Forbid` keeps passes from overlapping.
+fn cron_manifest_yaml(
+    b: &BinSpec,
+    model: &Model,
+    pin: Option<&ImagePin>,
+    secret_keys: &[(String, String, String, String)],
+) -> String {
+    let image = image_ref(&b.name, pin);
+    let schedule = b.schedule.as_deref().expect("cron manifest requires a declared schedule");
+    let unpinned_note = if pin.and_then(|p| p.digest.as_ref()).is_none() {
+        "\n# UNPINNED: deploy/pins/{bin}.json has no digest yet -- CI's pin-bump (#363/#371) writes it\n# and regenerates this file; the :unpinned tag is deliberately undeployable, never a default."
+            .replace("{bin}", &b.name)
+    } else {
+        String::new()
+    };
+    let suspend_note = if b.suspended {
+        "\n# SUSPENDED (c4-l2 `suspended: true`): visibly OFF -- an external residence stays\n# authoritative for this pass until the #358 cutover records the handover."
+    } else {
+        ""
+    };
+    format!(
+        r#"# GENERATED by the Captain.Food codegen -- do not edit by hand (ADR-20260808-062933, #393).
+# `{name}` (worker, PERIODIC -- declared cadence `{schedule}` UTC in c4-l2). Image resolved from
+# the deploy ledger deploy/pins/{name}.json ({{digest, source_hash}}; rollback = git revert of
+# the pin change). Applied by NOTHING yet -- gate-then-stabilize: Argo CD (#366) reconciles this
+# tree only after steps (6)-(7) flip deployment.{unpinned}{suspend_note}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {name}
+  namespace: {ns}
+  labels:
+{labels}spec:
+  # The DECLARED cadence (c4-l2 `schedule:`, UTC) -- the platform's scheduler is the scheduler
+  # (ADR-20260808-062933); the bin main runs ONE pass and exits.
+  schedule: "{schedule}"
+  timeZone: Etc/UTC
+  suspend: {suspend}
+  # Never two passes at once: each pass is idempotent/checkpointed, but overlap would contend on
+  # the same rows for no benefit -- the NEXT scheduled run is the retry.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No in-Job retry (the pass is idempotent; the next scheduled run retries with fresh
+      # state) and a wall-clock ceiling so a hung pass can never straddle its own next firing.
+      backoffLimit: 0
+      activeDeadlineSeconds: {deadline}
+      template:
+        metadata:
+          labels:
+{tpl_labels}        spec:
+          restartPolicy: Never
+          containers:
+            - name: {name}
+              image: {image}
+              imagePullPolicy: IfNotPresent
+              env:
+{env}              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  memory: 96Mi
+"#,
+        name = b.name,
+        ns = DEPLOY_NAMESPACE,
+        labels = labels_yaml(b, "    "),
+        tpl_labels = labels_yaml(b, "            "),
+        image = image,
+        schedule = schedule,
+        suspend = b.suspended,
+        deadline = cron_active_deadline_seconds(b),
+        env = env_yaml(b, model, secret_keys, "                "),
+        unpinned = unpinned_note,
+        suspend_note = suspend_note,
+    )
+}
+
+/// One bin's manifest file: Deployment (+ Service for the HTTP families), or a CronJob for a
+/// periodic worker (declared `schedule:` — ADR-20260808-062933).
+fn bin_manifest_yaml(b: &BinSpec, model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String)]) -> String {
+    if b.schedule.is_some() {
+        return cron_manifest_yaml(b, model, pin, secret_keys);
+    }
     let image = image_ref(&b.name, pin);
     let unpinned_note = if pin.and_then(|p| p.digest.as_ref()).is_none() {
         "\n# UNPINNED: deploy/pins/{bin}.json has no digest yet -- CI's pin-bump (#363/#371) writes it\n# and regenerates this file; the :unpinned tag is deliberately undeployable, never a default."
@@ -263,7 +377,7 @@ metadata:
         tpl_labels = labels_yaml(b, "        "),
         image = image,
         port = HTTP_PORT,
-        env = env_yaml(b, model, secret_keys),
+        env = env_yaml(b, model, secret_keys, "            "),
         unpinned = unpinned_note,
     );
     if has_service(b.family) {
@@ -362,7 +476,7 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
         // TRANSITION ALIAS (partner dashboards still point at the marketplace host until
         // re-registered on hooks.captain.food): each partner's /adapters/{slug} prefix routes
         // to ITS bin — same per-partner mapping as the integration host, derived from the
-        // adapter family, never a hand list. The sync-worker's /external/graphql also rides
+        // adapter family, never a hand list. The external ACL's /external/graphql also rides
         // this host.
         let extra = if *surface == "fo-marketplace" {
             let mut e = Vec::new();
@@ -629,7 +743,7 @@ fn images_json(topology: &[BinSpec]) -> String {
 /// The `captain-secrets` contract: which env keys the sealed Secret must hold in production and
 /// which GitHub repo secret supplies each (the k8s face of render-config-sync.json; #358 seals
 /// the actual values -- they never touch the repo).
-fn secret_keys_json(model: &Model) -> String {
+fn secret_keys_json(model: &Model, topology: &[BinSpec]) -> String {
     let mut map = serde_json::Map::new();
     map.insert(
         "_generated".into(),
@@ -638,7 +752,15 @@ fn secret_keys_json(model: &Model) -> String {
         )),
     );
     let mut keys = serde_json::Map::new();
-    for (key, scope, repo_secret) in production_secret_keys(model) {
+    let hosted: BTreeSet<&String> = topology.iter().flat_map(|b| b.consumers.iter()).collect();
+    for (key, scope, consumer, repo_secret) in production_secret_keys(model) {
+        // The contract lists exactly what some pod's env references (#393): `server`-consumed
+        // keys plus any consumer a worker bin declares it hosts. A non-server consumer's key
+        // with NO hosting pod stays out — today that is every SIRENE key anyway, since they
+        // declare no production `from_secret` (GitHub-Actions-injected until the #358 cutover).
+        if consumer != "server" && !hosted.contains(&consumer) {
+            continue;
+        }
         let mut entry = serde_json::Map::new();
         entry.insert("scope".into(), serde_json::Value::String(scope));
         entry.insert("from_github_secret".into(), serde_json::Value::String(repo_secret));
@@ -684,7 +806,7 @@ pub(crate) fn emit_deploy_tree(model: &Model, pins: &BTreeMap<String, ImagePin>)
         ("README.md".into(), deploy_readme(&topology)),
         ("Dockerfile.bin".into(), dockerfile_bin()),
         ("images.json".into(), images_json(&topology)),
-        ("secret-keys.json".into(), secret_keys_json(model)),
+        ("secret-keys.json".into(), secret_keys_json(model, &topology)),
         ("manifests/namespace.yaml".into(), namespace_yaml()),
         ("manifests/kustomization.yaml".into(), kustomization_yaml(&topology)),
         ("manifests/ingress.yaml".into(), ingress_yaml(model, &topology)),

@@ -27,6 +27,7 @@
 pub mod client;
 pub mod compaction;
 pub mod staging;
+pub mod sweep;
 pub mod wire;
 
 pub use client::{

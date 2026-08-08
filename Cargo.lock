@@ -6267,6 +6267,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
+name = "worker-erasure"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "worker-journal-sweep"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "worker-retention"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "worker-sirene-sync"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "sirene_ingest",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

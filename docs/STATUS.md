@@ -3,8 +3,30 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-08 — ONE BIN PER ADAPTER: THE COMPOSED `adapters` POD IS SPLIT PER PARTNER, PR IN
-> REVIEW — [#391 "One bin per adapter"](https://github.com/TheCaptainCompany/captain-food/issues/391)
+> 🚧 **2026-08-08 — ONE BIN PER WORKER: THE CROSS-CUTTING WORKERS GET CRONJOB-SHAPED HOMES, PR IN
+> REVIEW — [#393 "Cross-cutting worker hosting: one bin per worker"](https://github.com/TheCaptainCompany/captain-food/issues/393)
+> via [ADR-20260808-062933](adr/ADR-20260808-062933-one-bin-per-worker.md) (product-owner
+> decision; the FINAL repo work item of the ADR-20260807-183024 program).** c4-l2 replaces
+> `sync-worker` with `worker-sirene-sync` + `worker-retention` / `worker-journal-sweep` /
+> `worker-erasure`, each with a DECLARED 5-field cron cadence (`schedule:`; validator rules
+> `c4-worker-*`); shape follows cadence — the emitter renders CronJobs (Forbid, restartPolicy
+> Never, UTC, `suspend:` from spec) for periodic workers, `bam` stays the always-on Deployment.
+> Worker mains are run-to-completion passes over the EXISTING implementation crates (shared:
+> `sirene_ingest::sweep` + `infrastructure::integrations::journal_sweep` extracted so monolith
+> and bins run ONE implementation). MINIMAL GRANTS: periodic workers keep only the
+> DATABASE_URL + HONEYCOMB_API_KEY secret floor from `common` (the GDPR erasure pod is the
+> auditable case — asserted against the FULL secret catalog in the deploy test); the
+> `sirene_ingest`-consumer keys route to `worker-sirene-sync` alone (still without a deploy
+> source until cutover — GitHub Actions injects them). `worker-sirene-sync` lands SUSPENDED:
+> sirene-sync.yml stays the authoritative cron until the #358 cutover records the handover, and
+> the pass honours RUN_SIRENE_WORKER (#220 pause) besides. c4-l3: `sirene-google-acl` split —
+> enrichment stays with the sync worker; Google ownership verification is its own component
+> homed on `actor-restaurant` (where the `GoogleOwnershipVerifier` port executes). Bin count
+> 53 → 57. GATE-THEN-STABILIZE: nothing applies manifests; the monolith's in-process loops stay
+> the running instances.
+>
+> ✅ **2026-08-08 — ONE BIN PER ADAPTER: THE COMPOSED `adapters` POD IS SPLIT PER PARTNER, MERGED
+> (PR #395) — [#391 "One bin per adapter"](https://github.com/TheCaptainCompany/captain-food/issues/391)
 > via [ADR-20260808-062432](adr/ADR-20260808-062432-one-bin-per-adapter.md) (product-owner
 > decision).** c4-l2 replaces `adapters` with `adapter-stripe`/`adapter-hubrise`/
 > `adapter-uber-direct`/`adapter-coopcycle`/`adapter-avelo37`; the emitter derives the family from
