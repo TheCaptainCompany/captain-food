@@ -5458,14 +5458,14 @@ fn deploy_tree_is_complete_both_ways() {
         assert!(bins.contains(bin), "stale pin deploy/pins/{name}: no bin '{bin}' in the topology");
     }
 
-    // Ingress derivation: every screens->surface binding names a real bin, and every fo-*/bo-*
-    // surface in the topology is bound to a screens file (adapters is the one surface with no
-    // screens -- it serves webhooks, not humans).
+    // Ingress derivation: every screens->surface binding names a real bin, and EVERY surface in
+    // the topology is bound to a screens file (since ADR-20260808-062432 the webhook adapters
+    // are their own family -- a surface serves humans, so an unbound one is unroutable).
     for (_, surface) in screens_surface_bindings() {
         assert!(bins.contains(surface), "screens binding names unknown surface '{surface}'");
     }
     let bound: BTreeSet<&str> = screens_surface_bindings().iter().map(|(_, s)| *s).collect();
-    for b in topology.iter().filter(|b| b.family == "surface" && b.name != "adapters") {
+    for b in topology.iter().filter(|b| b.family == "surface") {
         assert!(
             bound.contains(b.name.as_str()),
             "surface bin '{}' has no screens->surface binding -- its host would be unroutable",
@@ -5479,6 +5479,76 @@ fn deploy_tree_is_complete_both_ways() {
             "ingress misses the /{role_seg}/graphql role path (role = path, ADR-0006)"
         );
     }
+
+    // One bin per adapter (ADR-20260808-062432), everything derived from the topology, never a
+    // hand list of partners:
+    let adapters: Vec<&BinSpec> = topology.iter().filter(|b| b.family == "adapter").collect();
+    assert!(
+        adapters.len() >= 5,
+        "expected one bin per crates/adapters/* crate, got {:?}",
+        adapters.iter().map(|b| &b.name).collect::<Vec<_>>()
+    );
+    // The env-prefix narrowing is only sound while no partner's prefix is a prefix of
+    // another's (a future `crates/adapters/uber` would swallow UBER_DIRECT_*): assert the
+    // derivation's precondition so the sixth crate that breaks it fails HERE, not by silently
+    // leaking another partner's secrets into its pod.
+    for a in &adapters {
+        for b in &adapters {
+            let (pa, pb) = (
+                adapter_env_prefix(a.partner.as_deref().unwrap()),
+                adapter_env_prefix(b.partner.as_deref().unwrap()),
+            );
+            assert!(
+                pa == pb || !pa.starts_with(&pb),
+                "partner env prefixes must be disjoint: {pa} vs {pb} — the ADR-20260808-062432 narrowing cannot tell their keys apart"
+            );
+        }
+    }
+    for a in &adapters {
+        let dir = a.partner.as_deref().expect("adapter bin carries its partner");
+        let slug = partner_slug(dir);
+        assert_eq!(a.name, format!("adapter-{slug}"), "bin name is derived from the crate dir");
+        // The crate-package naming the manifest derivation relies on ({slug}-adapter) is a
+        // real workspace fact, not an assumption.
+        let manifest_toml =
+            fs::read_to_string(root.join("crates/adapters").join(dir).join("Cargo.toml"))
+                .expect("adapter crate manifest");
+        assert!(
+            manifest_toml.contains(&format!("name = \"{slug}-adapter\"")),
+            "crates/adapters/{dir} must be packaged as '{slug}-adapter' (the derivation the bin manifests link)"
+        );
+        // Ingress: the integration host carries this partner's path to ITS service.
+        assert!(
+            ingress.contains(&format!("- path: /adapters/{slug}")),
+            "ingress misses the /adapters/{slug} partner path"
+        );
+        let bin_manifest = files[format!("manifests/bins/{}.yaml", a.name).as_str()];
+        // THE point of the split: no other partner's secret ever reaches this pod. Checked
+        // pairwise over the derived family (the delivery scope declares three partners' keys,
+        // so scope routing alone would fail this).
+        for other in &adapters {
+            let other_dir = other.partner.as_deref().unwrap();
+            if other_dir != dir {
+                let prefix = adapter_env_prefix(other_dir);
+                assert!(
+                    !bin_manifest.contains(&format!("name: {prefix}")),
+                    "{}: pod env carries another partner's key ({prefix}*) -- the ADR-20260808-062432 narrowing broke",
+                    a.name
+                );
+            }
+        }
+    }
+    // The money path positively holds ITS OWN keys (narrowing must never fail closed into a
+    // Stripe pod that cannot verify webhooks -- "the customer is charged and the restaurant is
+    // never told" is the failure this secret exists to prevent).
+    let stripe_manifest = files["manifests/bins/adapter-stripe.yaml"];
+    assert!(
+        stripe_manifest.contains("name: STRIPE_WEBHOOK_SECRET")
+            && stripe_manifest.contains("name: STRIPE_SECRET_KEY"),
+        "adapter-stripe's pod env must carry the Stripe secrets"
+    );
+    // The composed pod is gone for good: no `adapters` bin, no manifest, no pin.
+    assert!(!bins.contains("adapters"), "the composed adapters bin must not come back");
 }
 
 /// The pin ledger drives the Deployment image: a recorded digest is baked in (digest-pinned,

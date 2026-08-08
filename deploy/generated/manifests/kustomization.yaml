@@ -21,7 +21,11 @@ resources:
   - bins/actor-restaurant.yaml
   - bins/actor-restaurant-account.yaml
   - bins/actor-rider.yaml
-  - bins/adapters.yaml
+  - bins/adapter-avelo37.yaml
+  - bins/adapter-coopcycle.yaml
+  - bins/adapter-hubrise.yaml
+  - bins/adapter-stripe.yaml
+  - bins/adapter-uber-direct.yaml
   - bins/bam.yaml
   - bins/bo-admin.yaml
   - bins/bo-restaurant.yaml

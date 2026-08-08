@@ -4,8 +4,9 @@
 # that role's gateway. TLS: the cert-manager DNS-01 wildcard certificate (#358 bootstrap issues
 # it; ingress-nginx terminates). The BARE captain.food host is owned by fo-marketplace
 # (captain_frontoffice.yaml additional_hosts, #385); hooks.captain.food is the declared
-# integration host (c4-l2 adapters.ingress_host) -- everything on it routes to the adapters
-# Service, with the marketplace-host webhook paths kept as the transition alias.
+# integration host (c4-l2 adapter-* ingress_host, ADR-20260808-062432 one bin per adapter) --
+# one /adapters/{partner} path per adapter Service, no surface at /, with the marketplace-host
+# per-partner paths kept as the transition alias.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -67,25 +68,39 @@ spec:
                 name: gateway-public
                 port:
                   name: http
-          - path: /webhooks
+          - path: /adapters/avelo37
             pathType: Prefix
             backend:
               service:
-                name: adapters
+                name: adapter-avelo37
                 port:
                   name: http
-          - path: /adapters
+          - path: /adapters/coopcycle
             pathType: Prefix
             backend:
               service:
-                name: adapters
+                name: adapter-coopcycle
                 port:
                   name: http
-          - path: /services
+          - path: /adapters/hubrise
             pathType: Prefix
             backend:
               service:
-                name: adapters
+                name: adapter-hubrise
+                port:
+                  name: http
+          - path: /adapters/stripe
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-stripe
+                port:
+                  name: http
+          - path: /adapters/uber-direct
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-uber-direct
                 port:
                   name: http
           - path: /external/graphql
@@ -187,10 +202,38 @@ spec:
     - host: "hooks.captain.food"
       http:
         paths:
-          - path: /
+          - path: /adapters/stripe
             pathType: Prefix
             backend:
               service:
-                name: adapters
+                name: adapter-stripe
+                port:
+                  name: http
+          - path: /adapters/hubrise
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-hubrise
+                port:
+                  name: http
+          - path: /adapters/uber-direct
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-uber-direct
+                port:
+                  name: http
+          - path: /adapters/coopcycle
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-coopcycle
+                port:
+                  name: http
+          - path: /adapters/avelo37
+            pathType: Prefix
+            backend:
+              service:
+                name: adapter-avelo37
                 port:
                   name: http

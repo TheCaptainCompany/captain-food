@@ -188,10 +188,30 @@
       ],
       "path": "crates/bins/actor-rider"
     },
-    "adapters": {
-      "kind": "surface",
+    "adapter-avelo37": {
+      "kind": "adapter",
       "domain_crates": [],
-      "path": "crates/bins/adapters"
+      "path": "crates/bins/adapter-avelo37"
+    },
+    "adapter-coopcycle": {
+      "kind": "adapter",
+      "domain_crates": [],
+      "path": "crates/bins/adapter-coopcycle"
+    },
+    "adapter-hubrise": {
+      "kind": "adapter",
+      "domain_crates": [],
+      "path": "crates/bins/adapter-hubrise"
+    },
+    "adapter-stripe": {
+      "kind": "adapter",
+      "domain_crates": [],
+      "path": "crates/bins/adapter-stripe"
+    },
+    "adapter-uber-direct": {
+      "kind": "adapter",
+      "domain_crates": [],
+      "path": "crates/bins/adapter-uber-direct"
     },
     "bam": {
       "kind": "worker",

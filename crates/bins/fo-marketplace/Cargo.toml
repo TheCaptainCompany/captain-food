@@ -15,7 +15,7 @@ version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Captain.Food `fo-marketplace` deployable: surface bin -- assets/SSR/webhooks; speaks to its role gateway, holds no domain vocabulary and no broad views access (ADR-20260807-183024)."
+description = "Captain.Food `fo-marketplace` deployable: surface bin -- assets/SSR; speaks to its role gateway, holds no domain vocabulary and no broad views access (ADR-20260807-183024)."
 
 [dependencies]
 # (no domain crates -- this family holds NO domain vocabulary; an added domain crate

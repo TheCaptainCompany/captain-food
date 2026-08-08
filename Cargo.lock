@@ -230,18 +230,66 @@ dependencies = [
 ]
 
 [[package]]
-name = "adapters"
+name = "adapter-avelo37"
+version = "0.1.0"
+dependencies = [
+ "avelo37-adapter",
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-coopcycle"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "coopcycle-adapter",
+ "infrastructure",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-hubrise"
 version = "0.1.0"
 dependencies = [
  "actor_client",
- "avelo37-adapter",
  "bin_runtime",
- "coopcycle-adapter",
  "hubrise-adapter",
  "infrastructure",
  "regex",
  "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-stripe"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "serde_json",
  "stripe-adapter",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "adapter-uber-direct"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "infrastructure",
+ "regex",
+ "serde_json",
  "tokio",
  "tracing",
  "uber-direct-adapter",

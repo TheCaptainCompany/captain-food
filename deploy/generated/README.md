@@ -14,5 +14,5 @@ runtime. The bins behind these manifests are probe-serving shells (/health + /pi
 business runtime wiring (mailbox hosting, per-scope projection, subgraph slices, gateway
 composition tables) is tracked on #349 and blocks the flip.
 
-Bins: 49. Build one image: `docker build -f deploy/generated/Dockerfile.bin --build-arg
+Bins: 53. Build one image: `docker build -f deploy/generated/Dockerfile.bin --build-arg
 BIN=<bin> .` Render the manifests: `kustomize build deploy/generated/manifests`.

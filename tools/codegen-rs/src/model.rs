@@ -79,6 +79,12 @@ pub(crate) struct Model {
     /// Issues raised while loading (duplicate item names across fragment files). Surfaced by
     /// `validate()` so they gate like any other issue.
     pub(crate) load_issues: Vec<Issue>,
+    /// The adapter-crate directory names under `crates/adapters/` (sorted), scanned at load time.
+    /// THE derivation source of the `adapter-*` bin family (ADR-20260808-062432 — one bin per
+    /// partner ACL, never a hand list): a sixth adapter crate produces a sixth bin the day it
+    /// exists, and §15 then requires its c4-l2 container. Empty on fixture models (`Default`),
+    /// which keeps the degenerate-model guard intact.
+    pub(crate) adapter_crates: Vec<String>,
 }
 
 /// Strip file-level meta (version/description) like load.ts META_KEYS, preserving key order.
@@ -297,7 +303,34 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
             }
         }
     }
-    Ok(Model { defs, origins, scopes, load_issues })
+    // The adapter-crate list (ADR-20260808-062432): every `crates/adapters/<dir>` holding a
+    // Cargo.toml, relative to the repo root the specs live in. This is a WORKSPACE fact, not a
+    // spec fact — deliberately scanned here so `bin_topology` stays a pure function of the Model
+    // and the §15 validator can prove the c4-l2 container list against it in both directions.
+    let mut adapter_crates: Vec<String> = Vec::new();
+    let adapters_dir = match specs.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.join("crates/adapters"),
+        _ => PathBuf::from("crates/adapters"),
+    };
+    if adapters_dir.is_dir() {
+        // FAIL LOUD on a read error of an existing directory: an empty list here would drop the
+        // whole adapter family from the topology, and only the §15 both-ways check (adapter-*
+        // containers with no derived bin abort generation) stands between that and a mass-prune
+        // of the bin crates. Absent dir = fixture/degenerate model, honestly empty.
+        let rd = fs::read_dir(&adapters_dir)
+            .map_err(|e| format!("read {}: {}", adapters_dir.display(), e))?;
+        for e in rd {
+            let e = e.map_err(|e| format!("read {}: {}", adapters_dir.display(), e))?;
+            let p = e.path();
+            if p.is_dir() && p.join("Cargo.toml").is_file() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    adapter_crates.push(name.to_string());
+                }
+            }
+        }
+    }
+    adapter_crates.sort();
+    Ok(Model { defs, origins, scopes, load_issues, adapter_crates })
 }
 
 /// A parsed `<file>#/<a>/<b>` reference. `file` is empty for a local `#/…` ref (resolved against context).

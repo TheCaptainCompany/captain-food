@@ -335,6 +335,38 @@ mod tests {
             "a surface holds no server/infrastructure link (D8: no views access, no DB)"
         );
 
+        // One bin per adapter (ADR-20260808-062432): each adapter bin's closure carries ITS OWN
+        // partner crate and NO OTHER partner's — the whole point of the split is that a Stripe
+        // rebuild no longer implies an Avelo37 rebuild (and vice versa), and a shared partner
+        // crate sneaking into another bin's manifest would silently rebuild the family in
+        // lockstep again. Derived from the workspace, never a hand list of partners.
+        let adapter_bins: Vec<String> = graph()
+            .packages()
+            .filter(|p| p.in_workspace() && p.name().starts_with("adapter-"))
+            .map(|p| p.name().to_string())
+            .collect();
+        assert!(adapter_bins.len() >= 5, "expected the full adapter family, found {adapter_bins:?}");
+        for bin in &adapter_bins {
+            let own_dir = format!("crates/adapters/{}", bin.trim_start_matches("adapter-").replace('-', "_"));
+            let closure = closure_dirs(graph(), bin).expect("closure resolves");
+            assert!(closure.contains(own_dir.as_str()), "{bin} misses its own partner crate {own_dir}");
+            for dir in closure.iter().filter(|d| d.starts_with("crates/adapters/")) {
+                assert_eq!(
+                    dir, &own_dir,
+                    "{bin}'s closure carries ANOTHER partner's crate — the per-partner split broke"
+                );
+            }
+            // HONEST, like the wired spine above: the bin rides `infrastructure` (the mailbox is
+            // the only door), which carries the whole domain facade transitively — the recorded
+            // blast-radius cost whose exit is the per-scope infrastructure split. The MANIFEST
+            // keeps domain vocabulary unspellable (no domain crate is nameable), so the sharp
+            // assertion here is the per-partner one above, not a domain wall.
+            assert!(
+                closure.contains("crates/infrastructure"),
+                "{bin} must reach the mailbox through infrastructure (verify -> mirror -> ACL -> ENQUEUE)"
+            );
+        }
+
         // A gateway's closure is the ONE that stays sharp: no domain, no server, no web (D8).
         // ALL gateway bins are asserted, derived from the workspace — a gate that samples one of
         // seven instances is not a backstop for the other six (ADR-20260803-234035): a one-off
