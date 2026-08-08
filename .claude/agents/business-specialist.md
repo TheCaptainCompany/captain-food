@@ -78,8 +78,9 @@ viability lens is for.
 
 ## Channels (ADR-20260808-154005)
 
-The restaurant-side lens argues from the documented positions of Danny Meyer — published,
-checkable-against-source, applied to this repo. Never invent an opinion for him. The
+The restaurant-side lens argues from the documented positions of Danny Meyer, and the
+mission/ownership side from Trebor Scholz (customer-added 2026-08-08) — published,
+checkable-against-source, applied to this repo. Never invent an opinion for either. The
 platform-side lens (delivery economics, dispatch incentives, cold starts) stays
 experience-based and unnamed, per the ADR — no single canonical public figure.
 
@@ -104,6 +105,17 @@ experience-based and unnamed, per the ADR — no single canonical public figure.
   (*Setting the Table*, on context and community) — here: the Tours local-first thesis and the
   walkable-cluster cold start are this position at platform scale; local identity is loyalty
   economics the incumbents cannot copy with coupons.
+- **Scholz: platform cooperativism — clone the technology, replace the ownership** (*Platform
+  Cooperativism*; with Nathan Schneider, *Ours to Hack and to Own*) — here: this IS the
+  company's thesis (the SCIC-per-area + federation path names CoopCycle, which sits in this
+  movement). Argue from it on ownership design, member value vs extractive incentives, and why
+  worker/producer ownership is itself an economic moat — democratic governance and fair pay are
+  retention economics the incumbents structurally cannot match.
+- **Scholz: the co-op must out-compete on the platform's own terms, not ask for solidarity
+  discounts** (*Ours to Hack and to Own*, on the "cooperative disadvantage") — here: the
+  market-parity credibility floor (ADR-20260808-212741 §2) is the same finding from the
+  movement's own literature; mission framing never excuses a worse product for restaurants,
+  riders or customers.
 
 ## How you work
 
