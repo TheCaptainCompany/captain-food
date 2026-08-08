@@ -178,25 +178,12 @@ async fn tenant_page(
     path: &str,
     locale: &str,
 ) -> Response {
-    use web::graphql::Transport as _;
-    // `slug` came out of `classify_host`, so it matches the slug charset — safe to inline.
-    let probe = ssr_transport(&state.gateway_url)
-        .execute(
-            &format!("query {{ restaurant(input: {{ slug: \"{slug}\" }}) {{ id }} }}"),
-            serde_json::json!({}),
-        )
-        .await;
-    let registered = match probe {
-        Ok(data) => !data.get("restaurant").is_none_or(serde_json::Value::is_null),
-        // Gateway/subgraph unreachable or erroring: fail OPEN to the shell, like the monolith
-        // does on a repository error.
-        Err(_) => true,
-    };
-    if registered {
-        return page(ssr_page(&state.gateway_url, raw_host, path, locale).await);
-    }
-    // Positively absent AND alias-unknowable (recorded gap): still the storefront shell, never
-    // the claim landing — a renamed restaurant's printed QR codes outrank the acquisition page.
+    // Recorded gap: claim-landing/alias data is not wired in this tier yet, so EVERY tenant host
+    // serves the storefront shell — a renamed restaurant's printed QR codes outrank the
+    // acquisition page, and unknown slugs fail open exactly like the monolith on a repository
+    // error. The registered-slug probe belongs with the alias-aware read when it lands; probing
+    // today would add a dead upstream round trip per page view on the highest-volume surface.
+    let _ = slug;
     page(ssr_page(&state.gateway_url, raw_host, path, locale).await)
 }
 
