@@ -534,6 +534,11 @@ pub(crate) fn validate(model: &Model) -> Report {
                 }
             }
         }
+        // The `tombstone:` event is USED by construction — the projector routes it to row deletion
+        // (emit/projectors.rs), so it can never map to a column `from` and must not read as unused.
+        if let Some(tomb) = &view.tombstone {
+            used_events.insert(tomb.clone());
+        }
         if !used_events.is_empty() {
             let mut seen: BTreeSet<&str> = BTreeSet::new();
             for ev in &view.fedby {
