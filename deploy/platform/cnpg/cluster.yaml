@@ -77,7 +77,7 @@ spec:
   managed:
     # claude_ro: the SELECT-only diagnosis role (D7, §2b practice 5). The operator creates the
     # LOGIN role from the sealed secret (name-only reference); what it may read is granted by
-    # migration 20260808143000_claude_ro_select_only.sql -- role lifecycle and grant lifecycle
+    # migration 20260808070000_claude_ro_select_only.sql -- role lifecycle and grant lifecycle
     # deliberately live in different records (the grant travels with the schema it grants on).
     roles:
       - name: claude_ro
