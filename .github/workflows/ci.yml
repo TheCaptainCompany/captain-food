@@ -96,11 +96,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2   # clippy is a full check-build of the workspace; the cache is what keeps this job fast
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
       - name: Unused dependencies (cargo-machete — the D6 lint floor, #302)
         run: cargo machete
+
+      # The #388 env-mutation ban: std::env::set_var/remove_var are disallowed methods (clippy.toml)
+      # — concurrent setenv/unsetenv vs getenv is glibc UB, the intermittent test-binary SIGSEGV
+      # class. `-D clippy::disallowed-methods` is passed ON THE COMMAND LINE deliberately: Cargo
+      # lint inheritance is all-or-nothing, so the crates that restate their own `[lints]` tables
+      # (infrastructure, the adapters, clients/*, telemetry, actor_client) would NOT inherit the
+      # `[workspace.lints.clippy]` deny — the CLI flag reaches every workspace member regardless of
+      # manifest. `--all-targets` is load-bearing too: both #388 violations lived in #[cfg(test)]
+      # code, which a plain `cargo clippy` never compiles.
+      - name: Env-mutation ban (clippy disallowed-methods, #388)
+        run: cargo clippy --workspace --all-targets -- -D clippy::disallowed-methods
 
   specs:
     # THE POINT OF THE SPLIT. The validator is the blocking gate and the one most likely to fail on
@@ -169,10 +181,47 @@ jobs:
           rustup target add wasm32-unknown-unknown
           make wasm
 
+      # #388 evidence: "non-reproducible" was partly "uninstrumented" — no disk/memory picture, no
+      # cores, no failure artifacts. These steps are ZERO-RISK to green runs: `|| true` guards every
+      # evidence line so they can never fail the job themselves.
+      - name: "Evidence: disk + memory before tests (#388)"
+        run: |
+          df -h || true
+          free -m || true
+
       # Kept WITHOUT a DATABASE_URL on purpose: this run proves the offline path (every DB-gated test
       # must skip cleanly on a contributor machine with no Postgres). The DB suites run for real in `db-test`.
+      # The two evidence lines before cargo test enable core dumps in THIS shell (ulimit is per-shell):
+      # ubuntu runners pipe cores to apport by default, which drops them — a plain writable pattern
+      # keeps the corpse for the failure-artifact upload. Guarded so they never fail a green run.
       - name: Unit tests (whole workspace)
-        run: cargo test --workspace --verbose
+        run: |
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p" || true
+          ulimit -c unlimited || true
+          cargo test --workspace --verbose
+
+      - name: "Evidence: disk + memory after tests (#388)"
+        if: always()
+        run: |
+          df -h || true
+          free -m || true
+
+      - name: "Evidence: collect cores + test-binary listing (#388)"
+        if: failure()
+        run: |
+          # Cores only — the deps test binaries run to hundreds of MB each; a text listing names
+          # which binaries were present so the crashing one can be rebuilt bit-identically.
+          mkdir -p crash-evidence || true
+          cp core.* crash-evidence/ 2>/dev/null || true
+          ls -lh target/debug/deps/ > crash-evidence/target-debug-deps-listing.txt 2>/dev/null || true
+
+      - name: "Evidence: upload crash artifacts (#388)"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-evidence-build-test
+          path: crash-evidence/
+          if-no-files-found: ignore
 
   db-test:
     # A real Postgres for the DATABASE_URL-gated integration suites (#230). Without one they take
@@ -205,19 +254,51 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: sqlx migrate run --source migrations
 
+      # #388 evidence (same shape as build-test): zero-risk to green runs, `|| true` on every line.
+      - name: "Evidence: disk + memory before tests (#388)"
+        run: |
+          df -h || true
+          free -m || true
+
       # --test-threads=1 because the suites share one database and reset the same tables; the per-file
       # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
       # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
       # actor_runtime carries the Proto.Actor port suites (ADR-20260730-234918: fencing, ordering,
       # rebalance, discipline) — it was missing here until #275, so those suites only ever ran on
       # developer machines.
+      # The two evidence lines before cargo test enable core dumps in THIS shell (#388, see build-test).
       - name: DB integration tests (previously these always skipped — no Postgres in CI)
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           DB_TESTS_REQUIRED: '1'
-        run: >-
-          cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter
-          -p actor_runtime --tests --verbose -- --test-threads=1
+        run: |
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p" || true
+          ulimit -c unlimited || true
+          cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter \
+            -p actor_runtime --tests --verbose -- --test-threads=1
+
+      - name: "Evidence: disk + memory after tests (#388)"
+        if: always()
+        run: |
+          df -h || true
+          free -m || true
+
+      - name: "Evidence: collect cores + test-binary listing (#388)"
+        if: failure()
+        run: |
+          # Cores only — the deps test binaries run to hundreds of MB each; a text listing names
+          # which binaries were present so the crashing one can be rebuilt bit-identically.
+          mkdir -p crash-evidence || true
+          cp core.* crash-evidence/ 2>/dev/null || true
+          ls -lh target/debug/deps/ > crash-evidence/target-debug-deps-listing.txt 2>/dev/null || true
+
+      - name: "Evidence: upload crash artifacts (#388)"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-evidence-db-test
+          path: crash-evidence/
+          if-no-files-found: ignore
 
   codegen:
     # THE REQUIRED STATUS CHECK ON `main`. Keep this job id: branch protection matches on it, and a
