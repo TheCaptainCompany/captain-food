@@ -18,7 +18,6 @@ description = "Captain.Food role-gateway runtime: top-level-field routing to own
 
 [dependencies]
 axum = { workspace = true }
-tokio = { workspace = true }
 serde_json = { workspace = true }
 # Parser + GraphiQL page only — no schema, no execution. Same major as the subgraphs' runtime.
 async-graphql = { workspace = true }

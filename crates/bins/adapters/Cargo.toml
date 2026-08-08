@@ -24,7 +24,6 @@ description = "Captain.Food `adapters` deployable: surface bin -- assets/SSR/web
 # mounts (stripe/avelo37/coopcycle/uber_direct/hubrise) -- verify, mirror, ACL, ENQUEUE on
 # the shared mailbox; the owning actor bins deliver (woken by the INSERT's pg_notify).
 bin_runtime = { path = "../../bin_runtime" }
-application = { path = "../../application" }
 infrastructure = { path = "../../infrastructure" }
 actor_client = { path = "../../actor_client" }
 stripe-adapter = { path = "../../adapters/stripe" }
@@ -32,7 +31,6 @@ avelo37-adapter = { path = "../../adapters/avelo37" }
 coopcycle-adapter = { path = "../../adapters/coopcycle" }
 uber-direct-adapter = { path = "../../adapters/uber_direct" }
 hubrise-adapter = { path = "../../adapters/hubrise" }
-axum = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"

@@ -234,9 +234,7 @@ name = "adapters"
 version = "0.1.0"
 dependencies = [
  "actor_client",
- "application",
  "avelo37-adapter",
- "axum",
  "bin_runtime",
  "coopcycle-adapter",
  "hubrise-adapter",
@@ -2173,7 +2171,6 @@ dependencies = [
  "axum",
  "reqwest",
  "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -5197,9 +5194,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "serde_json",
- "tokio",
  "tower-http",
- "tracing",
  "web",
 ]
 

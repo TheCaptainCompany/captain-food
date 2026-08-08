@@ -310,7 +310,7 @@ fn bin_manifest(b: &BinSpec) -> String {
             }
             "surface" if b.name == "adapters" => {
                 deps.push_str(
-                    "# The ADAPTERS surface (#385): re-hosts the partner webhook ingestors the monolith\n# mounts (stripe/avelo37/coopcycle/uber_direct/hubrise) -- verify, mirror, ACL, ENQUEUE on\n# the shared mailbox; the owning actor bins deliver (woken by the INSERT's pg_notify).\nbin_runtime = { path = \"../../bin_runtime\" }\napplication = { path = \"../../application\" }\ninfrastructure = { path = \"../../infrastructure\" }\nactor_client = { path = \"../../actor_client\" }\nstripe-adapter = { path = \"../../adapters/stripe\" }\navelo37-adapter = { path = \"../../adapters/avelo37\" }\ncoopcycle-adapter = { path = \"../../adapters/coopcycle\" }\nuber-direct-adapter = { path = \"../../adapters/uber_direct\" }\nhubrise-adapter = { path = \"../../adapters/hubrise\" }\naxum = { workspace = true }\n",
+                    "# The ADAPTERS surface (#385): re-hosts the partner webhook ingestors the monolith\n# mounts (stripe/avelo37/coopcycle/uber_direct/hubrise) -- verify, mirror, ACL, ENQUEUE on\n# the shared mailbox; the owning actor bins deliver (woken by the INSERT's pg_notify).\nbin_runtime = { path = \"../../bin_runtime\" }\ninfrastructure = { path = \"../../infrastructure\" }\nactor_client = { path = \"../../actor_client\" }\nstripe-adapter = { path = \"../../adapters/stripe\" }\navelo37-adapter = { path = \"../../adapters/avelo37\" }\ncoopcycle-adapter = { path = \"../../adapters/coopcycle\" }\nuber-direct-adapter = { path = \"../../adapters/uber_direct\" }\nhubrise-adapter = { path = \"../../adapters/hubrise\" }\n",
                 );
                 deps.push_str(common);
             }
