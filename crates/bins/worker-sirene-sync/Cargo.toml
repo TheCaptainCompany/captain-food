@@ -29,7 +29,6 @@ infrastructure = { path = "../../infrastructure" }
 # loop the scheduled GitHub Actions job runs, zero forks.
 sirene_ingest = { path = "../../sirene_ingest" }
 tokio = { workspace = true }
-serde_json = { workspace = true }
 tracing = "0.1"
 # The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values
 # against their scalars' regexes at startup.

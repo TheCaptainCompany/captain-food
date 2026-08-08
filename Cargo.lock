@@ -6273,7 +6273,6 @@ dependencies = [
  "bin_runtime",
  "infrastructure",
  "regex",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -6285,7 +6284,6 @@ dependencies = [
  "bin_runtime",
  "infrastructure",
  "regex",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -6297,7 +6295,6 @@ dependencies = [
  "bin_runtime",
  "infrastructure",
  "regex",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -6309,7 +6306,6 @@ dependencies = [
  "bin_runtime",
  "infrastructure",
  "regex",
- "serde_json",
  "sirene_ingest",
  "tokio",
  "tracing",

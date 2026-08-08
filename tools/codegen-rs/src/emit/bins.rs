@@ -474,7 +474,9 @@ fn bin_manifest(b: &BinSpec) -> String {
             }
             "worker" => {
                 // Periodic worker (ADR-20260808-062933): a thin RUN-TO-COMPLETION pass over the
-                // existing implementation crates — no logic forks, no domain crates.
+                // existing implementation crates — no logic forks, no domain crates. No
+                // serde_json: a cron main serves no JSON health body (D6/machete keeps this
+                // honest).
                 deps.push_str(
                     "# CRON WORKER (one bin per worker, ADR-20260808-062933): telemetry/config/pool from the\n# composition kit; the pass itself lives in the implementation crate below -- this bin adds\n# scheduling shape (one pass per Job), never logic.\nbin_runtime = { path = \"../../bin_runtime\" }\ninfrastructure = { path = \"../../infrastructure\" }\n",
                 );
@@ -483,7 +485,9 @@ fn bin_manifest(b: &BinSpec) -> String {
                         "# Hosts the sirene_ingest ingestion pass (the shared sweep orchestration) -- the same\n# loop the scheduled GitHub Actions job runs, zero forks.\nsirene_ingest = { path = \"../../sirene_ingest\" }\n",
                     );
                 }
-                deps.push_str(common);
+                deps.push_str(
+                    "tokio = { workspace = true }\ntracing = \"0.1\"\n# The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values\n# against their scalars' regexes at startup.\nregex = \"1\"\n",
+                );
             }
             "subgraph" => {
                 deps.push_str(

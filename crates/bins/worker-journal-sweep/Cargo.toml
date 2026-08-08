@@ -26,7 +26,6 @@ description = "Captain.Food `worker-journal-sweep` deployable: scheduled command
 bin_runtime = { path = "../../bin_runtime" }
 infrastructure = { path = "../../infrastructure" }
 tokio = { workspace = true }
-serde_json = { workspace = true }
 tracing = "0.1"
 # The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values
 # against their scalars' regexes at startup.
