@@ -18,6 +18,10 @@
 > COMPILER-SHARPNESS DEVIATION (conscious, tested): only gateways keep a sharp compile-time
 > closure — subgraphs link `server` (whole facade), surfaces reach domain via `web→core`; the
 > wall is the runtime scope slice + #360's GRANT wall until the per-scope infrastructure split.
+> Third coupling direction, same disclosure: `server` depends on `gateway_runtime` (shared
+> `root_fields` walk — the price of routing and acceptance provably agreeing) and on
+> `surface_runtime` (relocated `hosts`), so the thin runtimes ride transitively into every
+> subgraph bin via `server`.
 > Review: 3 independent lenses + required `claude-review`, 8 findings — 5 fixed on-branch,
 > CUTOVER PRECONDITIONS recorded on #385 (auth-session mint has no bin home; per-key secret
 > consumer metadata BEFORE #358 — `STRIPE_SECRET_KEY` must not reach the adapters pod;

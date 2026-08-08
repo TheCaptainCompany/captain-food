@@ -336,14 +336,25 @@ mod tests {
         );
 
         // A gateway's closure is the ONE that stays sharp: no domain, no server, no web (D8).
-        let gateway = closure_dirs(graph(), "gateway-public").expect("closure resolves");
-        assert!(gateway.contains("crates/gateway_runtime"));
-        assert!(
-            !gateway.iter().any(|d| d.starts_with("crates/domains/"))
-                && !gateway.contains("crates/server")
-                && !gateway.contains("crates/infrastructure")
-                && !gateway.contains("crates/web"),
-            "a gateway closure carrying domain/server/web is a D8 boundary violation: {gateway:?}"
-        );
+        // ALL gateway bins are asserted, derived from the workspace — a gate that samples one of
+        // seven instances is not a backstop for the other six (ADR-20260803-234035): a one-off
+        // patch or a role-conditional emitter branch would compile clean and slip past a sample.
+        let gateway_bins: Vec<String> = graph()
+            .packages()
+            .filter(|p| p.name().starts_with("gateway-"))
+            .map(|p| p.name().to_string())
+            .collect();
+        assert!(gateway_bins.len() >= 7, "expected the full gateway family, found {gateway_bins:?}");
+        for bin in &gateway_bins {
+            let gateway = closure_dirs(graph(), bin).expect("closure resolves");
+            assert!(gateway.contains("crates/gateway_runtime"), "{bin} misses gateway_runtime");
+            assert!(
+                !gateway.iter().any(|d| d.starts_with("crates/domains/"))
+                    && !gateway.contains("crates/server")
+                    && !gateway.contains("crates/infrastructure")
+                    && !gateway.contains("crates/web"),
+                "{bin}'s closure carrying domain/server/web is a D8 boundary violation: {gateway:?}"
+            );
+        }
     }
 }
