@@ -517,7 +517,13 @@ credit must require a resolvable PM edge, never an annotation).
 `Proposed`. **D1 and D5 decided by ensemble consent** —
 [ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
 customer veto window open. **D2, D3, D4 remain the customer's** (money-path event vocabulary;
-legal-shaded opt-out posture; the enum-vs-boolean guard genuinely contested between lenses). One
+legal-shaded opt-out posture; the enum-vs-boolean guard). D3/D4 are now grounded by the
+legal-specialist's obligation brief ([docs/legal/BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md),
+exposures in [#401](https://github.com/TheCaptainCompany/captain-food/issues/401)): the fold's
+suppression-list shape is legally REQUIRED, and the brief's audit-defensibility verdict tips D4 to
+the orthogonal boolean; the founder's Google-parity directive
+([#402](https://github.com/TheCaptainCompany/captain-food/issues/402)) independently requires the
+same orthogonality. One
 principle, two faces: disappearance is always a designed
 state; physical row removal is reserved for legal erasure. **Three unchecked Concerns mechanically
 block `Approved`**: D2 is THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
