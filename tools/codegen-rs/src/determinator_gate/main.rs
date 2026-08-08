@@ -386,9 +386,9 @@ mod tests {
         assert!(hit.contains("graphql-delivery"), "subgraphs couple through server's facade (recorded #385 limit)");
         assert!(hit.contains("fo-storefront"), "surfaces couple through web -> core -> domain (recorded #385 limit)");
         assert!(
-            !hit.contains("gateway-public"),
+            !hit.iter().any(|b| b.starts_with("gateway-")),
             "gateways hold no domain vocabulary (D8) — the one family with a sharp radius; a domain \
-             crate reaching a gateway closure is a boundary violation, not a test to relax"
+             crate reaching ANY gateway closure is a boundary violation, not a test to relax: {hit:?}"
         );
     }
 
@@ -400,7 +400,7 @@ mod tests {
         for expected in ["actor-order", "actor-rider", "bam", "projector-payments"] {
             assert!(hit.contains(expected), "{expected} links domain-common");
         }
-        assert!(!hit.contains("gateway-public"), "…but never the domain-free gateways (D8)");
+        assert!(!hit.iter().any(|b| b.starts_with("gateway-")), "…but never the domain-free gateways (D8): {hit:?}");
     }
 
     /// …and a bin-local change affects that bin alone.
