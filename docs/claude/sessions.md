@@ -106,6 +106,16 @@ tracking links high; read the validator source before debugging the message. Rel
 `make validate`'s summary line does not name warning kinds — diff kinds against baseline with
 `make validate 2>&1 | grep '\[warn ]' | awk '{print $3}' | sort | uniq -c`.
 
+**A dispatch that forbids GitHub access must CARRY the exact titles of any issues it links
+(2026-08-08, second occurrence):** CLAUDE.md requires issue titles in repo markdown, but titles
+live on GitHub, not in the corpus — two executors in one day had to fall back to descriptive
+parentheticals after fruitless searches (~3 wasted searches each). The coordinator pastes exact
+titles into the brief for every issue the dispatch may newly link. Related validator fact that
+saves a check: proposal-hygiene special-cases only the literal strings `Approved`/`APPROVED`
+(case-sensitive, `tools/codegen-rs/src/validate/proposals.rs`) — any other Status value,
+including `Superseded`, needs only the Status line + a header tracking link, so a Superseded
+flip is always gate-safe.
+
 **`check-drift` fails on ANY dirty file, and says the wrong thing about it (2026-08-04):** it diffs
 the whole working tree, not just generated paths, so an uncommitted hand edit — a `Cargo.toml`
 tweak, a doc fix — trips it with `generated artifacts drifted -- run 'make generate' and commit the
