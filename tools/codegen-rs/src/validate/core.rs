@@ -536,7 +536,21 @@ pub(crate) fn validate(model: &Model) -> Report {
         }
         // The `tombstone:` event is USED by construction — the projector routes it to row deletion
         // (emit/projectors.rs), so it can never map to a column `from` and must not read as unused.
+        // But that routing walks ONLY `fedBy` (emit/projectors.rs dispatch), so a tombstone absent
+        // from fedBy would silently never dispatch: the erasure fold just doesn't happen. Error,
+        // not warn — there is no legitimate transitional state where an unroutable tombstone is
+        // intended.
         if let Some(tomb) = &view.tombstone {
+            if !fed_by_names.contains(tomb.as_str()) {
+                issues.push(err(
+                    "view-tombstone-not-fedby",
+                    at.clone(),
+                    format!(
+                        "tombstone '{}' is not in this view's fedBy — the projector dispatch routes only fedBy events, so the row deletion would never happen.",
+                        tomb
+                    ),
+                ));
+            }
             used_events.insert(tomb.clone());
         }
         if !used_events.is_empty() {
