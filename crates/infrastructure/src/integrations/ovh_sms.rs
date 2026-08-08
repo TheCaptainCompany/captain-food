@@ -11,6 +11,19 @@ use domain::shared::errors::DomainError;
 use serde_json::json;
 use sha1::{Digest, Sha1};
 
+/// The raw environment inputs of [`OvhSmsClient::from_env`], one field per key, read verbatim
+/// (empty-string filtering and defaults are [`OvhSmsClient::from_parts`]'s job). Exists so the
+/// gating logic is a pure function tests can drive without mutating process env (#388).
+#[derive(Default)]
+struct OvhSmsEnv {
+    endpoint: Option<String>,
+    application_key: Option<String>,
+    application_secret: Option<String>,
+    consumer_key: Option<String>,
+    service_name: Option<String>,
+    sender: Option<String>,
+}
+
 /// The OVH SMS sender client. `from_env` gates on the full credential set — a partial config is
 /// treated as UNSET (fail-closed: never a half-configured send path).
 pub struct OvhSmsClient {
@@ -27,18 +40,39 @@ impl OvhSmsClient {
     /// Build from env — ALL required, else `None`:
     /// `OVH_APPLICATION_KEY/SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`. Optional:
     /// `OVH_ENDPOINT` (base URL, default the EU API) and `OVH_SMS_SENDER` (default `CaptainFood`).
+    ///
+    /// Thin env-reading shell over [`Self::from_parts`] — the `server/src/lib.rs`
+    /// `env_flag`/`parse_flag` pattern (#388): the gating logic is tested against constructed
+    /// parts, so no test ever mutates process env (concurrent env mutation vs `getenv` under the
+    /// parallel libtest harness is glibc UB — the intermittent SIGSEGV class). The closure shape
+    /// (`let var = |k: &str| …`) is deliberate: it is shape 3 of the env-inventory drift gate
+    /// (`every_env_var_read_by_the_crates_is_declared`), which harvests the keys off `var("…")`.
     pub fn from_env() -> Option<Self> {
-        let var = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
+        let var = |k: &str| std::env::var(k).ok();
+        Self::from_parts(OvhSmsEnv {
+            endpoint: var("OVH_ENDPOINT"),
+            application_key: var("OVH_APPLICATION_KEY"),
+            application_secret: var("OVH_APPLICATION_SECRET"),
+            consumer_key: var("OVH_CONSUMER_KEY"),
+            service_name: var("OVH_SMS_SERVICE_NAME"),
+            sender: var("OVH_SMS_SENDER"),
+        })
+    }
+
+    /// The pure gating core of [`Self::from_env`]: same fail-closed rule (any required part
+    /// absent or empty ⇒ `None`), no environment access.
+    fn from_parts(parts: OvhSmsEnv) -> Option<Self> {
+        let set = |v: Option<String>| v.filter(|s| !s.is_empty());
         Some(Self {
-            base_url: var("OVH_ENDPOINT")
+            base_url: set(parts.endpoint)
                 .unwrap_or_else(|| "https://eu.api.ovh.com/1.0".to_string())
                 .trim_end_matches('/')
                 .to_string(),
-            application_key: var("OVH_APPLICATION_KEY")?,
-            application_secret: var("OVH_APPLICATION_SECRET")?,
-            consumer_key: var("OVH_CONSUMER_KEY")?,
-            service_name: var("OVH_SMS_SERVICE_NAME")?,
-            sender: var("OVH_SMS_SENDER").unwrap_or_else(|| "CaptainFood".to_string()),
+            application_key: set(parts.application_key)?,
+            application_secret: set(parts.application_secret)?,
+            consumer_key: set(parts.consumer_key)?,
+            service_name: set(parts.service_name)?,
+            sender: set(parts.sender).unwrap_or_else(|| "CaptainFood".to_string()),
             http: reqwest::Client::new(),
         })
     }
@@ -111,23 +145,44 @@ fn now_unix() -> u64 {
 mod tests {
     use super::*;
 
+    /// The pure core is exercised with constructed parts — NEVER by mutating process env (#388:
+    /// mutating process env from parallel lib tests is the glibc-UB SIGSEGV class; clippy
+    /// `disallowed-methods` now gates it).
     #[test]
     fn from_env_requires_the_full_credential_set() {
-        for k in ["OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY", "OVH_SMS_SERVICE_NAME", "OVH_SMS_SENDER", "OVH_ENDPOINT"] {
-            std::env::remove_var(k);
-        }
-        assert!(OvhSmsClient::from_env().is_none(), "no config → None (fail-closed)");
-        std::env::set_var("OVH_APPLICATION_KEY", "app");
-        std::env::set_var("OVH_APPLICATION_SECRET", "secret");
-        std::env::set_var("OVH_CONSUMER_KEY", "consumer");
-        assert!(OvhSmsClient::from_env().is_none(), "service name still missing → None");
-        std::env::set_var("OVH_SMS_SERVICE_NAME", "sms-test-1");
-        let c = OvhSmsClient::from_env().expect("full set → Some");
+        assert!(
+            OvhSmsClient::from_parts(OvhSmsEnv::default()).is_none(),
+            "no config → None (fail-closed)"
+        );
+        let partial = OvhSmsEnv {
+            application_key: Some("app".into()),
+            application_secret: Some("secret".into()),
+            consumer_key: Some("consumer".into()),
+            ..Default::default()
+        };
+        assert!(
+            OvhSmsClient::from_parts(partial).is_none(),
+            "service name still missing → None"
+        );
+        let full = OvhSmsEnv {
+            application_key: Some("app".into()),
+            application_secret: Some("secret".into()),
+            consumer_key: Some("consumer".into()),
+            service_name: Some("sms-test-1".into()),
+            ..Default::default()
+        };
+        let c = OvhSmsClient::from_parts(full).expect("full set → Some");
         assert_eq!(c.sender, "CaptainFood", "default sender");
         assert_eq!(c.base_url, "https://eu.api.ovh.com/1.0", "default EU endpoint");
-        for k in ["OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY", "OVH_SMS_SERVICE_NAME"] {
-            std::env::remove_var(k);
-        }
+        // An empty required value is UNSET, not a half-configured send path (fail-closed).
+        let empty_value = OvhSmsEnv {
+            application_key: Some("app".into()),
+            application_secret: Some("secret".into()),
+            consumer_key: Some("consumer".into()),
+            service_name: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(OvhSmsClient::from_parts(empty_value).is_none(), "empty required value → None");
     }
 
     #[test]

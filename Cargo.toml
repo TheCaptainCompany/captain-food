@@ -93,6 +93,14 @@ license-file = "LICENSE.md"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+# The #388 env-mutation ban: std::env::set_var/remove_var are disallowed (see clippy.toml for the
+# method list and rationale — concurrent setenv/unsetenv vs getenv is glibc UB, the intermittent
+# test-binary SIGSEGV class). DENY here covers every `[lints] workspace = true` member; crates that
+# restate their own `[lints]` tables are covered by CI's `-D clippy::disallowed-methods` flag
+# (Cargo lint inheritance is all-or-nothing, and the restating crates only restate the rust floor).
+[workspace.lints.clippy]
+disallowed_methods = "deny"
+
 # Optimized release profile for the deployed `server` binary. This tunes the RUNTIME performance of the
 # generated code and is independent of the build method (Docker vs native cargo) — the binary runs the same
 # either way; these flags are what actually make it faster. `panic = "abort"` is deliberately NOT set: the

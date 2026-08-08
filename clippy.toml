@@ -1,0 +1,21 @@
+# Workspace clippy configuration.
+#
+# disallowed-methods: the #388 env-mutation ban. Two lib tests used to interleave
+# std::env::set_var/remove_var with getenv reads under the parallel libtest harness — documented
+# glibc UB (unsetenv shifts `environ` under a walking reader), the canonical intermittent SIGSEGV
+# in Rust test binaries, and the reason edition 2024 makes env::set_var unsafe (this workspace is
+# edition 2021, so `unsafe_code = "forbid"` cannot see it). The house pattern instead splits a pure
+# core out of the env-reading shell (`server/src/lib.rs` `parse_flag`/`env_flag`;
+# `infrastructure` `from_lookup`/`from_env`) and tests the core with an injected lookup.
+#
+# Enforced as DENY by `[workspace.lints.clippy]` in the root Cargo.toml for every crate with
+# `[lints] workspace = true`, and — because Cargo lint inheritance is all-or-nothing, so crates
+# that restate their own `[lints]` tables would not inherit it — additionally by
+# `-D clippy::disallowed-methods` on CI's clippy invocation (.github/workflows/ci.yml `lint` job),
+# which reaches every workspace member regardless of manifest. Endgame is the edition-2024
+# migration (makes the mistake unspellable under the existing `unsafe_code = "forbid"` floor) —
+# ADR-20260808-224500, tracked separately.
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "mutating process env races glibc getenv on other threads (UB, intermittent SIGSEGV — #388). Split a pure core out of the env-reading shell and test the core with an injected lookup (see server/src/lib.rs parse_flag)." },
+    { path = "std::env::remove_var", reason = "mutating process env races glibc getenv on other threads (UB, intermittent SIGSEGV — #388). Split a pure core out of the env-reading shell and test the core with an injected lookup (see server/src/lib.rs parse_flag)." },
+]
