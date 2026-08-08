@@ -561,7 +561,8 @@ fn main() {
         ("query.rs", emit_server_query(&model)),
         ("mutation.rs", emit_server_mutation(&model)),
         ("subscription.rs", emit_server_subscription(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod types;\npub mod inputs;\npub mod acl;\npub mod query;\npub mod mutation;\npub mod subscription;\n".to_string()),
+        ("operation_scopes.rs", emit_server_operation_scopes(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod types;\npub mod inputs;\npub mod acl;\npub mod query;\npub mod mutation;\npub mod subscription;\npub mod operation_scopes;\n".to_string()),
     ] {
         let path = srv_gen.join(name);
         if let Err(e) = fs::write(&path, content) {

@@ -108,7 +108,23 @@ pub fn build_schema(
     writes: Option<WriteDeps>,
     events: Option<EventBus>,
 ) -> CaptainSchema {
+    build_schema_for_scope(deps, writes, events, None)
+}
+
+/// [`build_schema`] with an optional SUBGRAPH SCOPE SLICE (#385 API-tier wiring, D8): with
+/// `Some(scope)` the schema rejects any document whose top-level fields belong to another
+/// scope's `specs/{scope}/api.yaml` fragment (see `scope_slice`). The monolith passes `None`
+/// and keeps serving everything; a `graphql-{scope}` bin passes its own scope.
+pub fn build_schema_for_scope(
+    deps: Option<ReadDeps>,
+    writes: Option<WriteDeps>,
+    events: Option<EventBus>,
+    scope: Option<&'static str>,
+) -> CaptainSchema {
     let mut builder = Schema::build(QueryRoot, MutationRoot, SubscriptionRoot);
+    if let Some(scope) = scope {
+        builder = builder.extension(super::scope_slice::ScopeSlice::new(scope));
+    }
     if let Some(d) = deps {
         builder = builder.data(d.restaurants);
         builder = builder.data(d.prospection);

@@ -1,0 +1,30 @@
+# The gateway-{role} RUNTIME (#385 API-tier wiring, PROP-20260807-174246 D8).
+#
+# Hand-written machinery for the GENERATED gateway mains: parse a GraphQL document's top-level
+# fields, resolve the owning subgraph from the codegen-emitted composition table, proxy the
+# request. STATIC stitching — no runtime discovery, no query planner, no schema: composition
+# failures are build failures, never 20:30 incidents.
+#
+# BOUNDARY (D8, deliberately): NO database, NO domain crates, NO application/infrastructure/server
+# link — a gateway that can transitively spell a domain type is a boundary violation to review.
+# Auth stays at the SUBGRAPH (the schema boundary); the gateway forwards credentials untouched.
+[package]
+name = "gateway_runtime"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food role-gateway runtime: top-level-field routing to owning subgraphs from the generated composition table (#385, D8)."
+
+[dependencies]
+axum = { workspace = true }
+serde_json = { workspace = true }
+# Parser + GraphiQL page only — no schema, no execution. Same major as the subgraphs' runtime.
+async-graphql = { workspace = true }
+# The house HTTP client (same pin + feature posture as crates/web's native transport).
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+tracing = "0.1"
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

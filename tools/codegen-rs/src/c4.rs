@@ -30,6 +30,16 @@ pub(crate) struct Container {
     /// Actor/PM names this container realizes (`realizes:` $refs) — the bin ↔ deployable binding
     /// (ADR-20260807-183024; consumed by the #349 emitter chain).
     pub(crate) realizes: Vec<String>,
+    /// The dedicated Ingress host this container is served on (`ingress_host:`, #385): the spec
+    /// home for the integration host — declared on `adapters`, consumed by the deploy emitter.
+    pub(crate) ingress_host: Option<String>,
+    /// The domain scopes whose CONFIGURATION KEYS this container's runtime needs
+    /// (`integration_scopes:`, #385): the adapters surface hosts every partner ACL, so its pod
+    /// env + generated Config carry the integration scopes' keys (webhook secrets live in
+    /// payments/delivery/catalog). NOT yet validator-checked: a typo'd scope name silently
+    /// drops those keys from the pod's env — the rule is tracked on #385 with the per-key
+    /// consumer-metadata design (ADR-20260808-060309 consequences).
+    pub(crate) integration_scopes: Vec<String>,
 }
 pub(crate) struct External {
     pub(crate) id: String,
@@ -445,6 +455,17 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                     technology: c.get("technology").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     realizes: ref_names(c.get("realizes")),
+                    ingress_host: c
+                        .get("ingress_host")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string()),
+                    integration_scopes: c
+                        .get("integration_scopes")
+                        .and_then(|v| v.as_sequence())
+                        .map(|s| {
+                            s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect()
+                        })
+                        .unwrap_or_default(),
                 });
             }
         }

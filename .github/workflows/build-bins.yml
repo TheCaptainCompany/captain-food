@@ -165,10 +165,14 @@ jobs:
           cache_to="--cache-to type=gha,mode=max,scope=bins"
           for b in $BINS; do
             h=$(jq -r --arg b "$b" '.hashes[$b]' /tmp/hashes.json)
-            echo "::group::build+push $b (source_hash $h)"
+            # The Dockerfile target per bin (#385): runtime-web for the wasm-carrying SDUI
+            # surfaces, runtime for everything else -- declared in generated images.json.
+            t=$(jq -r --arg b "$b" '.targets[$b] // "runtime"' deploy/generated/images.json)
+            echo "::group::build+push $b (source_hash $h, target $t)"
             # shellcheck disable=SC2086 # $cache_to is deliberately word-split (empty after 1st)
             docker buildx build \
               -f deploy/generated/Dockerfile.bin \
+              --target "$t" \
               --build-arg BIN="$b" \
               --build-arg SOURCE_HASH="$h" \
               --build-arg CAPTAIN_BUILD_VERSION="$short" \

@@ -118,11 +118,18 @@ pub(crate) fn needs_db(b: &BinSpec, model: &Model) -> bool {
 
 /// The configuration scopes whose keys a bin's pod receives: its linked domain scopes, its
 /// owning scope (projector/subgraph), plus `common` (platform keys — DB, telemetry, identity —
-/// per ADR-20260807-183024 D5 every bin reads its own scope's + common's keys).
-pub(crate) fn bin_config_scopes(b: &BinSpec) -> BTreeSet<String> {
+/// per ADR-20260807-183024 D5 every bin reads its own scope's + common's keys), plus the
+/// c4-DECLARED `integration_scopes` (#385: the `adapters` surface hosts every partner ACL, whose
+/// webhook secrets live in the integration scopes' catalogs — spec-declared, never a hand list).
+pub(crate) fn bin_config_scopes(b: &BinSpec, model: &Model) -> BTreeSet<String> {
     let mut s: BTreeSet<String> = b.domain_scopes.clone();
     if let Some(scope) = &b.scope {
         s.insert(scope.clone());
+    }
+    for c in read_c4(model).containers {
+        if c.id == b.name {
+            s.extend(c.integration_scopes.iter().cloned());
+        }
     }
     s.insert(KERNEL_SCOPE.to_string());
     s
@@ -153,7 +160,7 @@ fn production_secret_keys(model: &Model) -> Vec<(String, String, String)> {
 /// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
 /// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
 fn env_yaml(b: &BinSpec, model: &Model, secret_keys: &[(String, String, String)]) -> String {
-    let scopes = bin_config_scopes(b);
+    let scopes = bin_config_scopes(b, model);
     let mut out = String::new();
     out.push_str(&format!(
         "            - name: APP_PROFILE\n              value: production\n            - name: PORT\n              value: \"{HTTP_PORT}\"\n"
@@ -293,9 +300,12 @@ struct HostRule {
 /// binding mirrors c4-l2's container descriptions; `screens_surface_bindings` is asserted
 /// complete against the topology by a codegen test. `fo-storefront` serves the TENANT hosts
 /// (`{slug}.captain.food`, CLAUDE.md multi-tenancy), so its rule is the wildcard under its
-/// base domain. The BARE domain is deliberately NOT routed: captain_frontoffice.yaml and
-/// restaurant_frontoffice.yaml both mention "then the bare captain.food" without agreeing on an
-/// owner -- an ambiguity for the specs to settle, not the emitter to guess.
+/// base domain. The BARE domain is SETTLED (#385): captain_frontoffice.yaml declares it in
+/// `additional_hosts` (spec home; ADR-20260808-060309) — the marketplace owns the apex, matching
+/// `web::router`'s host → surface mapping. The integration host is SETTLED the same way:
+/// c4-l2's `adapters.ingress_host` (`hooks.captain.food`) gets its own rule routing everything
+/// to the adapters Service; the marketplace-host webhook paths stay as the transition alias
+/// (partner dashboards point at them until re-registered).
 pub(crate) fn screens_surface_bindings() -> &'static [(&'static str, &'static str)] {
     &[
         ("captain_frontoffice", "fo-marketplace"),
@@ -355,12 +365,41 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
         } else {
             Vec::new()
         };
+        let roles: Vec<String> = roles.into_iter().collect();
+        // The declared extra hosts of this surface (#385 spec home): `additional_hosts` on the
+        // screens file — the bare apex on captain_frontoffice — served identically to the
+        // base host (same surface, same role paths).
+        if let Some(hosts) = def.get("additional_hosts").and_then(|v| v.as_sequence()) {
+            for h in hosts.iter().filter_map(|v| v.as_str()) {
+                rules.push(HostRule {
+                    host: h.to_string(),
+                    surface: surface.to_string(),
+                    roles: roles.clone(),
+                    extra: Vec::new(),
+                });
+            }
+        }
         rules.push(HostRule {
             host,
             surface: surface.to_string(),
-            roles: roles.into_iter().collect(),
+            roles,
             extra,
         });
+    }
+    // The dedicated integration host (#385 spec home): c4-l2 `ingress_host` on a container —
+    // everything on that host routes to the container's Service (webhooks are path-verified by
+    // the adapters themselves; there is no surface at `/`).
+    for c in read_c4(model).containers {
+        if let Some(host) = c.ingress_host {
+            if bins.contains(c.id.as_str()) {
+                rules.push(HostRule {
+                    host,
+                    surface: c.id.clone(),
+                    roles: Vec::new(),
+                    extra: Vec::new(),
+                });
+            }
+        }
     }
     rules
 }
@@ -394,8 +433,10 @@ fn ingress_yaml(model: &Model, topology: &[BinSpec]) -> String {
 # Host routing derived from the screens specs' base_url + per-screen roles (role = path,
 # ADR-0006): each host serves its surface bin at / and its audience roles' /{{role}}/graphql at
 # that role's gateway. TLS: the cert-manager DNS-01 wildcard certificate (#358 bootstrap issues
-# it; ingress-nginx terminates). The BARE captain.food host is deliberately unrouted -- the
-# screens specs disagree on its owner (see the emitter doc comment).
+# it; ingress-nginx terminates). The BARE captain.food host is owned by fo-marketplace
+# (captain_frontoffice.yaml additional_hosts, #385); hooks.captain.food is the declared
+# integration host (c4-l2 adapters.ingress_host) -- everything on it routes to the adapters
+# Service, with the marketplace-host webhook paths kept as the transition alias.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -455,8 +496,10 @@ fn dockerfile_bin() -> String {
 # Parametrized per-bin image: `--build-arg BIN=<bin>` selects which crates/bins/ binary the
 # runtime stage carries. The chef/planner/cook stages are IDENTICAL for every bin, so one cook is
 # shared across the whole matrix build (layer-cached); only the final `cargo build -p` and the
-# runtime COPY differ. Surface bins do not yet carry the wasm hydrate bundle -- that lands with
-# their runtime wiring (recorded on #349), the monolith Dockerfile keeps it until then.
+# runtime COPY differ. Two final targets (#385): `runtime` (default) and `runtime-web` -- the
+# SDUI surface bins build with `--target runtime-web` (images.json `targets`) so their image
+# additionally carries the wasm hydrate bundle they serve under /assets; buildkit only builds
+# the wasm stage when that target is requested, so the other 45 bins never pay for it.
 FROM rust:1-bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/* \
@@ -477,6 +520,21 @@ COPY . .
 ARG BIN
 RUN cargo build --release -p "${BIN}"
 
+# The wasm hydrate bundle (#385, mirrors the monolith Dockerfile's wasm stage): built only when
+# the requested target is runtime-web. wasm-bindgen-cli is pinned to the exact wasm-bindgen
+# version of crates/web (the CLI refuses a mismatch) -- bump both together, and with the
+# monolith Dockerfile, in the same change.
+FROM chef AS wasm-builder
+RUN cargo install wasm-bindgen-cli --locked --version 0.2.126
+COPY --from=planner /app/recipe.json recipe.json
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo chef cook --release --recipe-path recipe.json \
+       --target wasm32-unknown-unknown --no-default-features --features hydrate --package web
+COPY . .
+RUN cargo build --release -p web --target wasm32-unknown-unknown --no-default-features --features hydrate \
+    && wasm-bindgen --target web --no-typescript --out-dir /app/dist --out-name web \
+       target/wasm32-unknown-unknown/release/web.wasm
+
 FROM debian:bookworm-slim AS runtime
 ARG BIN
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
@@ -494,26 +552,48 @@ LABEL org.opencontainers.image.revision=$CAPTAIN_BUILD_VERSION \
       org.opencontainers.image.source=https://github.com/TheCaptainCompany/captain-food \
       food.captain.source-hash=$SOURCE_HASH
 CMD ["app"]
+
+# The wasm-carrying surface image (#385): `runtime` + the hydrate bundle under the
+# WEB_ASSETS_DIR default the surface bins serve at /assets.
+FROM runtime AS runtime-web
+COPY --from=wasm-builder /app/dist /app/web-assets
 "#
     .to_string()
 }
 
+/// Does this bin's image carry the wasm hydrate bundle (#385: the SDUI surfaces serve `/assets`
+/// themselves — the monolith Dockerfile's wasm stage moves into their images)? The four
+/// audiences with a `web::router::Surface`; `bo-admin` serves a plain landing (no web surface
+/// yet) and `adapters` serves webhooks — neither carries wasm.
+pub(crate) fn wasm_target(b: &BinSpec) -> bool {
+    b.family == "surface" && !matches!(b.name.as_str(), "adapters" | "bo-admin")
+}
+
 /// The bin -> image mapping (#363's matrix input; the "every bin maps to exactly one image and
-/// back" completeness contract).
+/// back" completeness contract) + each bin's Dockerfile TARGET (`runtime` | `runtime-web`,
+/// #385: the SDUI surface images additionally carry the wasm hydrate bundle).
 fn images_json(topology: &[BinSpec]) -> String {
     let mut map = serde_json::Map::new();
     map.insert(
         "_generated".into(),
         serde_json::Value::String(
-            "GENERATED by the Captain.Food codegen (ADR-20260807-183024 step 4, #349) -- do not edit by hand. Bin -> image mapping; the build matrix (#363) and the pin ledger (deploy/pins/) key off it."
+            "GENERATED by the Captain.Food codegen (ADR-20260807-183024 step 4, #349) -- do not edit by hand. Bin -> image mapping; the build matrix (#363) and the pin ledger (deploy/pins/) key off it. targets: the Dockerfile.bin stage per bin (runtime-web = wasm-carrying SDUI surface, #385)."
                 .into(),
         ),
     );
     let mut images = serde_json::Map::new();
+    let mut targets = serde_json::Map::new();
     for b in topology {
         images.insert(b.name.clone(), serde_json::Value::String(format!("{IMAGE_PREFIX}/{}", b.name)));
+        targets.insert(
+            b.name.clone(),
+            serde_json::Value::String(
+                if wasm_target(b) { "runtime-web" } else { "runtime" }.to_string(),
+            ),
+        );
     }
     map.insert("images".into(), serde_json::Value::Object(images));
+    map.insert("targets".into(), serde_json::Value::Object(targets));
     serde_json::to_string_pretty(&serde_json::Value::Object(map)).expect("images.json serializes") + "\n"
 }
 

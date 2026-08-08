@@ -1,0 +1,27 @@
+# The fo-*/bo-* SURFACE runtime (#385 API-tier wiring, PROP-20260807-174246 D8).
+#
+# Hand-written machinery for the GENERATED surface mains: audience host classification (moved
+# from the monolith's `server::hosts`, which now re-exports it — one implementation), SSR of the
+# generated screen trees through the ROLE GATEWAY (the same `web::graphql::HttpTransport` the
+# hydrating client uses — no direct views access, D8's "no surface binary holds broad views
+# access any more"), the wasm `/assets` dir, and the per-audience landings.
+#
+# BOUNDARY (deliberate): NO database, NO domain crates, NO server/infrastructure link. A surface
+# reads ONLY through GraphQL on its gateway.
+[package]
+name = "surface_runtime"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food surface-bin runtime: audience host serving + gateway-backed SSR + wasm assets (#385, D8)."
+
+[dependencies]
+web = { path = "../web" }
+axum = { workspace = true }
+# Static /assets serving — the same tower-http ServeDir the monolith uses for the wasm bundle.
+tower-http = { version = "0.6", features = ["fs"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

@@ -42,6 +42,11 @@ spec:
               value: production
             - name: PORT
               value: "8080"
+            - name: HUBRISE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: HUBRISE_WEBHOOK_SECRET
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -92,6 +97,36 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_SMS_SERVICE_NAME
+            - name: UBER_DIRECT_CUSTOMER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: UBER_DIRECT_CUSTOMER_ID
+            - name: UBER_DIRECT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: UBER_DIRECT_CLIENT_ID
+            - name: UBER_DIRECT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: UBER_DIRECT_CLIENT_SECRET
+            - name: UBER_DIRECT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: UBER_DIRECT_WEBHOOK_SECRET
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: STRIPE_WEBHOOK_SECRET
           readinessProbe:
             httpGet:
               path: /health

@@ -21,11 +21,11 @@ infrastructure = { path = "../infrastructure" }
 # PM-lane seeding for the money backfill sequencing (the same call the monolith composition root
 # makes before its saga runner's first tick) and the WorkerConfig the fleets run under.
 actor_runtime = { path = "../actor_runtime" }
-telemetry = { path = "../telemetry" }
-axum = { workspace = true }
+# The probe/telemetry floor (#385 API-tier wiring): factored out so the pure gateway/surface
+# families serve probes without linking infrastructure; re-exported here for the spine mains.
+bin_probes = { path = "../bin_probes" }
 tokio = { workspace = true }
 sqlx = { workspace = true }
-serde_json = { workspace = true }
 tracing = "0.1"
 
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.

@@ -3032,6 +3032,8 @@ keys:
             ("crates/adapters/uber_direct/Cargo.toml", "reqwest", "partner outbound API"),
             ("crates/server/Cargo.toml", "reqwest",
              "the ADR-0047 auth verifier fetches the Supabase JWKS over HTTPS (identity wrapper lives in server today; measured holder kept with this WHY)"),
+            ("crates/gateway_runtime/Cargo.toml", "reqwest",
+             "the role gateway IS a proxy (#385, D8): it forwards each GraphQL request to the owning subgraph Service — network reach is its entire job, and it holds neither sqlx nor any domain crate"),
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")

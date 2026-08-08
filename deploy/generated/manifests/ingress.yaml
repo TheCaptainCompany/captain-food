@@ -2,8 +2,10 @@
 # Host routing derived from the screens specs' base_url + per-screen roles (role = path,
 # ADR-0006): each host serves its surface bin at / and its audience roles' /{role}/graphql at
 # that role's gateway. TLS: the cert-manager DNS-01 wildcard certificate (#358 bootstrap issues
-# it; ingress-nginx terminates). The BARE captain.food host is deliberately unrouted -- the
-# screens specs disagree on its owner (see the emitter doc comment).
+# it; ingress-nginx terminates). The BARE captain.food host is owned by fo-marketplace
+# (captain_frontoffice.yaml additional_hosts, #385); hooks.captain.food is the declared
+# integration host (c4-l2 adapters.ingress_host) -- everything on it routes to the adapters
+# Service, with the marketplace-host webhook paths kept as the transition alias.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -15,13 +17,39 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
+        - "captain.food"
         - "live.captain.food"
         - "*.captain.food"
         - "restos.captain.food"
         - "riders.captain.food"
         - "system.captain.food"
+        - "hooks.captain.food"
       secretName: wildcard-captain-food-tls
   rules:
+    - host: "captain.food"
+      http:
+        paths:
+          - path: /customer/graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-customer
+                port:
+                  name: http
+          - path: /public/graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-public
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fo-marketplace
+                port:
+                  name: http
     - host: "live.captain.food"
       http:
         paths:
@@ -154,5 +182,15 @@ spec:
             backend:
               service:
                 name: bo-admin
+                port:
+                  name: http
+    - host: "hooks.captain.food"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: adapters
                 port:
                   name: http

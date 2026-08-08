@@ -43,6 +43,19 @@ members = [
                                # workspace by being generated, so the members list cannot drift from
                                # the spec. Depending on one is the permission to address that actor.
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
+    "crates/bin_probes",       # the probe/telemetry FLOOR of every bin (#385 API-tier wiring):
+                               # build identity, telemetry init, /health + /ping serving and
+                               # graceful drain — NO database, NO domain, so the pure gateway/
+                               # surface families can stand on it without infrastructure
+    "crates/gateway_runtime",  # the gateway-{role} runtime (#385, D8): parse a GraphQL document's
+                               # top-level fields, route to the owning subgraph from the
+                               # codegen-emitted composition table, proxy the request — NO
+                               # database, NO domain crates, NO state (a domain dep here is a
+                               # boundary violation to review)
+    "crates/surface_runtime",  # the fo-*/bo-* surface runtime (#385, D8): audience host serving,
+                               # SSR of the generated screens through the role gateway (HTTP
+                               # transport — no direct views access), the wasm /assets dir —
+                               # depends on web + bin_probes, never on server or infrastructure
     "crates/bin_runtime",      # the per-bin COMPOSITION KIT (#385, ADR-20260807-183024): telemetry
                                # init, declared-size pg pool, probe server, and the fleet/runner/
                                # projector spawn helpers the GENERATED bin mains call — hand-written

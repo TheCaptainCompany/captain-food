@@ -315,23 +315,35 @@ mod tests {
         assert!(dirs.contains("crates/bin_runtime"), "wired bins ride the composition kit");
         assert!(dirs.contains("crates/infrastructure"), "the runtime spine is a real build input");
 
-        // A SHELL subgraph keeps the sharp slice: one domain, nothing else's.
+        // A WIRED subgraph (#385) serves the master schema through `server`, so its closure
+        // honestly carries the whole facade — the recorded blast-radius cost; the per-scope
+        // infrastructure split is the exit. The direct scope link stays its manifest assertion.
         let subgraph = closure_dirs(graph(), "graphql-ordering").expect("closure resolves");
         assert!(subgraph.contains("crates/domains/ordering"));
         assert!(
-            !subgraph.iter().any(|d| d.contains("domains/delivery")),
-            "no unlinked scope leaks into a shell subgraph"
-        );
-        assert!(
-            !subgraph.contains("crates/infrastructure"),
-            "shells carry no runtime spine until their #385 wiring lands"
+            subgraph.contains("crates/server"),
+            "a wired subgraph re-hosts the monolith's GraphQL surface (#385)"
         );
 
+        // A WIRED surface reads only over GraphQL but renders through `web` (SSR), whose core
+        // folds domain rows — so its closure carries web/core, NEVER server or infrastructure.
         let surface = closure_dirs(graph(), "fo-storefront").expect("closure resolves");
-        assert_eq!(
-            surface.into_iter().collect::<Vec<_>>(),
-            vec!["crates/bins/fo-storefront".to_string()],
-            "a surface bin's closure is itself alone (no domain vocabulary, D8)"
+        assert!(surface.contains("crates/surface_runtime"));
+        assert!(surface.contains("crates/web"));
+        assert!(
+            !surface.contains("crates/server") && !surface.contains("crates/infrastructure"),
+            "a surface holds no server/infrastructure link (D8: no views access, no DB)"
+        );
+
+        // A gateway's closure is the ONE that stays sharp: no domain, no server, no web (D8).
+        let gateway = closure_dirs(graph(), "gateway-public").expect("closure resolves");
+        assert!(gateway.contains("crates/gateway_runtime"));
+        assert!(
+            !gateway.iter().any(|d| d.starts_with("crates/domains/"))
+                && !gateway.contains("crates/server")
+                && !gateway.contains("crates/infrastructure")
+                && !gateway.contains("crates/web"),
+            "a gateway closure carrying domain/server/web is a D8 boundary violation: {gateway:?}"
         );
     }
 }

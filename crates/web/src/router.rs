@@ -61,13 +61,17 @@ impl Surface {
     }
 
     /// The storefront tenant slug when this host is a `{slug}.captain.food` storefront.
-    /// Excludes every ADR-0036 reserved audience label (`live`/`restos`/`riders`/`system`/`api`)
-    /// and the off-server marketing hosts (`www`/`join`).
+    /// Excludes every ADR-0036 reserved audience label (`live`/`restos`/`riders`/`system`/`api`),
+    /// the off-server marketing hosts (`www`/`join`), and the integration ingress host
+    /// (`hooks`, #385 — mirrors `server::hosts::classify_host`, same mirror-honesty rule).
     pub fn slug_of(host: &str) -> Option<&str> {
         let host = host.split(':').next().unwrap_or(host);
         let label = host.strip_suffix(".captain.food")?;
         (!label.contains('.')
-            && !matches!(label, "www" | "join" | "live" | "restos" | "riders" | "system" | "api"))
+            && !matches!(
+                label,
+                "www" | "join" | "hooks" | "live" | "restos" | "riders" | "system" | "api"
+            ))
         .then_some(label)
     }
 }
