@@ -127,6 +127,25 @@ below; 9+1 rows go to the customer's brief
   personal data; a partner's volume published is an adoption killer); prefer k ≥ 10 per cell
   when slicing ever starts.
 
+### Addendum (same day) — two rows the synthesis omitted, decided with existing consent evidence
+
+The register overhaul's honest recount caught two classified-and-consented rows missing from the
+lists above — a coordinator synthesis omission, not a consent gap:
+
+- **PROP-172500 D4 — job-pool filtering** (city + zone + `RiderStatus`, composed with the
+  decline exclusion): business consented explicitly (actively supports density), ux consented
+  (silence), legal consented with the note — already recorded above — that `SUSPENDED` is
+  deactivation machinery needing written, appealable criteria when it gains a write path.
+- **PROP-032306 D5 — menu ownership + per-channel price parity**: classified team-after-evidence;
+  the business lens delivered CONFIRM in this sweep (one writer decided by the stored
+  HubRise-connected fact; pushing Captain prices unchanged would destroy the restaurant's Uber
+  P&L AND invalidate `basis: REAL`) with two binding realization constraints: the uplift is
+  preserved as a RATIO when Captain prices change, and the push never defaults to overwrite —
+  both pinned by spec test.
+
+Consent total: **32** rows, not 30. The open-decision count after this addendum: **15**
+(the customer's ten + the five §22 rows).
+
 ### Escalated to the customer (added to the brief)
 
 - **PROP-165500 D5 — merchandising order**: business-lens MODIFY (the recommendation never

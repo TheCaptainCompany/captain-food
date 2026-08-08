@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-08-08** · **17 open decisions** — the customer's ten ([the brief](BRIEF-20260808-customer-decisions.md)), the five new sweep rows (§22), and two residual team rows (PROP-172500 D4 job-pool filtering · PROP-032306 D5 menu ownership/price parity). The 2026-08-08 five-lens sweep decided **30 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
+Last reconciled: **2026-08-08** · **15 open decisions** — the customer's ten ([the brief](BRIEF-20260808-customer-decisions.md)) and the five new sweep rows (§22). The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
 
 > **Customer decisions: see [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) (ten decisions).**
 > Everything only the product owner can decide — the five-decision money posture, account-level
@@ -72,7 +72,7 @@ Six decisions gate roughly two thirds of the backlog. Everything else can wait.
 These have a conventional right answer and little genuine trade-off. Reading the recommendation and
 saying "yes to all" is a reasonable use of five minutes.
 
-**2026-08-08**: every row here is now decided or retired EXCEPT PROP-172500 D4 (job-pool filtering) —
+**2026-08-08**: every row here is now decided or retired (PROP-172500 D4 closed by the ADR addendum) —
 see the per-row notes.
 
 | Decision | Question | Recommendation |
@@ -89,7 +89,7 @@ see the per-row notes.
 | PROP-171500 D3 | Sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) | Immediately after it lands — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open); note: [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) has NOT landed yet (the §4 register note was stale) |
 | PROP-172000 D3 | The drifted product spec | Rewrite §4–§5 to match ADR-0034 — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) |
 | PROP-172000 D4 | Fix the four dead actions with the rule | Same PR — a rule landing red breaks "keep main green" — ✅ OVERTAKEN: the rules landed as the two screen-action warning rules and the work is tracked in [#342](https://github.com/TheCaptainCompany/captain-food/issues/342) (the 17 screen-action↔command-input findings); stale row retired 2026-08-08 (ADR-20260808-171056) |
-| PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` — composes with [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) slice 4's per-rider decline exclusion on the same `myDeliveries` query (the rider write surface itself moved to that proposal, §20) |
+| PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` — composes with [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) slice 4's per-rider decline exclusion on the same `myDeliveries` query (the rider write surface itself moved to that proposal, §20) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056 addendum; veto open; business + ux consented, legal consented with the SUSPENDED-is-deactivation-machinery note carried in the ADR) |
 | PROP-172500 D5 | Rider↔customer contact | Route through the order conversation, not phone numbers — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +masked/bridged call fallback and rider-side one-tap canned chips ("customer unreachable at the door" needs synchronous escalation; a keyboard on a bike violates the one-hand rule). **Customer-endorsed 2026-08-08** |
 | PROP-165500 D6 | Menu scheduling | Defer, but record it — needed when combos land — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): deferred until combos |
 
@@ -296,7 +296,7 @@ D4 and D7 are the customer's (brief ch. 1.5 / ch. 4); **D5 remains open**.
 | PROP-032306 D2 | Which Uber org is billed for a Direct dispatch? | ✅ **DECIDED 2026-07-30: two orgs, split by acquisition surface, storefront first.** (C — one org plus internal attribution — was recommended; A was chosen) |
 | PROP-032306 D3 | Where does the acquisition surface live? | **A field on `OrderPlaced`.** Not derivable at dispatch: acceptance-first (ADR-20260720-015500) means the saga runs long after the `Host` header is gone — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), cure folded: the acquisition scalar is declared ONCE in `specs/common` so a future `ExternalOrderReceived` shares it |
 | **PROP-032306 D4** | How is a marketplace-originated order represented, given it carries **no Captain PaymentIntent**? | **A distinct `ExternalOrderReceived` event.** Making the payment fields nullable on `OrderPlaced` would weaken a money invariant for every order to accommodate a minority. **Pairs with §1 A/B (payout posture, capture timing) — decide together** — **the customer's**: brief ch. 1.5 |
-| **PROP-032306 D5** | Menu ownership across Captain / HubRise / Uber, and per-channel price parity | **HubRise authoritative when connected, else Captain**, one-way push. Parity is the sharp edge: restaurants mark Uber prices up to absorb Uber's commission, and ADR-0024's comparison coefficients are calibrated on that — pushing Captain prices unchanged undercuts the restaurant *and* invalidates `basis: REAL` |
+| **PROP-032306 D5** | Menu ownership across Captain / HubRise / Uber, and per-channel price parity | **HubRise authoritative when connected, else Captain**, one-way push. Parity is the sharp edge: restaurants mark Uber prices up to absorb Uber's commission, and ADR-0024's comparison coefficients are calibrated on that — pushing Captain prices unchanged undercuts the restaurant *and* invalidates `basis: REAL` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056 addendum; veto open; business CONFIRM: uplift preserved as a RATIO, push never defaults to overwrite, pinned by spec test) |
 | **PROP-032306 D7** | Is the Provider entity on the signed Uber agreement (**Caring Hope Foundation**, RNA W372020229 — a loi-1901 association) the entity that will operate the platform? | **Needs legal input, not a recommendation.** An Uber API licence follows the entity; if the association holds it while another entity operates and earns commission, access sits outside the licence. Also interacts with the payout posture in §1 A — **the customer's**: brief ch. 4 (the operating entity) |
 
 
