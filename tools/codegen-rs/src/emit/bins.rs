@@ -2,8 +2,9 @@
 //! ADR-20260807-183024 (#382), on top of the #375 spec reorg and the #373 per-scope domain
 //! crates. One binary crate per c4-l2 deployable: `actor-{type}` / `pm-{name}` (mailbox
 //! workers), `projector-{scope}` (D4), `graphql-{scope}` subgraphs + `gateway-{role}` role
-//! gateways (D8), the `fo-*`/`bo-*`/`adapters` surface bins and the `bam` worker
-//! (PROP-20260806-223656 §2b D5 addendum container list).
+//! gateways (D8), the `fo-*`/`bo-*` surface bins, one `adapter-{partner}` bin per partner ACL
+//! (ADR-20260808-062432) and the `bam` worker (PROP-20260806-223656 §2b D5 addendum container
+//! list).
 //!
 //! WHAT THE SPLIT BUYS. Each bin's `Cargo.toml` links ONLY the domain-scope crates its entry in
 //! the derived crate graph declares — the manifest IS the lane/scope assertion (compiler-first,
@@ -30,7 +31,9 @@
 //! bridge doctrine made load-bearing); projector/subgraph bins from the declared scopes (kernel
 //! gets a subgraph but no projector — it owns no `View_*`); gateway bins from the `UserType`
 //! role paths (role = path, ADR-0006); surface bins and `bam` from the c4-l2 container list
-//! itself (their existence is a deploy-topology decision, not derivable from any other spec).
+//! itself (their existence is a deploy-topology decision, not derivable from any other spec);
+//! adapter bins from the adapter-crate list scanned at model load (`crates/adapters/*`,
+//! ADR-20260808-062432 — one bin per partner ACL, never a hand list).
 //! Projector/subgraph bins link ONLY their scope's crate — DELIBERATELY not `domain-common`:
 //! today's skeletons name no kernel type, and the assertion stays minimal so that when the
 //! runtime wiring (#349+) legitimately reaches kernel value objects (Money in a subgraph's
@@ -43,7 +46,8 @@ use crate::*;
 pub(crate) struct BinSpec {
     /// Bin/crate/container name, e.g. `actor-order`, `projector-catalog`, `gateway-public`.
     pub(crate) name: String,
-    /// Family: `actor` | `pm` | `projector` | `subgraph` | `gateway` | `surface` | `worker`.
+    /// Family: `actor` | `pm` | `projector` | `subgraph` | `gateway` | `surface` | `adapter` |
+    /// `worker`.
     pub(crate) family: &'static str,
     /// The realized actor/PM (actor + pm families).
     pub(crate) actor: Option<String>,
@@ -62,6 +66,40 @@ pub(crate) struct BinSpec {
     /// lane's worker fleet. All 15 aggregates and the two money PMs; the three state-table PMs
     /// host only the restricted saga runner.
     pub(crate) mailboxed: bool,
+    /// The partner adapter-crate DIRECTORY name (`crates/adapters/{partner}`, snake_case —
+    /// adapter family only, ADR-20260808-062432): the one partner ACL this bin hosts, and the
+    /// root of every per-partner derivation (bin name/slug, ingress path, env-key prefix).
+    pub(crate) partner: Option<String>,
+}
+
+/// `uber_direct` → `uber-direct`: the partner's SLUG (repo slug convention) — the bin name
+/// suffix (`adapter-{slug}`), the crate package prefix (`{slug}-adapter`, asserted by a codegen
+/// test) and the ingress path segment (`/adapters/{slug}`, matching the routes every adapter
+/// crate mounts).
+pub(crate) fn partner_slug(dir: &str) -> String {
+    dir.replace('_', "-")
+}
+
+/// `uber_direct` → `UBER_DIRECT_`: the partner's configuration-key prefix. THE narrowing that
+/// makes "each pod holds ONLY its partner's secrets" (ADR-20260808-062432) a derivation instead
+/// of a hand list: within an adapter bin's declared `integration_scopes`, only keys carrying
+/// this prefix reach its pod env and its generated Config (kernel/common keys always pass).
+pub(crate) fn adapter_env_prefix(dir: &str) -> String {
+    format!("{}_", dir.to_ascii_uppercase())
+}
+
+/// May this configuration key reach this bin's pod env / generated Config? Non-adapter families:
+/// scope routing alone decides (unchanged). Adapter family: kernel keys pass; a key from the
+/// integration scope must carry the partner's own prefix — the delivery scope declares THREE
+/// partners' keys, so scope granularity alone would put Uber Direct's OAuth secret in the
+/// Avelo37 pod, exactly the pile-up the split exists to end. Applied identically by the deploy
+/// emitter (pod env) and the bin-crate emitter (Config) — one derivation.
+pub(crate) fn adapter_key_allowed(b: &BinSpec, key: &str, origin_scope: &str) -> bool {
+    if b.family != "adapter" || origin_scope == KERNEL_SCOPE {
+        return true;
+    }
+    let Some(dir) = b.partner.as_deref() else { return false };
+    key.starts_with(&adapter_env_prefix(dir))
 }
 
 /// `RESTAURANT_ACCOUNT` → `restaurant-account`: the role's path segment (`/{path}/graphql`,
@@ -103,14 +141,16 @@ fn actor_meta(model: &Model, actor: &str) -> (BTreeSet<String>, bool) {
     (ports, mailboxed)
 }
 
-/// The c4-l2 container ids that are SURFACE bins (`fo-*`, `bo-*`, `adapters`) or the `bam`
-/// worker. These two families exist only in the deploy topology — the container list is their
-/// source of truth, so they are read from it rather than re-derived.
+/// The c4-l2 container ids that are SURFACE bins (`fo-*`, `bo-*`) or the `bam` worker. These
+/// two families exist only in the deploy topology — the container list is their source of
+/// truth, so they are read from it rather than re-derived. (The `adapter-*` family is NOT read
+/// from here: its source is the adapter-crate list on the Model, ADR-20260808-062432, and §15
+/// proves the container list against it.)
 fn c4_surface_and_worker_bins(model: &Model) -> (Vec<String>, bool) {
     let mut surfaces = Vec::new();
     let mut bam = false;
     for c in read_c4(model).containers {
-        if c.id.starts_with("fo-") || c.id.starts_with("bo-") || c.id == "adapters" {
+        if c.id.starts_with("fo-") || c.id.starts_with("bo-") {
             surfaces.push(c.id);
         } else if c.id == "bam" {
             bam = true;
@@ -144,6 +184,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             domain_scopes: scopes.intersection(&emitted).cloned().collect(),
             ports,
             mailboxed,
+            partner: None,
         });
     }
     // projector-{scope}: every non-kernel scope projects its own views schema (D4). The kernel
@@ -163,6 +204,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
                 domain_scopes: BTreeSet::from([scope.clone()]),
                 ports: BTreeSet::new(),
                 mailboxed: false,
+                partner: None,
             });
         }
         out.push(BinSpec {
@@ -174,6 +216,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             domain_scopes: BTreeSet::from([scope.clone()]),
             ports: BTreeSet::new(),
             mailboxed: false,
+            partner: None,
         });
     }
     // gateway-{role}: thin generated routing per role path — NO domain crates, no DB, no state
@@ -188,6 +231,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             domain_scopes: BTreeSet::new(),
             ports: BTreeSet::new(),
             mailboxed: false,
+            partner: None,
         });
     }
     // Surface bins (assets/SSR/webhooks — speak to their role gateway, hold no domain
@@ -204,6 +248,7 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             domain_scopes: BTreeSet::new(),
             ports: BTreeSet::new(),
             mailboxed: false,
+            partner: None,
         });
     }
     if bam {
@@ -216,6 +261,25 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
             domain_scopes: emitted.clone(),
             ports: BTreeSet::new(),
             mailboxed: false,
+            partner: None,
+        });
+    }
+    // adapter-{partner}: ONE BIN PER PARTNER ACL (ADR-20260808-062432), derived from the
+    // adapter-crate list scanned at model load (`crates/adapters/*`) — never a hand list: a
+    // sixth adapter crate produces a sixth bin the day it exists, and §15 then requires its
+    // c4-l2 container. No domain crates: an adapter translates and records, it never holds
+    // domain vocabulary.
+    for dir in &model.adapter_crates {
+        out.push(BinSpec {
+            name: format!("adapter-{}", partner_slug(dir)),
+            family: "adapter",
+            actor: None,
+            scope: None,
+            role: None,
+            domain_scopes: BTreeSet::new(),
+            ports: BTreeSet::new(),
+            mailboxed: false,
+            partner: Some(dir.clone()),
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -256,7 +320,11 @@ fn family_purpose(b: &BinSpec) -> String {
             "role gateway for /{}/graphql -- thin generated top-level routing, no DB access, no business logic, no state (D8)",
             b.role.as_deref().map(role_path).unwrap_or_default()
         ),
-        "surface" => "surface bin -- assets/SSR/webhooks; speaks to its role gateway, holds no domain vocabulary and no broad views access".to_string(),
+        "surface" => "surface bin -- assets/SSR; speaks to its role gateway, holds no domain vocabulary and no broad views access".to_string(),
+        "adapter" => format!(
+            "partner webhook ingestion bin for `{}` -- verify, mirror, ACL, ENQUEUE on the shared mailbox; holds ONLY this partner's secrets (one bin per adapter, ADR-20260808-062432)",
+            b.partner.as_deref().map(partner_slug).unwrap_or_default()
+        ),
         "worker" => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
         f => unreachable!("unknown bin family '{f}' — every family added to bin_topology needs its purpose line here"),
     }
@@ -269,7 +337,7 @@ fn family_purpose(b: &BinSpec) -> String {
 pub(crate) fn wired(b: &BinSpec) -> bool {
     matches!(
         b.family,
-        "actor" | "pm" | "projector" | "subgraph" | "gateway" | "surface" | "worker"
+        "actor" | "pm" | "projector" | "subgraph" | "gateway" | "surface" | "adapter" | "worker"
     )
 }
 
@@ -308,10 +376,17 @@ fn bin_manifest(b: &BinSpec) -> String {
                 );
                 deps.push_str(common);
             }
-            "surface" if b.name == "adapters" => {
-                deps.push_str(
-                    "# The ADAPTERS surface (#385): re-hosts the partner webhook ingestors the monolith\n# mounts (stripe/avelo37/coopcycle/uber_direct/hubrise) -- verify, mirror, ACL, ENQUEUE on\n# the shared mailbox; the owning actor bins deliver (woken by the INSERT's pg_notify).\nbin_runtime = { path = \"../../bin_runtime\" }\ninfrastructure = { path = \"../../infrastructure\" }\nactor_client = { path = \"../../actor_client\" }\nstripe-adapter = { path = \"../../adapters/stripe\" }\navelo37-adapter = { path = \"../../adapters/avelo37\" }\ncoopcycle-adapter = { path = \"../../adapters/coopcycle\" }\nuber-direct-adapter = { path = \"../../adapters/uber_direct\" }\nhubrise-adapter = { path = \"../../adapters/hubrise\" }\n",
-                );
+            "adapter" => {
+                let dir = b.partner.as_deref().expect("adapter bin carries its partner");
+                let slug = partner_slug(dir);
+                deps.push_str(&format!(
+                    "# ADAPTER bin (one bin per partner ACL, ADR-20260808-062432): hosts ONLY the `{slug}`\n# ingestor -- verify, mirror, ACL, ENQUEUE on the shared mailbox; the owning actor bins\n# deliver (woken by the INSERT's pg_notify). ANOTHER partner's crate appearing here is the\n# exact secret/fate pile-up the split ended -- a boundary violation to review.\nbin_runtime = {{ path = \"../../bin_runtime\" }}\ninfrastructure = {{ path = \"../../infrastructure\" }}\n{slug}-adapter = {{ path = \"../../adapters/{dir}\" }}\n",
+                ));
+                if dir == "hubrise" {
+                    deps.push_str(
+                        "# The HubRise connect flow reports through the operation-status bus (process-local).\nactor_client = { path = \"../../actor_client\" }\n",
+                    );
+                }
                 deps.push_str(common);
             }
             "surface" => {
@@ -599,7 +674,7 @@ fn bin_main(b: &BinSpec, model: &Model) -> String {
         // The API tier (#385 remainder): subgraph slices, role gateways, surfaces, bam.
         "subgraph" => return subgraph_main(b),
         "gateway" => return gateway_main(b, model),
-        "surface" if b.name == "adapters" => return adapters_main(b),
+        "adapter" => return adapter_main(b),
         "surface" => return surface_main(b),
         "worker" => return worker_main(b),
         _ => {}
@@ -706,10 +781,14 @@ pub(crate) fn emit_bin_crates(model: &Model) -> Vec<BinCrate> {
             config: wired(b).then(|| {
                 // The bin's key subset = the SAME scope routing the deploy emitter uses for its
                 // pod's env (#374 Q4 closed by #385): its linked scopes + owning scope + common.
+                // ADAPTER bins narrow further to their partner's env prefix within the declared
+                // integration scope (ADR-20260808-062432 — the same rule env_yaml applies, so
+                // Config and pod env cannot disagree on which secrets exist here).
                 // DATABASE_URL follows the SAME needs_db exclusion as deploy.rs::env_yaml — a
                 // db-less bin (gateway/surface) whose Config still required the key would
                 // exit(78) on boot while the manifest correctly never provides it.
                 let mut keys = scoped_config_keys(model, &bin_config_scopes(b, model));
+                keys.retain(|k| adapter_key_allowed(b, &k.name, config_key_origin(model, &k.name)));
                 keys.retain(|k| k.name != "DATABASE_URL" || super::deploy::needs_db(b, model));
                 emit_config_module(model, &keys, /* is_server */ false)
             }),
@@ -998,16 +1077,26 @@ fn surface_main(b: &BinSpec) -> String {
     out
 }
 
-/// `adapters`: the partner webhook ingestion surface — the SAME verify → mirror → ACL → ENQUEUE
-/// composition the monolith mounts, one route set per partner. Delivery is the owning actor
-/// bins' job (the mailbox INSERT's in-transaction pg_notify wakes them); this bin spawns NO
-/// worker fleet — one drainer per lane is the #193/#242 constraint, and the actor bins hold it.
-fn adapters_main(b: &BinSpec) -> String {
+/// `adapter-{partner}`: ONE partner's webhook ingestion bin (ADR-20260808-062432) — the SAME
+/// verify → mirror → ACL → ENQUEUE composition the monolith mounts, restricted to this partner's
+/// route set. Delivery is the owning actor bins' job (the mailbox INSERT's in-transaction
+/// pg_notify wakes them); an adapter bin spawns NO worker fleet — one drainer per lane is the
+/// #193/#242 constraint, and the actor bins hold it. The per-partner match below is the
+/// partner's WIRING, not a family hand-list: the family (crate, manifest, Deployment, ingress,
+/// image, pin) derives from the adapter-crate list, and a new crate without its arm here fails
+/// generation LOUDLY instead of shipping an empty pod.
+fn adapter_main(b: &BinSpec) -> String {
+    let dir = b.partner.as_deref().expect("adapter bin carries its partner");
+    let slug = partner_slug(dir);
     let mut out = main_header(
         b,
-        &"hosts the partner webhook ingestors (stripe/avelo37/coopcycle/uber_direct/hubrise): verify, mirror into the external_* journals, translate through the ACL, ENQUEUE on the shared mailbox — the owning actor bins deliver".to_string(),
+        &format!(
+            "hosts the `{slug}` partner webhook ingestor: verify, mirror into the external_* journals, translate through the ACL, ENQUEUE on the shared mailbox — the owning actor bins deliver. This pod holds ONLY this partner's secrets (ADR-20260808-062432)"
+        ),
     );
-    out.push('\n');
+    out.push_str(&format!(
+        "/// The ONE partner ACL this bin hosts (one bin per adapter, ADR-20260808-062432).\nconst PARTNER: &str = \"{slug}\";\n\n"
+    ));
     out.push_str(&main_prologue("bin_runtime"));
     out.push_str(r#"    // Without a database nothing can be mirrored or enqueued: stay a viable pod that says so
     // (readiness 503) -- the config gate already stopped prod/staging.
@@ -1030,29 +1119,40 @@ fn adapters_main(b: &BinSpec) -> String {
                     .with_nudges(nudges.clone()),
             )
         };
-        // Stripe (ADR-20260731-122500 -- the mailbox is the only door): POST /adapters/stripe/webhooks.
-        let stripe_ingestor = std::sync::Arc::new(stripe_adapter::StripeWebhookIngestor::new(
+"#);
+    out.push_str(match dir {
+        "stripe" => r#"        // Stripe (ADR-20260731-122500 -- the mailbox is the only door): POST /adapters/stripe/webhooks.
+        let ingestor = std::sync::Arc::new(stripe_adapter::StripeWebhookIngestor::new(
             std::sync::Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
             mailbox(),
         ));
-        // Avelo37 (issue #28): POST /adapters/avelo37/webhooks.
-        let avelo37_ingestor = std::sync::Arc::new(avelo37_adapter::Avelo37WebhookIngestor::new(
+        stripe_adapter::routes(Some(ingestor))
+"#,
+        "avelo37" => r#"        // Avelo37 (issue #28): POST /adapters/avelo37/webhooks.
+        let ingestor = std::sync::Arc::new(avelo37_adapter::Avelo37WebhookIngestor::new(
             std::sync::Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
             mailbox(),
         ));
-        // CoopCycle (issue #58, federated): POST /adapters/coopcycle/{instance}/webhooks.
-        let coopcycle_ingestor = std::sync::Arc::new(coopcycle_adapter::CoopCycleWebhookIngestor::new(
+        avelo37_adapter::routes(Some(ingestor))
+"#,
+        "coopcycle" => r#"        // CoopCycle (issue #58, federated): POST /adapters/coopcycle/{instance}/webhooks.
+        let ingestor = std::sync::Arc::new(coopcycle_adapter::CoopCycleWebhookIngestor::new(
             std::sync::Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
             mailbox(),
         ));
-        let coopcycle_registry = coopcycle_adapter::CoopCycleRegistry::from_env()
+        let registry = coopcycle_adapter::CoopCycleRegistry::from_env()
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, key = "COOPCYCLE_INSTANCES", "misconfigured, treating as unset");
                 None
             })
             .unwrap_or_default();
-        // Uber Direct (issue #57): POST /adapters/uber-direct/webhooks (X-Uber-Signature HMAC).
-        let uber_direct_ingestor = std::sync::Arc::new(uber_direct_adapter::UberDirectWebhookIngestor::new(
+        coopcycle_adapter::routes(coopcycle_adapter::CoopCycleWebhookState {
+            ingestor: Some(ingestor),
+            registry: std::sync::Arc::new(registry),
+        })
+"#,
+        "uber_direct" => r#"        // Uber Direct (issue #57): POST /adapters/uber-direct/webhooks (X-Uber-Signature HMAC).
+        let ingestor = std::sync::Arc::new(uber_direct_adapter::UberDirectWebhookIngestor::new(
             std::sync::Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
             mailbox(),
         ));
@@ -1060,7 +1160,12 @@ fn adapters_main(b: &BinSpec) -> String {
             tracing::warn!(error = %e, key = "UBER_DIRECT_*", "misconfigured, treating as unset");
             None
         });
-        // HubRise (issue #20): raw mirror + enrichment + connect flow, per-account pull tokens.
+        uber_direct_adapter::routes(uber_direct_adapter::UberDirectWebhookState {
+            ingestor: Some(ingestor),
+            webhook_secret: uber_direct_config.map(|c| std::sync::Arc::new(c.webhook_secret)),
+        })
+"#,
+        "hubrise" => r#"        // HubRise (issue #20): raw mirror + enrichment + connect flow, per-account pull tokens.
         // The connect status bus is process-local (the recorded #385 push gap; polls unaffected).
         let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
         hubrise_state.raw =
@@ -1083,27 +1188,24 @@ fn adapters_main(b: &BinSpec) -> String {
                 client_secret: std::env::var("HUBRISE_WEBHOOK_SECRET").unwrap_or_default(),
             },
         )));
-        stripe_adapter::routes(Some(stripe_ingestor))
-            .merge(avelo37_adapter::routes(Some(avelo37_ingestor)))
-            .merge(coopcycle_adapter::routes(coopcycle_adapter::CoopCycleWebhookState {
-                ingestor: Some(coopcycle_ingestor),
-                registry: std::sync::Arc::new(coopcycle_registry),
-            }))
-            .merge(uber_direct_adapter::routes(uber_direct_adapter::UberDirectWebhookState {
-                ingestor: Some(uber_direct_ingestor),
-                webhook_secret: uber_direct_config.map(|c| std::sync::Arc::new(c.webhook_secret)),
-            }))
-            .merge(hubrise_adapter::routes(hubrise_state))
-    } else {
+        hubrise_adapter::routes(hubrise_state)
+"#,
+        other => unreachable!(
+            "adapter bin for '{other}' has no ingestor wiring — the family derivation \
+             (crates/adapters/) already emitted its crate/manifest/Deployment; add its \
+             composition arm here (and only here) in the same change"
+        ),
+    });
+    out.push_str(r#"    } else {
         tracing::warn!(bin = BIN, "DATABASE_URL unset -- webhook ingestion not mounted, readiness stays 503");
         Default::default()
     };
-    // Readiness = the ingestion routes are mounted over their database.
+    // Readiness = this partner's ingestion routes are mounted over their database.
     let health: bin_runtime::HealthFn = std::sync::Arc::new(move || {
         (
             db_ready,
             serde_json::json!({
-                "adapters": ["stripe", "avelo37", "coopcycle", "uber_direct", "hubrise"],
+                "adapter": PARTNER,
                 "db": if db_ready { "configured" } else { "not_configured" },
             }),
         )

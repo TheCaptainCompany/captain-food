@@ -15,22 +15,29 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_bo_restaurant = container "bo-restaurant" "Restaurant back office (restaurant_backoffice screens): order queue, catalog, refunds; speaks to gateway-restaurant/gateway-restaurant-account." "Rust — Axum bin (assets + SSR)"
       ct_bo_rider = container "bo-rider" "Rider back office (rider screens): job list, pickup/deliver flow; speaks to gateway-rider." "Rust — Axum bin (assets + SSR)"
       ct_bo_admin = container "bo-admin" "Platform admin back office (system screens): approvals, prospection, mailbox supervision; speaks to gateway-admin." "Rust — Axum bin (assets + SSR)"
-      ct_adapters = container "adapters" "The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only." "Rust — Axum bin (webhooks + /external/graphql + integration ACLs)" {
-        c_hubrise_acl = component "hubrise-acl" "Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain." "Instrumented"
+      ct_adapter_stripe = container "adapter-stripe" "Stripe webhook ingestion (the money path, isolated): verify signature, mirror into external_stripe_events, translate through the ACL, ENQUEUE on the Payment lane — the owning actor bins deliver. Holds only Stripe secrets." "Rust — Axum bin (webhook ingestor + Stripe ACL)" {
         c_stripe_adapter = component "stripe-adapter" "Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded)." "Instrumented"
-        c_supabase_acl = component "supabase-acl" "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates." "Instrumented"
-        c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
-        c_prospection_acl = component "prospection-acl" "B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description." "Instrumented"
-        c_avelo37_acl = component "avelo37-acl" "Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter." "Instrumented"
-        c_coopcycle_acl = component "coopcycle-acl" "Anti-Corruption Layer for the CoopCycle delivery federation (issue #58, ADR-20260721-122910): the third PARTNER seam, mirroring avelo37-acl. FEDERATION — CoopCycle is many self-hosted co-op instances, so the outbound offer_job resolves a job to an instance (per-instance base URL + OAuth2 client-credentials, env-gated) and each instance's verified webhook (per-instance secret) is translated into the same inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain." "Instrumented"
+      }
+      ct_adapter_hubrise = container "adapter-hubrise" "HubRise callbacks + OAuth connect flow: verify HMAC, mirror, enrich via per-connection tokens, enqueue catalog imports. Holds only HubRise secrets." "Rust — Axum bin (webhook ingestor + HubRise ACL + connect flow)" {
+        c_hubrise_acl = component "hubrise-acl" "Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain." "Instrumented"
+      }
+      ct_adapter_uber_direct = container "adapter-uber-direct" "Uber Direct courier/status webhooks (X-Uber-Signature HMAC): verify, mirror, enqueue on the DeliveryJob lane. Holds only Uber Direct secrets." "Rust — Axum bin (webhook ingestor + Uber Direct ACL)" {
         c_uber_direct_acl = component "uber_direct-acl" "Anti-Corruption Layer for the Uber Direct delivery partner (issue #57, ADR-20260721-172500): a PARTNER seam via the Uber DIRECT delivery API (not the Uber Eats marketplace), mirroring avelo37-acl. ONE central API (no federation): the outbound offer_job fetches an OAuth2 client-credentials token (env-gated by UBER_DIRECT_*) and POSTs a Create Delivery; Uber's verified webhook (X-Uber-Signature raw-body HMAC) is translated into the same inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain." "Instrumented"
+      }
+      ct_adapter_coopcycle = container "adapter-coopcycle" "CoopCycle per-instance webhooks (federation registry): verify per-instance secret, mirror, enqueue on the DeliveryJob lane. Holds only CoopCycle configuration." "Rust — Axum bin (webhook ingestor + CoopCycle ACL, federated)" {
+        c_coopcycle_acl = component "coopcycle-acl" "Anti-Corruption Layer for the CoopCycle delivery federation (issue #58, ADR-20260721-122910): the third PARTNER seam, mirroring avelo37-acl. FEDERATION — CoopCycle is many self-hosted co-op instances, so the outbound offer_job resolves a job to an instance (per-instance base URL + OAuth2 client-credentials, env-gated) and each instance's verified webhook (per-instance secret) is translated into the same inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain." "Instrumented"
+      }
+      ct_adapter_avelo37 = container "adapter-avelo37" "Avelo37 delivery-partner webhooks: verify, mirror, enqueue on the DeliveryJob lane. PRE-MILESTONE: the bin exists but stays unprovisioned/undeployed (its keys deliberately declare no deploy source) until the partner milestone." "Rust — Axum bin (webhook ingestor + Avelo37 ACL)" {
+        c_avelo37_acl = component "avelo37-acl" "Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter." "Instrumented"
       }
       ct_graphql_ordering = container "graphql-ordering" "Ordering subgraph: cart/checkout/order queries over the ordering views schema; mutations enqueue ordering commands on the mailbox." "Rust — async-graphql subgraph bin" {
         c_actor_client = component "actor-client" "The compiler-enforced mailbox door (crates/actor_client — #290 phase 1, PROP-20260802-130500 D1/D4): one GENERATED typed client per actor with a SPEC-GATED surface (send/record/schedule/cancel_scheduling exist only where actors.yaml declares a use, ADR-20260802-170059) plus the generic ActorClient operation-status read door. The only place a mailbox row can be constructed (MailboxEntry fields private); graphql-gateway and the ACLs enqueue through it, and PgMailbox (infrastructure) is the SQL adapter behind its Mailbox port. Port-level assembly, pure — NOT instrumented." "Domain"
       }
       ct_graphql_catalog = container "graphql-catalog" "Catalog subgraph: menu/product/offer queries over the catalog views schema; catalog mutations." "Rust — async-graphql subgraph bin"
       ct_graphql_network = container "graphql-network" "Network (supply-side) subgraph: restaurant accounts/locations/prospection over the network views schema." "Rust — async-graphql subgraph bin"
-      ct_graphql_customer = container "graphql-customer" "Customer subgraph: identity, profile, favorites, addresses over the customer views schema." "Rust — async-graphql subgraph bin"
+      ct_graphql_customer = container "graphql-customer" "Customer subgraph: identity, profile, favorites, addresses over the customer views schema." "Rust — async-graphql subgraph bin" {
+        c_supabase_acl = component "supabase-acl" "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates." "Instrumented"
+      }
       ct_graphql_delivery = container "graphql-delivery" "Delivery subgraph: jobs, riders, dispatch state over the delivery views schema." "Rust — async-graphql subgraph bin"
       ct_graphql_payments = container "graphql-payments" "Payments subgraph: payment intents, refunds, pricing policy over the payments views schema." "Rust — async-graphql subgraph bin"
       ct_graphql_comms = container "graphql-comms" "Comms subgraph: per-order conversations and messages over the comms views schema." "Rust — async-graphql subgraph bin"
@@ -122,7 +129,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_projector_comms = container "projector-comms" "Projects comms-scope events into the comms views schema; own checkpoint." "Rust — projection worker bin"
       ct_event_store = container "event-store" "Append-only domain_events + the inbound_messages mailbox (the write model / source of truth; ALL backup/PITR budget — D2/D3)." "PostgreSQL (CNPG) — captain-core"
       ct_read_models = container "read-models" "Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2)." "PostgreSQL (CNPG) — captain-views"
-      ct_sync_worker = container "sync-worker" "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the adapters surface. Prospection scoring/outreach is a later step." "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)"
+      ct_sync_worker = container "sync-worker" "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the external gateway (/external/graphql). Prospection scoring/outreach is a later step." "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)" {
+        c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
+        c_prospection_acl = component "prospection-acl" "B2B prospection worker (ADR-0020): consumes the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. NOTE: carries no `reads:` on purpose -- no such worker exists in Rust yet, and the ProspectionPipeline read that DOES exist lives in the command handlers, which declare it. The declaration follows the code, not this description." "Instrumented"
+      }
       ct_bam = container "bam" "Business Activity Monitoring projector — consumes the same event stream to answer business questions." "Projection worker" {
         c_bam_projector = component "bam-projector" "Business Activity Monitoring projection (runs in the bam container); business_metrics only." "Instrumented"
       }
@@ -190,13 +200,18 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_pm_refund -> x_stripe "Request refunds (outbound payment port)"
     ct_pm_delivery_dispatch -> ct_event_store "Drain dispatch lanes; append dispatch facts"
     ct_pm_delivery_dispatch -> x_delivery_partner "Dispatch delivery jobs to the partner API"
-    ct_adapters -> ct_event_store "Record verified inbound facts idempotently through the mailbox"
-    x_stripe -> ct_adapters "Payment webhooks (PaymentCaptured/Failed/Refunded)"
-    x_hubrise -> ct_adapters "Catalog/inventory callbacks (inbound facts)"
-    x_delivery_partner -> ct_adapters "Courier acceptance/status webhooks (inbound facts) — ADR-0031"
-    ct_adapters -> x_hubrise "Import catalog / sync inventory via the ACL"
-    ct_adapters -> x_supabase_auth "OTP verify / session (out of domain)"
-    ct_adapters -> x_google_maps "Verify restaurant ownership (GBP) for claim/opt-out"
+    ct_adapter_stripe -> ct_event_store "Record verified inbound payment facts idempotently through the mailbox"
+    ct_adapter_hubrise -> ct_event_store "Record verified catalog/inventory callbacks through the mailbox"
+    ct_adapter_uber_direct -> ct_event_store "Record verified courier/status facts through the mailbox"
+    ct_adapter_coopcycle -> ct_event_store "Record verified courier/status facts through the mailbox"
+    ct_adapter_avelo37 -> ct_event_store "Record verified courier/status facts through the mailbox (pre-milestone: undeployed)"
+    x_stripe -> ct_adapter_stripe "Payment webhooks (PaymentCaptured/Failed/Refunded)"
+    x_hubrise -> ct_adapter_hubrise "Catalog/inventory callbacks (inbound facts)"
+    x_delivery_partner -> ct_adapter_uber_direct "Courier acceptance/status webhooks (inbound facts) — ADR-0031"
+    x_delivery_partner -> ct_adapter_coopcycle "Per-instance courier/status webhooks (inbound facts) — ADR-0031"
+    x_delivery_partner -> ct_adapter_avelo37 "Courier acceptance/status webhooks (inbound facts) — ADR-0031"
+    ct_adapter_hubrise -> x_hubrise "Import catalog / sync inventory via the ACL"
+    ct_graphql_customer -> x_supabase_auth "OTP verify / session (out of domain)"
     ct_sync_worker -> x_sirene "Poll establishments (SIRET/NAF/address/closures)"
     ct_sync_worker -> x_google_maps "Fetch Business Profile data (rating/reviews/hours/website)"
     ct_sync_worker -> ct_gateway_external "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)"
@@ -211,7 +226,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_gateway_customer -> ct_otel_collector "OTLP export (every gateway bin)"
     ct_actor_order -> ct_otel_collector "OTLP export (every actor/pm bin)"
     ct_projector_ordering -> ct_otel_collector "OTLP export (every projector bin)"
-    ct_adapters -> ct_otel_collector "OTLP export"
+    ct_adapter_stripe -> ct_otel_collector "OTLP export (every adapter bin)"
     ct_bam -> ct_otel_collector "Export traces/metrics/logs (OTLP)"
     c_graphql_gateway -> c_command_bus "dispatches command"
     c_command_bus -> c_command_handlers "invokes handler"
@@ -236,11 +251,31 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       include *
       autolayout lr
     }
-    component ct_adapters "AdaptersComponents" {
+    component ct_adapter_stripe "AdapterStripeComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_adapter_hubrise "AdapterHubriseComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_adapter_uber_direct "AdapterUberDirectComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_adapter_coopcycle "AdapterCoopcycleComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_adapter_avelo37 "AdapterAvelo37Components" {
       include *
       autolayout lr
     }
     component ct_graphql_ordering "GraphqlOrderingComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_graphql_customer "GraphqlCustomerComponents" {
       include *
       autolayout lr
     }
@@ -329,6 +364,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       autolayout lr
     }
     component ct_projector_ordering "ProjectorOrderingComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_sync_worker "SyncWorkerComponents" {
       include *
       autolayout lr
     }

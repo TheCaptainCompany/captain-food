@@ -11648,7 +11648,11 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `bo-restaurant` | Rust — Axum bin (assets + SSR) | Restaurant back office (restaurant_backoffice screens): order queue, catalog, refunds; speaks to gateway-restaurant/gateway-restaurant-account. |
 | 🧱 `bo-rider` | Rust — Axum bin (assets + SSR) | Rider back office (rider screens): job list, pickup/deliver flow; speaks to gateway-rider. |
 | 🧱 `bo-admin` | Rust — Axum bin (assets + SSR) | Platform admin back office (system screens): approvals, prospection, mailbox supervision; speaks to gateway-admin. |
-| 🧱 `adapters` | Rust — Axum bin (webhooks + /external/graphql + integration ACLs) | The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only. |
+| 🧱 `adapter-stripe` | Rust — Axum bin (webhook ingestor + Stripe ACL) | Stripe webhook ingestion (the money path, isolated): verify signature, mirror into external_stripe_events, translate through the ACL, ENQUEUE on the Payment lane — the owning actor bins deliver. Holds only Stripe secrets. |
+| 🧱 `adapter-hubrise` | Rust — Axum bin (webhook ingestor + HubRise ACL + connect flow) | HubRise callbacks + OAuth connect flow: verify HMAC, mirror, enrich via per-connection tokens, enqueue catalog imports. Holds only HubRise secrets. |
+| 🧱 `adapter-uber-direct` | Rust — Axum bin (webhook ingestor + Uber Direct ACL) | Uber Direct courier/status webhooks (X-Uber-Signature HMAC): verify, mirror, enqueue on the DeliveryJob lane. Holds only Uber Direct secrets. |
+| 🧱 `adapter-coopcycle` | Rust — Axum bin (webhook ingestor + CoopCycle ACL, federated) | CoopCycle per-instance webhooks (federation registry): verify per-instance secret, mirror, enqueue on the DeliveryJob lane. Holds only CoopCycle configuration. |
+| 🧱 `adapter-avelo37` | Rust — Axum bin (webhook ingestor + Avelo37 ACL) | Avelo37 delivery-partner webhooks: verify, mirror, enqueue on the DeliveryJob lane. PRE-MILESTONE: the bin exists but stays unprovisioned/undeployed (its keys deliberately declare no deploy source) until the partner milestone. |
 | 🧱 `graphql-ordering` | Rust — async-graphql subgraph bin | Ordering subgraph: cart/checkout/order queries over the ordering views schema; mutations enqueue ordering commands on the mailbox. |
 | 🧱 `graphql-catalog` | Rust — async-graphql subgraph bin | Catalog subgraph: menu/product/offer queries over the catalog views schema; catalog mutations. |
 | 🧱 `graphql-network` | Rust — async-graphql subgraph bin | Network (supply-side) subgraph: restaurant accounts/locations/prospection over the network views schema. |
@@ -11693,7 +11697,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `projector-comms` | Rust — projection worker bin | Projects comms-scope events into the comms views schema; own checkpoint. |
 | 🧱 `event-store` | PostgreSQL (CNPG) — captain-core | Append-only domain_events + the inbound_messages mailbox (the write model / source of truth; ALL backup/PITR budget — D2/D3). |
 | 🧱 `read-models` | PostgreSQL (CNPG) — captain-views | Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2). |
-| 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the adapters surface. Prospection scoring/outreach is a later step. |
+| 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the external gateway (/external/graphql). Prospection scoring/outreach is a later step. |
 | 🧱 `bam` | Projection worker | Business Activity Monitoring projector — consumes the same event stream to answer business questions. |
 | 🧱 `otel-collector` | OpenTelemetry Collector | Receives traces/metrics/logs from every service bin; exports to the backend(s). |
 
@@ -11767,13 +11771,18 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | `pm-refund` → `stripe` | Request refunds (outbound payment port) |
 | `pm-delivery-dispatch` → `event-store` | Drain dispatch lanes; append dispatch facts |
 | `pm-delivery-dispatch` → `delivery-partner` | Dispatch delivery jobs to the partner API |
-| `adapters` → `event-store` | Record verified inbound facts idempotently through the mailbox |
-| `stripe` → `adapters` | Payment webhooks (PaymentCaptured/Failed/Refunded) |
-| `hubrise` → `adapters` | Catalog/inventory callbacks (inbound facts) |
-| `delivery-partner` → `adapters` | Courier acceptance/status webhooks (inbound facts) — ADR-0031 |
-| `adapters` → `hubrise` | Import catalog / sync inventory via the ACL |
-| `adapters` → `supabase-auth` | OTP verify / session (out of domain) |
-| `adapters` → `google-maps` | Verify restaurant ownership (GBP) for claim/opt-out |
+| `adapter-stripe` → `event-store` | Record verified inbound payment facts idempotently through the mailbox |
+| `adapter-hubrise` → `event-store` | Record verified catalog/inventory callbacks through the mailbox |
+| `adapter-uber-direct` → `event-store` | Record verified courier/status facts through the mailbox |
+| `adapter-coopcycle` → `event-store` | Record verified courier/status facts through the mailbox |
+| `adapter-avelo37` → `event-store` | Record verified courier/status facts through the mailbox (pre-milestone: undeployed) |
+| `stripe` → `adapter-stripe` | Payment webhooks (PaymentCaptured/Failed/Refunded) |
+| `hubrise` → `adapter-hubrise` | Catalog/inventory callbacks (inbound facts) |
+| `delivery-partner` → `adapter-uber-direct` | Courier acceptance/status webhooks (inbound facts) — ADR-0031 |
+| `delivery-partner` → `adapter-coopcycle` | Per-instance courier/status webhooks (inbound facts) — ADR-0031 |
+| `delivery-partner` → `adapter-avelo37` | Courier acceptance/status webhooks (inbound facts) — ADR-0031 |
+| `adapter-hubrise` → `hubrise` | Import catalog / sync inventory via the ACL |
+| `graphql-customer` → `supabase-auth` | OTP verify / session (out of domain) |
 | `sync-worker` → `sirene` | Poll establishments (SIRET/NAF/address/closures) |
 | `sync-worker` → `google-maps` | Fetch Business Profile data (rating/reviews/hours/website) |
 | `sync-worker` → `gateway-external` | Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql) |
@@ -11788,7 +11797,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | `gateway-customer` → `otel-collector` | OTLP export (every gateway bin) |
 | `actor-order` → `otel-collector` | OTLP export (every actor/pm bin) |
 | `projector-ordering` → `otel-collector` | OTLP export (every projector bin) |
-| `adapters` → `otel-collector` | OTLP export |
+| `adapter-stripe` → `otel-collector` | OTLP export (every adapter bin) |
 | `bam` → `otel-collector` | Export traces/metrics/logs (OTLP) |
 
 ### ⚙️ L3 — Components of the `api` container

@@ -329,18 +329,20 @@ pub(crate) fn scoped_config_keys(model: &Model, scopes: &BTreeSet<String>) -> Ve
     parse_config_keys(model)
         .into_iter()
         .filter(|k| k.consumer == "server")
-        .filter(|k| {
-            // configuration.yaml is a SECTION kind (`keys:`), so origins key it as
-            // `keys/{name}`; a key from a flat root catalog has no origin entry -> common.
-            let origin = model
-                .origins
-                .get(&("configuration.yaml".to_string(), format!("keys/{}", k.name)))
-                .or_else(|| model.origins.get(&("configuration.yaml".to_string(), k.name.clone())))
-                .map(|s| s.as_str())
-                .unwrap_or(KERNEL_SCOPE);
-            scopes.contains(origin)
-        })
+        .filter(|k| scopes.contains(config_key_origin(model, &k.name)))
         .collect()
+}
+
+/// The ORIGIN SCOPE of one configuration key. configuration.yaml is a SECTION kind (`keys:`),
+/// so origins key it as `keys/{name}`; a key from a flat root catalog has no origin entry →
+/// common (the kernel is where placement-less platform keys live).
+pub(crate) fn config_key_origin<'a>(model: &'a Model, key: &str) -> &'a str {
+    model
+        .origins
+        .get(&("configuration.yaml".to_string(), format!("keys/{key}")))
+        .or_else(|| model.origins.get(&("configuration.yaml".to_string(), key.to_string())))
+        .map(|s| s.as_str())
+        .unwrap_or(KERNEL_SCOPE)
 }
 
 /// The generated typed reader over an explicit key subset. `is_server` picks the consumer

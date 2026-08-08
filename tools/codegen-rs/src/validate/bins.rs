@@ -12,12 +12,15 @@
 //!    the container id are the same string or the #349 image/Deployment chain would fork names.
 //! 2. `c4-bin-missing`: every derived bin has its c4-l2 container (the deploy topology is
 //!    complete — a bin with no container would build an image that deploys nowhere).
-//! 3. `c4-bin-unknown`: every `projector-*` / `graphql-*` / `gateway-*` container matches a
-//!    derived bin (no phantom scope/role; `projector-common` is unspellable — the kernel owns no
-//!    View_*).
+//! 3. `c4-bin-unknown`: every `projector-*` / `graphql-*` / `gateway-*` / `adapter-*` container
+//!    matches a derived bin (no phantom scope/role/partner; `projector-common` is unspellable —
+//!    the kernel owns no View_*; an `adapter-*` container without its `crates/adapters/` crate
+//!    names a partner ACL that does not exist — ADR-20260808-062432).
 //!
-//! Surfaces (`fo-*`/`bo-*`/`adapters`) and `bam` are exempt from 2–3 by construction: the
-//! container list IS their source (a deploy-topology decision, not derivable elsewhere).
+//! Surfaces (`fo-*`/`bo-*`) and `bam` are exempt from 2–3 by construction: the container list
+//! IS their source (a deploy-topology decision, not derivable elsewhere). The `adapter-*`
+//! family is NOT exempt: its source is the adapter-crate list, so BOTH directions are checked —
+//! a crate without its container (2) and a container without its crate (3).
 
 use crate::*;
 
@@ -77,7 +80,7 @@ pub(crate) fn validate_bin_topology(model: &Model, issues: &mut Vec<Issue>) {
     // 3. every projector-*/graphql-*/gateway-* container matches a derived bin.
     let derived: BTreeSet<&str> = topology.iter().map(|b| b.name.as_str()).collect();
     for c in &c4.containers {
-        let generated_family = ["projector-", "graphql-", "gateway-"]
+        let generated_family = ["projector-", "graphql-", "gateway-", "adapter-"]
             .iter()
             .any(|p| c.id.starts_with(p));
         if generated_family && !derived.contains(c.id.as_str()) {
@@ -85,7 +88,7 @@ pub(crate) fn validate_bin_topology(model: &Model, issues: &mut Vec<Issue>) {
                 "c4-bin-unknown",
                 format!("architecture/c4-l2.yaml/containers.{}", c.id),
                 format!(
-                    "container '{}' matches a generated bin family but no derived bin — its scope/role does not exist (or names the kernel's projector, which owns no View_*).",
+                    "container '{}' matches a generated bin family but no derived bin — its scope/role/partner does not exist (kernel projector, or an adapter with no crates/adapters/ crate).",
                     c.id
                 ),
             ));

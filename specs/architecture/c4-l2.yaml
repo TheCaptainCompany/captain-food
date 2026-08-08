@@ -75,9 +75,10 @@ boundedContexts:
 
 # --- Containers (deployable / runtime units) ---
 # The former single `api` container is SPLIT into the real deployable list (ADR-20260807-183024,
-# PROP-20260806-223656 D5 addendum): surface bins (fo-*/bo-*/adapters), one GraphQL subgraph per
-# scope, one thin generated gateway per role path, one bin per aggregate (actor-*) and per process
-# manager (pm-*), and one projector per scope. Every actor/PM is REALIZED by exactly one bin — the
+# PROP-20260806-223656 D5 addendum): surface bins (fo-*/bo-*), one adapter bin per partner ACL
+# (adapter-*, ADR-20260808-062432), one GraphQL subgraph per scope, one thin generated gateway per
+# role path, one bin per aggregate (actor-*) and per process manager (pm-*), and one projector per
+# scope. Every actor/PM is REALIZED by exactly one bin — the
 # `realizes:` binding is what the #349 emitter turns into bin crates ↔ images ↔ Deployments.
 containers:
   # -- client apps (run on the user's device) --
@@ -119,19 +120,42 @@ containers:
   bo-admin:
     technology: "Rust — Axum bin (assets + SSR)"
     description: "Platform admin back office (system screens): approvals, prospection, mailbox supervision; speaks to gateway-admin."
-  adapters:
-    technology: "Rust — Axum bin (webhooks + /external/graphql + integration ACLs)"
-    description: "The integration surface: verified inbound webhooks (Stripe, HubRise, delivery partners) recorded as inbound facts through the ACLs, plus the /external/graphql path the SIRENE/Google sync worker calls. No business logic — translation and idempotent recording only."
-    # The dedicated integration host (#385 spec home, ADR-20260807-183024): the generated Ingress
-    # routes everything on it to this Service; the marketplace-host /webhooks|/adapters paths stay
-    # as the transition alias until every partner dashboard is re-registered. The `hooks` label is
-    # reserved in host classification so it can never be claimed as a storefront slug.
+  # -- adapter bins (ONE BIN PER PARTNER ACL, ADR-20260808-062432): each pod hosts exactly one
+  #    partner's webhook ingestor and holds ONLY that partner's secrets (least privilege by
+  #    construction — a parsing bug in one ingestor can no longer share a process with Stripe
+  #    material). The emitter derives the family from the adapter-crate list (crates/adapters/*),
+  #    never a hand list; §15 keeps this container list and the derived bins from drifting.
+  #    Shared integration host: `hooks.captain.food` (#385 spec home, ADR-20260807-183024) with
+  #    one `/adapters/{partner}` path per bin; the marketplace-host /adapters/{partner} paths stay
+  #    as the transition alias until every partner dashboard is re-registered. The `hooks` label
+  #    is reserved in host classification so it can never be claimed as a storefront slug.
+  #    `integration_scopes` routes the partner's OWN scope's configuration keys (narrowed to the
+  #    partner's env prefix) to the pod env AND the generated per-bin Config — one derivation.
+  adapter-stripe:
+    technology: "Rust — Axum bin (webhook ingestor + Stripe ACL)"
+    description: "Stripe webhook ingestion (the money path, isolated): verify signature, mirror into external_stripe_events, translate through the ACL, ENQUEUE on the Payment lane — the owning actor bins deliver. Holds only Stripe secrets."
     ingress_host: "hooks.captain.food"
-    # The scopes whose CONFIGURATION KEYS this runtime needs (#385): it hosts every partner ACL,
-    # and the webhook secrets are declared in the integrations' owning scopes. Routes both the
-    # pod env (deploy emitter) and the generated per-bin Config — one derivation, never a hand
-    # list in the emitter.
-    integration_scopes: [catalog, delivery, payments]
+    integration_scopes: [payments]
+  adapter-hubrise:
+    technology: "Rust — Axum bin (webhook ingestor + HubRise ACL + connect flow)"
+    description: "HubRise callbacks + OAuth connect flow: verify HMAC, mirror, enrich via per-connection tokens, enqueue catalog imports. Holds only HubRise secrets."
+    ingress_host: "hooks.captain.food"
+    integration_scopes: [catalog]
+  adapter-uber-direct:
+    technology: "Rust — Axum bin (webhook ingestor + Uber Direct ACL)"
+    description: "Uber Direct courier/status webhooks (X-Uber-Signature HMAC): verify, mirror, enqueue on the DeliveryJob lane. Holds only Uber Direct secrets."
+    ingress_host: "hooks.captain.food"
+    integration_scopes: [delivery]
+  adapter-coopcycle:
+    technology: "Rust — Axum bin (webhook ingestor + CoopCycle ACL, federated)"
+    description: "CoopCycle per-instance webhooks (federation registry): verify per-instance secret, mirror, enqueue on the DeliveryJob lane. Holds only CoopCycle configuration."
+    ingress_host: "hooks.captain.food"
+    integration_scopes: [delivery]
+  adapter-avelo37:
+    technology: "Rust — Axum bin (webhook ingestor + Avelo37 ACL)"
+    description: "Avelo37 delivery-partner webhooks: verify, mirror, enqueue on the DeliveryJob lane. PRE-MILESTONE: the bin exists but stays unprovisioned/undeployed (its keys deliberately declare no deploy source) until the partner milestone."
+    ingress_host: "hooks.captain.food"
+    integration_scopes: [delivery]
 
   # -- GraphQL subgraphs (one per scope: one domain, one graph, one GRANT — D8) --
   graphql-ordering:
@@ -318,7 +342,7 @@ containers:
     description: "Per-scope schemas of denormalized View_* projections + admin + bam; queries read here, never domain_events. Excluded from backups — restore is replay (D2)."
   sync-worker:
     technology: "Scheduled worker (GitHub Actions cron + Rust binary, shared Crux core)"
-    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the adapters surface. Prospection scoring/outreach is a later step."
+    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner through the external gateway (/external/graphql). Prospection scoring/outreach is a later step."
   bam:
     technology: "Projection worker"
     description: "Business Activity Monitoring projector — consumes the same event stream to answer business questions."
@@ -399,15 +423,22 @@ relationships:
   - { from: pm-refund, to: stripe, description: "Request refunds (outbound payment port)" }
   - { from: pm-delivery-dispatch, to: event-store, description: "Drain dispatch lanes; append dispatch facts" }
   - { from: pm-delivery-dispatch, to: delivery-partner, description: "Dispatch delivery jobs to the partner API" }
-  # adapters: inbound webhooks + integration ACLs
-  - { from: adapters, to: event-store, description: "Record verified inbound facts idempotently through the mailbox" }
-  - { from: stripe, to: adapters, description: "Payment webhooks (PaymentCaptured/Failed/Refunded)" }
-  - { from: hubrise, to: adapters, description: "Catalog/inventory callbacks (inbound facts)" }
-  - { from: delivery-partner, to: adapters, description: "Courier acceptance/status webhooks (inbound facts) — ADR-0031" }
-  - { from: adapters, to: hubrise, description: "Import catalog / sync inventory via the ACL" }
-  - { from: adapters, to: supabase-auth, description: "OTP verify / session (out of domain)" }
-  - { from: adapters, to: google-maps, description: "Verify restaurant ownership (GBP) for claim/opt-out" }
-  # sync worker (SIRENE/Google) goes through the adapters surface
+  # adapter bins: one per partner ACL (ADR-20260808-062432) — verified inbound webhooks recorded
+  # as facts through the mailbox; each bin's edges name ONLY its partner
+  - { from: adapter-stripe, to: event-store, description: "Record verified inbound payment facts idempotently through the mailbox" }
+  - { from: adapter-hubrise, to: event-store, description: "Record verified catalog/inventory callbacks through the mailbox" }
+  - { from: adapter-uber-direct, to: event-store, description: "Record verified courier/status facts through the mailbox" }
+  - { from: adapter-coopcycle, to: event-store, description: "Record verified courier/status facts through the mailbox" }
+  - { from: adapter-avelo37, to: event-store, description: "Record verified courier/status facts through the mailbox (pre-milestone: undeployed)" }
+  - { from: stripe, to: adapter-stripe, description: "Payment webhooks (PaymentCaptured/Failed/Refunded)" }
+  - { from: hubrise, to: adapter-hubrise, description: "Catalog/inventory callbacks (inbound facts)" }
+  - { from: delivery-partner, to: adapter-uber-direct, description: "Courier acceptance/status webhooks (inbound facts) — ADR-0031" }
+  - { from: delivery-partner, to: adapter-coopcycle, description: "Per-instance courier/status webhooks (inbound facts) — ADR-0031" }
+  - { from: delivery-partner, to: adapter-avelo37, description: "Courier acceptance/status webhooks (inbound facts) — ADR-0031" }
+  - { from: adapter-hubrise, to: hubrise, description: "Import catalog / sync inventory via the ACL" }
+  # identity: the supabase ACL runs in the customer subgraph (auth lives at the subgraph — D8)
+  - { from: graphql-customer, to: supabase-auth, description: "OTP verify / session (out of domain)" }
+  # sync worker (SIRENE/Google) goes through the external gateway
   - { from: sync-worker, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
   - { from: sync-worker, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
   - { from: sync-worker, to: gateway-external, description: "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)" }
@@ -425,5 +456,5 @@ relationships:
   - { from: gateway-customer, to: otel-collector, description: "OTLP export (every gateway bin)" }
   - { from: actor-order, to: otel-collector, description: "OTLP export (every actor/pm bin)" }
   - { from: projector-ordering, to: otel-collector, description: "OTLP export (every projector bin)" }
-  - { from: adapters, to: otel-collector, description: "OTLP export" }
+  - { from: adapter-stripe, to: otel-collector, description: "OTLP export (every adapter bin)" }
   - { from: bam, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }

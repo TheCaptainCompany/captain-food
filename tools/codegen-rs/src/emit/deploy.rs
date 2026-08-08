@@ -92,22 +92,23 @@ fn image_ref(bin: &str, pin: Option<&ImagePin>) -> String {
 /// Families that get a Service (they are called by other pods / the ingress). Worker families
 /// (actor/pm/projector/bam) serve /health + /ping for probes but nothing routes TO them.
 fn has_service(family: &str) -> bool {
-    matches!(family, "subgraph" | "gateway" | "surface")
+    matches!(family, "subgraph" | "gateway" | "surface" | "adapter")
 }
 
 /// Does this bin's pod get DATABASE_URL? Two derivations, no hand-curated bin list:
 /// - FAMILY: actor/pm/projector/worker/subgraph touch the mailbox, the log or the views by
-///   construction. Gateways and surfaces hold no DB access (D8 — "no surface binary holds broad
-///   views access"), so the credential never reaches their pods.
+///   construction, and every adapter bin mirrors + enqueues by construction (verify → mirror →
+///   ACL → ENQUEUE is the family's definition, ADR-20260808-062432). Gateways and surfaces hold
+///   no DB access (D8 — "no surface binary holds broad views access"), so the credential never
+///   reaches their pods.
 /// - DECLARED c4 EDGE: a bin with an explicit c4-l2 relationship to `event-store` or
-///   `read-models` gets it regardless of family — this is what routes `adapters` (family
-///   surface, but its ACLs record inbound facts through the mailbox: a declared edge). c4
-///   relationships are representative for the uniform families, which is why the family rule
-///   stays primary; the edge check only ever WIDENS.
-/// Every other secret key routes by scope membership until the per-bin Config reader (#374 Q4)
-/// narrows it.
+///   `read-models` gets it regardless of family. c4 relationships are representative for the
+///   uniform families, which is why the family rule stays primary; the edge check only ever
+///   WIDENS.
+/// Every other secret key routes by scope membership (adapter bins narrowed further to their
+/// partner's env prefix — `adapter_key_allowed`).
 pub(crate) fn needs_db(b: &BinSpec, model: &Model) -> bool {
-    if matches!(b.family, "actor" | "pm" | "projector" | "worker" | "subgraph") {
+    if matches!(b.family, "actor" | "pm" | "projector" | "worker" | "subgraph" | "adapter") {
         return true;
     }
     read_c4(model)
@@ -119,8 +120,10 @@ pub(crate) fn needs_db(b: &BinSpec, model: &Model) -> bool {
 /// The configuration scopes whose keys a bin's pod receives: its linked domain scopes, its
 /// owning scope (projector/subgraph), plus `common` (platform keys — DB, telemetry, identity —
 /// per ADR-20260807-183024 D5 every bin reads its own scope's + common's keys), plus the
-/// c4-DECLARED `integration_scopes` (#385: the `adapters` surface hosts every partner ACL, whose
-/// webhook secrets live in the integration scopes' catalogs — spec-declared, never a hand list).
+/// c4-DECLARED `integration_scopes` (#385/ADR-20260808-062432: each adapter bin declares its
+/// partner's OWNING scope, whose webhook secrets live in that scope's catalog — spec-declared,
+/// never a hand list; `adapter_key_allowed` then narrows within the scope to the partner's own
+/// env prefix).
 pub(crate) fn bin_config_scopes(b: &BinSpec, model: &Model) -> BTreeSet<String> {
     let mut s: BTreeSet<String> = b.domain_scopes.clone();
     if let Some(scope) = &b.scope {
@@ -168,6 +171,9 @@ fn env_yaml(b: &BinSpec, model: &Model, secret_keys: &[(String, String, String)]
     for (key, scope, _) in secret_keys {
         if !scopes.contains(scope) {
             continue;
+        }
+        if !adapter_key_allowed(b, key, scope) {
+            continue; // ADR-20260808-062432: an adapter pod carries ONLY its partner's secrets
         }
         if key == "DATABASE_URL" && !needs_db(b, model) {
             continue; // D8: gateways/surfaces hold no database access — the pod never sees the URL
@@ -289,9 +295,11 @@ metadata:
 /// routed to its gateway (role = path, ADR-0006).
 struct HostRule {
     host: String,
-    surface: String,
+    /// The Service serving `/` — `None` for the integration host, which has ONLY the partner
+    /// paths (no surface at `/`; anything else is refused by the ingress itself).
+    surface: Option<String>,
     roles: Vec<String>,
-    /// Extra `(path, service)` routes (the integration paths on the live host).
+    /// Extra `(path, service)` routes (partner adapter paths, /external/graphql).
     extra: Vec<(String, String)>,
 }
 
@@ -303,9 +311,12 @@ struct HostRule {
 /// base domain. The BARE domain is SETTLED (#385): captain_frontoffice.yaml declares it in
 /// `additional_hosts` (spec home; ADR-20260808-060309) — the marketplace owns the apex, matching
 /// `web::router`'s host → surface mapping. The integration host is SETTLED the same way:
-/// c4-l2's `adapters.ingress_host` (`hooks.captain.food`) gets its own rule routing everything
-/// to the adapters Service; the marketplace-host webhook paths stay as the transition alias
-/// (partner dashboards point at them until re-registered).
+/// each `adapter-*` container declares `ingress_host` (`hooks.captain.food`) in c4-l2; bins
+/// sharing that host are GROUPED into one rule with a per-partner path (`/adapters/{slug}` →
+/// its Service — ADR-20260808-062432, one bin per adapter) and no surface at `/`. The
+/// marketplace-host `/adapters/{slug}` paths stay as the per-partner transition alias (partner
+/// dashboards point at them until re-registered); the old bare `/webhooks` and `/services`
+/// aliases are gone — no adapter ever mounted routes there, so they only routed to 404s.
 pub(crate) fn screens_surface_bindings() -> &'static [(&'static str, &'static str)] {
     &[
         ("captain_frontoffice", "fo-marketplace"),
@@ -348,15 +359,17 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
                 }
             }
         }
-        // The integration paths ride the marketplace host until a spec names a dedicated
-        // integration host: webhook targets and the sync-worker's /external/graphql need SOME
-        // routable address, and inventing `hooks.captain.food` here would be an undeclared host.
+        // TRANSITION ALIAS (partner dashboards still point at the marketplace host until
+        // re-registered on hooks.captain.food): each partner's /adapters/{slug} prefix routes
+        // to ITS bin — same per-partner mapping as the integration host, derived from the
+        // adapter family, never a hand list. The sync-worker's /external/graphql also rides
+        // this host.
         let extra = if *surface == "fo-marketplace" {
             let mut e = Vec::new();
-            if bins.contains("adapters") {
-                e.push(("/webhooks".to_string(), "adapters".to_string()));
-                e.push(("/adapters".to_string(), "adapters".to_string()));
-                e.push(("/services".to_string(), "adapters".to_string()));
+            for a in topology.iter().filter(|b| b.family == "adapter") {
+                if let Some(dir) = &a.partner {
+                    e.push((format!("/adapters/{}", partner_slug(dir)), a.name.clone()));
+                }
             }
             if bins.contains("gateway-external") {
                 e.push(("/external/graphql".to_string(), "gateway-external".to_string()));
@@ -373,7 +386,7 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
             for h in hosts.iter().filter_map(|v| v.as_str()) {
                 rules.push(HostRule {
                     host: h.to_string(),
-                    surface: surface.to_string(),
+                    surface: Some(surface.to_string()),
                     roles: roles.clone(),
                     extra: Vec::new(),
                 });
@@ -381,25 +394,38 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
         }
         rules.push(HostRule {
             host,
-            surface: surface.to_string(),
+            surface: Some(surface.to_string()),
             roles,
             extra,
         });
     }
-    // The dedicated integration host (#385 spec home): c4-l2 `ingress_host` on a container —
-    // everything on that host routes to the container's Service (webhooks are path-verified by
-    // the adapters themselves; there is no surface at `/`).
+    // The dedicated integration host (#385 spec home, ADR-20260808-062432): c4-l2 `ingress_host`
+    // on the adapter containers — bins sharing a host are grouped into ONE rule carrying a
+    // per-partner path (`/adapters/{slug}` → its Service) and NO surface at `/` (webhooks are
+    // path-verified by the adapters themselves; anything outside the declared partner paths is
+    // refused by the ingress). A non-adapter container with an `ingress_host` keeps the
+    // whole-host rule.
+    let by_bin: BTreeMap<&str, &BinSpec> = topology.iter().map(|b| (b.name.as_str(), b)).collect();
+    let mut integration_hosts: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for c in read_c4(model).containers {
         if let Some(host) = c.ingress_host {
-            if bins.contains(c.id.as_str()) {
-                rules.push(HostRule {
+            let Some(b) = by_bin.get(c.id.as_str()) else { continue };
+            match (b.family, &b.partner) {
+                ("adapter", Some(dir)) => integration_hosts
+                    .entry(host)
+                    .or_default()
+                    .push((format!("/adapters/{}", partner_slug(dir)), b.name.clone())),
+                _ => rules.push(HostRule {
                     host,
-                    surface: c.id.clone(),
+                    surface: Some(c.id.clone()),
                     roles: Vec::new(),
                     extra: Vec::new(),
-                });
+                }),
             }
         }
+    }
+    for (host, extra) in integration_hosts {
+        rules.push(HostRule { host, surface: None, roles: Vec::new(), extra });
     }
     rules
 }
@@ -422,10 +448,12 @@ fn ingress_yaml(model: &Model, topology: &[BinSpec]) -> String {
                 "          - path: {path}\n            pathType: Prefix\n            backend:\n              service:\n                name: {svc}\n                port:\n                  name: http\n"
             ));
         }
-        paths.push_str(&format!(
-            "          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: {}\n                port:\n                  name: http\n",
-            r.surface
-        ));
+        if let Some(surface) = &r.surface {
+            paths.push_str(&format!(
+                "          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: {}\n                port:\n                  name: http\n",
+                surface
+            ));
+        }
         rules_yaml.push_str(&format!("    - host: \"{}\"\n      http:\n        paths:\n{}", r.host, paths));
     }
     format!(
@@ -435,8 +463,9 @@ fn ingress_yaml(model: &Model, topology: &[BinSpec]) -> String {
 # that role's gateway. TLS: the cert-manager DNS-01 wildcard certificate (#358 bootstrap issues
 # it; ingress-nginx terminates). The BARE captain.food host is owned by fo-marketplace
 # (captain_frontoffice.yaml additional_hosts, #385); hooks.captain.food is the declared
-# integration host (c4-l2 adapters.ingress_host) -- everything on it routes to the adapters
-# Service, with the marketplace-host webhook paths kept as the transition alias.
+# integration host (c4-l2 adapter-* ingress_host, ADR-20260808-062432 one bin per adapter) --
+# one /adapters/{{partner}} path per adapter Service, no surface at /, with the marketplace-host
+# per-partner paths kept as the transition alias.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -564,9 +593,9 @@ COPY --from=wasm-builder /app/dist /app/web-assets
 /// Does this bin's image carry the wasm hydrate bundle (#385: the SDUI surfaces serve `/assets`
 /// themselves — the monolith Dockerfile's wasm stage moves into their images)? The four
 /// audiences with a `web::router::Surface`; `bo-admin` serves a plain landing (no web surface
-/// yet) and `adapters` serves webhooks — neither carries wasm.
+/// yet) and carries none.
 pub(crate) fn wasm_target(b: &BinSpec) -> bool {
-    b.family == "surface" && !matches!(b.name.as_str(), "adapters" | "bo-admin")
+    b.family == "surface" && b.name != "bo-admin"
 }
 
 /// The bin -> image mapping (#363's matrix input; the "every bin maps to exactly one image and
