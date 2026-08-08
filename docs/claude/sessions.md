@@ -663,3 +663,23 @@ were needed to get there, and only the last one produced any evidence at all.
 Separately, that probe proved a **test gap**: `cargo test --workspace` and the DB suites both go
 green with the oversell hole in place, so nothing asserts that a stock-TRACKED offer at quantity 0
 rejects the line.
+
+**The overnight stall that cost 5 hours (2026-08-08, #385 API-tier wiring)** — three compounding
+failures, each with a rule:
+(1) **In-session cron jobs are IN-MEMORY and die silently when the remote container recycles.**
+Webhook and agent-completion wakeups survive restarts; scheduled probes do not. A watch that must
+survive the night needs a durable trigger (`send_later`/Routines — approve the MCP permission), and
+every wake should re-check `CronList` and re-arm missing jobs. Never trust a 5-minute cron to still
+exist an hour later.
+(2) **A stalled executor generates no events, so event-driven supervision cannot see it.** The
+probe must escalate, not just report: N consecutive no-commit/no-tree-change probes on a "running"
+executor (~45 min) ⇒ SendMessage a convergence order (status + 15-minute budget: arm the PR on
+green gates, or report the concrete failure). The 07:44 manual intervention recovered 5 lost hours
+in two minutes — automate it.
+(3) **Executors stall at the finish line, not mid-work.** The dispatch template must bind the
+final actions (push, PR body, ready + auto-merge) into the SAME work unit as the last gate — "gates
+green" is not done; "PR armed and reported" is done. Also: commit at phase boundaries at least
+hourly (a 3-hour implementation with no commit is indistinguishable from a hang from outside), run
+`cargo machete` locally (CI's lint gate does), and keep baseline checkouts of main in the
+SCRATCHPAD — a stray clone in the repo root became a committed gitlink via a coordinator
+`git add -A` (itself a mistake: enumerate paths in shared trees).
