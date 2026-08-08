@@ -308,14 +308,23 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
     // spec fact — deliberately scanned here so `bin_topology` stays a pure function of the Model
     // and the §15 validator can prove the c4-l2 container list against it in both directions.
     let mut adapter_crates: Vec<String> = Vec::new();
-    if let Some(root) = specs.parent() {
-        if let Ok(rd) = fs::read_dir(root.join("crates/adapters")) {
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.is_dir() && p.join("Cargo.toml").is_file() {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        adapter_crates.push(name.to_string());
-                    }
+    let adapters_dir = match specs.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.join("crates/adapters"),
+        _ => PathBuf::from("crates/adapters"),
+    };
+    if adapters_dir.is_dir() {
+        // FAIL LOUD on a read error of an existing directory: an empty list here would drop the
+        // whole adapter family from the topology, and only the §15 both-ways check (adapter-*
+        // containers with no derived bin abort generation) stands between that and a mass-prune
+        // of the bin crates. Absent dir = fixture/degenerate model, honestly empty.
+        let rd = fs::read_dir(&adapters_dir)
+            .map_err(|e| format!("read {}: {}", adapters_dir.display(), e))?;
+        for e in rd {
+            let e = e.map_err(|e| format!("read {}: {}", adapters_dir.display(), e))?;
+            let p = e.path();
+            if p.is_dir() && p.join("Cargo.toml").is_file() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    adapter_crates.push(name.to_string());
                 }
             }
         }
