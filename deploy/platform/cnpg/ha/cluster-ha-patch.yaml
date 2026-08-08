@@ -1,0 +1,28 @@
+# PLATFORM SOURCE, hand-written (#360) -- THE LADDER SHAPE, GATED. See deploy/platform/README.md.
+#
+# ADR-20260807-002705 D2's original conditions, parked by ADR-20260807-114122 until #242 lands
+# or the first paying restaurants arrive: 3 instances spread across >=3 nodes by the REQUIRED
+# anti-affinity already present in the base, plus quorum-synchronous replication. The two move
+# TOGETHER (codegen-test-pinned): 3 async instances can acknowledge a paid order on the primary
+# that a failover then loses -- for an event-sourced money path, silent async failover is data
+# loss wearing an HA costume (PROP-20260806-223656 §2b practice 3).
+#
+# Flip procedure (config, not migration): node pool >=3 first (#358 ladder), then a one-line ADR
+# + a PR pointing the reconciled path at this overlay. NEVER a hand `kubectl apply -k ha/`.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: captain-db
+  namespace: captain-prod
+spec:
+  instances: 3
+  postgresql:
+    synchronous:
+      # Quorum: ANY 1 of the 2 standbys must confirm before commit returns -- survives one node
+      # loss with zero data loss, keeps commit latency at the faster standby's ack.
+      method: any
+      number: 1
+      # Strict durability: if BOTH standbys are gone, writes BLOCK rather than silently degrade
+      # to async -- ordering halts, but a paid order is never acknowledged into a single copy.
+      # At Friday peak that trade reads: a visibly-down checkout over a silently lossy one.
+      dataDurability: required

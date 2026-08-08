@@ -3,6 +3,29 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-08 — ADR-183024 STEP (6) PREP: CNPG PLATFORM TREE IN REVIEW —
+> [#360 "CNPG: operator + 3-instance cluster, WAL archiving to Object Storage, weekly executed
+> restore drill"](https://github.com/TheCaptainCompany/captain-food/issues/360) repo-only slice via
+> [PR #392](https://github.com/TheCaptainCompany/captain-food/pull/392),
+> [ADR-20260808-063951](adr/ADR-20260808-063951-cnpg-platform-source-tree.md) (hand-written
+> platform SOURCE under `deploy/platform/`, invariants pinned by `platform_*` codegen tests —
+> CNPG derives from no spec, so no emitter).** Pinned operator 1.27.4 (vendored byte-identical,
+> sha256 in PIN.json); `captain-db` Cluster at the ADR-20260807-114122 ENTRY shape
+> (`instances: 1`, required anti-affinity, superuser disabled, postgres 17.10 digest-pinned,
+> `captain-db-retain` StorageClass, barman WAL archiving to the OVH bucket by NAME —
+> `cnpg-object-storage`/`claude-ro-credentials`/`restore-drill-github-token` secrets referenced,
+> never provisioned, missing = visibly-failing pod); the 3-instance quorum-sync D2 shape is the
+> GATED `cnpg/ha/` overlay (flip = its own one-line ADR). Weekly restore drill (Mon 04:30 UTC,
+> standing scratch ns `captain-restore-drill`, least-privilege RBAC): restores latest backup,
+> verifies domain_events count+md5 vs production OVER THE SAME position RANGE as SELECT-only
+> claude_ro, files a deduplicated GitHub issue on failure; hourly WAL-archiving/backup-age
+> check alongside (§2b practice 4). `claude_ro` grants ship as ordinary migration
+> 20260808070000 (practice 5; role lifecycle stays with CNPG `managed.roles`). `db-migrate.yml`
+> gains the GATED `target: cnpg-port-forward` dispatch input (default supabase unchanged;
+> flip of the default is a separate ADR). NOTHING IS APPLIED: bucket, secrets, first apply,
+> executed drill = the product-owner console checklist in `deploy/platform/README.md`; #360
+> stays open for the EXECUTED drill.
+>
 > 🚧 **2026-08-08 — API TIER WIRED: ALL 49 BINS ARE BUSINESS RUNTIMES, PR #389 IN MERGE —
 > [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) remainder delivered by
 > [PR #389](https://github.com/TheCaptainCompany/captain-food/pull/389),

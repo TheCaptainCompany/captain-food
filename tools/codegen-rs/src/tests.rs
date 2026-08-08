@@ -5508,3 +5508,214 @@ fn pin_digest_resolves_into_the_deployment_image() {
     );
     assert!(unpinned.contains("UNPINNED"), "an unpinned bin must say so in the manifest header");
 }
+
+// ─── The hand-written platform tree (#360, deploy/platform/) ────────────────────────────────────
+// CNPG is PLATFORM SOURCE like C4 -- nothing in the specs derives it, so no emitter owns it.
+// What replaces drift-checking for hand-written manifests is this suite: every YAML document
+// parses, the vendored operator matches its recorded upstream pin, and the safety invariants
+// that would silently lose the event log hold. Style of `makefile_recipe_lines_are_ascii`:
+// loud, runs against the real tree, never skips.
+
+fn platform_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/platform")
+}
+
+fn platform_yaml_files() -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(dir).expect("platform dir readable").flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|e| e == "yaml" || e == "yml") {
+                out.push(p);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&platform_root(), &mut out);
+    assert!(!out.is_empty(), "deploy/platform/ contains no YAML -- the tree moved without this test");
+    out.sort();
+    out
+}
+
+/// Every YAML document in the platform tree parses (kubeconform/kubeval are absent in this
+/// container -- docs/claude/sessions.md -- so parseability is the executable floor), and no
+/// document is a Secret: values live in the sealed store, a committed Secret in a PUBLIC repo
+/// is an incident, not a convenience.
+#[test]
+fn platform_manifests_parse_and_carry_no_secret() {
+    for path in platform_yaml_files() {
+        let text = fs::read_to_string(&path).unwrap();
+        let mut docs = 0usize;
+        for doc in serde_yaml::Deserializer::from_str(&text) {
+            let value: serde_yaml::Value = match serde::Deserialize::deserialize(doc) {
+                Ok(v) => v,
+                Err(e) => panic!("{}: YAML parse failure: {e}", path.display()),
+            };
+            docs += 1;
+            if let Some(kind) = value.get("kind").and_then(|k| k.as_str()) {
+                assert_ne!(
+                    kind, "Secret",
+                    "{}: a Secret manifest may never live in the repo (public repo; sealed store only, s2b practice 7)",
+                    path.display()
+                );
+            }
+        }
+        assert!(docs > 0, "{}: no YAML documents", path.display());
+    }
+}
+
+/// The vendored operator file is byte-identical to the upstream release its PIN.json records:
+/// re-vendoring without touching the pin (or editing the vendor file "just a little") is a
+/// supply-chain event this test refuses to let pass as an ordinary diff.
+#[test]
+fn platform_operator_vendor_matches_pin() {
+    use sha2::{Digest, Sha256};
+    let root = platform_root().join("cnpg-operator");
+    let pin: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("PIN.json")).expect("PIN.json exists"))
+            .expect("PIN.json parses");
+    let version = pin["version"].as_str().expect("pin has version");
+    let expected = pin["sha256"].as_str().expect("pin has sha256");
+    let vendor = root.join(format!("cnpg-{version}.yaml"));
+    let bytes = fs::read(&vendor)
+        .unwrap_or_else(|_| panic!("vendored operator file {} missing", vendor.display()));
+    let actual: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        actual, expected,
+        "cnpg-{version}.yaml does not match PIN.json's sha256 -- if this is a deliberate \
+         re-vendor, update PIN.json in the same reviewed change"
+    );
+}
+
+/// The replication-safety pair (ADR-20260807-114122 + PROP-20260806-223656 s2b practice 3):
+/// the ENTRY shape must carry no `synchronous` block (quorum-sync with zero replicas blocks
+/// every write -- checkout freezes), and the HA ladder overlay must carry BOTH `instances: 3`
+/// and quorum-synchronous with strict durability (3 async instances can acknowledge a paid
+/// order a failover then loses). Superuser stays disabled in both shapes.
+#[test]
+fn platform_cluster_entry_and_ha_shapes_are_safe() {
+    let cnpg = platform_root().join("cnpg");
+    let cluster: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(cnpg.join("cluster.yaml")).unwrap()).unwrap();
+    let spec = &cluster["spec"];
+    assert_eq!(spec["instances"].as_u64(), Some(1), "entry shape is instances: 1 (ADR-20260807-114122)");
+    assert!(
+        spec["postgresql"]["synchronous"].is_null(),
+        "instances: 1 with a synchronous block would block every write -- the ladder overlay owns sync"
+    );
+    assert_eq!(spec["enableSuperuserAccess"].as_bool(), Some(false), "superuser stays disabled (D2)");
+    assert_eq!(
+        spec["affinity"]["podAntiAffinityType"].as_str(),
+        Some("required"),
+        "required anti-affinity is part of D2 and must already be in place for the ladder"
+    );
+
+    let patch: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(cnpg.join("ha/cluster-ha-patch.yaml")).unwrap()).unwrap();
+    let hspec = &patch["spec"];
+    assert_eq!(hspec["instances"].as_u64(), Some(3), "ladder shape is instances: 3");
+    let sync = &hspec["postgresql"]["synchronous"];
+    assert_eq!(sync["method"].as_str(), Some("any"), "quorum-based synchronous replication");
+    assert!(sync["number"].as_u64().is_some_and(|n| n >= 1), "at least one synchronous standby");
+    assert_eq!(
+        sync["dataDurability"].as_str(),
+        Some("required"),
+        "strict durability: writes block rather than silently degrade to async"
+    );
+
+    // The ladder stays GATED: no kustomization outside ha/ itself lists the overlay as a
+    // resource -- flipping the ladder is a separate recorded decision (ADR-20260807-114122),
+    // never a side effect of an ordinary apply.
+    for path in platform_yaml_files() {
+        if path.file_name().is_some_and(|f| f == "kustomization.yaml")
+            && !path.parent().is_some_and(|p| p.ends_with("ha"))
+        {
+            let kust: serde_yaml::Value =
+                serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            for entry in kust["resources"].as_sequence().into_iter().flatten() {
+                let r = entry.as_str().unwrap_or_default();
+                assert!(
+                    r != "ha" && !r.ends_with("/ha") && !r.starts_with("ha/") && !r.contains("/ha/"),
+                    "{}: resource '{r}' wires in the gated ha/ ladder overlay",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// The drill's recovery source must mirror the production archive EXACTLY (destination path,
+/// endpoint, postgres image) -- a drift here means the weekly drill rehearses restoring the
+/// WRONG archive while reporting green. And the drill cluster itself must never archive
+/// (`backup:` stanza) nor use the Retain storage class (weekly volume leak).
+#[test]
+fn platform_drill_env_matches_cluster_backup() {
+    let root = platform_root();
+    let cluster: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(root.join("cnpg/cluster.yaml")).unwrap()).unwrap();
+    let barman = &cluster["spec"]["backup"]["barmanObjectStore"];
+    let dest = barman["destinationPath"].as_str().expect("cluster has destinationPath");
+    let endpoint = barman["endpointURL"].as_str().expect("cluster has endpointURL");
+    let image = cluster["spec"]["imageName"].as_str().expect("cluster has imageName");
+
+    let pin: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("cnpg-operator/PIN.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        pin["postgres_image"].as_str(),
+        Some(image),
+        "PIN.json postgres_image and cluster.yaml imageName must be the same pin"
+    );
+
+    let cron: serde_yaml::Value = serde_yaml::from_str(
+        &fs::read_to_string(root.join("restore-drill/cronjob-restore-drill.yaml")).unwrap(),
+    )
+    .unwrap();
+    let containers = &cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0];
+    let env = containers["env"].as_sequence().expect("drill cronjob has env");
+    let get_env = |name: &str| -> &str {
+        env.iter()
+            .find(|e| e["name"].as_str() == Some(name))
+            .and_then(|e| e["value"].as_str())
+            .unwrap_or_else(|| panic!("drill cronjob missing env {name}"))
+    };
+    assert_eq!(get_env("BARMAN_DESTINATION_PATH"), dest, "drill restores from the production destination path");
+    assert_eq!(get_env("BARMAN_ENDPOINT_URL"), endpoint, "drill uses the production object-storage endpoint");
+    assert_eq!(get_env("DRILL_IMAGE"), image, "drill restores under the same pinned postgres image");
+
+    // The GitHub token is a REQUIRED secret ref: a missing secret must fail the pod visibly,
+    // never run a drill whose failures nobody hears.
+    let token = env
+        .iter()
+        .find(|e| e["name"].as_str() == Some("GITHUB_TOKEN"))
+        .expect("drill cronjob has GITHUB_TOKEN");
+    assert!(
+        token["valueFrom"]["secretKeyRef"]["optional"].is_null()
+            || token["valueFrom"]["secretKeyRef"]["optional"].as_bool() == Some(false),
+        "GITHUB_TOKEN secret ref must not be optional"
+    );
+
+    // Script-level safety: strip comments, then the drill script may neither archive nor touch
+    // the Retain class.
+    let script =
+        fs::read_to_string(root.join("restore-drill/scripts/restore-drill.sh")).unwrap();
+    let code: String = script
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !code.contains("backup:"),
+        "drill cluster must have no backup stanza -- archiving into the production destination corrupts the recovery path"
+    );
+    assert!(
+        !code.contains("captain-db-retain"),
+        "drill cluster must not use the Retain storage class -- a weekly drill on Retain leaks one volume per run"
+    );
+    assert!(
+        code.contains("sslmode=require") && code.contains("claude_ro"),
+        "production comparison must run as the SELECT-only claude_ro role (D7)"
+    );
+}

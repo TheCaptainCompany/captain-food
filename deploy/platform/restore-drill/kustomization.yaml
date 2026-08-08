@@ -1,0 +1,23 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# Everything drill-side, stamped into the standing scratch namespace. The production half of
+# the drill's access lives in ../cnpg/rbac-drill-access.yaml (this kustomization's namespace
+# stamp is exactly why). Scripts ship as a generated ConfigMap FROM the files in scripts/ --
+# one source of truth, no inline duplication; stable name so the CronJobs can reference it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: captain-restore-drill
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - cronjob-restore-drill.yaml
+  - cronjob-wal-archive-age.yaml
+configMapGenerator:
+  - name: restore-drill-scripts
+    files:
+      - scripts/restore-drill.sh
+      - scripts/wal-archive-age.sh
+      - scripts/lib-issue.sh
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: captain-food

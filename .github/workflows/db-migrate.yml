@@ -39,6 +39,22 @@ on:
         description: "Skip the wait-for-deployed-build check (exceptional manual runs only)"
         type: boolean
         default: false
+      # The PREPARED CNPG retarget (#360, ADR-20260807-002705 D6: migrations applied FRESH at
+      # cutover), gated behind this input: the default stays supabase, the workflow_run path
+      # never selects cnpg, and flipping the DEFAULT is a separate one-line ADR at cutover --
+      # gate-then-stabilize. The cnpg path reaches the in-cluster database through a kubectl
+      # port-forward using the MKS_KUBECONFIG repo secret (#358's deliverable) and the
+      # operator-generated captain-db-app credentials -- no separate DATABASE_URL secret to
+      # drift. It deliberately skips the /health build-version wait: pre-cutover there is no
+      # serving app on CNPG, and the schema-version /health gate (ADR-20260730-051500) holds
+      # the app side instead.
+      target:
+        description: "Migration target: supabase (default, today's production) or cnpg-port-forward (prepared cutover path)"
+        type: choice
+        options:
+          - supabase
+          - cnpg-port-forward
+        default: supabase
 
 permissions:
   contents: read
@@ -58,7 +74,8 @@ jobs:
           # The deploy's exact commit; on manual dispatch, the ref the run was dispatched on.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Wait for the deployed build to be serving
-        if: ${{ !inputs.skip_deploy_check }}
+        # Render path only: the CNPG target has no serving app pre-cutover (see the input's note).
+        if: ${{ !inputs.skip_deploy_check && inputs.target != 'cnpg-port-forward' }}
         env:
           # The commit this run is migrating for: the deploy's own head_sha, or the dispatched ref.
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -97,6 +114,33 @@ jobs:
         with:
           tool: sqlx-cli
       - name: Apply migrations
+        if: ${{ inputs.target != 'cnpg-port-forward' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: sqlx migrate run --source migrations
+      - name: Apply migrations via CNPG port-forward (gated cutover path, #360)
+        if: ${{ inputs.target == 'cnpg-port-forward' }}
+        env:
+          MKS_KUBECONFIG: ${{ secrets.MKS_KUBECONFIG }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MKS_KUBECONFIG}" ]; then
+            echo "::error::MKS_KUBECONFIG repo secret is not provisioned (#358 deliverable) -- the CNPG path is gated on it and fails loudly rather than guessing"
+            exit 1
+          fi
+          export KUBECONFIG="${RUNNER_TEMP}/kubeconfig"
+          printf '%s' "${MKS_KUBECONFIG}" > "${KUBECONFIG}"
+          chmod 600 "${KUBECONFIG}"
+          # App credentials come from the operator-generated captain-db-app secret -- reading
+          # them at run time means there is no second copy of the password to rotate or drift.
+          PGPASS=$(kubectl -n captain-prod get secret captain-db-app -o jsonpath='{.data.password}' | base64 -d)
+          echo "::add-mask::${PGPASS}"
+          kubectl -n captain-prod port-forward svc/captain-db-rw 15432:5432 &
+          PF_PID=$!
+          trap 'kill "${PF_PID}" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/15432) 2>/dev/null && { exec 3>&- 3<&-; break; }
+            [ "$i" = "30" ] && { echo "::error::port-forward to captain-db-rw never became ready"; exit 1; }
+            sleep 2
+          done
+          DATABASE_URL="postgresql://app:${PGPASS}@127.0.0.1:15432/app" sqlx migrate run --source migrations

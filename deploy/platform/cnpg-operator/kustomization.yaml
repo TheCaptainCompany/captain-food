@@ -1,0 +1,9 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md. The operator install is
+# the vendored upstream release manifest, pinned by PIN.json (version + sha256, test-enforced).
+# Installs into `cnpg-system` (namespace ships inside the vendor file). Apply BEFORE cnpg/ --
+# the Cluster CR needs the CRDs; use `kubectl apply --server-side` (the CRDs exceed the
+# client-side last-applied annotation limit).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cnpg-1.27.4.yaml

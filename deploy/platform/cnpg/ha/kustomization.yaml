@@ -1,0 +1,14 @@
+# PLATFORM SOURCE, hand-written (#360) -- THE LADDER OVERLAY, deliberately UNREFERENCED by the
+# root kustomization and by Argo CD. Rendering it (`kustomize build deploy/platform/cnpg/ha`)
+# yields the full ADR-20260807-002705 D2 shape; wiring it into the reconciled path is the
+# separate, recorded ladder decision of ADR-20260807-114122 (one-line ADR + PR), never a hand
+# apply. Kept building at all times so the flip-day diff is exactly two lines of routing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../
+patches:
+  - path: cluster-ha-patch.yaml
+    target:
+      kind: Cluster
+      name: captain-db

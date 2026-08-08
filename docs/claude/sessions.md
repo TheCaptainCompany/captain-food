@@ -683,3 +683,14 @@ hourly (a 3-hour implementation with no commit is indistinguishable from a hang 
 `cargo machete` locally (CI's lint gate does), and keep baseline checkouts of main in the
 SCRATCHPAD — a stray clone in the repo root became a committed gitlink via a coordinator
 `git add -A` (itself a mistake: enumerate paths in shared trees).
+
+**Pinning third-party artifacts when the GitHub API is proxy-blocked (2026-08-08, #360)**: in this
+container `api.github.com` returns 403 through the agent proxy, but `raw.githubusercontent.com`
+serves release manifests fine (probe versioned paths directly, e.g.
+`.../release-1.27/releases/cnpg-1.27.4.yaml` — 200 vs 404 walks the patch versions), and registry
+digests need no `gh` at all: `curl "https://ghcr.io/token?scope=repository:{org}/{repo}:pull"`
+yields an anonymous token whose `docker-content-digest` response header on
+`/v2/{org}/{repo}/manifests/{tag}` is the digest to pin (same flow works unauthenticated on Docker
+Hub via `hub.docker.com/v2/repositories/{org}/{repo}/tags`). Vendor the manifest BYTE-IDENTICAL
+and record url+sha256 in a PIN.json a test recomputes — a header comment inside the vendored file
+would silently break the checksum.

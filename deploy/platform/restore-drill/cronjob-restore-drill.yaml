@@ -1,0 +1,77 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+# The weekly restore drill (s2b practice 4): Monday 04:30 UTC -- the quietest slot of the week
+# (peak is Fri/Sat 19:00-21:30 Europe/Paris), and the scratch cluster's ~512Mi transient
+# footprint is what the snug single-node budget (ADR-20260807-114122) can spare only off-peak.
+#
+# Failure visibility: the SCRIPT files the GitHub issue (internal deadlines all shorter than
+# activeDeadlineSeconds), so the only silent-death window is the pod being killed from outside
+# or never scheduling -- startingDeadlineSeconds surfaces the latter in kubectl, and the
+# Honeycomb trigger loop (#364) is the eventual net for job-level death. backoffLimit: 0 on
+# purpose: a retry storm re-creating 20Gi recovery clusters is worse than one crisp failure
+# issue per week.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restore-drill
+  labels:
+    app.kubernetes.io/part-of: captain-food
+spec:
+  schedule: "30 4 * * 1"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: captain-food
+            app.kubernetes.io/name: restore-drill
+        spec:
+          serviceAccountName: restore-drill
+          restartPolicy: Never
+          containers:
+            - name: drill
+              # kubectl + jq + curl toolbox, tag+digest pinned (third-party: digest is the pin,
+              # the tag is for humans). kubectl 1.34 stays within +/-1 minor of the MKS server.
+              image: docker.io/alpine/k8s:1.34.9@sha256:72c921a10c53ab749674e828ad12b776d006481c852bba7dd89e149ceed666f3
+              command: ["/scripts/restore-drill.sh"]
+              env:
+                # BARMAN_* and DRILL_IMAGE mirror ../cnpg/cluster.yaml and
+                # ../cnpg-operator/PIN.json -- consistency is pinned by the codegen test
+                # platform_drill_env_matches_cluster_backup, so a cluster.yaml edit that
+                # forgets this file fails the build.
+                - name: BARMAN_DESTINATION_PATH
+                  value: s3://captain-food-db-backups/captain-db
+                - name: BARMAN_ENDPOINT_URL
+                  value: https://s3.eu-west-par.io.cloud.ovh.net
+                - name: DRILL_IMAGE
+                  value: ghcr.io/cloudnative-pg/postgresql:17.10@sha256:405d29f68759fb823da5e378e99b68194bb9f93fa47f575f0a7ae95024910f38
+                - name: GITHUB_REPO
+                  value: TheCaptainCompany/captain-food
+                # Required, NOT optional: a missing token secret must fail the pod visibly
+                # (CreateContainerConfigError), never run a drill whose failures nobody hears.
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: restore-drill-github-token
+                      key: token
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: restore-drill-scripts
+                defaultMode: 0555

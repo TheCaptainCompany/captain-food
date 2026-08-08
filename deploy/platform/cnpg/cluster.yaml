@@ -1,0 +1,135 @@
+# PLATFORM SOURCE, hand-written (#360) -- see deploy/platform/README.md.
+#
+# `captain-db`: the ONE PostgreSQL cluster -- event log (`domain_events`), mailbox
+# (`inbound_messages`), View_* read models. ADR-20260807-002705 D2 as amended by
+# ADR-20260807-114122 "MKS starts at one node": ENTRY SHAPE `instances: 1` on the single d2-8
+# node; WAL archiving to Object Storage is the ONLY recovery path, which is why the restore
+# drill (../restore-drill/) is load-bearing, not ceremonial. The 3-instance quorum-synchronous
+# LADDER shape is fully written in ha/ (unreferenced -- flipping it is a separate one-line ADR
+# when #242 lands or the first paying restaurants arrive).
+#
+# INVARIANTS PINNED BY CODEGEN TESTS (tools/codegen-rs/src/tests.rs, platform_*):
+#   - instances: 1 here => NO `synchronous` block (quorum-sync with zero replicas blocks
+#     every write -- the checkout path would freeze at the first order);
+#   - enableSuperuserAccess: false;
+#   - secrets referenced by NAME only (cnpg-object-storage, claude-ro-credentials) -- values
+#     live in the sealed store (#362); a missing secret is a visibly-degraded cluster status,
+#     never a placeholder.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: captain-db
+  namespace: captain-prod
+  labels:
+    app.kubernetes.io/part-of: captain-food
+spec:
+  instances: 1
+
+  # Digest-pinned like every image we deploy (ADR-20260730-051500); recorded with the operator
+  # pin in ../cnpg-operator/PIN.json. Fresh chain starts on PostgreSQL 17 (D6 clean start).
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.10@sha256:405d29f68759fb823da5e378e99b68194bb9f93fa47f575f0a7ae95024910f38
+
+  # No network superuser, ever (D2). Inside-pod peer auth (`kubectl exec ... psql`) remains the
+  # break-glass surface, governed by §2b practice 6 (time-boxed, backfilled the same day).
+  enableSuperuserAccess: false
+
+  # The #360 checklist's PDB item, satisfied by CNPG's OWN PodDisruptionBudgets (explicit here
+  # even though true is the default): the operator creates and retargets them across switchovers
+  # -- a second, hand-written PDB over the same pods would fight it. Consequence to expect at
+  # instances: 1: a node drain that wants to evict the only instance can be held by the PDB, so
+  # MKS node maintenance is a SUPERVISED event (console session), not a background one. Accepted:
+  # a silent eviction of the write path is the worse failure than a paused upgrade.
+  enablePDB: true
+
+  # REQUIRED anti-affinity is already in place at instances: 1 (vacuously true on one pod) so
+  # the ladder flip changes NOTHING here -- exactly the "config, not migration" climb
+  # ADR-20260807-114122 promises.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+
+  # Fits the single-node demand budget ADR-20260807-114122 calls snug (~5.5 Gi of ~6.3 Gi
+  # allocatable includes ~1 Gi for this cluster). Memory request == limit (no OOM surprise on
+  # the write path at Friday peak); no CPU limit (throttling the WAL flush at 20:30 Saturday
+  # is a self-inflicted outage).
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 1Gi
+
+  postgresql:
+    parameters:
+      # 1 Gi pod: 256MB shared_buffers (25%), the rest for backends + page cache.
+      shared_buffers: 256MB
+      # Connection budget math (specs/common/configuration.yaml DATABASE_POOL_MAX_CONNECTIONS,
+      # default 5): today ONE monolith pod x 5 = 5; at bin cutover ~37 db-needing bins x 5 = 185,
+      # + drill/diagnosis psql + operator headroom => 220 with ~30 spare. The bin flip re-opens
+      # this number (or adds a pooler) BEFORE it lands -- 37 pods reconnecting after a Recreate
+      # deploy is a connection storm this ceiling must absorb.
+      max_connections: "220"
+      # Force a WAL segment switch at most every 5 min under activity, so the archive (the only
+      # recovery path) never lags a quiet-but-not-idle evening by more than one segment. A
+      # totally idle database switches nothing -- the wal-archive-age check accounts for that.
+      archive_timeout: "300"
+
+  managed:
+    # claude_ro: the SELECT-only diagnosis role (D7, §2b practice 5). The operator creates the
+    # LOGIN role from the sealed secret (name-only reference); what it may read is granted by
+    # migration 20260808070000_claude_ro_select_only.sql -- role lifecycle and grant lifecycle
+    # deliberately live in different records (the grant travels with the schema it grants on).
+    roles:
+      - name: claude_ro
+        comment: >-
+          SELECT-only diagnosis role for agent sessions (ADR-20260807-002705 D7); grants via
+          migrations, password via the sealed claude-ro-credentials secret.
+        login: true
+        inherit: true
+        connectionLimit: 3
+        passwordSecret:
+          name: claude-ro-credentials
+
+  bootstrap:
+    # D6: production starts CLEAN -- initdb, empty schema, all migrations applied fresh via the
+    # gated db-migrate path. NO dump-restore path exists anywhere in this tree, on purpose.
+    initdb:
+      database: app
+      owner: app
+
+  storage:
+    # 20 Gi high-speed, Retain (see storageclass.yaml). Growth math (dba lens): V0 Tours order
+    # volume puts the event log in single-digit GiB for the first year; the historical hazard
+    # here is bulk mirrors (SIRENE hit 655 MB once, #231), caught by expansion
+    # (allowVolumeExpansion) not by over-provisioning day one.
+    size: 20Gi
+    storageClass: captain-db-retain
+
+  backup:
+    # Continuous WAL archiving + base backups to OVH Object Storage (EU, egress-free) -- the
+    # only recovery path at instances: 1. Retention 30d: every restore point inside a month,
+    # PITR anywhere in between; the weekly drill (../restore-drill/) proves it restorable.
+    # NOTE upstream direction: in-tree barmanObjectStore is deprecated in favor of the Barman
+    # Cloud Plugin; it is fully supported on 1.27 -- revisit at the next operator re-vendor.
+    # `serverName` defaults to the cluster name (captain-db); the drill's externalClusters
+    # recovery references that same name READ-ONLY and must never write here.
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      # Bucket + endpoint are the console session's checklist items 1-2 (README): the bucket is
+      # created to MATCH this manifest; if the real region differs, this file is fixed by PR
+      # first. Secret referenced by NAME -- never provisioned from the repo.
+      destinationPath: s3://captain-food-db-backups/captain-db
+      endpointURL: https://s3.eu-west-par.io.cloud.ovh.net
+      s3Credentials:
+        accessKeyId:
+          name: cnpg-object-storage
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cnpg-object-storage
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+        jobs: 1
