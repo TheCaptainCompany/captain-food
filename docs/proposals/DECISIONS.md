@@ -480,7 +480,10 @@ $ref-kind-appropriateness).
 
 [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)
 ([#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)).
-`Proposed`, all decisions **open**. Derives the four delivery persona journeys and answers the
+`Proposed`. **D1, D2, D4, D6 decided by ensemble consent** —
+[ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
+customer veto window open. **D3 and D5 remain the customer's** (event-vocabulary naming reserved
+by Concern; money path). Derives the four delivery persona journeys and answers the
 epic's vocabulary question (the wired offer/accept vocabulary is canonical); decomposes into 8 V0
 slices (+3 V1). Absorbs the rider-write-surface half of PROP-20260726-172500 (whose D1/D2/D3/D4/D5
 rows above remain that proposal's). **Two unchecked Concerns mechanically block `Approved`**: the
@@ -503,7 +506,11 @@ credit must require a resolvable PM edge, never an annotation).
 [PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md)
 ([#398 "Decide the API contract for tombstoned rows before the #194 projection sweep"](https://github.com/TheCaptainCompany/captain-food/issues/398)
 + [#347 "Decide the last annotated read-model hole: Restaurant fed by RestaurantListingOptedOut"](https://github.com/TheCaptainCompany/captain-food/issues/347)).
-`Proposed`, all decisions **open**. One principle, two faces: disappearance is always a designed
+`Proposed`. **D1 and D5 decided by ensemble consent** —
+[ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
+customer veto window open. **D2, D3, D4 remain the customer's** (money-path event vocabulary;
+legal-shaded opt-out posture; the enum-vs-boolean guard genuinely contested between lenses). One
+principle, two faces: disappearance is always a designed
 state; physical row removal is reserved for legal erasure. **Three unchecked Concerns mechanically
 block `Approved`**: D2 is THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
 + the replacement-order emitter) needing PO event sign-off; the resolver-policy change lands in the
