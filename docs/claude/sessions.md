@@ -196,7 +196,13 @@ which was enough to finish `cargo test --workspace` without touching the debug c
 not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50M -delete` freed
 15G and cost only a **relink** of whatever ran next (~seconds each), where deleting all of `deps/`
 costs a full recompile of ~200 crates. Two ENOSPC build failures in one session were both cured by
-this plus dropping `incremental/`.
+this plus dropping `incremental/`. **Post-#335 (2026-08-09) the biggest producer is gone**:
+`infrastructure`'s 27 integration binaries (1.4G per build state, ≈52M each — most of any `+50M`
+sweep's haul) are ONE `--test main` binary at ~70M, so a stale-hash day accumulates ~20× less
+there; the remaining large link products are other crates' suites and the `server` binaries. The
+consolidated suite pays instead a ~0.4 s/test schema reset (the witness replays the full
+41-migration chain per test): the 54-test infrastructure pass went 15 s → 37 s of pure execution,
+bought back several times over by 26 fewer link steps per iteration.
 
 **After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
 `make rust` check-drift ran a STALE `generate` binary right after the deps sweep and mass-pruned
