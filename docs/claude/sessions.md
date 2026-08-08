@@ -734,7 +734,13 @@ would silently break the checksum.
 
 **The interactive decision form (2026-08-08, product-owner directive: keep this approach)** — when
 a batch of decisions goes to the customer, do NOT deliver a wall of markdown: publish the brief as
-an **interactive artifact** and let them answer at their own tempo. The ten-decision brief closed
+an **interactive artifact** and let them answer at their own tempo. **This binds even when the
+customer is LIVE in-session, and `AskUserQuestion` is NOT a substitute for a batch of 3+** — the
+inline tool has no room for the per-lens arguments, so the customer decides blind; on 2026-08-08
+(night) the #348 batch went through it, the customer had to re-raise the contract themselves
+("I was supposed to have an html page… I thought it was in the rules"), and the brief was rebuilt
+after the fact with the answers pre-filled for review. `AskUserQuestion` stays right for a single
+quick mechanical follow-up only. The ten-decision brief closed
 same-day this way where the register had been accumulating for weeks. Recipe (rebuildable in any
 session): one `<article>` per decision (question, per-lens arguments, recommendation, links into
 docs/proposals); per-card widgets = three radio chips ("Approve as recommended" / "Different
