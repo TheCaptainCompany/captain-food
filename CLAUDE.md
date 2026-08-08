@@ -153,11 +153,12 @@ lists entrypoints. The validator (`make validate`, the Rust `tools/codegen-rs`) 
 the **whole spec** — schema/refs, actor wiring, api↔model, views, C4, observability, and (ADR-0032)
 **tests, stories and rules completeness**: every message/event/error is exercised by a test, every
 mutation/query is reached by a story step, and every test↔rule link holds both ways. It must be
-**0 errors**. Warnings are a **baseline to compare against, not a clean slate**: `main` carries 32,
-and only 4 are the "known view design-holes" the earlier wording implied were the whole set —
-`command-no-mutation` ×13 and `event-not-projected` ×11 dominate, then `id-not-in-payload` ×3,
-`view-fedby-unused` ×2, `view-column-no-source` ×2,
-`identity-property-not-on-command` ×1. The rule for a change is therefore **0 errors and no NEW
+**0 errors**. Warnings are a **baseline to compare against, not a clean slate**: as of 2026-08-08
+`main` carries 43 — `command-no-mutation` ×13, `event-not-projected` ×11,
+`action-missing-required-input` ×10, `action-unknown-input` ×7, `view-fedby-unused` ×1,
+`identity-property-not-on-command` ×1. These numbers DRIFT as specs evolve (an earlier pin of 32
+went stale within a day): ALWAYS re-measure the baseline on a pristine `main` worktree before
+comparing. The rule for a change is therefore **0 errors and no NEW
 warning**: diff the count and kinds against `main` (`make validate` prints
 `checks: N error(s), M warning(s)`), and never read a non-zero count as a regression you caused.
 Three independent reviewer passes on [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)
