@@ -3,6 +3,68 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-09 (night) — G5/G6 UNBLOCKED (not closed), G7 CLOSED: the customer path is
+> wired, and still unreachable in a browser
+> ([#420 "Customer delivery reassurance: tracking shows the rider path, checkout FAILED state, orphan binding fix (#348 slice 8)"](https://github.com/TheCaptainCompany/captain-food/issues/420),
+> the code-only half of PROP-20260809-021351 §6 item 1).** `hydrate()` no longer returns above the
+> crate's only `mount_to_body`: checkout and order_tracking MOUNT, install the delegated action
+> layer, resolve their declared `data_requirements`, and tracking folds `orderStatusChanged` with a
+> pull re-sync on every (re)connect. `render_path_with` resolves `data_requirements` for EVERY
+> matched screen — the `sdui` conjunct never had a reason, and the `requires_auth` one was a fact
+> about the TRANSPORT (which the renderer cannot know), so it now asks and lets a refusal degrade the
+> binding exactly as before. The checkout shell is built from `cart.current`/`me.profile`/
+> `paymentStatus.byOrder` instead of `""`/`0`/`""`/`false`, and tracking from `order.byId` instead of
+> `TrackingState::new(id)`; the status hero renders the resolved SENTENCE (it used to emit `data-i18n`
+> on EMPTY elements, so the page a customer landed on after paying was blank above the fold).
+> **G7, in the EMITTER**: `orderStatusChanged` filtered only `Order-<id>` AND deduped on
+> `OrderStatus`, so the #424 delivery mirror was swallowed twice over; it now also matches THIS
+> order's delivery job (bound lazily via `DeliveryReadRepository::by_order`, so a foreign envelope
+> costs nothing once bound) and dedupes on the row's own `updated_at` fold clock.
+> **The gate hole is closed COMPILER-FIRST** (ADR-20260803-234035): `crates/web/src/handwritten.rs`
+> carries a closed `HandWrittenScreen` enum, exhaustive dispatch with no `_` arm on either entry, and
+> two `const` proofs walking the generated screen tables at COMPILE TIME in both directions — a new
+> `sdui: false` screen without a mount is now `E0080`, not a page that silently renders nothing.
+> `every_sdui_screen_of_every_surface_renders` → `every_screen_of_every_surface_renders`, skip
+> removed. Both named tests seen RED first (`left: 0` reads; `Elapsed(())` on the delivery hop).
+> Gates: `make rust` green, 0 errors, warning histogram **37 → 37, same kinds**;
+> `cargo test -p server --test graphql_subscriptions` **10/10** (NOT covered by `make rust`).
+> The delivery-hop test was **renamed to what it proves** after `beck` established by mutation that
+> it proved the DEDUPE, not the filter: reverting the filter while keeping the dedupe left it green,
+> because the helper pumps 50 copies of the order's own envelope and each opens a ~3 s re-poll
+> window, so a lingering `Order-` envelope delivered the second frame.
+> `a_delivery_job_envelope_alone_reaches_the_confirmation_page` now isolates the delivery branch —
+> verified RED under that exact mutation (`Elapsed`), green restored.
+>
+> **WHY G5/G6 ARE NOT CLOSED — the mounts are wired and every read they feed is REFUSED.** Three
+> review lenses converged on this; it must not be mistaken for done.
+> **(a)** `/checkout` has **no route params**, and `cart.current` / `paymentStatus.byOrder` both take
+> REQUIRED inputs, so both documents are dropped before they are sent — the shell receives an empty
+> map and renders the old hardcoded state plus the host slug. `payment_failed` **cannot become true**.
+> **(b)** `order.byId`, `me.profile` and `orderStatusChanged` are all `CUSTOMER`-guarded, while the
+> customer surface talks to `/public` and `web_ssr.rs` renders as anonymous `RequestRole::Public`
+> with no session — and **no bearer token exists anywhere in `crates/web`**. SSR, hydrate, the
+> reconnect re-sync and the socket subscribe are each refused.
+> So a customer who pays today still lands on a page carrying no order. What #427 changed is that
+> the page **no longer lies about it**: a refused read renders `data-status="PENDING"` and makes no
+> claim, where it previously rendered "Commande introuvable" for every order, forever — `OrderRead`
+> makes "the transport refused" and "no such order" unrepresentable-if-confused.
+>
+> **GAP(copy), on #420**: the right content for the unresolved state is the acceptance-first
+> reassurance ("Reçu ✓ — confirmation en cours…"). It needs a translation key, and customer copy is
+> approved verbatim by the product owner, so it rides the spec half rather than being invented here.
+> **Still open on this path, each needing a DSL change and reported on #420**: no Stripe
+> **publishable** key exists anywhere (`specs/payments/configuration.yaml`); a way for the checkout
+> route to supply a cart/order id; a customer bearer token on the web transport; `cart.current`
+> carries no restaurant NAME (the shell falls back to the host's tenant slug); and the `order.byId`
+> selection carries no restaurant name either, so the hero's BODY copy is withheld rather than
+> shipped with an unfilled `{restaurant}` — which is **every status in the twenty-minute pre-food
+> window**, so the customer gets a title alone for the whole anxiety curve.
+> **And one gate that does not exist**: `beck` re-planted the exact `if !screen.sdui { return; }` bug
+> this work fixes and **both CI gates stayed green** (96 native tests, `make wasm`). `make wasm` is a
+> COMPILE check and the regression class is a semantic early return, so it cannot help; the `const`
+> proofs prove an arm EXISTS, never that `hydrate()` reaches it. The honest gate is
+> `wasm-bindgen-test` + a headless DOM — filed on #420, not assumed.
+>
 > 🔴 **2026-08-09 (night) — THE CUSTOMER PATH IS INERT ON `main`, and a paid order tells nobody.**
 > Four lenses briefed in parallel on [#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410)
 > (farley lead · ux-designer · beck · dba) converged independently on the same root cause, recorded

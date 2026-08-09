@@ -129,6 +129,7 @@ impl SubscriptionRoot {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?.clone();
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?.clone();
+        let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?.clone();
         // Tracked by orderId (#14, ADR-20260720-220000) — the key the confirmation screen has —
         // replacing the pre-acceptance-first correlationId convention.
         let order_id: domain::generated::scalars::OrderId = input.order_id.into();
@@ -166,10 +167,19 @@ impl SubscriptionRoot {
                 // RESTAURANT / RESTAURANT_ACCOUNT — the only other paths the roles list admits.
                 _ => true,
             };
-            // The last state pushed to this subscriber: (status, row updated_at). The timestamp
-            // advances on EVERY projected fold, so "identical to last" distinguishes a not-yet-folded
-            // event (re-poll briefly) from a fold that truly left the status unchanged (dedupe).
-            let mut last: Option<(ds::OrderStatus, chrono::DateTime<chrono::Utc>)> = None;
+            // The last state pushed to this subscriber: the projected row's `updated_at`, which the
+            // projector advances on EVERY fold of this row. Deliberately NOT keyed on `status`
+            // (#420): a rider's pickup/dropoff folds `delivery_status` / `courier` /
+            // `estimated_dropoff_at` onto this same row (#424) and leaves `status` untouched, so a
+            // status-keyed dedupe SWALLOWED exactly the movement the tracking screen exists to
+            // show. `updated_at` is the row's own "something changed" clock, so the key is the
+            // rendered state rather than one field of it.
+            let mut last: Option<chrono::DateTime<chrono::Utc>> = None;
+            // THIS order's delivery job stream, learned lazily: before dispatch there is no job, so
+            // the lookup repeats only across the (short) window between subscribing and dispatch,
+            // and costs nothing once bound. Without it, every `DeliveryJob-` envelope on the
+            // platform would make every tracking subscriber re-read its row.
+            let mut delivery_stream: Option<String> = None;
             'events: loop {
                 let evt = match rx.recv().await {
                     Ok(evt) => evt,
@@ -178,9 +188,25 @@ impl SubscriptionRoot {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
-                // Only THIS order's stream moves this subscription (`Order-<uuid>`).
+                // THIS order's own stream (`Order-<uuid>`), or THIS order's delivery job
+                // (`DeliveryJob-<uuid>`) — the rider hops are appended there, never to the Order
+                // stream, so an Order-only filter is a confirmation page that goes quiet at exactly
+                // the moment the customer is watching hardest.
                 if evt.stream_name != wanted_stream {
-                    continue;
+                    if !evt.stream_name.starts_with("DeliveryJob-") {
+                        continue;
+                    }
+                    if delivery_stream.is_none() {
+                        delivery_stream = match deliveries.by_order(order_id).await {
+                            Ok(Some(job)) => Some(format!("DeliveryJob-{}", job.delivery_job_id.0)),
+                            // No job yet (or the read failed): ignore this envelope and try again on
+                            // the next one — never bind to someone else's job.
+                            _ => None,
+                        };
+                    }
+                    if delivery_stream.as_deref() != Some(evt.stream_name.as_str()) {
+                        continue;
+                    }
                 }
                 // The row is folded ASYNCHRONOUSLY by the projection worker (ADR-0040): give it a
                 // bounded window to absorb this event before treating it as a no-op.
@@ -199,15 +225,10 @@ impl SubscriptionRoot {
                     if !owned(&row) {
                         continue 'events; // not this caller's order — stay silent, no oracle
                     }
-                    if last == Some((row.status, row.updated_at)) {
-                        continue; // fold not visible yet — re-poll
+                    if last == Some(row.updated_at) {
+                        continue; // fold not visible yet — re-poll within the bounded window
                     }
-                    if last.map(|(status, _)| status) == Some(row.status) {
-                        // A fold landed but the status is unchanged — dedupe, don't re-push.
-                        last = Some((row.status, row.updated_at));
-                        continue 'events;
-                    }
-                    last = Some((row.status, row.updated_at));
+                    last = Some(row.updated_at);
                     let terminal = matches!(
                         row.status,
                         ds::OrderStatus::REJECTED

@@ -172,14 +172,28 @@ pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
 #[cfg(feature = "ssr")]
 const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } from '/assets/web.js'; await init(); hydrate();</script>";
 
-/// Server-side render with LIVE data (#92): resolve the matched SDUI screen's
-/// `data_requirements` through the given transport (the BFF passes its in-process
-/// `SchemaTransport` — no loopback HTTP) before rendering, exactly like the hydrate path (route
-/// `:params` feed resolver args), so the initial HTML carries the real content the screens spec
-/// contracts (`rendering_strategy: SSR_first`). `requires_auth` screens skip the fetch — a
-/// document GET carries no credentials, so their session-scoped reads could only answer
-/// empty; they ship as shells and the client owns their data. A resolver error skips that one
-/// binding (the shell slot renders empty; hydrate retries) — SSR must degrade, never 500.
+/// Server-side render with LIVE data (#92): resolve the matched screen's `data_requirements`
+/// through the given transport (the BFF passes its in-process `SchemaTransport` — no loopback
+/// HTTP) before rendering, exactly like the hydrate path (route `:params` feed resolver args), so
+/// the initial HTML carries the real content the screens spec contracts
+/// (`rendering_strategy: SSR_first`). A resolver error or a null skips that one binding (the shell
+/// slot renders empty; hydrate retries) — SSR must degrade, never 500.
+///
+/// #420 removed BOTH conditions this fetch used to carry, and each removal is a separate decision:
+///
+///   * `screen.sdui` — never had a reason. `checkout` and `order_tracking` declare
+///     `data_requirements` like every other screen; skipping them is what shipped a checkout shell
+///     with an empty cart summary and a confirmation page stuck on the not-found hero for every
+///     order (PROP-20260809-021351 §2, G5/G6).
+///   * `!screen.requires_auth` — the stated reason was "a document GET carries no credentials, so
+///     their session-scoped reads could only answer empty". That is a fact about the TRANSPORT, not
+///     about the screen, and this function cannot know it: the caller supplies the transport. Let
+///     the transport answer. Today's in-process SSR transport is anonymous/PUBLIC, so a
+///     CUSTOMER-scoped read (`order`, `cart`) fails its role guard and the binding is skipped —
+///     byte-identical output to the old skip, one wasted role-guard rejection per requirement. The
+///     day the BFF's SSR transport carries the caller's identity, the confirmation page is right on
+///     first paint with no further change here. (The #107 OOM is unrelated: that was the DEFAULT
+///     host branch, which still serves through the data-less [`render_path`].)
 #[cfg(feature = "ssr")]
 pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     transport: &T,
@@ -191,18 +205,16 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
     let mut ctx = RenderContext::new(locale);
-    if matched.screen.sdui && !matched.screen.requires_auth {
-        for resolver in matched.screen.data_requirements {
-            let mut vars = serde_json::Map::new();
-            for (k, v) in matched.param_args(*resolver) {
-                vars.insert(k, v);
-            }
-            if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
-                ctx.insert_resolved(resolver.as_str(), value);
-            }
+    for resolver in matched.screen.data_requirements {
+        let mut vars = serde_json::Map::new();
+        for (k, v) in matched.param_args(*resolver) {
+            vars.insert(k, v);
+        }
+        if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
+            ctx.insert_resolved(resolver.as_str(), value);
         }
     }
-    Some(render_matched(&matched, surface, ctx, locale))
+    Some(render_matched(&matched, surface, ctx, host, locale))
 }
 
 /// Server-side render the page for `host` + `path` — the data-less entry (SSR SHELL only; the
@@ -213,46 +225,31 @@ pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
     use crate::renderer::RenderContext;
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
-    Some(render_matched(&matched, surface, RenderContext::new(locale), locale))
+    Some(render_matched(&matched, surface, RenderContext::new(locale), host, locale))
 }
 
 /// The shared tail of both entries: render the matched screen (SDUI tree + sheets, or the
 /// hand-written non-SDUI shells) and inject the hydrate boot script.
+///
+/// The hand-written branch dispatches on [`HandWrittenScreen`], whose variants are proved at
+/// COMPILE TIME to be exactly the `sdui: false` set (`handwritten.rs`) — so the old
+/// `_ => empty SDUI shell` fallback, which is what a new hand-written screen used to land in
+/// silently, no longer exists and cannot be reintroduced without failing the build.
 #[cfg(feature = "ssr")]
 fn render_matched(
     matched: &RouteMatch,
     surface: Surface,
     ctx: crate::renderer::RenderContext,
+    host: &str,
     locale: &str,
 ) -> String {
-    use crate::renderer::{render_screen_html, RenderContext};
-    let html = if matched.screen.sdui {
-        render_screen_html(matched.screen, surface.sheets(), ctx)
-    } else {
-        match matched.screen.id {
-            "checkout" => crate::checkout::render_checkout_html(
-                crate::checkout::CheckoutViewState {
-                    restaurant_name: String::new(),
-                    cart_line_count: 0,
-                    formatted_total: String::new(),
-                    is_delivery: true,
-                    // The data-less SSR shell: the payment outcome arrives with the page's own
-                    // paymentStatus read/subscription, never from the shell.
-                    payment_failed: false,
-                    locale: locale.to_string(),
-                },
-                locale,
-            ),
-            "order_tracking" => {
-                let order_id = matched
-                    .param("orderId")
-                    .and_then(|v| uuid::Uuid::parse_str(v).ok())
-                    .unwrap_or_else(uuid::Uuid::nil);
-                crate::tracking::render_tracking_html(crate::tracking::TrackingState::new(order_id), locale)
-            }
-            // A future sdui:false screen without a hand-written shell: an empty SDUI shell.
-            _ => render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale)),
+    use crate::handwritten::HandWrittenScreen;
+    use crate::renderer::render_screen_html;
+    let html = match HandWrittenScreen::of(matched.screen) {
+        Some(hand_written) => {
+            hand_written.render_html(matched, &ctx, Surface::slug_of(host), locale)
         }
+        None => render_screen_html(matched.screen, surface.sheets(), ctx),
     };
     html.replace("</body>", &format!("{HYDRATE_SCRIPT}</body>"))
 }
@@ -286,6 +283,11 @@ mod tests {
         // Unknown hosts / localhost: anonymous-safe marketplace default.
         assert_eq!(surface_for_host("localhost:8080"), Surface::CaptainFrontoffice);
         assert_eq!(surface_for_host("127.0.0.1"), Surface::CaptainFrontoffice);
+        // `slug_of` takes a HOST, never an ORIGIN: it splits on `:` to strip a port, so an origin
+        // reduces to "https" and the storefront label silently vanishes. The hydrate mount got this
+        // wrong once (#420, caught in self-review, never shipped) — pinned so it cannot come back.
+        assert_eq!(Surface::slug_of("https://chez-test.captain.food"), None);
+        assert_eq!(Surface::slug_of("chez-test.captain.food:8080"), Some("chez-test"));
     }
 
     #[test]
@@ -373,14 +375,132 @@ mod tests {
         assert!(fake.call(1).0.contains("$input: RestaurantsQueryInput!"));
         assert_eq!(fake.call(1).1["input"]["list"], json!("RECOMMENDED"));
 
-        // A requires_auth screen ships as a SHELL: zero server-side reads (no credentials on a
-        // document GET — its data is the client's).
-        let fake = FakeTransport::scripted(vec![]);
+        // A requires_auth screen ASKS its transport (since #420 — see `render_path_with`'s docs:
+        // whether a session-scoped read can be answered is the transport's fact, not the screen's)
+        // and DEGRADES to a shell when the answer is a refusal. Today's SSR transport is
+        // anonymous/PUBLIC, so this is what production sees: one role-guard rejection, and the
+        // client owns the data — byte-identical output to the old unconditional skip.
+        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Errors(
+            "Unauthorized: orders requires CUSTOMER".into(),
+        ))]);
         let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr")
             .await
             .expect("order history renders");
         assert!(html.contains("data-hydrate=\"order_history\""));
-        assert_eq!(fake.call_count(), 0, "requires_auth screens must not fetch server-side");
+        assert_eq!(fake.call_count(), 1, "the screen's declared read is attempted");
+        assert!(html.contains("data-empty=\"true\""), "a refused read degrades, never 500s: {html}");
+    }
+
+    /// #420 / PROP-20260809-021351 §2 (G6): the confirmation page is the ONE screen a customer who
+    /// has just paid looks at, and until now production SSR built it as `TrackingState::new(id)` —
+    /// the UNKNOWN / not-found hero, for every order, forever. Rendered through **production's own
+    /// call site** (`render_path_with`, what the BFF serves), not through `render_tracking_html`
+    /// with a state the test built itself.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn the_confirmation_page_tells_a_stranger_what_state_their_order_is_in() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+
+        let order = || {
+            json!({ "order": {
+                "id": "00000000-0000-7000-8000-000000000000",
+                "status": "ACCEPTED",
+                "statusChangedAt": "2026-08-09T19:30:00Z",
+                "estimatedReadyAt": "2026-08-09T19:55:00Z",
+                "items": [{ "offerId": "o1" }, { "offerId": "o2" }],
+            }})
+        };
+        let path = "/orders/00000000-0000-7000-8000-000000000000/confirmation";
+
+        // The human sentence, in BOTH shipped languages — a `data-i18n` attribute with an empty
+        // element is not a page that tells anybody anything.
+        for (locale, sentence) in [("fr", "Commande acceptée"), ("en", "Order accepted")] {
+            let fake = FakeTransport::scripted(vec![Ok(order())]);
+            let html = render_path_with(&fake, "chez-test.captain.food", path, locale)
+                .await
+                .expect("the confirmation route renders");
+            assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
+            assert!(html.contains(sentence), "{locale}: no human status sentence in {html}");
+            assert!(html.contains("data-status=\"ACCEPTED\""), "{locale}: {html}");
+            assert!(
+                !html.contains("data-status=\"UNKNOWN\""),
+                "{locale}: a real order must not render the not-found hero: {html}"
+            );
+            assert!(
+                !html.contains("[order.status."),
+                "{locale}: no `[key]` fallback marker — every key resolved: {html}"
+            );
+        }
+
+        // A read the transport cannot answer degrades to the not-found hero — never a 500, never a
+        // blank page (the SSR contract), and never a claim about an order we could not see.
+        let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null }))]);
+        let html = render_path_with(&fake, "chez-test.captain.food", path, "fr")
+            .await
+            .expect("the confirmation route still renders");
+        assert!(html.contains("data-status=\"UNKNOWN\""), "{html}");
+        assert!(html.contains("Commande introuvable"), "the not-found copy is resolved too: {html}");
+    }
+
+    /// #420 / PROP-20260809-021351 §2 (G5): the checkout shell was hardcoded to an empty restaurant,
+    /// zero lines, an empty total and `payment_failed: false` at its ONLY production call site — so
+    /// `checkout::tests::a_failed_payment_renders_the_failure_state_…` passed over a state
+    /// production never built. This is the counterpart test, through the real call site.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn the_checkout_shell_carries_the_cart_it_is_about_to_charge_for() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+
+        let cart = || {
+            json!({ "cart": {
+                "id": "cart-1", "restaurantId": "r-1", "status": "OPEN",
+                "lines": [
+                    { "offerId": "o1", "name": "Burger maison", "quantity": 2 },
+                    { "offerId": "o2", "name": "Frites", "quantity": 1 },
+                ],
+                "totalAmount": { "amountCents": 2350, "currency": "EUR" },
+            }})
+        };
+        let profile = || json!({ "me": { "customerId": "c-1", "displayName": "Camille Durand" } });
+
+        let fake = FakeTransport::scripted(vec![
+            Ok(cart()),
+            Ok(profile()),
+            Ok(json!({ "paymentStatus": null })),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+            .await
+            .expect("the checkout route renders");
+        assert_eq!(fake.call_count(), 3, "one read per declared resolver");
+        assert!(html.contains("2 items"), "the real line count: {html}");
+        assert!(html.contains("23,50 EUR"), "the real total, formatted: {html}");
+        assert!(html.contains("chez-test"), "the restaurant being ordered from: {html}");
+        assert!(
+            !html.contains("payment_failed_state"),
+            "no failure state before a failure: {html}"
+        );
+
+        // A FAILED payment status now REACHES the shell — the state the unit test asserts is built
+        // by production, not only by a test.
+        let fake = FakeTransport::scripted(vec![
+            Ok(cart()),
+            Ok(profile()),
+            Ok(json!({ "paymentStatus": {
+                "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED",
+            }})),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+            .await
+            .expect("the checkout route renders");
+        assert!(html.contains("id=\"payment_failed_state\""), "{html}");
+        assert!(html.contains("Paiement refusé"), "{html}");
+        assert!(html.contains("Votre carte n'a pas été débitée. Votre panier est intact."), "{html}");
+        assert!(
+            !html.contains("[checkout.payment_failed"),
+            "no `[key]` fallback marker: {html}"
+        );
     }
 
     #[cfg(feature = "ssr")]

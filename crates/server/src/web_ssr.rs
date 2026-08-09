@@ -6,8 +6,14 @@
 //! resolves a screen's `data_requirements` through [`SchemaTransport`], which injects the SAME
 //! execution context the HTTP route would — the PUBLIC role, the anonymous [`Principal`], no
 //! session — so SSR can never see more than an anonymous first request would (the per-field ACL
-//! applies identically). `requires_auth` screens skip server-side resolution entirely
-//! (`web::router::render_path_with`); their data is the client's.
+//! applies identically). Since #420 `render_path_with` resolves the `data_requirements` of EVERY
+//! matched screen, including `requires_auth` ones: whether a read is permitted is a fact about the
+//! TRANSPORT, which the renderer cannot know, so it asks and lets a refusal degrade that one
+//! binding. On this anonymous transport a `requires_auth` screen's reads are refused by the
+//! per-field ACL during validation — no resolver, no query, output unchanged — so the behaviour
+//! here is identical to the old skip. **The day this transport carries identity that stops being
+//! true**: the same code path will emit personalised HTML, and nothing in `hosts.rs` sets
+//! `Cache-Control`. That is a caching decision to take deliberately, not to discover.
 
 use async_trait::async_trait;
 use serde_json::Value;

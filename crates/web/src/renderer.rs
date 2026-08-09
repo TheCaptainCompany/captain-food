@@ -87,8 +87,10 @@ impl RenderContext {
 }
 
 /// `{ amountCents, currency }` → "12,34 EUR" (fr-style decimal comma — V0 market). Non-Money
-/// values render empty rather than lying.
-fn format_currency(v: &Value) -> String {
+/// values render empty rather than lying. `pub(crate)` since #420: the hand-written checkout shell
+/// formats its cart total through the SAME function the SDUI money bindings use, so the price a
+/// customer confirms cannot be formatted one way on one screen and another way on the next.
+pub(crate) fn format_currency(v: &Value) -> String {
     let (Some(cents), Some(cur)) = (
         v.get("amountCents").and_then(Value::as_i64),
         v.get("currency").and_then(Value::as_str),
@@ -630,13 +632,28 @@ pub fn hydrate() {
     let (surface, matched) = router::resolve(&host, &path);
     let Some(matched) = matched else { return };
     let screen: &'static Screen = matched.screen;
-    if !screen.sdui {
-        // checkout / order_tracking: their hand-written flows own hydration (split 3 modules).
-        return;
-    }
 
     let session = crate::session::SessionId::load_or_mint();
     let origin = location.origin().unwrap_or_default();
+
+    // The hand-written screens (`sdui: false`) mount their own flows — #420. This used to be
+    // `if !screen.sdui { return; }`, sitting ABOVE the crate's only `mount_to_body`, so checkout
+    // mounted no Stripe element and no submit handler and tracking never moved. `HandWrittenScreen`
+    // is proved at compile time to cover exactly that set (`handwritten.rs`), so this branch cannot
+    // be a silent default again.
+    if let Some(hand_written) = crate::handwritten::HandWrittenScreen::of(screen) {
+        crate::handwritten::mount::mount(
+            hand_written,
+            matched,
+            host,
+            origin,
+            surface.role(),
+            session,
+            locale,
+        );
+        return;
+    }
+
     let transport = crate::graphql::HttpTransport::new(&origin, surface.role(), session);
 
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
@@ -687,10 +704,19 @@ mod tests {
         RenderContext::new("en")
     }
 
+    /// The whole generated surface area renders without panicking, empty data included — the "no
+    /// placeholder left behind a reachable route" gate at the smoke level.
+    ///
+    /// #420 renamed this from `every_sdui_screen_of_every_surface_renders` and removed its
+    /// `if !screen.sdui { continue }`. The skip excluded EXACTLY the two screens that were broken
+    /// (checkout and order_tracking) while the name promised "every screen" — beck's verdict on
+    /// `main` was *"not one test in this repo would go red if a stranger could not order"*, and this
+    /// skip is a large part of why. Hand-written screens are now rendered through the same
+    /// [`HandWrittenScreen`](crate::handwritten::HandWrittenScreen) dispatch production uses.
     #[test]
-    fn every_sdui_screen_of_every_surface_renders() {
-        // The whole generated surface area renders without panicking, empty data included —
-        // the "no placeholder left behind a reachable route" gate at the smoke level.
+    fn every_screen_of_every_surface_renders() {
+        use crate::handwritten::HandWrittenScreen;
+        use crate::router::match_route;
         for surface in [
             Surface::CaptainFrontoffice,
             Surface::RestaurantFrontoffice,
@@ -698,10 +724,21 @@ mod tests {
             Surface::Rider,
         ] {
             for screen in surface.screens() {
-                if !screen.sdui {
-                    continue;
-                }
-                let html = render_screen_html(screen, surface.sheets(), ctx());
+                let html = match HandWrittenScreen::of(screen) {
+                    None => render_screen_html(screen, surface.sheets(), ctx()),
+                    Some(hand_written) => {
+                        // Through the real route match, so `:param` capture participates.
+                        let concrete: String = screen
+                            .route
+                            .split('/')
+                            .map(|seg| if seg.starts_with(':') { "x" } else { seg })
+                            .collect::<Vec<_>>()
+                            .join("/");
+                        let matched = match_route(surface, &concrete)
+                            .unwrap_or_else(|| panic!("{}: route unreachable", screen.id));
+                        hand_written.render_html(&matched, &ctx(), Some("chez-test"), "fr")
+                    }
+                };
                 assert!(
                     html.contains(&format!("data-hydrate=\"{}\"", screen.id)),
                     "{}: no hydrate root",
