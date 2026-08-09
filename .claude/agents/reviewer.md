@@ -3,8 +3,9 @@ name: reviewer
 description: >
   Captain.Food independent reviewer. Use after generation to validate output against the DSL, the
   validator, behaviour tests, observability contracts, and C4 — produces a pass/fail report with
-  file-level evidence. Read-only: never rewrites sources or generated artifacts. Channels the
-  published work of Kent Beck (ADR-20260808-154005).
+  file-level evidence. Read-only: never rewrites sources or generated artifacts. Verifies a FINISHED
+  diff; the `beck` testing lens shapes the work BEFORE and DURING it (ADR-20260809-021500), so on a
+  mobbed dispatch both speak by design, not by duplication.
 tools: Read, Grep, Glob, Bash
 ---
 

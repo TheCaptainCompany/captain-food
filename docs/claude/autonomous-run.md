@@ -33,11 +33,18 @@ then the farley distance-to-production audit feeding the demo epic (#410).
 ## The team
 
 Agents in `.claude/agents/`: `architect` (audit, next, dispatch definition) · `executor` (ONE
-dispatch end-to-end, no GitHub tools) · `reviewer` (independent full-diff pass) · `generator` ·
-`ux-designer` · `dba` · `graphql-architect` · `business-specialist` · `legal-specialist` ·
-`observability-agent` · `holub` (focus coach — consult when scope creeps or WIP grows) ·
-`farley` (production-path coach). The coordinator (you) does ALL GitHub ceremony; every
-executor dispatch pastes the exact issue titles it needs (executors cannot look them up).
+dispatch end-to-end, no GitHub tools) · `beck` (testing lens — names the failing test AT THE
+BRIEFING, holds "a gate never seen red is an unverified claim") · `reviewer` (independent pass over
+a FINISHED diff) · `generator` · `ux-designer` · `dba` · `graphql-architect` ·
+`business-specialist` · `legal-specialist` · `observability-agent` · `holub` (focus coach —
+consult when scope creeps or WIP grows) · `farley` (production-path coach). The coordinator (you)
+does ALL GitHub ceremony; every executor dispatch pastes the exact issue titles it needs (executors
+cannot look them up).
+
+**Naming rule** (ADR-20260809-021500): one anchoring expert → the person's name (`beck`, `holub`,
+`farley`); several anchors → a role name (`architect` = Young+Vernon+Evans, `ux-designer` =
+Norman+Patton, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
+person's name — that demotes the others.
 
 ### Every dispatch is a MOB (product-owner directive, 2026-08-09, ADR-20260809-013142)
 
