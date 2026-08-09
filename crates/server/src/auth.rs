@@ -45,16 +45,21 @@ const SUPABASE_AUDIENCE: &str = "authenticated";
 pub struct Principal {
     pub user_id: Option<String>,
     pub role: RequestRole,
-    /// Tenant claims (#144), verified with the rest of the token — the login-to-domain bridge lives
-    /// in JWT claims (ADR-20260809-050000 CARD-11). The restaurant side needs no lookup: the claim
-    /// IS the domain id. CUSTOMER still bridges `sub` -> CustomerId via the Customer read model
-    /// (domain ids are deliberately not the auth subject — PROP-20260725-185140 §3.2.1).
+    /// Tenant claims (#144/#433), verified with the rest of the token — the login-to-domain bridge
+    /// lives in JWT claims for EVERY role (ADR-20260809-050000 CARD-11; product-owner correction on
+    /// #430: "this information is provided in the jwt"). The claim IS the domain id; the auth
+    /// subject stays `sub` (PROP-20260725-185140 §3.2.1 — a binding, not a subject swap). No
+    /// per-request lookup resolves read scope anywhere.
     ///
     /// KNOWN LIMITATION (proposal §6.4, register row "claim staleness", open by explicit decision):
-    /// a claim is frozen until token refresh, so removing someone from a restaurant leaves their
-    /// existing token working until it expires.
+    /// a claim is frozen until token refresh. For customers/riders the only transition is
+    /// null -> set at mint time, so the #429 bearer-token item carries the BLOCKING precondition
+    /// that the client obtains its token AFTER the claim stamp (or forces one refresh) — otherwise
+    /// the first paid session is the one denied its tracking screen.
     pub restaurant_id: Option<uuid::Uuid>,
     pub restaurant_account_id: Option<uuid::Uuid>,
+    pub customer_id: Option<uuid::Uuid>,
+    pub rider_id: Option<uuid::Uuid>,
 }
 
 impl Principal {
@@ -62,7 +67,14 @@ impl Principal {
     /// (#92: a document GET carries no credentials, so server-side data resolution is by
     /// construction the anonymous view).
     pub(crate) fn anonymous() -> Self {
-        Self { user_id: None, role: RequestRole::Public, restaurant_id: None, restaurant_account_id: None }
+        Self {
+            user_id: None,
+            role: RequestRole::Public,
+            restaurant_id: None,
+            restaurant_account_id: None,
+            customer_id: None,
+            rider_id: None,
+        }
     }
 }
 
@@ -115,6 +127,15 @@ struct AppMetadata {
     /// restaurant role with a multiplicity problem.
     #[serde(default)]
     captain_restaurant_account_id: Option<String>,
+    /// The CUSTOMER's domain id (#433) — stamped when the Customer is registered/resolved
+    /// (verifyPhone), never user-editable. Replaces the per-request `auth_ref` bridge for read
+    /// scope; a token without it fails closed to Public.
+    #[serde(default)]
+    captain_customer_id: Option<String>,
+    /// The RIDER's domain id (#433) — minted by the #415 per-person rider onboarding. Until that
+    /// lands no rider token carries it, and rider reads fail closed.
+    #[serde(default)]
+    captain_rider_id: Option<String>,
 }
 
 struct CachedJwks {
@@ -186,6 +207,8 @@ impl AuthContext {
                         role: RequestRole::External,
                         restaurant_id: None,
                         restaurant_account_id: None,
+                        customer_id: None,
+                        rider_id: None,
                     })
                 } else {
                     Err(AuthError::Unauthorized)
@@ -201,11 +224,11 @@ impl AuthContext {
             .map(parse_role)
             .unwrap_or(RequestRole::Customer);
         if role_permitted(path_role, granted) {
-            let parse_uuid =
-                |v: &Option<String>| v.as_deref().and_then(|s| uuid::Uuid::parse_str(s).ok());
             Ok(Principal {
-                restaurant_id: parse_uuid(&claims.app_metadata.captain_restaurant_id),
-                restaurant_account_id: parse_uuid(&claims.app_metadata.captain_restaurant_account_id),
+                restaurant_id: claim_uuid(&claims.app_metadata.captain_restaurant_id),
+                restaurant_account_id: claim_uuid(&claims.app_metadata.captain_restaurant_account_id),
+                customer_id: claim_uuid(&claims.app_metadata.captain_customer_id),
+                rider_id: claim_uuid(&claims.app_metadata.captain_rider_id),
                 user_id: Some(claims.sub),
                 role: path_role,
             })
@@ -536,173 +559,80 @@ mod tests {
     }
 }
 
-/// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] — the
-/// ONE place the auth subject becomes a domain identity (#144, PROP-20260725-185140 §3.1/§3.2).
-///
-/// Done once per request, not once per check: a conversation thread rendering five attachments pays
-/// for the customer bridge a single time, and every membership test afterwards is a primary-key
-/// lookup with no join.
-///
-/// How each role resolves (ADR-20260809-050000 CARD-11 — the login-to-domain bridge lives in JWT
-/// claims):
-///   * RESTAURANT / RESTAURANT_ACCOUNT — the verified claim IS the domain id, no lookup.
-///   * CUSTOMER — bridges `sub` -> CustomerId via the Customer read model (`auth_ref`): a domain id
-///     is deliberately NOT the auth subject, or changing auth provider would invalidate every id
-///     already written into the immutable event log.
-///   * RIDER — the `sub` parsed as the RiderId, mirroring the generated `myDeliveries` resolver's
-///     placeholder convention; #415 (rider identity) replaces this with a minted per-person claim.
-///
-/// An unresolvable bridge yields `Public`, i.e. a denial. Fail closed: inventing an identity is the
-/// one outcome an authorization seam must never produce.
-pub async fn read_scope(
-    principal: &Principal,
-    customers: &dyn application::queries::CustomerReadRepository,
-) -> application::queries::ReadScope {
-    use application::queries::ReadScope;
-    use domain::generated::scalars::{ExternalReference, RestaurantAccountId, RestaurantId, RiderId};
+/// A `captain_*` claim parsed as a domain uuid. Malformed values yield `None` — fail closed,
+/// indistinguishable from an absent claim by design (an attacker-shaped string must never widen
+/// into an identity; `read_scope` then denies and counts it as unresolved).
+fn claim_uuid(v: &Option<String>) -> Option<uuid::Uuid> {
+    v.as_deref().and_then(|s| uuid::Uuid::parse_str(s).ok())
+}
 
+/// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] —
+/// a PURE function of the token's verified claims (#433, ADR-20260809-050000 CARD-11: the
+/// login-to-domain bridge lives in JWT claims for EVERY role; product-owner correction on #430).
+///
+/// No per-request lookup, no database, no async: `sub` is NEVER an identity — a customer or rider
+/// token whose `captain_*` claim is absent (or malformed) fails closed to Public, and the
+/// `read_authorization_bridge_unresolved_total{role}` counter now means exactly one thing: an
+/// authenticated caller whose token carries no domain binding (a provisioning gap or pre-refresh
+/// staleness — never ordinary user denial, never a DB outage).
+///
+/// The #430 mechanisms this replaced: the per-request `customers.by_auth_ref` bridge and the
+/// rider `sub`-parsed-as-uuid placeholder. `by_auth_ref` REMAINS the customer identity mechanism
+/// at the write-side seams (the mailbox `resolve_actor`, the generated mutation edge bridges) —
+/// a named follow-up on #432, envelope-shape territory, not silently claimed here.
+pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
+    use application::queries::ReadScope;
+    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
+
+    let unresolved = |role: &str| {
+        telemetry::meters::read_authorization::bridge_unresolved(role);
+        ReadScope::Public
+    };
     match principal.role {
         RequestRole::Admin => ReadScope::Admin,
         RequestRole::Restaurant => match principal.restaurant_id {
             Some(id) => ReadScope::Restaurant(RestaurantId(id)),
-            None => {
-                telemetry::meters::read_authorization::bridge_unresolved("RESTAURANT");
-                ReadScope::Public
-            }
+            None => unresolved("RESTAURANT"),
         },
         RequestRole::RestaurantAccount => match principal.restaurant_account_id {
             Some(id) => ReadScope::RestaurantAccount(RestaurantAccountId(id)),
-            None => {
-                telemetry::meters::read_authorization::bridge_unresolved("RESTAURANT_ACCOUNT");
-                ReadScope::Public
-            }
+            None => unresolved("RESTAURANT_ACCOUNT"),
         },
-        RequestRole::Customer => {
-            let Some(sub) = principal.user_id.as_deref() else {
-                return ReadScope::Public;
-            };
-            match customers.by_auth_ref(ExternalReference(sub.to_string())).await {
-                Ok(Some(row)) => ReadScope::Customer(row.customer_id),
-                // No bridge row (or the lookup failed) -> no identity -> denied. Never a guess —
-                // and counted apart from ordinary denials: an AUTHENTICATED customer with no
-                // Customer projection row is a defect, not a policy outcome.
-                _ => {
-                    telemetry::meters::read_authorization::bridge_unresolved("CUSTOMER");
-                    ReadScope::Public
-                }
-            }
-        }
-        RequestRole::Rider => match principal.user_id.as_deref().and_then(|s| uuid::Uuid::parse_str(s).ok())
-        {
+        RequestRole::Customer => match principal.customer_id {
+            Some(id) => ReadScope::Customer(CustomerId(id)),
+            None => unresolved("CUSTOMER"),
+        },
+        RequestRole::Rider => match principal.rider_id {
             Some(id) => ReadScope::Rider(RiderId(id)),
-            None => {
-                telemetry::meters::read_authorization::bridge_unresolved("RIDER");
-                ReadScope::Public
-            }
+            None => unresolved("RIDER"),
         },
         RequestRole::Public | RequestRole::External => ReadScope::Public,
     }
 }
 
-/// The identity bridge the edge needs to turn a verified `Principal` into a
-/// [`application::queries::ReadScope`] (#144).
-///
-/// Provided as an Axum `Extension` rather than pulled out of the GraphQL schema, because the bridge
-/// must run BEFORE the schema executes — resolving it once per request is the property that keeps a
-/// thread rendering N attachments from paying for N lookups.
-#[derive(Clone, Default)]
-pub struct ScopeResolver {
-    pub customers: Option<std::sync::Arc<dyn application::queries::CustomerReadRepository>>,
-}
-
-impl ScopeResolver {
-    /// Resolve a principal, under the contract's `auth.read_scope` span (ONE per request). With no
-    /// bridge wired (no database) every caller degrades to `Public`, which sees no tenant rows —
-    /// the safe direction. A resolver that returned "unrestricted" here would turn a missing
-    /// dependency into a data leak.
-    pub async fn resolve(&self, principal: &Principal) -> application::queries::ReadScope {
-        use tracing::Instrument as _;
-
-        let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role));
-        // Reads carry no command envelope, so the contract's correlation_id is MINTED here — one
-        // per request, at the same moment the scope is resolved (`request.correlation_id`).
-        span.record(
-            "business.correlation_id",
-            uuid::Uuid::new_v4().to_string().as_str(),
-        );
-        let scope = async {
-            let Some(customers) = &self.customers else {
-                return application::queries::ReadScope::Public;
-            };
-            read_scope(principal, customers.as_ref()).await
-        }
-        .instrument(span.clone())
-        .await;
-        telemetry::spans::record_bridge_resolved(
-            &span,
-            !matches!(scope, application::queries::ReadScope::Public)
-                || principal.role == RequestRole::Public
-                || principal.role == RequestRole::External,
-        );
-        scope
-    }
+/// [`read_scope`] under the contract's `auth.read_scope` span (ONE per request), with the
+/// request's correlation id MINTED here (reads carry no command envelope —
+/// `request.correlation_id` in the contract). This is the transport entry point; the pure
+/// function above is the logic.
+pub fn resolve_read_scope(principal: &Principal) -> application::queries::ReadScope {
+    let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role));
+    span.record("business.correlation_id", uuid::Uuid::new_v4().to_string().as_str());
+    let scope = span.in_scope(|| read_scope(principal));
+    telemetry::spans::record_bridge_resolved(
+        &span,
+        !matches!(scope, application::queries::ReadScope::Public)
+            || principal.role == RequestRole::Public
+            || principal.role == RequestRole::External,
+    );
+    scope
 }
 
 #[cfg(test)]
 mod read_scope_tests {
-    use application::queries::{CustomerReadRepository, CustomerRow, ReadScope};
-    use domain::generated::scalars::{
-        CustomerId, EmailAddress, ExternalReference, PhoneNumber, RestaurantAccountId, RestaurantId,
-        RiderId,
-    };
-    use domain::shared::errors::DomainError;
+    use application::queries::ReadScope;
+    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
 
     use super::*;
-
-    /// Resolves ONE auth_ref to ONE customer id — the bridge seam, stubbed.
-    struct OneCustomer {
-        auth_ref: String,
-        customer_id: CustomerId,
-    }
-
-    #[async_trait::async_trait]
-    impl CustomerReadRepository for OneCustomer {
-        async fn by_phone(&self, _p: PhoneNumber) -> Result<Option<CustomerRow>, DomainError> {
-            Ok(None)
-        }
-        async fn by_email(&self, _e: EmailAddress) -> Result<Option<CustomerRow>, DomainError> {
-            Ok(None)
-        }
-        async fn by_id(&self, _id: CustomerId) -> Result<Option<CustomerRow>, DomainError> {
-            Ok(None)
-        }
-        async fn by_auth_ref(
-            &self,
-            r: ExternalReference,
-        ) -> Result<Option<CustomerRow>, DomainError> {
-            if r.0 != self.auth_ref {
-                return Ok(None);
-            }
-            let now = chrono::Utc::now();
-            Ok(Some(CustomerRow {
-                customer_id: self.customer_id,
-                phone: PhoneNumber("+33600000000".into()),
-                auth_ref: Some(r),
-                display_name: None,
-                email: None,
-                email_verified: false,
-                locale: None,
-                timezone: None,
-                ratings: serde_json::json!([]),
-                favorite_restaurant_ids: serde_json::json!([]),
-                preferences: None,
-                addresses: serde_json::json!([]),
-                payment_method_id: None,
-                created_at: now,
-                updated_at: now,
-            }))
-        }
-    }
 
     fn principal(role: RequestRole, sub: Option<&str>) -> Principal {
         Principal {
@@ -710,86 +640,88 @@ mod read_scope_tests {
             role,
             restaurant_id: None,
             restaurant_account_id: None,
+            customer_id: None,
+            rider_id: None,
         }
     }
 
-    /// Every seam of the bridge FAILS CLOSED to Public (a denial): no principal, no bridge row, an
-    /// unparseable rider subject, a missing restaurant claim. Fail-open here — any arm returning a
-    /// tenant scope it did not verify — is the one outcome an authorization seam must never
-    /// produce, and this is the test that goes red if one does.
-    #[tokio::test]
-    async fn the_bridge_fails_closed_at_every_seam() {
-        let customers = OneCustomer {
-            auth_ref: "known-sub".into(),
-            customer_id: CustomerId(uuid::Uuid::from_u128(7)),
-        };
+    /// The pure claims function, per role. The load-bearing data shape (beck): `sub` and the claim
+    /// are DIFFERENT uuids — an implementation that still derives identity from `sub` fails these
+    /// assertions instead of passing by coincidence. Seen RED by re-planting #430's fallbacks
+    /// (customer via `user_id`, rider via `sub`-parse): the absent-claim arms below went red with
+    /// "sub is never an identity", green restored on removal.
+    #[test]
+    fn read_scope_is_a_pure_claims_function() {
+        let sub = uuid::Uuid::from_u128(1).to_string();
 
-        // CUSTOMER with a bridge row → their domain id.
-        assert_eq!(
-            read_scope(&principal(RequestRole::Customer, Some("known-sub")), &customers).await,
-            ReadScope::Customer(CustomerId(uuid::Uuid::from_u128(7)))
-        );
-        // CUSTOMER with NO bridge row → Public (denied), never a guess.
-        assert_eq!(
-            read_scope(&principal(RequestRole::Customer, Some("unknown-sub")), &customers).await,
-            ReadScope::Public
-        );
-        // CUSTOMER with no subject at all → Public.
-        assert_eq!(
-            read_scope(&principal(RequestRole::Customer, None), &customers).await,
-            ReadScope::Public
-        );
-        // RIDER: the sub IS the RiderId placeholder (myDeliveries convention; #415 replaces it
-        // with a minted claim per ADR-20260809-050000 CARD-11)…
-        let rider_uuid = uuid::Uuid::from_u128(9);
-        assert_eq!(
-            read_scope(
-                &principal(RequestRole::Rider, Some(&rider_uuid.to_string())),
-                &customers
-            )
-            .await,
-            ReadScope::Rider(RiderId(rider_uuid))
-        );
-        // …and an unparseable rider subject denies rather than inventing an id.
-        assert_eq!(
-            read_scope(&principal(RequestRole::Rider, Some("not-a-uuid")), &customers).await,
-            ReadScope::Public
-        );
-        // RESTAURANT / RESTAURANT_ACCOUNT without their claim → Public.
-        assert_eq!(
-            read_scope(&principal(RequestRole::Restaurant, Some("s")), &customers).await,
-            ReadScope::Public
-        );
-        assert_eq!(
-            read_scope(&principal(RequestRole::RestaurantAccount, Some("s")), &customers).await,
-            ReadScope::Public
-        );
-        // With the claim, the claim IS the domain id (CARD-11) — no lookup.
+        // Claim present -> the DOMAIN id, verbatim — never the subject.
+        let customer_claim = uuid::Uuid::from_u128(2);
+        let mut p = principal(RequestRole::Customer, Some(&sub));
+        p.customer_id = Some(customer_claim);
+        assert_eq!(read_scope(&p), ReadScope::Customer(CustomerId(customer_claim)));
+
+        let rider_claim = uuid::Uuid::from_u128(4);
+        let mut p = principal(RequestRole::Rider, Some(&sub));
+        p.rider_id = Some(rider_claim);
+        assert_eq!(read_scope(&p), ReadScope::Rider(RiderId(rider_claim)));
+
         let rid = uuid::Uuid::from_u128(11);
         let mut p = principal(RequestRole::Restaurant, Some("s"));
         p.restaurant_id = Some(rid);
-        assert_eq!(read_scope(&p, &customers).await, ReadScope::Restaurant(RestaurantId(rid)));
+        assert_eq!(read_scope(&p), ReadScope::Restaurant(RestaurantId(rid)));
         let mut p = principal(RequestRole::RestaurantAccount, Some("s"));
         p.restaurant_account_id = Some(rid);
-        assert_eq!(
-            read_scope(&p, &customers).await,
-            ReadScope::RestaurantAccount(RestaurantAccountId(rid))
-        );
-        // ADMIN is a role decision, PUBLIC/EXTERNAL are never tenants.
-        assert_eq!(read_scope(&principal(RequestRole::Admin, None), &customers).await, ReadScope::Admin);
-        assert_eq!(read_scope(&principal(RequestRole::Public, None), &customers).await, ReadScope::Public);
-        assert_eq!(read_scope(&principal(RequestRole::External, None), &customers).await, ReadScope::Public);
-    }
+        assert_eq!(read_scope(&p), ReadScope::RestaurantAccount(RestaurantAccountId(rid)));
 
-    /// The layered resolver with NO bridge wired (no database) degrades every caller to Public —
-    /// a missing dependency must be a denial, never a leak.
-    #[tokio::test]
-    async fn an_empty_resolver_degrades_to_public() {
-        let resolver = ScopeResolver::default();
+        // Claim ABSENT -> Public, even with a perfectly parseable sub: sub is never an identity.
         assert_eq!(
-            resolver.resolve(&principal(RequestRole::Customer, Some("known-sub"))).await,
+            read_scope(&principal(RequestRole::Customer, Some(&sub))),
+            ReadScope::Public,
+            "sub is never an identity (customer)"
+        );
+        assert_eq!(
+            read_scope(&principal(RequestRole::Rider, Some(&sub))),
+            ReadScope::Public,
+            "sub is never an identity (rider — #430's placeholder must stay dead)"
+        );
+        assert_eq!(read_scope(&principal(RequestRole::Restaurant, Some("s"))), ReadScope::Public);
+        assert_eq!(
+            read_scope(&principal(RequestRole::RestaurantAccount, Some("s"))),
             ReadScope::Public
         );
-        assert_eq!(resolver.resolve(&principal(RequestRole::Admin, None)).await, ReadScope::Public);
+
+        // Role decisions, no claims involved.
+        assert_eq!(read_scope(&principal(RequestRole::Admin, None)), ReadScope::Admin);
+        assert_eq!(read_scope(&principal(RequestRole::Public, None)), ReadScope::Public);
+        assert_eq!(read_scope(&principal(RequestRole::External, None)), ReadScope::Public);
     }
+
+    /// The serde seam the pure test cannot reach: a misspelled `captain_*` field name would
+    /// silently deserialize to `None` -> Public everywhere, and the first detector would be a
+    /// production smoke timeout. All four keys pinned; a malformed uuid claim fails closed.
+    #[test]
+    fn app_metadata_claims_deserialize_and_malformed_uuids_fail_closed() {
+        let meta: AppMetadata = serde_json::from_str(
+            r#"{
+                "captain_role": "CUSTOMER",
+                "captain_restaurant_id": "00000000-0000-0000-0000-000000000001",
+                "captain_restaurant_account_id": "00000000-0000-0000-0000-000000000002",
+                "captain_customer_id": "00000000-0000-0000-0000-000000000003",
+                "captain_rider_id": "00000000-0000-0000-0000-000000000004"
+            }"#,
+        )
+        .expect("app_metadata blob");
+        assert_eq!(claim_uuid(&meta.captain_restaurant_id), Some(uuid::Uuid::from_u128(1)));
+        assert_eq!(claim_uuid(&meta.captain_restaurant_account_id), Some(uuid::Uuid::from_u128(2)));
+        assert_eq!(claim_uuid(&meta.captain_customer_id), Some(uuid::Uuid::from_u128(3)));
+        assert_eq!(claim_uuid(&meta.captain_rider_id), Some(uuid::Uuid::from_u128(4)));
+
+        // Garbage never widens into an identity — indistinguishable from absent, by design.
+        assert_eq!(claim_uuid(&Some("not-a-uuid".into())), None);
+        assert_eq!(claim_uuid(&None), None);
+    }
+
+    // #430's `an_empty_resolver_degrades_to_public` is DELETED deliberately: its premise (a
+    // resolver whose DB dependency may be missing) dissolved when resolution became a pure claims
+    // function — there is no dependency left to be missing.
 }

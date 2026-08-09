@@ -239,22 +239,15 @@ impl SubscriptionRoot {
             Some(crate::graphql::acl::RequestRole::Admin)
         );
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
-        // Resolve the caller's Customer identity ONCE at setup (same path as queries/paymentStatus).
-        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
-            .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.clone())
-        {
-            Some(auth_ref) => {
-                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
-                customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|c| c.customer_id)
-            }
-            None => None,
-        };
+        // The caller's Customer identity comes from the ReadScope resolved ONCE at connection
+        // init from the token's verified claims (#433, CARD-11) — the same identity source as
+        // queries/paymentStatus, so the checkout's order read and its payment stream can never
+        // disagree on who the customer is. No bridge row, no lookup.
+        let caller_customer: Option<domain::generated::scalars::CustomerId> =
+            match ctx.data_opt::<application::queries::ReadScope>() {
+                Some(application::queries::ReadScope::Customer(id)) => Some(*id),
+                _ => None,
+            };
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars as ds;
