@@ -350,6 +350,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         DomainEvent::OrderTipped(_) => { let mut row = state?; row.rated_at = Some(env.occurred_at); let v = c.rider_tip_cents(Some(&row), env); row.rider_tip_cents = v; let v = c.restaurant_tip_cents(Some(&row), env); row.restaurant_tip_cents = v; let v = c.captain_tip_cents(Some(&row), env); row.captain_tip_cents = v; Some(row) },
         DomainEvent::DeliveryAcceptedByPartner(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; let v = c.estimated_dropoff_at(Some(&row), env); row.estimated_dropoff_at = v; Some(row) },
         DomainEvent::DeliveryAcceptedByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; Some(row) },
+        DomainEvent::DeliveryPickedUp(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryStatusUpdated(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryCompleted(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryDispatchFailed(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },

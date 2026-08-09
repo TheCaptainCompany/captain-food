@@ -469,17 +469,17 @@ fn fx_delivery_requested() -> DomainEvent {
 
 /// tests.yaml#/fixtures/deliveryAcceptedByRider — events.yaml#/DeliveryAcceptedByRider
 fn fx_delivery_accepted_by_rider() -> DomainEvent {
-    DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")) })
+    DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")) })
 }
 
 /// tests.yaml#/fixtures/deliveryPickedUp — events.yaml#/DeliveryPickedUp
 fn fx_delivery_picked_up() -> DomainEvent {
-    DomainEvent::DeliveryPickedUp(evs::DeliveryPickedUp { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), at: None })
+    DomainEvent::DeliveryPickedUp(evs::DeliveryPickedUp { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), at: None })
 }
 
 /// tests.yaml#/fixtures/deliveryCompleted — events.yaml#/DeliveryCompleted
 fn fx_delivery_completed() -> DomainEvent {
-    DomainEvent::DeliveryCompleted(evs::DeliveryCompleted { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), at: None })
+    DomainEvent::DeliveryCompleted(evs::DeliveryCompleted { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), at: None })
 }
 
 /// tests.yaml#/fixtures/deliveryCancelled — events.yaml#/DeliveryCancelled
@@ -514,12 +514,12 @@ fn fx_delivery_offer_timed_out() -> DomainEvent {
 
 /// tests.yaml#/fixtures/deliveryStatusUpdatedDelivered — events.yaml#/DeliveryStatusUpdated
 fn fx_delivery_status_updated_delivered() -> DomainEvent {
-    DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: None, status: sc::DeliveryStatus::DELIVERED, occurred_at: None, note: None })
+    DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: Some(sc::OrderId(support::uid("order-1"))), partner_ref: None, status: sc::DeliveryStatus::DELIVERED, occurred_at: None, note: None })
 }
 
 /// tests.yaml#/fixtures/deliveryStatusUpdatedPickedUp — events.yaml#/DeliveryStatusUpdated
 fn fx_delivery_status_updated_picked_up() -> DomainEvent {
-    DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None, note: None })
+    DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: Some(sc::OrderId(support::uid("order-1"))), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None, note: None })
 }
 
 /// tests.yaml#/fixtures/deliveryUnassignedFromPartner — events.yaml#/DeliveryUnassignedFromPartner
@@ -2976,7 +2976,7 @@ async fn test_dispatch_closes_order_on_partner_delivered() {
     bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_accepted_by_restaurant(), fx_order_marked_ready()]).await;
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
     let before = bed.snapshot();
-    let ev = evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: None, status: sc::DeliveryStatus::DELIVERED, occurred_at: None, note: None };
+    let ev = evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: Some(sc::OrderId(support::uid("order-1"))), partner_ref: None, status: sc::DeliveryStatus::DELIVERED, occurred_at: None, note: None };
     let result = crate::process_managers::delivery_dispatch::on_delivery_status_updated(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await;
     let _ = result.expect("TestDispatchClosesOrderOnPartnerDelivered: the spec expects acceptance");
     bed.assert_appended("TestDispatchClosesOrderOnPartnerDelivered", &before, &[
@@ -2993,7 +2993,7 @@ async fn test_dispatch_closes_order_on_rider_completed() {
     bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_accepted_by_restaurant(), fx_order_marked_ready()]).await;
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up()]).await;
     let before = bed.snapshot();
-    let ev = evs::DeliveryCompleted { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), at: None };
+    let ev = evs::DeliveryCompleted { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), at: None };
     let result = crate::process_managers::delivery_dispatch::on_delivery_completed(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await;
     let _ = result.expect("TestDispatchClosesOrderOnRiderCompleted: the spec expects acceptance");
     bed.assert_appended("TestDispatchClosesOrderOnRiderCompleted", &before, &[
@@ -3308,7 +3308,7 @@ async fn test_delivery_job_records_partner_status_report() {
     spec_baseline(&bed).await;
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_partner()]).await;
     let before = bed.snapshot();
-    let ev = evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None, note: None };
+    let ev = evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: Some(sc::OrderId(support::uid("order-1"))), partner_ref: Some(sc::ExternalReference("avelo-77".into())), status: sc::DeliveryStatus::PICKED_UP, occurred_at: None, note: None };
     let result = bed.record_fact(&format!("DeliveryJob-{}", support::uid("deliv-1")), DomainEvent::DeliveryStatusUpdated(ev)).await;
     let _ = result.expect("TestDeliveryJobRecordsPartnerStatusReport: the spec expects acceptance");
     bed.assert_appended("TestDeliveryJobRecordsPartnerStatusReport", &before, &[

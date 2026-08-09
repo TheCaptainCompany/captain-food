@@ -149,6 +149,9 @@ impl OrderTrackingCompute for OrderTrackingProjector {
             DomainEvent::DeliveryAcceptedByPartner(_) | DomainEvent::DeliveryAcceptedByRider(_) => {
                 Some(DeliveryStatus::ASSIGNED)
             }
+            // The rider path's own pickup fact (the partner path reports it through
+            // DeliveryStatusUpdated above) — mirrors View_DeliveryJob's derive map.
+            DomainEvent::DeliveryPickedUp(_) => Some(DeliveryStatus::PICKED_UP),
             DomainEvent::DeliveryCompleted(_) => Some(DeliveryStatus::DELIVERED),
             // Terminal dispatch failure — the offer cap was exhausted (ADR-20260720-004556).
             DomainEvent::DeliveryDispatchFailed(_) => Some(DeliveryStatus::FAILED),

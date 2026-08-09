@@ -631,6 +631,22 @@
     "en": "Payment",
     "fr": "Paiement"
   },
+  "checkout.payment_failed.back_to_cart": {
+    "en": "Back to cart",
+    "fr": "Revenir au panier"
+  },
+  "checkout.payment_failed.body": {
+    "en": "Your card was not charged. Your cart is intact.",
+    "fr": "Votre carte n'a pas été débitée. Votre panier est intact."
+  },
+  "checkout.payment_failed.retry": {
+    "en": "Retry payment",
+    "fr": "Réessayer le paiement"
+  },
+  "checkout.payment_failed.title": {
+    "en": "Payment failed",
+    "fr": "Paiement refusé"
+  },
   "checkout.phone": {
     "en": "Phone",
     "fr": "Téléphone"

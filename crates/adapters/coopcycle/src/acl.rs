@@ -301,6 +301,9 @@ pub fn map_coopcycle_event(event: &CoopCycleEvent) -> Result<CoopCycleMapOutcome
             Ok(CoopCycleMapOutcome::Mapped(DomainEvent::DeliveryStatusUpdated(
                 DeliveryStatusUpdated {
                     delivery_job_id,
+                    // The webhook carries no order id; the inbound recorder enriches it from the
+                    // job's birth fact before appending (D-QW1 option b, ADR-20260808-234907).
+                    order_id: None,
                     partner_ref: partner_ref(&delivery),
                     status,
                     occurred_at: delivery.occurred_at.clone(),

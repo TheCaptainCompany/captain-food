@@ -51,7 +51,7 @@ fn delivery_job_of(event: &DomainEvent) -> Option<DeliveryJobId> {
 /// identity (EXTERNAL, correlation = the webhook's, `cause_id` = the inbound row, ADR-0041).
 pub async fn record_inbound_delivery_event(
     store: &dyn EventStore,
-    event: DomainEvent,
+    mut event: DomainEvent,
     actor: &Actor,
 ) -> Result<RecordOutcome, DomainError> {
     let Some(job_id) = delivery_job_of(&event) else {
@@ -63,6 +63,16 @@ pub async fn record_inbound_delivery_event(
     let (events, version) = store.load(&stream).await?;
 
     if let Some(job) = domain::delivery_job::fold(&events) {
+        // ENRICHMENT (D-QW1 option b, ADR-20260808-234907): a partner webhook carries no order id,
+        // so the ACLs map `DeliveryStatusUpdated` with `order_id: None`. The stream is already
+        // loaded and folded here, so filling it from the birth fact costs no extra I/O and makes
+        // the recorded fact as self-contained as the rider path's. Orphan streams (no birth, no
+        // fold) keep `None` -- the recorded anomaly the nullable field exists for.
+        if let DomainEvent::DeliveryStatusUpdated(e) = &mut event {
+            if e.order_id.is_none() {
+                e.order_id = Some(job.order_id);
+            }
+        }
         match &event {
             // Redelivery tail: the job already carries this partner's assignment.
             DomainEvent::DeliveryAcceptedByPartner(e)
@@ -171,9 +181,12 @@ mod tests {
             reason: Some("No courier available".into()),
         })
     }
+    /// The ACLs' PRE-enrichment shape: a partner webhook carries no order id, so `order_id` is
+    /// `None` on the way in and the recorder fills it (or leaves it as the orphan anomaly).
     fn status(status: DeliveryStatus) -> DomainEvent {
         DomainEvent::DeliveryStatusUpdated(DeliveryStatusUpdated {
             delivery_job_id: job_id(),
+            order_id: None,
             partner_ref: Some(ExternalReference("avelo-77".into())),
             status,
             occurred_at: None,
@@ -273,6 +286,36 @@ mod tests {
             RecordOutcome::AlreadyRecorded
         );
         assert_eq!(store.stream(&stream()).len(), 1);
+    }
+
+    /// D-QW1 option b (ADR-20260808-234907): a partner report arrives with no order id, and the
+    /// recorder ENRICHES it from the job's folded birth fact before appending — that is what lets
+    /// the projection worker key the customer's OrderTracking row from the payload alone, with no
+    /// lookup. On a birthless (orphan) stream there is no order id anywhere in the system, so the
+    /// field stays `None` — the recorded anomaly the nullable exists for, not a convenience.
+    #[tokio::test]
+    async fn partner_status_report_is_enriched_with_the_birth_facts_order_id() {
+        let store = MemStore::default();
+        store.seed(&stream(), vec![birth(), accepted()]);
+        record_inbound_delivery_event(&store, status(DeliveryStatus::PICKED_UP), &actor())
+            .await
+            .unwrap();
+        let appended = store.stream(&stream());
+        let DomainEvent::DeliveryStatusUpdated(recorded) = appended.last().unwrap() else {
+            panic!("expected a DeliveryStatusUpdated, got {:?}", appended.last());
+        };
+        assert_eq!(recorded.order_id, Some(OrderId(uid(2))), "enriched from DeliveryRequested");
+
+        // Orphan stream: nothing to enrich from, the fact is still recorded, order_id stays null.
+        let orphan = MemStore::default();
+        record_inbound_delivery_event(&orphan, status(DeliveryStatus::PICKED_UP), &actor())
+            .await
+            .unwrap();
+        let appended = orphan.stream(&stream());
+        let DomainEvent::DeliveryStatusUpdated(recorded) = appended.last().unwrap() else {
+            panic!("expected a DeliveryStatusUpdated, got {:?}", appended.last());
+        };
+        assert_eq!(recorded.order_id, None, "no birth fact -> the anomaly is recorded as null");
     }
 
     /// A non-delivery event reaching this recorder is a routing bug, surfaced loudly.

@@ -388,7 +388,11 @@ screens:
     sdui: false
     sdui_reason: "Stripe Elements + payment security — a static React page, not runtime JSON."
     requires_auth: true
-    data_requirements: [cart.current, me.profile]
+    # paymentStatus.byOrder: the payment-outcome read this screen ALREADY performs (the Stripe
+    # element binds payment_status.clientSecret below) — now declared. Its orderId arg is the
+    # client-minted PlaceOrder.orderId (supplied by the page at dispatch time; /checkout has no
+    # route param — see the place_order action note).
+    data_requirements: [cart.current, me.profile, paymentStatus.byOrder]
     actions_used: [place_order, set_delivery_address_saved]
     components:
       - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' } }
@@ -408,6 +412,21 @@ screens:
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:
           - { type: stripe_express_checkout_element, id: stripe_payment, payment_intent_source: "{{ payment_status.clientSecret }}", on_confirm: { type: confirm_payment } }
+      # PAYMENT FAILED state (#348 quick win; PROP-20260808-141817 §1d/§3): the saga outcome
+      # PaymentFailed → run FAILED, nothing placed, the cart stays OPEN
+      # (TestPlaceOrderPaymentFailedPlacesNothing) — so the copy can promise "your cart is
+      # intact" truthfully. Shown when paymentStatus reports FAILED; retry re-enters checkout
+      # (fresh intent, same cart). Synchronous card declines are surfaced inline by Stripe
+      # Elements; this state is the async/webhook outcome the page previously answered with
+      # nothing (a spinner at the peak of the anxiety curve).
+      - type: conditional_section
+        id: payment_failed_state
+        visible_when: "payment_status.status == 'FAILED'"
+        content:
+          - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.title' }, style: { size: xl, weight: bold, color: error } }
+          - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.body' } }
+          - { type: button, id: retry_payment_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.retry' }, variant: primary, full_width: true, action: { type: navigate, route: "/checkout" } }
+          - { type: button, id: back_to_cart_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.back_to_cart' }, variant: outline, full_width: true, action: { type: navigate, route: "/cart" } }
       - type: sticky_bottom_bar
         content:
           - type: button

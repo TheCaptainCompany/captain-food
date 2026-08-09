@@ -72,7 +72,7 @@ async fn delivery_lifecycle_events_serve_the_three_read_queries() {
         &s1,
         2,
         "DeliveryAcceptedByRider",
-        serde_json::json!({ "deliveryJobId": j1, "riderId": rider }),
+        serde_json::json!({ "deliveryJobId": j1, "orderId": o1, "riderId": rider }),
         t0 + Duration::minutes(2),
     )
     .await;
@@ -81,7 +81,7 @@ async fn delivery_lifecycle_events_serve_the_three_read_queries() {
         &s1,
         3,
         "DeliveryPickedUp",
-        serde_json::json!({ "deliveryJobId": j1, "riderId": rider }),
+        serde_json::json!({ "deliveryJobId": j1, "orderId": o1, "riderId": rider }),
         t0 + Duration::minutes(10),
     )
     .await;
@@ -133,7 +133,7 @@ async fn delivery_lifecycle_events_serve_the_three_read_queries() {
         &s3,
         3,
         "DeliveryStatusUpdated",
-        serde_json::json!({ "deliveryJobId": j3, "status": "DELIVERED" }),
+        serde_json::json!({ "deliveryJobId": j3, "orderId": o3, "status": "DELIVERED" }),
         t0 + Duration::minutes(22),
     )
     .await;

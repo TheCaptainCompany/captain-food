@@ -236,6 +236,10 @@ fn render_matched(
                     cart_line_count: 0,
                     formatted_total: String::new(),
                     is_delivery: true,
+                    // The data-less SSR shell: the payment outcome arrives with the page's own
+                    // paymentStatus read/subscription, never from the shell.
+                    payment_failed: false,
+                    locale: locale.to_string(),
                 },
                 locale,
             ),

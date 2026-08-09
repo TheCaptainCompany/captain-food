@@ -25,6 +25,7 @@ pub struct DeliveryRequested {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryAcceptedByRider {
     pub delivery_job_id: DeliveryJobId,
+    pub order_id: OrderId,
     pub rider_id: RiderId,
 }
 
@@ -33,6 +34,7 @@ pub struct DeliveryAcceptedByRider {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryPickedUp {
     pub delivery_job_id: DeliveryJobId,
+    pub order_id: OrderId,
     pub rider_id: RiderId,
     pub at: Option<String>,
 }
@@ -42,6 +44,7 @@ pub struct DeliveryPickedUp {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryCompleted {
     pub delivery_job_id: DeliveryJobId,
+    pub order_id: OrderId,
     pub at: Option<String>,
 }
 
@@ -107,6 +110,7 @@ pub struct DeliveryRejectedByPartner {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryStatusUpdated {
     pub delivery_job_id: DeliveryJobId,
+    pub order_id: Option<OrderId>,
     pub partner_ref: Option<ExternalReference>,
     pub status: DeliveryStatus,
     pub occurred_at: Option<String>,

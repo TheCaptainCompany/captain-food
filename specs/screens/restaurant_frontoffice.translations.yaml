@@ -109,6 +109,10 @@ checkout.processing:       { messages: { en: "Processing…", fr: "Traitement…
 checkout.place_order:
   params: { total: "formatted order total" }
   messages: { en: "Place order — {total}", fr: "Commander — {total}" }
+checkout.payment_failed.title: { messages: { en: "Payment failed", fr: "Paiement refusé" } }
+checkout.payment_failed.body:  { messages: { en: "Your card was not charged. Your cart is intact.", fr: "Votre carte n'a pas été débitée. Votre panier est intact." } }
+checkout.payment_failed.retry: { messages: { en: "Retry payment", fr: "Réessayer le paiement" } }
+checkout.payment_failed.back_to_cart: { messages: { en: "Back to cart", fr: "Revenir au panier" } }
 
 # ── order tracking + history ─────────────────────────────────────────────────
 order.tracking_title: { messages: { en: "Order tracking", fr: "Suivi de commande" } }

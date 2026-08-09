@@ -96,6 +96,14 @@ impl PaymentIntent {
             status: field("status"),
         }
     }
+
+    /// The terminal failure the customer must be TOLD about: the saga's FAILED leg (PaymentFailed
+    /// recorded inbound from Stripe → the run row goes FAILED, nothing is placed and the cart stays
+    /// OPEN). This is what drives the checkout screen's `payment_failed_state`
+    /// (specs/screens/restaurant_frontoffice.yaml, #424 quick win 2).
+    pub fn is_failed(&self) -> bool {
+        self.status.as_deref() == Some("FAILED")
+    }
 }
 
 /// The accepted checkout: the minted ids + the acceptance handle. Deliberately plain data, like
@@ -126,6 +134,12 @@ impl PlacedOrder {
     /// Await with explicit bounds (tests pass `Duration::ZERO`). A `null` intent or one without a
     /// `clientSecret` yet means "saga still working" — keep reading until the bound; the
     /// `paymentStatusChanged` subscription is the push path for the same row and needs no bound.
+    ///
+    /// A **FAILED** status short-circuits the poll and returns `Ok` (#424 quick win 2): the payment
+    /// is terminally refused, so no `clientSecret` is ever coming and polling out the whole bound
+    /// would leave the customer on a spinner at the peak of the anxiety curve — the exact failure
+    /// this quick win exists to remove. The caller renders `payment_failed_state` from
+    /// [`PaymentIntent::is_failed`]; the cart is untouched, so retry is safe.
     pub async fn await_payment_intent_with(
         &self,
         transport: &dyn Transport,
@@ -144,7 +158,7 @@ impl PlacedOrder {
                 continue;
             }
             let parsed = PaymentIntent::parse(&intent);
-            if parsed.client_secret.is_some() {
+            if parsed.client_secret.is_some() || parsed.is_failed() {
                 return Ok(parsed);
             }
         }
@@ -238,6 +252,14 @@ pub struct CheckoutViewState {
     pub cart_line_count: usize,
     pub formatted_total: String,
     pub is_delivery: bool,
+    /// `paymentStatus.byOrder.status == FAILED` ([`PaymentIntent::is_failed`]) — renders the
+    /// screen's `payment_failed_state` (#424 quick win 2). False on the data-less SSR shell: a
+    /// customer who has not paid yet must never be shown a failure.
+    pub payment_failed: bool,
+    /// The locale the failure copy resolves in. The rest of this shell is still hardcoded English
+    /// (a pre-existing gap); the failure copy is translated because it is the one place on this
+    /// page where the wrong language costs a conversion at the worst possible moment.
+    pub locale: String,
 }
 
 /// The checkout screen — the spec's component tree (`back_button_header`, the `checkout_section`s,
@@ -248,6 +270,8 @@ pub struct CheckoutViewState {
 #[component]
 pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     let summary = format!("{} items - {}", state.cart_line_count, state.formatted_total);
+    let locale = state.locale.clone();
+    let t = move |key: &str| crate::i18n::resolve(key, &locale);
     view! {
         <main id="app" data-hydrate="checkout">
             <header data-c="back_button_header"><h1>"Checkout"</h1></header>
@@ -270,6 +294,41 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 // The Stripe mount point: stripe.rs attaches the element here on hydrate.
                 <div data-c="stripe_express_checkout_element" id=crate::stripe::MOUNT_ID></div>
             </section>
+            // `payment_failed_state` (spec: screens/restaurant_frontoffice.yaml#checkout). The saga
+            // keeps the cart OPEN and places nothing on PaymentFailed, so "your cart is intact" is
+            // a promise the system actually keeps. Both actions are client-kind `navigate`, carried
+            // by the same `data-action`/`data-route` DOM contract the SDUI renderer emits.
+            // NOT REACHABLE YET, and the emitted markup is the reason it will be cheap when it is:
+            // production constructs this state with `payment_failed: false` (router.rs), and
+            // `renderer.rs` returns for `sdui: false` screens BEFORE installing the delegated
+            // listener — so today nothing sets the flag and nothing would drive the buttons.
+            // Wiring the checkout page controller is scoped on #420 alongside the tracking twin.
+            {state.payment_failed.then(|| view! {
+                <section data-c="conditional_section" id="payment_failed_state">
+                    <p data-c="text" data-size="xl" data-weight="bold" data-color="error">
+                        {t("checkout.payment_failed.title")}
+                    </p>
+                    <p data-c="text">{t("checkout.payment_failed.body")}</p>
+                    <button
+                        data-c="button"
+                        id="retry_payment_btn"
+                        data-variant="primary"
+                        data-action="navigate"
+                        data-route="/checkout"
+                    >
+                        {t("checkout.payment_failed.retry")}
+                    </button>
+                    <button
+                        data-c="button"
+                        id="back_to_cart_btn"
+                        data-variant="outline"
+                        data-action="navigate"
+                        data-route="/cart"
+                    >
+                        {t("checkout.payment_failed.back_to_cart")}
+                    </button>
+                </section>
+            })}
             <footer data-c="sticky_bottom_bar">
                 <button data-c="button" id="place_order_btn" data-variant="primary">
                     "Place order - "{state.formatted_total}
@@ -281,8 +340,10 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
 
 /// Server-side render the checkout page to a full document (the `ssr` build).
 #[cfg(feature = "ssr")]
-pub fn render_checkout_html(state: CheckoutViewState, lang: &str) -> String {
+pub fn render_checkout_html(mut state: CheckoutViewState, lang: &str) -> String {
     let lang = crate::i18n::normalize_locale(lang).unwrap_or(crate::i18n::DEFAULT_LOCALE);
+    // ONE source of truth for the language: the document's `lang` is also what the copy resolves in.
+    state.locale = lang.to_string();
     let body = CheckoutScreen(CheckoutScreenProps { state }).to_html();
     crate::renderer::page_html("Checkout - Captain.Food", lang, &body)
 }
@@ -368,6 +429,26 @@ mod tests {
         assert_eq!(fake.call(1).1["input"]["orderId"], json!(placed.order_id));
     }
 
+    /// #424 quick win 2: a refused payment must not be answered with a spinner. The FAILED status
+    /// ENDS the poll on the read that reports it (no clientSecret is ever coming), so the page can
+    /// render `payment_failed_state` immediately instead of waiting out the whole bound and then
+    /// showing a technical `IntentUnavailable`.
+    #[tokio::test]
+    async fn a_failed_payment_ends_the_poll_immediately_instead_of_spinning() {
+        let fake = FakeTransport::scripted(vec![
+            Ok(acceptance("PENDING")),
+            Ok(json!({ "paymentStatus": { "paymentIntentId": "pi_1", "clientSecret": null, "status": null } })),
+            Ok(json!({ "paymentStatus": { "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED" } })),
+            // Never reached: the poll stops on FAILED rather than running to the bound.
+            Ok(json!({ "paymentStatus": { "paymentIntentId": "pi_1", "clientSecret": "late_secret", "status": "FAILED" } })),
+        ]);
+        let placed = submit(&fake, &ctx(), &form(), "pm_123").await.unwrap();
+        let intent = placed.await_payment_intent_with(&fake, 5, Duration::ZERO).await.unwrap();
+        assert!(intent.is_failed(), "the page learns the payment failed");
+        assert_eq!(intent.client_secret, None);
+        assert_eq!(fake.call_count(), 3, "submit + two reads — the poll stopped on FAILED");
+    }
+
     #[tokio::test]
     async fn intent_polling_gives_up_at_the_bound() {
         let fake = FakeTransport::scripted(vec![
@@ -435,14 +516,57 @@ mod tests {
     }
 
     #[cfg(feature = "ssr")]
+    fn view_state(is_delivery: bool, payment_failed: bool) -> CheckoutViewState {
+        CheckoutViewState {
+            restaurant_name: "Chez Test".into(),
+            cart_line_count: if is_delivery { 2 } else { 1 },
+            formatted_total: "23,50 EUR".into(),
+            is_delivery,
+            payment_failed,
+            locale: "fr".into(),
+        }
+    }
+
+    /// #424 quick win 2: the checkout page answers a refused payment with the spec's
+    /// `payment_failed_state` — failure copy, the truthful "your cart is intact" promise (the saga
+    /// places nothing and leaves the cart OPEN), and two client-kind `navigate` controls carrying
+    /// the renderer's own DOM action contract. Absent unless the payment actually failed.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_failed_payment_renders_the_failure_state_with_retry_and_an_intact_cart() {
+        let html = render_checkout_html(view_state(true, true), "fr");
+        assert!(html.contains("id=\"payment_failed_state\""), "the spec's section id: {html}");
+        assert!(html.contains("data-c=\"conditional_section\""));
+        // The copy resolves from the spec's translation keys, in the page's language.
+        assert!(html.contains("Paiement refusé"), "fr title: {html}");
+        assert!(html.contains("Votre carte n'a pas été débitée. Votre panier est intact."));
+        assert!(html.contains("Réessayer le paiement"));
+        assert!(html.contains("Revenir au panier"));
+        assert!(
+            !html.contains("[checkout.payment_failed"),
+            "no `[key]` fallback marker — every key resolved against the generated catalog: {html}"
+        );
+        // Both controls carry the DOM contract the delegated listener navigates on — the markup is
+        // ready; the listener is not installed for this screen yet (see the render comment, #420).
+        assert!(html.contains("id=\"retry_payment_btn\""));
+        assert!(html.contains("data-route=\"/checkout\""));
+        assert!(html.contains("id=\"back_to_cart_btn\""));
+        assert!(html.contains("data-route=\"/cart\""));
+
+        // English keeps the same structure with the English copy.
+        let en = render_checkout_html(view_state(true, true), "en");
+        assert!(en.contains("Your card was not charged. Your cart is intact."), "{en}");
+
+        // Not failed → the state does not exist at all (a spinner is bad; a false alarm is worse).
+        let ok = render_checkout_html(view_state(true, false), "fr");
+        assert!(!ok.contains("payment_failed_state"), "no failure state before a failure");
+        assert!(!ok.contains("Paiement refusé"));
+    }
+
+    #[cfg(feature = "ssr")]
     #[test]
     fn checkout_renders_the_spec_component_tree() {
-        let html = render_checkout_html(CheckoutViewState {
-            restaurant_name: "Chez Test".into(),
-            cart_line_count: 2,
-            formatted_total: "23,50 EUR".into(),
-            is_delivery: true,
-        }, "fr");
+        let html = render_checkout_html(view_state(true, false), "fr");
         for tag in [
             "back_button_header",
             "checkout_section",
@@ -455,12 +579,7 @@ mod tests {
         assert!(html.contains("data-hydrate=\"checkout\""));
         assert!(html.contains(crate::stripe::MOUNT_ID), "the Stripe mount point must exist");
         // COLLECTION hides the delivery sections.
-        let collection = render_checkout_html(CheckoutViewState {
-            restaurant_name: "Chez Test".into(),
-            cart_line_count: 1,
-            formatted_total: "9,80 EUR".into(),
-            is_delivery: false,
-        }, "fr");
+        let collection = render_checkout_html(view_state(false, false), "fr");
         assert!(!collection.contains("data-s=\"delivery_details\""));
     }
 }

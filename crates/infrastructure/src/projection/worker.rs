@@ -154,7 +154,11 @@ impl ReadModelProjector {
                     match payload_uuid_of(env, "orderId") {
                         Some(uuid) => uuid,
                         None => {
-                            tracing::warn!(
+                            // DEBUG, not warn: since the DeliveryJob-% slice joined this group, an
+                            // unkeyable event is the ORDINARY case (every delivery fact except the
+                            // three rider ones carries no `orderId`), so a warn would be one line
+                            // per such event per drain and would stop meaning "anomaly".
+                            tracing::debug!(
                                 projection = "OrderTracking",
                                 stream = %env.stream_name,
                                 position = env.position,
@@ -277,9 +281,19 @@ const REGISTRY: &[ProjectorGroup] = &[
     // The Payment-% slice closes the OrderTracking.payment_status feed gap (docs/sagas.md;
     // ADR-20260719-193500): PaymentCaptured/PaymentRefunded live on Payment-{intentId} streams
     // but are declared in the ordertracking fedBy. Same 'Order' checkpoint = one ordered fold.
+    // The DeliveryJob-% slice does the same for the delivery mirror (delivery_status/courier/
+    // estimated_dropoff_at, spec'd but unfed until now -- docs/sagas.md): the WHOLE DeliveryJob-%
+    // family under this checkpoint, so order, payment and delivery facts fold in global `position`
+    // order. Keying needs no code for the RIDER path: the three rider facts carry `orderId` in
+    // their payload (D-QW1 option b, ADR-20260808-234907), which the branch above already reads.
+    // The PARTNER path is NOT fed by this: `DeliveryAcceptedByPartner` is in the fedBy (it feeds
+    // courier/estimated_dropoff_at) yet carries no `orderId`, so it keys to nothing and those two
+    // columns stay unfed on a partner delivery -- slice 8 (#420) owns closing that. Consequently
+    // the unkeyed branch is a DEBUG, not a warn: it is the ordinary case for every DeliveryJob-%
+    // fact outside the three rider ones, not an anomaly worth a line per event per drain.
     ProjectorGroup {
         checkpoint: "Order",
-        stream_prefixes: &["Order-", "Payment-"],
+        stream_prefixes: &["Order-", "Payment-", "DeliveryJob-"],
         projectors: &[ReadModelProjector::OrderTracking],
         scope: "ordering",
     },

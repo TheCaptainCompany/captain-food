@@ -5,6 +5,43 @@
 
 > ✅ **2026-08-09 — [#335 "Decide whether to consolidate integration test binaries (~3.5G of link products)"](https://github.com/TheCaptainCompany/captain-food/issues/335): `crates/infrastructure`'s 27 integration binaries consolidated into ONE (`tests/main/`, 1.4G → 70M of link products) behind a compiler-enforced `common::TestDb` witness (binary-wide lock + ONE migration-derived `reset_schema`), per ADR-20260808-224500 item 5 — which immediately surfaced and fixed a real spec↔migration drift: `catalog.slug` was still NOT NULL in production migrations while the generated schema and the projector have it nullable (`migrations/20260809000000_catalog_slug_nullable.sql`).**
 
+> ✅ **2026-08-09 — #348 CUSTOMER-ANXIETY QUICK WINS APPLIED
+> ([#424 "Customer-anxiety quick wins: DeliveryPickedUp reaches order tracking, checkout shows a FAILED state (approved spec diff, option b)"](https://github.com/TheCaptainCompany/captain-food/issues/424)),
+> per the exact-text approval in [ADR-20260809-002500](adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md)
+> realizing [PROP-20260808-233000](proposals/PROP-20260808-233000-customer-anxiety-quick-wins-spec-diff.md).**
+> **QW1 — the pickup fact now REACHES the customer's order row (the screen still has to be taught
+> to say it — slice 8, [#420](https://github.com/TheCaptainCompany/captain-food/issues/420)).**
+> `orderId` joins four delivery payloads (D-QW1
+> option b: REQUIRED on `DeliveryAcceptedByRider`/`DeliveryPickedUp`/`DeliveryCompleted`, NULLABLE on
+> the inbound `DeliveryStatusUpdated` — the orphan doctrine, where a birthless stream has no order id
+> anywhere in the system); `DeliveryPickedUp` joins OrderTracking's `fedBy` + the `delivery_status`
+> lineage. Application: `DeliveryJobState` folds `order_id` from the birth fact, the 3 rider command
+> handlers stamp it from state, the 3 partner ACLs emit `None` and the inbound recorder ENRICHES from
+> the fold before append (null therefore marks exactly the orphan anomaly), and the handlers emitter
+> gained a **state-sourced field seam** so the GENERATED `update_delivery_status` supplies `orderId`
+> the command deliberately does not carry. **The wiring that made it real**: the Order projector group
+> now slices the full `DeliveryJob-%` family (`worker.rs`) — the `docs/sagas.md` open item since
+> ADR-0031; without it the whole change was spec theater. First-ever runtime proof of the mirror:
+> `order_projection.rs::delivery_facts_move_the_customers_delivery_mirror` (verified to FAIL when the
+> stream prefix is removed). **Two honest limits** (independent review + ux-designer pass): the
+> PARTNER path stays unfed (`DeliveryAcceptedByPartner` is in the fedBy for `courier`/
+> `estimated_dropoff_at` but carries no `orderId`, so a partner delivery's courier and ETA never
+> reach the customer — slice 8); and the `DeliveryJob-%` slice joined the EXISTING `Order`
+> checkpoint, so any delivery event already below that position is never folded (moot on an empty
+> log; on a non-empty one the `Order` checkpoint must be reset at deploy).
+> **QW2 — the checkout FAILED state EXISTS but is NOT REACHABLE yet.** The screen declares
+> `paymentStatus.byOrder` (a read it already performed undeclared) and a `payment_failed_state`
+> section + 4 translation keys, and a FAILED status now SHORT-CIRCUITS the intent poll instead of
+> spinning to the bound and reporting `IntentUnavailable` (verified: `PaymentStatus::FAILED` is
+> written only by the `PaymentFailed` leg, so no timeout or transient error can produce a false
+> FAILED). But production sets `payment_failed: false` unconditionally and `sdui: false` screens
+> never hydrate, so **no customer can reach the state today** — and a card refused AFTER checkout
+> lands on the tracking screen, which renders "Commande introuvable". Wiring the checkout page and
+> that tracking twin are the blocking items, scoped on #420; a copy rewrite ("Paiement refusé" is
+> untrue when the failure is technical) waits on customer approval.
+> Gates: 0 errors, warning histogram 37 → 37 byte-identical (the diff clears nothing by design —
+> its value is the read-model wiring), 916 workspace tests + the full infrastructure DB suite green.
+>
 > ✅ **2026-08-08 (night, follow-up) — #348 SLICES 1–2 APPROVED BY THE CUSTOMER LIVE; SLICE 1
 > APPLIED TO MAIN BY THE RUN ([ADR-20260808-230800](adr/ADR-20260808-230800-rider-delivery-slices-1-2-approved-and-applied.md)).**
 > All five answers were the recommended options: §2 as written (applied, full `make rust` gate,

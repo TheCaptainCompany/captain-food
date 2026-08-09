@@ -1,6 +1,10 @@
 # PROP-20260808-233000 — Customer-anxiety quick wins: the exact spec diff (DeliveryPickedUp into OrderTracking + checkout FAILED state)
 
-- **Status**: Proposed
+- **Status**: **Approved as exact text and APPLIED** — 2026-08-09, wholly (both quick wins), by
+  [ADR-20260809-002500 "Quick-wins option-(b) diff approved as written"](../adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md);
+  realized by [#424 "Customer-anxiety quick wins: DeliveryPickedUp reaches order tracking, checkout shows a FAILED state (approved spec diff, option b)"](https://github.com/TheCaptainCompany/captain-food/issues/424)
+  / PR [#425 "feat(#424): the customer sees the rider coming, and sees a failed payment"](https://github.com/TheCaptainCompany/captain-food/pull/425).
+  Application notes — where the text met the code — are §10.
 - **Date**: 2026-08-08 (rewritten same night for D-QW1 option (b) — living document, ADR-20260801-020000)
 - **Decision applied**: **D-QW1 was decided by the customer as option (b)** — `orderId` joins the four
   delivery event payloads — via the answer-sheet card recorded in
@@ -21,13 +25,12 @@
 
 ---
 
-> ## PREPARED — NOT APPLIED
+> ## APPLIED — 2026-08-09
 >
-> `specs/**` is frozen for autonomous loops (CLAUDE.md, non-negotiable). This document is the
-> prepared exact diff for the two quick wins, **rewritten for D-QW1 option (b)** per the customer's
-> answer sheet (ADR-20260808-234907); **nothing in it is applied**. Per that ADR's consequences,
-> the rewritten exact text returns to the customer for approval like the slice-1 diff did.
-> Approval mechanics: §9.
+> The customer approved this exact text wholly (ADR-20260809-002500) and the run applied it under
+> that recorded approval: §2 and §3 landed verbatim, plus the whole §7 sweep including the projection
+> worker's `DeliveryJob-%` widening. What the sections below describe is now the state of `main`, not
+> a proposal. Where the text did not survive contact with the code, §10 says so.
 
 **Why now — these are the two worst customer-facing moments in the product, and both are pre-rider
 fixes.** On the independent-rider path the customer's order tracking jumps READY → DELIVERED with a
@@ -746,3 +749,33 @@ emitters handle the rest mechanically (`emit/projectors.rs:173-245`, `emit/behav
 - **To reject or amend**: name the section; this file is rewritten (living document,
   ADR-20260801-020000) before any application. The applying session then flips this Status line,
   recording date and scope.
+
+## 10. Application notes — where this text met the code (2026-08-09)
+
+§2 and §3 applied verbatim; the validator histogram came back byte-identical (37 → 37, 0 errors) as
+§5 predicted, and `schema.generated.sql`/`views.generated.sql` were unchanged as §7 predicted. Five
+things §7 did not price, recorded so the next sweep of this shape is estimated honestly:
+
+1. **The FAILED state was unreachable from the page, not merely unrendered.** §7 item 13 framed QW2's
+   code half as "render `payment_failed_state`". The real blocker sat one layer up:
+   `PlacedOrder::await_payment_intent_with` returns `Ok` only on a `clientSecret`, and a failed
+   payment never gets one — so a refusal polled out the entire bound and surfaced as the technical
+   `IntentUnavailable`. Rendering alone would have shown the failure copy *after* the full spinner.
+   A FAILED status now short-circuits the poll (`PaymentIntent::is_failed`), which is the part that
+   actually removes the spinner the quick win exists to remove.
+2. **The state-sourced seam must be consulted before the required-field PANIC, not just before the
+   `None` fallback** (§7 item 5's wording). Consulted only ahead of the fallback, an aggregate could
+   never supply a REQUIRED event field from its fold — the emitter would still abort. Ordering is now
+   command field → seam state field → required-check → `None`, which is the general shape.
+3. **`crates/infrastructure/tests/order_projection.rs` needed a `db_lock()` guard** before it could
+   hold a second test: both tests DROP and recreate the same tables, and cargo runs tests within one
+   binary in parallel. CI's global `--test-threads=1` hides this; a local `cargo test` would not.
+   (The house pattern already exists in `event_wake.rs`/`sync_sirene_worker.rs`.)
+4. **`crates/web/src/generated/data_layer.rs` did not regenerate** from the new
+   `paymentStatus.byOrder` data requirement (only `screens.rs` did) — §7's generated-artifact list
+   expected both. `ResolverKey::PaymentStatusByOrder` pre-existed, so nothing is missing; the note is
+   that the data-requirements declaration does not reach the data layer emitter.
+5. **The mirror test is a genuine regression gate, verified as one.** Before marking §7 item 11 done,
+   the `DeliveryJob-` stream prefix was removed and the test re-run: it fails with
+   `delivery_status = None` (not `ASSIGNED`). The proposal asked for the assertion; the negative
+   control is what makes it evidence rather than decoration.
