@@ -171,7 +171,8 @@ becomes); (3) fans out the independent review ensemble on the result — reviewe
 graphql-architect (+ dba when storage-shaped, + business-specialist when money, adoption or
 competitive consequences are in play, + legal-specialist when regulatory, data-protection or
 platform-work consequences are in play), eyes that did not write it, in parallel; (4) keeps
-the product owner updated on a fixed cadence (~5 min) while any stage runs, and supervises to a
+the product owner updated at every meaningful transition, plus an hourly heartbeat while any
+stage runs (ADR-20260809-020859), and supervises to a
 merged/landed outcome — never ending at "dispatched, pending". The #397 run is the reference
 shape: the review pass everyone doubted (graphql-architect on a validator fix) produced the most
 consequential finding, so lenses are not skipped for being implausible.

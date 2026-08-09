@@ -90,16 +90,17 @@ FEWER, BIGGER dispatches — never a quietly smaller mob.
   cold, and BATCH questions — the customer checks in periodically; one visit should clear the
   whole queue. For a batch of 3+ decisions, use the interactive decision form
   (DECISIONS.md "How to decide" way #4; recipe in sessions.md).
-- **Status discipline** (customer directive, 2026-08-08: *"inform me every 5 minutes"*): while
-  any work is in flight, post a concise status **every ~5 minutes** via a durable re-armed
-  wake-up chain (`send_later`, 1-minute floor) — a one-line heartbeat ("executor still
-  compiling, no transition") is the correct content when nothing changed — AND at every
-  meaningful transition (dispatched, PR opened, merged, blocked, question queued). Keep a
-  ~60-min fallback wake armed besides, so a broken 5-min chain cannot silently end supervision.
+- **Status discipline** (customer directive, 2026-08-09: *"Every hour don't need more often"* —
+  ADR-20260809-020859, superseding the 5-minute cadence of 2026-08-08): post a status at
+  **every meaningful transition** (dispatched · PR opened · merged · blocked · question queued ·
+  a finding the customer would act on) **plus an hourly heartbeat while work is in flight**,
+  via a durable re-armed wake-up chain (`send_later`). **Silence between transitions is
+  correct, not neglect** — the 5-minute cadence turned supervision into narration, and most of
+  its heartbeats reported "no change" while runner queues did the waiting. While the customer
+  is asleep or away, drop the heartbeat further and keep the morning summary current instead.
   The customer reads top-down on check-in — the latest state must be findable in one screen.
-  This cadence spends the weekly budget markedly faster; the customer chose it knowingly
-  (2026-08-08) after the cost was stated. If push notifications are available, use one only when
-  the question queue goes from empty to non-empty or the run ends.
+  If push notifications are available, use one only when the question queue goes from empty to
+  non-empty or the run ends.
 
 ## Ending a run
 
