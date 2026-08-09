@@ -492,6 +492,9 @@ pub async fn router() -> Router {
         Arc::new(nudges)
     };
     let mut read_deps: Option<ReadDeps> = None;
+    // The edge's ReadScope bridge (#144); empty without a database — the handler then fails CLOSED
+    // (every caller resolves to Public, which sees no tenant rows).
+    let mut scope_resolver = auth::ScopeResolver::default();
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
@@ -612,6 +615,9 @@ pub async fn router() -> Router {
                 // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
                 tenant_lookup = di.tenant_lookup;
                 auth_sessions = di.auth_sessions;
+                // The sub -> CustomerId bridge (#144), held at the edge (not only inside the
+                // schema) because the ReadScope must be resolved BEFORE the schema executes.
+                scope_resolver = auth::ScopeResolver { customers: Some(di.read.customers.clone()) };
                 read_deps = Some(di.read);
                 write_deps = Some(di.write);
 
@@ -1325,6 +1331,10 @@ pub async fn router() -> Router {
         .layer(Extension(tenant_lookup))
         // The fallback's SSR executor (#92): pages resolve their data in-process before rendering.
         .layer(Extension(ssr_exec))
+        // Per-instance authorization bridge (#144): the sub -> domain-id lookup the edge needs to
+        // build a ReadScope. Empty without a database, and an empty resolver resolves every caller
+        // to Public — no tenant rows. Fail closed: a missing bridge must never widen access.
+        .layer(Extension(scope_resolver))
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
         .layer(Extension(auth::AuthContext::from_config(

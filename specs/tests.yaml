@@ -256,6 +256,7 @@ fixtures:
     data:
       orderId: "order-1"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       customerContact: { displayName: "Johnny", phone: "+33612345678" }
       serviceType: "DELIVERY"
       deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -279,6 +280,7 @@ fixtures:
     data:
       orderId: "replacement-order-1"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       customerContact: { displayName: "Johnny", phone: "+33612345678" }
       serviceType: "DELIVERY"
       deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -344,11 +346,13 @@ fixtures:
     data:
       paymentIntentId: "pi_123"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       amount: { amountCents: 1960, currency: "EUR" }
       checkout:
         orderId: "order-1"
         cartId: "cart-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -369,11 +373,13 @@ fixtures:
     data:
       paymentIntentId: "pi_123"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       amount: { amountCents: 1960, currency: "EUR" }
       checkout:
         orderId: "order-1"
         cartId: "cart-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         items:
@@ -2119,6 +2125,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -2143,6 +2150,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         expectedTotal: { amountCents: 1960, currency: "EUR" }
@@ -2167,6 +2175,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         expectedTotal: { amountCents: 100, currency: "EUR" }
@@ -2191,6 +2200,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         paymentMethodId: "pm_123"
@@ -2211,6 +2221,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         paymentMethodId: "pm_declined"
@@ -2237,6 +2248,7 @@ tests:
         restaurantId: "resto-1"
         cartId: "cart-1"
         mode: "LIVE"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }
@@ -2589,6 +2601,7 @@ tests:
       data:
         orderId: "order-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -2619,11 +2632,13 @@ tests:
       data:
         paymentIntentId: "pi_123"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         amount: { amountCents: 1960, currency: "EUR" }
         checkout:
           orderId: "order-1"
           cartId: "cart-1"
           restaurantId: "resto-1"
+          customerId: "cust-1"
           customerContact: { displayName: "Johnny", phone: "+33612345678" }
           serviceType: "DELIVERY"
           deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }

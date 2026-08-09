@@ -12,7 +12,7 @@ use crate::entities::*;
 pub struct PaymentIntentCreated {
     pub payment_intent_id: PaymentIntentId,
     pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub amount: Money,
     pub checkout: CheckoutSnapshot,
 }

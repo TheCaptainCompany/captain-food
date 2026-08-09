@@ -13,8 +13,8 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    CatalogId, RefundStatus, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug,
-    StockStatus,
+    CatalogId, RefundStatus, RestaurantAccountId, RestaurantId, RiderId, ScopeType, SessionId, Slug,
+    StockStatus, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -307,10 +307,28 @@ pub struct OrderFilter {
 /// GraphQL queries — the single canonical Order read model (history + back-office queue + tracking).
 #[async_trait]
 pub trait OrderReadRepository: Send + Sync {
-    /// Orders honouring the filter, most recently placed first.
-    async fn list(&self, filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError>;
-    /// A single order by id (tracking), or `None` if absent.
-    async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError>;
+    /// Orders honouring the filter, most recently placed first, **restricted to `scope`** (#144).
+    ///
+    /// FILTERED, not checked: rows outside the scope are absent, not denied — so a list cannot leak
+    /// existence and cannot "forget" to be scoped. The `scope` parameter is mandatory precisely so
+    /// that an unscoped list is not expressible; before #144 it was, and `orders` with no arguments
+    /// returned the entire tracking table to any authenticated customer.
+    async fn list(
+        &self,
+        filter: OrderFilter,
+        scope: &ReadScope,
+    ) -> Result<Vec<OrderTrackingRow>, DomainError>;
+
+    /// A single order by id, or `None` — **including when it exists but is outside `scope`** (#144).
+    ///
+    /// Returning `None` rather than a distinct "forbidden" keeps the read side free of an existence
+    /// oracle; the by-id GraphQL surface renders it as "not found". The `/files` route is the case
+    /// that deliberately differs (403, to preserve the probing signal) — see PROP-20260725-185140.
+    async fn by_id(
+        &self,
+        id: OrderId,
+        scope: &ReadScope,
+    ) -> Result<Option<OrderTrackingRow>, DomainError>;
 }
 
 /// Read port over the `OrderConversation` projection table (ADR-0040; #131, epic #129). Backs the
@@ -727,4 +745,71 @@ pub trait MailboxRequeue: Send + Sync {
     /// the predicate and the flip are one statement.
     async fn requeue_if_poisoned(&self, message_id: uuid::Uuid)
         -> Result<RequeueOutcome, DomainError>;
+}
+
+// =====================================================================
+// Read-side per-instance authorization (#144, PROP-20260725-185140)
+// =====================================================================
+
+/// The verified caller, resolved to DOMAIN ids once per request.
+///
+/// Constructed only from an authenticated `Principal` (the edge does the `sub` → domain-id bridge and
+/// the JWT-claim reads exactly once — ADR-20260809-050000 CARD-11: the login-to-domain bridge lives in
+/// the token's claims, not in per-request lookups), so nothing downstream can invent a scope for
+/// itself. The resolution is deliberately NOT repeated per check: a thread rendering five attachments
+/// pays for the bridge once, and every membership test after it is a primary-key lookup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadScope {
+    /// Unauthenticated. Reaches only genuinely public read models (discovery, catalog, referential).
+    Public,
+    Customer(CustomerId),
+    Restaurant(RestaurantId),
+    RestaurantAccount(RestaurantAccountId),
+    Rider(RiderId),
+    /// Unrestricted by role alone — ADMIN holds no membership rows at all, by design.
+    Admin,
+    /// The system itself: a process manager or worker acting with no user principal (#144).
+    ///
+    /// Deliberately NOT `Admin`. A saga is not an administrator, and conflating them would mean that
+    /// the day admin reads become audited or restricted, every process manager silently inherits the
+    /// restriction — or, worse, silently evades the audit. Same predicate today, different meaning,
+    /// and the difference is the kind that only bites once.
+    System,
+}
+
+impl ReadScope {
+    /// The `(principal_type, principal_id)` half of a membership question, or `None` for the scopes
+    /// that are answered without consulting the index (`Admin`/`System` short-circuit, `Public` denies).
+    pub fn principal(&self) -> Option<(UserType, uuid::Uuid)> {
+        match self {
+            ReadScope::Customer(id) => Some((UserType::CUSTOMER, id.0)),
+            ReadScope::Restaurant(id) => Some((UserType::RESTAURANT, id.0)),
+            ReadScope::RestaurantAccount(id) => Some((UserType::RESTAURANT_ACCOUNT, id.0)),
+            ReadScope::Rider(id) => Some((UserType::RIDER, id.0)),
+            ReadScope::Admin | ReadScope::System | ReadScope::Public => None,
+        }
+    }
+}
+
+/// The one authorization question, asked the same way by every surface (#144).
+///
+/// GraphQL reads FILTER through it (a scope-less query returns fewer rows); a by-id fetch such as
+/// `/files/<uuid>` CHECKS through it (one object, one yes/no). Both call this port rather than
+/// growing their own logic, which is why it lives in `application` and not beside either transport.
+#[async_trait]
+pub trait ScopeMembershipRepository: Send + Sync {
+    /// May this principal see this instance?
+    async fn is_member(
+        &self,
+        scope_type: ScopeType,
+        scope_id: uuid::Uuid,
+        scope: &ReadScope,
+    ) -> Result<bool, DomainError>;
+
+    /// Every scope of this type the principal may see — the list-query filter.
+    async fn scopes_for(
+        &self,
+        scope_type: ScopeType,
+        scope: &ReadScope,
+    ) -> Result<Vec<uuid::Uuid>, DomainError>;
 }

@@ -92,7 +92,12 @@ queries:
 
 
   carts:
-    description: "A customer's carts (one OPEN cart per restaurant)."
+    description: >
+      A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a
+      CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity
+      (resolved once per request from the verified principal); only ADMIN reads another customer's
+      carts. An unresolvable caller identity yields an empty list, never a fall-through to the
+      client-supplied filter.
     args:
       customerId: { $ref: 'scalars.yaml#/CustomerId', required: true }
     returns: { $ref: '#/types/Cart', array: true }

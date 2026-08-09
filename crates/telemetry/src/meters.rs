@@ -146,6 +146,72 @@ pub mod place_order {
     }
 }
 
+/// Technical + BAM metrics for the `read-authorization` contract (#144).
+pub mod read_authorization {
+    use opentelemetry::metrics::Gauge;
+
+    use super::*;
+
+    fn checks_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::READ_AUTHORIZATION_CHECKS_TOTAL).build())
+    }
+
+    fn denied_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::READ_AUTHORIZATION_DENIED_TOTAL).build())
+    }
+
+    fn bridge_unresolved_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| {
+            meter().u64_counter(metric::READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL).build()
+        })
+    }
+
+    fn check_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::READ_AUTHORIZATION_CHECK_MS).with_unit("ms").build()
+        })
+    }
+
+    fn lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::SCOPE_MEMBERSHIP_LAG_POSITIONS).build())
+    }
+
+    /// One discrete membership check (a by-id read or the subscription guard): counts it, counts the
+    /// denial when `!authorized`, and records its latency. The LIST path never calls this — it
+    /// enforces via a fused SQL predicate, so a list "denial" is structurally invisible.
+    pub fn checked(scope_type: &str, role: &str, authorized: bool, elapsed_ms: f64) {
+        let labels = [
+            KeyValue::new("scope_type", scope_type.to_string()),
+            KeyValue::new("role", role.to_string()),
+        ];
+        checks_counter().add(1, &labels);
+        if !authorized {
+            denied_counter().add(1, &labels);
+        }
+        check_histogram()
+            .record(elapsed_ms, &[KeyValue::new("scope_type", scope_type.to_string())]);
+    }
+
+    /// An authenticated caller could not be mapped to a domain id (`bridge_resolved=false`). It
+    /// denies — safe — but it is a DEFECT (a missing Customer projection row), not a policy outcome,
+    /// so it must never sit inside the ordinary denial count where it would look like noise.
+    pub fn bridge_unresolved(role: &str) {
+        bridge_unresolved_counter().add(1, &[KeyValue::new("role", role.to_string())]);
+    }
+
+    /// BAM gauge: projection lag on the ACL index, in log positions. While it lags, a just-placed
+    /// order's own customer is DENIED their order — a user-visible denial, not stale data, which is
+    /// why it is watched separately from generic projection lag.
+    pub fn lag_positions(lag: i64) {
+        lag_gauge().record(lag, &[]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Recording against the global no-op provider (no `init`) must not panic. This is the state of
@@ -160,5 +226,8 @@ mod tests {
         super::place_order::duration("captured", 431.0);
         super::place_order::placed("PLACED");
         super::place_order::payment_failure("card_declined");
+        super::read_authorization::checked("ORDER", "CUSTOMER", false, 1.5);
+        super::read_authorization::bridge_unresolved("CUSTOMER");
+        super::read_authorization::lag_positions(0);
     }
 }

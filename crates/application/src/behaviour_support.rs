@@ -286,7 +286,7 @@ impl TestBed {
                         payment_intent_id: e.payment_intent_id.clone(),
                         process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
                         payment_status: PaymentStatus::PENDING,
-                        customer_id: e.checkout.customer_id,
+                        customer_id: Some(e.checkout.customer_id),
                         session_id: None,
                         client_secret: Some("pi_123_secret".into()),
                         last_processed_stripe_event_id: None,
@@ -463,7 +463,7 @@ pub fn tracking_row_from_order_placed(
         order_id: e.order_id,
         r#ref: ExternalReference(format!("spec-{}", e.order_id.0)),
         restaurant_id: e.restaurant_id,
-        customer_id: e.customer_id,
+        customer_id: Some(e.customer_id),
         status: OrderStatus::PLACED,
         service_type: e.service_type,
         items: serde_json::to_value(&e.items).expect("items json"),
@@ -884,7 +884,7 @@ impl SpecOrders {
 
 #[async_trait]
 impl OrderReadRepository for SpecOrders {
-    async fn list(&self, filter: OrderFilter) -> Result<Vec<crate::queries::OrderTrackingRow>, DomainError> {
+    async fn list(&self, filter: OrderFilter, _scope: &crate::queries::ReadScope) -> Result<Vec<crate::queries::OrderTrackingRow>, DomainError> {
         Ok(self
             .rows
             .lock()
@@ -896,7 +896,7 @@ impl OrderReadRepository for SpecOrders {
             .cloned()
             .collect())
     }
-    async fn by_id(&self, id: OrderId) -> Result<Option<crate::queries::OrderTrackingRow>, DomainError> {
+    async fn by_id(&self, id: OrderId, _scope: &crate::queries::ReadScope) -> Result<Option<crate::queries::OrderTrackingRow>, DomainError> {
         Ok(self.by_id_sync(id))
     }
 }

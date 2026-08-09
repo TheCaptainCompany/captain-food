@@ -115,8 +115,12 @@ PlaceOrder:
       description: "The OPEN cart to check out; its lines become the order's line items."
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
-      description: "Resolved from the now-authenticated session; bound onto the cart at checkout."
+      description: >
+        Resolved from the now-authenticated session; bound onto the cart at checkout. REQUIRED
+        (#144) — the description above already asserted the customer has verified their phone by
+        this point, but the field was nullable and absent from `required`, so nothing enforced it.
+        Non-null makes it a structural (GraphQL) rejection rather than a domain invariant: the
+        client cannot submit an unidentified checkout at all, so no new errors.yaml code is needed.
     customerContact:
       $ref: 'entities.yaml#/CustomerContact'
     serviceType:
@@ -142,7 +146,7 @@ PlaceOrder:
         anything — the server recomputes the total from the live catalog (the only price authority)
         and rejects with errors.yaml#/PriceMismatch when the two diverge, so a customer is never
         charged an amount other than the one they were shown.
-  required: [orderId, restaurantId, cartId, customerContact, serviceType, paymentMethodId]
+  required: [orderId, restaurantId, cartId, customerId, customerContact, serviceType, paymentMethodId]
 
 
 # =====================================================================

@@ -1114,7 +1114,7 @@ pub async fn rate_order(
     let event = DomainEvent::OrderRated(OrderRated {
         order_id: cmd.order_id,
         restaurant_id: cmd.restaurant_id,
-        customer_id: state.customer_id,
+        customer_id: Some(state.customer_id),
         rider_thumb: cmd.rider_thumb,
     });
     Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
@@ -1137,7 +1137,7 @@ pub async fn rate_restaurant(
     let event = DomainEvent::RestaurantRated(RestaurantRatedEvent {
         order_id: cmd.order_id,
         restaurant_id: cmd.restaurant_id,
-        customer_id: state.customer_id,
+        customer_id: Some(state.customer_id),
         stars: cmd.stars,
         comment: cmd.comment,
     });
@@ -1209,7 +1209,7 @@ pub async fn tip_order(
         order_id: cmd.order_id,
         restaurant_id: cmd.restaurant_id,
         tipped_by,
-        customer_id: if tipped_by == Tipper::CUSTOMER { state.customer_id } else { None },
+        customer_id: if tipped_by == Tipper::CUSTOMER { Some(state.customer_id) } else { None },
         tips: cmd.tips,
     });
     Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
@@ -1230,7 +1230,7 @@ pub async fn request_refund(
     let event = DomainEvent::RefundRequested(RefundRequested {
         order_id: cmd.order_id,
         restaurant_id: cmd.restaurant_id,
-        customer_id: state.customer_id,
+        customer_id: Some(state.customer_id),
         reason: cmd.reason,
     });
     Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
@@ -2257,11 +2257,10 @@ pub async fn consume_customer_credit(
 /// negative — money stays exact.
 pub(crate) async fn credit_to_apply(
     store: &dyn EventStore,
-    customer_id: Option<CustomerId>,
+    customer_id: CustomerId,
     order_id: &OrderId,
     order_total: &Money,
 ) -> Result<i64, DomainError> {
-    let Some(customer_id) = customer_id else { return Ok(0) };
     let (state, _version) = Repository::new(store).load::<CustomerCreditState>(customer_id).await?;
     let Some(state) = state else { return Ok(0) };
     // Retry-stable: a re-submitted checkout for the same order reuses the amount already consumed.
@@ -2502,21 +2501,19 @@ pub async fn place_order(
     // Done AFTER the intent so a declined checkout never consumes credit; the balance guard in the
     // handler still holds should the balance have fallen since it was read (a rare same-customer race).
     if applied_credit > 0 {
-        if let Some(customer_id) = cmd.customer_id {
-            consume_customer_credit(
-                store,
-                ConsumeCustomerCredit {
-                    customer_id,
-                    amount: Money {
-                        amount_cents: domain::generated::scalars::MoneyCents(applied_credit),
-                        currency: gross.currency.clone(),
-                    },
-                    order_id: cmd.order_id,
+        consume_customer_credit(
+            store,
+            ConsumeCustomerCredit {
+                customer_id: cmd.customer_id,
+                amount: Money {
+                    amount_cents: domain::generated::scalars::MoneyCents(applied_credit),
+                    currency: gross.currency.clone(),
                 },
-                actor,
-            )
-            .await?;
-        }
+                order_id: cmd.order_id,
+            },
+            actor,
+        )
+        .await?;
     }
     // Freeze the priced checkout onto the event so PlaceOrderProcess can rebuild OrderPlaced +
     // CartCheckedOut from the log on capture (rules.yaml#/CheckoutSnapshotFrozenAtIntent): the
@@ -2567,11 +2564,13 @@ pub async fn place_order(
             payment_intent_id: intent.payment_intent_id.clone(),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
-            // Initiator scope + credential for the paymentStatus read (ADR-20260720-015500): the
-            // customer when identified, and ALWAYS the dispatch-layer anonymous session when the
-            // header was present — a guest checkout survives an app restart on the session scope
-            // alone (#12, ADR-20260720-213000).
-            customer_id: cmd.customer_id,
+            // Initiator scope + credential for the paymentStatus read (ADR-20260720-015500). The
+            // customer is now ALWAYS present (PlaceOrder.customerId is required as of #144 —
+            // checkout verifies a phone, which registers or resolves the Customer), so this is a
+            // widening, not a maybe. The anonymous session is still recorded when the header was
+            // present: it is a second, device-scoped credential that survives an app restart
+            // (#12, ADR-20260720-213000), not a fallback for an unidentified buyer.
+            customer_id: Some(cmd.customer_id),
             session_id,
             client_secret: Some(intent.client_secret.clone()),
             last_processed_stripe_event_id: None,
@@ -3610,7 +3609,7 @@ mod credit_checkout_tests {
     async fn applies_balance_up_to_the_order_total() {
         let store = MemStore::default();
         store.seed(&credit_stream(), vec![grant(300, 1)]);
-        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        let applied = credit_to_apply(&store, cid(), &order(9), &eur(1000)).await.unwrap();
         assert_eq!(applied, 300);
     }
 
@@ -3619,7 +3618,7 @@ mod credit_checkout_tests {
     async fn caps_applied_credit_at_the_order_total() {
         let store = MemStore::default();
         store.seed(&credit_stream(), vec![grant(1500, 1)]);
-        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        let applied = credit_to_apply(&store, cid(), &order(9), &eur(1000)).await.unwrap();
         assert_eq!(applied, 1000);
     }
 
@@ -3629,16 +3628,16 @@ mod credit_checkout_tests {
         let store = MemStore::default();
         store.seed(&credit_stream(), vec![grant(300, 1)]); // ledger EUR
         let usd = Money { amount_cents: MoneyCents(1000), currency: CurrencyCode("USD".into()) };
-        let applied = credit_to_apply(&store, Some(cid()), &order(9), &usd).await.unwrap();
+        let applied = credit_to_apply(&store, cid(), &order(9), &usd).await.unwrap();
         assert_eq!(applied, 0);
     }
 
-    /// A guest checkout (no customer) and a customer with no ledger apply nothing.
+    /// A customer with no ledger applies nothing. (The guest case is gone: PlaceOrder.customerId
+    /// is REQUIRED as of #144, so an unidentified checkout is structurally unrepresentable.)
     #[tokio::test]
-    async fn guest_or_no_ledger_applies_nothing() {
+    async fn no_ledger_applies_nothing() {
         let store = MemStore::default();
-        assert_eq!(credit_to_apply(&store, None, &order(9), &eur(1000)).await.unwrap(), 0);
-        assert_eq!(credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap(), 0);
+        assert_eq!(credit_to_apply(&store, cid(), &order(9), &eur(1000)).await.unwrap(), 0);
     }
 
     /// RETRY-STABLE: once an order was debited, the SAME applied amount is reused — never recomputed
@@ -3648,7 +3647,7 @@ mod credit_checkout_tests {
         let store = MemStore::default();
         store.seed(&credit_stream(), vec![grant(1000, 1), consumed(300, 9)]);
         // Balance is now 700, but order 9 already applied 300 — reuse 300, not min(700, total).
-        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        let applied = credit_to_apply(&store, cid(), &order(9), &eur(1000)).await.unwrap();
         assert_eq!(applied, 300);
     }
 
@@ -3754,7 +3753,7 @@ mod credit_checkout_tests {
             order_id: order(0x7007),
             restaurant_id: resto(),
             cart_id: cart(),
-            customer_id: Some(cid()),
+            customer_id: cid(),
             customer_contact: CustomerContact {
                 display_name: CustomerDisplayName("Jo".into()),
                 email: None,

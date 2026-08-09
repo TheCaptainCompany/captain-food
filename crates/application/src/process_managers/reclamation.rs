@@ -138,7 +138,7 @@ async fn on_refund_resolution(
 ) -> Result<Outcome, DomainError> {
     // Read the order (cross-aggregate, by orderId) for the captured total + payment state — mirrors how
     // the refund legs read order state from OrderTracking.
-    let Some(order) = orders.by_id(event.order_id).await? else {
+    let Some(order) = orders.by_id(event.order_id, &crate::queries::ReadScope::System).await? else {
         return Ok(Outcome::Skipped(format!(
             "order {} is not in the OrderTracking read model — nothing captured to refund",
             event.order_id.0
@@ -266,7 +266,7 @@ mod tests {
             order_id: OrderId(uid(2)),
             r#ref: None,
             restaurant_id: RestaurantId(uid(9)),
-            customer_id: Some(CustomerId(uid(3))),
+            customer_id: CustomerId(uid(3)),
             customer_contact: CustomerContact {
                 display_name: CustomerDisplayName("Johnny".into()),
                 email: None,
@@ -309,10 +309,10 @@ mod tests {
     }
     #[async_trait]
     impl OrderReadRepository for FakeOrders {
-        async fn list(&self, _filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError> {
+        async fn list(&self, _filter: OrderFilter, _scope: &crate::queries::ReadScope) -> Result<Vec<OrderTrackingRow>, DomainError> {
             Ok(self.row.clone().into_iter().collect())
         }
-        async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
+        async fn by_id(&self, id: OrderId, _scope: &crate::queries::ReadScope) -> Result<Option<OrderTrackingRow>, DomainError> {
             Ok(self.row.clone().filter(|r| r.order_id == id))
         }
     }

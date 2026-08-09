@@ -42,10 +42,12 @@ use sqlx::{PgPool, Row};
 use tracing::Instrument as _;
 
 use crate::persistence::event_wake::EventWaiter;
+use application::projectors::scope_membership;
+use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
-    slug_alias_store,
+    scope_membership_store, slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -80,6 +82,12 @@ enum ReadModelProjector {
     /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
     /// rename, so a restaurant renamed N times leaves N rows on the same stream.
     SlugAlias,
+    /// SET-shaped (#144): one event GRANTS/REVOKES N membership rows, so there is no
+    /// `load -> project -> upsert` triple and no generated dispatch (`emit_projectors` skips a
+    /// table whose pk lineage carries no property path). The pure fold lives in
+    /// `application::projectors::scope_membership`; this arm resolves its two lookups and applies
+    /// the changes on the batch transaction.
+    ScopeMembership,
 }
 
 impl ReadModelProjector {
@@ -216,6 +224,63 @@ impl ReadModelProjector {
                     slug_alias_store::upsert(&mut *conn, &next).await?;
                 }
             }
+            Self::ScopeMembership => {
+                // Two lookups the PURE fold cannot do are resolved here and passed in:
+                //   * DeliveryCancelled carries only a deliveryJobId -> which order is it?
+                //     (DeliveryAcceptedByRider / DeliveryDispatchFailed carry `orderId` since
+                //     D-QW1 option b, so only the cancel needs the View_DeliveryJob lookup — the
+                //     view folds straight off `domain_events`, so it is always consistent with the
+                //     log and the job's birth precedes its cancel in position order.)
+                //   * OrderPlaced carries no restaurantAccountId -> resolved from THIS table's own
+                //     RESTAURANT-scope grant (written by RestaurantRegistered, which precedes any
+                //     OrderPlaced for that restaurant in position order and is read-your-writes on
+                //     the batch transaction). Reading a sibling projection (the restaurant table)
+                //     instead would make a full rebuild non-deterministic: that table belongs to an
+                //     INDEPENDENT checkpoint group, which may not have caught up during a DR replay.
+                // An unresolved lookup yields NO change (the pure layer's choice) — see the fold's
+                // orphan-cancel note for why that is allow-stale-but-acceptable, not deny-safe.
+                let resolved = scope_membership::Resolved {
+                    order_id: resolve_cancelled_delivery_order(&mut *conn, env).await?,
+                    restaurant_account_id: resolve_restaurant_account(&mut *conn, env).await?,
+                };
+                let changes = scope_membership::membership_changes(env, &resolved);
+                // All of one event's changes ride the SAME transaction (the per-event savepoint):
+                // a reassignment is a revoke followed by a grant; applying them separately would
+                // leave a window in which the order has no rider — or two.
+                for change in &changes {
+                    match change {
+                        scope_membership::MembershipChange::Grant {
+                            scope_type,
+                            scope_id,
+                            principal_type,
+                            principal_id,
+                        } => {
+                            scope_membership_store::grant(
+                                &mut *conn,
+                                *scope_type,
+                                *scope_id,
+                                *principal_type,
+                                *principal_id,
+                                env.occurred_at,
+                            )
+                            .await?;
+                        }
+                        scope_membership::MembershipChange::RevokeRole {
+                            scope_type,
+                            scope_id,
+                            principal_type,
+                        } => {
+                            scope_membership_store::revoke_role(
+                                &mut *conn,
+                                *scope_type,
+                                *scope_id,
+                                *principal_type,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+            }
             Self::CustomerCreditBalance => {
                 // Single-stream: the ledger lives on `CustomerCredit-{customerId}`; both fed events
                 // carry customerId, so the row key resolves from the stream uuid (payload fallback).
@@ -328,7 +393,84 @@ const REGISTRY: &[ProjectorGroup] = &[
         projectors: &[ReadModelProjector::CustomerCreditBalance],
         scope: "payments",
     },
+    // The ScopeMembership ACL index (#144) spans THREE categories under ONE checkpoint, and the
+    // single checkpoint is the load-bearing part — not a convenience. Grants arrive on `Order-%`
+    // and `Restaurant-%`; the rider revoke/grant pair arrives on `DeliveryJob-%`. With independent
+    // checkpoints those categories could interleave out of global `position` order, folding a
+    // revoke BEFORE the grant it supersedes and leaving a stale grant behind — the one failure mode
+    // of an ACL cache that is a silent breach rather than a visible denial. One checkpoint = one
+    // totally ordered fold.
+    //
+    // BACKFILL IS FREE, and deliberately so: a group with no `projection_checkpoint` row starts at
+    // position 0 (`drain_group`'s `unwrap_or(0)`), so the first tick replays the whole log and
+    // materializes every historical membership — no separate backfill job before enforcement goes
+    // live (which matters because enforcement lands immediately, not behind a shadow mode:
+    // product-owner decision 2026-07-25). Replay is safe because both operations are idempotent
+    // over the same ordered log: `grant` upserts on a key DERIVED from the membership itself, and
+    // grant -> revoke -> grant folds to the same end state the live path produced. (Historical
+    // OrderPlaced events predating #144 carry no customerId and fail to deserialize — they are
+    // log-skipped, so pre-#144 orders simply hold no grants and stay Admin-only. Throwaway smoke
+    // data today; recorded so the first such denial is not read as a bug.)
+    //
+    // `"Order-"` FIRST is load-bearing: `registry_scopes_match_the_spec_placement` derives the
+    // owning scope from `stream_prefixes[0]`. And ADDING a prefix to this group later requires
+    // deleting the ScopeMembership checkpoint row in the same migration — a prefix joined below an
+    // advanced checkpoint is never folded (the #424 lesson).
+    ProjectorGroup {
+        checkpoint: "ScopeMembership",
+        stream_prefixes: &["Order-", "DeliveryJob-", "Restaurant-"],
+        projectors: &[ReadModelProjector::ScopeMembership],
+        scope: "ordering",
+    },
 ];
+
+/// Which order does this `DeliveryCancelled` job belong to? Only the cancel needs this —
+/// `DeliveryAcceptedByRider` and `DeliveryDispatchFailed` carry `orderId` in the payload (D-QW1
+/// option b). `View_DeliveryJob` is a projection-on-read over `domain_events` itself, so the answer
+/// is always consistent with the log; job -> order is immutable, so there is no race. `None`
+/// (an orphan stream with no birth fact) yields no membership change at all.
+async fn resolve_cancelled_delivery_order(
+    conn: &mut sqlx::PgConnection,
+    env: &Envelope,
+) -> Result<Option<uuid::Uuid>, DomainError> {
+    let job_id = match &env.event {
+        DomainEvent::DeliveryCancelled(e) => e.delivery_job_id.0,
+        _ => return Ok(None),
+    };
+    let row: Option<(Option<uuid::Uuid>,)> =
+        sqlx::query_as("SELECT order_id FROM view_deliveryjob WHERE delivery_job_id = $1")
+            .bind(job_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(db_err)?;
+    Ok(row.and_then(|(id,)| id))
+}
+
+/// Which account owns the restaurant on this `OrderPlaced`? Resolved from the ScopeMembership
+/// table's OWN RestaurantRegistered grant (scope RESTAURANT, principal RESTAURANT_ACCOUNT), which
+/// this group folds in the same total order — deterministic under a full rebuild, unlike reading
+/// the sibling `restaurant` projection, whose independent checkpoint may lag during a DR replay.
+/// An unresolved account simply omits that one grant.
+async fn resolve_restaurant_account(
+    conn: &mut sqlx::PgConnection,
+    env: &Envelope,
+) -> Result<Option<uuid::Uuid>, DomainError> {
+    let restaurant_id = match &env.event {
+        DomainEvent::OrderPlaced(e) => e.restaurant_id.0,
+        _ => return Ok(None),
+    };
+    let row: Option<(uuid::Uuid,)> = sqlx::query_as(
+        "SELECT principal_id FROM scopemembership \
+          WHERE scope_type = $1 AND scope_id = $2 AND principal_type = $3 LIMIT 1",
+    )
+    .bind(domain::generated::scalars::ScopeType::RESTAURANT.to_text())
+    .bind(restaurant_id)
+    .bind(domain::generated::scalars::UserType::RESTAURANT_ACCOUNT.to_text())
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    Ok(row.map(|(id,)| id))
+}
 
 pub struct ProjectionWorker {
     pool: PgPool,
@@ -507,6 +649,13 @@ impl ProjectionWorker {
             .fetch_all(&self.pool)
             .await
             .map_err(db_err)?;
+            // The ACL index's lag is a USER-VISIBLE DENIAL, not stale data (a just-placed order's
+            // own customer is denied their order while it lags), so it gets the contract's
+            // dedicated gauge (`read-authorization` business_metrics). Emitted per scan: the
+            // pending batch length is a lower bound while draining, and an exact 0 when caught up.
+            if group.checkpoint == "ScopeMembership" {
+                telemetry::meters::read_authorization::lag_positions(pending.len() as i64);
+            }
             if pending.is_empty() {
                 return Ok(());
             }
@@ -690,6 +839,24 @@ mod tests {
                 group.checkpoint, group.scope, category, owning
             );
         }
+    }
+
+    /// The ScopeMembership group's SHAPE is the ordering guarantee (#144): ONE checkpoint over the
+    /// three categories whose interleaving could otherwise fold a revoke before the grant it
+    /// supersedes — a stale grant, the silent-breach failure mode of an ACL cache. Deliberately
+    /// structure-sensitive: forcing the interleaving dynamically costs more than it proves, and the
+    /// structure IS the claim. `"Order-"` first is also load-bearing (the scope-placement test
+    /// derives the owning scope from `stream_prefixes[0]`).
+    #[test]
+    fn scope_membership_folds_three_categories_under_one_checkpoint() {
+        let group = REGISTRY
+            .iter()
+            .find(|g| g.checkpoint == "ScopeMembership")
+            .expect("the ScopeMembership ACL index has a registry group");
+        assert_eq!(group.stream_prefixes, &["Order-", "DeliveryJob-", "Restaurant-"]);
+        assert_eq!(group.projectors.len(), 1);
+        assert!(matches!(group.projectors[0], ReadModelProjector::ScopeMembership));
+        assert_eq!(group.scope, "ordering");
     }
 
     /// Every non-kernel scope with registry groups is reachable through the scope filter, and

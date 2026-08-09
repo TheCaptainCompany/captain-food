@@ -181,7 +181,7 @@ CheckoutSnapshot:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: "REQUIRED (#144) — frozen from PlaceOrder, whose customerId is now required."
     mode:
       $ref: 'scalars.yaml#/Mode'
       nullable: true
@@ -211,6 +211,7 @@ CheckoutSnapshot:
     - orderId
     - cartId
     - restaurantId
+    - customerId
     - customerContact
     - serviceType
     - items

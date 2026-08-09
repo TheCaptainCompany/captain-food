@@ -3,7 +3,7 @@
 //! Postgres: set `DATABASE_URL` (see restaurant_projection.rs for a throwaway docker one-liner).
 //! Without it the test SKIPS (prints and returns) so `cargo test` stays green offline.
 
-use application::queries::{OrderFilter, OrderReadRepository as _};
+use application::queries::{OrderFilter, ReadScope, OrderReadRepository as _};
 use domain::generated::scalars::{CustomerId, OrderId, OrderStatus, RestaurantId};
 use infrastructure::{PgOrderRepository, ProjectionWorker};
 use sqlx::PgPool;
@@ -134,7 +134,7 @@ async fn order_events_fold_into_the_read_model() {
 
     // 3) The read repository sees the folded state — by id and through the list filters.
     let repo = PgOrderRepository::new(pool.clone());
-    let row = repo.by_id(OrderId(order_id)).await.expect("by_id").expect("order exists by id");
+    let row = repo.by_id(OrderId(order_id), &ReadScope::System).await.expect("by_id").expect("order exists by id");
     assert_eq!(row.status, OrderStatus::ACCEPTED);
     assert_eq!(row.r#ref.0, "CF-0001");
     assert_eq!(row.restaurant_payout_cents.0, 1800);
@@ -143,7 +143,7 @@ async fn order_events_fold_into_the_read_model() {
 
     // Customer history scope.
     let history = repo
-        .list(OrderFilter { customer_id: Some(CustomerId(customer_id)), ..Default::default() })
+        .list(OrderFilter { customer_id: Some(CustomerId(customer_id)), ..Default::default() }, &ReadScope::System)
         .await
         .expect("list by customer");
     assert_eq!(history.len(), 1);
@@ -154,13 +154,13 @@ async fn order_events_fold_into_the_read_model() {
             restaurant_id: Some(RestaurantId(restaurant_id)),
             status: Some(OrderStatus::ACCEPTED),
             ..Default::default()
-        })
+        }, &ReadScope::System)
         .await
         .expect("list by restaurant+status");
     assert_eq!(queue.len(), 1);
 
     let placed = repo
-        .list(OrderFilter { status: Some(OrderStatus::PLACED), ..Default::default() })
+        .list(OrderFilter { status: Some(OrderStatus::PLACED), ..Default::default() }, &ReadScope::System)
         .await
         .expect("list PLACED");
     assert!(placed.is_empty());

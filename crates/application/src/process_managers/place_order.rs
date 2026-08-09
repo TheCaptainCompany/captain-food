@@ -153,7 +153,7 @@ mod tests {
             order_id: OrderId(uid(1)),
             cart_id: CartId(uid(2)),
             restaurant_id: RestaurantId(uid(3)),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             mode: None,
             r#ref: None,
             customer_contact: CustomerContact {
@@ -192,7 +192,7 @@ mod tests {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
-            customer_id: None,
+            customer_id: Some(CustomerId(uuid::Uuid::nil())),
             session_id: None,
             client_secret: Some("pi_123_secret".into()),
             last_processed_stripe_event_id: None,
@@ -204,7 +204,7 @@ mod tests {
         vec![DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             restaurant_id: RestaurantId(uid(3)),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             amount: eur(1960),
             checkout: snapshot(),
         })]
@@ -215,7 +215,7 @@ mod tests {
                 cart_id: CartId(uid(2)),
                 restaurant_id: RestaurantId(uid(3)),
                 session_id: SessionId(uid(7)),
-                customer_id: None,
+                customer_id: Some(CustomerId(uuid::Uuid::nil())),
             }),
             DomainEvent::CartLineAdded(CartLineAdded {
                 cart_id: CartId(uid(2)),

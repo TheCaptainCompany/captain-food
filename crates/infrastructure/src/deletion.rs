@@ -534,7 +534,7 @@ fn receipt_payload(
                 payload: serde_json::json!({
                     "orderId": key,
                     "restaurantId": state.restaurant_id.0.to_string(),
-                    "customerId": state.customer_id.as_ref().map(|c| c.0.to_string()),
+                    "customerId": state.customer_id.0.to_string(),
                     "policy": window_key(&on),
                 }),
             })

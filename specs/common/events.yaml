@@ -39,7 +39,7 @@ PaymentIntentCreated:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: "REQUIRED (#144) — derived from PlaceOrder, whose customerId is now required."
     amount:
       $ref: 'entities.yaml#/Money'
     checkout:
@@ -48,6 +48,7 @@ PaymentIntentCreated:
   required:
     - paymentIntentId
     - restaurantId
+    - customerId
     - amount
     - checkout
 

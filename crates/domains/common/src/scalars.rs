@@ -423,3 +423,11 @@ pub struct LogLevel(pub String);
 /// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RestaurantAccountId(pub uuid::Uuid);
+
+/// The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ScopeType {
+    ORDER,
+    RESTAURANT,
+}
