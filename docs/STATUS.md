@@ -30,6 +30,29 @@
 >
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-09 (evening) — #433: READSCOPE RESOLVES FROM JWT CLAIMS FOR ALL ROLES (product-owner
+> correction on the merged #430, in their words: "This information is provided in the jwt") —
+> [PR #434](https://github.com/TheCaptainCompany/captain-food/pull/434),
+> [ADR-20260809-160000 addendum 2](adr/ADR-20260809-160000-read-authorization-lands-ported-from-152.md).**
+> `read_scope` is now a PURE function of the token's verified claims (`captain_customer_id` /
+> `captain_rider_id` join the two restaurant claims): the per-request `by_auth_ref` bridge and the
+> rider sub-parse placeholder are DELETED from scope resolution ("sub is never an identity" — pinned
+> with distinct-uuid tests, seen RED under a planted sub-fallback), `ScopeResolver` is gone entirely
+> (no dependency left to be missing; the Friday-peak auth path no longer shares fate with the
+> database), and the four generated resolvers that still authorized via `by_auth_ref`
+> (`paymentStatus`, `paymentStatusChanged`, `myReclamations`, `customerCredit` — the mob's graphql +
+> architect lenses) read the same claim-derived ReadScope, killing the order-visible-but-payment-dead
+> split-brain. prod-smoke now mints the claims it needs (unconditional stamp BEFORE link generation,
+> both keys, token-decoded assertion): the L4 order poll is the customer-POSITIVE production proof,
+> and the negative probe is a BRIDGED stranger (the membership EXISTS path), outage-honest.
+> **Honestly scoped**: `by_auth_ref` REMAINS at the write-side seams (mailbox `resolve_actor`,
+> mutation edge bridges) and `myDeliveries` keeps its rider sub-parse until #415 — recorded, not
+> overclaimed. **BLOCKING precondition recorded on #429's bearer-token item** (three lenses
+> independently): verifyPhone must stamp the claim BEFORE the client's token is issued, or the first
+> paid session is the one denied its tracking screen. **Erasure obligation on #194**: Supabase
+> `app_metadata` now stores domain ids and a claim outlives erasure until expiry — the sequence must
+> scrub app_metadata + revoke refresh tokens.
+
 > ✅ **2026-08-09 (afternoon) — #429's REBASE-AND-LAND ITEM: READ-SIDE PER-INSTANCE AUTHORIZATION
 > LANDED, ported from the parked PR #152
 > ([#144 "Read-side per-instance authorization: ReadScope on the read ports + RESTAURANT/RIDER identity bridges"](https://github.com/TheCaptainCompany/captain-food/issues/144),

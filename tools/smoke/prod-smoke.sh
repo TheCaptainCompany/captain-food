@@ -55,6 +55,10 @@ FIX_PRODUCT_ID="e2e50000-0000-4000-8000-000000000003"
 FIX_OFFER_ID="e2e50000-0000-4000-8000-000000000004"
 SMOKE_ADMIN_EMAIL="smoke-admin@${SMOKE_BASE_DOMAIN}"
 SMOKE_CUSTOMER_EMAIL="smoke-customer@${SMOKE_BASE_DOMAIN}"
+# The BRIDGED stranger for the #433 read-guard negative: its own user, its own per-run
+# captain_customer_id claim — reusing the customer user with a different claim would clobber the
+# first token's claim between steps.
+SMOKE_STRANGER_EMAIL="smoke-stranger@${SMOKE_BASE_DOMAIN}"
 
 # --- Helpers --------------------------------------------------------------------------------------
 # pass/fail/say write to stderr so they survive command substitution (helpers like gql_ok and
@@ -158,37 +162,58 @@ load_supabase_creds() {
   fi
 }
 
-# mint_token <email> <captain_role> — ensure the smoke user exists with the role, then magic-link
-# verify to a session. Prints the access token. Nothing is emailed (admin generate_link only).
+# mint_token <email> <captain_role> [customer_id] — ensure the smoke user exists with the role
+# (and, when given, a per-run captain_customer_id claim — #433: the JWT carries the domain ids),
+# then magic-link verify to a session. Prints the access token. Nothing is emailed.
+#
+# ORDER IS LOAD-BEARING (mob findings, beck+farley): the app_metadata stamp is UNCONDITIONAL and
+# happens BEFORE the link used for verification is generated — a conditional repair keyed on the
+# role would skip re-stamping a reused smoke user, whose token would then carry LAST run's
+# customer id: the positive poll times out and the negative probe silently proves the wrong
+# posture. Claims materialize at token ISSUANCE (/verify), and each generate_link rotates the OTP
+# hash, so the sequence is: create -> stamp -> link -> verify. The PUT sends BOTH keys — GoTrue's
+# app_metadata merge is shallow and version-dependent; never rely on it preserving captain_role.
 mint_token() {
-  local email="$1" role="$2" link th sess tok uid have_role
+  local email="$1" role="$2" customer_id="${3:-}" link th sess tok uid meta payload claim
   load_supabase_creds
   # Idempotent create (an already-registered email errors; ignored).
   curl -sS -m 20 -o /dev/null -X POST "$SB_URL/auth/v1/admin/users" \
     -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
     -d "$(jq -cn --arg e "$email" --arg r "$role" '{email:$e, email_confirm:true, app_metadata:{captain_role:$r}}')" || true
+  # Resolve the user id (a first link also proves the user exists), then stamp UNCONDITIONALLY.
+  link=$(curl -sS -m 20 -X POST "$SB_URL/auth/v1/admin/generate_link" \
+    -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg e "$email" '{type:"magiclink", email:$e}')")
+  uid=$(printf '%s' "$link" | jq -r '.id // .user.id // empty')
+  [ -n "$uid" ] || fail "L3: could not resolve the Supabase user id for $email: $(printf '%s' "$link" | jq -c 'del(.action_link, .email_otp, .hashed_token)' | head -c 400)"
+  if [ -n "$customer_id" ]; then
+    meta=$(jq -cn --arg r "$role" --arg c "$customer_id" '{app_metadata:{captain_role:$r, captain_customer_id:$c}}')
+  else
+    meta=$(jq -cn --arg r "$role" '{app_metadata:{captain_role:$r}}')
+  fi
+  curl -sS -m 20 -o /dev/null -X PUT "$SB_URL/auth/v1/admin/users/$uid" \
+    -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
+    -d "$meta"
+  # Fresh link AFTER the stamp (each generate_link rotates the OTP hash — never hold two links).
   link=$(curl -sS -m 20 -X POST "$SB_URL/auth/v1/admin/generate_link" \
     -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
     -d "$(jq -cn --arg e "$email" '{type:"magiclink", email:$e}')")
   th=$(printf '%s' "$link" | jq -r '.hashed_token // empty')
   [ -n "$th" ] || fail "L3: could not generate a sign-in link for $email: $(printf '%s' "$link" | jq -c 'del(.action_link, .email_otp, .hashed_token)' | head -c 400)"
-  # Repair the role claim if the (pre-existing) user lacks it, then re-link.
-  have_role=$(printf '%s' "$link" | jq -r '.app_metadata.captain_role // .user.app_metadata.captain_role // empty')
-  if [ "$have_role" != "$role" ]; then
-    uid=$(printf '%s' "$link" | jq -r '.id // .user.id')
-    curl -sS -m 20 -o /dev/null -X PUT "$SB_URL/auth/v1/admin/users/$uid" \
-      -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
-      -d "$(jq -cn --arg r "$role" '{app_metadata:{captain_role:$r}}')"
-    link=$(curl -sS -m 20 -X POST "$SB_URL/auth/v1/admin/generate_link" \
-      -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
-      -d "$(jq -cn --arg e "$email" '{type:"magiclink", email:$e}')")
-    th=$(printf '%s' "$link" | jq -r '.hashed_token // empty')
-  fi
   sess=$(curl -sS -m 20 -X POST "$SB_URL/auth/v1/verify" \
     -H "apikey: $SB_KEY" -H "Content-Type: application/json" \
     -d "$(jq -cn --arg t "$th" '{type:"magiclink", token_hash:$t}')")
   tok=$(printf '%s' "$sess" | jq -r '.access_token // empty')
   [ -n "$tok" ] || fail "L3: magic-link verification for $email yielded no session: $(printf '%s' "$sess" | jq -c 'del(.user, .access_token, .refresh_token)' | head -c 400)"
+  # The smoke's own "seen red" (#433): decode the JWT payload (base64, no crypto) and assert the
+  # claim on the token ACTUALLY ISSUED equals this run's value — every stale-claim failure mode
+  # above would otherwise surface only as a 90s timeout or, worse, a false negative-probe pass.
+  if [ -n "$customer_id" ]; then
+    payload=$(printf '%s' "$tok" | cut -d. -f2 | tr '_-' '/+')
+    case $(( ${#payload} % 4 )) in 2) payload="${payload}==";; 3) payload="${payload}=";; esac
+    claim=$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r '.app_metadata.captain_customer_id // empty')
+    [ "$claim" = "$customer_id" ] || fail "L3: token for $email carries captain_customer_id '$claim', expected '$customer_id' — the stamp did not reach the issued token"
+  fi
   printf '%s' "$tok"
 }
 
@@ -299,30 +324,39 @@ l3() {
   pass "L3 fixture: restaurant '$SMOKE_TENANT_SLUG' ACTIVE with offer $FIX_OFFER_ID (created)"
 }
 
-# --- L4b: the read guard, executed in production (#144) -------------------------------------------
-# The only executable proof the vulnerability #144 closed stays closed where it matters: a caller
-# who is NOT the order's member reads NOTHING — no by-id row, no list dump. Runs with the smoke
-# CUSTOMER token, which is authenticated but holds no domain Customer bridge row, so it resolves to
-# the fail-closed Public scope: exactly the posture a stranger probing ids would land in.
+# --- L4b: the read guard, executed in production (#144/#433) --------------------------------------
+# The only executable proof the closed vulnerability stays closed where it matters: a caller who is
+# NOT the order's member reads NOTHING — no by-id row, no list dump. Since #433 this runs as a
+# BRIDGED stranger: a second smoke user carrying its OWN per-run captain_customer_id claim, so the
+# probe exercises the membership EXISTS path itself (the sharper posture — #430's version proved
+# only the unbridged fail-closed-Public arm, which the DB suite already pinned).
 # (rules.yaml cannot carry read-guard coverage — #212 — so this assertion is the production gate.)
 l4_negative() {
-  local resp others
-  # Outage-honest (review finding): an errored response must FAIL the proof, not satisfy it — a
-  # transport error also has empty .data, and `null | length` is 0 in jq.
-  resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+  local resp others stranger stranger_id
+  stranger_id=$(uuid)
+  [ "$stranger_id" != "$customer_id" ] || fail "L4: stranger uuid collided with the customer id — probe would false-alarm"
+  stranger=$(mint_token "$SMOKE_STRANGER_EMAIL" "CUSTOMER" "$stranger_id")
+  # Outage-honest (post-#430 review): an errored OR malformed response must FAIL the proof — a
+  # transport failure collapses to `{}` in gql(), which has no `errors` key and null-chains
+  # `.data.order` to null, so has("data") is load-bearing on every probe.
+  resp=$(gql "$API_BASE/customer/graphql" "$stranger" \
     'query($id: OrderId!){ order(input:{id:$id}) { id } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
   [ "$(printf '%s' "$resp" | jq -r 'has("errors")')" = "false" ] \
     || fail "L4: read-guard probe ERRORED (cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
+  [ "$(printf '%s' "$resp" | jq -r 'has("data")')" = "true" ] \
+    || fail "L4: read-guard probe returned no data envelope (outage, not a deny — cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
   [ "$(printf '%s' "$resp" | jq -r '.data.order')" = "null" ] \
-    || fail "L4: READ GUARD BREACH — a non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
-  others=$(gql "$API_BASE/customer/graphql" "$customer" \
+    || fail "L4: READ GUARD BREACH — a bridged non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
+  others=$(gql "$API_BASE/customer/graphql" "$stranger" \
     'query{ orders { id } }' '{}')
   [ "$(printf '%s' "$others" | jq -r 'has("errors")')" = "false" ] \
     || fail "L4: read-guard list probe ERRORED (cannot prove the guard): $(printf '%s' "$others" | head -c 300)"
+  [ "$(printf '%s' "$others" | jq -r 'has("data")')" = "true" ] \
+    || fail "L4: read-guard list probe returned no data envelope: $(printf '%s' "$others" | head -c 300)"
   [ "$(printf '%s' "$others" | jq -r '.data.orders == []')" = "true" ] \
-    || fail "L4: READ GUARD BREACH — a non-member customer listed orders (the pre-#144 full-table dump): $(printf '%s' "$others" | head -c 300)"
-  say "      L4: read guard held — non-member by-id resolved null, list came back empty"
+    || fail "L4: READ GUARD BREACH — a bridged non-member customer listed orders (the pre-#144 full-table dump): $(printf '%s' "$others" | head -c 300)"
+  say "      L4: read guard held — bridged non-member by-id resolved null, list came back empty"
 }
 
 # --- L4: full money path (TEST mode) --------------------------------------------------------------
@@ -351,11 +385,11 @@ l4() {
   #    the X-SESSION-ID envelope header: the run row stamps it (#12), so the session-scoped
   #    paymentStatus read below works exactly like a real guest checkout.
   #    customerId is REQUIRED as of #144 (structural, not domain-checked at placement): the smoke
-  #    generates one per run — the real client resolves it from the verified phone session. The
-  #    smoke Supabase user has NO domain Customer row (verifyPhone needs a real SMS OTP), so the
-  #    customer-scoped ORDER read below runs as ADMIN, and that same gap powers the negative
-  #    assertion at the end: an authenticated-but-unbridged CUSTOMER must read NOTHING.
-  customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER")
+  #    generates one per run and — since #433 — stamps the SAME value into the token's
+  #    captain_customer_id claim, exactly what the product's verifyPhone mint will do (the
+  #    stamp-before-issue precondition recorded on #429). The claim IS the identity: the order
+  #    poll below runs as this customer, and the negative probe as a bridged stranger.
+  customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER" "$customer_id")
   resp=$(gql_ok "L4" "$API_BASE/customer/graphql" "$customer" \
     'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ messageId operationStatus duplicate } }' \
     "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" --arg u "$customer_id" '{i:{
@@ -413,29 +447,33 @@ l4() {
     || fail "L4: PaymentIntent confirm did not succeed: $(printf '%s' "$confirm" | jq -c '{status, error}' | head -c 500)"
   say "      L4: payment intent confirmed (succeeded) — waiting for the webhook + saga"
 
-  # 4. The inbound webhook (PaymentCaptured) drives the saga: OrderPlaced + projection. Poll.
-  #    As ADMIN (#144): order reads are membership-scoped now, and the smoke customer has no domain
-  #    Customer bridge row (see step 2), so its own read is REFUSED by design — the fail-closed
-  #    posture the negative assertion below proves. A customer-scoped positive read lands when the
-  #    smoke can mint a domain Customer (the verifyPhone SMS gap, recorded on #144's follow-up).
-  admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
+  # 4. The inbound webhook (PaymentCaptured) drives the saga: OrderPlaced + projection. Poll —
+  #    AS THE CUSTOMER (#433): the token now carries this run's captain_customer_id (asserted on
+  #    the token itself at mint), so this is the customer-POSITIVE production proof #430 could not
+  #    give: the paying customer reads their own order through the membership guard.
   t=0; last="(never observed)"
   while [ "$t" -le "$SMOKE_ORDER_TIMEOUT" ]; do
-    resp=$(gql "$API_BASE/admin/graphql" "$admin" \
+    resp=$(gql "$API_BASE/customer/graphql" "$customer" \
       'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')")
     status=$(printf '%s' "$resp" | jq -r '.data.order.status // empty')
     pay_status=$(printf '%s' "$resp" | jq -r '.data.order.paymentStatus // empty')
     last="status=${status:-<no order row>} paymentStatus=${pay_status:-<none>}"
     if [ "$pay_status" = "CAPTURED" ] && [ -n "$status" ]; then
-      say "      L4: order captured — asserting the read guard (#144) before declaring victory"
+      say "      L4: customer read their captured order — asserting the read guard before declaring victory"
       l4_negative
-      pass "L4 money path: order $order_id $last (intent $pi captured via webhook; read guard held)"
+      pass "L4 money path: order $order_id $last (intent $pi captured via webhook; customer-positive + read guard held)"
       return 0
     fi
     sleep 5; t=$((t+5))
   done
-  fail "L4: order $order_id not captured after ${SMOKE_ORDER_TIMEOUT}s — last observed: $last"
+  # Diagnosability on timeout (farley): ONE admin read separates "capture never happened" from
+  # "capture landed but the customer's claim scope is broken" — otherwise both are the same 90s.
+  admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
+  resp=$(gql "$API_BASE/admin/graphql" "$admin" \
+    'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
+    "$(jq -cn --arg id "$order_id" '{id:$id}')")
+  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = capture/projection broken)"
 }
 
 # --- Run ------------------------------------------------------------------------------------------
