@@ -811,3 +811,38 @@ production's call site proves the renderer, not the page. Cheap tell: unit tests
 production never constructs (here `payment_failed: true`, hardcoded `false` at the only real call
 site). And when a gate's scope is narrower than its name, **rename it or widen it in the same
 change** — the name is what the next reader trusts.
+
+## 16. A lens invited late still pays — and the ones you skip are the ones that disagree
+
+The mob ADR (ADR-20260809-013142) says invite the roster by default. On the first dispatch after it
+landed, the coordinator invited four lenses of eleven by its own judgement and got a real result —
+the customer path is inert on `main`. Then the other six were invited on the already-committed
+proposal, and the honest measurement is uncomfortable:
+
+**The six late lenses found four defects the four missed, all verified in the tree:**
+
+- `orders` / `order` / `carts` apply **no ownership filter for any role** — `orders` with no
+  arguments returns the whole `ordertracking` table, un-paginated, while the SDL says ownership is
+  enforced (graphql-architect).
+- The cart's total and the competitor comparison **never compute** — the projector carries them
+  forward from a row no event ever writes; the epic's one commercial screen cannot render
+  (business-specialist).
+- The `orderStatusChanged` dedupe keys on `status` alone, so widening the stream filter **still
+  swallows** every delivery movement — and it lives in the EMITTER, not the crate the executor was
+  scoped to (graphql-architect; the executor was mid-work and had to be checkpointed).
+- `orders_placed_total` — the metric that says a stranger paid us — has **zero emission sites**, so
+  the alert that would have caught the inert checkout could never have fired; and `place-order`'s
+  success rule requires a span with no call sites, making the contract unsatisfiable by construction
+  (observability-agent).
+
+**The selection bias is the lesson, not the count.** The four invited were the four most likely to
+produce more design. The lens whose only job is to say *build less* (holub) was not invited, and it
+was the one that argued the epic should be deferred — with two other lenses independently agreeing
+that ~80% of it was production work misfiled under a marketing epic. **A coordinator picking lenses
+picks the answer**, because it picks who is allowed to disagree.
+
+**Operationally**: late invitation still works and is cheap — six parallel reads of a committed
+proposal cost one wall-clock stretch and caught a security defect. So the recovery is real, but it
+arrives after the proposal has shaped everyone's thinking, and one dispatch was already running
+against a scope that turned out to be wrong. Invite first. If cost forces a subset, the subset must
+include the lens most likely to say the work should not happen.
