@@ -38,15 +38,6 @@ use infrastructure::{
 };
 use sqlx::PgPool;
 
-/// Both tests DROP+CREATE the same tables in one shared database — the harness's concurrent
-/// threads would clobber each other's schema mid-test (the `staging_upsert` lesson). One
-/// suite-wide lock, held for each test's whole body, restores determinism.
-static SUITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn serialize_suite() -> std::sync::MutexGuard<'static, ()> {
-    SUITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// An [`EventStore`] that counts the loads reaching the REAL store per stream — a load served
 /// from the activation cache never shows up here.
 struct CountingStore {
@@ -78,71 +69,6 @@ impl EventStore for CountingStore {
         *self.loads.lock().unwrap().entry(stream_name.to_owned()).or_default() += 1;
         self.inner.load(stream_name).await
     }
-}
-
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events, customer CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-    sqlx::raw_sql(
-        "CREATE TABLE domain_events (\n\
-           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
-           id UUID NOT NULL UNIQUE,\n\
-           stream_name TEXT NOT NULL,\n\
-           version INTEGER NOT NULL,\n\
-           user_id UUID NOT NULL,\n\
-           user_type TEXT NOT NULL,\n\
-           correlation_id UUID NOT NULL,\n\
-           cause_id UUID NULL,\n\
-           event_type TEXT NOT NULL,\n\
-           payload JSONB NOT NULL,\n\
-           metadata JSONB NULL,\n\
-           occurred_at TIMESTAMPTZ NOT NULL,\n\
-           expired_at TIMESTAMPTZ NULL,\n\
-           UNIQUE (stream_name, version)\n\
-         )",
-    )
-    .execute(pool)
-    .await
-    .expect("domain_events");
-    sqlx::raw_sql(
-        "CREATE TABLE customer (\n\
-           customer_id UUID PRIMARY KEY,\n\
-           phone TEXT NOT NULL UNIQUE,\n\
-           auth_ref TEXT,\n\
-           display_name TEXT,\n\
-           email TEXT,\n\
-           email_verified BOOLEAN NOT NULL,\n\
-           locale TEXT,\n\
-           timezone TEXT,\n\
-           ratings JSONB NOT NULL,\n\
-           favorite_restaurant_ids JSONB NOT NULL,\n\
-           preferences JSONB,\n\
-           addresses JSONB NOT NULL,\n\
-           payment_method_id TEXT,\n\
-           created_at TIMESTAMPTZ NOT NULL,\n\
-           updated_at TIMESTAMPTZ NOT NULL\n\
-         )",
-    )
-    .execute(pool)
-    .await
-    .expect("customer");
 }
 
 fn deps_over(store: Arc<dyn EventStore>, pool: &PgPool) -> CommandDeps {
@@ -219,26 +145,10 @@ fn post_payload(order: uuid::Uuid, message_n: u128, body: &str) -> serde_json::V
     })
 }
 
-fn gated() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP mailbox_activations: DATABASE_URL not set");
-            None
-        }
-    }
-}
-
 #[tokio::test]
 async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writer() {
-    let Some(url) = gated() else { return };
-    let _suite = serialize_suite();
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_activations").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0xAC71);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
@@ -356,10 +266,8 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
 /// abort + invalidate, and the redelivery refolds and decides correctly.
 #[tokio::test]
 async fn stale_hold_cannot_commit_a_wrong_rejection() {
-    let Some(url) = gated() else { return };
-    let _suite = serialize_suite();
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_activations").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0xAC73);
     let restaurant = uuid::Uuid::from_u128(0x0E59);
@@ -455,10 +363,8 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
 
 #[tokio::test]
 async fn per_actor_opt_out_caches_nothing() {
-    let Some(url) = gated() else { return };
-    let _suite = serialize_suite();
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_activations").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0xAC72);
     let restaurant = uuid::Uuid::from_u128(0x0E58);

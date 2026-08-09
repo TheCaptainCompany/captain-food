@@ -30,49 +30,6 @@ use infrastructure::{
 };
 use sqlx::{PgPool, Row};
 
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events, customer CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-    sqlx::raw_sql(
-        "CREATE TABLE domain_events (\n\
-           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
-           id UUID NOT NULL UNIQUE,\n\
-           stream_name TEXT NOT NULL,\n\
-           version INTEGER NOT NULL,\n\
-           user_id UUID NOT NULL,\n\
-           user_type TEXT NOT NULL,\n\
-           correlation_id UUID NOT NULL,\n\
-           cause_id UUID NULL,\n\
-           event_type TEXT NOT NULL,\n\
-           payload JSONB NOT NULL,\n\
-           metadata JSONB NULL,\n\
-           occurred_at TIMESTAMPTZ NOT NULL,\n\
-           expired_at TIMESTAMPTZ NULL,\n\
-           UNIQUE (stream_name, version)\n\
-         )",
-    )
-    .execute(pool)
-    .await
-    .expect("domain_events");
-}
-
 fn deps_over(pool: &PgPool) -> CommandDeps {
     CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
@@ -151,16 +108,8 @@ async fn enqueue_message(
 
 #[tokio::test]
 async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP mailbox_retention: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_retention").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x0AD1);
     let restaurant = uuid::Uuid::from_u128(0x0E57);

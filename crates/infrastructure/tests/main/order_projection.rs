@@ -8,83 +8,6 @@ use domain::generated::scalars::{CustomerId, OrderId, OrderStatus, RestaurantId}
 use infrastructure::{PgOrderRepository, ProjectionWorker};
 use sqlx::PgPool;
 
-/// Fresh copies of the three tables the slice touches (mirrors migrations/20260717120000 + …170000).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS domain_events, ordertracking, projection_checkpoint CASCADE;
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE TABLE ordertracking (
-          order_id UUID PRIMARY KEY,
-          ref TEXT NOT NULL,
-          restaurant_id UUID NOT NULL,
-          customer_id UUID,
-          status TEXT NOT NULL,
-          service_type TEXT NOT NULL,
-          items JSONB NOT NULL,
-          total_amount_cents BIGINT NOT NULL,
-          currency TEXT NOT NULL,
-          articles_cents BIGINT NOT NULL,
-          delivery_cents BIGINT NOT NULL,
-          service_fee_cents BIGINT NOT NULL,
-          restaurant_payout_cents BIGINT NOT NULL,
-          rider_payout_cents BIGINT NOT NULL,
-          captain_net_cents BIGINT NOT NULL,
-          uber_total_cents BIGINT,
-          uber_restaurant_cents BIGINT,
-          uber_rider_cents BIGINT,
-          uber_platform_cents BIGINT,
-          uber_basis TEXT,
-          delivery_address JSONB,
-          estimated_ready_at TIMESTAMPTZ,
-          placed_at TIMESTAMPTZ NOT NULL,
-          status_changed_at TIMESTAMPTZ NOT NULL,
-          payment_intent_id TEXT,
-          payment_status TEXT NOT NULL,
-          restaurant_stars INTEGER,
-          rating_comment TEXT,
-          rider_thumb TEXT,
-          -- Added by migrations/20260722000000; the projector's upsert names it, so a fixture
-          -- without it fails the whole INSERT and the row never materializes (caught when #230
-          -- first ran this suite in CI).
-          delivery_timeliness TEXT,
-          rider_tip_cents BIGINT,
-          restaurant_tip_cents BIGINT,
-          captain_tip_cents BIGINT,
-          rated_at TIMESTAMPTZ,
-          delivery_status TEXT,
-          courier JSONB,
-          estimated_dropoff_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        CREATE TABLE projection_checkpoint (
-          projector  TEXT        PRIMARY KEY,
-          position   BIGINT      NOT NULL DEFAULT 0,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
-
 async fn append_event(
     pool: &PgPool,
     stream_name: &str,
@@ -115,16 +38,8 @@ fn money(cents: i64) -> serde_json::Value {
 
 #[tokio::test]
 async fn order_events_fold_into_the_read_model() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP order_events_fold_into_the_read_model: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("order_projection").await else { return };
+    let pool = db.pool();
 
     let order_id = uuid::Uuid::new_v4();
     let restaurant_id = uuid::Uuid::new_v4();

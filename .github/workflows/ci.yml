@@ -260,8 +260,10 @@ jobs:
           df -h || true
           free -m || true
 
-      # --test-threads=1 because the suites share one database and reset the same tables; the per-file
-      # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
+      # --test-threads=1 because the suites share one database and reset the same tables; the
+      # infrastructure binary's TestDb witness serializes its own bodies, but spawned-worker tails
+      # outlive the gate, and server/actor_runtime suites have no witness. DB_TESTS_REQUIRED makes a
+      # skip LOUD: if this step
       # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
       # actor_runtime carries the Proto.Actor port suites (ADR-20260730-234918: fencing, ordering,
       # rebalance, discipline) — it was missing here until #275, so those suites only ever ran on

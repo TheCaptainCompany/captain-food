@@ -17,54 +17,6 @@ use application::ports::EventStore;
 use infrastructure::{DeletionEngine, PgEventStore};
 use sqlx::{PgPool, Row};
 
-/// The tests DROP+CREATE the same tables and the harness runs a file's tests concurrently —
-/// serialize the suite (the staging_upsert lesson, 2026-08-01).
-static SUITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn serialize_suite() -> std::sync::MutexGuard<'static, ()> {
-    SUITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS domain_events, domain_stream, projection_checkpoint CASCADE;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(
-        "CREATE TABLE domain_events (\n\
-           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
-           id UUID NOT NULL UNIQUE,\n\
-           stream_name TEXT NOT NULL,\n\
-           version INTEGER NOT NULL,\n\
-           user_id UUID NOT NULL,\n\
-           user_type TEXT NOT NULL,\n\
-           correlation_id UUID NOT NULL,\n\
-           cause_id UUID NULL,\n\
-           event_type TEXT NOT NULL,\n\
-           payload JSONB NOT NULL,\n\
-           metadata JSONB NULL,\n\
-           occurred_at TIMESTAMPTZ NOT NULL,\n\
-           expired_at TIMESTAMPTZ NULL,\n\
-           UNIQUE (stream_name, version)\n\
-         );\n\
-         CREATE TABLE domain_stream (\n\
-           stream_name TEXT PRIMARY KEY,\n\
-           max_age INTERVAL NULL,\n\
-           max_count INTEGER NULL\n\
-         );\n\
-         CREATE TABLE projection_checkpoint (\n\
-           projector TEXT PRIMARY KEY,\n\
-           position BIGINT NOT NULL,\n\
-           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()\n\
-         );",
-    )
-    .execute(pool)
-    .await
-    .expect("schema");
-}
-
 fn money(cents: i64) -> serde_json::Value {
     serde_json::json!({ "amountCents": cents, "currency": "EUR" })
 }
@@ -161,17 +113,8 @@ async fn stream_rows(pool: &PgPool, stream: &str) -> i64 {
 
 #[tokio::test]
 async fn the_journey_erases_the_stream_and_records_the_receipt() {
-    let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP deletion_engine: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("deletion_engine").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x0AD1);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
@@ -224,13 +167,8 @@ async fn the_journey_erases_the_stream_and_records_the_receipt() {
 
 #[tokio::test]
 async fn a_lagging_projection_defers_the_journey_until_it_folds_the_expiry() {
-    let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP deletion_engine (lag): DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("deletion_engine").await else { return };
+    let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x0AD2);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
@@ -273,15 +211,10 @@ async fn a_lagging_projection_defers_the_journey_until_it_folds_the_expiry() {
 
 #[tokio::test]
 async fn load_skips_technical_rows_but_counts_their_version() {
-    let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP deletion_engine (load): DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
+    let Some(db) = crate::common::TestDb::acquire("deletion_engine").await else { return };
+    let pool = db.pool();
     // Own schema namespace: reuse setup (serial within this file is unnecessary — each test
     // rebuilds the schema, and the three tests share no assertions across runs).
-    setup(&pool).await;
 
     let order = uuid::Uuid::from_u128(0x0AD3);
     let stream = format!("Order-{order}");

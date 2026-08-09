@@ -11,21 +11,13 @@
 use infrastructure::persistence::runtime_posture::{
     read_posture, PostureRead, PM_MAILBOX_DELIVERY,
 };
-use sqlx::PgPool;
 
-const MIGRATION: &str = include_str!("../../../migrations/20260803104819_runtime_posture.sql");
+const MIGRATION: &str = include_str!("../../../../migrations/20260803104819_runtime_posture.sql");
 
 #[tokio::test]
 async fn posture_read_is_fail_closed_by_cause() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP runtime_posture: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect");
+    let Some(db) = crate::common::TestDb::acquire("runtime_posture").await else { return };
+    let pool = db.pool();
 
     // (1) TABLE MISSING (schema behind this binary): UNPROVABLE, not an error — the caller
     // falls to the legacy arm deterministically; no retry loop, no guess.
@@ -82,6 +74,6 @@ async fn posture_read_is_fail_closed_by_cause() {
         "a missing row must resolve Unprovable"
     );
 
-    // Leave the table seeded for sibling suites (CI shares one database, #230).
+    // Seeding persistence beyond this test is moot since every TestDb::acquire resets the schema.
     sqlx::raw_sql(MIGRATION).execute(&pool).await.expect("re-seed");
 }
