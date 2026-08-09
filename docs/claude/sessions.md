@@ -124,6 +124,20 @@ regenerated files`. Running `make generate` then changes nothing and the failure
 the fix is to **commit your own change**, not to regenerate. Real drift names files under
 `specs/generated/**` or `crates/**/generated/**`.
 
+**A PR "waiting on checks" may not be waiting on checks at all — read `mergeable_state` FIRST
+(2026-08-09).** `pull_request_read` with `method: get_status` returns `{state: pending,
+total_count: 0}` for BOTH "the required check is queued" and "this PR has a merge conflict", so a
+conflicted PR looks exactly like a slow runner. The tell is on the PR object, not the status:
+`mergeable_state: "dirty"` = conflict (also `"behind"`, `"blocked"`); `get_status` never says so.
+Cost: ~40 minutes of heartbeats attributing a real conflict to runner backlog while auto-merge sat
+armed and could never fire. Habit: when an armed auto-merge does not land within one CI cycle, call
+`pull_request_read method:get minimal_output:true` and read `mergeable_state` before blaming the
+platform. Related: the conflict was SEMANTIC, not textual — one branch moved every
+`crates/infrastructure/tests/*.rs` into the `tests/main/` witness harness while the other added a
+test in the old layout, so git's auto-merge produced a file mixing both idioms. Resolve onto the
+NEW harness and re-run the moved test against a live database; a compile-only check would have
+passed while the test silently lost its serialization guard.
+
 **Before diagnosing weird CI behaviour, check `githubstatus.com` — three symptoms together mean the
 PLATFORM, not your change**: jobs completing as `cancelled` (rather than `failure`), a run sitting
 `queued` for tens of minutes, and — the tell — **pushes creating NO workflow run at all**. On
