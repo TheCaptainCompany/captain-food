@@ -30,6 +30,32 @@
 >
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-09 (late night) — #437: VERIFYPHONE STAMPS THE CUSTOMER CLAIM BEFORE THE TOKEN IS PARKED
+> ([#437 "verifyPhone stamps captain_customer_id before token issue; customer bearer token rides the session (#429 blocking precondition)"](https://github.com/TheCaptainCompany/captain-food/issues/437),
+> [PR #438](https://github.com/TheCaptainCompany/captain-food/pull/438),
+> [ADR-20260809-212810](adr/ADR-20260809-212810-verify-phone-claim-stamp-posture.md)).**
+> The #429 blocking precondition: `verify_phone` now resolves the Customer, STAMPS
+> `captain_customer_id` + `captain_role` via a new Supabase admin ACL call
+> (`identity.stamp_customer_claim`, spec-declared with `SUPABASE_SECRET_KEY`), refresh-ROTATES the
+> session, and parks ONLY the rotated (claim-bearing) token — so the `captain_auth` cookie minted
+> at `/auth/session` pickup already satisfies `ReadScope::Customer`. Failure posture: verification
+> stands, an unstamped token is never parked, `claim_conflict` never retried (`claims.stamp` span
+> + `customer_claim_stamp_failed_total{reason}` at the ACL). Idempotent re-stamp with the
+> role-exactness rule (no-op ONLY on `captain_role == "CUSTOMER"`; wrong role repaired by the PUT).
+> **Red-first chain, each seen red verbatim**: parked-token decode (`InvalidLastSymbol` on the
+> pre-rotation token) → ordering; `stamp_decision` wrong-role (`left: Noop right: Put`) → role
+> exactness; planted claim→`rider_id` transposition in `authorize()` (`left: None right:
+> Some(…437)`) → the new end-to-end test (real seeded ES256 JWKS, JWT delivered cookie-ONLY,
+> claim → `Principal` → `ReadScope`, tamper-rejection arm). **No client bearer plumbing** — ratified
+> deviation: the httpOnly cookie IS the transport on both legs (#112 shipped design; same-origin
+> fetch + WS upgrade; `ws_auth_headers` extracted pure + pinned so no-payload-token keeps the
+> upgrade cookie untouched). Host-only cookie consequence recorded: storefront sign-in ≠ marketplace
+> sign-in. **Deploy facts (verified)**: GitHub Actions secret `SUPABASE_SECRET_KEY` exists
+> (render-config-sync run 31335187939) and Render already holds the value; presence is the gate —
+> boot never fails without it, the stamp fails closed. **Known gap (pre-existing, observability
+> lens)**: the customer-identification contract's `otp.verify` span is implemented nowhere — issue
+> to be filed by the coordinator. DB suite untouched (no schema change).
+
 > 🚧 **2026-08-09 (night) — #435: ScopeMembership `principal_type`/`principal_id` → `member_type`/`member_id`
 > ([#435 "ScopeMembership: rename principal_type/principal_id to member_type/member_id (product-owner naming directive)"](https://github.com/TheCaptainCompany/captain-food/issues/435),
 > [PR #436](https://github.com/TheCaptainCompany/captain-food/pull/436),
