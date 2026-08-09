@@ -392,7 +392,7 @@ exactly the kind that photographs someone's front door.
 
    ```sql
    SELECT EXISTS(SELECT 1 FROM "ScopeMembership"
-                  WHERE scope_type=$1 AND scope_id=$2 AND principal_type=$3 AND principal_id=$4);
+                  WHERE scope_type=$1 AND scope_id=$2 AND member_type=$3 AND member_id=$4);
    ```
 
    The guard never learns what an order *is*. A new `FileScopeType` is a projector rule, not new code
@@ -486,7 +486,7 @@ query was selected (PROP-20260725-185140 §3.3.2). Same check, two mounting poin
 #### 4.5.2 The prerequisite: `ScopeMembership` and its projector rules
 
 The membership answer comes from the **`ScopeMembership`** projection
-(PROP-20260725-185140 §3.4) — `(scope_type, scope_id, principal_type, principal_id)`, maintained by an
+(PROP-20260725-185140 §3.4) — `(scope_type, scope_id, member_type, member_id)`, maintained by an
 app-layer projector through declared `grants`/`revokes` per event. `/files` does not resolve membership
 itself; it asks that index, exactly as every GraphQL read does.
 

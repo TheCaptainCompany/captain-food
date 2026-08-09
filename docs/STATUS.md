@@ -30,6 +30,24 @@
 >
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-09 (night) — #435: ScopeMembership `principal_type`/`principal_id` → `member_type`/`member_id`
+> ([#435 "ScopeMembership: rename principal_type/principal_id to member_type/member_id (product-owner naming directive)"](https://github.com/TheCaptainCompany/captain-food/issues/435),
+> [PR #436](https://github.com/TheCaptainCompany/captain-food/pull/436),
+> [ADR-20260809-200826](adr/ADR-20260809-200826-scope-membership-member-naming.md)).**
+> The membership columns hold DOMAIN ids, so they are `member_*` now; the server's `Principal`
+> struct keeps its name — it IS the technical caller (the meaning the product owner reserves for
+> the word). Spec table + regeneration, a separate ALTER migration (`20260809190000`, the CREATE
+> is checksummed) + `REQUIRED_SCHEMA_VERSION` bump, and a rename-only code mirror
+> (`ReadScope::principal()` → `member()`; the worker's revoke-failure log field key is
+> `member_type` now). Proven red-then-green against throwaway Postgres: 4 scope_membership DB
+> tests failed on `column "principal_type" does not exist` with the migration in and the code
+> unmirrored, 60/60 green after. **Key stability**: `membership_id` (UUIDv5) hashes enum wire
+> values, not column names — the pinned-literal test passed byte-identical throughout. Deploy
+> fact: production has no serving binary and never ran `20260809140000`, so CREATE + ALTER land
+> in one `sqlx migrate run`; pre-#436 images are not deployable against a migrated DB (no down
+> migration). The `actors.yaml` `principals:` role-mapping vocabulary is a DIFFERENT concept,
+> consciously deferred.
+
 > 🚧 **2026-08-09 (evening) — #433: READSCOPE RESOLVES FROM JWT CLAIMS FOR ALL ROLES (product-owner
 > correction on the merged #430, in their words: "This information is provided in the jwt") —
 > [PR #434](https://github.com/TheCaptainCompany/captain-food/pull/434),

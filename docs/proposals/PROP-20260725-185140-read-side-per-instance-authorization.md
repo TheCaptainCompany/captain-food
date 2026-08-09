@@ -455,19 +455,19 @@ ScopeMembership:
   columns:
     scope_type:     { type: { $ref: 'scalars.yaml#/ScopeType' } }
     scope_id:       { type: uuid }
-    principal_type: { type: { $ref: 'scalars.yaml#/UserType' } }
-    principal_id:   { type: uuid }   # customerId | restaurantId | restaurantAccountId | riderId
+    member_type: { type: { $ref: 'scalars.yaml#/UserType' } }
+    member_id:   { type: uuid }   # customerId | restaurantId | restaurantAccountId | riderId
     granted_at:     { type: timestamptz }
-  pk: [scope_type, scope_id, principal_type, principal_id]
+  pk: [scope_type, scope_id, member_type, member_id]
   indexes:
-    - [principal_type, principal_id, scope_type]   # "everything this principal may see" -> list queries
+    - [member_type, member_id, scope_type]   # "everything this member may see" -> list queries
 ```
 
 The entire guard collapses to one index-only lookup, forever, for every scope type and role:
 
 ```sql
 SELECT EXISTS(SELECT 1 FROM "ScopeMembership"
-               WHERE scope_type=$1 AND scope_id=$2 AND principal_type=$3 AND principal_id=$4);
+               WHERE scope_type=$1 AND scope_id=$2 AND member_type=$3 AND member_id=$4);
 ```
 
 #### 3.4.1 What this dissolves
@@ -477,10 +477,10 @@ SELECT EXISTS(SELECT 1 FROM "ScopeMembership"
 - **`active: true` (§3.3.5).** Reassignment is a **`revoke` then `grant`**, an explicit projector action,
   rather than a status predicate inferred at query time.
 - **Multiple riders per order.** Two rows. The problem disappears instead of being special-cased.
-- **The guard/filter asymmetry (§3.3.3).** The `[principal_type, principal_id, scope_type]` index answers
+- **The guard/filter asymmetry (§3.3.3).** The `[member_type, member_id, scope_type]` index answers
   *"which orders may I see"*, so list queries can use the same mechanism as by-id checks.
 
-`principal_type` is in the pk deliberately: a **rider who is also a customer** must hold two distinct
+`member_type` is in the pk deliberately: a **rider who is also a customer** must hold two distinct
 memberships, or their customer row would let them fetch rider-audience files.
 
 #### 3.4.2 Declaring how the projector fills it
@@ -492,17 +492,17 @@ ScopeMembership:
   grants:
     - on: OrderPlaced
       scope: { type: ORDER, id: orderId }
-      principals:
+      members:
         - { type: CUSTOMER,           id: customerId }
         - { type: RESTAURANT,         id: restaurantId }
         - { type: RESTAURANT_ACCOUNT, id: restaurantAccountId, via: restaurant }
     - on: DeliveryAcceptedByRider
       scope: { type: ORDER, id: orderId, via: deliveryJob }   # see below
-      principals: [{ type: RIDER, id: riderId }]
+      members: [{ type: RIDER, id: riderId }]
   revokes:
     - on: [DeliveryCancelled, DeliveryDispatchFailed]
       scope: { type: ORDER, id: orderId, via: deliveryJob }
-      principals: [{ type: RIDER, id: riderId }]
+      members: [{ type: RIDER, id: riderId }]
 ```
 
 ⚠️ **`via: deliveryJob` is required, not decoration.** `DeliveryAcceptedByRider` and `DeliveryCancelled`
