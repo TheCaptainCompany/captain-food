@@ -69,8 +69,11 @@ marketplace host, and vice versa.**
 adapter." That concern is **superseded** for exactly one operation: `SUPABASE_SECRET_KEY` is now
 spec-declared (`specs/` configuration + `identity.stamp_customer_claim`) for the single admin
 `app_metadata` write above — presence-gated (absence never fails boot, only fails the stamp
-closed), 5s-bounded per call against the 30s mailbox lease. The anon-key posture of every other
-identity operation is unchanged.
+closed), 5s-bounded per call against the 30s mailbox lease — as is the rotation POST, since it too
+runs inside the VerifyPhone delivery (worst case GET + PUT + refresh = 15s < 30s). The user-facing
+OTP-verify call itself remains unbounded (reqwest client default) — a PRE-EXISTING pattern
+predating this change and outside this PR's scope, noted here rather than silently inherited. The
+anon-key posture of every other identity operation is unchanged.
 
 ## Alternatives considered
 

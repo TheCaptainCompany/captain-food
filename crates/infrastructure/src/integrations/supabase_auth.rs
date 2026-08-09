@@ -25,11 +25,12 @@ use domain::shared::errors::DomainError;
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
-/// Admin-call HTTP timeout (#437, DBA concern): the claim stamp runs INSIDE the VerifyPhone
-/// mailbox delivery, so its worst case (GET + PUT = 2 x 5s = 10s) must stay WELL below the
-/// mailbox lease TTL (`MAILBOX_LEASE_SECONDS`, default 30s — `actor_runtime::worker`), or a hung
-/// provider call would let the lane lease lapse mid-delivery and stall the customer's whole lane
-/// (head-of-line). The anon OTP calls keep the client default; only the admin calls are bounded.
+/// In-lease HTTP timeout (#437, DBA concern): the claim stamp AND the session rotation run INSIDE
+/// the VerifyPhone mailbox delivery, so their worst case (GET + PUT + refresh = 3 x 5s = 15s)
+/// must stay WELL below the mailbox lease TTL (`MAILBOX_LEASE_SECONDS`, default 30s —
+/// `actor_runtime::worker`), or a hung provider call would let the lane lease lapse mid-delivery
+/// and stall the customer's whole lane (head-of-line). The user-facing OTP calls keep the client
+/// default; only the in-lease calls (admin GET/PUT + the rotation POST) are bounded.
 const ADMIN_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Fail-closed [`IdentityService`]: sends error ("not configured"), verifications reject with the
@@ -230,14 +231,27 @@ impl SupabaseIdentityService {
 
     /// POST a JSON body to `/auth/v1/<path>` with the anon apikey; return the parsed JSON on 2xx,
     /// or a mapped [`DomainError`] (typed rejection on 4xx, `Repository` on transport/5xx).
-    async fn post(&self, path: &str, body: Value, verify_ctx: Option<Value>) -> Result<Value, DomainError> {
+    /// `timeout` bounds the one request when given — pass it for any call that runs INSIDE a
+    /// mailbox delivery (the lease-vs-timeout math on [`ADMIN_HTTP_TIMEOUT`]); `None` keeps the
+    /// client default for the user-facing OTP round-trips.
+    async fn post(
+        &self,
+        path: &str,
+        body: Value,
+        verify_ctx: Option<Value>,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Value, DomainError> {
         let url = format!("{}/auth/v1/{path}", self.base_url);
-        let resp = self
+        let mut req = self
             .http
             .post(&url)
             .header("apikey", &self.apikey)
             .header("Authorization", format!("Bearer {}", self.apikey))
-            .json(&body)
+            .json(&body);
+        if let Some(t) = timeout {
+            req = req.timeout(t);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|e| DomainError::Repository(format!("supabase auth transport: {e}")))?;
@@ -332,7 +346,6 @@ impl StampFailure {
     }
 }
 
-/// The admin PUT body — PURE so a unit test pins the shallow-merge rule: GoTrue merges
 /// What [`SupabaseIdentityService::stamp_inner`] does after reading the auth user's current
 /// `app_metadata` — the PURE redelivery/conflict decision, unit-tested with constructed metadata.
 #[derive(Debug, PartialEq, Eq)]
@@ -362,6 +375,7 @@ fn stamp_decision(metadata: &Value, target: &str) -> StampDecision {
     }
 }
 
+/// The admin PUT body — PURE so a unit test pins the shallow-merge rule: GoTrue merges
 /// `app_metadata` SHALLOWLY (top-level keys replace, siblings survive), so BOTH claims travel in
 /// EVERY write — a single-key write would leave a token whose two claims came from different
 /// writes, and on a fresh user would mint a customer id with no role. `captain_role` is HARDCODED
@@ -384,7 +398,7 @@ impl IdentityService for SupabaseIdentityService {
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         let phone = canonical_phone(&input.dialing_code, &input.national_number);
-        self.post("otp", json!({ "phone": phone }), None).await.map(|_| ())
+        self.post("otp", json!({ "phone": phone }), None, None).await.map(|_| ())
     }
 
     async fn verify_phone_otp(
@@ -399,6 +413,10 @@ impl IdentityService for SupabaseIdentityService {
                 "verify",
                 json!({ "type": "sms", "phone": phone, "token": input.code.0 }),
                 Some(ctx),
+                // PRE-EXISTING unbounded pattern (client default, no per-request bound): the
+                // user-facing OTP verify round-trip. Recorded in ADR-20260809-212810's timeout
+                // note; bounding it is outside #437's scope.
+                None,
             )
             .await?;
         Ok(IdentityVerifyPhoneOtpOutput {
@@ -419,6 +437,10 @@ impl IdentityService for SupabaseIdentityService {
                 "token?grant_type=refresh_token",
                 json!({ "refresh_token": input.refresh_token }),
                 None,
+                // The rotation leg of stamp -> rotate -> park runs INSIDE the VerifyPhone mailbox
+                // delivery, so it shares the in-lease bound (worst case GET + PUT + refresh = 15s
+                // < 30s lease -- see ADMIN_HTTP_TIMEOUT).
+                Some(ADMIN_HTTP_TIMEOUT),
             )
             .await?;
         Ok(IdentityRefreshSessionOutput {
@@ -454,7 +476,7 @@ impl IdentityService for SupabaseIdentityService {
         input: IdentitySendEmailMagicLinkInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        self.post("otp", json!({ "email": input.email.0 }), None).await.map(|_| ())
+        self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
     }
 
     async fn verify_email_token(
@@ -469,6 +491,7 @@ impl IdentityService for SupabaseIdentityService {
                 "verify",
                 json!({ "type": "email", "token_hash": input.token.0 }),
                 Some(ctx),
+                None,
             )
             .await?;
         let email = v
