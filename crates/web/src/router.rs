@@ -383,6 +383,118 @@ mod tests {
         assert_eq!(fake.call_count(), 0, "requires_auth screens must not fetch server-side");
     }
 
+    /// #420 / PROP-20260809-021351 §2 (G6): the confirmation page is the ONE screen a customer who
+    /// has just paid looks at, and until now production SSR built it as `TrackingState::new(id)` —
+    /// the UNKNOWN / not-found hero, for every order, forever. Rendered through **production's own
+    /// call site** (`render_path_with`, what the BFF serves), not through `render_tracking_html`
+    /// with a state the test built itself.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn the_confirmation_page_tells_a_stranger_what_state_their_order_is_in() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+
+        let order = || {
+            json!({ "order": {
+                "id": "00000000-0000-7000-8000-000000000000",
+                "status": "ACCEPTED",
+                "statusChangedAt": "2026-08-09T19:30:00Z",
+                "estimatedReadyAt": "2026-08-09T19:55:00Z",
+                "items": [{ "offerId": "o1" }, { "offerId": "o2" }],
+            }})
+        };
+        let path = "/orders/00000000-0000-7000-8000-000000000000/confirmation";
+
+        // The human sentence, in BOTH shipped languages — a `data-i18n` attribute with an empty
+        // element is not a page that tells anybody anything.
+        for (locale, sentence) in [("fr", "Commande acceptée"), ("en", "Order accepted")] {
+            let fake = FakeTransport::scripted(vec![Ok(order())]);
+            let html = render_path_with(&fake, "chez-test.captain.food", path, locale)
+                .await
+                .expect("the confirmation route renders");
+            assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
+            assert!(html.contains(sentence), "{locale}: no human status sentence in {html}");
+            assert!(html.contains("data-status=\"ACCEPTED\""), "{locale}: {html}");
+            assert!(
+                !html.contains("data-status=\"UNKNOWN\""),
+                "{locale}: a real order must not render the not-found hero: {html}"
+            );
+            assert!(
+                !html.contains("[order.status."),
+                "{locale}: no `[key]` fallback marker — every key resolved: {html}"
+            );
+        }
+
+        // A read the transport cannot answer degrades to the not-found hero — never a 500, never a
+        // blank page (the SSR contract), and never a claim about an order we could not see.
+        let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null }))]);
+        let html = render_path_with(&fake, "chez-test.captain.food", path, "fr")
+            .await
+            .expect("the confirmation route still renders");
+        assert!(html.contains("data-status=\"UNKNOWN\""), "{html}");
+        assert!(html.contains("Commande introuvable"), "the not-found copy is resolved too: {html}");
+    }
+
+    /// #420 / PROP-20260809-021351 §2 (G5): the checkout shell was hardcoded to an empty restaurant,
+    /// zero lines, an empty total and `payment_failed: false` at its ONLY production call site — so
+    /// `checkout::tests::a_failed_payment_renders_the_failure_state_…` passed over a state
+    /// production never built. This is the counterpart test, through the real call site.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn the_checkout_shell_carries_the_cart_it_is_about_to_charge_for() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+
+        let cart = || {
+            json!({ "cart": {
+                "id": "cart-1", "restaurantId": "r-1", "status": "OPEN",
+                "lines": [
+                    { "offerId": "o1", "name": "Burger maison", "quantity": 2 },
+                    { "offerId": "o2", "name": "Frites", "quantity": 1 },
+                ],
+                "totalAmount": { "amountCents": 2350, "currency": "EUR" },
+            }})
+        };
+        let profile = || json!({ "me": { "customerId": "c-1", "displayName": "Camille Durand" } });
+
+        let fake = FakeTransport::scripted(vec![
+            Ok(cart()),
+            Ok(profile()),
+            Ok(json!({ "paymentStatus": null })),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+            .await
+            .expect("the checkout route renders");
+        assert_eq!(fake.call_count(), 3, "one read per declared resolver");
+        assert!(html.contains("2 items"), "the real line count: {html}");
+        assert!(html.contains("23,50 EUR"), "the real total, formatted: {html}");
+        assert!(html.contains("chez-test"), "the restaurant being ordered from: {html}");
+        assert!(
+            !html.contains("payment_failed_state"),
+            "no failure state before a failure: {html}"
+        );
+
+        // A FAILED payment status now REACHES the shell — the state the unit test asserts is built
+        // by production, not only by a test.
+        let fake = FakeTransport::scripted(vec![
+            Ok(cart()),
+            Ok(profile()),
+            Ok(json!({ "paymentStatus": {
+                "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED",
+            }})),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+            .await
+            .expect("the checkout route renders");
+        assert!(html.contains("id=\"payment_failed_state\""), "{html}");
+        assert!(html.contains("Paiement refusé"), "{html}");
+        assert!(html.contains("Votre carte n'a pas été débitée. Votre panier est intact."), "{html}");
+        assert!(
+            !html.contains("[checkout.payment_failed"),
+            "no `[key]` fallback marker: {html}"
+        );
+    }
+
     #[cfg(feature = "ssr")]
     #[test]
     fn render_path_serves_every_surface_and_injects_the_hydrate_boot() {
