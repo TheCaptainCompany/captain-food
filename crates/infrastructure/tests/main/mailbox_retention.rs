@@ -125,6 +125,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
         serde_json::json!({
             "orderId": order,
             "restaurantId": restaurant,
+            "customerId": uuid::Uuid::new_v4(),
             "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
             "serviceType": "DELIVERY",
             "items": [{

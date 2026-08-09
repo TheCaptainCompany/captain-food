@@ -172,7 +172,11 @@ async fn a_lagging_projection_defers_the_journey_until_it_folds_the_expiry() {
 
     let order = uuid::Uuid::from_u128(0x0AD2);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
-    let stream = seed_expired_order(&pool, order, restaurant, None).await;
+    // The order carries a customer like every post-#144 order — OrderPlaced.customerId is
+    // REQUIRED now, so the "guest order" class is unrepresentable in a log born after #144 (and
+    // this deployment's log was empty at the change; the narrowing is the recorded exception).
+    let customer = uuid::Uuid::new_v4();
+    let stream = seed_expired_order(&pool, order, restaurant, Some(customer)).await;
     let head: i64 = sqlx::query_scalar("SELECT MAX(position) FROM domain_events")
         .fetch_one(&pool)
         .await
@@ -198,15 +202,16 @@ async fn a_lagging_projection_defers_the_journey_until_it_folds_the_expiry() {
     assert_eq!(engine.run_once().await.expect("tick (caught up)"), 1);
     assert_eq!(stream_rows(&pool, &stream).await, 0, "erased once the fold is verified");
 
-    // A guest order's receipt carries a NULL customerId — the reference is optional, the
-    // accountability record is not.
+    // The receipt names the erased order's customer — the accountability reference the erasure
+    // ADR designed the receipt around. (The wire field stays nullable for logs that predate
+    // #144's required customerId; no such log exists for this deployment.)
     let payload: serde_json::Value = sqlx::query_scalar(
         "SELECT payload FROM domain_events WHERE stream_name = 'DeletionLedger-Order'",
     )
     .fetch_one(&pool)
     .await
     .expect("receipt");
-    assert_eq!(payload["customerId"], serde_json::Value::Null);
+    assert_eq!(payload["customerId"], serde_json::json!(customer.to_string()));
 }
 
 #[tokio::test]
