@@ -68,3 +68,38 @@ excuses itself, the coordinator does not excuse it.
   money path → business-specialist writes "nothing in my lens" without reading the diff). Starts at
   ALL, with the first three mobbed dispatches measured; a reduction is its own decision, recorded,
   never a drift.
+
+## Measurement log — the instrument this ADR asked for
+
+Appended as the first three mobbed dispatches happen, per the open tuning question above. This log
+records what the mob COST and what it CAUGHT; it does not change the decision, which stays ALL.
+
+### Dispatch 1 — [#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410) briefing, 2026-08-09
+
+**Deviation, recorded honestly: the coordinator invited 4 of 11 lenses by its own taste** — farley
+(lead), ux-designer, beck, dba. That is exactly the discretion §"Selection by coordinator taste
+ends" abolished, on the very first dispatch after the ADR landed. Not a reduction decision, not a
+lens excusing itself: a drift.
+
+**What the four caught** (each independently, none sent to look for it): the customer path is inert
+on `main` — `hydrate()` returns early for every `sdui: false` screen, so checkout mounts no Stripe
+element and tracking renders the not-found hero for every order; and no notification port exists, so
+a paid order tells nobody. Twenty-two web tests pass in ten milliseconds over all of it. The
+briefing paid for itself several times over before any code was written, which is the ADR's claim
+holding.
+
+**The correction, same night**: the remaining lenses with plausible standing were invited on the
+committed proposal — legal-specialist, business-specialist, graphql-architect, holub,
+observability-agent, architect. Two were deferred with a stated reason rather than by taste:
+`reviewer`'s standing is on a finished diff (it is the third look on the #420 PR), and `generator`'s
+is on the emitter change that dispatch may or may not make. **Excusal by timing is legitimate;
+excusal by the coordinator's guess about relevance is not** — the difference is that the first can
+be named in one sentence and checked.
+
+### Dispatch 2 — [#420 "Customer delivery reassurance"](https://github.com/TheCaptainCompany/captain-food/issues/420) code-only hydration, 2026-08-09
+
+**No fresh briefing was run**, deliberately: the four-lens #410 briefing WAS the briefing for this
+work — the same files, the same defect, and beck's two named failing tests went into the dispatch
+prompt verbatim. Recorded because "we already briefed this" is the most plausible way the ritual
+decays: it is legitimate only when the earlier briefing covered *this* diff's surface, and the
+coordinator must say which briefing it is reusing. Here: PROP-20260809-021351 §2 and §6 move 1.
