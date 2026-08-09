@@ -25,20 +25,51 @@ use crate::generated::data_layer::{ActionKey, ResolverKey};
 use crate::graphql::{execute_resolver, ResolverError, Transport};
 use crate::subscriptions::SubscriptionEvent;
 
+/// What the `order.byId` read actually SAID — the three cases the confirmation page must tell
+/// apart, made unrepresentable-if-confused rather than collapsed into an `Option`
+/// (ADR-20260803-234035: the compiler first).
+///
+/// The mob review of #427 found the collapse shipping as a lie: `order.byId` is
+/// `RoleGuard::new(ALLOW_CUSTOMER_…)` and every customer-facing transport is `Role::Public`
+/// (`web_ssr.rs` renders anonymous), so the read is REFUSED in production — and a refusal
+/// rendered as `None` produced "Commande introuvable" for a customer whose card was charged
+/// thirty seconds earlier. A transport refusing to answer is not the order being absent, and
+/// the page may not say it is.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum OrderRead {
+    /// Nobody has answered yet: not attempted, errored, or refused by the transport. The page
+    /// makes NO claim about the order in this state.
+    #[default]
+    Unresolved,
+    /// The read answered, explicitly: no such order is visible to this caller. Renders the
+    /// not-found state — never an existence oracle (a stranger and a bad id look identical).
+    Absent,
+    /// The order subtree, `order.byId`-shaped.
+    Present(Value),
+}
+
+impl OrderRead {
+    /// The order subtree, when one was actually read.
+    pub fn value(&self) -> Option<&Value> {
+        match self {
+            OrderRead::Present(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// The tracked order — one screen, one order, keyed by the route's `orderId` (#14: the subscription
 /// takes exactly what the confirmation route holds).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackingState {
     pub order_id: Uuid,
-    /// The current `Order` subtree (`order.byId` shape). `None` until the first successful load —
-    /// or when the caller may not see this order (the read resolves null to strangers; the UI
-    /// renders the not-found state, never an existence oracle).
-    pub order: Option<Value>,
+    /// What the `order.byId` read said — see [`OrderRead`].
+    pub order: OrderRead,
 }
 
 impl TrackingState {
     pub fn new(order_id: Uuid) -> Self {
-        Self { order_id, order: None }
+        Self { order_id, order: OrderRead::Unresolved }
     }
 
     /// Build from an already-RESOLVED render context — the screen's own declared `order.byId`
@@ -47,9 +78,15 @@ impl TrackingState {
     /// `TrackingState::new(order_id)` unconditionally, so every confirmation page rendered the
     /// not-found hero regardless of what the order was actually doing (PROP-20260809-021351 §2, G6).
     ///
-    /// A null/absent read yields `order: None` — the honest not-found state, never a guess.
+    /// The three cases are separable HERE and nowhere downstream, because `render_path_with`
+    /// distinguishes them by construction: a resolver `Err` (refused, transport error) leaves the
+    /// key ABSENT from the map, while a resolver that answers null inserts `Value::Null`.
     pub fn from_resolved(order_id: Uuid, data: &Map<String, Value>) -> Self {
-        let order = data.get("order").filter(|v| !v.is_null()).cloned();
+        let order = match data.get("order") {
+            None => OrderRead::Unresolved,
+            Some(Value::Null) => OrderRead::Absent,
+            Some(v) => OrderRead::Present(v.clone()),
+        };
         Self { order_id, order }
     }
 
@@ -58,10 +95,15 @@ impl TrackingState {
         let mut vars = Map::new();
         vars.insert("id".into(), json!(self.order_id));
         let order = execute_resolver(transport, ResolverKey::OrderById, vars).await?;
-        // A null read after a non-null one keeps the last known state: blipping the screen back
-        // to "not found" mid-tracking would be a worse lie than a briefly-stale order.
-        if !order.is_null() {
-            self.order = Some(order);
+        if order.is_null() {
+            // A null read after a good one keeps the last known state: blipping the screen back
+            // mid-tracking would be a worse lie than a briefly-stale order. A null before any good
+            // read is the honest absent state — the read DID answer.
+            if !matches!(self.order, OrderRead::Present(_)) {
+                self.order = OrderRead::Absent;
+            }
+        } else {
+            self.order = OrderRead::Present(order);
         }
         Ok(())
     }
@@ -81,18 +123,18 @@ impl TrackingState {
             _ => true,
         };
         if newer {
-            self.order = Some(pushed.clone());
+            self.order = OrderRead::Present(pushed.clone());
         }
         newer
     }
 
     /// The current order's `status` token (`scalars.yaml#/OrderStatus`), when loaded.
     pub fn status(&self) -> Option<&str> {
-        self.order.as_ref().and_then(|o| o.get("status")).and_then(Value::as_str)
+        self.order.value().and_then(|o| o.get("status")).and_then(Value::as_str)
     }
 
     fn timestamp(&self) -> Option<String> {
-        self.order.as_ref().and_then(|o| timestamp_of(o))
+        self.order.value().and_then(timestamp_of)
     }
 }
 
@@ -248,7 +290,7 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
     let hero = status.as_deref().and_then(status_hero);
     let eta = state
         .order
-        .as_ref()
+        .value()
         .and_then(|o| o.get("estimatedReadyAt"))
         .and_then(Value::as_str)
         .map(str::to_string);
@@ -256,11 +298,12 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
     let delivered = status.as_deref() == Some("DELIVERED");
     let item_count = state
         .order
-        .as_ref()
+        .value()
         .and_then(|o| o.get("items"))
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
+    let unresolved = matches!(state.order, OrderRead::Unresolved);
 
     let not_found = crate::i18n::resolve("order.not_found", &locale);
     view! {
@@ -275,7 +318,19 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
                         </section>
                     }.into_any()
                 }
-                // No order (loading / stranger / unknown id): the not-found state — same DOM slot.
+                // No renderable status. Two DIFFERENT states share this DOM slot, and conflating
+                // them is what the #427 mob review caught: only an ANSWERED read may say
+                // "not found". While the read is unresolved — which is every production render
+                // today, because `order.byId` is CUSTOMER-guarded and this transport is PUBLIC —
+                // the page makes no claim at all about a customer's order.
+                //
+                // GAP(copy): the right content here is the acceptance-first reassurance
+                // ("Reçu ✓ — confirmation en cours…"). It needs a translation key, and customer
+                // copy is approved verbatim by the product owner, so it rides #420's spec half
+                // rather than being invented here. Until then: silence, which is honest.
+                None if unresolved => view! {
+                    <section data-c="order_status_hero" data-status="PENDING"></section>
+                }.into_any(),
                 None => view! {
                     <section data-c="order_status_hero" data-status="UNKNOWN">
                         <h1 data-i18n="order.not_found">{not_found}</h1>
@@ -414,12 +469,39 @@ mod tests {
         data.insert("order".into(), order("ACCEPTED", "2026-08-09T19:30:00Z"));
         assert_eq!(TrackingState::from_resolved(id, &data).status(), Some("ACCEPTED"));
 
-        // A null read (stranger / unknown id / a transport that may not see this order) is the
-        // honest not-found state — never an existence oracle, never a guessed status.
+        // An ANSWERED null (stranger / unknown id) is the honest not-found state — never an
+        // existence oracle, never a guessed status.
         data.insert("order".into(), Value::Null);
-        assert_eq!(TrackingState::from_resolved(id, &data).order, None);
-        assert_eq!(TrackingState::from_resolved(id, &Map::new()).order, None);
+        assert_eq!(TrackingState::from_resolved(id, &data).order, OrderRead::Absent);
+
+        // An ABSENT key is a read that never answered — refused, errored, or not attempted. It is
+        // NOT the same fact, and saying "not found" on it is a lie to a customer who just paid
+        // (#427 mob review). `render_path_with` skips the key on `Err` and inserts `Value::Null`
+        // on a genuine null, so the two are distinguishable exactly here.
+        assert_eq!(TrackingState::from_resolved(id, &Map::new()).order, OrderRead::Unresolved);
         assert_eq!(TrackingState::from_resolved(id, &Map::new()).order_id, id);
+    }
+
+    /// #427: the two no-order states render DIFFERENTLY, because only one of them is a claim the
+    /// page is entitled to make. Today every production render is the unresolved one —
+    /// `order.byId` is CUSTOMER-guarded and the customer surface talks to `/public`.
+    #[test]
+    fn an_unanswered_read_never_tells_a_customer_their_order_was_not_found() {
+        let id = Uuid::now_v7();
+
+        let unresolved = render_tracking_html(TrackingState::from_resolved(id, &Map::new()), "fr");
+        assert!(unresolved.contains(r#"data-status="PENDING""#), "{unresolved}");
+        assert!(
+            !unresolved.contains("Commande introuvable"),
+            "a refused read must not be reported as a missing order: {unresolved}"
+        );
+        assert!(!unresolved.contains("[order.not_found]"), "{unresolved}");
+
+        let mut answered = Map::new();
+        answered.insert("order".into(), Value::Null);
+        let absent = render_tracking_html(TrackingState::from_resolved(id, &answered), "fr");
+        assert!(absent.contains(r#"data-status="UNKNOWN""#), "{absent}");
+        assert!(absent.contains("Commande introuvable"), "an answered null still says so: {absent}");
     }
 
     /// #420: the hero renders WORDS. It used to emit `data-i18n` on empty elements and nothing
@@ -442,7 +524,12 @@ mod tests {
             // with a visible placeholder.
             assert!(!html.contains("{restaurant}"), "no unfilled param reaches a customer: {html}");
 
-            let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), locale);
+            // An ANSWERED null — the only state entitled to say "not found" (#427). A state that
+            // was never read renders no claim at all; that is
+            // `an_unanswered_read_never_tells_a_customer_their_order_was_not_found`.
+            let answered_null =
+                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent };
+            let html = render_tracking_html(answered_null, locale);
             assert!(html.contains(not_found), "{locale}: {html}");
             assert!(!html.contains("[order.not_found]"), "{html}");
         }
@@ -473,8 +560,14 @@ mod tests {
         assert!(!html.contains("data-c=\"eta_bar\""), "no ETA once DELIVERED");
         assert!(html.contains("rating_sheet"), "DELIVERED offers the rating sheet");
 
-        // The empty state: no order loaded.
-        let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), "fr");
+        // The two empty states are DIFFERENT (#427): a read that answered null is UNKNOWN; a read
+        // that never answered makes no claim.
+        let html = render_tracking_html(
+            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent },
+            "fr",
+        );
         assert!(html.contains("data-status=\"UNKNOWN\""));
+        let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), "fr");
+        assert!(html.contains("data-status=\"PENDING\""));
     }
 }

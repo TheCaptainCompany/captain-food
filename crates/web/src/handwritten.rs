@@ -88,11 +88,19 @@ const fn str_eq(a: &str, b: &str) -> bool {
 }
 
 /// Every generated surface table — the source of truth both proofs walk.
-const SURFACES: [&[Screen]; 4] = [
+///
+/// ALL FIVE generated modules, including `system`: the mob review of #427 planted an `sdui: false`
+/// screen in `system` and it compiled clean, because this list had four entries while the proofs'
+/// own doc promised "every `sdui: false` screen in the generated tables". A compiler-first gate
+/// whose premise is a hand-kept list is only as good as the list. Harmless when it was found
+/// (`Surface` has no `System` variant, so those screens are not host-routed) and latent the day
+/// one is added — which is exactly the shape of defect these proofs exist to make impossible.
+const SURFACES: [&[Screen]; 5] = [
     screens::captain_frontoffice::SCREENS,
     screens::restaurant_frontoffice::SCREENS,
     screens::restaurant_backoffice::SCREENS,
     screens::rider::SCREENS,
+    screens::system::SCREENS,
 ];
 
 // PROOF 1 (spec -> type): every `sdui: false` screen in the generated tables has a variant. Adding

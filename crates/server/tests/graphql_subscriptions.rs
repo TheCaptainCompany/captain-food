@@ -506,7 +506,7 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
 /// are exercised here: the envelope arrives on the delivery stream AND the order status is
 /// unchanged across the push.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_delivery_hop_reaches_the_confirmation_page_though_the_order_status_never_moves() {
+async fn a_status_unchanged_fold_still_reaches_the_confirmation_page() {
     let restaurant_id = uuid::Uuid::new_v4();
     let order_id = uuid::Uuid::new_v4();
     let job_id = uuid::Uuid::new_v4();
@@ -569,6 +569,72 @@ async fn a_delivery_hop_reaches_the_confirmation_page_though_the_order_status_ne
         data["orderStatusChanged"]["deliveryStatus"],
         serde_json::json!("PICKED_UP"),
         "the hop the customer is waiting for"
+    );
+}
+
+/// The `DeliveryJob-` half of the filter widening, ISOLATED — the one thing its sibling above
+/// cannot prove.
+///
+/// The mob review of #427 established this by mutation: revert the filter to `Order-<id>` only, or
+/// make the `by_order` binding structurally impossible, and the sibling stays GREEN. The reason is
+/// `spawn_publisher`, which pumps 50 copies of an envelope over ~1s while each delivered envelope
+/// opens a ~3s re-poll window on the row — so a lingering `Order-` envelope re-reads the mutated
+/// row and delivers the second frame, and the delivery branch is never entered. A test whose name
+/// claims a behaviour it does not exercise is worse than no test: the next reader counts it as
+/// coverage and stops looking.
+///
+/// Here the ONLY envelope ever published names the order's delivery job. Nothing else can wake the
+/// subscriber, so the first frame is proof the widened filter and the lazy `by_order` binding both
+/// work. Red on `main` (filter matches `Order-<id>` only -> no frame -> timeout).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delivery_job_envelope_alone_reaches_the_confirmation_page() {
+    let restaurant_id = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let job_id = uuid::Uuid::new_v4();
+    // The fold has ALREADY landed: the rider picked the order up, the row carries it, and the
+    // OrderStatus never moved. Only the delivery envelope remains to wake anyone.
+    let mut row = order_row(order_id, restaurant_id, ds::OrderStatus::ACCEPTED);
+    row.delivery_status = Some(ds::DeliveryStatus::PICKED_UP);
+    row.courier = Some(serde_json::json!({ "displayName": "Camille" }));
+    let store = Arc::new(Mutex::new(HashMap::from([(order_id, row)])));
+    let deliveries =
+        InMemoryDeliveries(Arc::new(Mutex::new(Some(delivery_job_row(job_id, order_id, restaurant_id)))));
+    let bus = EventBus::default();
+    let schema = schema_over_with_deliveries(
+        InMemoryOrders(store.clone()),
+        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(deliveries),
+        bus.clone(),
+    );
+
+    let query = format!(
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status deliveryStatus }} }}"#
+    );
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Restaurant));
+
+    // The ONLY publish in this test. `spawn_publisher` (not a one-shot) because the bus receiver
+    // exists only once the response stream is first polled.
+    spawn_publisher(
+        bus.clone(),
+        AppendedEvent {
+            stream_name: format!("DeliveryJob-{job_id}"),
+            event_type: "DeliveryPickedUp".into(),
+            correlation_id: uuid::Uuid::new_v4(),
+            position: 1,
+        },
+    );
+
+    let first = tokio::time::timeout(Duration::from_secs(15), stream.next())
+        .await
+        .expect("a delivery-job envelope alone must reach the screen")
+        .expect("stream item");
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    let data = first.data.into_json().expect("json");
+    assert_eq!(data["orderStatusChanged"]["status"], serde_json::json!("ACCEPTED"), "status never moved");
+    assert_eq!(
+        data["orderStatusChanged"]["deliveryStatus"],
+        serde_json::json!("PICKED_UP"),
+        "the delivery fold reached the customer, woken by the DeliveryJob- envelope alone"
     );
 }
 

@@ -359,12 +359,16 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
             // keeps the cart OPEN and places nothing on PaymentFailed, so "your cart is intact" is
             // a promise the system actually keeps. Both actions are client-kind `navigate`, carried
             // by the same `data-action`/`data-route` DOM contract the SDUI renderer emits.
-            // REACHABLE since #420: production now derives `payment_failed` from the screen's own
-            // `paymentStatus.byOrder` requirement (`CheckoutViewState::from_resolved`) instead of
-            // hardcoding `false`, and `hydrate()` mounts this screen and installs the delegated
-            // listener, so both buttons dispatch. What is still missing to reach it END TO END is a
-            // browser-side Stripe publishable key (no such configuration key exists anywhere) —
-            // reported on #420 as the DSL change it needs, not worked around here.
+            // WIRED since #420, NOT YET REACHABLE — the distinction matters, and an earlier draft
+            // of this comment got it wrong (caught by the #427 mob review). Production now derives
+            // `payment_failed` from the screen's own `paymentStatus.byOrder` requirement
+            // (`CheckoutViewState::from_resolved`) instead of hardcoding `false`, and `hydrate()`
+            // mounts this screen and installs the delegated listener. But `paymentStatus` takes a
+            // REQUIRED `orderId` and `/checkout` carries no route params, so the read is dropped
+            // before it is sent and `payment_failed` cannot become true. Reaching this state needs
+            // two DSL changes reported on #420: a way for the route to supply the order id, and a
+            // browser-side Stripe publishable key (no such configuration key exists anywhere).
+            // Neither is worked around here.
             {state.payment_failed.then(|| view! {
                 <section data-c="conditional_section" id="payment_failed_state">
                     <p data-c="text" data-size="xl" data-weight="bold" data-color="error">
