@@ -557,6 +557,98 @@ mod tests {
         let ctx = ctx_with_cache(test_set(), stale_instant());
         assert!(ctx.key_for("rotated-unknown-kid").await.is_err(), "unknown key must fail closed");
     }
+
+    /// TEST-ONLY ES256 keypair (generated for this test file, never a deployed key): the PEM signs,
+    /// [`signing_set`] is its public point as a JWKS. Unlike [`test_set`]'s dummy material this
+    /// key VERIFIES — it exists so [`cookie_delivered_jwt_yields_the_customer_principal_and_scope`]
+    /// can exercise `authorize()` end to end (signature check included), the one link no pure test
+    /// reaches (#437, beck's mandatory test: a claim→field transposition at the `Principal`
+    /// construction passes every other test in this crate).
+    const TEST_EC_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTCTNdGfegiVKVsm+
+vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
+5bKnk8sNetDUBHLVIGpXoxBRFJVNSeDN6QB9IHl6rqDLaZR4iqLatScL
+-----END PRIVATE KEY-----
+";
+
+    fn signing_set() -> JwkSet {
+        serde_json::from_str(
+            r#"{"keys":[{"kty":"EC","crv":"P-256","use":"sig","kid":"captain-test-es256","alg":"ES256","x":"baNA5O-X8ZdiMi8fPb8L41FpCQG_6eWyp5PLDXrQ1AQ","y":"ctUgalejEFEUlU1J4M3pAH0geXquoMtplHiKotq1Jws"}]}"#,
+        )
+        .expect("parse signing JWKS")
+    }
+
+    /// Sign a Supabase-shaped customer JWT: `sub` is the AUTH subject (deliberately a different
+    /// uuid from the claim — an implementation deriving identity from `sub` cannot pass), the
+    /// domain identity is `app_metadata.captain_customer_id` (#433/#437).
+    fn signed_customer_jwt(sub: &str, customer_id: uuid::Uuid) -> String {
+        let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+        header.kid = Some("captain-test-es256".into());
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_secs()
+            + 3600;
+        let claims = serde_json::json!({
+            "sub": sub,
+            "aud": SUPABASE_AUDIENCE,
+            "exp": exp,
+            "app_metadata": {
+                "captain_role": "CUSTOMER",
+                "captain_customer_id": customer_id.to_string(),
+            },
+        });
+        let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+            .expect("test EC key parses");
+        jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
+    /// The end-to-end link every pure test stops short of (#437): a REAL signature verified
+    /// against a seeded JWKS, the token delivered ONLY via the `captain_auth` cookie (the
+    /// storefront's one credential — no Authorization header exists on the request), and the
+    /// verified claim landing in `Principal.customer_id` → `ReadScope::Customer`. A field
+    /// transposition in `authorize()`'s Principal construction (customer claim into `rider_id`)
+    /// is caught HERE and nowhere else.
+    #[tokio::test]
+    async fn cookie_delivered_jwt_yields_the_customer_principal_and_scope() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now()); // fresh cache: no network, ever
+        let sub = uuid::Uuid::from_u128(0xA0).to_string();
+        let customer = uuid::Uuid::from_u128(0x437);
+        let jwt = signed_customer_jwt(&sub, customer);
+
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::COOKIE, format!("captain_auth={jwt}").parse().unwrap());
+        assert!(h.get(AUTHORIZATION).is_none(), "cookie-only delivery: no bearer on this request");
+
+        let principal =
+            ctx.authorize(RequestRole::Customer, &h).await.expect("cookie-carried JWT authorizes");
+        assert_eq!(principal.customer_id, Some(customer), "the verified claim IS the identity");
+        assert_eq!(principal.rider_id, None, "no cross-field leakage (the transposition trap)");
+        assert_eq!(principal.restaurant_id, None);
+        assert_eq!(principal.restaurant_account_id, None);
+        assert_eq!(principal.user_id.as_deref(), Some(sub.as_str()), "sub stays the auth subject");
+        assert_eq!(
+            read_scope(&principal),
+            application::queries::ReadScope::Customer(domain::generated::scalars::CustomerId(customer)),
+            "the scope every #437 tracking read is filtered by"
+        );
+
+        // The signature is REALLY checked: tamper with the last payload byte → Unauthorized.
+        let mut parts: Vec<String> = jwt.split('.').map(str::to_string).collect();
+        let flipped = {
+            let p = &mut parts[1];
+            let last = p.pop().expect("payload non-empty");
+            p.push(if last == 'A' { 'B' } else { 'A' });
+            parts.join(".")
+        };
+        let mut tampered = HeaderMap::new();
+        tampered
+            .insert(axum::http::header::COOKIE, format!("captain_auth={flipped}").parse().unwrap());
+        assert!(
+            ctx.authorize(RequestRole::Customer, &tampered).await.is_err(),
+            "a tampered payload must be rejected by signature verification"
+        );
+    }
 }
 
 /// A `captain_*` claim parsed as a domain uuid. Malformed values yield `None` — fail closed,
