@@ -18,7 +18,7 @@
 
 use crate::generated::events::DomainEvent;
 pub use crate::generated::lifecycles::delivery_job as lifecycle;
-use crate::generated::scalars::{DeliveryStatus, ExternalReference, RiderId};
+use crate::generated::scalars::{DeliveryStatus, ExternalReference, OrderId, RiderId};
 
 /// What the DeliveryJob command handlers need to know about the aggregate to accept or reject a
 /// command. `None` (from [`fold`]) means the job does not exist → `DeliveryJobNotFound`.
@@ -26,6 +26,12 @@ use crate::generated::scalars::{DeliveryStatus, ExternalReference, RiderId};
 pub struct DeliveryJobState {
     /// Delivery status machine (PENDING → ASSIGNED → PICKED_UP → …) — `InvalidDeliveryStatus`.
     pub status: DeliveryStatus,
+    /// The order this job delivers, folded from the birth fact (`DeliveryRequested.orderId`,
+    /// required). Non-optional BY CONSTRUCTION: the stream is born by that fact and nothing else,
+    /// so a job that exists always knows its order — which is what lets the rider commands emit a
+    /// self-contained `orderId` on their facts (D-QW1 option b, ADR-20260808-234907) instead of the
+    /// projector looking it up.
+    pub order_id: OrderId,
     /// The independent rider the job is assigned to, when rider-fulfilled — pickup/completion must come
     /// from this rider; `None` on a PENDING or partner-fulfilled job.
     pub rider_id: Option<RiderId>,
@@ -52,8 +58,14 @@ pub fn fold(events: &[DomainEvent]) -> Option<DeliveryJobState> {
 /// the issue flag.
 fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<DeliveryJobState> {
     if let Some(status) = lifecycle::initial(event) {
+        // The generated `initial` births this stream from ONE fact — `DeliveryRequested` — and that
+        // fact carries the order (required), so the birth branch destructures it for `order_id`.
+        let DomainEvent::DeliveryRequested(birth) = event else {
+            return state;
+        };
         return Some(DeliveryJobState {
             status,
+            order_id: birth.order_id,
             rider_id: None,
             assigned: false,
             partner_ref: None,
@@ -114,11 +126,15 @@ mod tests {
             country: CountryCode("FR".into()),
         }
     }
+    /// Distinct from `job_id()` on purpose: the fold must carry the ORDER's id, not the job's.
+    fn order_id() -> OrderId {
+        OrderId(uuid::Uuid::from_u128(0x0DE4))
+    }
     fn requested() -> DomainEvent {
         DomainEvent::DeliveryRequested(DeliveryRequested {
             mode: None,
             delivery_job_id: job_id(),
-            order_id: OrderId(uuid::Uuid::nil()),
+            order_id: order_id(),
             restaurant_id: RestaurantId(uuid::Uuid::nil()),
             pickup: address(),
             dropoff: address(),
@@ -146,6 +162,9 @@ mod tests {
     fn requested_births_a_pending_unassigned_job() {
         let s = fold(&[requested()]).unwrap();
         assert_eq!(s.status, DeliveryStatus::PENDING);
+        // The birth fact's order — what the rider commands stamp onto their facts so the
+        // customer's OrderTracking row can be keyed without a lookup (D-QW1 option b).
+        assert_eq!(s.order_id, order_id());
         assert_eq!(s.rider_id, None);
         assert!(!s.assigned);
         assert_eq!(s.partner_ref, None);
@@ -157,6 +176,7 @@ mod tests {
         let rider = RiderId(uuid::Uuid::nil());
         let accept = DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
             delivery_job_id: job_id(),
+            order_id: order_id(),
             rider_id: rider,
         });
         let s = fold(&[requested(), accept]).unwrap();
@@ -182,6 +202,7 @@ mod tests {
     fn partner_status_report_moves_the_status_machine() {
         let report = DomainEvent::DeliveryStatusUpdated(DeliveryStatusUpdated {
             delivery_job_id: job_id(),
+            order_id: Some(order_id()),
             partner_ref: Some(ExternalReference("avelo37".into())),
             status: DeliveryStatus::PICKED_UP,
             occurred_at: None,

@@ -1296,6 +1296,8 @@ pub async fn accept_delivery(
     }
     let event = DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
         delivery_job_id: cmd.delivery_job_id,
+        // From the folded birth fact, never from the client (D-QW1 option b).
+        order_id: state.order_id,
         rider_id: cmd.rider_id,
     });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
@@ -1312,6 +1314,9 @@ pub async fn confirm_pickup(
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
     let event = DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
         delivery_job_id: cmd.delivery_job_id,
+        // From the folded birth fact, never from the client (D-QW1 option b) — this is the field
+        // that lets the customer's OrderTracking row move to PICKED_UP.
+        order_id: state.order_id,
         rider_id: cmd.rider_id,
         at: None,
     });
@@ -1350,6 +1355,8 @@ pub async fn complete_delivery(
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
     let event = DomainEvent::DeliveryCompleted(DeliveryCompleted {
         delivery_job_id: cmd.delivery_job_id,
+        // From the folded birth fact, never from the client (D-QW1 option b).
+        order_id: state.order_id,
         at: None,
     });
     // The declared machine allows the completion from PICKED_UP or OUT_FOR_DELIVERY

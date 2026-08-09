@@ -601,6 +601,8 @@ async fn partner_delivered_status_closes_the_order() {
 
     let trigger = DeliveryStatusUpdated {
         delivery_job_id: job_id(),
+        // Post-enrichment shape (the recorder fills it from the birth fact before append).
+        order_id: Some(order_id()),
         partner_ref: None,
         status: DeliveryStatus::DELIVERED,
         occurred_at: None,

@@ -277,9 +277,16 @@ const REGISTRY: &[ProjectorGroup] = &[
     // The Payment-% slice closes the OrderTracking.payment_status feed gap (docs/sagas.md;
     // ADR-20260719-193500): PaymentCaptured/PaymentRefunded live on Payment-{intentId} streams
     // but are declared in the ordertracking fedBy. Same 'Order' checkpoint = one ordered fold.
+    // The DeliveryJob-% slice does the same for the delivery mirror (delivery_status/courier/
+    // estimated_dropoff_at, spec'd but unfed until now -- docs/sagas.md): the WHOLE DeliveryJob-%
+    // family under this checkpoint, so order, payment and delivery facts fold in global `position`
+    // order. Keying needs no code: every delivery fact in the fedBy carries `orderId` in its
+    // payload (D-QW1 option b, ADR-20260808-234907), which the branch above already reads -- the
+    // skip-with-warn now fires only for a null-orderId orphan DeliveryStatusUpdated, which has no
+    // OrderTracking row to key anyway.
     ProjectorGroup {
         checkpoint: "Order",
-        stream_prefixes: &["Order-", "Payment-"],
+        stream_prefixes: &["Order-", "Payment-", "DeliveryJob-"],
         projectors: &[ReadModelProjector::OrderTracking],
         scope: "ordering",
     },
