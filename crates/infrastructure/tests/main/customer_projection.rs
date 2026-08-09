@@ -10,7 +10,7 @@ use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
     IdentityVerifyPhoneOtpOutput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
-    ServiceCallMeta,
+    IdentityStampCustomerClaimInput, ServiceCallMeta,
 };
 use application::ports::Actor;
 use application::queries::CustomerReadRepository;
@@ -56,6 +56,14 @@ impl IdentityService for AlwaysVerifiedAuth {
         _meta: &ServiceCallMeta,
     ) -> Result<IdentityRefreshSessionOutput, DomainError> {
         Ok(IdentityRefreshSessionOutput { access_token: "t".into(), refresh_token: None, expires_in: None })
+    }
+
+    async fn stamp_customer_claim(
+        &self,
+        _input: IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
     }
 
     async fn send_email_magic_link(

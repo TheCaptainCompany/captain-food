@@ -302,6 +302,16 @@ customer-identification:
       attributes:
         - { key: "messaging.system", type: string, required: true }
         - { key: "business.result", type: string, required: true }
+    # The claim stamp (identity.stamp_customer_claim, #437): after the OTP verifies and the
+    # customer resolves, the provider-side auth user is stamped with captain_customer_id +
+    # captain_role so the session the customer keeps CARRIES the domain claim. `failed` here means
+    # verification stood but no session was rotated or parked (fail-closed on the credential).
+    - name: "claims.stamp"
+      kind: CLIENT
+      required: true
+      attributes:
+        - { key: "messaging.system", type: string, required: true }
+        - { key: "business.result", type: string, required: true }   # stamped | failed
     - name: "event.store.append"
       kind: INTERNAL
       required: true
@@ -315,14 +325,18 @@ customer-identification:
 
   metrics:
     - { name: "customer_identification_duration_ms", type: histogram, attributes: ["result"] }
+    # DEFECT counter (the read_authorization_bridge_unresolved_total pattern): a stamp failure is
+    # a credential/provisioning/provider defect — never ordinary user error — and each one is a
+    # customer whose login silently stayed anonymous. Alert on ANY sustained non-zero rate.
+    - { name: "customer_claim_stamp_failed_total", type: counter, attributes: ["reason"] }
   business_metrics:
     - { name: "customer_signins_total", type: counter, attributes: ["outcome"] }
     - { name: "otp_verifications_failed_total", type: counter, attributes: ["reason"] }
 
   status_rules:
     success:
-      required_spans: ["command.receive", "otp.verify", "event.store.append", "event.publish"]
-      conditions: ["otp.verify.business.result == 'verified'"]
+      required_spans: ["command.receive", "otp.verify", "claims.stamp", "event.store.append", "event.publish"]
+      conditions: ["otp.verify.business.result == 'verified'", "claims.stamp.business.result == 'stamped'"]
     business_rejected:
       conditions: ["otp.verify.business.result == 'invalid_code'"]
     technical_error:

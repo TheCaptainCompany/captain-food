@@ -52,6 +52,11 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: SUPABASE_SMS_HOOK_SECRET
+            - name: SUPABASE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: SUPABASE_SECRET_KEY
             - name: HONEYCOMB_API_KEY
               valueFrom:
                 secretKeyRef:

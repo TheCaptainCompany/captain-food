@@ -1068,6 +1068,14 @@ impl IdentityService for FakeIdentity {
             expires_in: Some(3600),
         })
     }
+    async fn stamp_customer_claim(
+        &self,
+        _input: crate::generated::services::IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The provider double stamps successfully — behaviour specs exercise the happy path.
+        Ok(())
+    }
     async fn send_email_magic_link(
         &self,
         _input: IdentitySendEmailMagicLinkInput,

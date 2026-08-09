@@ -209,6 +209,23 @@ keys:
         staging: SUPABASE_SMS_HOOK_SECRET
 
 
+  SUPABASE_SECRET_KEY:
+    type: string
+    secret: true
+    gates: >
+      Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin
+      `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT
+      /auth/v1/admin/users/{authRef} writing `captain_customer_id` + `captain_role` at phone
+      verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED
+      (verification stands, but the session is never rotated or parked, so login degrades to a
+      fresh-OTP retry once configured — an unstamped token is never parked). Never used on the
+      anon OTP flows, which keep SUPABASE_PUBLISHABLE_KEY; never sent to any client.
+    deploy:
+      from_secret:
+        production: SUPABASE_SECRET_KEY
+        staging: SUPABASE_SECRET_KEY
+
+
   # ===================================================================
   # Telemetry (issue #191, PROP-170500 D1/D2) — without this, production is undiagnosable
   #

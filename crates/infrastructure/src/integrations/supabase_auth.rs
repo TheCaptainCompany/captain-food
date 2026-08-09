@@ -16,8 +16,8 @@ use application::commands::canonical_phone;
 use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
-    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityVerifyPhoneOtpOutput,
-    ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityStampCustomerClaimInput,
+    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
 use domain::generated::scalars::{EmailAddress, ExternalReference};
@@ -66,6 +66,16 @@ impl IdentityService for FailClosedIdentityService {
     ) -> Result<IdentityRefreshSessionOutput, DomainError> {
         // TODO(#117): rotate the session with Supabase Auth (grant_type=refresh_token).
         Err(not_configured("session refresh"))
+    }
+
+    async fn stamp_customer_claim(
+        &self,
+        _input: IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // Fail CLOSED (services.yaml identity.stamp_customer_claim, #437): never pretend to have
+        // stamped — the caller must then skip session rotation/parking entirely.
+        Err(not_configured("customer claim stamp"))
     }
 
     async fn send_email_magic_link(
@@ -255,6 +265,17 @@ impl IdentityService for SupabaseIdentityService {
             refresh_token: str_field(&v, "refresh_token"),
             expires_in: v.get("expires_in").and_then(Value::as_i64),
         })
+    }
+
+    async fn stamp_customer_claim(
+        &self,
+        _input: IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // TODO(#437 phase 2): admin PUT /auth/v1/admin/users/{authRef} writing captain_customer_id
+        // + captain_role together (shallow merge), gated on SUPABASE_SECRET_KEY — this anon-key
+        // adapter holds no admin credential, so it fails CLOSED until the admin client lands.
+        Err(not_configured("customer claim stamp"))
     }
 
     async fn send_email_magic_link(
