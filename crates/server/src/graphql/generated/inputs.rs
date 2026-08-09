@@ -915,9 +915,9 @@ pub struct PlaceOrderInput {
     /// The OPEN cart to check out; its lines become the order's line items.
     #[graphql(name = "cartId")]
     pub cart_id: CartId,
-    /// Resolved from the now-authenticated session; bound onto the cart at checkout.
+    /// Resolved from the now-authenticated session; bound onto the cart at checkout. REQUIRED (#144) — the description above already asserted the customer has verified their phone by this point, but the field was nullable and absent from `required`, so nothing enforced it. Non-null makes it a structural (GraphQL) rejection rather than a domain invariant: the client cannot submit an unidentified checkout at all, so no new errors.yaml code is needed.
     #[graphql(name = "customerId")]
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     #[graphql(name = "customerContact")]
     pub customer_contact: CustomerContactInput,
     #[graphql(name = "serviceType")]

@@ -299,10 +299,36 @@ l3() {
   pass "L3 fixture: restaurant '$SMOKE_TENANT_SLUG' ACTIVE with offer $FIX_OFFER_ID (created)"
 }
 
+# --- L4b: the read guard, executed in production (#144) -------------------------------------------
+# The only executable proof the vulnerability #144 closed stays closed where it matters: a caller
+# who is NOT the order's member reads NOTHING — no by-id row, no list dump. Runs with the smoke
+# CUSTOMER token, which is authenticated but holds no domain Customer bridge row, so it resolves to
+# the fail-closed Public scope: exactly the posture a stranger probing ids would land in.
+# (rules.yaml cannot carry read-guard coverage — #212 — so this assertion is the production gate.)
+l4_negative() {
+  local resp others
+  # Outage-honest (review finding): an errored response must FAIL the proof, not satisfy it — a
+  # transport error also has empty .data, and `null | length` is 0 in jq.
+  resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+    'query($id: OrderId!){ order(input:{id:$id}) { id } }' \
+    "$(jq -cn --arg id "$order_id" '{id:$id}')")
+  [ "$(printf '%s' "$resp" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: read-guard probe ERRORED (cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
+  [ "$(printf '%s' "$resp" | jq -r '.data.order')" = "null" ] \
+    || fail "L4: READ GUARD BREACH — a non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
+  others=$(gql "$API_BASE/customer/graphql" "$customer" \
+    'query{ orders { id } }' '{}')
+  [ "$(printf '%s' "$others" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: read-guard list probe ERRORED (cannot prove the guard): $(printf '%s' "$others" | head -c 300)"
+  [ "$(printf '%s' "$others" | jq -r '.data.orders == []')" = "true" ] \
+    || fail "L4: READ GUARD BREACH — a non-member customer listed orders (the pre-#144 full-table dump): $(printf '%s' "$others" | head -c 300)"
+  say "      L4: read guard held — non-member by-id resolved null, list came back empty"
+}
+
 # --- L4: full money path (TEST mode) --------------------------------------------------------------
 l4() {
-  local cart_id line_id session_id order_id customer resp message_id op_status pi secret confirm status pay_status deadline t last
-  cart_id=$(uuid); line_id=$(uuid); session_id=$(uuid); order_id=$(uuid)
+  local cart_id line_id session_id order_id customer_id customer admin resp message_id op_status pi secret confirm status pay_status deadline t last
+  cart_id=$(uuid); line_id=$(uuid); session_id=$(uuid); order_id=$(uuid); customer_id=$(uuid)
 
   # 1. Build the cart (PUBLIC role — guest carts by design). Acceptance-first: the mutation only
   #    acknowledges (MutationAcceptance); the cart-projection wait below observes the completion.
@@ -324,11 +350,16 @@ l4() {
   #    (the journal row's user_id) — until it leaves PENDING. The cart's session id rides along as
   #    the X-SESSION-ID envelope header: the run row stamps it (#12), so the session-scoped
   #    paymentStatus read below works exactly like a real guest checkout.
+  #    customerId is REQUIRED as of #144 (structural, not domain-checked at placement): the smoke
+  #    generates one per run — the real client resolves it from the verified phone session. The
+  #    smoke Supabase user has NO domain Customer row (verifyPhone needs a real SMS OTP), so the
+  #    customer-scoped ORDER read below runs as ADMIN, and that same gap powers the negative
+  #    assertion at the end: an authenticated-but-unbridged CUSTOMER must read NOTHING.
   customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER")
   resp=$(gql_ok "L4" "$API_BASE/customer/graphql" "$customer" \
     'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ messageId operationStatus duplicate } }' \
-    "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" '{i:{
-        mode:"TEST", orderId:$o, restaurantId:$r, cartId:$c,
+    "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" --arg u "$customer_id" '{i:{
+        mode:"TEST", orderId:$o, restaurantId:$r, cartId:$c, customerId:$u,
         customerContact:{displayName:"Smoke Customer", phone:"+33600000000"},
         serviceType:"COLLECTION", paymentMethodId:"pm_card_visa"}}')" "$session_id")
   message_id=$(printf '%s' "$resp" | jq -r '.data.placeOrder.messageId // empty')
@@ -383,16 +414,23 @@ l4() {
   say "      L4: payment intent confirmed (succeeded) — waiting for the webhook + saga"
 
   # 4. The inbound webhook (PaymentCaptured) drives the saga: OrderPlaced + projection. Poll.
+  #    As ADMIN (#144): order reads are membership-scoped now, and the smoke customer has no domain
+  #    Customer bridge row (see step 2), so its own read is REFUSED by design — the fail-closed
+  #    posture the negative assertion below proves. A customer-scoped positive read lands when the
+  #    smoke can mint a domain Customer (the verifyPhone SMS gap, recorded on #144's follow-up).
+  admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
   t=0; last="(never observed)"
   while [ "$t" -le "$SMOKE_ORDER_TIMEOUT" ]; do
-    resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+    resp=$(gql "$API_BASE/admin/graphql" "$admin" \
       'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')")
     status=$(printf '%s' "$resp" | jq -r '.data.order.status // empty')
     pay_status=$(printf '%s' "$resp" | jq -r '.data.order.paymentStatus // empty')
     last="status=${status:-<no order row>} paymentStatus=${pay_status:-<none>}"
     if [ "$pay_status" = "CAPTURED" ] && [ -n "$status" ]; then
-      pass "L4 money path: order $order_id $last (intent $pi captured via webhook)"
+      say "      L4: order captured — asserting the read guard (#144) before declaring victory"
+      l4_negative
+      pass "L4 money path: order $order_id $last (intent $pi captured via webhook; read guard held)"
       return 0
     fi
     sleep 5; t=$((t+5))

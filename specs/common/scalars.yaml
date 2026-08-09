@@ -660,3 +660,17 @@ RestaurantAccountId:
   type: string
   format: uuid
   description: "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations."
+
+# --- Authorization scopes (#144, PROP-20260725-185140) ---
+
+ScopeType:
+  type: string
+  enum:
+    - ORDER       # one order and everything hanging off it (conversation, attachments)
+    - RESTAURANT  # one restaurant location (back-office reads, restaurant-owned documents)
+  description: >
+    The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names
+    exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side
+    per-instance authorization asks one question of this vocabulary — "is this principal a member of
+    (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an
+    order or a restaurant is.

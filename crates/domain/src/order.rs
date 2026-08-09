@@ -28,9 +28,11 @@ pub struct OrderState {
     /// The restaurant the order was placed against; commands carrying another restaurantId are scoped
     /// out as `OrderNotFound`.
     pub restaurant_id: RestaurantId,
-    /// The owning customer when the order was placed authenticated — stamped onto the feedback events
-    /// (OrderRated / RestaurantRated / OrderTipped / RefundRequested payloads).
-    pub customer_id: Option<CustomerId>,
+    /// The owning customer — REQUIRED on OrderPlaced as of #144, so the state carries it
+    /// unconditionally; stamped onto the feedback events (OrderRated / RestaurantRated /
+    /// OrderTipped / RefundRequested payloads), which stay nullable on the wire but are always
+    /// populated for orders born after #144.
+    pub customer_id: CustomerId,
     /// Whether the delivery (rider thumb) was already rated — `OrderAlreadyRated` (rate-once).
     pub delivery_rated: bool,
     /// Whether the restaurant was already rated for this order — `RestaurantAlreadyRated` (rate-once).
@@ -114,7 +116,7 @@ mod tests {
             order_id: oid(),
             r#ref: None,
             restaurant_id: rid(),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             customer_contact: CustomerContact {
                 display_name: CustomerDisplayName("Jo".into()),
                 email: None,

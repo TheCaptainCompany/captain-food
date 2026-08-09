@@ -117,6 +117,13 @@ the same action as marking the PR ready — never earlier, never separately.
 
 ## Stale-claim reaper
 
+**Known hole (2026-08-09, the #144 precedent):** a claim whose linked draft PR simply sits there
+survived **13 days** parked — the reaper never fired, so "carries `status/in-progress`" is NOT
+proof of an active session. Meeting a stale-looking claim with a long-quiet linked PR: check the
+claim comment's session link and the PR's last activity; if both are days old, re-claim explicitly
+with a fresh comment naming your branch and session (as #144 → PR #430 did) rather than treating
+the label as untouchable — and rather than silently working alongside it.
+
 `.github/workflows/stale-claim-reaper.yml` (hourly): a `status/in-progress` issue with **>24h**
 of no activity (issue comments, linked-PR references — the reaper ignores its own comments)
 loses the label and gets a "claim expired" comment → back to the queue. A crashed session can

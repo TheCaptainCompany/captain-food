@@ -115,7 +115,7 @@ fn tracking_row(service_type: ServiceType) -> OrderTrackingRow {
         order_id: order_id(),
         r#ref: ExternalReference("order-1".into()),
         restaurant_id: restaurant_id(),
-        customer_id: None,
+        customer_id: Some(CustomerId(uuid::Uuid::nil())),
         status: OrderStatus::READY,
         service_type,
         items: serde_json::json!([]),
@@ -160,10 +160,10 @@ struct FakeOrders {
 }
 #[async_trait]
 impl OrderReadRepository for FakeOrders {
-    async fn list(&self, _filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError> {
+    async fn list(&self, _filter: OrderFilter, _scope: &crate::queries::ReadScope) -> Result<Vec<OrderTrackingRow>, DomainError> {
         Ok(self.row.clone().into_iter().collect())
     }
-    async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
+    async fn by_id(&self, id: OrderId, _scope: &crate::queries::ReadScope) -> Result<Option<OrderTrackingRow>, DomainError> {
         Ok(self.row.clone().filter(|r| r.order_id == id))
     }
 }
@@ -174,7 +174,7 @@ fn placed(service_type: ServiceType) -> DomainEvent {
         order_id: order_id(),
         r#ref: None,
         restaurant_id: restaurant_id(),
-        customer_id: None,
+        customer_id: CustomerId(uuid::Uuid::nil()),
         customer_contact: CustomerContact {
             display_name: CustomerDisplayName("Johnny".into()),
             email: None,

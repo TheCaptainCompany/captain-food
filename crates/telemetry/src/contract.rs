@@ -33,6 +33,10 @@ pub mod span {
     pub const EVENT_PUBLISH: &str = "event.publish";
     /// CONSUMER — a projector applying an event to a read model.
     pub const EVENT_CONSUME_PROJECTION: &str = "event.consume.projection";
+    /// INTERNAL — the sub -> domain-id bridge, ONE per request (`read-authorization` contract, #144).
+    pub const AUTH_READ_SCOPE: &str = "auth.read_scope";
+    /// INTERNAL — one discrete membership check (a by-id read or the subscription guard, #144).
+    pub const AUTH_SCOPE_MEMBERSHIP: &str = "auth.scope_membership";
 }
 
 /// Attribute keys. All business context is `business.*` per `docs/claude/observability.md`; the two
@@ -59,6 +63,12 @@ pub mod attr {
     /// `trace_id` is technical and may rotate across async boundaries, so both are recorded.
     pub const CORRELATION_ID: &str = "business.correlation_id";
     pub const ORDER_ID: &str = "business.order_id";
+
+    /// `read-authorization` contract keys (#144).
+    pub const ROLE: &str = "business.role";
+    pub const BRIDGE_RESOLVED: &str = "business.bridge_resolved";
+    pub const SCOPE_TYPE: &str = "business.scope_type";
+    pub const AUTHORIZED: &str = "business.authorized";
 }
 
 /// Metric names, split exactly as the contracts split them: `metrics` are technical, `business_metrics`
@@ -78,6 +88,17 @@ pub mod metric {
     pub const PLACE_ORDER_DURATION_MS: &str = "place_order_duration_ms";
     pub const ORDERS_PLACED_TOTAL: &str = "orders_placed_total";
     pub const CHECKOUT_PAYMENT_FAILURES_TOTAL: &str = "checkout_payment_failures_total";
+    /// `read-authorization` contract (#144). Denials only ever fire on by-id/subscription paths —
+    /// the list path enforces via a fused SQL predicate, so a list "denial" is structurally
+    /// invisible (rows are simply absent); see the contract comment before "fixing" that.
+    pub const READ_AUTHORIZATION_DENIED_TOTAL: &str = "read_authorization_denied_total";
+    pub const READ_AUTHORIZATION_CHECKS_TOTAL: &str = "read_authorization_checks_total";
+    pub const READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL: &str =
+        "read_authorization_bridge_unresolved_total";
+    pub const READ_AUTHORIZATION_CHECK_MS: &str = "read_authorization_check_ms";
+    /// BAM gauge: projection lag on the ACL index — while it lags, a just-placed order's own
+    /// customer is DENIED their order (`read-authorization` business_metrics).
+    pub const SCOPE_MEMBERSHIP_LAG_POSITIONS: &str = "scope_membership_lag_positions";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

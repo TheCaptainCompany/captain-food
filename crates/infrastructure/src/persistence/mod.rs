@@ -32,6 +32,7 @@ pub mod referential;
 pub mod refund_queue;
 pub mod restaurant;
 pub mod restaurant_store;
+pub mod scope_membership_store;
 pub mod runtime_posture;
 pub mod slug_alias_store;
 pub mod slug_reservation;

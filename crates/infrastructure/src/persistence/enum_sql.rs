@@ -14,7 +14,7 @@ use domain::generated::scalars::{
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
-    RestaurantStatus, ServiceType, ThumbRating,
+    RestaurantStatus, ScopeType, ServiceType, ThumbRating, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -115,6 +115,22 @@ enum_text!(ReclamationResolution {
 });
 enum_text!(CommandJournalStatus { RECEIVED, SUCCEEDED, REJECTED, FAILED });
 enum_text!(CommandChannel { GRAPHQL, WORKER, INTERNAL });
+// --- Read-side per-instance authorization (#144) ---
+// ScopeMembership stores BOTH of these as TEXT (the variant name verbatim, like every enum column
+// since ADR-20260728). UserType's stored values are shared vocabulary with
+// `domain_events.user_type` / `command_journal.user_type` — a scalars.yaml variant RENAME would
+// strand historical rows, which is also why the UUIDv5 membership key pins its own literal
+// (`membership_id_is_pinned` in the projector).
+enum_text!(ScopeType { ORDER, RESTAURANT });
+enum_text!(UserType {
+    PUBLIC,
+    CUSTOMER,
+    RESTAURANT_ACCOUNT,
+    RESTAURANT,
+    RIDER,
+    ADMIN,
+    EXTERNAL,
+});
 
 /// `to_text` through an `Option` (nullable enum column).
 pub fn opt_to_text<E: EnumText>(v: &Option<E>) -> Option<&'static str> {

@@ -1028,7 +1028,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: [🎭 `Restaurant`](#actor-restaurant)
-- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1186,7 +1186,7 @@ An owner proved ownership of the listing (Google Business Profile verification) 
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3407,7 +3407,7 @@ A single reclamation by id (#154) — claim detail for the customer who raised i
 <a id="subscription-orderstatuschanged"></a>
 #### 🔔 Subscription: [`orderStatusChanged`](#subscription-orderstatuschanged)
 
-Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
+Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership enforced server-side (#144): every row resolve reads through the caller's ReadScope against the ScopeMembership index, for EVERY role — customer, restaurant, account, rider — which closed the old "RESTAURANT paths are trusted" gap (ADR-20260809-160000 §7). A non-member's stream stays silent (no oracle). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
 
 
 - **Input**: 🧩 `OrderStatusChangedSubscriptionInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
@@ -4038,7 +4038,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(7)_
+### 🗄️ Views (read models) _(8)_
 
 <a id="view-view_deliverysatisfaction"></a>
 #### 🗄️ View: `View_DeliverySatisfaction`
@@ -4217,6 +4217,25 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+<a id="view-scopemembership"></a>
+#### 🗄️ View: `ScopeMembership`
+
+- **Source**: [🎭 `Order`](#actor-order) · 🛶 V0 · 🔒 internal
+- **Note**: WHO may see WHICH protected instance (#144). One row per (scope, principal): the single index every read-side authorization question resolves against, for every role and every surface — `SELECT EXISTS(... WHERE membership_id = $1)`. The guard never learns what an order is, so a new ScopeType is a projector rule rather than new code in the guard. Adopting this index replaced four separate mechanisms (PROP-20260725-185140 §3.4): per-role table/column resolution, the restaurant -> account hop, an `active` predicate on rider membership, and multi-rider-per-order special cases. Reassignment needs no special handling: it is a REVOKE followed by a GRANT, so the previous rider loses access the moment the new one is recorded. SAFETY: this is an ACL cache with asymmetric failure modes. A MISSING row denies (visible, safe); a STALE row grants (a silent breach). The revoke rules are therefore more safety-critical than the grants, and the projector errs toward deleting. Drift is repairable by replay, which is the property that makes the cache acceptable at all. 
+- **Rules**: GRANT on OrderPlaced: the order's customer, its restaurant, and that restaurant's account. These are PERMANENT — order history must stay readable forever (product-owner decision, 2026-07-25). GRANT on DeliveryAcceptedByRider: the accepting rider, on the `orderId` the event carries (D-QW1 option b, ADR-20260808-234907). REVOKE on DeliveryCancelled / DeliveryDispatchFailed: the RIDER role rows for that job's order. The ONLY revoke in V0 — riders are the only membership that ends. DeliveryCancelled carries no orderId, so the worker resolves it via View_DeliveryJob before folding; an unresolvable job yields NO change (allow-stale on an orphan stream — acceptable only because a birth fact always precedes its cancel in position order). GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT. GRANT on RestaurantListingClaimed: the claiming account, scope_type RESTAURANT — the post-registration attachment path. A Sirene-seeded listing registers with NO accountId; without this fold its account would never gain membership and resolve_restaurant_account would find nothing for every subsequent OrderPlaced (review finding, ADR-20260809-160000 addendum). ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless. membership_id is UUIDv5 over (scope_type, scope_id, principal_type, principal_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). ERASURE (#194, ADR-20260731-160000): this is an Order-fed read model holding a customer-to-order link — it OWES an OrderExpired tombstone fold (delete the order scope's rows) when the deletion engine lands. Named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips.
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `membership_id` | `uuid` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed) | PK | UUIDv5(scope_type|scope_id|principal_type|principal_id) — derived, never random, so a replayed grant upserts onto itself. |
+| `scope_type` | [🔤 `ScopeType`](#scalar-scopetype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload. The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, principal_type) — they write no value, they key a deletion. |
+| `scope_id` | `uuid` | [⚡ `OrderPlaced`.`orderId`](#event-orderplaced--orderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`restaurantId`](#event-restaurantlistingclaimed--restaurantid), [⚡ `DeliveryAcceptedByRider`.`orderId`](#event-deliveryacceptedbyrider--orderid), [⚡ `DeliveryDispatchFailed`.`orderId`](#event-deliverydispatchfailed--orderid), [⚡ `DeliveryCancelled`](#event-deliverycancelled) | — | The protected instance: an OrderId or a RestaurantId. DeliveryCancelled carries no orderId — the worker resolves the job's order via View_DeliveryJob before folding. |
+| `principal_type` | [🔤 `UserType`](#scalar-usertype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or their customer row would let them fetch rider-audience data. The revoke events key their deletion by this column (the RIDER role), which is why they appear in its lineage.  |
+| `principal_id` | `uuid` | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid), [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid), [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid) | — | The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge. |
+| `granted_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed) | — | When the membership was recorded (the event's occurred_at) — deterministic under replay; preserved on a replayed grant (ON CONFLICT DO NOTHING). |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### 📩 Commands _(33)_
 
 <a id="command-openconversation"></a>
@@ -4376,7 +4395,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 | <a id="command-placeorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Client-generated id for the order the saga will materialize on payment capture. |
 | <a id="command-placeorder--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-placeorder--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ | The OPEN cart to check out; its lines become the order's line items. |
-| <a id="command-placeorder--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ | Resolved from the now-authenticated session; bound onto the cart at checkout. |
+| <a id="command-placeorder--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | Resolved from the now-authenticated session; bound onto the cart at checkout. REQUIRED (#144) — the description above already asserted the customer has verified their phone by this point, but the field was nullable and absent from `required`, so nothing enforced it. Non-null makes it a structural (GraphQL) rejection rather than a domain invariant: the client cannot submit an unidentified checkout at all, so no new errors.yaml code is needed.  |
 | <a id="command-placeorder--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="command-placeorder--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="command-placeorder--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -4743,7 +4762,7 @@ A payment intent was created at checkout for a pending order. Carries the full p
 | --- | --- | --- | --- |
 | <a id="event-paymentintentcreated--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
 | <a id="event-paymentintentcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144) — derived from PlaceOrder, whose customerId is now required. |
 | <a id="event-paymentintentcreated--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-paymentintentcreated--checkout"></a>`checkout` | [📦 `CheckoutSnapshot`](#entity-checkoutsnapshot) | ✅ | The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture). |
 
@@ -4952,7 +4971,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: [🎭 `Order`](#actor-order)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4960,7 +4979,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-orderplaced--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-orderplaced--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The identified customer. REQUIRED (#144): checkout requires a verified phone (PRODUCT_SPEC_WEB_CLIENT.md), which registers or resolves the Customer, and OrderPlaced is emitted ONLY by PlaceOrderProcess — there is no import path that could produce an order without one. Previously nullable, which let the schema permit what the prose forbade and left an "order nobody owns" class the authorization index (ScopeMembership) could not grant.  |
 | <a id="event-orderplaced--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="event-orderplaced--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="event-orderplaced--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -5434,7 +5453,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-checkoutsnapshot--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="entity-checkoutsnapshot--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
 | <a id="entity-checkoutsnapshot--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-checkoutsnapshot--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144) — frozen from PlaceOrder, whose customerId is now required. |
 | <a id="entity-checkoutsnapshot--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="entity-checkoutsnapshot--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="entity-checkoutsnapshot--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
@@ -5556,7 +5575,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="entity-order--id"></a>`id` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="entity-order--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="entity-order--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144), mirroring OrderPlaced: an Order is only ever born from that event, which now always carries an identified customer. Leaving the entity looser than the event it is folded from would reintroduce the "order nobody owns" class at the aggregate level.  |
 | <a id="entity-order--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="entity-order--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="entity-order--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -5565,7 +5584,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(34)_
+### 🔤 Scalars _(36)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5577,11 +5596,13 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
+| <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 | <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
 | <a id="scalar-reclamationid"></a>🔤 `ReclamationId` | string _uuid_ | Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).  |
 | <a id="scalar-reclamationcategory"></a>🔤 `ReclamationCategory` | enum (MISSING_ITEM \| WRONG_ITEM \| QUALITY \| LATE_DELIVERY \| DAMAGED \| NOT_DELIVERED \| OTHER) | What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).  |
 | <a id="scalar-reclamationresolution"></a>🔤 `ReclamationResolution` | enum (FULL_REFUND \| PARTIAL_REFUND \| REPLACEMENT \| GOODWILL_CREDIT \| REJECTED) | The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).  |
 | <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
+| <a id="scalar-scopetype"></a>🔤 `ScopeType` | enum (ORDER \| RESTAURANT) | The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.  |
 | <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).  |
 | <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
 | <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
@@ -7400,7 +7421,8 @@ The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to
 <a id="query-carts"></a>
 #### 🔎 Query: `carts`
 
-A customer's carts (one OPEN cart per restaurant).
+A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity (resolved once per request from the verified principal); only ADMIN reads another customer's carts. An unresolvable caller identity yields an empty list, never a fall-through to the client-supplied filter.
+
 
 - **Input**: 🧩 `CartsQueryInput!` — `customerId`: [🔤 `CustomerId`](#scalar-customerid)
 - **Returns**: [🧩 `Cart`](#type-cart) (list) · **reads** [🗄️ `Cart`](#view-cart)
@@ -9037,7 +9059,7 @@ An independent Captain rider accepted the delivery job.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9083,7 +9105,7 @@ A delivery job was cancelled before delivery (e.g. by the restaurant or admin).
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9097,7 +9119,7 @@ Dispatch failed terminally: the delivery partner declined the job at every offer
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Consumed by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10281,7 +10303,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(53)_
+### 🔤 Scalars _(52)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10325,7 +10347,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-restaurantdispatchmode"></a>🔤 `RestaurantDispatchMode` | enum (CAPTAIN \| RESTAURANT) | Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour. |
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
-| <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 | <a id="scalar-configboolean"></a>🔤 `ConfigBoolean` | string `^(?i)(true|yes|1|on|false|no|0|off)$` | A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.  |
 | <a id="scalar-stripesecretkey"></a>🔤 `StripeSecretKey` | string `^sk_(test|live)_[A-Za-z0-9]+$` | A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.  |
 | <a id="scalar-stripesecretkeytest"></a>🔤 `StripeSecretKeyTest` | string `^sk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).  |
@@ -10355,7 +10376,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(6)_
+### 📡 Observability _(7)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -10543,6 +10564,32 @@ _criticality: **medium**_
 - **Metrics**: `sirene_sweep_duration_ms` _(histogram)_ · **Business metrics**: `sirene_records_created_total` _(counter)_, `sirene_records_updated_total` _(counter)_, `sirene_records_ignored_total` _(counter)_, `sirene_records_failed_total` _(counter)_, `event_store_version_conflicts_total` _(counter)_
 - **Status rules**: success ⇐ spans [`registry.stage`, `inbound.drain`]
 - **SLOs**: p95 ≤ 500ms · p99 ≤ 2000ms · error rate ≤ 1%
+
+<a id="obs-read-authorization"></a>
+#### 📡 Contract: `read-authorization`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `auth.read_scope` | `INTERNAL` | ✅ | — | `business.role`*, `business.bridge_resolved`* |
+| `auth.scope_membership` | `INTERNAL` | ✅ | — | `business.scope_type`*, `business.role`*, `business.authorized`* |
+
+- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
+- **Status rules**: success ⇐ spans [`auth.read_scope`, `auth.scope_membership`]
+- **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)

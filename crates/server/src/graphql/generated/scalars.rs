@@ -1676,6 +1676,31 @@ impl From<RestaurantAccountId> for ds::RestaurantAccountId {
     }
 }
 
+/// The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ScopeType {
+    #[graphql(name = "ORDER")]
+    ORDER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+}
+impl From<ds::ScopeType> for ScopeType {
+    fn from(v: ds::ScopeType) -> Self {
+        match v {
+            ds::ScopeType::ORDER => Self::ORDER,
+            ds::ScopeType::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+impl From<ScopeType> for ds::ScopeType {
+    fn from(v: ScopeType) -> Self {
+        match v {
+            ScopeType::ORDER => Self::ORDER,
+            ScopeType::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);

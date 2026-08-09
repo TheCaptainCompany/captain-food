@@ -55,7 +55,7 @@ pub struct Order {
     pub id: OrderId,
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub customer_contact: CustomerContact,
     pub service_type: ServiceType,
     pub delivery_address: Option<Address>,

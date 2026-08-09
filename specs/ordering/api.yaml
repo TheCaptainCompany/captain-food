@@ -92,7 +92,12 @@ queries:
 
 
   carts:
-    description: "A customer's carts (one OPEN cart per restaurant)."
+    description: >
+      A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a
+      CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity
+      (resolved once per request from the verified principal); only ADMIN reads another customer's
+      carts. An unresolvable caller identity yields an empty list, never a fall-through to the
+      client-supplied filter.
     args:
       customerId: { $ref: 'scalars.yaml#/CustomerId', required: true }
     returns: { $ref: '#/types/Cart', array: true }
@@ -292,9 +297,10 @@ subscriptions:
     description: >
       Order status change events for ONE order, tracked by orderId — what the confirmation screen
       has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key).
-      Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees
-      any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a
-      caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads
+      Ownership enforced server-side (#144): every row resolve reads through the caller's ReadScope
+      against the ScopeMembership index, for EVERY role — customer, restaurant, account, rider —
+      which closed the old "RESTAURANT paths are trusted" gap (ADR-20260809-160000 §7). A
+      non-member's stream stays silent (no oracle). No guest session scope on Order reads
       (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
     args:
       orderId: { $ref: 'scalars.yaml#/OrderId', required: true }

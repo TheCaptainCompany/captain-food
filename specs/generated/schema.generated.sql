@@ -493,6 +493,19 @@ CREATE TABLE CustomerCreditBalance (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE ScopeMembership (
+  membership_id UUID PRIMARY KEY,
+  scope_type TEXT NOT NULL,
+  scope_id UUID NOT NULL,
+  principal_type TEXT NOT NULL,
+  principal_id UUID NOT NULL,
+  granted_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON ScopeMembership (principal_type, principal_id, scope_type);
+CREATE INDEX ON ScopeMembership (scope_type, scope_id);
+
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.
 -- all_events()  ==  SELECT * FROM domain_events ORDER BY position

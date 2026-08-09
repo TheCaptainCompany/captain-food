@@ -30,6 +30,38 @@
 >
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-09 (afternoon) — #429's REBASE-AND-LAND ITEM: READ-SIDE PER-INSTANCE AUTHORIZATION
+> LANDED, ported from the parked PR #152
+> ([#144 "Read-side per-instance authorization: ReadScope on the read ports + RESTAURANT/RIDER identity bridges"](https://github.com/TheCaptainCompany/captain-food/issues/144),
+> [PR #430](https://github.com/TheCaptainCompany/captain-food/pull/430),
+> [ADR-20260809-160000](adr/ADR-20260809-160000-read-authorization-lands-ported-from-152.md);
+> PROP-20260725-185140 → `Approved`).** The pre-#144 hole — `orders` with no arguments dumped the
+> ENTIRE tracking table to any authenticated customer; `order(id:)`/`carts(customerId:)` read
+> anyone's rows — is closed by the `ScopeMembership` ACL index (grants narrow, revokes broad, ONE
+> checkpoint over `Order-`/`DeliveryJob-`/`Restaurant-` so a revoke can never fold before the grant
+> it supersedes) and a `&ReadScope` parameter that makes an unscoped order read UNSPELLABLE.
+> Ten-lens mob briefing (ADR-20260809-013142) reshaped the port before code: **no Rider bridge
+> table** (CARD-11: bridge lives in JWT claims; sub-as-RiderId placeholder until
+> [#415](https://github.com/TheCaptainCompany/captain-food/issues/415)); TEXT enum storage (the
+> branch predated ADR-20260728); `myDeliveries` hydrates as SYSTEM (caller-scoped hydration would
+> blank the PENDING offer pool = a self-sealing dispatch outage, ux lens); `delivery` degrades
+> out-of-scope hydration to null (no oracle); the subscription reads through ReadScope, closing its
+> "RESTAURANT paths are trusted" gap; `customerId` REQUIRED through the checkout chain (narrowing
+> legal solely on the empty log — recorded exception); prod-smoke L4 reworked in the same PR
+> (placeOrder carries customerId, captured-order poll as ADMIN, and a NEGATIVE assertion proving in
+> production that a non-member reads nothing — the only executable proof, #212 keeps rules.yaml
+> blind here). Gates: `make rust` green (0 errors, warning histogram 37 → 37 byte-identical,
+> baseline re-measured on pristine main), full infra DB suite 59/59 on a throwaway Postgres with
+> `DB_TESTS_REQUIRED=1` (the money test seen RED under both forced mutations: EXISTS clause deleted →
+> stranger list dumped; by_id check deleted → stranger read leaked), application 315/315.
+> **Honest limits**: restaurant back-office order reads are EMPTY until minted tokens carry
+> `captain_restaurant_id` (#429's restaurant leg runs on ADMIN until #415 — no such token exists
+> today, nothing that works stopped working); ACL-index projection lag = a user-visible denial
+> (dedicated `scope_membership_lag_positions` gauge, worker-emitted); the smoke customer has no
+> domain Customer (verifyPhone needs real SMS), so its own order read is refused BY DESIGN and the
+> negative assertion rides exactly that. Remaining tenant read surfaces + LIMIT/pagination +
+> the ownership-declared validator rule = one follow-up issue.
+
 > 🚧 **2026-08-09 (night) — G5/G6 UNBLOCKED (not closed), G7 CLOSED: the customer path is
 > wired, and still unreachable in a browser
 > ([#420 "Customer delivery reassurance: tracking shows the rider path, checkout FAILED state, orphan binding fix (#348 slice 8)"](https://github.com/TheCaptainCompany/captain-food/issues/420),

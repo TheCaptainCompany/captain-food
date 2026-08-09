@@ -48,7 +48,12 @@ DB-gated suites take their early-return branch and report `ok`. On 2026-08-04 a 
 **86 suites / 847 passed** and still missed the failure CI then hit — with a real database the
 `infrastructure` package alone contributes **29 suites / 87 tests** that had all silently skipped.
 `ci.yml` already warns about this for CI; the part nobody had written down is that you can run them
-**here**: Postgres 16 is installed in this container (there is no Docker), it is simply not started.
+**here**: Postgres 16 is installed in this container, it is simply not started. (2026-08-09
+correction: SOME sessions' containers DO carry Docker — `which docker` before assuming; the daemon
+just isn't running. `dockerd >/tmp/dockerd.log 2>&1 &`, wait ~8s, then
+`docker run -d -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=captain -p 55432:5432 postgres:16-alpine`
+and `DB_TESTS_REQUIRED=1 DATABASE_URL=postgres://postgres:pw@localhost:55432/captain` is the
+fastest full-suite path — the #430 run's 59/59 came from exactly this.)
 
 ```bash
 PGDATA=/var/lib/postgresql/ci-repro                       # initdb REFUSES to run as root --

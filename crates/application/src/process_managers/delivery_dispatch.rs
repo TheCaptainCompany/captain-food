@@ -103,7 +103,7 @@ impl<'a> DispatchOpenHooks<'a> {
 #[async_trait::async_trait]
 impl delivery_dispatch_process::OrderMarkedReadyHooks for DispatchOpenHooks<'_> {
     async fn read_order(&self, order_id: OrderId) -> Result<HookOutcome<OrderRead>, DomainError> {
-        let Some(order) = self.orders.by_id(order_id).await? else {
+        let Some(order) = self.orders.by_id(order_id, &crate::queries::ReadScope::System).await? else {
             return Ok(HookOutcome::Skip(format!(
                 "order {} is not in the OrderTracking read model yet — cannot dispatch its delivery",
                 order_id.0

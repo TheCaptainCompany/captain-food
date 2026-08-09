@@ -94,7 +94,7 @@ pub struct CheckoutSnapshot {
     pub order_id: OrderId,
     pub cart_id: CartId,
     pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub mode: Option<Mode>,
     pub r#ref: Option<ExternalReference>,
     pub customer_contact: CustomerContact,

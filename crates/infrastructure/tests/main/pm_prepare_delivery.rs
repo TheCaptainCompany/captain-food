@@ -250,6 +250,7 @@ fn place_order_payload(expected_cents: Option<i64>) -> serde_json::Value {
         "orderId": uid(ORDER),
         "restaurantId": uid(RESTAURANT),
         "cartId": uid(CART),
+        "customerId": uid(0xC057),
         "customerContact": {
             "displayName": "Johnny",
             "phone": "+33612345678",

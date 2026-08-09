@@ -123,7 +123,7 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
+    /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership enforced server-side (#144): every row resolve reads through the caller's ReadScope against the ScopeMembership index, for EVERY role — customer, restaurant, account, rider — which closed the old "RESTAURANT paths are trusted" gap (ADR-20260809-160000 §7). A non-member's stream stays silent (no oracle). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
     #[graphql(name = "orderStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OrderStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Order>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
@@ -134,39 +134,16 @@ impl SubscriptionRoot {
         // replacing the pre-acceptance-first correlationId convention.
         let order_id: domain::generated::scalars::OrderId = input.order_id.into();
         let wanted_stream = format!("Order-{}", order_id.0);
-        // Ownership scope, resolved ONCE at setup and applied per resolved row (the row may not be
-        // projected yet when the confirmation screen subscribes): ADMIN sees any order; a CUSTOMER
-        // caller must BE the order's customer (auth_ref → Customer); RESTAURANT/RESTAURANT_ACCOUNT
-        // paths are trusted like the `orders` query until a caller↔restaurant binding exists
-        // (recorded gap, ADR-20260720-220000). Guests: no session scope on Order reads
-        // (ADR-20260720-213000 §3).
-        let role = ctx.data_opt::<crate::graphql::acl::RequestRole>().copied();
-        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
-            .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.clone())
-        {
-            Some(auth_ref) => {
-                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
-                customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|c| c.customer_id)
-            }
-            None => None,
-        };
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at connection init,
+        // from the same bridge the query path uses — the stream must not widen what a query would
+        // refuse. Every row read below is scoped, so ownership for EVERY role (customer,
+        // restaurant, account, rider) comes from the ScopeMembership index — this closes the
+        // "RESTAURANT paths are trusted" gap recorded on ADR-20260720-220000. Absent scope
+        // (schema executed outside a transport) => Public, i.e. no rows — fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars as ds;
-            let owned = |row: &application::queries::OrderTrackingRow| match role {
-                Some(crate::graphql::acl::RequestRole::Admin) => true,
-                Some(crate::graphql::acl::RequestRole::Customer) => {
-                    caller_customer.is_some() && caller_customer == row.customer_id
-                }
-                // RESTAURANT / RESTAURANT_ACCOUNT — the only other paths the roles list admits.
-                _ => true,
-            };
             // The last state pushed to this subscriber: the projected row's `updated_at`, which the
             // projector advances on EVERY fold of this row. Deliberately NOT keyed on `status`
             // (#420): a rider's pickup/dropoff folds `delivery_status` / `courier` /
@@ -214,17 +191,18 @@ impl SubscriptionRoot {
                     if attempt > 0 {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     }
-                    let row = match orders.by_id(order_id).await {
+                    // The scoped read makes "not projected yet" and "not this caller's order"
+                    // both `None` — deliberately indistinguishable (no oracle). A stranger
+                    // therefore pays this bounded re-poll window per envelope and then goes
+                    // silent; the denial itself is counted by the adapter's telemetry.
+                    let row = match orders.by_id(order_id, &scope).await {
                         Ok(Some(row)) => row,
-                        Ok(None) => continue, // not projected yet — re-poll
+                        Ok(None) => continue, // not projected yet, or out of scope — re-poll
                         Err(e) => {
                             yield Err(async_graphql::Error::new(e.to_string()));
                             continue 'events;
                         }
                     };
-                    if !owned(&row) {
-                        continue 'events; // not this caller's order — stay silent, no oracle
-                    }
                     if last == Some(row.updated_at) {
                         continue; // fold not visible yet — re-poll within the bounded window
                     }

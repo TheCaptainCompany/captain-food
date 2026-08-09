@@ -49,7 +49,7 @@ impl RefundOpenHooks<'_> {
     /// The shared `read order` body: OrderTracking by id, coerced to the generated sink types
     /// (`total_amount_cents` carries the full [`Money`] the RefundOpened amount needs).
     async fn load_order(&self, order_id: OrderId) -> Result<HookOutcome<OrderRead>, DomainError> {
-        let Some(o) = self.orders.by_id(order_id).await? else {
+        let Some(o) = self.orders.by_id(order_id, &crate::queries::ReadScope::System).await? else {
             return Ok(HookOutcome::Skip(format!(
                 "order {} is not in the OrderTracking read model — nothing captured to refund",
                 order_id.0
@@ -266,10 +266,10 @@ mod tests {
 
     #[async_trait]
     impl OrderReadRepository for FakeOrders {
-        async fn list(&self, _filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError> {
+        async fn list(&self, _filter: OrderFilter, _scope: &crate::queries::ReadScope) -> Result<Vec<OrderTrackingRow>, DomainError> {
             Ok(self.row.clone().into_iter().collect())
         }
-        async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
+        async fn by_id(&self, id: OrderId, _scope: &crate::queries::ReadScope) -> Result<Option<OrderTrackingRow>, DomainError> {
             Ok(self.row.clone().filter(|r| r.order_id == id))
         }
     }
@@ -280,7 +280,7 @@ mod tests {
             order_id: order_id(),
             r#ref: ExternalReference("order-1".into()),
             restaurant_id: restaurant_id(),
-            customer_id: None,
+            customer_id: Some(CustomerId(uuid::Uuid::nil())),
             status: OrderStatus::PLACED,
             service_type: ServiceType::DELIVERY,
             items: serde_json::json!([]),
@@ -373,13 +373,13 @@ mod tests {
                 DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
                     payment_intent_id: PaymentIntentId("pi_123".into()),
                     restaurant_id: restaurant_id(),
-                    customer_id: None,
+                    customer_id: CustomerId(uuid::Uuid::nil()),
                     amount: eur(1960),
                     checkout: CheckoutSnapshot {
                         order_id: order_id(),
                         cart_id: CartId(uid(2)),
                         restaurant_id: restaurant_id(),
-                        customer_id: None,
+                        customer_id: CustomerId(uuid::Uuid::nil()),
                         mode: None,
                         r#ref: None,
                         customer_contact: CustomerContact {
@@ -551,7 +551,7 @@ mod tests {
             &RefundRequested {
                 order_id: order_id(),
                 restaurant_id: restaurant_id(),
-                customer_id: None,
+                customer_id: Some(CustomerId(uuid::Uuid::nil())),
                 reason: Some("Late delivery".into()),
             },
             &envelope(),
@@ -623,7 +623,7 @@ mod tests {
             &RefundRequested {
                 order_id: order_id(),
                 restaurant_id: restaurant_id(),
-                customer_id: None,
+                customer_id: Some(CustomerId(uuid::Uuid::nil())),
                 reason: Some("Late delivery".into()),
             },
             &envelope(),

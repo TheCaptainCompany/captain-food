@@ -130,7 +130,7 @@ mod tests {
         RefundDenied, RefundOpened,
     };
     use crate::generated::scalars::{
-        CartId, CurrencyCode, CustomerDisplayName, MoneyCents, PhoneNumber, ServiceType,
+        CartId, CurrencyCode, CustomerDisplayName, CustomerId, MoneyCents, PhoneNumber, ServiceType,
     };
 
     fn pi() -> PaymentIntentId {
@@ -151,13 +151,13 @@ mod tests {
         DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
             payment_intent_id: pi(),
             restaurant_id: restaurant_id(),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             amount: money(1000),
             checkout: CheckoutSnapshot {
                 order_id: order_id(),
                 cart_id: CartId(uuid::Uuid::nil()),
                 restaurant_id: restaurant_id(),
-                customer_id: None,
+                customer_id: CustomerId(uuid::Uuid::nil()),
                 mode: None,
                 r#ref: None,
                 customer_contact: CustomerContact {

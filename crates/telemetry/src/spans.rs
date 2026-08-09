@@ -200,6 +200,49 @@ pub fn record_order_id(span: &Span, order_id: &str) {
     span.record(attr::ORDER_ID, order_id);
 }
 
+/// `auth.read_scope` (INTERNAL) — the sub -> domain-id bridge, ONE per request (#144). If this span
+/// appears N times for a single request, the once-per-request caching contract of
+/// PROP-20260725-185140 §3.3 has regressed.
+///
+/// `bridge_resolved` and `correlation_id` are late-bound: the correlation id is MINTED at the server
+/// boundary (reads carry no command envelope), and whether the bridge resolved is only known after
+/// the lookup.
+pub fn auth_read_scope(role: &str) -> Span {
+    tracing::info_span!(
+        "auth.read_scope",
+        otel.kind = "internal",
+        business.role = role,
+        business.bridge_resolved = Empty,
+        business.correlation_id = Empty,
+    )
+}
+
+/// Record whether the bridge resolved the caller to a domain identity. `false` means the request
+/// degrades to Public — denied, safely, but a DEFECT worth its own counter
+/// (`read_authorization_bridge_unresolved_total`), never noise inside the ordinary denial count.
+pub fn record_bridge_resolved(span: &Span, resolved: bool) {
+    span.record(attr::BRIDGE_RESOLVED, if resolved { "true" } else { "false" });
+}
+
+/// `auth.scope_membership` (INTERNAL) — one discrete membership check (#144): a by-id read or the
+/// subscription guard. The LIST path never emits this — it enforces via a fused SQL predicate, so
+/// there is no per-row decision to record (see the contract comment).
+pub fn auth_scope_membership(scope_type: &str, role: &str) -> Span {
+    tracing::info_span!(
+        "auth.scope_membership",
+        otel.kind = "internal",
+        business.scope_type = scope_type,
+        business.role = role,
+        business.authorized = Empty,
+    )
+}
+
+/// Record the check's outcome. A denial is an ORDINARY outcome (`status_rules.business_rejected`),
+/// never a technical error.
+pub fn record_authorized(span: &Span, authorized: bool) {
+    span.record(attr::AUTHORIZED, if authorized { "true" } else { "false" });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +299,16 @@ mod tests {
         let validate = command_validate();
         record_validation_status(&validate, "accepted");
         assert!(validate.metadata().unwrap().fields().field(attr::VALIDATION_STATUS).is_some());
+
+        let bridge = auth_read_scope("CUSTOMER");
+        record_bridge_resolved(&bridge, false);
+        let bf = bridge.metadata().unwrap().fields();
+        assert!(bf.field(attr::BRIDGE_RESOLVED).is_some(), "bridge_resolved is late-bound but declared");
+        assert!(bf.field(attr::CORRELATION_ID).is_some(), "correlation_id is late-bound but declared");
+
+        let membership = auth_scope_membership("ORDER", "CUSTOMER");
+        record_authorized(&membership, false);
+        assert!(membership.metadata().unwrap().fields().field(attr::AUTHORIZED).is_some());
     }
 
     /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
@@ -277,6 +330,8 @@ mod tests {
             payment_intent_create(),
             pricing_compute(),
             cart_read("a"),
+            auth_read_scope("CUSTOMER"),
+            auth_scope_membership("ORDER", "CUSTOMER"),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");
