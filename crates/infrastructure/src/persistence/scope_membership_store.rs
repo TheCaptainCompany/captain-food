@@ -3,13 +3,13 @@
 //!
 //! Three operations, and the asymmetry between them is the whole safety story:
 //!   * [`grant`]   — idempotent upsert, keyed by the UUIDv5-derived `membership_id`;
-//!   * [`revoke_role`] — drops every principal of one role on one scope;
+//!   * [`revoke_role`] — drops every member of one role on one scope;
 //!   * [`is_member`]   — the guard's read: one primary-key `EXISTS`, no joins, ever.
 //!
 //! A MISSING row denies (visible, safe). A STALE row grants (a silent breach). So `revoke_role`
 //! deletes broadly and `grant` writes narrowly — never the other way round.
 //!
-//! Column conventions (ADR-20260728): `scope_type` and `principal_type` are TEXT (the variant name
+//! Column conventions (ADR-20260728): `scope_type` and `member_type` are TEXT (the variant name
 //! verbatim, [`crate::persistence::enum_sql`]), self-describing without a lookup join.
 
 use application::projectors::scope_membership::membership_id;
@@ -31,22 +31,22 @@ pub async fn grant(
     conn: &mut sqlx::PgConnection,
     scope_type: ScopeType,
     scope_id: Uuid,
-    principal_type: UserType,
-    principal_id: Uuid,
+    member_type: UserType,
+    member_id: Uuid,
     granted_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), DomainError> {
-    let id = membership_id(scope_type, scope_id, principal_type, principal_id);
+    let id = membership_id(scope_type, scope_id, member_type, member_id);
     sqlx::query(
         "INSERT INTO scopemembership \
-           (membership_id, scope_type, scope_id, principal_type, principal_id, granted_at, created_at, updated_at) \
+           (membership_id, scope_type, scope_id, member_type, member_id, granted_at, created_at, updated_at) \
          VALUES ($1,$2,$3,$4,$5,$6,$6,$6) \
          ON CONFLICT (membership_id) DO NOTHING",
     )
     .bind(id)
     .bind(scope_type.to_text())
     .bind(scope_id)
-    .bind(principal_type.to_text())
-    .bind(principal_id)
+    .bind(member_type.to_text())
+    .bind(member_id)
     .bind(granted_at)
     .execute(&mut *conn)
     .await
@@ -54,7 +54,7 @@ pub async fn grant(
     Ok(())
 }
 
-/// Drop EVERY principal holding `principal_type` on this scope.
+/// Drop EVERY member holding `member_type` on this scope.
 ///
 /// Deliberately not "revoke this one rider": if a reassignment ever left two rider rows on one order,
 /// a targeted delete would strip one and leave the other holding access — the stale-grant breach. The
@@ -63,15 +63,15 @@ pub async fn revoke_role(
     conn: &mut sqlx::PgConnection,
     scope_type: ScopeType,
     scope_id: Uuid,
-    principal_type: UserType,
+    member_type: UserType,
 ) -> Result<u64, DomainError> {
     let deleted = sqlx::query(
         "DELETE FROM scopemembership \
-          WHERE scope_type = $1 AND scope_id = $2 AND principal_type = $3",
+          WHERE scope_type = $1 AND scope_id = $2 AND member_type = $3",
     )
     .bind(scope_type.to_text())
     .bind(scope_id)
-    .bind(principal_type.to_text())
+    .bind(member_type.to_text())
     .execute(&mut *conn)
     .await
     .map_err(db_err)?
@@ -79,7 +79,7 @@ pub async fn revoke_role(
     Ok(deleted)
 }
 
-/// The guard's question, for every role and every surface: may this principal see this instance?
+/// The guard's question, for every role and every surface: may this member see this instance?
 ///
 /// One primary-key lookup — the id is derived in-process from the four parts, so this never scans,
 /// never joins, and costs the same whatever the scope type is.
@@ -87,10 +87,10 @@ pub async fn is_member(
     pool: &PgPool,
     scope_type: ScopeType,
     scope_id: Uuid,
-    principal_type: UserType,
-    principal_id: Uuid,
+    member_type: UserType,
+    member_id: Uuid,
 ) -> Result<bool, DomainError> {
-    let id = membership_id(scope_type, scope_id, principal_type, principal_id);
+    let id = membership_id(scope_type, scope_id, member_type, member_id);
     let found: Option<(bool,)> =
         sqlx::query_as("SELECT true FROM scopemembership WHERE membership_id = $1")
             .bind(id)
@@ -100,20 +100,20 @@ pub async fn is_member(
     Ok(found.is_some())
 }
 
-/// Every scope of one type this principal may see — the list-query filter, served by the
-/// `(principal_type, principal_id, scope_type)` index rather than by a second mechanism.
+/// Every scope of one type this member may see — the list-query filter, served by the
+/// `(member_type, member_id, scope_type)` index rather than by a second mechanism.
 pub async fn scopes_for(
     pool: &PgPool,
-    principal_type: UserType,
-    principal_id: Uuid,
+    member_type: UserType,
+    member_id: Uuid,
     scope_type: ScopeType,
 ) -> Result<Vec<Uuid>, DomainError> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
         "SELECT scope_id FROM scopemembership \
-          WHERE principal_type = $1 AND principal_id = $2 AND scope_type = $3",
+          WHERE member_type = $1 AND member_id = $2 AND scope_type = $3",
     )
-    .bind(principal_type.to_text())
-    .bind(principal_id)
+    .bind(member_type.to_text())
+    .bind(member_id)
     .bind(scope_type.to_text())
     .fetch_all(pool)
     .await
@@ -149,10 +149,10 @@ impl ScopeMembershipRepository for PgScopeMembershipRepository {
             // by not asking this question at all, not by answering it `true`.
             ReadScope::Public => Ok(false),
             _ => {
-                let Some((principal_type, principal_id)) = scope.principal() else {
+                let Some((member_type, member_id)) = scope.member() else {
                     return Ok(false);
                 };
-                is_member(&self.pool, scope_type, scope_id, principal_type, principal_id).await
+                is_member(&self.pool, scope_type, scope_id, member_type, member_id).await
             }
         }
     }
@@ -165,10 +165,10 @@ impl ScopeMembershipRepository for PgScopeMembershipRepository {
         // ADMIN is deliberately NOT special-cased into "everything" here: an unbounded list is a
         // different question from an unbounded check, and callers that need it must ask the read
         // model directly rather than materialize every scope id in the system.
-        let Some((principal_type, principal_id)) = scope.principal() else {
+        let Some((member_type, member_id)) = scope.member() else {
             return Ok(Vec::new());
         };
-        scopes_for(&self.pool, principal_type, principal_id, scope_type).await
+        scopes_for(&self.pool, member_type, member_id, scope_type).await
     }
 }
 
@@ -183,8 +183,8 @@ pub enum ScopePredicate {
     All,
     /// Nothing is visible (PUBLIC on a tenant read model).
     None,
-    /// Restricted to rows whose scope this principal is a member of:
-    /// `(principal_type wire text, principal_id)`.
+    /// Restricted to rows whose scope this member belongs to:
+    /// `(member_type wire text, member_id)`.
     Member(&'static str, Uuid),
 }
 
@@ -192,9 +192,9 @@ pub fn scope_predicate(scope: &ReadScope) -> ScopePredicate {
     match scope {
         ReadScope::Admin | ReadScope::System => ScopePredicate::All,
         ReadScope::Public => ScopePredicate::None,
-        _ => match scope.principal() {
-            Some((principal_type, principal_id)) => {
-                ScopePredicate::Member(principal_type.to_text(), principal_id)
+        _ => match scope.member() {
+            Some((member_type, member_id)) => {
+                ScopePredicate::Member(member_type.to_text(), member_id)
             }
             None => ScopePredicate::None,
         },
@@ -214,7 +214,7 @@ mod tests {
     }
 
     /// THE authorization inversion, pinned. An unauthenticated caller reaching a tenant read model
-    /// must see NOTHING. The tempting bug is to treat "no principal" as "no restriction" — which
+    /// must see NOTHING. The tempting bug is to treat "no member identity" as "no restriction" — which
     /// turns the most exposed caller into the most privileged one.
     #[test]
     fn public_sees_nothing_rather_than_everything() {
@@ -229,11 +229,11 @@ mod tests {
         assert!(matches!(scope_predicate(&ReadScope::System), ScopePredicate::All));
     }
 
-    /// Each tenant role resolves to its OWN principal_type wire value. A shared value would let one
-    /// role's membership satisfy another's check — the reason principal_type is in the key at all.
-    /// And the scope must carry the SAME id through — never rewrite the principal.
+    /// Each tenant role resolves to its OWN member_type wire value. A shared value would let one
+    /// role's membership satisfy another's check — the reason member_type is in the key at all.
+    /// And the scope must carry the SAME id through — never rewrite the member id.
     #[test]
-    fn every_tenant_role_maps_to_a_distinct_principal_type() {
+    fn every_tenant_role_maps_to_a_distinct_member_type() {
         let id = Uuid::from_u128(7);
         let types: Vec<&str> = [
             ReadScope::Customer(CustomerId(id)),
@@ -248,7 +248,7 @@ mod tests {
         let mut sorted = types.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), types.len(), "two roles share a principal_type value");
+        assert_eq!(sorted.len(), types.len(), "two roles share a member_type value");
         for scope in [ReadScope::Customer(CustomerId(id)), ReadScope::Rider(RiderId(id))] {
             assert_eq!(member_of(&scope).unwrap().1, id);
         }
@@ -258,7 +258,7 @@ mod tests {
     /// with `domain_events.user_type`. Pinning them here makes a scalars.yaml variant rename fail
     /// loudly instead of silently stranding both this index and historical event rows.
     #[test]
-    fn principal_type_wire_text_matches_the_usertype_declaration() {
+    fn member_type_wire_text_matches_the_usertype_declaration() {
         let id = Uuid::from_u128(1);
         assert_eq!(member_of(&ReadScope::Customer(CustomerId(id))).unwrap().0, "CUSTOMER");
         assert_eq!(

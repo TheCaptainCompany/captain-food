@@ -30,12 +30,12 @@ use crate::projections::Envelope;
 /// would re-key every existing row and silently orphan the old ones.
 const MEMBERSHIP_NAMESPACE: Uuid = Uuid::from_u128(0x6ca4_1f0e_9b27_4d55_a3e1_7c88_5b02_9df4);
 
-/// One change the projector wants applied. Grants are per-principal; revokes drop a whole ROLE on a
-/// scope rather than a named principal — see the module note on the missing-vs-stale asymmetry.
+/// One change the projector wants applied. Grants are per-member; revokes drop a whole ROLE on a
+/// scope rather than a named member — see the module note on the missing-vs-stale asymmetry.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MembershipChange {
-    Grant { scope_type: ScopeType, scope_id: Uuid, principal_type: UserType, principal_id: Uuid },
-    RevokeRole { scope_type: ScopeType, scope_id: Uuid, principal_type: UserType },
+    Grant { scope_type: ScopeType, scope_id: Uuid, member_type: UserType, member_id: Uuid },
+    RevokeRole { scope_type: ScopeType, scope_id: Uuid, member_type: UserType },
 }
 
 /// Lookups the infrastructure worker resolves before folding (the pure layer cannot do I/O).
@@ -60,10 +60,10 @@ pub struct Resolved {
 pub fn membership_id(
     scope_type: ScopeType,
     scope_id: Uuid,
-    principal_type: UserType,
-    principal_id: Uuid,
+    member_type: UserType,
+    member_id: Uuid,
 ) -> Uuid {
-    let key = format!("{scope_type:?}|{scope_id}|{principal_type:?}|{principal_id}");
+    let key = format!("{scope_type:?}|{scope_id}|{member_type:?}|{member_id}");
     Uuid::new_v5(&MEMBERSHIP_NAMESPACE, key.as_bytes())
 }
 
@@ -83,21 +83,21 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             out.push(MembershipChange::Grant {
                 scope_type: ScopeType::ORDER,
                 scope_id: order_id,
-                principal_type: UserType::CUSTOMER,
-                principal_id: e.customer_id.0,
+                member_type: UserType::CUSTOMER,
+                member_id: e.customer_id.0,
             });
             out.push(MembershipChange::Grant {
                 scope_type: ScopeType::ORDER,
                 scope_id: order_id,
-                principal_type: UserType::RESTAURANT,
-                principal_id: e.restaurant_id.0,
+                member_type: UserType::RESTAURANT,
+                member_id: e.restaurant_id.0,
             });
             if let Some(account_id) = resolved.restaurant_account_id {
                 out.push(MembershipChange::Grant {
                     scope_type: ScopeType::ORDER,
                     scope_id: order_id,
-                    principal_type: UserType::RESTAURANT_ACCOUNT,
-                    principal_id: account_id,
+                    member_type: UserType::RESTAURANT_ACCOUNT,
+                    member_id: account_id,
                 });
             }
             out
@@ -108,8 +108,8 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
         DomainEvent::DeliveryAcceptedByRider(e) => vec![MembershipChange::Grant {
             scope_type: ScopeType::ORDER,
             scope_id: e.order_id.0,
-            principal_type: UserType::RIDER,
-            principal_id: e.rider_id.0,
+            member_type: UserType::RIDER,
+            member_id: e.rider_id.0,
         }],
 
         // The job ended without delivery: no rider should retain access. Revoking the ROLE rather
@@ -125,13 +125,13 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
         DomainEvent::DeliveryDispatchFailed(e) => vec![MembershipChange::RevokeRole {
             scope_type: ScopeType::ORDER,
             scope_id: e.order_id.0,
-            principal_type: UserType::RIDER,
+            member_type: UserType::RIDER,
         }],
         DomainEvent::DeliveryCancelled(_) => match resolved.order_id {
             Some(order_id) => vec![MembershipChange::RevokeRole {
                 scope_type: ScopeType::ORDER,
                 scope_id: order_id,
-                principal_type: UserType::RIDER,
+                member_type: UserType::RIDER,
             }],
             None => Vec::new(),
         },
@@ -143,16 +143,16 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             let mut out = vec![MembershipChange::Grant {
                 scope_type: ScopeType::RESTAURANT,
                 scope_id: restaurant_id,
-                principal_type: UserType::RESTAURANT,
-                principal_id: restaurant_id,
+                member_type: UserType::RESTAURANT,
+                member_id: restaurant_id,
             }];
             // Unlike OrderPlaced, this event CARRIES its owning account — no lookup needed.
             if let Some(account_id) = e.account_id.as_ref().map(|a| a.0) {
                 out.push(MembershipChange::Grant {
                     scope_type: ScopeType::RESTAURANT,
                     scope_id: restaurant_id,
-                    principal_type: UserType::RESTAURANT_ACCOUNT,
-                    principal_id: account_id,
+                    member_type: UserType::RESTAURANT_ACCOUNT,
+                    member_id: account_id,
                 });
             }
             out
@@ -168,8 +168,8 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             Some(account_id) => vec![MembershipChange::Grant {
                 scope_type: ScopeType::RESTAURANT,
                 scope_id: e.restaurant_id.0,
-                principal_type: UserType::RESTAURANT_ACCOUNT,
-                principal_id: account_id.0,
+                member_type: UserType::RESTAURANT_ACCOUNT,
+                member_id: account_id.0,
             }],
             None => Vec::new(),
         },
@@ -251,8 +251,8 @@ mod tests {
         );
     }
 
-    /// A principal who is BOTH a customer and a rider must hold two distinct memberships, or their
-    /// customer row would let them fetch rider-audience data. This is why principal_type is in the key.
+    /// A member who is BOTH a customer and a rider must hold two distinct memberships, or their
+    /// customer row would let them fetch rider-audience data. This is why member_type is in the key.
     #[test]
     fn same_person_as_customer_and_rider_gets_distinct_memberships() {
         let person = Uuid::from_u128(42);
@@ -272,20 +272,20 @@ mod tests {
         assert!(changes.contains(&MembershipChange::Grant {
             scope_type: ScopeType::ORDER,
             scope_id: ORDER,
-            principal_type: UserType::CUSTOMER,
-            principal_id: CUSTOMER,
+            member_type: UserType::CUSTOMER,
+            member_id: CUSTOMER,
         }));
         assert!(changes.contains(&MembershipChange::Grant {
             scope_type: ScopeType::ORDER,
             scope_id: ORDER,
-            principal_type: UserType::RESTAURANT,
-            principal_id: RESTAURANT,
+            member_type: UserType::RESTAURANT,
+            member_id: RESTAURANT,
         }));
         assert!(changes.contains(&MembershipChange::Grant {
             scope_type: ScopeType::ORDER,
             scope_id: ORDER,
-            principal_type: UserType::RESTAURANT_ACCOUNT,
-            principal_id: ACCOUNT,
+            member_type: UserType::RESTAURANT_ACCOUNT,
+            member_id: ACCOUNT,
         }));
     }
 
@@ -300,8 +300,8 @@ mod tests {
         assert!(changes.contains(&MembershipChange::Grant {
             scope_type: ScopeType::ORDER,
             scope_id: ORDER,
-            principal_type: UserType::CUSTOMER,
-            principal_id: CUSTOMER,
+            member_type: UserType::CUSTOMER,
+            member_id: CUSTOMER,
         }));
         // No account resolved -> customer + restaurant only.
         assert_eq!(changes.len(), 2);
@@ -328,8 +328,8 @@ mod tests {
             vec![MembershipChange::Grant {
                 scope_type: ScopeType::ORDER,
                 scope_id: ORDER,
-                principal_type: UserType::RIDER,
-                principal_id: RIDER_A,
+                member_type: UserType::RIDER,
+                member_id: RIDER_A,
             }]
         );
 
@@ -344,7 +344,7 @@ mod tests {
             vec![MembershipChange::RevokeRole {
                 scope_type: ScopeType::ORDER,
                 scope_id: ORDER,
-                principal_type: UserType::RIDER,
+                member_type: UserType::RIDER,
             }],
             "a targeted revoke would strip one rider and leave the other — the stale-grant breach"
         );
@@ -355,8 +355,8 @@ mod tests {
             vec![MembershipChange::Grant {
                 scope_type: ScopeType::ORDER,
                 scope_id: ORDER,
-                principal_type: UserType::RIDER,
-                principal_id: RIDER_B,
+                member_type: UserType::RIDER,
+                member_id: RIDER_B,
             }]
         );
     }
@@ -396,8 +396,8 @@ mod tests {
             vec![MembershipChange::Grant {
                 scope_type: ScopeType::RESTAURANT,
                 scope_id: RESTAURANT,
-                principal_type: UserType::RESTAURANT_ACCOUNT,
-                principal_id: ACCOUNT,
+                member_type: UserType::RESTAURANT_ACCOUNT,
+                member_id: ACCOUNT,
             }]
         );
         assert!(membership_changes(&claim(None), &Resolved::default()).is_empty());

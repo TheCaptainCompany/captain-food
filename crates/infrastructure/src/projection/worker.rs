@@ -252,15 +252,15 @@ impl ReadModelProjector {
                         scope_membership::MembershipChange::Grant {
                             scope_type,
                             scope_id,
-                            principal_type,
-                            principal_id,
+                            member_type,
+                            member_id,
                         } => {
                             scope_membership_store::grant(
                                 &mut *conn,
                                 *scope_type,
                                 *scope_id,
-                                *principal_type,
-                                *principal_id,
+                                *member_type,
+                                *member_id,
                                 env.occurred_at,
                             )
                             .await?;
@@ -268,7 +268,7 @@ impl ReadModelProjector {
                         scope_membership::MembershipChange::RevokeRole {
                             scope_type,
                             scope_id,
-                            principal_type,
+                            member_type,
                         } => {
                             // A failed REVOKE is not an ordinary skipped fold: the drain loop's
                             // log-and-skip advances the checkpoint past it, and on THIS table a
@@ -281,14 +281,14 @@ impl ReadModelProjector {
                                 &mut *conn,
                                 *scope_type,
                                 *scope_id,
-                                *principal_type,
+                                *member_type,
                             )
                             .await
                             {
                                 tracing::error!(
                                     scope_type = ?scope_type,
                                     scope_id = %scope_id,
-                                    principal_type = ?principal_type,
+                                    member_type = ?member_type,
                                     error = %e,
                                     "SCOPE-MEMBERSHIP REVOKE FAILED -- if the batch skips this event a STALE GRANT STANDS until a ScopeMembership checkpoint-reset replay"
                                 );
@@ -464,7 +464,7 @@ async fn resolve_cancelled_delivery_order(
 }
 
 /// Which account owns the restaurant on this `OrderPlaced`? Resolved from the ScopeMembership
-/// table's OWN RestaurantRegistered/RestaurantListingClaimed grants (scope RESTAURANT, principal
+/// table's OWN RestaurantRegistered/RestaurantListingClaimed grants (scope RESTAURANT, member
 /// RESTAURANT_ACCOUNT), which this group folds in the same total order — deterministic under a
 /// full rebuild, unlike reading the sibling `restaurant` projection, whose independent checkpoint
 /// may lag during a DR replay. An unresolved account simply omits that one grant.
@@ -486,8 +486,8 @@ async fn resolve_restaurant_account(
         _ => return Ok(None),
     };
     let row: Option<(uuid::Uuid,)> = sqlx::query_as(
-        "SELECT principal_id FROM scopemembership \
-          WHERE scope_type = $1 AND scope_id = $2 AND principal_type = $3 \
+        "SELECT member_id FROM scopemembership \
+          WHERE scope_type = $1 AND scope_id = $2 AND member_type = $3 \
           ORDER BY granted_at ASC, membership_id ASC LIMIT 1",
     )
     .bind(domain::generated::scalars::ScopeType::RESTAURANT.to_text())

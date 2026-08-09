@@ -778,9 +778,9 @@ pub enum ReadScope {
 }
 
 impl ReadScope {
-    /// The `(principal_type, principal_id)` half of a membership question, or `None` for the scopes
+    /// The `(member_type, member_id)` half of a membership question, or `None` for the scopes
     /// that are answered without consulting the index (`Admin`/`System` short-circuit, `Public` denies).
-    pub fn principal(&self) -> Option<(UserType, uuid::Uuid)> {
+    pub fn member(&self) -> Option<(UserType, uuid::Uuid)> {
         match self {
             ReadScope::Customer(id) => Some((UserType::CUSTOMER, id.0)),
             ReadScope::Restaurant(id) => Some((UserType::RESTAURANT, id.0)),
@@ -798,7 +798,7 @@ impl ReadScope {
 /// growing their own logic, which is why it lives in `application` and not beside either transport.
 #[async_trait]
 pub trait ScopeMembershipRepository: Send + Sync {
-    /// May this principal see this instance?
+    /// May this member see this instance?
     async fn is_member(
         &self,
         scope_type: ScopeType,
@@ -806,7 +806,7 @@ pub trait ScopeMembershipRepository: Send + Sync {
         scope: &ReadScope,
     ) -> Result<bool, DomainError>;
 
-    /// Every scope of this type the principal may see — the list-query filter.
+    /// Every scope of this type the member may see — the list-query filter.
     async fn scopes_for(
         &self,
         scope_type: ScopeType,

@@ -72,6 +72,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("20260808070000_claude_ro_select_only.sql", include_str!("../../../../migrations/20260808070000_claude_ro_select_only.sql")),
     ("20260809000000_catalog_slug_nullable.sql", include_str!("../../../../migrations/20260809000000_catalog_slug_nullable.sql")),
     ("20260809140000_scope_membership.sql", include_str!("../../../../migrations/20260809140000_scope_membership.sql")),
+    ("20260809190000_scope_membership_member_rename.sql", include_str!("../../../../migrations/20260809190000_scope_membership_member_rename.sql")),
 ];
 
 /// The witness: proof that this test holds the database. Owns the pool AND the binary-wide

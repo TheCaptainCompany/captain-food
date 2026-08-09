@@ -45,16 +45,16 @@ impl OrderReadRepository for PgOrderRepository {
         match scope_predicate(scope) {
             ScopePredicate::All => {}
             ScopePredicate::None => return Ok(Vec::new()),
-            ScopePredicate::Member(principal_type, principal_id) => {
+            ScopePredicate::Member(member_type, member_id) => {
                 qb.push(
                     " AND EXISTS (SELECT 1 FROM scopemembership m \
                        WHERE m.scope_type = ",
                 )
                 .push_bind(ScopeType::ORDER.to_text())
-                .push(" AND m.scope_id = ordertracking.order_id AND m.principal_type = ")
-                .push_bind(principal_type)
-                .push(" AND m.principal_id = ")
-                .push_bind(principal_id)
+                .push(" AND m.scope_id = ordertracking.order_id AND m.member_type = ")
+                .push_bind(member_type)
+                .push(" AND m.member_id = ")
+                .push_bind(member_id)
                 .push(")");
             }
         }
@@ -88,22 +88,22 @@ impl OrderReadRepository for PgOrderRepository {
                 telemetry::meters::read_authorization::checked("ORDER", "PUBLIC", false, 0.0);
                 return Ok(None);
             }
-            ScopePredicate::Member(principal_type, principal_id) => {
-                let span = telemetry::spans::auth_scope_membership("ORDER", principal_type);
+            ScopePredicate::Member(member_type, member_id) => {
+                let span = telemetry::spans::auth_scope_membership("ORDER", member_type);
                 let started = std::time::Instant::now();
                 let member = scope_membership_store::is_member(
                     &self.pool,
                     ScopeType::ORDER,
                     id.0,
-                    EnumText::from_text(principal_type)?,
-                    principal_id,
+                    EnumText::from_text(member_type)?,
+                    member_id,
                 )
                 .await?;
                 let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
                 telemetry::spans::record_authorized(&span, member);
                 telemetry::meters::read_authorization::checked(
                     "ORDER",
-                    principal_type,
+                    member_type,
                     member,
                     elapsed_ms,
                 );
