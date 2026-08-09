@@ -885,3 +885,32 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   creating `captain-food/cad2-wt` — a worktree nested in its own repo, showing up as an untracked
   directory one `git add -A` away from being committed. Verify with `git worktree list` after adding,
   and remove with `git worktree remove --force` rather than `rm -rf`.
+
+### `make rust` does not compile the application
+
+`rust: rust-build rust-test validate check-drift`, and both `rust-*` targets carry
+`--manifest-path tools/codegen-rs/Cargo.toml` (`Makefile:68-73`). So the gate CLAUDE.md names as the
+pre-push bar — "local gates are green (`make rust`)" — builds and tests **the codegen tool**, runs the
+validator, and checks generated-artifact drift. It never compiles `crates/**`, and it runs none of
+the workspace's tests.
+
+A `crates/web` change that does not compile therefore passes `make rust`. So does a `crates/server`
+integration test that fails: the `graphql_subscriptions` suite covering the #427 emitter change was
+never run by any local gate, and a reviewer had to flag the hole after the fact. Two of the three
+`make rust` invocations in that session reported OK while telling me nothing about the code I had
+actually written.
+
+**Run the crate-scoped tests yourself** — `cargo test -p web --features ssr`, `cargo test -p server
+--test <suite>`, `make wasm` for anything in the browser half — and name them individually when you
+report gates. "Gates green" without saying which is not a claim about the diff. CI does build the
+workspace, so this bites as a late red on a PR you called ready, not as a bug in `main`.
+
+The executable fix (folding a workspace build+test into `rust`) is a Makefile change, so it goes
+through the claim -> PR flow rather than riding a docs commit.
+
+### One more shell trap in commit messages
+
+`git commit -m "…"` with **backticks** inside the double quotes runs command substitution: a message
+containing `` `system` `` silently lost the word and committed the gap. The existing ASCII rule
+covers Makefile recipes; this is the same class one layer over. Write any commit message with
+backticks, `$`, or `!` to a file and use `git commit -F <file>`.
