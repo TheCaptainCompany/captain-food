@@ -113,8 +113,22 @@ fn money(cents: i64) -> serde_json::Value {
     serde_json::json!({ "amountCents": cents, "currency": "EUR" })
 }
 
+fn address(line1: &str) -> serde_json::Value {
+    serde_json::json!({
+        "line1": line1, "postalCode": "37000", "city": "Tours", "country": "FR"
+    })
+}
+
+/// The two tests in this file DROP and recreate the same tables, so they may never interleave.
+/// (CI also passes `--test-threads=1`; this guard makes a local `cargo test` safe on its own.)
+fn db_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 #[tokio::test]
 async fn order_events_fold_into_the_read_model() {
+    let _guard = db_lock().lock().await;
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -317,4 +331,191 @@ async fn order_events_fold_into_the_read_model() {
             .await
             .expect("Order checkpoint after payment facts");
     assert_eq!(checkpoint, 5);
+}
+
+/// The customer-anxiety quick win (#424, PROP-20260808-233000 §2): on the independent-rider path
+/// the order view used to jump READY -> DELIVERED with a 15-25 minute silent hole, because NO
+/// worker ever drained `DeliveryJob-%` into OrderTracking (docs/sagas.md: "mirror columns spec'd
+/// but unfed"). This is the mirror's first end-to-end runtime proof: real delivery facts on a real
+/// `DeliveryJob-{id}` stream, folded by the real worker, moving `ordertracking.delivery_status` on
+/// the row of the ORDER they belong to.
+///
+/// It proves three things that were each independently broken, and any one of which reopens the
+/// silent hole:
+///   1. the Order projector group SLICES `DeliveryJob-%` at all (worker.rs stream_prefixes);
+///   2. a delivery fact KEYS its OrderTracking row from the payload's `orderId` — the field
+///      D-QW1 option (b) put on the payload (ADR-20260808-234907), with no view lookup;
+///   3. `DeliveryPickedUp` is both dispatched (fedBy + column lineage -> generated arm) and MAPPED
+///      (the hand-written `delivery_status` compute arm) — a fedBy entry with no mapping folds to
+///      "still ASSIGNED forever", which looks identical to the bug being fixed.
+#[tokio::test]
+async fn delivery_facts_move_the_customers_delivery_mirror() {
+    let _guard = db_lock().lock().await;
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
+        eprintln!("SKIP delivery_facts_move_the_customers_delivery_mirror: DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+
+    let order_id = uuid::Uuid::new_v4();
+    let restaurant_id = uuid::Uuid::new_v4();
+    let customer_id = uuid::Uuid::new_v4();
+    let job_id = uuid::Uuid::new_v4();
+    let rider_id = uuid::Uuid::new_v4();
+    let order_stream = format!("Order-{order_id}");
+    let job_stream = format!("DeliveryJob-{job_id}");
+    let worker = ProjectionWorker::new(pool.clone());
+
+    // The customer's order exists and is on its way out of the kitchen.
+    append_event(
+        &pool,
+        &order_stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": order_id,
+            "ref": "CF-0424",
+            "restaurantId": restaurant_id,
+            "customerId": customer_id,
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "DELIVERY",
+            "items": [{
+                "offerId": uuid::Uuid::new_v4(),
+                "name": "Margherita",
+                "quantity": 1,
+                "unitPrice": money(980),
+                "lineTotal": money(980)
+            }],
+            "totalAmount": money(1580),
+            "breakdown": {
+                "articles": money(980), "delivery": money(400), "serviceFee": money(200),
+                "total": money(1580), "restaurantContribution": money(160),
+                "restaurantPayout": money(820), "riderPayout": money(400), "captainNet": money(360)
+            },
+            "paymentIntentId": "pi_424"
+        }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (placed)");
+
+    let delivery_status: Option<String> =
+        sqlx::query_scalar("SELECT delivery_status FROM ordertracking WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("placed order row");
+    assert_eq!(delivery_status, None, "no dispatch yet — the mirror is null, not a stale value");
+
+    // Dispatch: the job is born on its OWN stream, carrying the order it delivers.
+    append_event(
+        &pool,
+        &job_stream,
+        1,
+        "DeliveryRequested",
+        serde_json::json!({
+            "deliveryJobId": job_id, "orderId": order_id, "restaurantId": restaurant_id,
+            "pickup": address("1 rue de la Paix"), "dropoff": address("2 avenue Grammont"),
+        }),
+    )
+    .await;
+    // A Captain rider takes it (rider path — no partner, no DeliveryStatusUpdated in sight).
+    append_event(
+        &pool,
+        &job_stream,
+        2,
+        "DeliveryAcceptedByRider",
+        serde_json::json!({ "deliveryJobId": job_id, "orderId": order_id, "riderId": rider_id }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (accepted by rider)");
+
+    let (delivery_status, courier): (Option<String>, Option<serde_json::Value>) = sqlx::query_as(
+        "SELECT delivery_status, courier FROM ordertracking WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("assigned order row");
+    assert_eq!(delivery_status.as_deref(), Some("ASSIGNED"));
+    assert_eq!(
+        courier.as_ref().and_then(|c| c.get("rider_id")).and_then(|v| v.as_str()),
+        Some(rider_id.to_string().as_str()),
+        "the rider is mirrored onto the customer's row"
+    );
+
+    // THE FIX: the rider collects the food. Before #424 this event reached nothing at all.
+    append_event(
+        &pool,
+        &job_stream,
+        3,
+        "DeliveryPickedUp",
+        serde_json::json!({ "deliveryJobId": job_id, "orderId": order_id, "riderId": rider_id }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (picked up)");
+
+    let delivery_status: Option<String> =
+        sqlx::query_scalar("SELECT delivery_status FROM ordertracking WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("picked-up order row");
+    assert_eq!(
+        delivery_status.as_deref(),
+        Some("PICKED_UP"),
+        "the customer's screen moves when the rider collects the food (#424 quick win 1)"
+    );
+
+    // …through to hand-over, so the mirror is not a one-event fluke.
+    append_event(
+        &pool,
+        &job_stream,
+        4,
+        "DeliveryCompleted",
+        serde_json::json!({ "deliveryJobId": job_id, "orderId": order_id }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (completed)");
+    let delivery_status: Option<String> =
+        sqlx::query_scalar("SELECT delivery_status FROM ordertracking WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("delivered order row");
+    assert_eq!(delivery_status.as_deref(), Some("DELIVERED"));
+
+    // The orphan anomaly the nullable `orderId` exists for (PROP-20260808-233000 §2.2d): a partner
+    // report on a birthless stream has no order to key, so the worker SKIPS it with a warn and
+    // keeps draining — it is not poison, and it corrupts no row.
+    append_event(
+        &pool,
+        &format!("DeliveryJob-{}", uuid::Uuid::new_v4()),
+        1,
+        "DeliveryStatusUpdated",
+        serde_json::json!({
+            "deliveryJobId": uuid::Uuid::new_v4(), "orderId": null, "status": "PICKED_UP"
+        }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (orphan skipped, not poison)");
+
+    let delivery_status: Option<String> =
+        sqlx::query_scalar("SELECT delivery_status FROM ordertracking WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("order row after the orphan");
+    assert_eq!(delivery_status.as_deref(), Some("DELIVERED"), "untouched by the orphan");
+    // The checkpoint advanced past every fact — 1 order + 5 delivery.
+    let checkpoint: i64 =
+        sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Order'")
+            .fetch_one(&pool)
+            .await
+            .expect("Order checkpoint");
+    assert_eq!(checkpoint, 6);
 }
