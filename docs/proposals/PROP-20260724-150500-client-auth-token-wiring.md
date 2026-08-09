@@ -3,7 +3,9 @@
   don't need me")
 - **Date**: 2026-07-24
 - **Tracking issue**: [#112 "Client auth-token wiring: JWT storage, Authorization on HTTP+WS, sign_out, auth cookie for SSR 302"](https://github.com/TheCaptainCompany/captain-food/issues/112)
-- **Realized by**: (pending)
+- **Realized by**: shipped across the #112 implementation PRs; claim-bearing completion by
+  [PR #438 "feat(#437): verifyPhone stamps captain_customer_id before token issue; customer bearer transport"](https://github.com/TheCaptainCompany/captain-food/pull/438)
+  (see [ADR-20260809-212810](../adr/ADR-20260809-212810-verify-phone-claim-stamp-posture.md))
 
 ## Why
 
@@ -23,8 +25,13 @@ acceptance envelope (ADR-20260720-015500) — the session token has no channel t
    [#50](https://github.com/TheCaptainCompany/captain-food/issues/50) precedent of adding `email`
    to `verify_email_token.output`): `identity.verify_phone_otp.output` and
    `verify_email_token.output` gain `accessToken` + `refreshToken` + `expiresIn` — Supabase's
-   verify APIs already return them; today the adapter drops them on the floor.
-2. **The VerifyPhone/VerifyEmail handler parks the session** in a new transport table
+   verify APIs already return them (shipped; the adapter captures them).
+2. **The VerifyPhone/VerifyEmail handler parks the session** in a new transport table.
+   Since [#437](https://github.com/TheCaptainCompany/captain-food/issues/437) the parked
+   VerifyPhone token is the POST-claim-stamp ROTATED session (stamp → rotate → park,
+   [ADR-20260809-212810](../adr/ADR-20260809-212810-verify-phone-claim-stamp-posture.md)), so the
+   cookie minted from it already carries `captain_customer_id` — the claim `ReadScope` resolves
+   from. The parking mechanics: the table is
    `auth_sessions` (the `hubrise_connections` category: never event-sourced, never in api.yaml):
    `message_id` (pk, the acceptance handle), ciphertext session (AES-GCM under an env key),
    `session_id` (the anonymous X-SESSION-ID that journaled the command), short TTL (minutes),

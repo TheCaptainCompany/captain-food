@@ -148,6 +148,14 @@ pub struct IdentityRefreshSessionOutput {
     pub expires_in: Option<i64>,
 }
 
+/// Input of `identity.stamp_customer_claim`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityStampCustomerClaimInput {
+    pub auth_ref: ExternalReference,
+    pub customer_id: CustomerId,
+}
+
 /// Input of `identity.send_email_magic_link`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,6 +194,9 @@ pub trait IdentityService: Send + Sync {
     /// Rotate a provider session from its refresh token (#112 — backs POST /auth/refresh; the fail-closed stand-in 503s until the supabase-acl adapter lands).
     /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`.
     async fn refresh_session(&self, input: IdentityRefreshSessionInput, meta: &ServiceCallMeta) -> Result<IdentityRefreshSessionOutput, DomainError>;
+    /// Write the customer domain claims onto the provider-side auth user identified by `authRef` (#437 — the paying customer's session must carry the claim): sets `captain_customer_id` AND `captain_role` together. The provider merges claim metadata SHALLOWLY, so callers always send BOTH keys in one write — a single-key write silently drops the sibling claim. Idempotent on redelivery: a no-op when the stamped id already equals the target; a DIFFERENT already-stamped customer id is a hard error, never an overwrite. FAIL-CLOSED on the credential: without the admin secret (SUPABASE_SECRET_KEY) the operation errors — it never pretends to have stamped, and callers must then skip session rotation/parking entirely (an unstamped token is never parked; recovery is a fresh OTP + idempotent re-stamp).
+    /// Anticipated rejections: none declared.
+    async fn stamp_customer_claim(&self, input: IdentityStampCustomerClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;

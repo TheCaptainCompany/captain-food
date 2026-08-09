@@ -243,6 +243,34 @@ pub fn record_authorized(span: &Span, authorized: bool) {
     span.record(attr::AUTHORIZED, if authorized { "true" } else { "false" });
 }
 
+/// `claims.stamp` (CLIENT) — the customer claim stamp onto the auth provider's user
+/// (`customer-identification` contract, #437): the admin GET+PUT inside the identity ACL that
+/// writes `captain_customer_id` + `captain_role` at phone verification. Emitted by the ACL, so it
+/// nests under the ambient verify-flow span and shares its trace/correlation.
+///
+/// `business.result` (stamped | failed) and `otel.status_code` are late-bound: the outcome is only
+/// known after the provider answers.
+pub fn claims_stamp() -> Span {
+    tracing::info_span!(
+        "claims.stamp",
+        otel.kind = "client",
+        messaging.system = "supabase.auth",
+        business.result = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the stamp outcome. A FAILED stamp also sets OTel ERROR status (mob obligation on #437):
+/// the contract's `success` rule requires `business.result == 'stamped'`, and without the ERROR
+/// status a failed run would be unclassifiable by `status_rules` — neither success nor
+/// `technical_error`.
+pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
+    span.record(attr::RESULT, if stamped { "stamped" } else { "failed" });
+    if !stamped {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +337,15 @@ mod tests {
         let membership = auth_scope_membership("ORDER", "CUSTOMER");
         record_authorized(&membership, false);
         assert!(membership.metadata().unwrap().fields().field(attr::AUTHORIZED).is_some());
+
+        let stamp = claims_stamp();
+        record_claims_stamp_result(&stamp, false);
+        let sf = stamp.metadata().unwrap().fields();
+        assert!(sf.field(attr::RESULT).is_some(), "business.result is late-bound but declared");
+        assert!(
+            sf.field("otel.status_code").is_some(),
+            "otel.status_code is late-bound but declared -- without it a failed stamp could not export ERROR status"
+        );
     }
 
     /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
@@ -332,6 +369,7 @@ mod tests {
             cart_read("a"),
             auth_read_scope("CUSTOMER"),
             auth_scope_membership("ORDER", "CUSTOMER"),
+            claims_stamp(),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");

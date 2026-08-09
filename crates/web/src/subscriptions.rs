@@ -146,8 +146,11 @@ pub struct WsClient {
 
 impl WsClient {
     /// Start a connection: the client + the `connection_init` frame the driver must send FIRST.
-    /// `auth` is the `Bearer …` value for authenticated roles (`None` on the PUBLIC path); the
-    /// session id always travels — anonymous ownership scoping depends on it.
+    /// `auth` is the `Bearer …` value for header-incapable-but-token-holding clients (e.g.
+    /// desktop). It is `None` on EVERY browser path, signed-in customers included (#437/#112):
+    /// their credential is the httpOnly `captain_auth` cookie, which rides the same-origin WS
+    /// upgrade automatically and which the server reads when the init payload carries no token.
+    /// The session id always travels — anonymous ownership scoping depends on it.
     pub fn connect(auth: Option<&str>, session: SessionId) -> (Self, String) {
         let mut payload = Map::new();
         if let Some(token) = auth {

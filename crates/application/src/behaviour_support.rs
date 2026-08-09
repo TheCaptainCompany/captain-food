@@ -1033,8 +1033,17 @@ impl crate::dispatch_strategy::DispatchStrategyRepository for SpecDispatchConfig
 
 /// Identity double: any phone verifies to the spec's `auth-supabase-1`; the canonical bad code
 /// `000000` (and bad email token `bad-token`) is rejected like the Supabase ACL would.
+///
+/// STATEFUL for the #437 claim-stamp flow: `stamp_customer_claim` records the `app_metadata` a
+/// real provider would then hold, and `refresh_session` mints an unsigned but DECODABLE JWT
+/// (`hdr.<base64url(payload)>.sig`) whose payload reflects ONLY what was stamped — no stamp
+/// recorded means no claim in the token. Tests therefore pin the stamp→rotate→park ORDERING by
+/// decoding the parked token (behaviour), never by asserting a call log.
 #[derive(Default)]
-pub struct FakeIdentity;
+pub struct FakeIdentity {
+    /// The `app_metadata` the provider holds after a stamp (`None` = never stamped).
+    stamped: Mutex<Option<serde_json::Value>>,
+}
 
 #[async_trait]
 impl IdentityService for FakeIdentity {
@@ -1062,11 +1071,33 @@ impl IdentityService for FakeIdentity {
         _input: crate::generated::services::IdentityRefreshSessionInput,
         _meta: &ServiceCallMeta,
     ) -> Result<crate::generated::services::IdentityRefreshSessionOutput, DomainError> {
+        // The rotated token reflects ONLY what was stamped so far (a real provider re-mints the
+        // JWT from the user's CURRENT app_metadata at rotation): unsigned but decodable, so a
+        // test can read the claims out of whatever the handler parked.
+        use base64::Engine as _;
+        let app_metadata =
+            self.stamped.lock().expect("fake identity mutex").clone().unwrap_or_else(|| serde_json::json!({}));
+        let payload = serde_json::json!({ "app_metadata": app_metadata });
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&payload).expect("fake JWT payload serializes"));
         Ok(crate::generated::services::IdentityRefreshSessionOutput {
-            access_token: "fake.rotated.jwt".into(),
+            access_token: format!("hdr.{b64}.sig"),
             refresh_token: Some("fake.refresh.2".into()),
             expires_in: Some(3600),
         })
+    }
+    async fn stamp_customer_claim(
+        &self,
+        input: crate::generated::services::IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // Record what a correct provider would hold after the stamp: BOTH claims, per the
+        // shallow-merge rule of services.yaml identity.stamp_customer_claim.
+        *self.stamped.lock().expect("fake identity mutex") = Some(serde_json::json!({
+            "captain_role": "CUSTOMER",
+            "captain_customer_id": input.customer_id.0.to_string(),
+        }));
+        Ok(())
     }
     async fn send_email_magic_link(
         &self,

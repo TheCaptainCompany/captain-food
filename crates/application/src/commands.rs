@@ -141,9 +141,10 @@ use domain::generated::commands::{ConsumeCustomerCredit, GrantCustomerCredit};
 use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
 
 use crate::generated::services::{
-    IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
-    IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
-    PaymentRequestOutput, PaymentService, ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
+    IdentityService, IdentityStampCustomerClaimInput, IdentityVerifyEmailTokenInput,
+    IdentityVerifyPhoneOtpInput, PaymentRequestInput, PaymentRequestOutput, PaymentService,
+    ServiceCallMeta,
 };
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::queries::{CatalogReadRepository, OfferView};
@@ -3245,24 +3246,77 @@ pub async fn verify_phone(
             &ServiceCallMeta::new(actor.correlation_id),
         )
         .await?;
-    // Park the provider session for cookie pickup (#112): keyed by the acceptance messageId
-    // (actor.cause_id — the envelope→actor mapping, ADR-0041), owned by the journaling anonymous
-    // session. A parking failure never fails the VERIFICATION — the identity fact stands; the
-    // user's recovery is a fresh OTP. Absent tokens (a provider/mock without sessions) park nothing.
-    if let (Some(access_token), Some(message_id)) = (verified.access_token.clone(), actor.cause_id) {
-        let parked = crate::auth_sessions::ParkedAuthSession {
-            message_id,
-            session_id: Some(cmd.session_id.0),
-            access_token,
-            refresh_token: verified.refresh_token.clone(),
-            expires_in: verified.expires_in,
-        };
-        if let Err(e) = sessions.park(parked).await {
-            tracing::error!(%message_id, error = %e, "auth session parking failed -- verification stands, cookie pickup unavailable");
+    let auth_ref = verified.auth_ref.clone();
+
+    // Resolve new-vs-returning BEFORE any session work (#437): the claim stamp needs the
+    // AUTHORITATIVE customer id — the existing customer for a returning phone (the
+    // client-proposed id is discarded), else the new registration's id.
+    let existing = customers.by_phone(phone.clone()).await?;
+    let resolved_customer_id =
+        existing.as_ref().map(|row| row.customer_id).unwrap_or(cmd.customer_id);
+
+    // STAMP → rotate → park (#437, epic #429's blocking precondition): the auth user is stamped
+    // with the customer domain claim, the session is THEN rotated so the new token carries it,
+    // and only that POST-ROTATION token is parked for cookie pickup (#112), keyed by the
+    // acceptance messageId (actor.cause_id — the envelope→actor mapping, ADR-0041), owned by the
+    // journaling anonymous session.
+    //
+    // Failure posture (mob verdict on #437): the OTP is a consumed external fact, so verification
+    // STANDS whatever happens here — but an UNSTAMPED token is never parked, so any failure in
+    // this block skips the rest of it (parked content is claim-bearing or ABSENT, never
+    // claimless — the AUTH_SESSION_KEY silent-degrade shape is the named anti-pattern). Recovery
+    // is a fresh OTP + idempotent re-stamp. The stamp-failure defect counter
+    // (customer_claim_stamp_failed_total) is incremented by the identity ACL — this layer stays
+    // telemetry-SDK-free. A claim CONFLICT is deliberately not retried: the handler returns Ok to
+    // the mailbox (the verification succeeded), so there is no redelivery loop.
+    match auth
+        .stamp_customer_claim(
+            IdentityStampCustomerClaimInput {
+                auth_ref: auth_ref.clone(),
+                customer_id: resolved_customer_id,
+            },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await
+    {
+        Err(e) => {
+            tracing::error!(error = %e, "customer claim stamp failed -- verification stands; session rotation and parking SKIPPED (an unstamped token is never parked; recovery: fresh OTP, idempotent re-stamp)");
+        }
+        Ok(()) => {
+            // The PRE-rotation tokens are never parked — they were minted before the stamp, so
+            // they cannot carry the claim. No refresh token (a provider/mock without sessions)
+            // means nothing to rotate, hence nothing to park.
+            if let (Some(refresh_token), Some(message_id)) =
+                (verified.refresh_token.clone(), actor.cause_id)
+            {
+                match auth
+                    .refresh_session(
+                        IdentityRefreshSessionInput { refresh_token },
+                        &ServiceCallMeta::new(actor.correlation_id),
+                    )
+                    .await
+                {
+                    Ok(rotated) => {
+                        let parked = crate::auth_sessions::ParkedAuthSession {
+                            message_id,
+                            session_id: Some(cmd.session_id.0),
+                            access_token: rotated.access_token,
+                            refresh_token: rotated.refresh_token,
+                            expires_in: rotated.expires_in,
+                        };
+                        if let Err(e) = sessions.park(parked).await {
+                            tracing::error!(%message_id, error = %e, "auth session parking failed -- verification stands, cookie pickup unavailable");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(%message_id, error = %e, "session rotation after claim stamp failed -- verification stands, cookie pickup unavailable (recovery: fresh OTP)");
+                    }
+                }
+            }
         }
     }
-    let auth_ref = verified.auth_ref;
-    if let Some(existing) = customers.by_phone(phone.clone()).await? {
+
+    if let Some(existing) = existing {
         let (_state, version) = load_customer(store, &existing.customer_id).await?;
         let stream_name = customer_stream(&existing.customer_id);
         let event = DomainEvent::CustomerIdentified(CustomerIdentified {
@@ -3900,5 +3954,64 @@ mod create_if_absent_tests {
         let (events, version) = store.load("Customer-1").await.unwrap();
         assert_eq!(events.len(), 1, "the birth event, exactly once");
         assert_eq!(version, 1);
+    }
+}
+
+#[cfg(test)]
+mod verify_phone_claim_stamp_tests {
+    use super::*;
+    use crate::behaviour_support::{actor_as, TestBed};
+    use base64::Engine as _;
+    use domain::generated::scalars::{OtpCode, SessionId};
+
+    /// #429's blocking precondition, pinned as BEHAVIOUR (#437): the token parked for cookie
+    /// pickup must CARRY the resolved customer's domain claim. The stateful `FakeIdentity` mints
+    /// the rotated JWT from whatever was stamped BEFORE rotation, so this one decode-assertion
+    /// pins the whole ordering — park-before-stamp (today's bug) parks the pre-rotation
+    /// `fake.access.jwt`, which is not a decodable claim-bearing JWT, and stamp-after-refresh
+    /// would mint a claimless payload. No call-log assertions.
+    ///
+    /// `actor.cause_id = Some(mid)` is the point the generated support never reaches: it
+    /// dispatches with `None`, which is why the parking branch was untested until now.
+    #[tokio::test]
+    async fn parked_token_carries_the_stamped_customer_claim() {
+        let bed = TestBed::new();
+        let mid = uuid::Uuid::now_v7();
+        let mut actor = actor_as("PUBLIC");
+        actor.cause_id = Some(mid);
+        let cmd = VerifyPhone {
+            customer_id: CustomerId(uuid::Uuid::from_u128(0x437)),
+            dialing_code: DialingCode("+33".into()),
+            national_number: NationalPhoneNumber("0612345678".into()),
+            code: OtpCode("123456".into()),
+            session_id: SessionId(uuid::Uuid::from_u128(0x5E55)),
+            display_name: None,
+            locale: None,
+            timezone: None,
+        };
+
+        let outcome =
+            verify_phone(&bed.store, &bed.identity, &bed.customers, &bed.auth_sessions, cmd, &actor)
+                .await
+                .expect("verification succeeds");
+
+        let parked = bed.auth_sessions.parked();
+        let entry = parked
+            .iter()
+            .find(|p| p.message_id == mid)
+            .expect("a session parked under the acceptance messageId");
+        let payload_b64 =
+            entry.access_token.split('.').nth(1).expect("parked token is JWT-shaped");
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .expect("parked JWT payload base64url-decodes");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("parked JWT payload is JSON");
+        assert_eq!(
+            payload["app_metadata"]["captain_customer_id"],
+            serde_json::json!(outcome.customer_id.0.to_string()),
+            "the parked token must carry the resolved customer's claim \
+             (stamp BEFORE rotate; park ONLY the rotated token)"
+        );
     }
 }

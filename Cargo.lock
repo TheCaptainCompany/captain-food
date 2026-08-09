@@ -398,6 +398,7 @@ version = "0.1.0"
 dependencies = [
  "actor_client",
  "async-trait",
+ "base64",
  "chrono",
  "domain",
  "hex",

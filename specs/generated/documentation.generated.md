@@ -8405,11 +8405,12 @@ _criticality: **high**_
 | --- | --- | --- | --- | --- |
 | `command.receive` | `SERVER` | ✅ | — | `business.command_type`* |
 | `otp.verify` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
+| `claims.stamp` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
 | `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`* |
 | `event.publish` | `PRODUCER` | ✅ | — | `business.event_type`* |
 
-- **Metrics**: `customer_identification_duration_ms` _(histogram)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
-- **Status rules**: success ⇐ spans [`command.receive`, `otp.verify`, `event.store.append`, `event.publish`]
+- **Metrics**: `customer_identification_duration_ms` _(histogram)_, `customer_claim_stamp_failed_total` _(counter)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
+- **Status rules**: success ⇐ spans [`command.receive`, `otp.verify`, `claims.stamp`, `event.store.append`, `event.publish`]
 - **SLOs**: p95 ≤ 600ms · p99 ≤ 1200ms · error rate ≤ 2%
 
 <a id="sec-ctx-delivery"></a>

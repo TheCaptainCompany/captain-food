@@ -160,6 +160,22 @@ identity:
         expiresIn:    { type: integer, nullable: true }
       errors:
         - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+    stamp_customer_claim:
+      description: >
+        Write the customer domain claims onto the provider-side auth user identified by `authRef`
+        (#437 — the paying customer's session must carry the claim): sets `captain_customer_id`
+        AND `captain_role` together. The provider merges claim metadata SHALLOWLY, so callers
+        always send BOTH keys in one write — a single-key write silently drops the sibling claim.
+        Idempotent on redelivery: a no-op when the stamped id already equals the target; a
+        DIFFERENT already-stamped customer id is a hard error, never an overwrite. FAIL-CLOSED on
+        the credential: without the admin secret (SUPABASE_SECRET_KEY) the operation errors — it
+        never pretends to have stamped, and callers must then skip session rotation/parking
+        entirely (an unstamped token is never parked; recovery is a fresh OTP + idempotent
+        re-stamp).
+      input:
+        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        customerId: { $ref: 'scalars.yaml#/CustomerId' }
+      errors: []
     send_email_magic_link:
       description: "Email a magic link to verify/link this address, localized by the stored locale."
       input:

@@ -196,6 +196,8 @@ pub struct Config {
     pub auth_session_key: String,
     /// Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
     pub supabase_sms_hook_secret: Option<String>,
+    /// Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT /auth/v1/admin/users/{authRef} writing `captain_customer_id` + `captain_role` at phone verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED (verification stands, but the session is never rotated or parked, so login degrades to a fresh-OTP retry once configured — an unstamped token is never parked). Never used on the anon OTP flows, which keep SUPABASE_PUBLISHABLE_KEY; never sent to any client.
+    pub supabase_secret_key: Option<String>,
     /// Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export.
     pub honeycomb_api_key: Option<String>,
     /// OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent.
@@ -337,6 +339,7 @@ impl Config {
         }
         let auth_session_key = auth_session_key.unwrap_or_default();
         let supabase_sms_hook_secret = raw("SUPABASE_SMS_HOOK_SECRET");
+        let supabase_secret_key = raw("SUPABASE_SECRET_KEY");
         let honeycomb_api_key = raw("HONEYCOMB_API_KEY");
         let honeycomb_api_endpoint = raw("HONEYCOMB_API_ENDPOINT").or_else(|| baked("HONEYCOMB_API_ENDPOINT", profile).map(str::to_string));
         let honeycomb_api_endpoint = honeycomb_api_endpoint.unwrap_or_else(|| "https://api.eu1.honeycomb.io".to_string());
@@ -456,6 +459,7 @@ impl Config {
                 supabase_jwks_url,
                 auth_session_key,
                 supabase_sms_hook_secret,
+                supabase_secret_key,
                 honeycomb_api_key,
                 honeycomb_api_endpoint,
                 honeycomb_dataset,
@@ -519,6 +523,7 @@ impl Config {
         out.push_str(&format!("  SUPABASE_JWKS_URL          = {}\n", self.supabase_jwks_url));
         out.push_str(&format!("  AUTH_SESSION_KEY           = {}\n", if self.auth_session_key.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  SUPABASE_SMS_HOOK_SECRET   = {}\n", if self.supabase_sms_hook_secret.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  SUPABASE_SECRET_KEY        = {}\n", if self.supabase_secret_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  HONEYCOMB_API_KEY          = {}\n", if self.honeycomb_api_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  HONEYCOMB_API_ENDPOINT     = {}\n", self.honeycomb_api_endpoint));
         out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
@@ -560,7 +565,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 43;
+pub const KEY_COUNT: usize = 44;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -572,6 +577,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SUPABASE_JWKS_URL",
     "AUTH_SESSION_KEY",
     "SUPABASE_SMS_HOOK_SECRET",
+    "SUPABASE_SECRET_KEY",
     "HONEYCOMB_API_KEY",
     "HONEYCOMB_API_ENDPOINT",
     "HONEYCOMB_DATASET",

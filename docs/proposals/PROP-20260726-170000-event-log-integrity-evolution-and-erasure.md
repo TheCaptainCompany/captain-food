@@ -253,6 +253,17 @@ subject key — which is what makes "erase the person, keep the accounting" expr
   projections, files and identity provider; rule *an erased subject's personal data is not readable
   through any query or projection*; `$maxAge`/`expired_at` implemented or removed; DPIA, privacy
   notice and terms committed.
+  - **Art. 30 processor note (Supabase Auth)**: Supabase (EU region, Frankfurt) is a processor
+    holding, beyond the phone/email identifiers, the DOMAIN identity claim `captain_customer_id`
+    in `app_metadata` — stamped at verifyPhone since
+    [#437 "verifyPhone stamps captain_customer_id before token issue; customer bearer token rides the session (#429 blocking precondition)"](https://github.com/TheCaptainCompany/captain-food/issues/437)
+    ([ADR-20260809-212810](../adr/ADR-20260809-212810-verify-phone-claim-stamp-posture.md)).
+    Lawful basis: Art. 6(1)(b) — performance of contract (operating the customer's account).
+    Erasure reach already names the identity provider above; the claim makes the provider-side
+    delete non-optional (the auth user row links auth identity to domain identity).
+    **Open counsel question**: retention of Supabase auth LOGS and BACKUPS after erasure — how
+    long the claim/identifier pair persists in provider logs/backups, and whether that period
+    needs disclosure in the privacy notice.
 
 ## 8. Open questions for the product owner
 

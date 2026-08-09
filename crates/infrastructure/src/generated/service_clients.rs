@@ -169,6 +169,9 @@ impl IdentityService for HttpIdentityService {
     async fn refresh_session(&self, input: IdentityRefreshSessionInput, meta: &ServiceCallMeta) -> Result<IdentityRefreshSessionOutput, DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/refresh-session", input, meta).await
     }
+    async fn stamp_customer_claim(&self, input: IdentityStampCustomerClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/stamp-customer-claim", input, meta).await
+    }
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/send-email-magic-link", input, meta).await
     }

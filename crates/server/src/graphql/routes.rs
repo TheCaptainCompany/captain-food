@@ -128,6 +128,36 @@ async fn graphql_handler(
     resp.into_response()
 }
 
+/// The effective auth headers for a WS connection, PURE (#437 makes this composition load-bearing:
+/// the storefront's live order tracking authenticates through it). Start from the UPGRADE request's
+/// headers — for a same-origin browser socket these carry the httpOnly `captain_auth` cookie, the
+/// storefront customer's ONLY credential (PROP-20260724-150500: "no `connection_init` token needed")
+/// — then overlay the init payload: an `Authorization` token there wins (the channel for
+/// header-incapable-but-token-holding clients), and `X-SESSION-ID` rides the payload too (browsers
+/// cannot set WS headers — anonymous ownership scope, ADR-20260720-015500). No payload token means
+/// the upgrade headers pass through UNTOUCHED, cookie included.
+fn ws_auth_headers(mut headers: HeaderMap, payload: &serde_json::Value) -> HeaderMap {
+    if let Some(token) = payload
+        .get("Authorization")
+        .or_else(|| payload.get("authorization"))
+        .and_then(|v| v.as_str())
+    {
+        if let Ok(value) = token.parse() {
+            headers.insert(AUTHORIZATION, value);
+        }
+    }
+    if let Some(session) = payload
+        .get("X-SESSION-ID")
+        .or_else(|| payload.get("x-session-id"))
+        .and_then(|v| v.as_str())
+    {
+        if let Ok(value) = session.parse() {
+            headers.insert(crate::graphql::session::SESSION_HEADER, value);
+        }
+    }
+    headers
+}
+
 /// `GET /{role}/graphql`: the GraphQL-over-WebSocket upgrade (subscriptions, `graphql-ws` /
 /// `graphql-transport-ws`) when the request is a WS handshake; GraphiQL otherwise (its subscription
 /// endpoint points back at this same URL, so subscriptions work in the IDE).
@@ -168,29 +198,7 @@ async fn graphql_get(
     upgrade.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |stream| async move {
         GraphQLWebSocket::new(stream, schema, protocol)
             .on_connection_init(move |payload| async move {
-                // Prefer the init-payload token (the only channel a browser has); fall back to the
-                // upgrade request's headers so header-capable (server-side) clients keep working.
-                let mut headers = headers;
-                if let Some(token) = payload
-                    .get("Authorization")
-                    .or_else(|| payload.get("authorization"))
-                    .and_then(|v| v.as_str())
-                {
-                    if let Ok(value) = token.parse() {
-                        headers.insert(AUTHORIZATION, value);
-                    }
-                }
-                // X-SESSION-ID rides the init payload too (browsers cannot set WS headers) — the
-                // anonymous ownership scope of operationStatusChanged (ADR-20260720-015500).
-                if let Some(session) = payload
-                    .get("X-SESSION-ID")
-                    .or_else(|| payload.get("x-session-id"))
-                    .and_then(|v| v.as_str())
-                {
-                    if let Ok(value) = session.parse() {
-                        headers.insert(crate::graphql::session::SESSION_HEADER, value);
-                    }
-                }
+                let headers = ws_auth_headers(headers, &payload);
                 let principal = auth.authorize(role, &headers).await.map_err(|e| {
                     async_graphql::Error::new(match e {
                         crate::auth::AuthError::Unauthorized => {
@@ -264,3 +272,62 @@ const VOYAGER_HTML: &str = r#"<!DOCTYPE html>
 </body>
 </html>
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn upgrade_headers_with_cookie() -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            axum::http::header::COOKIE,
+            "captain_auth=jwt.from.cookie; other=1".parse().unwrap(),
+        );
+        h
+    }
+
+    /// The storefront path (#437 / PROP-20260724-150500): the browser sends NO init-payload token —
+    /// its only credential is the httpOnly `captain_auth` cookie on the upgrade request — so the
+    /// merge must pass the upgrade headers through UNTOUCHED (cookie included, no Authorization
+    /// key materialized). This is the composition `AuthContext::token()`'s cookie fallback relies on.
+    #[test]
+    fn no_payload_token_keeps_upgrade_cookie_untouched() {
+        let out = ws_auth_headers(
+            upgrade_headers_with_cookie(),
+            &json!({ "X-SESSION-ID": "00000000-0000-7000-8000-000000000112" }),
+        );
+        assert!(out.get(AUTHORIZATION).is_none(), "no payload token -> no Authorization key at all");
+        assert_eq!(
+            out.get(axum::http::header::COOKIE).unwrap().to_str().unwrap(),
+            "captain_auth=jwt.from.cookie; other=1",
+            "the httpOnly cookie -- the storefront customer's only credential -- must survive"
+        );
+        assert_eq!(
+            out.get(crate::graphql::session::SESSION_HEADER).unwrap().to_str().unwrap(),
+            "00000000-0000-7000-8000-000000000112",
+            "X-SESSION-ID rides the payload (browsers cannot set WS headers)"
+        );
+    }
+
+    /// A payload `Authorization` wins over whatever the upgrade carried (the deliberate-override
+    /// rule, same as HTTP where header beats cookie), lowercase key accepted per graphql-ws practice.
+    #[test]
+    fn payload_token_overrides_and_lowercase_is_accepted() {
+        let mut upgrade = upgrade_headers_with_cookie();
+        upgrade.insert(AUTHORIZATION, "Bearer stale.upgrade.token".parse().unwrap());
+        let out = ws_auth_headers(upgrade, &json!({ "Authorization": "Bearer from.payload" }));
+        assert_eq!(out.get(AUTHORIZATION).unwrap().to_str().unwrap(), "Bearer from.payload");
+        let out = ws_auth_headers(HeaderMap::new(), &json!({ "authorization": "Bearer lower.case" }));
+        assert_eq!(out.get(AUTHORIZATION).unwrap().to_str().unwrap(), "Bearer lower.case");
+    }
+
+    /// An empty payload against empty upgrade headers stays empty — the anonymous PUBLIC socket
+    /// gains no phantom credentials from the merge itself.
+    #[test]
+    fn empty_payload_and_headers_stay_empty() {
+        let out = ws_auth_headers(HeaderMap::new(), &json!({}));
+        assert!(out.get(AUTHORIZATION).is_none());
+        assert!(out.get(crate::graphql::session::SESSION_HEADER).is_none());
+    }
+}
