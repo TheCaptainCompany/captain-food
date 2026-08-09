@@ -186,6 +186,7 @@ pub async fn update_delivery_status(
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
     let event = DomainEvent::DeliveryStatusUpdated(DeliveryStatusUpdated {
         delivery_job_id: cmd.delivery_job_id,
+        order_id: Some(state.order_id),
         partner_ref: None,
         status: cmd.status,
         occurred_at: None,

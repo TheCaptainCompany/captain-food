@@ -454,7 +454,7 @@ pub mod restaurant_frontoffice {
             roles: &["CUSTOMER"],
             requires_auth: true,
             sdui: false,
-            data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile],
+            data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile, ResolverKey::PaymentStatusByOrder],
             tree: &[],
         },
         Screen {

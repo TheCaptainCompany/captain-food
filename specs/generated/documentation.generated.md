@@ -4134,7 +4134,7 @@ sequenceDiagram
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
 - **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -4172,7 +4172,7 @@ sequenceDiagram
 | `restaurant_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
 | `rated_at` | `timestamptz` | [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped) | nullable | Occurrence time of the latest rating/tip/survey event. |
-| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
+| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryPickedUp mirrors PICKED_UP on the rider path (the partner path reports it via DeliveryStatusUpdated); DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
 | `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | [⚡ `DeliveryAcceptedByPartner`.`estimatedDropoffAt`](#event-deliveryacceptedbypartner--estimateddropoffat) | nullable | Partner-reported ETA to the customer; null when unknown. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
@@ -9042,6 +9042,7 @@ An independent Captain rider accepted the delivery job.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliveryacceptedbyrider--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliveryacceptedbyrider--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907; the PaymentRefunded precedent). |
 | <a id="event-deliveryacceptedbyrider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 
 <a id="event-deliverypickedup"></a>
@@ -9051,11 +9052,12 @@ The rider collected the order from the restaurant.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliverypickedup--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliverypickedup--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907). |
 | <a id="event-deliverypickedup--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-deliverypickedup--at"></a>`at` | `string` _date-time_ | ⬜ |  |
 
@@ -9071,6 +9073,7 @@ The rider handed the order over to the customer (independent-rider delivery succ
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliverycompleted--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliverycompleted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907). |
 | <a id="event-deliverycompleted--at"></a>`at` | `string` _date-time_ | ⬜ |  |
 
 <a id="event-deliverycancelled"></a>
@@ -9178,6 +9181,7 @@ The delivery partner reported a status change for the job (inbound): PICKED_UP, 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliverystatusupdated--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliverystatusupdated--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | The order this job delivers (D-QW1 option b, ADR-20260808-234907). Nullable, NOT for convenience: partner webhooks carry no orderId and the inbound recorder legally appends facts to birthless orphan streams where none exists (deliveries.rs orphan doctrine). Every non-orphan path supplies it — the command handler from folded state, the recorder by enrichment from the birth fact — so null marks exactly the orphan anomaly. |
 | <a id="event-deliverystatusupdated--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-deliverystatusupdated--status"></a>`status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ✅ |  |
 | <a id="event-deliverystatusupdated--occurredat"></a>`occurredAt` | `string` _date-time_ | ⬜ |  |
@@ -10917,6 +10921,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 │ checkout_section — Delivery instructions │
 │ checkout_section — Order summary         │
 │ checkout_section — Payment               │
+│ conditional_section                      │
 │ sticky_bottom_bar                        │
 └──────────────────────────────────────────┘
 ```
@@ -10925,6 +10930,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | --- | --- | --- |
 | read | `cart.current` | [🔎 `cart`](#query-cart) |
 | read | `me.profile` | [🔎 `me`](#query-me) |
+| read | `paymentStatus.byOrder` | [🔎 `paymentStatus`](#query-paymentstatus) |
 | write | `place_order` | [✏️ `placeOrder`](#mutation-placeorder) |
 | write | `set_delivery_address_saved` | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
 
@@ -11382,6 +11388,10 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-checkout-payment"></a>`checkout.payment` | — | Payment | Paiement |
 | <a id="translation-checkout-processing"></a>`checkout.processing` | — | Processing… | Traitement… |
 | <a id="translation-checkout-place_order"></a>`checkout.place_order` | `total` | Place order — {total} | Commander — {total} |
+| <a id="translation-checkout-payment_failed-title"></a>`checkout.payment_failed.title` | — | Payment failed | Paiement refusé |
+| <a id="translation-checkout-payment_failed-body"></a>`checkout.payment_failed.body` | — | Your card was not charged. Your cart is intact. | Votre carte n'a pas été débitée. Votre panier est intact. |
+| <a id="translation-checkout-payment_failed-retry"></a>`checkout.payment_failed.retry` | — | Retry payment | Réessayer le paiement |
+| <a id="translation-checkout-payment_failed-back_to_cart"></a>`checkout.payment_failed.back_to_cart` | — | Back to cart | Revenir au panier |
 | <a id="translation-order-tracking_title"></a>`order.tracking_title` | — | Order tracking | Suivi de commande |
 | <a id="translation-order-status-placed-title"></a>`order.status.placed.title` | — | Order placed! | Commande passée ! |
 | <a id="translation-order-status-placed-body"></a>`order.status.placed.body` | `restaurant` | Your order is being sent to {restaurant}. | Votre commande est envoyée à {restaurant}. |

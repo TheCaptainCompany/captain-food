@@ -43,9 +43,12 @@ DeliveryAcceptedByRider:
   properties:
     deliveryJobId:
       $ref: 'scalars.yaml#/DeliveryJobId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907; the PaymentRefunded precedent)."
     riderId:
       $ref: 'scalars.yaml#/RiderId'
-  required: [deliveryJobId, riderId]
+  required: [deliveryJobId, orderId, riderId]
 
 
 DeliveryPickedUp:
@@ -54,12 +57,15 @@ DeliveryPickedUp:
   properties:
     deliveryJobId:
       $ref: 'scalars.yaml#/DeliveryJobId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907)."
     riderId:
       $ref: 'scalars.yaml#/RiderId'
     at:
       type: string
       format: date-time
-  required: [deliveryJobId, riderId]
+  required: [deliveryJobId, orderId, riderId]
 
 
 DeliveryCompleted:
@@ -68,10 +74,13 @@ DeliveryCompleted:
   properties:
     deliveryJobId:
       $ref: 'scalars.yaml#/DeliveryJobId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "The order this job delivers — self-contained cross-aggregate keying (D-QW1 option b, ADR-20260808-234907)."
     at:
       type: string
       format: date-time
-  required: [deliveryJobId]
+  required: [deliveryJobId, orderId]
 
 
 DeliveryCancelled:
@@ -203,6 +212,10 @@ DeliveryStatusUpdated:
   properties:
     deliveryJobId:
       $ref: 'scalars.yaml#/DeliveryJobId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: "The order this job delivers (D-QW1 option b, ADR-20260808-234907). Nullable, NOT for convenience: partner webhooks carry no orderId and the inbound recorder legally appends facts to birthless orphan streams where none exists (deliveries.rs orphan doctrine). Every non-orphan path supplies it — the command handler from folded state, the recorder by enrichment from the birth fact — so null marks exactly the orphan anomaly."
     partnerRef:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true

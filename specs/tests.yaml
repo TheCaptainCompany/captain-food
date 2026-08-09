@@ -441,13 +441,13 @@ fixtures:
       dropoff: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
   deliveryAcceptedByRider:
     type: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1" }
   deliveryPickedUp:
     type: { $ref: 'events.yaml#/DeliveryPickedUp' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1" }
   deliveryCompleted:
     type: { $ref: 'events.yaml#/DeliveryCompleted' }
-    data: { deliveryJobId: "deliv-1" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1" }
   deliveryCancelled:
     type: { $ref: 'events.yaml#/DeliveryCancelled' }
     data: { deliveryJobId: "deliv-1", reason: "Restaurant closed" }
@@ -468,10 +468,10 @@ fixtures:
     data: { deliveryJobId: "deliv-1", channel: "independent", rank: 1 }
   deliveryStatusUpdatedDelivered:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
-    data: { deliveryJobId: "deliv-1", status: "DELIVERED" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", status: "DELIVERED" }
   deliveryStatusUpdatedPickedUp:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
-    data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", partnerRef: "avelo-77", status: "PICKED_UP" }
   deliveryUnassignedFromPartner:
     type: { $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }
     data: { deliveryJobId: "deliv-1", reason: "Re-offering to another channel" }
@@ -2531,7 +2531,7 @@ tests:
       - { $ref: '#/fixtures/deliveryRequested' }
     when:
       type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
-      data: { deliveryJobId: "deliv-1", status: "DELIVERED" }
+      data: { deliveryJobId: "deliv-1", orderId: "order-1", status: "DELIVERED" }
     then:
       - { $ref: '#/fixtures/orderDelivered' }
 
@@ -2548,7 +2548,7 @@ tests:
       - { $ref: '#/fixtures/deliveryPickedUp' }
     when:
       type: { $ref: 'events.yaml#/DeliveryCompleted' }
-      data: { deliveryJobId: "deliv-1" }
+      data: { deliveryJobId: "deliv-1", orderId: "order-1" }
     then:
       - { $ref: '#/fixtures/orderDelivered' }
 
@@ -2840,7 +2840,7 @@ tests:
       - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
     when:
       type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
-      data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
+      data: { deliveryJobId: "deliv-1", orderId: "order-1", partnerRef: "avelo-77", status: "PICKED_UP" }
     then:
       - { $ref: '#/fixtures/deliveryStatusUpdatedPickedUp' }
 

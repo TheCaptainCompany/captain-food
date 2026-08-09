@@ -882,6 +882,12 @@ pub(crate) struct LifecycleHandlerSeam {
     pub(crate) reject: &'static str,
     /// Stream-name expression for the append.
     pub(crate) stream: &'static str,
+    /// Event payload fields the COMMAND cannot carry, sourced from the REHYDRATED state instead:
+    /// `(event property name, Rust expression over `state`)`. Consulted after the command's
+    /// same-named fields and BEFORE both the required-field check and the `None` fallback, so an
+    /// aggregate can supply from its own fold what no client should be trusted to assert — e.g. the
+    /// DeliveryJob's `orderId`, known from its birth fact (D-QW1 option b, ADR-20260808-234907).
+    pub(crate) state_fields: &'static [(&'static str, &'static str)],
 }
 
 pub(crate) const LIFECYCLE_HANDLER_SEAMS: &[LifecycleHandlerSeam] = &[
@@ -891,6 +897,7 @@ pub(crate) const LIFECYCLE_HANDLER_SEAMS: &[LifecycleHandlerSeam] = &[
         require: "require_order(store, &cmd.order_id, &cmd.restaurant_id)",
         reject: "invalid_order_status(&cmd.order_id, state.status)",
         stream: "order_stream(&cmd.order_id)",
+        state_fields: &[],
     },
     LifecycleHandlerSeam {
         aggregate: "Rider",
@@ -898,6 +905,7 @@ pub(crate) const LIFECYCLE_HANDLER_SEAMS: &[LifecycleHandlerSeam] = &[
         require: "require_rider(store, &cmd.rider_id)",
         reject: "reject(\"InvalidRiderStatusTransition\", json!({ \"riderId\": cmd.rider_id, \"currentStatus\": state.status, \"targetStatus\": cmd.status }))",
         stream: "rider_stream(&cmd.rider_id)",
+        state_fields: &[],
     },
     LifecycleHandlerSeam {
         aggregate: "DeliveryJob",
@@ -905,6 +913,10 @@ pub(crate) const LIFECYCLE_HANDLER_SEAMS: &[LifecycleHandlerSeam] = &[
         require: "require_delivery_job(store, &cmd.delivery_job_id)",
         reject: "invalid_delivery_status(&cmd.delivery_job_id, state.status, canonical_predecessor(cmd.status))",
         stream: "delivery_job_stream(&cmd.delivery_job_id)",
+        // The job knows the order it delivers from its birth fact (`DeliveryRequested.orderId`,
+        // required); UpdateDeliveryStatus deliberately carries no orderId — a client asserting it
+        // would be surplus input the handler must distrust (PROP-20260808-233000 §4).
+        state_fields: &[("orderId", "Some(state.order_id)")],
     },
 ];
 
@@ -926,8 +938,8 @@ pub(crate) const LIFECYCLE_GENERATED_HANDLERS: &[(&str, &str)] = &[
 
 /// Emit `crates/application/src/generated/handlers.rs` — one require+guard+append command handler per
 /// [`LIFECYCLE_GENERATED_HANDLERS`] row (issue #23, ADR-20260721-093027): rehydrate through the
-/// aggregate's seam, build the single emitted event from the command's same-named fields (`None` for
-/// an optional field the command does not carry), consult the GENERATED lifecycle transition table,
+/// aggregate's seam, build the single emitted event from the command's same-named fields (then the
+/// seam's state-sourced fields, then `None` for an optional field neither supplies), consult the GENERATED lifecycle transition table,
 /// append. Generation FAILS if the actors.yaml wiring stops matching (≠1 emitted event, an event
 /// outside the declared machine, or a required event field the command cannot supply).
 pub(crate) fn emit_application_handlers(model: &Model) -> String {
@@ -995,6 +1007,8 @@ pub(crate) fn emit_application_handlers(model: &Model) -> String {
                 let field = snake_field(prop);
                 if cmd_props.contains(prop) {
                     fields.push_str(&format!("        {}: cmd.{},\n", field, field));
+                } else if let Some((_, expr)) = seam.state_fields.iter().find(|(p, _)| *p == prop) {
+                    fields.push_str(&format!("        {}: {},\n", field, expr));
                 } else if required.contains(prop) {
                     panic!(
                         "handlers: required event field {}.{} has no same-named field on command {}",
