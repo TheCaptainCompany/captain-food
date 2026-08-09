@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-08-09 (night)** · **15 open decisions** — §22 carries 8 (the five sweep rows, the Solida rebrand waiting on trademark, the avelo37 threshold, and the geocoding row) and §23 carries 7 (the step-DSL branching set D1–D7, added 2026-08-09). **The count was stale at "7" for a day** while §23 doubled the queue — caught by two independent lens audits the same night. A register that miscounts its own depth is a broken throttle, so: whoever adds a row updates this number in the same commit, and the honest response to a growing count is to ANSWER or DELETE rows, never to append quietly. **The ten-decision brief is fully answered** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) + [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the last three closed 2026-08-08 — tips via the customer's voluntary-contribution funding model (HelloAsso « pari », cascade-pricing fallback, public cagnotte), erasure two-path confirmed, admin explicit act-as confirmed (supersedes ADR-0037). **The customer answered the ten-decision brief 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): seven decided — payout posture and external orders and promo funding as recommended; capture timing per service type (delivered/picked-up/in-advance-at-table); acceptance timeout resolved by release-not-refund; entity path association→SASU→SCIC-federation; radical transparency. The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
+Last reconciled: **2026-08-09 (night)** · **21 open decisions** — §22 carries 8 (the five sweep rows, the Solida rebrand waiting on trademark, the avelo37 threshold, and the geocoding row), §23 carries 7 (the step-DSL branching set D1–D7, added 2026-08-09) and §24 carries 6 (the public-demo set D1–D6, added 2026-08-09; three of them customer-owned). **The count was stale at "7" for a day** while §23 doubled the queue — caught by two independent lens audits the same night. A register that miscounts its own depth is a broken throttle, so: whoever adds a row updates this number in the same commit, and the honest response to a growing count is to ANSWER or DELETE rows, never to append quietly. **The ten-decision brief is fully answered** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) + [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the last three closed 2026-08-08 — tips via the customer's voluntary-contribution funding model (HelloAsso « pari », cascade-pricing fallback, public cagnotte), erasure two-path confirmed, admin explicit act-as confirmed (supersedes ADR-0037). **The customer answered the ten-decision brief 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): seven decided — payout posture and external orders and promo funding as recommended; capture timing per service type (delivered/picked-up/in-advance-at-table); acceptance timeout resolved by release-not-refund; entity path association→SASU→SCIC-federation; radical transparency. The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
 
 > **Customer decisions: see [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) (ten decisions).**
 > Everything only the product owner can decide — the five-decision money posture, account-level
@@ -659,6 +659,32 @@ All seven are OPEN and gate slice 1.
 Related finding, deliberately NOT folded in: `call:` has no `with:`, so the Stripe refund **amount**
 is entirely hook-built and stays invisible to the validator even after all six slices — its own
 proposal, named in §2.1/§9 of PROP-20260809-003000.
+
+---
+
+## 24. The public demo — PROP-20260809-021351
+
+Six decisions from [PROP-20260809-021351 "The public demo: one continuous walk, on production's own
+pipeline"](PROP-20260809-021351-public-demo-one-continuous-walk.md) (tracking
+[#410 "Epic: public try-before-committing demo — seeded test restaurant/customer/order/rider on the marketing site"](https://github.com/TheCaptainCompany/captain-food/issues/410)),
+from the four-lens mob briefing of 2026-08-09 (farley lead · ux-designer · beck · dba).
+**D1, D3 and D4 are the customer's** — D1 would reverse a recorded decision or spend console time,
+D3 and D4 sit on the money path and the abuse surface. D2, D5 and D6 are team-decidable and are
+recorded as recommendations pending the veto window.
+
+| # | Decision | Recommendation | Owner |
+|---|---|---|---|
+| **D1** | Where the demo runs | **MKS demo namespace, same digest and manifests, `staging` profile** — no spec diff, and the demo namespace becomes the canary every production digest passes through. Cost: ~75–100 customer console-minutes across ≥2 sittings, no URL this week. Resuming Render buys a same-day URL by reversing ADR-20260731-061609 and applying 15 pending migrations to a database nobody intends to keep | **customer** |
+| **D2** | Demo data isolation | TEST-mode data in the production database + `mode` carried onto the `Restaurant`/`OrderTracking` projection tables + a validator rule that any projection table fed by a mode-carrying event must carry the column. Today `mode` is enforced in ONE runtime location and NO read model carries it | team |
+| **D3** | How a stranger is identified | `startDemo` mints a pre-identified demo session — real SMS OTP costs money, exposes an unauthenticated SMS-send surface on a public page, and dead-ends at 503 if the hook is unconfigured | **customer** |
+| **D4** | Stripe mode | Demo namespace carries `sk_test_`, production carries the live key, same image. **One deployment is one Stripe mode today**: a live key means the demo charges strangers' cards; a test key means production cannot take money | **customer** |
+| **D5** | Demo world lifetime | Fresh streams per visitor, never a reset — the Order projector is ONE checkpoint over `Order-`/`Payment-`/`DeliveryJob-`, so "replay the demo" resets every real customer's tracking screen. Reclamation is retention, and the `$maxAge` sweeper **does not exist**: demo data is unbounded (~375 MB/month at 500 runs/day) | team |
+| **D6** | Who drives the counterparties | The visitor wears all three hats in one walk, with labelled auto-accept as fallback | team |
+
+**Not a decision — a live defect the briefing surfaced**: the customer path is inert on `main`
+(checkout and tracking never hydrate; the tracking SSR renders the not-found hero for every order),
+and **nobody is told about a paid order** — no notification port exists. Neither is blocked on any
+row above; both are in §6 of the proposal as zero-console work.
 
 ---
 

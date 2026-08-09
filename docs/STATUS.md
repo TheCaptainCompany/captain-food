@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🔴 **2026-08-09 (night) — THE CUSTOMER PATH IS INERT ON `main`, and a paid order tells nobody.**
+> Four lenses briefed in parallel on [#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410)
+> (farley lead · ux-designer · beck · dba) converged independently on the same root cause, recorded
+> in [PROP-20260809-021351](proposals/PROP-20260809-021351-public-demo-one-continuous-walk.md) §2:
+> `renderer.rs::hydrate()` **returns early for every `sdui: false` screen** and the crate's only
+> `mount_to_body` sits after that guard, so **checkout mounts no Stripe element and its place-order
+> button dispatches nothing** — and its SSR shell is data-less (`router.rs:236-241` hardcodes
+> `restaurant_name: ""`, `cart_line_count: 0`, `formatted_total: ""`). The same guard makes
+> `/orders/:id/confirmation` render the **not-found hero for every order, forever**
+> (`TrackingState::new(order_id)`, `order: None`). Separately, **no notification port exists
+> anywhere** (`crates/application/src/ports.rs`) and `orderStatusChanged` is keyed per `orderId`, so
+> the kitchen queue only learns about a paid order on page reload — the domain lens's named worst
+> failure mode, live. **Why green gates missed all of it**: `prod-smoke.sh` never opens a browser,
+> and `every_sdui_screen_of_every_surface_renders()` deliberately SKIPS `!screen.sdui` screens, so
+> checkout and tracking are excluded from the one test that would have caught it — 22 web tests pass
+> in 10 ms over the entire broken half. beck: *"not one test in this repo would go red if a stranger
+> could not order."* #410 is therefore **not blocked on hosting**; the zero-console work is
+> PROP-20260809-021351 §6, and the customer owns D1/D3/D4 in
+> [DECISIONS.md §24](proposals/DECISIONS.md).
+>
 > ✅ **2026-08-09 — [#335 "Decide whether to consolidate integration test binaries (~3.5G of link products)"](https://github.com/TheCaptainCompany/captain-food/issues/335): `crates/infrastructure`'s 27 integration binaries consolidated into ONE (`tests/main/`, 1.4G → 70M of link products) behind a compiler-enforced `common::TestDb` witness (binary-wide lock + ONE migration-derived `reset_schema`), per ADR-20260808-224500 item 5 — which immediately surfaced and fixed a real spec↔migration drift: `catalog.slug` was still NOT NULL in production migrations while the generated schema and the projector have it nullable (`migrations/20260809000000_catalog_slug_nullable.sql`).**
 
 > ✅ **2026-08-09 — #348 CUSTOMER-ANXIETY QUICK WINS APPLIED

@@ -786,3 +786,28 @@ lenses, and close the loop in the same session. Reference run: BRIEF-20260808-cu
 → ADR-20260808-195315 + ADR-20260808-203443. Pair it with per-chapter GitHub decision-thread
 issues only if the customer wants an async back-and-forth channel too (issue comments do NOT wake
 a session — that channel needs a Routine or an explicit "check the threads").
+
+## 15. Read what a gate EXCLUDES before treating it as evidence
+
+Third in the family with §7 and §14, and the most expensive so far. For weeks `main` was green and
+read as "the product works". The four-lens briefing of
+[#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410)
+found the entire customer-visible half inert — checkout mounts no Stripe element, its place-order
+button dispatches nothing, and the tracking route renders the not-found hero for every order — while
+**22 web tests passed in 10 ms**.
+
+Neither gate was broken. Both were *narrower than the claim they were read as supporting*, and in
+each case the narrowing is one line you have to go and look at:
+
+- `every_sdui_screen_of_every_surface_renders()` opens with a skip for `!screen.sdui` — i.e. it
+  excludes exactly the two hand-written screens. The suite's name says "every screen".
+- `tools/smoke/prod-smoke.sh` never opens a browser, so no page-level defect is reachable by it at
+  all — and it orders `COLLECTION`, so the only thing that runs against production **never
+  dispatches a delivery**: every rider hop is unexercised, daily, on a green badge.
+
+The operational rule: **before citing a gate as evidence for a claim, read its skip conditions, its
+fixture shape and its entry point** — a test that builds its own populated state instead of calling
+production's call site proves the renderer, not the page. Cheap tell: unit tests that assert a state
+production never constructs (here `payment_failed: true`, hardcoded `false` at the only real call
+site). And when a gate's scope is narrower than its name, **rename it or widen it in the same
+change** — the name is what the next reader trusts.
