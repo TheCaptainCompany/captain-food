@@ -198,21 +198,16 @@ impl SupabaseIdentityService {
         }
 
         let metadata = user.get("app_metadata").cloned().unwrap_or_else(|| json!({}));
-        match metadata.get("captain_customer_id").and_then(Value::as_str) {
-            Some(existing) if existing != target => {
+        match stamp_decision(&metadata, &target) {
+            StampDecision::Conflict { existing } => {
                 return Err(StampFailure::ClaimConflict {
                     auth_ref: input.auth_ref.0.clone(),
-                    existing: existing.to_string(),
+                    existing,
                     target,
                 });
             }
-            // Both claims already in place → idempotent no-op (a redelivered VerifyPhone must
-            // not re-write). Same id but role missing = a half-stamped user: fall through and
-            // PUT both keys.
-            Some(_same) if metadata.get("captain_role").and_then(Value::as_str).is_some() => {
-                return Ok(());
-            }
-            _ => {}
+            StampDecision::Noop => return Ok(()),
+            StampDecision::Put => {}
         }
 
         let resp = self
@@ -338,6 +333,35 @@ impl StampFailure {
 }
 
 /// The admin PUT body — PURE so a unit test pins the shallow-merge rule: GoTrue merges
+/// What [`SupabaseIdentityService::stamp_inner`] does after reading the auth user's current
+/// `app_metadata` — the PURE redelivery/conflict decision, unit-tested with constructed metadata.
+#[derive(Debug, PartialEq, Eq)]
+enum StampDecision {
+    /// Both claims already in place and correct → idempotent no-op (a redelivered VerifyPhone
+    /// must not re-write).
+    Noop,
+    /// Write both claims via [`stamp_put_body`] — covers a fresh user, a half-stamped user
+    /// (id present, role missing), and a present-but-WRONG role (the PUT repairs it: the body
+    /// hardcodes CUSTOMER and the id is already equal, so the write is safe).
+    Put,
+    /// A DIFFERENT customer id is already stamped → refuse; never an overwrite.
+    Conflict { existing: String },
+}
+
+/// The idempotence/conflict decision on the CURRENT provider metadata, before any write.
+fn stamp_decision(metadata: &Value, target: &str) -> StampDecision {
+    match metadata.get("captain_customer_id").and_then(Value::as_str) {
+        Some(existing) if existing != target => StampDecision::Conflict { existing: existing.to_string() },
+        // No-op ONLY when the role is exactly CUSTOMER — a present-but-wrong role (checkpoint-b
+        // hole) must fall through to the repairing PUT, or the wrong-role token gets rotated
+        // and parked.
+        Some(_same) if metadata.get("captain_role").and_then(Value::as_str) == Some("CUSTOMER") => {
+            StampDecision::Noop
+        }
+        _ => StampDecision::Put,
+    }
+}
+
 /// `app_metadata` SHALLOWLY (top-level keys replace, siblings survive), so BOTH claims travel in
 /// EVERY write — a single-key write would leave a token whose two claims came from different
 /// writes, and on a fresh user would mint a customer id with no role. `captain_role` is HARDCODED
@@ -527,6 +551,36 @@ mod tests {
             2,
             "exactly the two claims -- GoTrue merges shallowly, so a missing sibling here means \
              a claim silently dropped on some provider states"
+        );
+    }
+
+    /// The redelivery/conflict decision (#437, checkpoint-b hole): the no-op arm must demand the
+    /// role be EXACTLY "CUSTOMER" — same id + any other role is a wrong-role stamp that the PUT
+    /// must repair (body hardcodes CUSTOMER, id already equal, safe), NEVER a no-op that lets a
+    /// wrong-role token get rotated and parked.
+    #[test]
+    fn stamp_decision_noop_only_on_exact_customer_role() {
+        let target = "00000000-0000-0000-0000-000000000437";
+        // Fully and correctly stamped -> idempotent no-op.
+        let stamped = json!({ "captain_customer_id": target, "captain_role": "CUSTOMER" });
+        assert_eq!(stamp_decision(&stamped, target), StampDecision::Noop);
+        // Same id but WRONG role -> the PUT is issued (repair), not a no-op.
+        let wrong_role = json!({ "captain_customer_id": target, "captain_role": "RESTAURANT" });
+        assert_eq!(
+            stamp_decision(&wrong_role, target),
+            StampDecision::Put,
+            "a present-but-wrong captain_role must fall through to the repairing PUT"
+        );
+        // Half-stamped (id, no role) -> PUT both keys.
+        let half = json!({ "captain_customer_id": target });
+        assert_eq!(stamp_decision(&half, target), StampDecision::Put);
+        // Fresh user -> PUT.
+        assert_eq!(stamp_decision(&json!({}), target), StampDecision::Put);
+        // Different id -> conflict, never an overwrite (role irrelevant).
+        let other = json!({ "captain_customer_id": "11111111-1111-1111-1111-111111111111", "captain_role": "CUSTOMER" });
+        assert_eq!(
+            stamp_decision(&other, target),
+            StampDecision::Conflict { existing: "11111111-1111-1111-1111-111111111111".into() }
         );
     }
 
