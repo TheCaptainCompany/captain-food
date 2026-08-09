@@ -59,7 +59,12 @@
 > today, nothing that works stopped working); ACL-index projection lag = a user-visible denial
 > (dedicated `scope_membership_lag_positions` gauge, worker-emitted); the smoke customer has no
 > domain Customer (verifyPhone needs real SMS), so its own order read is refused BY DESIGN and the
-> negative assertion rides exactly that. Remaining tenant read surfaces + LIMIT/pagination +
+> negative assertion rides exactly that. POST-MERGE CORRECTIONS (review comments that landed as
+> auto-merge fired; ADR addendum + [#432](https://github.com/TheCaptainCompany/captain-food/issues/432)):
+> pre-#144 `Order-*` streams are FROZEN, not "Admin-only" — the write-side loader hard-errors on
+> them, so no command can touch them (fine for smoke data; a named landmine for any future payload
+> narrowing on a live log); and the smoke's outage-honesty check is incomplete (`gql()` swallows
+> transport status — `{}` passes both jq probes), fix tracked on #432. Remaining tenant read surfaces + LIMIT/pagination +
 > the ownership-declared validator rule = one follow-up issue.
 
 > 🚧 **2026-08-09 (night) — G5/G6 UNBLOCKED (not closed), G7 CLOSED: the customer path is

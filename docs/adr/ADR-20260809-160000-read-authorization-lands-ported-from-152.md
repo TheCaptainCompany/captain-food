@@ -28,10 +28,20 @@ this change is a semantic port, mobbed per ADR-20260809-013142 (ten lenses brief
    the domain id); CUSTOMER keeps the existing `auth_ref` bridge. No new identity mechanism exists.
 3. **`OrderPlaced.customerId` (and the PaymentIntentCreated/CheckoutSnapshot/PlaceOrder chain)
    narrows nullable → REQUIRED.** A stored-contract narrowing, legal **solely because the production
-   log is empty** at this change (throwaway smoke fixtures only; pre-#144 smoke orders deserialize
-   as log-skipped rows and simply hold no grants — Admin-only, by design). This is a recorded
-   exception to additive-only evolution, not a precedent. The "guest order" class is unrepresentable
-   from here on; `OrderDeleted.customerId` stays nullable on the wire for logs that predate this.
+   log carries only throwaway smoke fixtures** at this change. Post-merge correction (review
+   finding on #430): the original wording here said pre-#144 orders stay "Admin-only" — that is
+   only the PROJECTION side (the worker log-skips the undeserializable event, so no grants fold).
+   The WRITE side has no such tolerance: `event_store.rs::load_inner` hard-errors on a pre-#144
+   `OrderPlaced`, so any command against such a stream (accept, refund, cancel, tip) is rejected —
+   **pre-#144 `Order-*` streams are FROZEN, unreadable through scoped reads and un-actionable**.
+   Acceptable solely for smoke data nobody acts on retroactively; the deploy-day check is
+   `SELECT count(*) FROM domain_events WHERE stream_name LIKE 'Order-%' AND occurred_at < '2026-08-09T14:00Z'`
+   via `claude_ro` — a non-zero count of NON-TERMINAL such streams would need clearing or a
+   deserialization fallback BEFORE this narrowing class is ever repeated. This is a recorded
+   exception to additive-only evolution, not a precedent — on a live event store the same change
+   would be a landmine, which is exactly why it is named here. The "guest order" class is
+   unrepresentable from here on; `OrderDeleted.customerId` stays nullable on the wire for logs
+   that predate this.
 4. **Enforce-immediately stands, with no toggle** — reaffirmed on today's facts: the CURRENT
    behaviour is the breach (`orders` dumps the whole tracking table to any authenticated customer),
    nothing is hosted for real customers (D1: nothing hosted), backfill is free (new checkpoint
@@ -107,3 +117,11 @@ Also hardened from review notes: the prod-smoke negative assertion now fails on 
 response instead of reading empty `.data` as proof (outage-honesty), and the known limits worth
 carrying travelled to #432 (bridged-non-member proof exists only in the DB suite; `bridge_unresolved`
 conflates DB outage with missing projection row; WS scope frozen at connection init).
+
+**Post-merge findings** (two review comments landed as auto-merge fired; both verified real,
+tracked on #432, neither reopens this PR): (a) the write-side loader intolerance above — the §3
+framing was corrected in this file; and (b) the smoke `l4_negative` outage-honesty fix is
+INCOMPLETE: `gql()` discards the HTTP status, so a transport failure collapses to `{}` which
+passes both jq checks (`has("errors")` → false, `.data.order` → null via jq null-chaining). The
+assertion must also require `has("data")` (or read `gql_raw`'s status line) — a `tools/**` change,
+so it rides the #432 claim flow rather than a docs push.
