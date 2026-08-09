@@ -645,6 +645,7 @@ pub fn hydrate() {
         crate::handwritten::mount::mount(
             hand_written,
             matched,
+            host,
             origin,
             surface.role(),
             session,

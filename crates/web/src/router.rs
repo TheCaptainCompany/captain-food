@@ -283,6 +283,11 @@ mod tests {
         // Unknown hosts / localhost: anonymous-safe marketplace default.
         assert_eq!(surface_for_host("localhost:8080"), Surface::CaptainFrontoffice);
         assert_eq!(surface_for_host("127.0.0.1"), Surface::CaptainFrontoffice);
+        // `slug_of` takes a HOST, never an ORIGIN: it splits on `:` to strip a port, so an origin
+        // reduces to "https" and the storefront label silently vanishes. The hydrate mount got this
+        // wrong once (#420, caught in self-review, never shipped) — pinned so it cannot come back.
+        assert_eq!(Surface::slug_of("https://chez-test.captain.food"), None);
+        assert_eq!(Surface::slug_of("chez-test.captain.food:8080"), Some("chez-test"));
     }
 
     #[test]

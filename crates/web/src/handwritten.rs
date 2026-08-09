@@ -201,9 +201,15 @@ pub mod mount {
 
     /// Mount the hand-written screen for a matched route. Exhaustive over the enum — a new variant
     /// fails to compile until it says what it does in a browser.
+    /// `host` is the request Host (`chez-test.captain.food`) and `origin` the scheme-qualified
+    /// origin (`https://chez-test.captain.food`) — two different strings that must not be swapped:
+    /// `Surface::slug_of` splits on `:` to strip a port, so handing it an origin makes it read
+    /// `https` and the storefront label silently disappears.
+    #[allow(clippy::too_many_arguments)]
     pub fn mount(
         hand_written: HandWrittenScreen,
         matched: RouteMatch,
+        host: String,
         origin: String,
         role: Role,
         session: SessionId,
@@ -215,7 +221,7 @@ pub mod mount {
         // — the failure mode CLAUDE.md calls worse than no control at all.
         crate::interact::install(&origin, role, session);
         let transport = HttpTransport::new(&origin, role, session);
-        let tenant = crate::router::Surface::slug_of(&origin).map(str::to_string);
+        let tenant = crate::router::Surface::slug_of(&host).map(str::to_string);
 
         wasm_bindgen_futures::spawn_local(async move {
             let ctx = resolve_requirements(&transport, &matched, &locale).await;
