@@ -22,58 +22,6 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use infrastructure::{PgCustomerRepository, PgEventStore, ProjectionWorker};
-use sqlx::PgPool;
-
-/// Fresh copies of the three tables this slice touches (mirrors prospection_projection.rs; `customer`
-/// matches the domain-schema migration).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS domain_events, customer, projection_checkpoint CASCADE;
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE TABLE customer (
-          customer_id UUID PRIMARY KEY,
-          phone TEXT NOT NULL UNIQUE,
-          auth_ref TEXT,
-          display_name TEXT,
-          email TEXT,
-          email_verified BOOLEAN NOT NULL,
-          locale TEXT,
-          timezone TEXT,
-          ratings JSONB NOT NULL,
-          favorite_restaurant_ids JSONB NOT NULL,
-          preferences JSONB,
-          addresses JSONB NOT NULL,
-          payment_method_id TEXT,
-          created_at TIMESTAMPTZ NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL
-        );
-        CREATE TABLE projection_checkpoint (
-          projector  TEXT        PRIMARY KEY,
-          position   BIGINT      NOT NULL DEFAULT 0,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
 
 /// Fake wrapped auth provider (Supabase ACL boundary, ADR-0015): every OTP verifies against a fixed
 /// provider user reference — the register/identify leg under test starts AFTER the provider check.
@@ -142,16 +90,8 @@ fn verify_phone_cmd(customer_id: uuid::Uuid) -> VerifyPhone {
 
 #[tokio::test]
 async fn registered_customer_is_folded_and_served_by_the_read_repository() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP registered_customer_is_folded_and_served_by_the_read_repository: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("customer_projection").await else { return };
+    let pool = db.pool();
 
     let store = PgEventStore::new(pool.clone());
     let repo = PgCustomerRepository::new(pool.clone());

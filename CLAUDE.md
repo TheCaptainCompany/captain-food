@@ -218,6 +218,18 @@ trust the numbers above if they look off.
   gate-then-stabilize — gating decides WHEN a finished thing takes over, never licenses a shim.
   Where staging is externally forced, the intermediate ships only with the final step already
   designed and recorded.
+- **Mob programming — every agent is in the dev** (product-owner directive, 2026-08-09, verbatim in
+  [ADR-20260809-013142](docs/adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)):
+  *"everyone is involved in the dev so … everyone will be able to detect issues during the dev."*
+  A dispatch is a MOB: (1) **mob briefing** — the brief goes to the WHOLE roster in parallel before
+  any code, each lens naming what it will catch and what the executor must know ("nothing in my
+  lens" is a complete answer and costs one line); (2) **mob checkpoints** — the executor stops at
+  declared phase boundaries and the mob reads the actual diff, any lens may stop the work;
+  (3) the independent full-diff review stays, now as the THIRD look. Coordinator-chosen lens
+  subsets are over — the roster is invited by default and a lens excuses itself. Earned by
+  [#424](https://github.com/TheCaptainCompany/captain-food/issues/424), where a post-hoc UX pass
+  found the built checkout state **could not render at all** — a finding that would have changed
+  the work, for free, if the lens had been in the briefing.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.

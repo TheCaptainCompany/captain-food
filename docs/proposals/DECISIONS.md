@@ -637,6 +637,31 @@ here instead of being improvised at realization.
 
 ---
 
+## 23. Process-manager step-DSL conditional branching — PROP-20260809-003000
+
+Seven decisions from [PROP-20260809-003000 "Conditional branching in the process-manager step DSL:
+the saga branch becomes spec, not wrapper"](PROP-20260809-003000-process-manager-step-dsl-conditional-branching.md)
+(tracking [#426 "Conditional branching in the process-manager step DSL: the saga branch becomes spec, not wrapper"](https://github.com/TheCaptainCompany/captain-food/issues/426)),
+the design the customer ordered in place of the declared `sends:` (card 10,
+[ADR-20260809-002500](../adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md)).
+All seven are OPEN and gate slice 1.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| **D1** | The branching construct's shape | `match:` on an enum discriminant (over `when:` arms or per-step `when:`) — the only shape where "is every case handled?" is machine-answered, and answered TWICE (validator, then `rustc` on the arm-complete emitted match) |
+| **D2** | Is a `default:`/catch-all allowed? | **No** — every enum member gets an arm; an intentionally empty arm carries a `note:`. A catch-all is how a new member silently does nothing |
+| **D3** | Where the REFUND arms live | Move them to `RefundProcess`, which receives `ReclamationResolved` directly — retires the cross-saga call on a **synthesized, never-recorded** `RefundRequested` |
+| **D4** | How a computed discriminant is declared | A typed `from_resolver` returning a DECLARED enum — never a raw value an effect consumes |
+| **D5** | Nullable discriminants | `present:`/`absent:` conditions (also deletes a generated panic path) |
+| **D6** | Sharing steps between arms | Accept duplication in v1 — no aliasing mechanism until a second real case asks for one |
+| **D7** | Deterministic derived ids | A `derived_id:` value form — **slice 1 cannot retire the wrapper without it** |
+
+Related finding, deliberately NOT folded in: `call:` has no `with:`, so the Stripe refund **amount**
+is entirely hook-built and stays invisible to the validator even after all six slices — its own
+proposal, named in §2.1/§9 of PROP-20260809-003000.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

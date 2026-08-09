@@ -28,46 +28,7 @@ use infrastructure::persistence::mailbox_wake::{
     spawn_mailbox_listener, spawn_mailbox_listener_with, MailboxPush, MAILBOX_CHANNEL,
 };
 use sqlx::postgres::PgListener;
-use sqlx::{PgPool, Postgres, Row, Transaction};
-
-/// Serialize the suite: every test resets the same tables.
-static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-fn database_url() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP mailbox_wake: DATABASE_URL not set");
-            None
-        }
-    }
-}
-
-async fn setup(pool: &PgPool) {
-    sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions CASCADE;\n\
-         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-    )
-    .execute(pool)
-    .await
-    .expect("drop");
-    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox attempts migration");
-    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
-        .execute(pool)
-        .await
-        .expect("apply the mailbox backoff migration");
-}
+use sqlx::{Postgres, Row, Transaction};
 
 fn cart_command(cart_id: uuid::Uuid) -> AddCartLine {
     AddCartLine {
@@ -99,10 +60,9 @@ fn envelope(message_id: uuid::Uuid) -> Envelope {
 /// 1. The real door's enqueue notifies at COMMIT, payload = the actor type.
 #[tokio::test]
 async fn an_enqueue_through_the_door_notifies_with_the_actor_type() {
-    let Some(url) = database_url() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
 
     let mut listener = PgListener::connect(&url).await.expect("listener");
     listener.listen(MAILBOX_CHANNEL).await.expect("listen");
@@ -124,10 +84,9 @@ async fn an_enqueue_through_the_door_notifies_with_the_actor_type() {
 /// one transaction coalesce to a single wake while distinct types stay distinct wakes.
 #[tokio::test]
 async fn rollback_notifies_nobody_and_one_transaction_coalesces_per_type() {
-    let Some(url) = database_url() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
 
     let mut listener = PgListener::connect(&url).await.expect("listener");
     listener.listen(MAILBOX_CHANNEL).await.expect("listen");
@@ -192,10 +151,9 @@ impl MessageHandler for AckHandler {
 /// the worker delivers — while the heartbeat (300 s) is far too slow to explain it.
 #[tokio::test]
 async fn a_foreign_process_enqueue_is_delivered_by_push_not_the_heartbeat() {
-    let Some(url) = database_url() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
 
     // Consuming side: nudges registry + listener + one Cart worker parked on a glacial heartbeat.
     let nudges = {
@@ -266,10 +224,9 @@ async fn a_foreign_process_enqueue_is_delivered_by_push_not_the_heartbeat() {
 /// a silently-deaf LISTEN (#314 review MAJOR-1) must not itself take a healthy listener down.
 #[tokio::test]
 async fn the_canary_holds_a_healthy_listener_live() {
-    let Some(url) = database_url() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
 
     let nudges = Arc::new(MailboxNudges::default());
     let push = MailboxPush::new();
@@ -297,10 +254,9 @@ async fn the_canary_holds_a_healthy_listener_live() {
 /// a row enqueued DURING the gap — the no-replay window is closed by the catch-up, not luck.
 #[tokio::test]
 async fn a_killed_listener_recovers_and_catches_up() {
-    let Some(url) = database_url() else { return };
-    let _guard = DB_LOCK.lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    setup(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("mailbox_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
 
     let nudges = {
         let mut n = MailboxNudges::default();

@@ -39,6 +39,23 @@ dispatch end-to-end, no GitHub tools) · `reviewer` (independent full-diff pass)
 `farley` (production-path coach). The coordinator (you) does ALL GitHub ceremony; every
 executor dispatch pastes the exact issue titles it needs (executors cannot look them up).
 
+### Every dispatch is a MOB (product-owner directive, 2026-08-09, ADR-20260809-013142)
+
+The roster is **invited by default** — the coordinator no longer picks a subset (that discretion is
+where a PM re-emerges, ADR-20260808-144738 D4). Three moments, and the FIRST is the load-bearing one:
+
+1. **Mob briefing — before any code.** Send the dispatch brief to the whole roster in parallel; each
+   lens answers: *what will you catch in this work, and what must the executor know before it
+   starts?* **"Nothing in my lens" is a complete answer and costs one line.** Fold every constraint
+   returned into the executor's brief. This is where a "that state can never render" finding is FREE
+   — post-hoc it is rework (#424).
+2. **Mob checkpoints — during.** The executor declares its phase boundaries in its own brief and
+   stops at them; the mob reads the ACTUAL diff so far. Any lens may stop the work at a checkpoint.
+3. **Mob review — after.** The independent full-diff pass stays, now as the third look.
+
+Silence must stay cheap or the mob becomes ceremony. If the cost is unsustainable, the answer is
+FEWER, BIGGER dispatches — never a quietly smaller mob.
+
 ## Rules that bind the run (repeated because breaking them is expensive)
 
 - **specs/** is untouchable** in autonomous mode — prepare spec diffs as proposal documents;

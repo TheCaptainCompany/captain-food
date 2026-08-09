@@ -1,7 +1,9 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-08. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-08-09 — [#335 "Decide whether to consolidate integration test binaries (~3.5G of link products)"](https://github.com/TheCaptainCompany/captain-food/issues/335): `crates/infrastructure`'s 27 integration binaries consolidated into ONE (`tests/main/`, 1.4G → 70M of link products) behind a compiler-enforced `common::TestDb` witness (binary-wide lock + ONE migration-derived `reset_schema`), per ADR-20260808-224500 item 5 — which immediately surfaced and fixed a real spec↔migration drift: `catalog.slug` was still NOT NULL in production migrations while the generated schema and the projector have it nullable (`migrations/20260809000000_catalog_slug_nullable.sql`).**
 
 > ✅ **2026-08-09 — #348 CUSTOMER-ANXIETY QUICK WINS APPLIED
 > ([#424 "Customer-anxiety quick wins: DeliveryPickedUp reaches order tracking, checkout shows a FAILED state (approved spec diff, option b)"](https://github.com/TheCaptainCompany/captain-food/issues/424)),

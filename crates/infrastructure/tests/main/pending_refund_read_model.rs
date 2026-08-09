@@ -15,61 +15,6 @@ use domain::generated::scalars::{RefundId, RefundStatus, RestaurantId};
 use infrastructure::PgRefundQueueRepository;
 use sqlx::PgPool;
 
-/// Fresh `domain_events` + the `View_PendingRefunds` fold view over it (mirrors
-/// migrations/20260720002210, whose view section is the generated `specs/generated/views.generated.sql`).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS domain_events CASCADE;
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE OR REPLACE VIEW View_PendingRefunds AS
-        SELECT
-          (c.payload->>'orderId')::uuid AS order_id,
-          (c.payload->>'restaurantId')::uuid AS restaurant_id,
-          (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 'REQUESTED' WHEN 'RefundApproved' THEN 'APPROVED' WHEN 'RefundDenied' THEN 'DENIED' WHEN 'PaymentRefunded' THEN 'REFUNDED' END FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')
-             ORDER BY e.position DESC LIMIT 1) AS status,
-          (c.payload->'amount'->>'amountCents')::bigint AS amount_cents,
-          c.payload->'amount'->>'currency' AS currency,
-          (SELECT (e.payload->'amount'->>'amountCents')::bigint FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved') AND e.payload ? 'amount'
-             ORDER BY e.position DESC LIMIT 1) AS approved_amount_cents,
-          (SELECT e.payload->>'reason' FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied') AND e.payload ? 'reason'
-             ORDER BY e.position DESC LIMIT 1) AS reason,
-          (SELECT e.payload->>'refundId' FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('PaymentRefunded') AND e.payload ? 'refundId'
-             ORDER BY e.position DESC LIMIT 1) AS refund_id,
-          c.occurred_at AS requested_at,
-          (SELECT max(e.occurred_at) FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved', 'RefundDenied')) AS decided_at,
-          c.occurred_at AS created_at,
-          (SELECT max(e.occurred_at) FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')) AS updated_at
-        FROM domain_events c
-        WHERE c.event_type = 'RefundOpened';
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
-
 async fn append_event(
     pool: &PgPool,
     stream_name: &str,
@@ -102,16 +47,8 @@ fn eur(cents: i64) -> serde_json::Value {
 
 #[tokio::test]
 async fn refund_lifecycle_events_serve_the_refund_queue() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP refund_lifecycle_events_serve_the_refund_queue: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("pending_refund_read_model").await else { return };
+    let pool = db.pool();
 
     let (r1, r2) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
     let (o1, o2, o3) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());

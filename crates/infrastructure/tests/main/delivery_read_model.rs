@@ -12,76 +12,6 @@ use domain::generated::scalars::{DeliveryProvider, DeliveryStatus, OrderId, Rest
 use infrastructure::PgDeliveryRepository;
 use sqlx::PgPool;
 
-/// Fresh `domain_events` + the `View_DeliveryJob` fold view over it (mirrors
-/// migrations/20260717120000, whose view section is the generated `specs/generated/views.generated.sql`).
-async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"
-        DROP TABLE IF EXISTS domain_events CASCADE;
-        CREATE TABLE domain_events (
-          position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          id UUID NOT NULL UNIQUE,
-          stream_name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          user_id UUID NOT NULL,
-          user_type TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          metadata JSONB NULL,
-          occurred_at TIMESTAMPTZ NOT NULL,
-          expired_at TIMESTAMPTZ NULL,
-          UNIQUE (stream_name, version)
-        );
-        CREATE OR REPLACE VIEW View_DeliveryJob AS
-        SELECT
-          (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
-          (c.payload->>'orderId')::uuid AS order_id,
-          (c.payload->>'restaurantId')::uuid AS restaurant_id,
-          (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' END FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled')
-             ORDER BY e.position DESC LIMIT 1) AS status,
-          (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' END FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
-             ORDER BY e.position DESC LIMIT 1) AS provider,
-          (SELECT (e.payload->>'riderId')::uuid FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider') AND e.payload ? 'riderId'
-             ORDER BY e.position DESC LIMIT 1) AS rider_id,
-          (SELECT e.payload->'courier' FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'courier'
-             ORDER BY e.position DESC LIMIT 1) AS courier,
-          (SELECT e.payload->>'partnerRef' FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'partnerRef'
-             ORDER BY e.position DESC LIMIT 1) AS partner_ref,
-          c.payload->'pickup' AS pickup_address,
-          c.payload->'dropoff' AS dropoff_address,
-          (SELECT (e.payload->>'estimatedPickupAt')::timestamptz FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'estimatedPickupAt'
-             ORDER BY e.position DESC LIMIT 1) AS estimated_pickup_at,
-          (SELECT (e.payload->>'estimatedDropoffAt')::timestamptz FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'estimatedDropoffAt'
-             ORDER BY e.position DESC LIMIT 1) AS estimated_dropoff_at,
-          c.occurred_at AS requested_at,
-          (SELECT max(e.occurred_at) FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPickedUp')) AS picked_up_at,
-          (SELECT max(e.occurred_at) FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND (e.event_type = 'DeliveryCompleted' OR (e.event_type = 'DeliveryStatusUpdated' AND e.payload->>'status' = 'DELIVERED'))) AS delivered_at,
-          (SELECT e.payload->>'reason' FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRejectedByPartner') AND e.payload ? 'reason'
-             ORDER BY e.position DESC LIMIT 1) AS last_partner_rejection,
-          c.occurred_at AS created_at,
-          (SELECT max(e.occurred_at) FROM domain_events e
-             WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled')) AS updated_at
-        FROM domain_events c
-        WHERE c.event_type = 'DeliveryRequested';
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("reset schema");
-}
-
 async fn append_event(
     pool: &PgPool,
     stream_name: &str,
@@ -114,16 +44,8 @@ fn address(line1: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn delivery_lifecycle_events_serve_the_three_read_queries() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP delivery_lifecycle_events_serve_the_three_read_queries: DATABASE_URL not set");
-        return;
-    };
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
-    reset_schema(&pool).await;
+    let Some(db) = crate::common::TestDb::acquire("delivery_read_model").await else { return };
+    let pool = db.pool();
 
     let (r1, r2) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
     let (o1, o2, o3) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());

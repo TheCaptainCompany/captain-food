@@ -16,13 +16,6 @@
 use std::time::Duration;
 
 use infrastructure::{spawn_event_listener, EventWake};
-use sqlx::PgPool;
-
-/// These tests share one DATABASE_URL and notify on the same channel — serialize them.
-static DB_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-fn db_lock() -> &'static tokio::sync::Mutex<()> {
-    DB_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
 
 /// How long a wake is allowed to take before we call it lost. Generous — the assertion is about
 /// delivery, not latency.
@@ -45,12 +38,9 @@ async fn wake_listening(url: &str) -> EventWake {
 
 #[tokio::test]
 async fn a_committed_notify_wakes_a_parked_drain_loop() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP a_committed_notify_wakes_a_parked_drain_loop: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    let Some(db) = crate::common::TestDb::acquire("event_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
     let wake = wake_listening(&url).await;
 
     // The listener signals once on connect (it may have missed notifications while down); consume
@@ -74,12 +64,9 @@ async fn a_committed_notify_wakes_a_parked_drain_loop() {
 
 #[tokio::test]
 async fn a_rolled_back_notify_wakes_nobody() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP a_rolled_back_notify_wakes_nobody: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    let Some(db) = crate::common::TestDb::acquire("event_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
     let wake = wake_listening(&url).await;
 
     let mut waiter = wake.waiter();
@@ -104,12 +91,9 @@ async fn a_rolled_back_notify_wakes_nobody() {
 
 #[tokio::test]
 async fn a_multi_event_append_coalesces_into_one_wake() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP a_multi_event_append_coalesces_into_one_wake: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    let Some(db) = crate::common::TestDb::acquire("event_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
     let wake = wake_listening(&url).await;
 
     let mut waiter = wake.waiter();
@@ -141,12 +125,9 @@ async fn a_multi_event_append_coalesces_into_one_wake() {
 
 #[tokio::test]
 async fn both_drain_loops_wake_on_the_same_append() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP both_drain_loops_wake_on_the_same_append: DATABASE_URL not set");
-        return;
-    };
-    let _guard = db_lock().lock().await;
-    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    let Some(db) = crate::common::TestDb::acquire("event_wake").await else { return };
+    let url = db.url();
+    let pool = db.pool();
     let wake = wake_listening(&url).await;
 
     // The projector and the saga runner share ONE listener; an append must reach both, or the money
