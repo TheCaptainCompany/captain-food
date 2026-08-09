@@ -464,10 +464,19 @@ async fn resolve_cancelled_delivery_order(
 }
 
 /// Which account owns the restaurant on this `OrderPlaced`? Resolved from the ScopeMembership
-/// table's OWN RestaurantRegistered grant (scope RESTAURANT, principal RESTAURANT_ACCOUNT), which
-/// this group folds in the same total order — deterministic under a full rebuild, unlike reading
-/// the sibling `restaurant` projection, whose independent checkpoint may lag during a DR replay.
-/// An unresolved account simply omits that one grant.
+/// table's OWN RestaurantRegistered/RestaurantListingClaimed grants (scope RESTAURANT, principal
+/// RESTAURANT_ACCOUNT), which this group folds in the same total order — deterministic under a
+/// full rebuild, unlike reading the sibling `restaurant` projection, whose independent checkpoint
+/// may lag during a DR replay. An unresolved account simply omits that one grant.
+///
+/// FIRST ACCOUNT WINS, deterministically (review finding on #430): a restaurant CAN hold two
+/// RESTAURANT_ACCOUNT rows — `claim_restaurant_listing` guards only `listing_claimed`, so a
+/// partner-onboarded restaurant (account granted at registration) claimed later by a second
+/// Google-verified account grants both. An unordered `LIMIT 1` would then pick arbitrarily per
+/// order, silently starving one account's back office. `ORDER BY granted_at, membership_id` makes
+/// the double-grant degrade to a DEFINED, replay-stable choice (both keys are stored, not
+/// wall-clock). Whether the write side should REJECT the second claim outright is a domain
+/// invariant question recorded on #432, not improvised here.
 async fn resolve_restaurant_account(
     conn: &mut sqlx::PgConnection,
     env: &Envelope,
@@ -478,7 +487,8 @@ async fn resolve_restaurant_account(
     };
     let row: Option<(uuid::Uuid,)> = sqlx::query_as(
         "SELECT principal_id FROM scopemembership \
-          WHERE scope_type = $1 AND scope_id = $2 AND principal_type = $3 LIMIT 1",
+          WHERE scope_type = $1 AND scope_id = $2 AND principal_type = $3 \
+          ORDER BY granted_at ASC, membership_id ASC LIMIT 1",
     )
     .bind(domain::generated::scalars::ScopeType::RESTAURANT.to_text())
     .bind(restaurant_id)

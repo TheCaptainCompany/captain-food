@@ -303,3 +303,123 @@ async fn delivery_lifecycle_grants_and_revokes_through_the_worker() {
     .expect("ScopeMembership checkpoint");
     assert_eq!(checkpoint, 6, "the orphan cancel advanced the checkpoint rather than wedging it");
 }
+
+/// FIRST ACCOUNT WINS, deterministically (review finding on #430): a partner-onboarded restaurant
+/// (account granted at registration) later claimed by a SECOND account holds two
+/// RESTAURANT_ACCOUNT rows — `claim_restaurant_listing` guards only `listing_claimed`. The
+/// OrderPlaced account resolution must then pick the EARLIEST grant, stably, not whatever an
+/// unordered LIMIT 1 returns — the losing pick would silently starve one account's back office
+/// per order, arbitrarily.
+#[tokio::test]
+async fn a_double_account_grant_resolves_to_the_first_account_deterministically() {
+    let Some(db) = crate::common::TestDb::acquire("scope_membership_double_account").await else {
+        return;
+    };
+    let pool = db.pool();
+
+    let restaurant_id = uuid::Uuid::new_v4();
+    let account_a = uuid::Uuid::new_v4();
+    let account_b = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let customer_id = uuid::Uuid::new_v4();
+
+    // Explicit, strictly increasing occurred_at — granted_at is the ordering key under test.
+    let mut at = chrono::Utc::now() - chrono::Duration::minutes(30);
+    let mut append_at = |stream: String, version: i32, event_type: &'static str, payload: serde_json::Value| {
+        at += chrono::Duration::minutes(1);
+        let pool = pool.clone();
+        let occurred = at;
+        let event_type = event_type.to_string();
+        async move {
+            sqlx::query(
+                "INSERT INTO domain_events \
+                 (id, stream_name, version, user_id, user_type, correlation_id, cause_id, event_type, payload, metadata, occurred_at) \
+                 VALUES ($1, $2, $3, $4, 5, $5, NULL, $6, $7, NULL, $8)",
+            )
+            .bind(uuid::Uuid::new_v4())
+            .bind(stream)
+            .bind(version)
+            .bind(uuid::Uuid::nil())
+            .bind(uuid::Uuid::new_v4())
+            .bind(event_type)
+            .bind(payload)
+            .bind(occurred)
+            .execute(&pool)
+            .await
+            .expect("append event");
+        }
+    };
+
+    let resto_stream = format!("Restaurant-{restaurant_id}");
+    append_at(
+        resto_stream.clone(),
+        1,
+        "RestaurantRegistered",
+        serde_json::json!({
+            "restaurantId": restaurant_id,
+            "accountId": account_a,
+            "listingStatus": "ACTIVE_PARTNER",
+            "displayName": "Chez Marco",
+            "address": address(),
+            "tags": []
+        }),
+    )
+    .await;
+    append_at(
+        resto_stream.clone(),
+        2,
+        "RestaurantListingClaimed",
+        serde_json::json!({ "restaurantId": restaurant_id, "accountId": account_b }),
+    )
+    .await;
+    append_at(
+        format!("Order-{order_id}"),
+        1,
+        "OrderPlaced",
+        order_placed_payload(order_id, restaurant_id, customer_id),
+    )
+    .await;
+
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once");
+
+    // Both accounts hold the RESTAURANT scope (the double-grant is real)…
+    for account in [account_a, account_b] {
+        assert!(
+            scope_membership_store::is_member(
+                &pool,
+                ScopeType::RESTAURANT,
+                restaurant_id,
+                UserType::RESTAURANT_ACCOUNT,
+                account
+            )
+            .await
+            .expect("is_member"),
+            "both RESTAURANT_ACCOUNT grants exist"
+        );
+    }
+    // …but the ORDER grant resolves to the FIRST account, and only it.
+    assert!(
+        scope_membership_store::is_member(
+            &pool,
+            ScopeType::ORDER,
+            order_id,
+            UserType::RESTAURANT_ACCOUNT,
+            account_a
+        )
+        .await
+        .expect("is_member"),
+        "the earliest-granted account owns the order membership"
+    );
+    assert!(
+        !scope_membership_store::is_member(
+            &pool,
+            ScopeType::ORDER,
+            order_id,
+            UserType::RESTAURANT_ACCOUNT,
+            account_b
+        )
+        .await
+        .expect("is_member"),
+        "the later claimant does not win arbitrarily"
+    );
+}
