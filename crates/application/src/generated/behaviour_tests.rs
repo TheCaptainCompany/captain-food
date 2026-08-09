@@ -359,12 +359,12 @@ fn fx_order_expired() -> DomainEvent {
 
 /// tests.yaml#/fixtures/orderRated — events.yaml#/OrderRated
 fn fx_order_rated() -> DomainEvent {
-    DomainEvent::OrderRated(evs::OrderRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, rider_thumb: sc::ThumbRating::UP })
+    DomainEvent::OrderRated(evs::OrderRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), rider_thumb: sc::ThumbRating::UP })
 }
 
 /// tests.yaml#/fixtures/restaurantRated — events.yaml#/RestaurantRated
 fn fx_restaurant_rated() -> DomainEvent {
-    DomainEvent::RestaurantRated(evs::RestaurantRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, stars: sc::StarRating(5), comment: Some(sc::RatingComment("Excellent!".into())) })
+    DomainEvent::RestaurantRated(evs::RestaurantRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), stars: sc::StarRating(5), comment: Some(sc::RatingComment("Excellent!".into())) })
 }
 
 /// tests.yaml#/fixtures/deliverySatisfactionRecorded — events.yaml#/DeliverySatisfactionRecorded
@@ -374,7 +374,7 @@ fn fx_delivery_satisfaction_recorded() -> DomainEvent {
 
 /// tests.yaml#/fixtures/orderTipped — events.yaml#/OrderTipped
 fn fx_order_tipped() -> DomainEvent {
-    DomainEvent::OrderTipped(evs::OrderTipped { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), tipped_by: sc::Tipper::CUSTOMER, customer_id: None, tips: vec![ent::Tip { recipient: sc::TipRecipient::RIDER, amount: ent::Money { amount_cents: sc::MoneyCents(200), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::RESTAURANT, amount: ent::Money { amount_cents: sc::MoneyCents(100), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::CAPTAIN, amount: ent::Money { amount_cents: sc::MoneyCents(50), currency: sc::CurrencyCode("EUR".into()) } }] })
+    DomainEvent::OrderTipped(evs::OrderTipped { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), tipped_by: sc::Tipper::CUSTOMER, customer_id: Some(sc::CustomerId(support::uid("cust-1"))), tips: vec![ent::Tip { recipient: sc::TipRecipient::RIDER, amount: ent::Money { amount_cents: sc::MoneyCents(200), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::RESTAURANT, amount: ent::Money { amount_cents: sc::MoneyCents(100), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::CAPTAIN, amount: ent::Money { amount_cents: sc::MoneyCents(50), currency: sc::CurrencyCode("EUR".into()) } }] })
 }
 
 /// tests.yaml#/fixtures/orderTippedByRestaurant — events.yaml#/OrderTipped
@@ -384,7 +384,7 @@ fn fx_order_tipped_by_restaurant() -> DomainEvent {
 
 /// tests.yaml#/fixtures/refundRequested — events.yaml#/RefundRequested
 fn fx_refund_requested() -> DomainEvent {
-    DomainEvent::RefundRequested(evs::RefundRequested { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, reason: Some("Late delivery".to_string()) })
+    DomainEvent::RefundRequested(evs::RefundRequested { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), reason: Some("Late delivery".to_string()) })
 }
 
 /// tests.yaml#/fixtures/paymentIntentCreated — events.yaml#/PaymentIntentCreated

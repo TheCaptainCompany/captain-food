@@ -150,7 +150,7 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260809000000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260809140000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
