@@ -77,3 +77,33 @@ this change is a semantic port, mobbed per ADR-20260809-013142 (ten lenses brief
 - Remaining tenant read surfaces (orderConversation first, reclamation by-id, delivery/refund/
   satisfaction ports, cart session flows), LIMIT/pagination on `orders`, and the
   ownership-declared-vs-emitted validator rule are ONE follow-up issue, not five.
+
+## Addendum (independent review, same day)
+
+The third-look review over the full branch diff returned three findings, resolved before
+ready-for-review:
+
+1. **Stale ownership prose swept**: the `orderStatusChanged` api.yaml description still described
+   the trusted-RESTAURANT gap this change closes; rewritten (and regenerated) to say what is now
+   true — the old-term sweep the operating model demands after a reshape.
+2. **`RestaurantListingClaimed` now grants**: the post-registration account-attachment path (a
+   Sirene-seeded listing registers with NO accountId and gains one at claim time) is folded —
+   without it, the claiming account would never hold RESTAURANT membership and
+   `resolve_restaurant_account` would find nothing for every subsequent order, a deny-safe coverage
+   hole that would have needed a checkpoint-reset replay to repair once discovered.
+   `RestaurantRemoved`/`RestaurantAccountDeleted` deliberately do NOT revoke in this change: the
+   product decision is "rider revoked / others permanent", a removed restaurant's principals cannot
+   mint tokens anyway, and designing restaurant-lifecycle revocation is recorded on
+   [#432 "Read-scope remainder"](https://github.com/TheCaptainCompany/captain-food/issues/432)
+   rather than improvised here.
+3. **A failed REVOKE is named, not generic**: the drain loop's log-and-skip is a liveness choice
+   that on THIS table converts a transient failure into a STANDING STALE GRANT (the silent-breach
+   mode). Accepted risk, bounded and now visible: the revoke path emits a dedicated, searchable
+   error naming the consequence and the repair — delete the `ScopeMembership`
+   `projection_checkpoint` row, which replays the whole (idempotent) fold from position 0. A
+   dedicated metric, if wanted, rides #432 with the contract change it needs.
+
+Also hardened from review notes: the prod-smoke negative assertion now fails on an ERRORED
+response instead of reading empty `.data` as proof (outage-honesty), and the known limits worth
+carrying travelled to #432 (bridged-non-member proof exists only in the DB suite; `bridge_unresolved`
+conflates DB outage with missing projection row; WS scope frozen at connection init).

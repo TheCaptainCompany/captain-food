@@ -123,7 +123,7 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
+    /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership enforced server-side (#144): every row resolve reads through the caller's ReadScope against the ScopeMembership index, for EVERY role — customer, restaurant, account, rider — which closed the old "RESTAURANT paths are trusted" gap (ADR-20260809-160000 §7). A non-member's stream stays silent (no oracle). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
     #[graphql(name = "orderStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OrderStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Order>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();

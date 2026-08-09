@@ -270,13 +270,30 @@ impl ReadModelProjector {
                             scope_id,
                             principal_type,
                         } => {
-                            scope_membership_store::revoke_role(
+                            // A failed REVOKE is not an ordinary skipped fold: the drain loop's
+                            // log-and-skip advances the checkpoint past it, and on THIS table a
+                            // missed revoke is a STANDING STALE GRANT — the silent-breach failure
+                            // mode, not stale data. The generic skip error stays (liveness), but
+                            // it gets a dedicated, searchable line naming the consequence and the
+                            // repair (delete the ScopeMembership checkpoint row → full replay).
+                            // Accepted risk + procedure: ADR-20260809-160000 addendum.
+                            if let Err(e) = scope_membership_store::revoke_role(
                                 &mut *conn,
                                 *scope_type,
                                 *scope_id,
                                 *principal_type,
                             )
-                            .await?;
+                            .await
+                            {
+                                tracing::error!(
+                                    scope_type = ?scope_type,
+                                    scope_id = %scope_id,
+                                    principal_type = ?principal_type,
+                                    error = %e,
+                                    "SCOPE-MEMBERSHIP REVOKE FAILED -- if the batch skips this event a STALE GRANT STANDS until a ScopeMembership checkpoint-reset replay"
+                                );
+                                return Err(e);
+                            }
                         }
                     }
                 }

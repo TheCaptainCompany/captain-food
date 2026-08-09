@@ -479,7 +479,7 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
     let bus = EventBus::default();
     let schema = schema_over(orders, InMemoryRestaurants(restaurant_row(restaurant_id)), bus.clone());
 
-    // Tracked by orderId (#14); the RESTAURANT path is trusted like the `orders` query.
+    // Tracked by orderId (#14); ownership rides the context ReadScope for every role (#144).
     let query = format!(
         r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status }} }}"#
     );

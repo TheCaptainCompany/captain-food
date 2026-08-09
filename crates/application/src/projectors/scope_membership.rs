@@ -158,6 +158,22 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             out
         }
 
+        // The POST-registration account attachment (review finding, ADR-20260809-160000 addendum):
+        // a Sirene-seeded listing registers with NO accountId and gains one when its owner proves
+        // ownership and claims it. Without this fold that account never holds RESTAURANT
+        // membership and `resolve_restaurant_account` finds nothing for every later OrderPlaced —
+        // deny-safe, but a coverage hole that would need a checkpoint-reset replay to repair once
+        // discovered (the #424 lesson).
+        DomainEvent::RestaurantListingClaimed(e) => match e.account_id.as_ref() {
+            Some(account_id) => vec![MembershipChange::Grant {
+                scope_type: ScopeType::RESTAURANT,
+                scope_id: e.restaurant_id.0,
+                principal_type: UserType::RESTAURANT_ACCOUNT,
+                principal_id: account_id.0,
+            }],
+            None => Vec::new(),
+        },
+
         // ADMIN holds no rows at all — the guard short-circuits on the role. Storing them would mean
         // a row per admin per instance, unbounded and pointless.
         _ => Vec::new(),
@@ -359,6 +375,32 @@ mod tests {
             membership_changes(&env(DomainEvent::DeliveryCancelled(e)), &Resolved::default())
                 .is_empty()
         );
+    }
+
+    /// The post-registration attachment: a claimed listing grants its account RESTAURANT
+    /// membership — the Sirene-seeded path, where registration carried no account (review finding).
+    /// A claim WITHOUT an account (nullable) grants nothing.
+    #[test]
+    fn listing_claim_grants_the_claiming_account() {
+        let claim = |account: Option<Uuid>| {
+            let e: domain::generated::events::RestaurantListingClaimed =
+                serde_json::from_value(serde_json::json!({
+                    "restaurantId": RESTAURANT,
+                    "accountId": account,
+                }))
+                .expect("RestaurantListingClaimed fixture");
+            env(DomainEvent::RestaurantListingClaimed(e))
+        };
+        assert_eq!(
+            membership_changes(&claim(Some(ACCOUNT)), &Resolved::default()),
+            vec![MembershipChange::Grant {
+                scope_type: ScopeType::RESTAURANT,
+                scope_id: RESTAURANT,
+                principal_type: UserType::RESTAURANT_ACCOUNT,
+                principal_id: ACCOUNT,
+            }]
+        );
+        assert!(membership_changes(&claim(None), &Resolved::default()).is_empty());
     }
 
     /// The overwhelmingly common case on the projection hot path: an event with no authorization

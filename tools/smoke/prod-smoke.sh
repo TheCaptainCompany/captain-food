@@ -307,15 +307,21 @@ l3() {
 # (rules.yaml cannot carry read-guard coverage — #212 — so this assertion is the production gate.)
 l4_negative() {
   local resp others
+  # Outage-honest (review finding): an errored response must FAIL the proof, not satisfy it — a
+  # transport error also has empty .data, and `null | length` is 0 in jq.
   resp=$(gql "$API_BASE/customer/graphql" "$customer" \
     'query($id: OrderId!){ order(input:{id:$id}) { id } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
-  [ "$(printf '%s' "$resp" | jq -r '.data.order // empty')" = "" ] \
+  [ "$(printf '%s' "$resp" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: read-guard probe ERRORED (cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
+  [ "$(printf '%s' "$resp" | jq -r '.data.order')" = "null" ] \
     || fail "L4: READ GUARD BREACH — a non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
   others=$(gql "$API_BASE/customer/graphql" "$customer" \
     'query{ orders { id } }' '{}')
-  [ "$(printf '%s' "$others" | jq -r '.data.orders | length')" = "0" ] \
-    || fail "L4: READ GUARD BREACH — a non-member customer listed $(printf '%s' "$others" | jq -r '.data.orders | length') orders (the pre-#144 full-table dump)"
+  [ "$(printf '%s' "$others" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: read-guard list probe ERRORED (cannot prove the guard): $(printf '%s' "$others" | head -c 300)"
+  [ "$(printf '%s' "$others" | jq -r '.data.orders == []')" = "true" ] \
+    || fail "L4: READ GUARD BREACH — a non-member customer listed orders (the pre-#144 full-table dump): $(printf '%s' "$others" | head -c 300)"
   say "      L4: read guard held — non-member by-id resolved null, list came back empty"
 }
 
