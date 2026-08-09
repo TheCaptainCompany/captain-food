@@ -104,3 +104,13 @@ make check-drift  # spec ↔ generation drift
 
 For any screen touched since the last review, hand-check that each action's `variables` satisfy the
 bound mutation's `required` list — the validator does not do this yet (#169).
+
+## Final-vision probe (ADR-20260808-235113)
+
+For every recommendation and every staged/intermediate the review encounters: does the option
+table present the final-clean-shape option FIRST, and does any staged choice CITE the recorded
+final step it stages toward (a register row, ADR, or issue — a named phrase repeated in prose does
+not count)? A shape called "the honest endpoint" that is recorded nowhere is a finding. Distinguish
+scope staging (thin slices of the final shape — fine) from shape staging (a different shape needing
+redo — the violation class); evidence-deferred numbers route to instrument-then-decide, never to a
+guessed "final".

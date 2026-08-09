@@ -51,6 +51,15 @@ chose what we chose.
   - **Per-option pros / cons for every decision** the proposal surfaces — each option gets its
     trade-offs (a small table is ideal), and the chosen option is marked. Never present a bare
     "A vs B" without the trade-offs that justify the pick.
+  - **Final vision first (product-owner directive, 2026-08-08, ADR-20260808-235113)**: the
+    final-clean-shape option is presented FIRST and is the default recommendation; a
+    staged/intermediate option may only be recommended when something EXTERNAL forces it, and
+    then it must CITE the recorded final step it stages toward (an option table that calls a
+    shape "the honest endpoint" while recommending against it, without recording that endpoint
+    anywhere, is the named anti-pattern — it produced the D-QW1 correction). Scope staging
+    (thin slices of the final shape) is not shape staging (a different shape you must redo);
+    evidence-deferred decisions (a number only production data can supply) are decided by
+    instrument-then-decide, not by guessing a "final" value.
   - **Drawbacks** — why we might regret the WHOLE thing (distinct from per-option cons: even the
     winning option's global costs — complexity added, doors closed, maintenance taken on).
   - **Unresolved questions** — the named open points the approval deliberately leaves open. On
