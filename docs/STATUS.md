@@ -3,7 +3,8 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> ✅ **2026-08-09 (night) — G5/G6/G7 CLOSED: the customer path is no longer inert
+> 🚧 **2026-08-09 (night) — G5/G6 UNBLOCKED (not closed), G7 CLOSED: the customer path is
+> wired, and still unreachable in a browser
 > ([#420 "Customer delivery reassurance: tracking shows the rider path, checkout FAILED state, orphan binding fix (#348 slice 8)"](https://github.com/TheCaptainCompany/captain-food/issues/420),
 > the code-only half of PROP-20260809-021351 §6 item 1).** `hydrate()` no longer returns above the
 > crate's only `mount_to_body`: checkout and order_tracking MOUNT, install the delegated action
@@ -25,13 +26,44 @@
 > `sdui: false` screen without a mount is now `E0080`, not a page that silently renders nothing.
 > `every_sdui_screen_of_every_surface_renders` → `every_screen_of_every_surface_renders`, skip
 > removed. Both named tests seen RED first (`left: 0` reads; `Elapsed(())` on the delivery hop).
-> Gates: `make rust` green, 0 errors, warning histogram **37 → 37, same kinds**.
+> Gates: `make rust` green, 0 errors, warning histogram **37 → 37, same kinds**;
+> `cargo test -p server --test graphql_subscriptions` **10/10** (NOT covered by `make rust`).
+> The delivery-hop test was **renamed to what it proves** after `beck` established by mutation that
+> it proved the DEDUPE, not the filter: reverting the filter while keeping the dedupe left it green,
+> because the helper pumps 50 copies of the order's own envelope and each opens a ~3 s re-poll
+> window, so a lingering `Order-` envelope delivered the second frame.
+> `a_delivery_job_envelope_alone_reaches_the_confirmation_page` now isolates the delivery branch —
+> verified RED under that exact mutation (`Elapsed`), green restored.
+>
+> **WHY G5/G6 ARE NOT CLOSED — the mounts are wired and every read they feed is REFUSED.** Three
+> review lenses converged on this; it must not be mistaken for done.
+> **(a)** `/checkout` has **no route params**, and `cart.current` / `paymentStatus.byOrder` both take
+> REQUIRED inputs, so both documents are dropped before they are sent — the shell receives an empty
+> map and renders the old hardcoded state plus the host slug. `payment_failed` **cannot become true**.
+> **(b)** `order.byId`, `me.profile` and `orderStatusChanged` are all `CUSTOMER`-guarded, while the
+> customer surface talks to `/public` and `web_ssr.rs` renders as anonymous `RequestRole::Public`
+> with no session — and **no bearer token exists anywhere in `crates/web`**. SSR, hydrate, the
+> reconnect re-sync and the socket subscribe are each refused.
+> So a customer who pays today still lands on a page carrying no order. What #427 changed is that
+> the page **no longer lies about it**: a refused read renders `data-status="PENDING"` and makes no
+> claim, where it previously rendered "Commande introuvable" for every order, forever — `OrderRead`
+> makes "the transport refused" and "no such order" unrepresentable-if-confused.
+>
+> **GAP(copy), on #420**: the right content for the unresolved state is the acceptance-first
+> reassurance ("Reçu ✓ — confirmation en cours…"). It needs a translation key, and customer copy is
+> approved verbatim by the product owner, so it rides the spec half rather than being invented here.
 > **Still open on this path, each needing a DSL change and reported on #420**: no Stripe
-> **publishable** key exists anywhere (`specs/payments/configuration.yaml`), so the browser still
-> mounts no payment element and `place_order` cannot be pressed end to end; `cart.current` carries no
-> restaurant NAME (the shell falls back to the host's tenant slug); and the `order.byId` selection
-> carries no restaurant name either, so the status hero's BODY copy is withheld rather than shipped
-> with an unfilled `{restaurant}`.
+> **publishable** key exists anywhere (`specs/payments/configuration.yaml`); a way for the checkout
+> route to supply a cart/order id; a customer bearer token on the web transport; `cart.current`
+> carries no restaurant NAME (the shell falls back to the host's tenant slug); and the `order.byId`
+> selection carries no restaurant name either, so the hero's BODY copy is withheld rather than
+> shipped with an unfilled `{restaurant}` — which is **every status in the twenty-minute pre-food
+> window**, so the customer gets a title alone for the whole anxiety curve.
+> **And one gate that does not exist**: `beck` re-planted the exact `if !screen.sdui { return; }` bug
+> this work fixes and **both CI gates stayed green** (96 native tests, `make wasm`). `make wasm` is a
+> COMPILE check and the regression class is a semantic early return, so it cannot help; the `const`
+> proofs prove an arm EXISTS, never that `hydrate()` reaches it. The honest gate is
+> `wasm-bindgen-test` + a headless DOM — filed on #420, not assumed.
 >
 > 🔴 **2026-08-09 (night) — THE CUSTOMER PATH IS INERT ON `main`, and a paid order tells nobody.**
 > Four lenses briefed in parallel on [#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410)
