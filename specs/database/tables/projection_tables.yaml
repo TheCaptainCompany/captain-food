@@ -824,7 +824,7 @@ ScopeMembership:
   slice: V0
   internal: true   # a technical authorization index, never a GraphQL `reads` target (no output type binds it)
   note: >
-    WHO may see WHICH protected instance (#144). One row per (scope, principal): the single index every
+    WHO may see WHICH protected instance (#144). One row per (scope, member): the single index every
     read-side authorization question resolves against, for every role and every surface —
     `SELECT EXISTS(... WHERE membership_id = $1)`. The guard never learns what an order is, so a new
     ScopeType is a projector rule rather than new code in the guard.
@@ -845,7 +845,7 @@ ScopeMembership:
     - "GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT."
     - "GRANT on RestaurantListingClaimed: the claiming account, scope_type RESTAURANT — the post-registration attachment path. A Sirene-seeded listing registers with NO accountId; without this fold its account would never gain membership and resolve_restaurant_account would find nothing for every subsequent OrderPlaced (review finding, ADR-20260809-160000 addendum)."
     - "ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless."
-    - "membership_id is UUIDv5 over (scope_type, scope_id, principal_type, principal_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern)."
+    - "membership_id is UUIDv5 over (scope_type, scope_id, member_type, member_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern)."
     - "ERASURE (#194, ADR-20260731-160000): this is an Order-fed read model holding a customer-to-order link — it OWES an OrderExpired tombstone fold (delete the order scope's rows) when the deletion engine lands. Named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips."
   fedBy:
     - { $ref: 'events.yaml#/OrderPlaced' }
@@ -855,7 +855,7 @@ ScopeMembership:
     - { $ref: 'events.yaml#/RestaurantRegistered' }
     - { $ref: 'events.yaml#/RestaurantListingClaimed' }
   indexes:
-    - [principal_type, principal_id, scope_type]   # "everything this principal may see" -> list-query filtering
+    - [member_type, member_id, scope_type]   # "everything this member may see" -> list-query filtering
     - [scope_type, scope_id]                       # "who may see this instance" -> audit + revoke sweeps
   columns:
     membership_id:
@@ -866,7 +866,7 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
         - { $ref: 'events.yaml#/RestaurantRegistered' }
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
-      note: "UUIDv5(scope_type|scope_id|principal_type|principal_id) — derived, never random, so a replayed grant upserts onto itself."
+      note: "UUIDv5(scope_type|scope_id|member_type|member_id) — derived, never random, so a replayed grant upserts onto itself."
     scope_type:
       type: { $ref: 'scalars.yaml#/ScopeType' }
       from:
@@ -875,7 +875,7 @@ ScopeMembership:
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
         - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
-      note: "Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload. The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, principal_type) — they write no value, they key a deletion."
+      note: "Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload. The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, member_type) — they write no value, they key a deletion."
     scope_id:
       type: uuid
       from:
@@ -886,7 +886,7 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryDispatchFailed/properties/orderId' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
       note: "The protected instance: an OrderId or a RestaurantId. DeliveryCancelled carries no orderId — the worker resolves the job's order via View_DeliveryJob before folding."
-    principal_type:
+    member_type:
       type: { $ref: 'scalars.yaml#/UserType' }
       from:
         - { $ref: 'events.yaml#/OrderPlaced' }
@@ -899,7 +899,7 @@ ScopeMembership:
         In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or
         their customer row would let them fetch rider-audience data. The revoke events key their
         deletion by this column (the RIDER role), which is why they appear in its lineage.
-    principal_id:
+    member_id:
       type: uuid
       from:
         - { $ref: 'events.yaml#/OrderPlaced/properties/customerId' }
