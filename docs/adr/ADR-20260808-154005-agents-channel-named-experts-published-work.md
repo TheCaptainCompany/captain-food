@@ -22,9 +22,17 @@ checkable-against-source positions instead of averaged instinct.
    - `architect` — Greg Young (CQRS/ES: event versioning, "CQRS is not a top-level architecture"),
      Vaughn Vernon (Implementing DDD, actor model), Eric Evans (strategic DDD, bounded contexts,
      ubiquitous language).
-   - `ux-designer` — Don Norman (user-centered design, affordances, error-as-design-failure) and
+   - `ux-designer` — Don Norman (user-centered design, affordances, error-as-design-failure),
      Jeff Patton (User Story Mapping — `specs/stories.yaml` IS a story map; journeys slice
-     outcomes, not features).
+     outcomes, not features), and **Jony Ive** (customer-added 2026-08-09): the craft lens —
+     simplicity as subtraction until what remains is inevitable, care in the details nobody is
+     asked to notice, materials honesty (a thing is what it appears to be), and "design is how it
+     works". The three are kept distinct: Norman asks *can they use it?*, Patton *does the journey
+     deliver an outcome?*, Ive *is this made with enough care to be trusted?* — which is the
+     decisive question for the demo, a credibility artifact aimed at restaurants
+     (ADR-20260808-212741 §2). Ive is invoked for behaviour, sequence, restraint and honesty —
+     never for styling; a finding that cannot be written as "the user experiences X instead of Y"
+     is not an Ive finding.
    - `dba` — Martin Kleppmann (Designing Data-Intensive Applications: logs as source of truth,
      derived data, exactly-once semantics).
    - `graphql-architect` — Lee Byron (GraphQL's design rationale: schema-first, additive
