@@ -8,6 +8,11 @@
   - [ ] `stripe-single-key`: one Stripe secret per deployment. A demo sharing the production deployment either charges a stranger's real card or blocks production from taking real money. D4 must be decided before any public URL exists.
   - [ ] `test-mode-unenforced`: `mode: TEST` is checked in exactly ONE runtime location and **no read model carries it** — demo orders are indistinguishable from real ones in the back office and in every metric built on the read models.
   - [ ] `demo-capacity-coupling`: demo events append to the same `Order` projector checkpoint and the same single-instance CNPG as the money path; a demo burst is projection lag on real customers' tracking screens.
+  - [ ] `comparison-not-computed`: the demo's single commercial screen cannot render. The cart projector carries `total_amount_cents`, `lines`, `estimated_breakdown` and `uber_comparison` forward from a previous row that no event ever populates — so the total is **0** and the comparison is **always `None`** (`crates/application/src/projectors/cart.rs:27-44`, verified).
+  - [ ] `nominative-comparison-unverifiable`: the named-competitor figure is a coefficient we chose (1.30–1.45) times our own price. Two lenses independently call publishing it on a public page the largest exposure in the epic — comparative-advertising law requires *verifiable* features, and the margin split we publish for a named company is the classic denigration shape. Needs a customer decision, and it is about the PRODUCT, not the demo.
+  - [ ] `unscoped-order-reads` **(blocks D3)**: `orders` / `order` / `carts` apply no ownership filter for ANY role — `orders` with no arguments returns the entire `ordertracking` table, un-paginated, while the SDL describes it as *"ownership/scope enforced server-side"*. A publicly-mintable demo session therefore reads every real order. Recorded on [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) with evidence; **D3 cannot ship before it lands**.
+  - [ ] `projector-no-mutual-exclusion` **(blocks D1+D2 together)**: the projector takes no lock and overwrites its checkpoint unconditionally (`SET position = EXCLUDED.position`, not `GREATEST`), so two deployments over one database regress it and re-fold — and at least one projector is a true accumulator, so a re-fold **doubles a customer's credit balance, silently and permanently**. There is also no reprojection entrypoint anywhere in the repo, so the fold cannot currently be re-derived.
+  - [ ] `fee-breakdown-anchors-zero`: `crates/application/src/pricing.rs:103-112` hard-zeroes delivery, service fee, restaurant contribution, rider payout and platform net. Publishing that breakdown anchors free delivery before the delivery-fee decision exists.
 
 ## 1. Why this exists now
 
@@ -35,6 +40,9 @@ All four lenses reached the same root cause independently.
 | **G7b** | Restaurant / rider sign-in | **No browser sign-in exists for staff.** No login/magic-link screen in any `specs/screens/**`, no `/auth/callback` route. A RESTAURANT or RIDER JWT is obtainable only through the Supabase admin API. **Nobody can open the back office in a browser today.** | `specs/screens/*.yaml`, `crates/server/src/auth_routes.rs` |
 | **G8** | The restaurant is *told* | **Nobody is told.** No notification port of any kind in `crates/application/src/ports.rs`. `orderStatusChanged` is keyed per `orderId`, so a queue cannot subscribe to arrivals; `orders_queue` refreshes only on page load. **A paid order sits silently until someone reloads.** This is the domain lens's named worst failure mode, live on `main`. | `specs/screens/restaurant_backoffice.yaml:116-136`, `specs/ordering/api.yaml:289-297` |
 | G10 | Payment mode | One Stripe key per deployment; `mode: TEST` isolates the domain, not the money. See D4. | `crates/adapters/stripe/src/outbound.rs:34-48` |
+| **C1** | The cart's total and the competitor comparison | **Never computed.** The projector's own comment says these come from the live catalog + policy read models and are `TODO(runtime)`; every accessor returns the previous row's value, and no event ever writes one. Total renders **0**, comparison renders **nothing**. | `crates/application/src/projectors/cart.rs:27-44` (verified) |
+| **C2** | The fee breakdown | Delivery, service fee, restaurant contribution, rider payout and platform net are **hard-zeroed** — the honest render today is *articles = total, livraison 0,00 €, frais de service 0,00 €*. | `crates/application/src/pricing.rs:103-112` (verified) |
+| **C3** | Allergens on the demo storefront | **Do not exist anywhere in the system** — zero hits across `specs/catalog/**`; HubRise `nutrition` is dropped at the ACL. An earlier proposal recorded the same finding independently. A legal precondition for the first real order (EU FIC 1169/2011), and a false claim if the demo copy says "real allergens". | `specs/catalog/*.yaml`, PROP-20260726-165500 §1 |
 
 **Why a green `main` did not notice.** `tools/smoke/prod-smoke.sh` proves the API path and never
 opens a browser — it is structurally incapable of seeing an unmounted page. And
@@ -59,9 +67,9 @@ GitHub Pages (ADR-0036) and can mint nothing, so the marketing button is a link.
 |---|---|---|---|---|---|---|
 | 1 | Marketing page, one button: *"Essayez une vraie commande — 2 minutes"* | static site (other repo) | — | — | — | GAP(content), trivial |
 | 2 | Demo entry: one button, and one line saying what is simulated | GAP `demo_entry` | GAP `startDemo` | GAP `StartDemoSession` → PM emitting `RegisterRestaurant` / `ImportCatalog` / `RegisterRider` / customer, all `mode: TEST` | GAP `View_DemoWorld` | **GAP ×4** |
-| 3 | Storefront of the demo restaurant — real catalog, real allergens, real prices. Demo bar: *"Vous êtes Camille, cliente."* | `restaurant_frontoffice#restaurant` | `restaurant`, `catalog` | — | `Restaurant`, `Catalog` | DONE |
+| 3 | Storefront of the demo restaurant — real catalog, real prices. Demo bar: *"Vous êtes Camille, cliente."* | `restaurant_frontoffice#restaurant` | `restaurant`, `catalog` | — | `Restaurant`, `Catalog` | DONE — **but see GAP(allergens) below** |
 | 4 | Adds two dishes | `#restaurant` / `#cart` | `addCartLine` | `AddCartLine` | `Cart` | DONE |
-| 5 | Cart → fee breakdown + the Uber Eats comparison — **the restaurant's pitch, shown as the customer sees it** | `#cart` | `cart` | — | `Cart` | DONE |
+| 5 | Cart → fee breakdown + the competitor comparison | `#cart` | `cart` | — | `Cart` | **GAP — the comparison never computes and the breakdown anchors at zero; see §2 rows C1/C2. Bigger than G5.** |
 | 6 | Checkout: address + phone prefilled, **no OTP**, real Stripe **test** PaymentIntent, card prefilled, labelled *"Mode test Stripe — aucun paiement réel."* | `#checkout` | `placeOrder` | `PlaceOrder` saga | `PlaceOrderProcess` | **blocked by G5**, identity by D3 |
 | 7 | The acceptance-first window shown honestly: *"Reçu ✓ — confirmation en cours…"* | `#order_tracking` | `operationStatus`, `order.byId` | — | `OrderTracking` | DONE (`pending.rs`) |
 | 8 | Demo bar changes by itself: *"Votre commande est sur l'écran du restaurant. Voir →"* | GAP (demo bar) | — | — | `View_DemoWorld` | GAP |
@@ -181,7 +189,7 @@ they are right to.
 
 | Seeded | The line the UI shows |
 |---|---|
-| Catalog, photos, allergens, restaurant identity | (no line needed — nobody believes the visitor typed it) |
+| Catalog, photos, restaurant identity | (no line needed — nobody believes the visitor typed it) |
 | Customer identity + address | *"Vous êtes Camille Durand, cliente de démonstration."* — permanently in the demo bar |
 | Payment | *"Mode test Stripe — aucun paiement réel, aucune carte demandée."* — on the pay button, **before** the tap |
 | Auto-accept when the visitor skips the restaurant hat | *"Le restaurant de démonstration accepte automatiquement au bout de 20 s. En production, c'est un humain qui appuie."* — shown **before** the 20 s |
@@ -347,6 +355,175 @@ demo (step 9 is the hop the restaurant is evaluating) and of production. It need
   legal shape and belongs to its own record.
 - Whether the 57-bin generated topology is ever the deployed shape, or the emitter grows a monolith
   manifest (D1's sub-item).
+
+## 10. What the late-invited lenses changed
+
+The coordinator briefed four lenses by its own taste; the rest were invited after this file was
+committed (recorded as the first measurement in
+[ADR-20260809-013142](../adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)).
+They did not refine the design — **they contested its place in the queue and found two things the
+first four missed.** Kept here because a proposal that hides the objection to itself is not a
+record.
+
+### 10.1 The epic is misfiled, not wrong — and it should not be next (holub, business, concurring)
+
+Both lenses reached the same structure independently: **~80% of §6 is production-critical work that
+must happen for the FIRST REAL ORDER whether or not a demo ever exists** (hydration, staff sign-in,
+the notification hop, the Stripe key split, smoke past capture, platform manifests). The genuinely
+demo-specific increment — `demo_entry`, `startDemo`, `View_DemoWorld`, the demo bar, `demo_summary`
+— is small, and cheap once the rest lands. Filing the production-critical bucket under a marketing
+epic hides that it is production-critical.
+
+holub's sharper form: **this proposal's §2 discovers that the third product surface has never
+rendered, and §3 then designs a fourth.** The demo does not compete with the standing objective, it
+*contains* it, plus ~40% surface that only pays off after the contained part works. His
+recommendation: mark #410 blocked-by the slice, leave D1/D3/D4 unanswered for a week, and note that
+option D1(c)'s con column — *"no stranger can touch it, which is the entire point of #410"* — is
+circular, because #410 is what is under question. Judged against the standing objective, (c) reaches
+a real user first: **a founder with a laptop in a Tours kitchen at 15:00 is a shorter feedback loop
+than a public URL, and costs zero console minutes.**
+
+business's sharper form: **self-serve is the wrong channel for this market shape.** With a few
+hundred relevant independents in the agglomeration and five-figure annual value per prospect, direct
+sales dominates self-serve by a wide margin. The demo's defensible job is *the thing the founder
+opens on a phone at the table*, plus inbound legitimacy for press and the ESS networks — and both
+jobs need seeded data and staff sign-in (G7b), not a public URL, a demo bar, or a session process
+manager. D6's "scripted demo operator" fallback is, commercially, the superior first version.
+
+Also from business, and it reframes the whole premise: **independents do not switch, they
+multi-home.** Nobody turns off a 30%-commission platform to try a three-restaurant marketplace —
+they add a second tablet. So "market parity" as feature count is probably not the binding
+constraint; workflow reliability on the one tablet is. What actually converts, ranked ahead of a
+demo: somebody else builds the menu (a 60-item catalog is 3–6 owner-hours, and no demo overcomes
+that), incremental orders that do not cannibalise, someone answering the phone at 20:00, and fast
+predictable payouts. **The walk has no money-to-restaurant moment at all** — fifteen steps, no
+payout view, no settlement cadence, for an audience whose first question is "what do I receive, and
+when?"
+
+### 10.2 The commercial screen is the epic's real blocker, not G5 (business, verified by the coordinator)
+
+Rows C1/C2 in §2. Step 5 was marked DONE; it cannot render. This was found by reading the
+projector, not the spec — and it outranks G5 for this epic specifically, because step 5 *is* the
+pitch.
+
+### 10.3 Two things that are the customer's, and are about the product rather than the demo
+
+- **The named-competitor comparison.** legal and business converged from opposite directions:
+  comparative advertising is lawful in France only where the compared features are **verifiable**,
+  and ours is a coefficient we chose times our own price, published alongside an estimated split of
+  a named company's commission, courier pay and margin. legal grades the denigration exposure high
+  and notes it is actionable by the competitor directly, without a regulator. business notes the
+  disclaimer the ADRs treat as the mitigation **has zero translation keys** — it does not exist as a
+  shippable artifact. Both propose the same replacement, and it is better on its own terms: a
+  **self-input commission calculator** where the restaurateur enters their own volume and their own
+  contracted rate. The number is theirs, so it is verifiable by construction, it sits outside
+  comparative-advertising law entirely, and it speaks the P&L instead of the customer's checkout.
+- **The fee breakdown before the delivery fee exists** (row C2). Publishing 0,00 € delivery anchors
+  free delivery with every visitor and every restaurateur pitched; when a real fee appears it reads
+  as a price rise. The two supplier pricing calls already named in ADR-20260809-020859 §2 are the
+  precondition, not a parallel track.
+
+### 10.4 Legal preconditions before any public URL (legal-specialist)
+
+Named here so they are not discovered at cutover. Each is an artifact someone can produce; none is
+legal advice, and the lens issues no clearance.
+
+1. **TEST data is publicly discoverable.** `specs/network/api.yaml` `restaurants` — the public
+   discovery query — has no `mode` argument, and per D2 no read model carries the column. The demo
+   restaurant would appear in the real marketplace and in any public count. This converts **D2(a)
+   from a hygiene preference into the required shape**, and the rule should be written so a public
+   read path *cannot compile* without a mode predicate.
+2. **D4 is a legal precondition, not an ops one.** A live key serving a visitor told *"aucun
+   paiement réel"* is an unauthorised payment transaction. The compiler-first instrument already
+   exists: `StripeSecretKeyTest` / `StripeSecretKeyLive` are separate scalars with anchored
+   patterns in `specs/common/scalars.yaml` — the demo profile must bind the TEST scalar so a live
+   key is rejected at startup rather than by a reviewer.
+3. **Mentions légales** (LCEN art. 6 III-1, including the host's name and address — a moving fact
+   mid-migration). No legal-pages screen or route exists; the only trace is a label string bound to
+   nothing, which is the repo's own "renders but does nothing" rule.
+4. **A privacy notice at the demo's collection point**, and a decision on demo funnel analytics
+   *before* instrumenting: session cookies are consent-exempt, funnel instrumentation generally is
+   not.
+5. **Restaurant identity.** A real partner needs written authorisation covering name, marks, menu
+   text, photographs **and** publication of a comparison over their prices. A fictional one needs a
+   name-clearance check and a label on the storefront itself, because that URL gets screenshotted
+   out of context. business argues for a real Tours partner with consent — it turns the demo cost
+   into a gift to the first partner.
+6. **D3(a) generates no new obligations at all; D3(b) generates a whole set** (an anti-abuse control
+   set — the repo has none: `RateLimited` exists only as an error definition and there is no
+   captcha/throttle anywhere — plus retention, purpose limitation so demo numbers never reach a
+   prospection base, a real Art. 13 notice, and a minors question). **One condition attaches to
+   (a): the prefilled visitor fields must be non-editable**, or a visitor types their real address
+   and the demo quietly becomes a personal-data store, re-importing every (b) obligation.
+
+### 10.5 The modelling is heavier than the repo needs (architect)
+
+Three of the four modelling choices have a cheaper, already-precedented shape in the tree:
+
+- **No new aggregate, no new events, no new read model.** A process manager here is *not* an
+  aggregate (`specs/database/tables/process_managers.yaml`: PM state tables are private, unprojected,
+  unqueried), and PM-driven aggregate birth is already production doctrine — `specs/ordering/processmanager.yaml`
+  annotates one *"Birth of the Payment"*. The demo appends only existing event types with `mode: TEST`,
+  so **nothing new ever enters the immutable log** and there is no versioning story to write. Step 2 is
+  GAP ×3 (command, PM, screens), not ×4.
+- **`View_DemoWorld` is not a projection.** `specs/database/projection_views.yaml` states every read
+  model there is a *pure fold* over `domain_events`. A TTL and a "current hat" fold from nothing — the
+  hat would need a `HatChanged` event per tab click, which is the worst outcome available. The
+  precedent is `auth_sessions`: *"adapter/transport-owned — never event-sourced, never in api.yaml,
+  never projected"*. The ids belong in the PM state table; the hat needs zero server state.
+- **D5's reclamation mechanism is wrong, and the right one already ships.** A generic, spec-declared,
+  restart-safe stream-deletion engine exists (`crates/infrastructure/src/deletion.rs`, shipped as
+  `worker-erasure`, gated, bounded by the slowest projection checkpoint, receipts on a ledger stream);
+  only `Order` declares a `deletion:` block today. Demo reclamation is a **policy on that engine**, not
+  the unimplemented `$maxAge`. The one missing primitive is small: `DeletionTrigger` has no payload
+  predicate, and the DSL already has the shape one file over (`whenPayload` in `projection_views.yaml`).
+
+**Two drift findings**, both against ADR-0038: `RegisterRider` and `ImportCatalog` **cannot** carry
+`mode: TEST` as §3 step 2 says — ADR-0038 deliberately puts mode on Restaurant/Customer/Order/DeliveryJob
+only (*"a rider's test status follows the job"*), and a catalog's mode is derivable from its restaurant
+by identity. And `specs/services.yaml` still declares V0 as **one deployable, `expose: false`** — which
+D1(a) and D4(a) contradict directly.
+
+**One ubiquitous-language defect**, worth fixing whatever happens to the demo: `Mode` (LIVE/TEST) and
+`OrderAcceptanceMode` both surface as the field name `mode`, one of them on a projection column. One
+name, two meanings, in a repo whose own rule is *one name = one dedicated scalar*.
+
+### 10.6 The observability contracts we already have are unsatisfiable (observability)
+
+The night's "green gates, broken product" failure has an exact twin on the telemetry side, and it is
+checkable without a cluster:
+
+- **`orders_placed_total` — the one number that says a stranger paid us — has zero emission sites.**
+  It is declared in `specs/observability.yaml` and exists as a function in `crates/telemetry/src/meters.rs`,
+  called by nothing. A trigger on *"`orders_placed_total` == 0 over 24h while storefront views > 0"*
+  would have fired the day checkout went inert. **The question was pre-authored in the spec and the
+  answer was never wired.**
+- **`place-order` cannot be satisfied by any run.** Its `status_rules.success` requires the span
+  `pricing.compute`, which has zero call sites; its `business_rejected` rule keys on `command.validate`,
+  also zero. Every run is unclassifiable or a technical error, by construction.
+- **Nine of eleven contracts are entirely dark** — no `webhook.verify`, no `otp.verify`, no
+  `refund.request`, no `dispatch.resolve_strategy` anywhere in `crates/`.
+- **The gate that should catch this does not exist, and the code says it does.**
+  `crates/telemetry/src/contract.rs` states that a conformance test reads `specs/observability.yaml`
+  and asserts every required span has a constant. **That test file does not exist**, and the validator
+  checks only a contract's internal shape — never that a declared span or metric is emitted.
+
+The compiler-first fix is the same shape as everywhere else tonight: **generate** `contract.rs` and the
+span constructors from the spec, so a missing declared attribute is a compile error; generate one test
+per contract; and only then add a validator check for unused instruments as the cross-crate fallback.
+
+Also: the walk cannot be reconstructed as one thing. `correlation_id` defaults to each mutation's own
+message id, the inbound `traceparent` is parsed and never used to set an OTel parent (so every mutation
+starts a fresh trace root), and the one id that genuinely survives the three hats — `session_id`, already
+on the command journal and PM state — is on no span and in no contract.
+
+### 10.7 What the run does with this
+
+The restructuring in §10.1 is a real option space and it is **not** decided here. What is already
+acted on: the false DONEs are corrected (§2 C1–C3, step 5), the concerns list carries the three new
+blockers, and the register's demo rows are marked as not gating the current slice. What is
+deliberately NOT done: no issues re-filed, no priorities changed — that is the customer's, and
+holub's own charter forbids him taking it.
 
 ## Refs
 

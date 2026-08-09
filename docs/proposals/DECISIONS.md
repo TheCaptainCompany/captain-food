@@ -681,10 +681,28 @@ recorded as recommendations pending the veto window.
 | **D5** | Demo world lifetime | Fresh streams per visitor, never a reset — the Order projector is ONE checkpoint over `Order-`/`Payment-`/`DeliveryJob-`, so "replay the demo" resets every real customer's tracking screen. Reclamation is retention, and the `$maxAge` sweeper **does not exist**: demo data is unbounded (~375 MB/month at 500 runs/day) | team |
 | **D6** | Who drives the counterparties | The visitor wears all three hats in one walk, with labelled auto-accept as fallback | team |
 
-**Not a decision — a live defect the briefing surfaced**: the customer path is inert on `main`
-(checkout and tracking never hydrate; the tracking SSR renders the not-found hero for every order),
-and **nobody is told about a paid order** — no notification port exists. Neither is blocked on any
-row above; both are in §6 of the proposal as zero-console work.
+**Six more lenses were invited on the committed proposal the same night** (legal, business,
+graphql-architect, holub, observability, architect — the first briefing had four, chosen by
+coordinator taste, which the mob ADR bans; recorded as its first measurement). They did not refine
+the design, they **contested its place in the queue** — see §10 of the proposal. Consequences for
+this register:
+
+- **D1 and D2 are not independent** and must be answered together: two namespaces sharing one
+  database is not a supported configuration of this codebase (the projector takes no lock and
+  overwrites its checkpoint unconditionally; one projector is a true accumulator, so a re-fold
+  doubles a customer's credit balance).
+- **D3 is blocked** by a live read-authorization hole, not by anything in this proposal — recorded
+  with evidence on [#144 "Read-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/144).
+- **Two lenses independently say the demo should not be next**, and that the ~80% of its work which
+  is production-critical should be re-filed out from under a marketing epic. That re-filing is the
+  customer's, not the team's.
+
+**Not decisions — live defects the briefing surfaced**, none blocked on any row above: the customer
+path is inert on `main`; nobody is told about a paid order (no notification port — though the OVH
+SMS adapter already exists with only the auth hook calling it); the cart's total and the competitor
+comparison **never compute**; `orders`/`order`/`carts` apply no ownership filter; and
+`orders_placed_total` — the metric that says a stranger paid us — has zero emission sites, so the
+alert that would have caught the inert checkout could never have fired.
 
 ---
 
