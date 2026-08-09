@@ -1,6 +1,6 @@
 # PROP-20260809-021351 — The public demo: one continuous walk, on production's own pipeline
 
-- **Status**: Proposed
+- **Status**: Deferred (product owner, 2026-08-09 answer sheet — the demo is not next; the production-critical remainder is re-filed on its own. D1/D3/D4 answered on the way out so the design is complete when it returns; [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md))
 - **Date**: 2026-08-09
 - **Tracking issue**: [#410 "Epic: public try-before-committing demo — seeded test restaurant/customer/order/rider on the marketing site"](https://github.com/TheCaptainCompany/captain-food/issues/410)
 - **Realized by**: (pending)

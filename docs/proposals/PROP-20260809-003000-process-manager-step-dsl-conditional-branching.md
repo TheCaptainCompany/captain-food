@@ -1,6 +1,6 @@
 # PROP-20260809-003000 — Conditional branching in the process-manager step DSL: the saga branch becomes spec, not wrapper
 
-- **Status**: Proposed — this file IS the discussion surface the customer asked for ("Let's discuss",
+- **Status**: Approved (product owner, 2026-08-09 answer sheet — D1–D7 as recommended; [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md)) — this file IS the discussion surface the customer asked for ("Let's discuss",
   card 10 of the decision brief)
 - **Date**: 2026-08-09
 - **Tracking issue**: [#426 "Conditional branching in the process-manager step DSL: the saga branch becomes spec, not wrapper"](https://github.com/TheCaptainCompany/captain-food/issues/426)

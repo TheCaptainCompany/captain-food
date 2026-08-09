@@ -1,6 +1,33 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
+
+> ✅ **2026-08-09 (morning) — THE EIGHT-DECISION BRIEF IS ANSWERED; the demo is deferred and the
+> target is now production-with-test-data** ([ADR-20260809-050000](adr/ADR-20260809-050000-morning-brief-eight-decisions.md)).
+> The open-decision register went **21 → 8** in one sitting, by answering rather than appending.
+> **The demo epic is DEFERRED** and the ~80% of it that was production correctness wearing a
+> marketing label is **re-filed on its own** as [#429 "Production with test data: a test customer places a real order against a test restaurant, paid with Stripe test mode"](https://github.com/TheCaptainCompany/captain-food/issues/429). The replacement target, in the product owner's words:
+> *"test customers making test orders on test restaurants with test payment on stripe"* — on the
+> **production deployment**, not a staging rehearsal (D1 → nothing hosted yet; one environment, so
+> the two-namespaces-over-one-database contradiction never arises). Also decided: the named Uber
+> comparison **stays and its substantiation is funded**, with the restaurant's own numbers published
+> beside it (it must be COMPUTED first — the cart projector's `uber_comparison` is always `None` and
+> the total is `0`); the demo session is **pre-identified, no SMS** (still blocked by the unscoped
+> order reads on [#144](https://github.com/TheCaptainCompany/captain-food/issues/144)); **one
+> deployment picks Stripe keys per order mode** — safe while everything is test mode, and **due a
+> type-level form before any live key exists**; the neutral checkout-failure copy is **approved**,
+> under a standing principle of *"as precise as possible"*; the login-to-domain bridge lives in
+> **JWT claims**, with **per-person accounts for every rider and every member of restaurant staff**
+> (this unblocks [#415](https://github.com/TheCaptainCompany/captain-food/issues/415)); and the
+> step-DSL branching set **D1–D7 is confirmed as recommended** (PROP-20260809-003000 → `Approved`).
+>
+> **What stands between here and that target**, all recorded and none of it speculative: no Stripe
+> publishable key exists anywhere; `/checkout` carries no route params while both its resolvers take
+> required inputs; no customer bearer token exists in `crates/web` while the order reads are
+> CUSTOMER-guarded; `orders`/`order`/`carts` apply no ownership filter (fix ~80% written in a draft
+> PR parked since 26 July); the cart total never computes; and nobody is told when a paid order
+> arrives.
+>
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
 > 🚧 **2026-08-09 (night) — G5/G6 UNBLOCKED (not closed), G7 CLOSED: the customer path is

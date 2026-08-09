@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-08-09 (night)** · **21 open decisions** — §22 carries 8 (the five sweep rows, the Solida rebrand waiting on trademark, the avelo37 threshold, and the geocoding row), §23 carries 7 (the step-DSL branching set D1–D7, added 2026-08-09) and §24 carries 6 (the public-demo set D1–D6, added 2026-08-09; three of them customer-owned). **The count was stale at "7" for a day** while §23 doubled the queue — caught by two independent lens audits the same night. A register that miscounts its own depth is a broken throttle, so: whoever adds a row updates this number in the same commit, and the honest response to a growing count is to ANSWER or DELETE rows, never to append quietly. **The ten-decision brief is fully answered** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) + [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the last three closed 2026-08-08 — tips via the customer's voluntary-contribution funding model (HelloAsso « pari », cascade-pricing fallback, public cagnotte), erasure two-path confirmed, admin explicit act-as confirmed (supersedes ADR-0037). **The customer answered the ten-decision brief 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): seven decided — payout posture and external orders and promo funding as recommended; capture timing per service type (delivered/picked-up/in-advance-at-table); acceptance timeout resolved by release-not-refund; entity path association→SASU→SCIC-federation; radical transparency. The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
+Last reconciled: **2026-08-09 (morning)** · **8 open decisions** — all of them §22 (the five sweep rows, the Solida rebrand waiting on trademark, the avelo37 threshold, and the geocoding row). **§23 and §24 closed 2026-08-09** by the customer's eight-decision answer sheet ([ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md)): the step-DSL branching set D1–D7 confirmed as recommended, and the public demo **deferred** with its production-critical remainder re-filed on its own. The register went 21 → 8 in one sitting by ANSWERING rows — the intended way for it to shrink; whoever adds a row updates this number in the same commit. **The ten-decision brief is fully answered** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) + [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the last three closed 2026-08-08 — tips via the customer's voluntary-contribution funding model (HelloAsso « pari », cascade-pricing fallback, public cagnotte), erasure two-path confirmed, admin explicit act-as confirmed (supersedes ADR-0037). **The customer answered the ten-decision brief 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): seven decided — payout posture and external orders and promo funding as recommended; capture timing per service type (delivered/picked-up/in-advance-at-table); acceptance timeout resolved by release-not-refund; entity path association→SASU→SCIC-federation; radical transparency. The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
 
 > **Customer decisions: see [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) (ten decisions).**
 > Everything only the product owner can decide — the five-decision money posture, account-level
@@ -637,7 +637,12 @@ here instead of being improvised at realization.
 
 ---
 
-## 23. Process-manager step-DSL conditional branching — PROP-20260809-003000
+## 23. Process-manager step-DSL conditional branching — PROP-20260809-003000 — ✅ FULLY DECIDED 2026-08-09
+
+> **DECIDED 2026-08-09 (product owner, answer sheet):** *"Confirm all seven as recommended."*
+> D1–D7 stand as proposed; the proposal moves to `Approved`.
+> Record: [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md).
+
 
 Seven decisions from [PROP-20260809-003000 "Conditional branching in the process-manager step DSL:
 the saga branch becomes spec, not wrapper"](PROP-20260809-003000-process-manager-step-dsl-conditional-branching.md)
@@ -662,7 +667,32 @@ proposal, named in §2.1/§9 of PROP-20260809-003000.
 
 ---
 
-## 24. The public demo — PROP-20260809-021351
+## 24. The public demo — PROP-20260809-021351 — ⏸️ DEFERRED 2026-08-09
+
+> **DEFERRED 2026-08-09 (product owner, answer sheet).** The demo is not next; its
+> production-critical remainder is **re-filed on its own** rather than shipped under a marketing
+> epic — the outcome two lenses independently recommended. The three customer-owned rows were
+> answered on the way out, so the design is complete when it returns:
+>
+> - **D1 → (c) nothing hosted yet.** *"Same production environment with test data in it for testing
+>   production on production with test data."* One environment, so the D1⊕D2 contradiction (two
+>   namespaces over one database, with a checkpoint-overwriting projector and a true accumulator)
+>   never arises.
+> - **D3 → (a) pre-identified demo session**, no SMS OTP. Still blocked by the unscoped order reads
+>   on [#144](https://github.com/TheCaptainCompany/captain-food/issues/144), which is a live defect,
+>   not a decision.
+> - **D4 → (b) one deployment, Stripe keys chosen per order mode.** Safe while everything is test
+>   mode; **due a type-level form before any live key exists** (compiler-first,
+>   [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)).
+>
+> **D2, D5 and D6 lapse with the deferral** — except D2's substance (`mode` carried onto the
+> projection tables + a validator rule), which is production correctness and travels with the
+> re-filed work.
+>
+> The target that replaces this epic: **test customers placing test orders against test restaurants
+> with Stripe test payments, on the production deployment** — [#429 "Production with test data: a test customer places a real order against a test restaurant, paid with Stripe test mode"](https://github.com/TheCaptainCompany/captain-food/issues/429).
+> Record: [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md).
+
 
 Six decisions from [PROP-20260809-021351 "The public demo: one continuous walk, on production's own
 pipeline"](PROP-20260809-021351-public-demo-one-continuous-walk.md) (tracking
