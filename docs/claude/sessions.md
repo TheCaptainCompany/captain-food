@@ -255,6 +255,16 @@ every source file read in that session combined.
 - Always cap **`perPage`** (5–10).
 - When you need one issue's body, fetch that issue — do not search and read six.
 
+**An agent created mid-session is not immediately dispatchable (2026-08-09).** Writing
+`.claude/agents/<name>.md` and pushing it does NOT register the agent in the running session:
+`Agent(subagent_type: "beck")` failed with *"Agent type 'beck' not found"* minutes after the file
+was committed, then registered on its own a few minutes later. So a new lens is usable in the
+session that created it only after a delay, and cannot be relied on at all. Workaround that works
+immediately and costs nothing: dispatch `general-purpose` with the new agent's charter PASTED into
+the prompt ("You are **beck** … here is your charter, adopt it fully") — the lens behaves
+correctly, and the dispatch is honest about why. Plan roster changes so the first real use is a
+later dispatch, not the one that motivated writing the file.
+
 The MCP servers also disconnect and reconnect mid-session (observed four times in one session). Tool
 schemas must be re-fetched via `ToolSearch` after a reconnect; that is normal, not a fault, and it is
 not worth narrating to the user.
