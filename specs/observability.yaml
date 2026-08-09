@@ -925,7 +925,7 @@ sirene-sync:
 
 # =====================================================================
 # read-authorization — the per-instance read guard (#144, PROP-20260725-185140)
-# verified Principal -> ReadScope (bridge, once per request) -> ScopeMembership -> allow | deny
+# verified Principal -> ReadScope (claim resolution, once per request) -> ScopeMembership -> allow | deny
 # Binds the WHOLE read surface (`surface: graphql`), like command-acceptance binds the write surface:
 # every guarded read and every by-id object fetch flows through the same question.
 # =====================================================================
@@ -942,9 +942,10 @@ read-authorization:
     - { name: trace_id, source: "otel.trace_id", required: true }
 
   spans:
-    # The sub -> domain-id bridge. ONE per request, not one per check — if this span appears N times
-    # for a single request, the caching contract of PROP-20260725-185140 §3.3 has regressed and the
-    # thread is paying for the bridge per attachment.
+    # The claims bridge: Principal -> domain-id ReadScope, a PURE function of the token's verified
+    # claims since #433 (CARD-11 — no per-request lookup, no DB). ONE per request, not one per
+    # check — N appearances for a single request is a STRUCTURAL regression (scope resolved more
+    # than once), the one-per-request sentinel this span exists to keep.
     - name: "auth.read_scope"
       kind: INTERNAL
       required: true
@@ -971,9 +972,10 @@ read-authorization:
     # (see the span note: list denials are structurally invisible).
     - { name: "read_authorization_denied_total", type: counter, attributes: ["scope_type", "role"] }
     - { name: "read_authorization_checks_total", type: counter, attributes: ["scope_type", "role"] }
-    # bridge_resolved=false means an authenticated caller could not be mapped to a domain id — a
-    # missing Customer projection row. It denies (safe), but it is a DEFECT, not a policy
-    # outcome, and must never sit inside the ordinary denial count where it would look like noise.
+    # bridge_resolved=false means an authenticated caller's token carries no domain binding — a
+    # missing (or malformed, or pre-refresh stale) captain_* claim, NEVER a DB outage: resolution
+    # has no I/O since #433. It denies (safe), but it is a provisioning gap or staleness — never
+    # ordinary user denial — and must not sit inside the denial count where it would look like noise.
     - { name: "read_authorization_bridge_unresolved_total", type: counter, attributes: ["role"] }
     - { name: "read_authorization_check_ms", type: histogram, attributes: ["scope_type"] }
 

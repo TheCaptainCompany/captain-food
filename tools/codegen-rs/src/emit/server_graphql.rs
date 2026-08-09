@@ -632,7 +632,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // row (the declared PM-privacy exception); initiator-scoped — ADMIN, the checkout's
         // customer (JWT subject → Customer row), or the checkout's session.
         "paymentStatus" => Some(
-            "        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;\n        let Some(row) = pm\n            .by_order(input.order_id.into())\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(None);\n        };\n        let admin = matches!(\n            ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n            Some(crate::graphql::acl::RequestRole::Admin)\n        );\n        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n        let session_owned = session.is_some() && session == row.session_id.as_ref().map(|s| s.0);\n        let mut customer_owned = false;\n        if let (Some(auth_ref), Some(row_customer)) = (\n            ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()),\n            row.customer_id.as_ref(),\n        ) {\n            let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n            customer_owned = customers\n                .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))\n                .await\n                .map_err(|e| async_graphql::Error::new(e.to_string()))?\n                .is_some_and(|c| c.customer_id == *row_customer);\n        }\n        if !(admin || customer_owned || session_owned) {\n            return Ok(None);\n        }\n        Ok(Some(PaymentIntent {\n            payment_intent_id: row.payment_intent_id.into(),\n            client_secret: row.client_secret,\n            status: row.payment_status.into(),\n        }))",
+            "        let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;\n        let Some(row) = pm\n            .by_order(input.order_id.into())\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(None);\n        };\n        let admin = matches!(\n            ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n            Some(crate::graphql::acl::RequestRole::Admin)\n        );\n        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n        let session_owned = session.is_some() && session == row.session_id.as_ref().map(|s| s.0);\n        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n        let customer_owned = matches!(\n            (&scope, row.customer_id.as_ref()),\n            (application::queries::ReadScope::Customer(c), Some(row_customer)) if c == row_customer\n        );\n        if !(admin || customer_owned || session_owned) {\n            return Ok(None);\n        }\n        Ok(Some(PaymentIntent {\n            payment_intent_id: row.payment_intent_id.into(),\n            client_secret: row.client_secret,\n            status: row.payment_status.into(),\n        }))",
         ),
         // The two Customer-vertical queries resolve through the Customer identity read model: `me`
         // maps the verified session Principal's authRef (ADR-0047/0015) to its Customer row;
@@ -711,7 +711,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // row, like `me`); `restaurantReclamations` filters the queue by status/category (restaurant
         // narrowing is a recorded follow-up gap); `reclamation` is claim detail by id. Rows map 1:1.
         "myReclamations" => Some(
-            "        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {\n            return Ok(Vec::new());\n        };\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n        let Some(customer) = customers\n            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(Vec::new());\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let rows = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
+            "        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n        // \"Which customer am I\" is exactly what the claim answers -- no bridge row, no lookup.\n        let application::queries::ReadScope::Customer(customer_id) = scope else {\n            return Ok(Vec::new());\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let rows = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
         ),
         "restaurantReclamations" => Some(
             "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::ReclamationFilter {\n                status: i.status.map(Into::into),\n                category: i.category.map(Into::into),\n                overdue: i.overdue,\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
@@ -724,7 +724,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // the materialized CustomerCreditBalance projection table. Null for an anonymous caller or a
         // customer with no ledger yet.
         "customerCredit" => Some(
-            "        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {\n            return Ok(None);\n        };\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n        let Some(customer) = customers\n            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(None);\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;\n        let row = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(row.map(CustomerCredit::from))",
+            "        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n        // \"Which customer am I\" is exactly what the claim answers -- no bridge row, no lookup.\n        let application::queries::ReadScope::Customer(customer_id) = scope else {\n            return Ok(None);\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;\n        let row = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(row.map(CustomerCredit::from))",
         ),
         "prospectionPipeline" => Some(
             "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ProspectionReadRepository>>()?;\n        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::ProspectFilter {\n                min_score: i.min_score.map(|s| s.0 as i32),\n                status: i.status.map(Into::into),\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory\n        // (both rows are folded from the same Restaurant-stream events, so a match always exists).\n        let by_id: std::collections::HashMap<_, _> = restaurants\n            .list(application::queries::RestaurantFilter::default())\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n            .into_iter()\n            .map(|r| (r.restaurant_id.0, r))\n            .collect();\n        Ok(rows\n            .into_iter()\n            .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, r))))\n            .collect())",
@@ -1619,22 +1619,15 @@ pub(crate) fn wired_subscription_body(name: &str) -> Option<&'static str> {
             Some(crate::graphql::acl::RequestRole::Admin)
         );
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
-        // Resolve the caller's Customer identity ONCE at setup (same path as queries/paymentStatus).
-        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
-            .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.clone())
-        {
-            Some(auth_ref) => {
-                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
-                customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|c| c.customer_id)
-            }
-            None => None,
-        };
+        // The caller's Customer identity comes from the ReadScope resolved ONCE at connection
+        // init from the token's verified claims (#433, CARD-11) — the same identity source as
+        // queries/paymentStatus, so the checkout's order read and its payment stream can never
+        // disagree on who the customer is. No bridge row, no lookup.
+        let caller_customer: Option<domain::generated::scalars::CustomerId> =
+            match ctx.data_opt::<application::queries::ReadScope>() {
+                Some(application::queries::ReadScope::Customer(id)) => Some(*id),
+                _ => None,
+            };
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars as ds;

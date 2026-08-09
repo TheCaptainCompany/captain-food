@@ -90,7 +90,6 @@ async fn sirene_drain(
 async fn graphql_handler(
     State(schema): State<CaptainSchema>,
     Extension(auth): Extension<Arc<AuthContext>>,
-    scopes: Option<Extension<crate::auth::ScopeResolver>>,
     Path(role_seg): Path<String>,
     headers: HeaderMap,
     req: GraphQLRequest,
@@ -115,16 +114,11 @@ async fn graphql_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid X-SESSION-ID (must be a UUID)").into_response(),
     };
     let trace = crate::graphql::session::trace_context(&headers);
-    // Per-instance authorization (#144): resolve the verified Principal to a ReadScope ONCE here,
-    // not per resolver and not per row. The bridge (auth `sub` -> domain id) is the only part that
-    // costs a lookup; every membership test downstream is a primary-key hit. Injected into the
-    // GraphQL context so the GENERATED resolvers can pass it into the read ports without any
-    // hand-written plumbing. Without a database the layered resolver has no bridge and every caller
-    // degrades to Public — no tenant rows. Fail closed by construction, not by a branch here.
-    let scope = match &scopes {
-        Some(Extension(r)) => r.resolve(&principal).await,
-        None => application::queries::ReadScope::Public,
-    };
+    // Per-instance authorization (#144/#433): resolve the verified Principal to a ReadScope ONCE
+    // here — a PURE function of the token's claims (CARD-11), no lookup, no dependency that could
+    // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
+    // read ports without hand-written plumbing; a missing claim fails closed inside read_scope.
+    let scope = crate::auth::resolve_read_scope(&principal);
     let resp: GraphQLResponse = schema
         .execute(
             req.into_inner().data(role).data(principal).data(session).data(trace).data(scope),
@@ -147,7 +141,6 @@ async fn graphql_handler(
 async fn graphql_get(
     State(schema): State<CaptainSchema>,
     Extension(auth): Extension<Arc<AuthContext>>,
-    scopes: Option<Extension<crate::auth::ScopeResolver>>,
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
@@ -172,7 +165,6 @@ async fn graphql_get(
         )
         .into_response();
     };
-    let resolver = scopes.map(|Extension(r)| r);
     upgrade.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |stream| async move {
         GraphQLWebSocket::new(stream, schema, protocol)
             .on_connection_init(move |payload| async move {
@@ -212,14 +204,10 @@ async fn graphql_get(
                 })?;
                 let mut data = async_graphql::Data::default();
                 data.insert(role);
-                // The socket resolves its ReadScope ONCE at connection init, from the same bridge
-                // the POST path uses — a subscription must not widen what a query would refuse
-                // (#144). No resolver layered (no database) -> Public -> no tenant rows.
-                let scope = match &resolver {
-                    Some(r) => r.resolve(&principal).await,
-                    None => application::queries::ReadScope::Public,
-                };
-                data.insert(scope);
+                // The socket resolves its ReadScope ONCE at connection init, from the same pure
+                // claims function the POST path uses — a subscription must not widen what a query
+                // would refuse (#144/#433).
+                data.insert(crate::auth::resolve_read_scope(&principal));
                 data.insert(principal);
                 // A malformed session id rejects the connection (fail-visible, like a bad token).
                 let session = crate::graphql::session::session_header(&headers)

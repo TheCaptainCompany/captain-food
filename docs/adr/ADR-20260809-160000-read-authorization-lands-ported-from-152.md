@@ -125,3 +125,46 @@ INCOMPLETE: `gql()` discards the HTTP status, so a transport failure collapses t
 passes both jq checks (`has("errors")` → false, `.data.order` → null via jq null-chaining). The
 assertion must also require `has("data")` (or read `gql_raw`'s status line) — a `tools/**` change,
 so it rides the #432 claim flow rather than a docs push.
+
+## Addendum 2 — product-owner correction, same day (#433): the JWT carries ALL the domain ids
+
+*"It's not the principal id we have to use in scope membership but the customer_id, the
+restaurant_id, the rider_id"* — *"This information is provided in the jwt."* The ScopeMembership
+table already stored the domain ids; what this corrected was the EDGE. Decision 2 above is
+**superseded**: CUSTOMER no longer bridges through `by_auth_ref`, and the rider `sub`-parse
+placeholder is dead. Realized by
+[#433](https://github.com/TheCaptainCompany/captain-food/issues/433) /
+[PR #434](https://github.com/TheCaptainCompany/captain-food/pull/434), mobbed (ten lenses):
+
+- `read_scope` is a PURE function of the verified claims (`captain_customer_id` /
+  `captain_rider_id` join the two restaurant claims); a missing or malformed claim fails closed to
+  Public, and `sub` is never an identity (pinned with distinct-uuid tests, seen RED under a planted
+  sub-fallback). `ScopeResolver` is deleted — resolution has no dependency that could be missing,
+  and the Friday-peak auth path no longer shares fate with the database (dba lens).
+- The four generated resolvers that still AUTHORIZED via `by_auth_ref` — `paymentStatus`,
+  `paymentStatusChanged`, `myReclamations`, `customerCredit` (graphql + architect lenses) — read
+  the same claim-derived ReadScope, so a customer's order read and their payment stream can never
+  disagree on identity (the post-payment split-brain spinner).
+- **Precisely scoped deletion claim**: `by_auth_ref` REMAINS the customer identity mechanism at the
+  write-side seams (the mailbox `resolve_actor`, the generated mutation edge bridges — envelope
+  territory) and `myDeliveries` keeps its own rider `sub`-parse until #415 mints the rider claim —
+  both recorded on #432/#415, not silently overclaimed.
+- **BLOCKING precondition on the #429 customer-bearer item** (business + ux + farley lenses,
+  independently): the product's `verifyPhone` must stamp `captain_customer_id` BEFORE the client's
+  token is issued (or force one refresh in the success path) — otherwise the FIRST paid session is
+  the one denied its tracking screen. The identity-port seam is not clean today (no admin
+  capability, a new server-held secret, an ordering design decision), so minting is that item's
+  work, not this one's.
+- **Erasure obligation** (legal + dba lenses): Supabase `app_metadata` is now a storage location
+  for domain ids, and a claim OUTLIVES erasure until token expiry — where the old lookup
+  fail-closed for free. The #194 erasure sequence must scrub `app_metadata` (or delete the auth
+  user) AND revoke refresh tokens; recorded on #194. §6.4 claim staleness now covers
+  customers/riders (only transition: null → set at mint).
+- prod-smoke upgraded to the claims it can mint itself: the L4 order poll is the customer-POSITIVE
+  production proof (token-decode asserts the claim per run — an unconditional stamp BEFORE link
+  generation, both keys in the PUT, per beck/farley), and the negative probe is a BRIDGED stranger
+  (the membership EXISTS path), outage-honest (`has("data")` — a `{}` transport body fails the
+  proof).
+- Observability contract comments corrected (span semantics unchanged, names kept): `bridge_
+  resolved=false` now reads as "missing/stale claim", never "missing projection row" — the
+  on-call rabbit hole the old text would have opened.
