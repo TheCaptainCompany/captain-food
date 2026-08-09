@@ -41,6 +41,18 @@ impl TrackingState {
         Self { order_id, order: None }
     }
 
+    /// Build from an already-RESOLVED render context — the screen's own declared `order.byId`
+    /// requirement, resolved by whichever entry is rendering (SSR's `render_path_with`, or
+    /// `hydrate`'s fetch loop). Before #420 the only production call site built
+    /// `TrackingState::new(order_id)` unconditionally, so every confirmation page rendered the
+    /// not-found hero regardless of what the order was actually doing (PROP-20260809-021351 §2, G6).
+    ///
+    /// A null/absent read yields `order: None` — the honest not-found state, never a guess.
+    pub fn from_resolved(order_id: Uuid, data: &Map<String, Value>) -> Self {
+        let order = data.get("order").filter(|v| !v.is_null()).cloned();
+        Self { order_id, order }
+    }
+
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
     pub async fn load(&mut self, transport: &dyn Transport) -> Result<(), ResolverError> {
         let mut vars = Map::new();
@@ -204,12 +216,33 @@ pub async fn tip_order(
 
 use leptos::prelude::*;
 
+/// The status copy of one hero, resolved into the page's language.
+///
+/// The title always renders. The BODY only renders when every `{param}` the catalog entry declares
+/// could be filled: `order.status.accepted.body` is *"{restaurant} prépare votre commande."* and
+/// `order.status.preparing.body` needs `{minutes}` — the `order.byId` selection carries neither the
+/// restaurant's display name nor a countdown, so an un-interpolated `{restaurant}` would be shipped
+/// copy that reads like a bug to the one customer most likely to be anxious. A title-only hero is
+/// complete and true; a placeholder is neither. (The gap is a selection/DSL matter, reported on
+/// #420 rather than papered over here.)
+fn hero_copy(hero: &StatusHero, locale: &str) -> (String, Option<String>) {
+    let title = crate::i18n::resolve(hero.title_key, locale);
+    let body = crate::i18n::resolve(hero.body_key, locale);
+    let body = (!body.contains('{')).then_some(body);
+    (title, body)
+}
+
 /// The order tracking screen, rendered from the [`TrackingState`] fold — the spec's tree
 /// (`order_status_hero`, `eta_bar`, `order_items_summary`, `order_id_row`, `post_order_actions`)
-/// with the renderer's `data-c` tagging. Subscription wiring + interactive sheets attach on
-/// hydrate (split 4 routing); this tree is the SSR shape both builds share.
+/// with the renderer's `data-c` tagging. The same tree serves SSR and hydrate.
+///
+/// `locale` is a prop rather than a field of [`TrackingState`] because the state is what the
+/// transport says about the ORDER; the language is what the request says about the READER. Since
+/// #420 the hero renders the resolved SENTENCE (it used to emit `data-i18n` attributes on EMPTY
+/// elements — nothing anywhere turned those into words, so the page a customer landed on after
+/// paying was literally blank above the fold).
 #[component]
-pub fn OrderTrackingScreen(state: TrackingState) -> impl IntoView {
+pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoView {
     let order_id = state.order_id.to_string();
     let status = state.status().map(str::to_string);
     let hero = status.as_deref().and_then(status_hero);
@@ -229,19 +262,23 @@ pub fn OrderTrackingScreen(state: TrackingState) -> impl IntoView {
         .map(Vec::len)
         .unwrap_or(0);
 
+    let not_found = crate::i18n::resolve("order.not_found", &locale);
     view! {
         <main id="app" data-hydrate="order_tracking">
             {match hero {
-                Some(h) => view! {
-                    <section data-c="order_status_hero" data-icon=h.icon data-status=status.clone().unwrap_or_default()>
-                        <h1 data-i18n=h.title_key></h1>
-                        <p data-i18n=h.body_key></p>
-                    </section>
-                }.into_any(),
+                Some(h) => {
+                    let (title, body) = hero_copy(&h, &locale);
+                    view! {
+                        <section data-c="order_status_hero" data-icon=h.icon data-status=status.clone().unwrap_or_default()>
+                            <h1 data-i18n=h.title_key>{title}</h1>
+                            {body.map(|body| view! { <p data-i18n=h.body_key>{body}</p> })}
+                        </section>
+                    }.into_any()
+                }
                 // No order (loading / stranger / unknown id): the not-found state — same DOM slot.
                 None => view! {
                     <section data-c="order_status_hero" data-status="UNKNOWN">
-                        <h1 data-i18n="order.not_found"></h1>
+                        <h1 data-i18n="order.not_found">{not_found}</h1>
                     </section>
                 }.into_any(),
             }}
@@ -264,7 +301,9 @@ pub fn OrderTrackingScreen(state: TrackingState) -> impl IntoView {
 #[cfg(feature = "ssr")]
 pub fn render_tracking_html(state: TrackingState, lang: &str) -> String {
     let lang = crate::i18n::normalize_locale(lang).unwrap_or(crate::i18n::DEFAULT_LOCALE);
-    let body = OrderTrackingScreen(OrderTrackingScreenProps { state }).to_html();
+    // ONE source of truth for the language: the document's `lang` is also what the copy resolves in.
+    let body =
+        OrderTrackingScreen(OrderTrackingScreenProps { state, locale: lang.to_string() }).to_html();
     crate::renderer::page_html("Your order - Captain.Food", lang, &body)
 }
 
@@ -365,6 +404,55 @@ mod tests {
         for i in 0..3 {
             assert!(fake.call(i).1["metadata"]["messageId"].is_string());
         }
+    }
+
+    /// #420: the confirmation page is built from the resolved `order.byId`, not from `None`.
+    #[test]
+    fn from_resolved_takes_the_order_the_page_read_and_nothing_else() {
+        let id = Uuid::now_v7();
+        let mut data = Map::new();
+        data.insert("order".into(), order("ACCEPTED", "2026-08-09T19:30:00Z"));
+        assert_eq!(TrackingState::from_resolved(id, &data).status(), Some("ACCEPTED"));
+
+        // A null read (stranger / unknown id / a transport that may not see this order) is the
+        // honest not-found state — never an existence oracle, never a guessed status.
+        data.insert("order".into(), Value::Null);
+        assert_eq!(TrackingState::from_resolved(id, &data).order, None);
+        assert_eq!(TrackingState::from_resolved(id, &Map::new()).order, None);
+        assert_eq!(TrackingState::from_resolved(id, &Map::new()).order_id, id);
+    }
+
+    /// #420: the hero renders WORDS. It used to emit `data-i18n` on empty elements and nothing
+    /// anywhere turned those into text, so the page a customer landed on after paying was blank
+    /// above the fold. The body is withheld rather than shipped with an unfilled `{param}`.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn the_status_hero_renders_a_sentence_in_both_languages() {
+        for (locale, title, not_found) in [
+            ("fr", "Commande acceptée", "Commande introuvable"),
+            ("en", "Order accepted", "Order not found"),
+        ] {
+            let mut state = TrackingState::new(Uuid::now_v7());
+            state.apply(&SubscriptionEvent::Next(order("ACCEPTED", "2026-08-09T19:30:00Z")));
+            let html = render_tracking_html(state, locale);
+            assert!(html.contains(title), "{locale}: {html}");
+            assert!(!html.contains("[order.status."), "no `[key]` marker: {html}");
+            // `order.status.accepted.body` is "{restaurant} prépare votre commande." and the
+            // order.byId selection carries no restaurant name — so the body is omitted, not shipped
+            // with a visible placeholder.
+            assert!(!html.contains("{restaurant}"), "no unfilled param reaches a customer: {html}");
+
+            let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), locale);
+            assert!(html.contains(not_found), "{locale}: {html}");
+            assert!(!html.contains("[order.not_found]"), "{html}");
+        }
+
+        // A status whose copy needs nothing renders its body in full.
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(order("DELIVERED", "2026-08-09T20:10:00Z")));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains("Livré !"), "{html}");
+        assert!(html.contains("Bon appétit."), "a param-free body renders: {html}");
     }
 
     #[cfg(feature = "ssr")]

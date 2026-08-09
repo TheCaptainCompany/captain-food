@@ -102,7 +102,7 @@ impl PaymentIntent {
     /// OPEN). This is what drives the checkout screen's `payment_failed_state`
     /// (specs/screens/restaurant_frontoffice.yaml, #424 quick win 2).
     pub fn is_failed(&self) -> bool {
-        self.status.as_deref() == Some("FAILED")
+        self.status.as_deref() == Some(FAILED_PAYMENT_STATUS)
     }
 }
 
@@ -262,6 +262,67 @@ pub struct CheckoutViewState {
     pub locale: String,
 }
 
+impl CheckoutViewState {
+    /// Build from an already-RESOLVED render context — the screen's OWN declared resolvers
+    /// (`cart.current`, `me.profile`, `paymentStatus.byOrder`), resolved by whichever entry is
+    /// rendering. Before #420 the only production call site hardcoded `restaurant_name: ""`,
+    /// `cart_line_count: 0`, `formatted_total: ""` and `payment_failed: false`, so a customer at
+    /// the moment of paying saw an empty summary and the failure state was unreachable outside a
+    /// unit test (PROP-20260809-021351 §2, G5).
+    ///
+    /// `restaurant_fallback` is the storefront's tenant label from the HOST — used only because the
+    /// `cart.current` selection carries `restaurantId` and no NAME. It is true (the customer is on
+    /// that restaurant's storefront) but it is a slug, not a display name; getting the real one
+    /// needs the checkout screen's `resolvers` (or the Cart type) to carry it, which is a DSL change
+    /// and is reported on #420 rather than smuggled in here.
+    pub fn from_resolved(
+        data: &Map<String, Value>,
+        restaurant_fallback: Option<&str>,
+        locale: &str,
+    ) -> Self {
+        let cart = data.get("cart").filter(|v| !v.is_null());
+        let str_at = |v: Option<&Value>, path: &[&str]| -> Option<String> {
+            let mut cur = v?;
+            for seg in path {
+                cur = cur.get(seg)?;
+            }
+            cur.as_str().map(str::to_string)
+        };
+        let restaurant_name = str_at(cart, &["restaurantName"])
+            .or_else(|| str_at(cart, &["restaurant", "displayName"]))
+            .or_else(|| restaurant_fallback.map(str::to_string))
+            .unwrap_or_default();
+        let cart_line_count = cart
+            .and_then(|c| c.get("lines"))
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+        let formatted_total = cart
+            .and_then(|c| c.get("totalAmount"))
+            .map(crate::renderer::format_currency)
+            .unwrap_or_default();
+        // Absent `serviceType` means DELIVERY: the delivery sections are the fuller form, and
+        // hiding an address field a customer needs is the costlier of the two mistakes.
+        let is_delivery = str_at(cart, &["serviceType"]).as_deref() != Some("COLLECTION");
+        // The terminal refusal, from the screen's own `paymentStatus.byOrder` requirement — the
+        // ONE thing on this page a customer must never be left guessing about.
+        let payment_failed = str_at(data.get("paymentStatus"), &["status"]).as_deref()
+            == Some(FAILED_PAYMENT_STATUS);
+        Self {
+            restaurant_name,
+            cart_line_count,
+            formatted_total,
+            is_delivery,
+            payment_failed,
+            locale: locale.to_string(),
+        }
+    }
+}
+
+/// The `paymentStatus.byOrder.status` token that means "terminally refused" — one spelling, shared
+/// by [`PaymentIntent::is_failed`] and [`CheckoutViewState::from_resolved`].
+const FAILED_PAYMENT_STATUS: &str = "FAILED";
+
 /// The checkout screen — the spec's component tree (`back_button_header`, the `checkout_section`s,
 /// the Stripe mount, `sticky_bottom_bar`) rendered with the same `data-c` tagging discipline as the
 /// SDUI renderer, so the DOM stays auditable against the spec even off-registry. Interactive form
@@ -298,11 +359,12 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
             // keeps the cart OPEN and places nothing on PaymentFailed, so "your cart is intact" is
             // a promise the system actually keeps. Both actions are client-kind `navigate`, carried
             // by the same `data-action`/`data-route` DOM contract the SDUI renderer emits.
-            // NOT REACHABLE YET, and the emitted markup is the reason it will be cheap when it is:
-            // production constructs this state with `payment_failed: false` (router.rs), and
-            // `renderer.rs` returns for `sdui: false` screens BEFORE installing the delegated
-            // listener — so today nothing sets the flag and nothing would drive the buttons.
-            // Wiring the checkout page controller is scoped on #420 alongside the tracking twin.
+            // REACHABLE since #420: production now derives `payment_failed` from the screen's own
+            // `paymentStatus.byOrder` requirement (`CheckoutViewState::from_resolved`) instead of
+            // hardcoding `false`, and `hydrate()` mounts this screen and installs the delegated
+            // listener, so both buttons dispatch. What is still missing to reach it END TO END is a
+            // browser-side Stripe publishable key (no such configuration key exists anywhere) —
+            // reported on #420 as the DSL change it needs, not worked around here.
             {state.payment_failed.then(|| view! {
                 <section data-c="conditional_section" id="payment_failed_state">
                     <p data-c="text" data-size="xl" data-weight="bold" data-color="error">
@@ -561,6 +623,58 @@ mod tests {
         let ok = render_checkout_html(view_state(true, false), "fr");
         assert!(!ok.contains("payment_failed_state"), "no failure state before a failure");
         assert!(!ok.contains("Paiement refusé"));
+    }
+
+    /// #420: the shell is built from the screen's DECLARED resolvers. The end-to-end proof is
+    /// `router::tests::the_checkout_shell_carries_the_cart_it_is_about_to_charge_for`; this pins the
+    /// degradation cases that call site cannot easily reach — and the one that matters most is the
+    /// LAST: an unresolvable payment status must never be read as a failure.
+    #[test]
+    fn the_shell_is_built_from_the_resolvers_and_degrades_without_lying() {
+        let populated = |status: Value| {
+            let mut data = Map::new();
+            data.insert(
+                "cart".into(),
+                json!({
+                    "lines": [{ "offerId": "o1" }, { "offerId": "o2" }, { "offerId": "o3" }],
+                    "totalAmount": { "amountCents": 1990, "currency": "EUR" },
+                    "serviceType": "COLLECTION",
+                }),
+            );
+            data.insert("paymentStatus".into(), status);
+            data
+        };
+
+        let state =
+            CheckoutViewState::from_resolved(&populated(Value::Null), Some("chez-marco"), "fr");
+        assert_eq!(state.cart_line_count, 3);
+        assert_eq!(state.formatted_total, "19,90 EUR");
+        assert_eq!(state.restaurant_name, "chez-marco", "the host's tenant label is the fallback");
+        assert!(!state.is_delivery, "COLLECTION hides the delivery sections");
+        assert!(!state.payment_failed);
+
+        // A name carried by the read WINS over the host fallback (forward-compatible with the
+        // selection gap reported on #420).
+        let mut named = populated(Value::Null);
+        named.insert("cart".into(), json!({ "restaurantName": "Chez Marco", "lines": [] }));
+        let state = CheckoutViewState::from_resolved(&named, Some("chez-marco"), "fr");
+        assert_eq!(state.restaurant_name, "Chez Marco");
+
+        // FAILED reaches the flag; every other status — including a read that could not be
+        // answered at all — leaves it false. Telling a customer their payment failed when we simply
+        // do not know is the one mistake on this page that costs more than saying nothing.
+        let failed = populated(json!({ "status": "FAILED" }));
+        assert!(CheckoutViewState::from_resolved(&failed, None, "fr").payment_failed);
+        for benign in [Value::Null, json!({ "status": "REQUIRES_CONFIRMATION" }), json!({})] {
+            let state = CheckoutViewState::from_resolved(&populated(benign.clone()), None, "fr");
+            assert!(!state.payment_failed, "{benign} must not read as a failure");
+        }
+        // Nothing resolved at all (an offline first paint): an empty shell, not a panic.
+        let empty = CheckoutViewState::from_resolved(&Map::new(), None, "fr");
+        assert_eq!(empty.cart_line_count, 0);
+        assert_eq!(empty.formatted_total, "");
+        assert!(empty.is_delivery, "absent serviceType assumes the fuller DELIVERY form");
+        assert!(!empty.payment_failed);
     }
 
     #[cfg(feature = "ssr")]

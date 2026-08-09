@@ -22,6 +22,7 @@ pub mod checkout;
 pub mod executor;
 pub mod generated;
 pub mod graphql;
+pub mod handwritten;
 pub mod i18n;
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
 pub mod interact;

@@ -172,14 +172,28 @@ pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
 #[cfg(feature = "ssr")]
 const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } from '/assets/web.js'; await init(); hydrate();</script>";
 
-/// Server-side render with LIVE data (#92): resolve the matched SDUI screen's
-/// `data_requirements` through the given transport (the BFF passes its in-process
-/// `SchemaTransport` — no loopback HTTP) before rendering, exactly like the hydrate path (route
-/// `:params` feed resolver args), so the initial HTML carries the real content the screens spec
-/// contracts (`rendering_strategy: SSR_first`). `requires_auth` screens skip the fetch — a
-/// document GET carries no credentials, so their session-scoped reads could only answer
-/// empty; they ship as shells and the client owns their data. A resolver error skips that one
-/// binding (the shell slot renders empty; hydrate retries) — SSR must degrade, never 500.
+/// Server-side render with LIVE data (#92): resolve the matched screen's `data_requirements`
+/// through the given transport (the BFF passes its in-process `SchemaTransport` — no loopback
+/// HTTP) before rendering, exactly like the hydrate path (route `:params` feed resolver args), so
+/// the initial HTML carries the real content the screens spec contracts
+/// (`rendering_strategy: SSR_first`). A resolver error or a null skips that one binding (the shell
+/// slot renders empty; hydrate retries) — SSR must degrade, never 500.
+///
+/// #420 removed BOTH conditions this fetch used to carry, and each removal is a separate decision:
+///
+///   * `screen.sdui` — never had a reason. `checkout` and `order_tracking` declare
+///     `data_requirements` like every other screen; skipping them is what shipped a checkout shell
+///     with an empty cart summary and a confirmation page stuck on the not-found hero for every
+///     order (PROP-20260809-021351 §2, G5/G6).
+///   * `!screen.requires_auth` — the stated reason was "a document GET carries no credentials, so
+///     their session-scoped reads could only answer empty". That is a fact about the TRANSPORT, not
+///     about the screen, and this function cannot know it: the caller supplies the transport. Let
+///     the transport answer. Today's in-process SSR transport is anonymous/PUBLIC, so a
+///     CUSTOMER-scoped read (`order`, `cart`) fails its role guard and the binding is skipped —
+///     byte-identical output to the old skip, one wasted role-guard rejection per requirement. The
+///     day the BFF's SSR transport carries the caller's identity, the confirmation page is right on
+///     first paint with no further change here. (The #107 OOM is unrelated: that was the DEFAULT
+///     host branch, which still serves through the data-less [`render_path`].)
 #[cfg(feature = "ssr")]
 pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     transport: &T,
@@ -191,18 +205,16 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
     let mut ctx = RenderContext::new(locale);
-    if matched.screen.sdui && !matched.screen.requires_auth {
-        for resolver in matched.screen.data_requirements {
-            let mut vars = serde_json::Map::new();
-            for (k, v) in matched.param_args(*resolver) {
-                vars.insert(k, v);
-            }
-            if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
-                ctx.insert_resolved(resolver.as_str(), value);
-            }
+    for resolver in matched.screen.data_requirements {
+        let mut vars = serde_json::Map::new();
+        for (k, v) in matched.param_args(*resolver) {
+            vars.insert(k, v);
+        }
+        if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
+            ctx.insert_resolved(resolver.as_str(), value);
         }
     }
-    Some(render_matched(&matched, surface, ctx, locale))
+    Some(render_matched(&matched, surface, ctx, host, locale))
 }
 
 /// Server-side render the page for `host` + `path` — the data-less entry (SSR SHELL only; the
@@ -213,46 +225,31 @@ pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
     use crate::renderer::RenderContext;
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
-    Some(render_matched(&matched, surface, RenderContext::new(locale), locale))
+    Some(render_matched(&matched, surface, RenderContext::new(locale), host, locale))
 }
 
 /// The shared tail of both entries: render the matched screen (SDUI tree + sheets, or the
 /// hand-written non-SDUI shells) and inject the hydrate boot script.
+///
+/// The hand-written branch dispatches on [`HandWrittenScreen`], whose variants are proved at
+/// COMPILE TIME to be exactly the `sdui: false` set (`handwritten.rs`) — so the old
+/// `_ => empty SDUI shell` fallback, which is what a new hand-written screen used to land in
+/// silently, no longer exists and cannot be reintroduced without failing the build.
 #[cfg(feature = "ssr")]
 fn render_matched(
     matched: &RouteMatch,
     surface: Surface,
     ctx: crate::renderer::RenderContext,
+    host: &str,
     locale: &str,
 ) -> String {
-    use crate::renderer::{render_screen_html, RenderContext};
-    let html = if matched.screen.sdui {
-        render_screen_html(matched.screen, surface.sheets(), ctx)
-    } else {
-        match matched.screen.id {
-            "checkout" => crate::checkout::render_checkout_html(
-                crate::checkout::CheckoutViewState {
-                    restaurant_name: String::new(),
-                    cart_line_count: 0,
-                    formatted_total: String::new(),
-                    is_delivery: true,
-                    // The data-less SSR shell: the payment outcome arrives with the page's own
-                    // paymentStatus read/subscription, never from the shell.
-                    payment_failed: false,
-                    locale: locale.to_string(),
-                },
-                locale,
-            ),
-            "order_tracking" => {
-                let order_id = matched
-                    .param("orderId")
-                    .and_then(|v| uuid::Uuid::parse_str(v).ok())
-                    .unwrap_or_else(uuid::Uuid::nil);
-                crate::tracking::render_tracking_html(crate::tracking::TrackingState::new(order_id), locale)
-            }
-            // A future sdui:false screen without a hand-written shell: an empty SDUI shell.
-            _ => render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale)),
+    use crate::handwritten::HandWrittenScreen;
+    use crate::renderer::render_screen_html;
+    let html = match HandWrittenScreen::of(matched.screen) {
+        Some(hand_written) => {
+            hand_written.render_html(matched, &ctx, Surface::slug_of(host), locale)
         }
+        None => render_screen_html(matched.screen, surface.sheets(), ctx),
     };
     html.replace("</body>", &format!("{HYDRATE_SCRIPT}</body>"))
 }
@@ -373,14 +370,20 @@ mod tests {
         assert!(fake.call(1).0.contains("$input: RestaurantsQueryInput!"));
         assert_eq!(fake.call(1).1["input"]["list"], json!("RECOMMENDED"));
 
-        // A requires_auth screen ships as a SHELL: zero server-side reads (no credentials on a
-        // document GET — its data is the client's).
-        let fake = FakeTransport::scripted(vec![]);
+        // A requires_auth screen ASKS its transport (since #420 — see `render_path_with`'s docs:
+        // whether a session-scoped read can be answered is the transport's fact, not the screen's)
+        // and DEGRADES to a shell when the answer is a refusal. Today's SSR transport is
+        // anonymous/PUBLIC, so this is what production sees: one role-guard rejection, and the
+        // client owns the data — byte-identical output to the old unconditional skip.
+        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Errors(
+            "Unauthorized: orders requires CUSTOMER".into(),
+        ))]);
         let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr")
             .await
             .expect("order history renders");
         assert!(html.contains("data-hydrate=\"order_history\""));
-        assert_eq!(fake.call_count(), 0, "requires_auth screens must not fetch server-side");
+        assert_eq!(fake.call_count(), 1, "the screen's declared read is attempted");
+        assert!(html.contains("data-empty=\"true\""), "a refused read degrades, never 500s: {html}");
     }
 
     /// #420 / PROP-20260809-021351 §2 (G6): the confirmation page is the ONE screen a customer who
