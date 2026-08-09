@@ -96,6 +96,12 @@ pub trait Transport: MaybeSync {
 /// server's ownership scoping for anonymous users depends on it — a request without the header is a
 /// different, session-less identity). The role is fixed at construction (role = path, ADR-0006): a
 /// client IS a role's client; talking to another role is a different client, not a per-call flag.
+///
+/// Customer identity (#437/#112): this transport NEVER builds an `Authorization` header — the
+/// signed-in customer's only credential is the httpOnly `captain_auth` cookie, which JS cannot
+/// read and the browser attaches to same-origin fetches on its own (the endpoint is the window
+/// origin on the browser path, so `fetch`'s default `same-origin` credentials mode sends it).
+/// Anonymous visitors simply have no cookie: same request shape, no Authorization key, ever.
 pub struct HttpTransport {
     endpoint: String,
     session: SessionId,

@@ -320,7 +320,13 @@ pub mod mount {
         vars.insert("orderId".into(), serde_json::json!(order_id));
         Connection::open(
             endpoint(&origin, role),
-            None, // the customer bearer token lands with staff/customer sign-in; PUBLIC pushes today
+            // None is CORRECT for the browser, signed-in or not (#437): the customer's only
+            // credential is the httpOnly `captain_auth` cookie (#112 — JS can never read it), and
+            // the browser sends it on the same-origin WS upgrade automatically; the server falls
+            // back to the upgrade headers when the init payload carries no token (`ws_auth_headers`).
+            // `Some(...)` is for header-incapable-but-token-holding clients (e.g. desktop), never
+            // the web storefront.
+            None,
             session,
             Rc::new({
                 let transport = Rc::clone(&transport);
