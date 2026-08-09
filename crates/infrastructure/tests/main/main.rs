@@ -12,9 +12,11 @@
 //! life of the returned witness and resets the schema from the REAL migration chain
 //! (`migrations/*.sql` via `include_str!`, one shared `reset_schema` replacing the ~20 divergent
 //! hand-copied DDL blocks the old files carried). An unlocked DB test is unspellable: there is no
-//! other pool constructor in this binary — do not add one. `--test-threads=1` is no longer load-
-//! bearing for THIS binary (the witness serializes on its own), but CI keeps it for the other
-//! DB-coupled crates' suites.
+//! other pool constructor in this binary — do not add one. The witness serializes test BODIES on
+//! its own, but `--test-threads=1` stays LOAD-BEARING locally too: tests that `tokio::spawn`
+//! long-running workers (mailbox_wake, mailbox_requeue, standalone_workers) only cancel them when
+//! the per-test runtime drops AFTER the gate is released, so at higher parallelism a prior test's
+//! worker can touch the database in that tail window while the next test resets the schema.
 
 mod common;
 

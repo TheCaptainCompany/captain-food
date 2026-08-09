@@ -74,6 +74,6 @@ async fn posture_read_is_fail_closed_by_cause() {
         "a missing row must resolve Unprovable"
     );
 
-    // Leave the table seeded for sibling suites (CI shares one database, #230).
+    // Seeding persistence beyond this test is moot since every TestDb::acquire resets the schema.
     sqlx::raw_sql(MIGRATION).execute(&pool).await.expect("re-seed");
 }

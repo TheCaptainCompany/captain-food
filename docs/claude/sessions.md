@@ -201,7 +201,7 @@ this plus dropping `incremental/`. **Post-#335 (2026-08-09) the biggest producer
 sweep's haul) are ONE `--test main` binary at ~70M, so a stale-hash day accumulates ~20× less
 there; the remaining large link products are other crates' suites and the `server` binaries. The
 consolidated suite pays instead a ~0.4 s/test schema reset (the witness replays the full
-41-migration chain per test): the 54-test infrastructure pass went 15 s → 37 s of pure execution,
+42-migration chain per test): the 54-test infrastructure pass went 15 s → 37 s of pure execution,
 bought back several times over by 26 fewer link steps per iteration.
 
 **After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
