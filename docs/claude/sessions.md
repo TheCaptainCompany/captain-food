@@ -254,6 +254,11 @@ every source file read in that session combined.
 - Always pass **`minimal_output: true`** unless you specifically need body text.
 - Always cap **`perPage`** (5–10).
 - When you need one issue's body, fetch that issue — do not search and read six.
+- **`minimal_output` does nothing for `actions_list` / `actions_get`.** A `list_workflow_runs` with
+  `perPage: 3` returned ~90k characters both with and without it — each run carries two full
+  `repository` objects plus the head commit message. The harness spills an oversized result to a file
+  under `tool-results/`; parse that with `python3 -c`, printing only `name/head_sha/status/conclusion`.
+  Do NOT `Read` it (single line, too long to chunk) and do not retry the call hoping for less.
 
 **An agent created mid-session is not immediately dispatchable (2026-08-09).** Writing
 `.claude/agents/<name>.md` and pushing it does NOT register the agent in the running session:
