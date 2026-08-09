@@ -3,6 +3,36 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-09. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-09 (night) — G5/G6/G7 CLOSED: the customer path is no longer inert
+> ([#420 "Customer delivery reassurance: tracking shows the rider path, checkout FAILED state, orphan binding fix (#348 slice 8)"](https://github.com/TheCaptainCompany/captain-food/issues/420),
+> the code-only half of PROP-20260809-021351 §6 item 1).** `hydrate()` no longer returns above the
+> crate's only `mount_to_body`: checkout and order_tracking MOUNT, install the delegated action
+> layer, resolve their declared `data_requirements`, and tracking folds `orderStatusChanged` with a
+> pull re-sync on every (re)connect. `render_path_with` resolves `data_requirements` for EVERY
+> matched screen — the `sdui` conjunct never had a reason, and the `requires_auth` one was a fact
+> about the TRANSPORT (which the renderer cannot know), so it now asks and lets a refusal degrade the
+> binding exactly as before. The checkout shell is built from `cart.current`/`me.profile`/
+> `paymentStatus.byOrder` instead of `""`/`0`/`""`/`false`, and tracking from `order.byId` instead of
+> `TrackingState::new(id)`; the status hero renders the resolved SENTENCE (it used to emit `data-i18n`
+> on EMPTY elements, so the page a customer landed on after paying was blank above the fold).
+> **G7, in the EMITTER**: `orderStatusChanged` filtered only `Order-<id>` AND deduped on
+> `OrderStatus`, so the #424 delivery mirror was swallowed twice over; it now also matches THIS
+> order's delivery job (bound lazily via `DeliveryReadRepository::by_order`, so a foreign envelope
+> costs nothing once bound) and dedupes on the row's own `updated_at` fold clock.
+> **The gate hole is closed COMPILER-FIRST** (ADR-20260803-234035): `crates/web/src/handwritten.rs`
+> carries a closed `HandWrittenScreen` enum, exhaustive dispatch with no `_` arm on either entry, and
+> two `const` proofs walking the generated screen tables at COMPILE TIME in both directions — a new
+> `sdui: false` screen without a mount is now `E0080`, not a page that silently renders nothing.
+> `every_sdui_screen_of_every_surface_renders` → `every_screen_of_every_surface_renders`, skip
+> removed. Both named tests seen RED first (`left: 0` reads; `Elapsed(())` on the delivery hop).
+> Gates: `make rust` green, 0 errors, warning histogram **37 → 37, same kinds**.
+> **Still open on this path, each needing a DSL change and reported on #420**: no Stripe
+> **publishable** key exists anywhere (`specs/payments/configuration.yaml`), so the browser still
+> mounts no payment element and `place_order` cannot be pressed end to end; `cart.current` carries no
+> restaurant NAME (the shell falls back to the host's tenant slug); and the `order.byId` selection
+> carries no restaurant name either, so the status hero's BODY copy is withheld rather than shipped
+> with an unfilled `{restaurant}`.
+>
 > 🔴 **2026-08-09 (night) — THE CUSTOMER PATH IS INERT ON `main`, and a paid order tells nobody.**
 > Four lenses briefed in parallel on [#410 "Epic: public try-before-committing demo"](https://github.com/TheCaptainCompany/captain-food/issues/410)
 > (farley lead · ux-designer · beck · dba) converged independently on the same root cause, recorded
