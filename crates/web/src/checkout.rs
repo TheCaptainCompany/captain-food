@@ -297,8 +297,12 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
             // `payment_failed_state` (spec: screens/restaurant_frontoffice.yaml#checkout). The saga
             // keeps the cart OPEN and places nothing on PaymentFailed, so "your cart is intact" is
             // a promise the system actually keeps. Both actions are client-kind `navigate`, carried
-            // by the same `data-action`/`data-route` DOM contract the SDUI renderer emits, so the
-            // one delegated listener in interact.rs drives them with no page-specific JS.
+            // by the same `data-action`/`data-route` DOM contract the SDUI renderer emits.
+            // NOT REACHABLE YET, and the emitted markup is the reason it will be cheap when it is:
+            // production constructs this state with `payment_failed: false` (router.rs), and
+            // `renderer.rs` returns for `sdui: false` screens BEFORE installing the delegated
+            // listener — so today nothing sets the flag and nothing would drive the buttons.
+            // Wiring the checkout page controller is scoped on #420 alongside the tracking twin.
             {state.payment_failed.then(|| view! {
                 <section data-c="conditional_section" id="payment_failed_state">
                     <p data-c="text" data-size="xl" data-weight="bold" data-color="error">
@@ -542,7 +546,8 @@ mod tests {
             !html.contains("[checkout.payment_failed"),
             "no `[key]` fallback marker — every key resolved against the generated catalog: {html}"
         );
-        // Both controls are wired, not decorative: the delegated listener navigates on these.
+        // Both controls carry the DOM contract the delegated listener navigates on — the markup is
+        // ready; the listener is not installed for this screen yet (see the render comment, #420).
         assert!(html.contains("id=\"retry_payment_btn\""));
         assert!(html.contains("data-route=\"/checkout\""));
         assert!(html.contains("id=\"back_to_cart_btn\""));
