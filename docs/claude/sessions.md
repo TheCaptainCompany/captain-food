@@ -846,3 +846,42 @@ proposal cost one wall-clock stretch and caught a security defect. So the recove
 arrives after the proposal has shaped everyone's thinking, and one dispatch was already running
 against a scope that turned out to be wrong. Invite first. If cost forces a subset, the subset must
 include the lens most likely to say the work should not happen.
+
+## 17. The container can restart mid-dispatch — put the handoff in the PR, not in the session
+
+The remote container restarted while an executor was working. **In-process subagents do not survive
+it** — `ListAgents` returns nothing, there is no reconnect — and neither does anything the
+coordinator was holding in context about what the dispatch had done so far.
+
+What survived was everything *pushed*, and recovery took three GitHub calls (list branches, list
+commits, read the PR) because the executor had followed the existing rules: open the draft PR
+**before** any code, commit at phase boundaries. Its PR body already carried the full state — what
+was done, what was deliberately NOT done and why, the re-measured validator histogram, and two
+adjacent findings for someone else. Nothing had to be reconstructed or redone.
+
+**The rule this earns, one step past "commit hourly": the PR body is the supervision state, not the
+session transcript.** Write the "what is true right now / what is deliberately not done" section
+into the PR *as you go*. A coordinator that keeps that state only in context loses it; an executor
+that saves its report for the final message loses the whole run when the container recycles.
+
+**Corollary**: after any unexplained gap, verify agent liveness before assuming a dispatch is still
+running. A silent agent and a dead agent are identical from inside the session, and the difference
+is one `ListAgents` call.
+
+### The disk cost of a parallel mob review, and what to reclaim first
+
+A three-lens review of one branch is three worktrees each running `make rust` — three full `target`
+trees. That filled the session allowance (99%, `0MB free`), and the failure mode is the one §2
+describes: writes fail while the numbers still look fine. Three things worth knowing:
+
+- **`CLAUDE_CODE_TMPDIR` is the escape hatch when even tool stdout cannot be written** — export it
+  inline in the same command (shell state does not persist between calls), or every command fails
+  before it runs.
+- **A dead agent's worktree is the first thing to reclaim, and it is free**: check
+  `git status --porcelain` and `git log -1` against the pushed head; clean at the remote sha means
+  nothing to lose. Here that was 8.8G — more than the whole review needed, and cheaper than
+  deleting `target/debug`, which costs a rebuild.
+- **`git worktree add <abs-path>` from a reset cwd can land the tree INSIDE the repo.** It did here,
+  creating `captain-food/cad2-wt` — a worktree nested in its own repo, showing up as an untracked
+  directory one `git add -A` away from being committed. Verify with `git worktree list` after adding,
+  and remove with `git worktree remove --force` rather than `rm -rf`.
