@@ -37,6 +37,9 @@ pub mod span {
     pub const AUTH_READ_SCOPE: &str = "auth.read_scope";
     /// INTERNAL — one discrete membership check (a by-id read or the subscription guard, #144).
     pub const AUTH_SCOPE_MEMBERSHIP: &str = "auth.scope_membership";
+    /// CLIENT — the customer claim stamp onto the auth provider's user (`customer-identification`
+    /// contract, #437): admin GET+PUT inside the identity ACL, `business.result` stamped | failed.
+    pub const CLAIMS_STAMP: &str = "claims.stamp";
 }
 
 /// Attribute keys. All business context is `business.*` per `docs/claude/observability.md`; the two
@@ -99,6 +102,11 @@ pub mod metric {
     /// BAM gauge: projection lag on the ACL index — while it lags, a just-placed order's own
     /// customer is DENIED their order (`read-authorization` business_metrics).
     pub const SCOPE_MEMBERSHIP_LAG_POSITIONS: &str = "scope_membership_lag_positions";
+    /// `customer-identification` contract (#437): a claim stamp failed — a DEFECT counter (the
+    /// read_authorization_bridge_unresolved_total pattern), attribute `reason` (not_configured |
+    /// claim_conflict | provider_error). Each one is a customer whose login silently stayed
+    /// anonymous; alert on any sustained non-zero rate.
+    pub const CUSTOMER_CLAIM_STAMP_FAILED_TOTAL: &str = "customer_claim_stamp_failed_total";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

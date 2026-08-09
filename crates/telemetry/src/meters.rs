@@ -212,6 +212,26 @@ pub mod read_authorization {
     }
 }
 
+/// Technical metrics for the `customer-identification` contract (#437).
+pub mod customer_identification {
+    use super::*;
+
+    fn stamp_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CUSTOMER_CLAIM_STAMP_FAILED_TOTAL).build())
+    }
+
+    /// A claim stamp failed (`customer_claim_stamp_failed_total{reason}`) — a DEFECT counter, the
+    /// `read_authorization::bridge_unresolved` pattern: never ordinary user error, each one a
+    /// customer whose login silently stayed anonymous (verification stood, nothing was parked).
+    /// `reason` is bounded: not_configured | claim_conflict | provider_error — `claim_conflict`
+    /// stays distinguishable because it is a data defect to INVESTIGATE (an auth user already
+    /// bound to a different customer), never retried (mob verdict, #437).
+    pub fn claim_stamp_failed(reason: &str) {
+        stamp_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Recording against the global no-op provider (no `init`) must not panic. This is the state of
@@ -229,5 +249,6 @@ mod tests {
         super::read_authorization::checked("ORDER", "CUSTOMER", false, 1.5);
         super::read_authorization::bridge_unresolved("CUSTOMER");
         super::read_authorization::lag_positions(0);
+        super::customer_identification::claim_stamp_failed("not_configured");
     }
 }

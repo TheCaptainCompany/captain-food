@@ -20,9 +20,17 @@ use application::generated::services::{
     IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
-use domain::generated::scalars::{EmailAddress, ExternalReference};
+use domain::generated::scalars::{CustomerId, EmailAddress, ExternalReference};
 use domain::shared::errors::DomainError;
 use serde_json::{json, Value};
+use tracing::Instrument as _;
+
+/// Admin-call HTTP timeout (#437, DBA concern): the claim stamp runs INSIDE the VerifyPhone
+/// mailbox delivery, so its worst case (GET + PUT = 2 x 5s = 10s) must stay WELL below the
+/// mailbox lease TTL (`MAILBOX_LEASE_SECONDS`, default 30s — `actor_runtime::worker`), or a hung
+/// provider call would let the lane lease lapse mid-delivery and stall the customer's whole lane
+/// (head-of-line). The anon OTP calls keep the client default; only the admin calls are bounded.
+const ADMIN_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Fail-closed [`IdentityService`]: sends error ("not configured"), verifications reject with the
 /// canonical typed rejections — so the identity flows reject cleanly until the real Supabase ACL
@@ -109,6 +117,10 @@ impl IdentityService for FailClosedIdentityService {
 pub struct SupabaseIdentityService {
     base_url: String,
     apikey: String,
+    /// The Supabase SECRET (service-role) key — authorizes ONLY the admin `app_metadata` stamp
+    /// (`stamp_customer_claim`, #437). `None` is a legal, boot-safe state (farley verdict): the
+    /// anon OTP flows keep working and stamping fails CLOSED with `not_configured`.
+    admin_key: Option<String>,
     http: reqwest::Client,
 }
 
@@ -120,6 +132,9 @@ pub struct SupabaseIdentityService {
 struct SupabaseEnv {
     url: Option<String>,
     publishable_key: Option<String>,
+    /// `SUPABASE_SECRET_KEY` — OPTIONAL: its absence must never fail construction (and so never
+    /// boot); it only gates the admin claim stamp closed (#437).
+    secret_key: Option<String>,
 }
 
 impl SupabaseIdentityService {
@@ -138,19 +153,84 @@ impl SupabaseIdentityService {
         Self::from_parts(SupabaseEnv {
             url: var("SUPABASE_URL"),
             publishable_key: var("SUPABASE_PUBLISHABLE_KEY"),
+            secret_key: var("SUPABASE_SECRET_KEY"),
         })
     }
 
-    /// The pure gating core of [`Self::from_env`]: both parts required (absent or empty ⇒
-    /// `None`), trailing slash trimmed, no environment access.
+    /// The pure gating core of [`Self::from_env`]: url + publishable key required (absent or
+    /// empty ⇒ `None`), trailing slash trimmed, no environment access. The secret key is
+    /// OPTIONAL — empty is unset, and unset only fails the claim stamp closed, never construction.
     fn from_parts(parts: SupabaseEnv) -> Option<Self> {
         let base_url = parts.url.filter(|s| !s.is_empty())?;
         let apikey = parts.publishable_key.filter(|s| !s.is_empty())?;
         Some(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             apikey,
+            admin_key: parts.secret_key.filter(|s| !s.is_empty()),
             http: reqwest::Client::new(),
         })
+    }
+
+    /// The claim-stamp core (#437): GET the auth user's current `app_metadata` (the
+    /// idempotence/conflict decision PRECEDES any write — the create_if_absent lesson), then PUT
+    /// both claims via [`stamp_put_body`]. Redelivery-idempotent: already-equal → no-op Ok;
+    /// DIFFERENT existing id → [`StampFailure::ClaimConflict`], never an overwrite.
+    async fn stamp_inner(&self, input: &IdentityStampCustomerClaimInput) -> Result<(), StampFailure> {
+        let Some(admin_key) = self.admin_key.as_deref() else {
+            return Err(StampFailure::NotConfigured);
+        };
+        let url = format!("{}/auth/v1/admin/users/{}", self.base_url, input.auth_ref.0);
+        let target = input.customer_id.0.to_string();
+
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .send()
+            .await
+            .map_err(|e| StampFailure::Provider(format!("admin get transport: {e}")))?;
+        let status = resp.status();
+        let user: Value = resp.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(StampFailure::Provider(format!("admin get {}: {user}", status.as_u16())));
+        }
+
+        let metadata = user.get("app_metadata").cloned().unwrap_or_else(|| json!({}));
+        match metadata.get("captain_customer_id").and_then(Value::as_str) {
+            Some(existing) if existing != target => {
+                return Err(StampFailure::ClaimConflict {
+                    auth_ref: input.auth_ref.0.clone(),
+                    existing: existing.to_string(),
+                    target,
+                });
+            }
+            // Both claims already in place → idempotent no-op (a redelivered VerifyPhone must
+            // not re-write). Same id but role missing = a half-stamped user: fall through and
+            // PUT both keys.
+            Some(_same) if metadata.get("captain_role").and_then(Value::as_str).is_some() => {
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        let resp = self
+            .http
+            .put(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .json(&stamp_put_body(&input.customer_id))
+            .send()
+            .await
+            .map_err(|e| StampFailure::Provider(format!("admin put transport: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            return Err(StampFailure::Provider(format!("admin put {}: {body}", status.as_u16())));
+        }
+        Ok(())
     }
 
     /// POST a JSON body to `/auth/v1/<path>` with the anon apikey; return the parsed JSON on 2xx,
@@ -214,6 +294,64 @@ fn str_field(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
+// ─── The customer claim stamp (#437, services.yaml identity.stamp_customer_claim) ───────────────
+
+/// Why a claim stamp failed — each variant is one bounded `reason` label of
+/// `customer_claim_stamp_failed_total` (contract `customer-identification`).
+#[derive(Debug)]
+enum StampFailure {
+    /// `SUPABASE_SECRET_KEY` absent: fail CLOSED, never pretend to have stamped (#437).
+    NotConfigured,
+    /// The auth user already carries a DIFFERENT `captain_customer_id` — a data defect to
+    /// INVESTIGATE, never an overwrite and never retried (architect verdict on #437: retrying
+    /// cannot fix a wrong binding, it can only hammer it).
+    ClaimConflict { auth_ref: String, existing: String, target: String },
+    /// Transport failure, non-2xx admin response, or a malformed provider payload.
+    Provider(String),
+}
+
+impl StampFailure {
+    /// The bounded metric label (`reason`).
+    fn reason(&self) -> &'static str {
+        match self {
+            StampFailure::NotConfigured => "not_configured",
+            StampFailure::ClaimConflict { .. } => "claim_conflict",
+            StampFailure::Provider(_) => "provider_error",
+        }
+    }
+
+    fn into_domain_error(self) -> DomainError {
+        match self {
+            StampFailure::NotConfigured => not_configured("customer claim stamp"),
+            StampFailure::ClaimConflict { auth_ref, existing, target } => DomainError::Repository(
+                format!(
+                    "supabase claim stamp CONFLICT: auth user {auth_ref} already stamped with \
+                     captain_customer_id {existing}, refusing to overwrite with {target} \
+                     (investigate, never retry -- #437)"
+                ),
+            ),
+            StampFailure::Provider(detail) => {
+                DomainError::Repository(format!("supabase claim stamp: {detail}"))
+            }
+        }
+    }
+}
+
+/// The admin PUT body — PURE so a unit test pins the shallow-merge rule: GoTrue merges
+/// `app_metadata` SHALLOWLY (top-level keys replace, siblings survive), so BOTH claims travel in
+/// EVERY write — a single-key write would leave a token whose two claims came from different
+/// writes, and on a fresh user would mint a customer id with no role. `captain_role` is HARDCODED
+/// CUSTOMER: this operation exists for the paying customer's session, and a wrong-role stamp is
+/// made unspellable rather than validated (architect verdict on #437).
+fn stamp_put_body(customer_id: &CustomerId) -> Value {
+    json!({
+        "app_metadata": {
+            "captain_role": "CUSTOMER",
+            "captain_customer_id": customer_id.0.to_string(),
+        }
+    })
+}
+
 #[async_trait]
 impl IdentityService for SupabaseIdentityService {
     async fn send_phone_otp(
@@ -269,13 +407,22 @@ impl IdentityService for SupabaseIdentityService {
 
     async fn stamp_customer_claim(
         &self,
-        _input: IdentityStampCustomerClaimInput,
+        input: IdentityStampCustomerClaimInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        // TODO(#437 phase 2): admin PUT /auth/v1/admin/users/{authRef} writing captain_customer_id
-        // + captain_role together (shallow merge), gated on SUPABASE_SECRET_KEY — this anon-key
-        // adapter holds no admin credential, so it fails CLOSED until the admin client lands.
-        Err(not_configured("customer claim stamp"))
+        // claims.stamp (CLIENT, customer-identification contract): emitted HERE at the ACL
+        // boundary — it nests under the ambient verify-flow span, so it shares the run's
+        // trace/correlation. A failed stamp records business.result=failed AND OTel ERROR status
+        // (mob obligation: without ERROR a failed run is unclassifiable by the status rules),
+        // and increments the defect counter with its bounded reason. The application layer sees
+        // only the DomainError — it stays telemetry-SDK-free.
+        let span = telemetry::spans::claims_stamp();
+        let result = self.stamp_inner(&input).instrument(span.clone()).await;
+        telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
+        result.map_err(|failure| {
+            telemetry::meters::customer_identification::claim_stamp_failed(failure.reason());
+            failure.into_domain_error()
+        })
     }
 
     async fn send_email_magic_link(
@@ -334,16 +481,53 @@ mod tests {
         let both = SupabaseEnv {
             url: Some("https://proj.supabase.co/".into()),
             publishable_key: Some("anon-key".into()),
+            ..Default::default()
         };
         let svc = SupabaseIdentityService::from_parts(both).expect("both set");
         // Trailing slash trimmed so `{base}/auth/v1/...` has no double slash.
         assert_eq!(svc.base_url, "https://proj.supabase.co");
+        // The secret key is OPTIONAL (farley, #437): its absence never fails construction —
+        // and so never boot — it only fails the claim stamp closed.
+        assert!(svc.admin_key.is_none(), "no secret key -> constructed, stamp gated closed");
         // An empty value is UNSET (fail-closed), same as absent.
         let empty_key = SupabaseEnv {
             url: Some("https://proj.supabase.co/".into()),
             publishable_key: Some(String::new()),
+            ..Default::default()
         };
         assert!(SupabaseIdentityService::from_parts(empty_key).is_none(), "empty key is unset");
+        // Secret key present (and non-empty) -> the admin stamp is armed; empty = unset.
+        let with_admin = SupabaseEnv {
+            url: Some("https://proj.supabase.co/".into()),
+            publishable_key: Some("anon-key".into()),
+            secret_key: Some("sb_secret_x".into()),
+        };
+        let svc = SupabaseIdentityService::from_parts(with_admin).expect("constructed");
+        assert_eq!(svc.admin_key.as_deref(), Some("sb_secret_x"));
+        let empty_admin = SupabaseEnv {
+            url: Some("https://proj.supabase.co/".into()),
+            publishable_key: Some("anon-key".into()),
+            secret_key: Some(String::new()),
+        };
+        let svc = SupabaseIdentityService::from_parts(empty_admin).expect("constructed");
+        assert!(svc.admin_key.is_none(), "empty secret key is unset -> stamp fails closed");
+    }
+
+    /// The shallow-merge rule of services.yaml `identity.stamp_customer_claim`, pinned on the
+    /// PURE body builder: BOTH claims in every write, exactly two keys, role hardcoded CUSTOMER
+    /// (a wrong-role stamp is unspellable — architect verdict, #437).
+    #[test]
+    fn stamp_put_body_carries_both_claims_in_one_write() {
+        let body = stamp_put_body(&CustomerId(uuid::Uuid::from_u128(0x437)));
+        let md = body["app_metadata"].as_object().expect("app_metadata object");
+        assert_eq!(md["captain_role"], json!("CUSTOMER"));
+        assert_eq!(md["captain_customer_id"], json!("00000000-0000-0000-0000-000000000437"));
+        assert_eq!(
+            md.len(),
+            2,
+            "exactly the two claims -- GoTrue merges shallowly, so a missing sibling here means \
+             a claim silently dropped on some provider states"
+        );
     }
 
     #[test]
