@@ -318,7 +318,74 @@ fn order_row(order_id: uuid::Uuid, restaurant_id: uuid::Uuid, status: ds::OrderS
     }
 }
 
+/// The order↔delivery-job binding the `orderStatusChanged` subscription learns lazily (#420), as a
+/// stand-in: `None` = this order has no delivery job (pre-dispatch, or COLLECTION).
+#[derive(Clone)]
+struct InMemoryDeliveries(Arc<Mutex<Option<application::queries::DeliveryJobRow>>>);
+
+#[async_trait]
+impl application::queries::DeliveryReadRepository for InMemoryDeliveries {
+    async fn by_order(
+        &self,
+        order_id: ds::OrderId,
+    ) -> Result<Option<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(self.0.lock().unwrap().clone().filter(|job| job.order_id == order_id))
+    }
+    async fn for_rider(
+        &self,
+        _r: ds::RiderId,
+        _s: Option<ds::DeliveryStatus>,
+    ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(vec![])
+    }
+    async fn by_restaurant(
+        &self,
+        _r: ds::RestaurantId,
+        _s: Option<ds::DeliveryStatus>,
+    ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+
+fn delivery_job_row(
+    job_id: uuid::Uuid,
+    order_id: uuid::Uuid,
+    restaurant_id: uuid::Uuid,
+) -> application::queries::DeliveryJobRow {
+    application::queries::DeliveryJobRow {
+        delivery_job_id: ds::DeliveryJobId(job_id),
+        order_id: ds::OrderId(order_id),
+        restaurant_id: ds::RestaurantId(restaurant_id),
+        status: ds::DeliveryStatus::ASSIGNED,
+        provider: None,
+        rider_id: None,
+        courier: None,
+        partner_ref: None,
+        pickup_address: serde_json::json!({}),
+        dropoff_address: serde_json::json!({}),
+        estimated_pickup_at: None,
+        estimated_dropoff_at: None,
+        requested_at: chrono::Utc::now(),
+        picked_up_at: None,
+        delivered_at: None,
+    }
+}
+
 fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: EventBus) -> CaptainSchema {
+    schema_over_with_deliveries(
+        orders,
+        restaurants,
+        Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
+        bus,
+    )
+}
+
+fn schema_over_with_deliveries(
+    orders: InMemoryOrders,
+    restaurants: InMemoryRestaurants,
+    deliveries: Arc<dyn application::queries::DeliveryReadRepository>,
+    bus: EventBus,
+) -> CaptainSchema {
     build_schema(
         Some(ReadDeps {
             restaurants: Arc::new(restaurants),
@@ -331,7 +398,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             orders: Arc::new(orders),
             order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
-            deliveries: Arc::new(Empty),
+            deliveries,
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -429,6 +496,127 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
         .await
         .expect("completion in time");
     assert!(end.is_none(), "stream must complete after a terminal status");
+}
+
+/// #420 / PROP-20260809-021351 §2 (G7): the rider hops are appended to `DeliveryJob-<id>`, never to
+/// the Order stream, and they fold `delivery_status` / `courier` / `estimated_dropoff_at` onto the
+/// SAME OrderTracking row while leaving `status` alone (#424). The subscription used to fail this
+/// TWICE over — the filter matched only `Order-<id>`, and the dedupe compared `status` — so the
+/// confirmation page went silent at the exact moment the customer is watching hardest. Both gates
+/// are exercised here: the envelope arrives on the delivery stream AND the order status is
+/// unchanged across the push.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delivery_hop_reaches_the_confirmation_page_though_the_order_status_never_moves() {
+    let restaurant_id = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let job_id = uuid::Uuid::new_v4();
+    let correlation = uuid::Uuid::new_v4();
+    let store = Arc::new(Mutex::new(HashMap::from([(
+        order_id,
+        order_row(order_id, restaurant_id, ds::OrderStatus::ACCEPTED),
+    )])));
+    let deliveries =
+        InMemoryDeliveries(Arc::new(Mutex::new(Some(delivery_job_row(job_id, order_id, restaurant_id)))));
+    let bus = EventBus::default();
+    let schema = schema_over_with_deliveries(
+        InMemoryOrders(store.clone()),
+        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(deliveries),
+        bus.clone(),
+    );
+
+    let query = format!(
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status deliveryStatus }} }}"#
+    );
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Restaurant));
+
+    // Establish the subscriber's baseline on the order's own stream: ACCEPTED, no delivery yet.
+    spawn_publisher(bus.clone(), order_envelope(order_id, correlation, "OrderAccepted", 1));
+    let first = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("baseline push in time")
+        .expect("stream item");
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    let data = first.data.into_json().expect("json");
+    assert_eq!(data["orderStatusChanged"]["status"], serde_json::json!("ACCEPTED"));
+    assert_eq!(data["orderStatusChanged"]["deliveryStatus"], serde_json::Value::Null);
+
+    // The rider picks the order up. ONLY the delivery fields and the row's fold clock move — the
+    // OrderStatus stays ACCEPTED, which is precisely what the old dedupe keyed on.
+    {
+        let mut rows = store.lock().unwrap();
+        let row = rows.get_mut(&order_id).expect("row");
+        row.delivery_status = Some(ds::DeliveryStatus::PICKED_UP);
+        row.courier = Some(serde_json::json!({ "displayName": "Camille" }));
+        row.updated_at = chrono::Utc::now();
+    }
+    let delivery_envelope = AppendedEvent {
+        stream_name: format!("DeliveryJob-{job_id}"),
+        event_type: "DeliveryPickedUp".into(),
+        correlation_id: uuid::Uuid::new_v4(),
+        position: 2,
+    };
+    spawn_publisher(bus.clone(), delivery_envelope);
+
+    let second = tokio::time::timeout(Duration::from_secs(15), stream.next())
+        .await
+        .expect("the delivery movement must reach the screen")
+        .expect("stream item");
+    assert!(second.errors.is_empty(), "{:?}", second.errors);
+    let data = second.data.into_json().expect("json");
+    assert_eq!(data["orderStatusChanged"]["status"], serde_json::json!("ACCEPTED"), "status unchanged");
+    assert_eq!(
+        data["orderStatusChanged"]["deliveryStatus"],
+        serde_json::json!("PICKED_UP"),
+        "the hop the customer is waiting for"
+    );
+}
+
+/// The widened filter must NOT become "every delivery on the platform wakes every tracking page":
+/// an envelope on ANOTHER order's delivery job is ignored, and the binding is resolved through the
+/// order's own delivery job rather than by prefix alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_orders_delivery_job_never_reaches_this_subscriber() {
+    let restaurant_id = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let store = Arc::new(Mutex::new(HashMap::from([(
+        order_id,
+        order_row(order_id, restaurant_id, ds::OrderStatus::ACCEPTED),
+    )])));
+    // This order HAS a delivery job — just not the one the envelope names.
+    let mine = uuid::Uuid::new_v4();
+    let deliveries =
+        InMemoryDeliveries(Arc::new(Mutex::new(Some(delivery_job_row(mine, order_id, restaurant_id)))));
+    let bus = EventBus::default();
+    let schema = schema_over_with_deliveries(
+        InMemoryOrders(store.clone()),
+        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(deliveries),
+        bus.clone(),
+    );
+    let query = format!(
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status }} }}"#
+    );
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Restaurant));
+
+    // Someone else's rider moves, and this order's row moves too (the worst case for a filter that
+    // only looked at "did the row change?"): the subscriber must still hear nothing.
+    {
+        let mut rows = store.lock().unwrap();
+        let row = rows.get_mut(&order_id).expect("row");
+        row.updated_at = chrono::Utc::now();
+    }
+    spawn_publisher(
+        bus.clone(),
+        AppendedEvent {
+            stream_name: format!("DeliveryJob-{}", uuid::Uuid::new_v4()),
+            event_type: "DeliveryPickedUp".into(),
+            correlation_id: uuid::Uuid::new_v4(),
+            position: 1,
+        },
+    );
+    let nothing = tokio::time::timeout(Duration::from_millis(1500), stream.next()).await;
+    assert!(nothing.is_err(), "another order's delivery job must yield nothing: {nothing:?}");
 }
 
 /// An envelope with a DIFFERENT correlationId never reaches the subscriber.
