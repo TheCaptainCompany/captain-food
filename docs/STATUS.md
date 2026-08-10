@@ -2,26 +2,41 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
-> ✅ **2026-08-10 — `orders_placed_total{status="PLACED"}` NOW EMITS: the "a stranger paid us" BAM
-> alarm can finally fire** ([#456 "Emit orders_placed_total so the un-told-order alarm can fire"](https://github.com/TheCaptainCompany/captain-food/issues/456),
+> 🚧 **2026-08-10 — `orders_placed_total{status="PLACED"}` EMIT WIRED ON THE PM-MAILBOX PATH —
+> ARMS WITH THE `PM_MAILBOX_DELIVERY` FLIP, DOES NOT FIRE IN THE CURRENT DEFAULT POSTURE**
+> ([#456 "Emit orders_placed_total so the un-told-order alarm can fire"](https://github.com/TheCaptainCompany/captain-food/issues/456),
 > PR [#457](https://github.com/TheCaptainCompany/captain-food/pull/457), epic
 > [#429](https://github.com/TheCaptainCompany/captain-food/issues/429), mob protocol).
 > **The gap**: the counter `ORDERS_PLACED_TOTAL` and its emitter `telemetry::meters::place_order::placed`
 > existed since #191, but had **ZERO call sites** — the success side of the place-order BAM contract
 > (`specs/observability.yaml`) was declared and never wired, so no alert on "orders placed" could ever
-> trip. **The fix (counter only)**: one emit at the mailbox handler seam
-> (`crates/infrastructure/src/mailbox/handler.rs`, in the `Outcome::Completed` arm AFTER
+> trip. **The wiring (counter only)**: one emit at the mailbox handler seam
+> (`crates/infrastructure/src/mailbox/handler.rs:612`, in the `Outcome::Completed` arm AFTER
 > `flush_staged_in_tx` succeeds), keyed on a pure predicate `staged_contains_order_placed(&[StagedAppend])`
-> — emit IFF this delivery's staged appends carry a `DomainEvent::OrderPlaced`. **Why the staged set,
-> not the outcome**: `OrderPlaced` is appended only when the place-order guard
-> `should_deliver_order_placed` (= `domain::order::fold(stream).is_none()`) is true; a re-delivery or
-> partial-reaction replay finds it false, stages nothing, and the predicate stays false — so the
-> staged set IS the guard's output transitively. Keying on `Outcome::Completed` (returned even on
-> replays that append nothing) would double-count a monotonic counter into a permanent lie — proved by
-> a planted-red spy reading `("PLACED", 4)` vs the correct `("PLACED", 1)` over four delivery shapes.
-> **Replay-safe, durable-first**: the count moves only once the append is in the completion
-> transaction. **SDK stays at the infra boundary** (c4-l3 `instrumented`); domain/application untouched.
-> **Tests**: a pure-predicate unit test (present/absent, no DB) plus a metric-spy binary
+> — emit IFF this delivery's staged appends carry a `DomainEvent::OrderPlaced`. **HONEST POSTURE — the
+> emit does NOT fire by default yet**: `record_order_placements` is called ONLY on the PM-mailbox
+> delivery path (`handler.rs`), which runs only when the `PM_MAILBOX_DELIVERY` runtime posture is ON.
+> That posture is **seeded FALSE** (`specs/database/tables/referential.yaml:111`; `RuntimePosture` DB
+> row, #318/ADR-20260803-104819) and its default flip **stays gated pending staging smoke** (see the
+> #275 D1 entry below, ~line 1256). With it OFF, the **legacy tick runner** processes
+> `PaymentCaptured` (`runner.rs` `dispatch` → `place_order::on_payment_captured` appends `OrderPlaced`
+> directly) and its completion arm (`runner.rs` `Ok(Outcome::Completed) => {}`) emits **nothing** — so
+> a real placement in today's default posture increments **no** counter. Therefore
+> `orders_placed_total` **ARMS with the flip**, it does not fire now. This is **deliberately
+> gate-then-stabilize-consistent**: the emit lives with the surviving seam it belongs to (the mailbox
+> — final-vision-first; the legacy runner is being retired, not instrumented), and the counter goes
+> live as a consequence of the separately-recorded `PM_MAILBOX_DELIVERY` default-flip decision, not as
+> a second hidden toggle. **Until that flip, the "a stranger paid us" alarm on this counter cannot
+> trip** — the un-told-order safety signal is not yet armed in production. **Why the staged set, not
+> the outcome**: `OrderPlaced` is appended only when the place-order guard `should_deliver_order_placed`
+> (= `domain::order::fold(stream).is_none()`) is true; a re-delivery or partial-reaction replay finds
+> it false, stages nothing, and the predicate stays false — so the staged set IS the guard's output
+> transitively. Keying on `Outcome::Completed` (returned even on replays that append nothing) would
+> double-count a monotonic counter into a permanent lie — proved by a planted-red spy reading
+> `("PLACED", 4)` vs the correct `("PLACED", 1)` over four delivery shapes. **Replay-safe,
+> durable-first**: the count moves only once the append is in the completion transaction. **SDK stays
+> at the infra boundary** (c4-l3 `instrumented`); domain/application untouched. **Tests**: a
+> pure-predicate unit test (present/absent, no DB) plus a metric-spy binary
 > `crates/infrastructure/tests/orders_placed_metric.rs` — its OWN binary because `telemetry::meters`
 > binds the process meter once via `OnceLock` (the shared `main` integration binary cannot host a spy;
 > same reason as `checkout_degraded_metric.rs`), no DB (the emit is pure over the staged Vec; the
@@ -30,7 +45,10 @@
 > equivalent-correctness change) and the place-order success-status SPAN CHAIN (coupled to the RED
 > pricing keystone [#451](https://github.com/TheCaptainCompany/captain-food/issues/451)). No new
 > status values beyond `PLACED` (the contract's `status` label is unbounded; `PLACED` is the success
-> value). No PENDING/enqueue-path emission.
+> value). No PENDING/enqueue-path emission. **NAMED RESIDUAL GAP**: if the `PM_MAILBOX_DELIVERY` flip
+> is deferred long-term, the legacy runner's completion arm carries no `orders_placed_total` emit and
+> the alarm stays disarmed — the mob's final-vision call was to NOT instrument the retiring runner, so
+> arming the alarm is bound to the flip landing.
 
 > ✅ **2026-08-10 — SECRET-GATE EXTRACTED TO ITS OWN LEAN CRATE: the deploy-path cold-compile tail
 > risk is gone** ([#453 "Extract secret-gate to a lean crate (fix #444 deploy-path cold-compile tail risk)"](https://github.com/TheCaptainCompany/captain-food/issues/453),
