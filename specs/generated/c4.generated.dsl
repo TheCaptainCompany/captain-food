@@ -1,6 +1,7 @@
 workspace "Captain.Food" "Local-first food ordering & delivery for independent restaurants and food trucks (V0: Tours)." {
   model {
     ss = softwareSystem "Captain.Food" "Local-first food ordering & delivery for independent restaurants and food trucks (V0: Tours)." {
+      ct_server = container "server" "The single deployed process (ADR-0042/0043): serves every audience host and every /{role}/graphql path from one binary, ingests partner webhooks, and runs the projector in-process. Split into the bin topology by ADR-20260807-183024 steps (6)-(7); retired when they flip." "Rust — Axum monolith (server bin): GraphQL role paths, SDUI SSR + assets, partner webhook ingest, in-process projector and mailbox drain"
       ct_web_client = container "web-client" "Customer mobile-first web client (SDUI renderer, ADR-0033/0034); multi-tenant via {restaurantSlug}.captain.food." "Leptos (Rust → WASM), Crux core, SSR+hydration"
       ct_web_restaurant = container "web-restaurant" "Restaurant web app/dashboard: onboarding (incl. Google Business Profile 'Order online' setup — ADR-019), catalog, order queue, payouts (/restaurant-account/graphql, /restaurant/graphql)." "Leptos (Rust → WASM), Crux core"
       ct_web_admin = container "web-admin" "Platform back-office for Captain.Food staff (/admin/graphql): restaurant approvals, pre-registration pipeline, ops." "Leptos (Rust → WASM), Crux core"

@@ -40,7 +40,8 @@ the product owner offered. A structural change with no option space (a file move
 
 | Date | What the product now promises differently | Tier | Change | `make validate` |
 |---|---|---|---|---|
-| — | *(nothing has landed under the lifted freeze yet; the first row belongs to whoever lands the next `specs/**` change)* | — | [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md) | — |
+| 2026-08-11 | The architecture now describes the thing we actually run, not only the thing we are building towards: the deployed server is a declared container with its own generated deployment, so "how Captain.Food is deployed today" is answerable from the repo — and retiring it becomes a recorded step instead of a silent one. | 0 | [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) · [ADR-20260811-004500](adr/ADR-20260811-004500-role-paths-live-on-audience-hosts-api-host-is-a-webhook-address.md) | 0 errors, 37 warnings (unchanged) |
+| — | *(nothing had landed under the lifted freeze before the row above)* | — | [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md) | — |
 
 ---
 

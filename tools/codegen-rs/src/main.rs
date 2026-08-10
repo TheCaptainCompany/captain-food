@@ -369,8 +369,16 @@ fn main() {
             std::process::exit(1);
         }
         let mut seeded = 0usize;
-        for c in &bin_crates {
-            let p = pins_dir.join(format!("{}.json", c.name));
+        // The monolith carries a pin like any other deployable — its Deployment reads
+        // deploy/pins/server.json. Seeded from the SPEC declaration (the `deploy_tree: monolith`
+        // container), so it appears and disappears with the container, never by hand.
+        let pinned: Vec<String> = bin_crates
+            .iter()
+            .map(|c| c.name.clone())
+            .chain(monolith_container(&model).map(|c| c.id))
+            .collect();
+        for c in &pinned {
+            let p = pins_dir.join(format!("{}.json", c));
             if !p.exists() {
                 if let Err(e) = fs::write(&p, pin_skeleton_json()) {
                     eprintln!("✗ write {}: {}", p.display(), e);

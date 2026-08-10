@@ -19,34 +19,44 @@
 # idempotent fixtures, fresh cart/order ids per run.
 #
 # Required env:
-#   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money).
-#                       CI supplies it from the repo secret STRIPE_SECRET_KEY_TEST; the unsuffixed
-#                       repo secret was retired 2026-07-29 because its mode was not visible in its name.
-#   RENDER_API_KEY      used to read the deployed Supabase SECRET key (SUPABASE_SECRET_KEY, which stays
-#                       dashboard-managed on the Render service) so role JWTs can be minted through the
-#                       deployment's own auth provider (Supabase admin API). The Supabase URL is NOT read
-#                       from Render: it is a non-secret that RIDES THE ARTIFACT (baked per-profile,
-#                       ADR-20260729-020000) and was deliberately removed from the Render env, so it is
-#                       read from the baked source of truth specs/configuration.yaml. Set SUPABASE_URL +
-#                       SUPABASE_SECRET_KEY directly to override both (RENDER_API_KEY then optional).
+#   STRIPE_SECRET_KEY     sk_test_... (refused otherwise — this script must never move live money).
+#                         CI supplies it from the repo secret STRIPE_SECRET_KEY_TEST; the unsuffixed
+#                         repo secret was retired 2026-07-29 because its mode was not visible in its name.
+#   SUPABASE_SECRET_KEY   the Supabase service key, used to mint role JWTs through the deployment's own
+#                         auth provider (Supabase admin API). It is ITS OWN repo secret since #358: it
+#                         used to be read off the Render service via RENDER_API_KEY, and that service
+#                         ceases to exist at the OVH cutover — a smoke that can only authenticate
+#                         against the platform we are leaving cannot verify the platform we are moving
+#                         to. The Supabase URL is NOT a secret: it RIDES THE ARTIFACT (baked per-profile,
+#                         ADR-20260729-020000) and is read from the DSL, overridable via SUPABASE_URL.
 # Optional env:
-#   SMOKE_BASE_DOMAIN     default captain.food
+#   SMOKE_BASE_DOMAIN     default captain.food. May carry a port for a local rehearsal
+#                         (`captain.local:8080`) — host classification ignores it.
+#   SMOKE_SCHEME          default https; set `http` when smoking a port-forwarded local stack.
 #   SMOKE_TENANT_SLUG     default smoke-test
-#   RENDER_SERVICE_NAME   default captain-food
 #   SMOKE_APP_PROFILE     which baked config profile the deployment runs (default production)
 #   SMOKE_ORDER_TIMEOUT   seconds to wait for the captured order (default 90)
 set -euo pipefail
 
 # --- Config ---------------------------------------------------------------------------------------
 SMOKE_BASE_DOMAIN="${SMOKE_BASE_DOMAIN:-captain.food}"
+SMOKE_SCHEME="${SMOKE_SCHEME:-https}"
 SMOKE_TENANT_SLUG="${SMOKE_TENANT_SLUG:-smoke-test}"
-RENDER_SERVICE_NAME="${RENDER_SERVICE_NAME:-captain-food}"
 SMOKE_APP_PROFILE="${SMOKE_APP_PROFILE:-production}"
 SMOKE_ORDER_TIMEOUT="${SMOKE_ORDER_TIMEOUT:-90}"
-# Repo root, so we can read baked (non-secret) config from specs/configuration.yaml (ADR-20260729-020000).
+# Repo root, so we can read baked (non-secret) config from the DSL (ADR-20260729-020000).
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-API_BASE="https://api.${SMOKE_BASE_DOMAIN}"
-TENANT_BASE="https://${SMOKE_TENANT_SLUG}.${SMOKE_BASE_DOMAIN}"
+
+# PER-AUDIENCE HOSTS, not one `api.` host (#358). This used to target `https://api.<domain>` for every
+# role path — a host the GENERATED Ingress routes NOWHERE: there, role = path on each audience host
+# (ADR-0006), so /admin/graphql lives on system.<domain> and the public/customer paths on the
+# marketplace host. The monolith answers every role path on every host (its routes are explicit and
+# host-independent), so these hosts are correct BOTH today and after the cutover, whereas `api.` was
+# correct only before it. `api.` itself stays alive on the monolith Ingress until the registered
+# partner webhooks move to hooks.<domain> — it is a webhook address, not an API address.
+PUBLIC_BASE="${SMOKE_PUBLIC_BASE:-${SMOKE_SCHEME}://live.${SMOKE_BASE_DOMAIN}}"
+ADMIN_BASE="${SMOKE_ADMIN_BASE:-${SMOKE_SCHEME}://system.${SMOKE_BASE_DOMAIN}}"
+TENANT_BASE="${SMOKE_SCHEME}://${SMOKE_TENANT_SLUG}.${SMOKE_BASE_DOMAIN}"
 STRIPE_API="https://api.stripe.com"
 
 # Fixed fixture ids => idempotent creation (register/create-catalog replays are no-ops server-side,
@@ -116,52 +126,50 @@ gql_ok() {
 # --- Supabase role-token minting (the deployment's own auth provider) -----------------------------
 # The two values have DIFFERENT homes since ADR-20260729-020000 ("non-secret config rides the artifact"):
 #   * SUPABASE_URL        — NON-secret, baked per-profile into the image by the codegen and DELIBERATELY
-#                           REMOVED from the Render env (env > baked precedence means a leftover dashboard
-#                           value would silently win over the digest). Read it from the baked source of
-#                           truth specs/configuration.yaml, NOT from the Render service. Before this fix
-#                           the script still read it from Render and failed L3 once the key was removed.
-#   * SUPABASE_SECRET_KEY — a real secret; stays on the Render service, read via RENDER_API_KEY.
-# An explicit SUPABASE_URL / SUPABASE_SECRET_KEY env still overrides either lookup.
+#                           REMOVED from the deployment env (env > baked precedence means a leftover
+#                           dashboard value would silently win over the digest). Read it from the baked
+#                           source of truth, the per-scope configuration catalogs.
+#   * SUPABASE_SECRET_KEY — a real secret, supplied directly. It USED to be read off the Render service
+#                           via RENDER_API_KEY; that branch is GONE (#358) because the service it reads
+#                           does not survive the cutover, and a smoke whose auth depends on the platform
+#                           being retired cannot verify the platform replacing it.
+# An explicit SUPABASE_URL env still overrides the baked lookup.
 SB_URL="${SUPABASE_URL:-}"
 SB_KEY="${SUPABASE_SECRET_KEY:-}"
 
 # Read a baked per-profile config value straight from the DSL source of truth, coreutils only: the CI
 # runner ships mikefarah yq while dev boxes often carry python-yq, and their query syntaxes differ, so a
 # yq invocation is not portable here. Blocks are 2-space-indented keys; `deploy:` holds per-profile values.
+#
+# SCANS EVERY SCOPE CATALOG (`specs/*/configuration.yaml`) rather than one path. The catalogs moved to
+# the per-scope layout (ADR-20260807-183024) and this function still pointed at the vanished
+# `specs/configuration.yaml`; because a missing file returned EMPTY rather than failing, the daily smoke
+# died at L3 saying "SUPABASE_URL not set" — blaming the environment for a repo-layout change. Absence
+# of the catalogs ENTIRELY is now its own loud diagnosis, and a key that changes scope needs no edit here.
 baked_config() {
-  local key="$1" prof="$2" cfg="${REPO_ROOT}/specs/configuration.yaml"
-  [ -f "$cfg" ] || return 0
-  awk -v key="$key" -v prof="$prof" '
-    $0 ~ "^  " key ":" {inkey=1; next}
-    inkey && /^  [A-Za-z_]/ {inkey=0}
-    inkey && $1=="deploy:" {indeploy=1; next}
-    indeploy && $1==prof":" {gsub(/^[^:]*:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}
-  ' "$cfg"
+  local key="$1" prof="$2" f out found=0
+  for f in "${REPO_ROOT}"/specs/*/configuration.yaml; do
+    [ -f "$f" ] || continue
+    found=1
+    out=$(awk -v key="$key" -v prof="$prof" '
+      $0 ~ "^  " key ":" {inkey=1; next}
+      inkey && /^  [A-Za-z_]/ {inkey=0}
+      inkey && $1=="deploy:" {indeploy=1; next}
+      indeploy && $1==prof":" {gsub(/^[^:]*:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}
+    ' "$f")
+    if [ -n "$out" ]; then printf '%s' "$out"; return 0; fi
+  done
+  [ "$found" = "1" ] || fail "L3: no specs/*/configuration.yaml found under ${REPO_ROOT} — the configuration catalogs moved (ADR-20260807-183024 per-scope layout) and this smoke is reading the wrong path, which is a REPO bug, not a missing environment variable"
+  return 0
 }
 
 load_supabase_creds() {
   [ -n "$SB_URL" ] && [ -n "$SB_KEY" ] && return 0
   if [ -z "$SB_URL" ]; then
     SB_URL=$(baked_config SUPABASE_URL "$SMOKE_APP_PROFILE")
-    [ -n "$SB_URL" ] || fail "L3: SUPABASE_URL not set and no baked default for profile '${SMOKE_APP_PROFILE}' in specs/configuration.yaml (ADR-20260729-020000); set SUPABASE_URL to override"
+    [ -n "$SB_URL" ] || fail "L3: SUPABASE_URL not set and no baked default for profile '${SMOKE_APP_PROFILE}' in any specs/*/configuration.yaml (ADR-20260729-020000); set SUPABASE_URL to override"
   fi
-  if [ -z "$SB_KEY" ]; then
-    [ -n "${RENDER_API_KEY:-}" ] || fail "L3: need RENDER_API_KEY (or SUPABASE_SECRET_KEY) to read the Supabase service key for role-token minting"
-    local sid ev vars
-    sid=$(curl -sS -m 20 "https://api.render.com/v1/services?name=${RENDER_SERVICE_NAME}&limit=1" \
-      -H "Authorization: Bearer $RENDER_API_KEY" | jq -r '.[0].service.id // empty')
-    [ -n "$sid" ] || fail "L3: Render service '${RENDER_SERVICE_NAME}' not found"
-    ev=$(curl -sS -m 20 "https://api.render.com/v1/services/${sid}/env-vars?limit=100" \
-      -H "Authorization: Bearer $RENDER_API_KEY")
-    # SHAPE-AGNOSTIC (2026-07-29): this used `.[].envVar | select(...)`, which assumes Render returns an
-    # array of {envVar:{key,value}}. It also returns an object wrapper over the same records, and the docs
-    # publish neither shape — the assumption died with `Cannot index string with string "envVar"` the first
-    # time render-config-sync.yml ran against production. Pull any object carrying key+value, wherever it
-    # sits, so either shape works.
-    vars=$(printf '%s' "$ev" | jq -c '[.. | objects | select(has("key") and has("value"))]')
-    SB_KEY=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_SECRET_KEY")) | .[0].value // empty')
-    [ -n "$SB_KEY" ] || fail "L3: SUPABASE_SECRET_KEY not configured on the Render service"
-  fi
+  [ -n "$SB_KEY" ] || fail "L3: SUPABASE_SECRET_KEY is not set — role JWTs cannot be minted. It is its own repo secret since #358 (it was previously read off the Render service, which the OVH cutover retires)."
 }
 
 # mint_token <email> <captain_role> [customer_id] — ensure the smoke user exists with the role
@@ -228,11 +236,11 @@ SMOKE_MIN_SCHEMA_VERSION=20260810113000
 
 l1() {
   local ping health body required
-  ping=$(curl -sS -m 15 "$API_BASE/ping" || true)
-  [ "$ping" = "pong" ] || fail "L1: $API_BASE/ping returned '$ping' (expected 'pong')"
-  body=$(curl -sS -m 15 -w $'\n%{http_code}' "$API_BASE/health" || true)
+  ping=$(curl -sS -m 15 "$PUBLIC_BASE/ping" || true)
+  [ "$ping" = "pong" ] || fail "L1: $PUBLIC_BASE/ping returned '$ping' (expected 'pong')"
+  body=$(curl -sS -m 15 -w $'\n%{http_code}' "$PUBLIC_BASE/health" || true)
   health="${body##*$'\n'}"; body="${body%$'\n'*}"
-  [ "$health" = "200" ] || fail "L1: $API_BASE/health returned HTTP $health — body: $(printf '%s' "$body" | head -c 400)"
+  [ "$health" = "200" ] || fail "L1: $PUBLIC_BASE/health returned HTTP $health — body: $(printf '%s' "$body" | head -c 400)"
   # Deploy ORDERING (#451): L4 now asserts a cart prices to > 0 through `current`, which a pre-#451
   # binary cannot do — it has no `current` resolver and no read-side pricer. Without this check that
   # shows up as a baffling assertion failure deep in L4; with it, the run says plainly that the
@@ -258,9 +266,9 @@ CATALOG_QUERY='query($rid: RestaurantId!){ catalog(input:{restaurantId:$rid}) { 
 
 fixture_state() { # prints: restaurant-status|offer-present (e.g. "ACTIVE|yes", "absent|no")
   local r c status offer
-  r=$(gql "$API_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
+  r=$(gql "$PUBLIC_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
   status=$(printf '%s' "$r" | jq -r '.data.restaurant.status // "absent"')
-  c=$(gql "$API_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
+  c=$(gql "$PUBLIC_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
   offer=$(printf '%s' "$c" | jq -r --arg o "$FIX_OFFER_ID" '[.data.catalog.products[]?.offers[]? | select(.id==$o and .availability=="AVAILABLE")] | if length>0 then "yes" else "no" end')
   printf '%s|%s' "$status" "$offer"
 }
@@ -289,7 +297,7 @@ l3() {
   #    no longer part of registration (ADR-20260728-011344): it is chosen by a separate
   #    ConfigureRestaurantSlug command, issued right below. TEST mode => rules.yaml
   #    OrderTestModeIsolation applies.
-  gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
     'mutation($i: RegisterRestaurantInput!){ registerRestaurant(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" '{i:{
         mode:"TEST", restaurantId:$id, displayName:"Smoke Test Restaurant",
@@ -299,33 +307,33 @@ l3() {
   # 1b. Configure the storefront slug (idempotent: re-submitting the current slug is a no-op). Same
   #     aggregate as the registration above, so the write-side ordering holds without a wait; the
   #     projection wait below then observes the slug becoming resolvable.
-  gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
     'mutation($i: ConfigureRestaurantSlugInput!){ configureRestaurantSlug(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" --arg slug "$SMOKE_TENANT_SLUG" '{i:{restaurantId:$id, slug:$slug}}')" >/dev/null
 
   # The registration + slug must be projected before createCatalog (RestaurantNotFound guard reads
   # the view) and before the slug resolves the tenant host.
   check_restaurant_projected() {
-    local r; r=$(gql "$API_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
+    local r; r=$(gql "$PUBLIC_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
     [ "$(printf '%s' "$r" | jq -r '.data.restaurant.id // empty')" = "$FIX_RESTAURANT_ID" ] && echo ok || printf '%s' "$r" | jq -c '.data' 2>/dev/null
   }
   wait_for "L3" "restaurant projection" 60 check_restaurant_projected
 
   # 2. Activate (idempotent: activating an ACTIVE restaurant is a no-op).
-  gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
     'mutation($i: ActivateRestaurantInput!){ activateRestaurant(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" '{i:{restaurantId:$id, reason:"prod smoke fixture"}}')" >/dev/null
 
   # 3. Catalog (idempotent server-side) + one product/offer (guarded by the offer existence check).
-  gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
     'mutation($i: CreateCatalogInput!){ createCatalog(input:$i){ correlationId } }' \
     "$(jq -cn --arg c "$FIX_CATALOG_ID" --arg r "$FIX_RESTAURANT_ID" '{i:{catalogId:$c, restaurantId:$r, name:"Smoke Catalog"}}')" >/dev/null
   if [ "${state##*|}" != "yes" ]; then
     local cat offer_known
-    cat=$(gql "$API_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
+    cat=$(gql "$PUBLIC_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
     offer_known=$(printf '%s' "$cat" | jq -r --arg o "$FIX_OFFER_ID" '[.data.catalog.products[]?.offers[]? | select(.id==$o)] | length')
     if [ "${offer_known:-0}" = "0" ]; then
-      gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+      gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
         'mutation($i: AddProductInput!){ addProduct(input:$i){ correlationId } }' \
         "$(jq -cn --arg p "$FIX_PRODUCT_ID" --arg c "$FIX_CATALOG_ID" --arg r "$FIX_RESTAURANT_ID" --arg o "$FIX_OFFER_ID" '{i:{
             productId:$p, catalogId:$c, restaurantId:$r, name:"Smoke Pizza",
@@ -376,7 +384,7 @@ l4_negative() {
   # Outage-honest (post-#430 review): an errored OR malformed response must FAIL the proof — a
   # transport failure collapses to `{}` in gql(), which has no `errors` key and null-chains
   # `.data.order` to null, so has("data") is load-bearing on every probe.
-  resp=$(gql "$API_BASE/customer/graphql" "$stranger" \
+  resp=$(gql "$PUBLIC_BASE/customer/graphql" "$stranger" \
     'query($id: OrderId!){ order(input:{id:$id}) { id } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
   [ "$(printf '%s' "$resp" | jq -r 'has("errors")')" = "false" ] \
@@ -385,7 +393,7 @@ l4_negative() {
     || fail "L4: read-guard probe returned no data envelope (outage, not a deny — cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
   [ "$(printf '%s' "$resp" | jq -r '.data.order')" = "null" ] \
     || fail "L4: READ GUARD BREACH — a bridged non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
-  others=$(gql "$API_BASE/customer/graphql" "$stranger" \
+  others=$(gql "$PUBLIC_BASE/customer/graphql" "$stranger" \
     'query{ orders { id } }' '{}')
   [ "$(printf '%s' "$others" | jq -r 'has("errors")')" = "false" ] \
     || fail "L4: read-guard list probe ERRORED (cannot prove the guard): $(printf '%s' "$others" | head -c 300)"
@@ -403,7 +411,7 @@ l4() {
 
   # 1. Build the cart (PUBLIC role — guest carts by design). Acceptance-first: the mutation only
   #    acknowledges (MutationAcceptance); the cart-projection wait below observes the completion.
-  gql_ok "L4" "$API_BASE/public/graphql" "" \
+  gql_ok "L4" "$PUBLIC_BASE/public/graphql" "" \
     'mutation($i: AddCartLineInput!){ addCartLine(input:$i){ messageId operationStatus } }' \
     "$(jq -cn --arg c "$cart_id" --arg r "$FIX_RESTAURANT_ID" --arg l "$line_id" --arg o "$FIX_OFFER_ID" --arg s "$session_id" \
       '{i:{cartId:$c, restaurantId:$r, sessionId:$s, line:{cartLineId:$l, offerId:$o, quantity:1}}}')" >/dev/null
@@ -423,7 +431,7 @@ l4() {
   # would have passed a status-only check while the customer saw no payable amount — the silent
   # conversion failure this smoke exists to catch. amountCents MUST be > 0 for the seeded fixture.
   check_cart_projected() {
-    local r; r=$(gql "$API_BASE/public/graphql" "" \
+    local r; r=$(gql "$PUBLIC_BASE/public/graphql" "" \
       'query{ current { id status totalAmount { amountCents currency } } }' '{}' "$session_id")
     [ "$(printf '%s' "$r" | jq -r '
         (.data.current.status == "OPEN")
@@ -445,7 +453,7 @@ l4() {
   #    stamp-before-issue precondition recorded on #429). The claim IS the identity: the order
   #    poll below runs as this customer, and the negative probe as a bridged stranger.
   customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER" "$customer_id")
-  resp=$(gql_ok "L4" "$API_BASE/customer/graphql" "$customer" \
+  resp=$(gql_ok "L4" "$PUBLIC_BASE/customer/graphql" "$customer" \
     'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ messageId operationStatus duplicate } }' \
     "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" --arg u "$customer_id" '{i:{
         mode:"TEST", orderId:$o, restaurantId:$r, cartId:$c, customerId:$u,
@@ -457,7 +465,7 @@ l4() {
 
   op_status=""; t=0; last="(never observed)"
   while [ "$t" -le 60 ]; do
-    resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+    resp=$(gql "$PUBLIC_BASE/customer/graphql" "$customer" \
       'query($m: MessageId!){ operationStatus(input:{messageId:$m}) { status errorCode message } }' \
       "$(jq -cn --arg m "$message_id" '{m:$m}')")
     op_status=$(printf '%s' "$resp" | jq -r '.data.operationStatus.status // empty')
@@ -478,7 +486,7 @@ l4() {
   # per #31, session ownership in the resolver; strangers get null).
   pi=""; t=0
   while [ "$t" -le 30 ]; do
-    resp=$(gql "$API_BASE/public/graphql" "" \
+    resp=$(gql "$PUBLIC_BASE/public/graphql" "" \
       'query($id: OrderId!){ paymentStatus(input:{orderId:$id}) { paymentIntentId clientSecret status } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')" "$session_id")
     pi=$(printf '%s' "$resp" | jq -r '.data.paymentStatus.paymentIntentId // empty')
@@ -508,7 +516,7 @@ l4() {
   #    give: the paying customer reads their own order through the membership guard.
   t=0; last="(never observed)"
   while [ "$t" -le "$SMOKE_ORDER_TIMEOUT" ]; do
-    resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+    resp=$(gql "$PUBLIC_BASE/customer/graphql" "$customer" \
       'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')")
     status=$(printf '%s' "$resp" | jq -r '.data.order.status // empty')
@@ -525,14 +533,14 @@ l4() {
   # Diagnosability on timeout (farley): ONE admin read separates "capture never happened" from
   # "capture landed but the customer's claim scope is broken" — otherwise both are the same 90s.
   admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
-  resp=$(gql "$API_BASE/admin/graphql" "$admin" \
+  resp=$(gql "$ADMIN_BASE/admin/graphql" "$admin" \
     'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
   fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = capture/projection broken)"
 }
 
 # --- Run ------------------------------------------------------------------------------------------
-say "Captain.Food production smoke — $API_BASE (tenant $TENANT_BASE) — Stripe TEST mode"
+say "Captain.Food production smoke — public $PUBLIC_BASE, admin $ADMIN_BASE, tenant $TENANT_BASE — Stripe TEST mode"
 l1
 l2
 l3

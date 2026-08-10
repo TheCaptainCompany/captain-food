@@ -1,0 +1,47 @@
+# PLATFORM SOURCE, hand-written (#358) -- see ../README.md and
+# docs/runbooks/cutover-local-rehearsal.md.
+#
+# THE REHEARSAL OVERLAY. Not production, never referenced by ../kustomization.yaml, and refused by
+# a codegen test if it ever grows an OVH-shaped field. Its only job: let a single-node k3s stand in
+# for MKS long enough to prove the CUTOVER SEQUENCE end to end -- operator, Cluster, initdb,
+# migrations, the monolith image, /health, the smoke -- before anyone pays for the cluster.
+#
+# WHAT IT CHANGES, and why each change is a thing the rehearsal therefore does NOT prove:
+#   1. storageClass captain-db-retain -> local-path. The Cinder CSI driver does not exist off OVH.
+#      => the rehearsal proves NOTHING about volume provisioning, expansion, or Retain semantics.
+#   2. `backup:` removed. WAL archiving needs the OVH Object Storage bucket and its sealed
+#      credentials. => the rehearsal proves NOTHING about the recovery path -- which at
+#      `instances: 1` is the ONLY recovery path, so this is the single biggest gap in it.
+#   3. `managed.roles` removed. `claude_ro` needs the sealed claude-ro-credentials secret.
+#      => the SELECT-only diagnosis role is not exercised.
+#   4. restore-drill/ and scheduled-backup not included -- both are (2) by another name.
+# Resource requests are left ALONE on purpose: if the cluster will not schedule at its production
+# request, that is a finding, not an inconvenience to patch away.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../cnpg
+patches:
+  - path: cluster-local-patch.yaml
+    target:
+      kind: Cluster
+      name: captain-db
+  # The StorageClass itself names the Cinder provisioner, which no k3s node can satisfy; the
+  # patched Cluster points at k3s's own local-path class instead, so this object is simply dropped.
+  - patch: |
+      $patch: delete
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: captain-db-retain
+    target:
+      kind: StorageClass
+      name: captain-db-retain
+  - patch: |
+      $patch: delete
+      apiVersion: postgresql.cnpg.io/v1
+      kind: ScheduledBackup
+      metadata:
+        name: captain-db-daily
+    target:
+      kind: ScheduledBackup
