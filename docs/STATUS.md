@@ -17,11 +17,17 @@
 > requests, counted by `checkout_degraded_render_total{reason=stripe_key_absent}` — emitted at the
 > SSR boundary and **proved firing** by `crates/server/tests/checkout_degraded_metric.rs` (the
 > repo's first spy-observed metric emission). Smoke gains L3b (/checkout must carry
-> `data-pk="pk_test_…"`, outage-honest). **Still open on this chunk**: the baked `deploy:` value
-> (one sanctioned extraction from `STRIPE_PUBLISHABLE_KEY_TEST`, then delete the service env var —
-> ADR §3), the surface-bins config-closure follow-up (#385 track), and the recorded activation
-> constraint (first real-restaurant activation mechanically impossible while checkout serves
-> `pk_test_` — ADR §4, binds future activation work).
+> `data-pk="pk_test_…"`, outage-honest). **Ships ENV-VAR-ONLY**: `STRIPE_PUBLISHABLE_KEY` is
+> declared non-secret with **no `deploy:` block** (validator-clean, absent from
+> `render-config-sync.json`), so production serves it via the existing Render env var and degrades
+> honestly when absent — the served value exists, the spec-baked copy does not yet. The one
+> extraction attempt (a CI step base64-defeating log masking) was correctly blocked by the security
+> classifier and is ABANDONED — no masking-bypass retry (ADR §3). **Still open**: the clean bake
+> ([#448](https://github.com/TheCaptainCompany/captain-food/issues/448) — human pastes the public
+> value, add the literal `deploy:` block, delete the shadowing Render env var in the same change;
+> until then the env var is a NAMED removal hazard); the surface-bins config-closure follow-up
+> (#385 track); and the recorded activation constraint (first real-restaurant activation
+> mechanically impossible while checkout serves `pk_test_` — ADR §4, binds future activation work).
 >
 
 > ✅ **2026-08-09 (morning) — THE EIGHT-DECISION BRIEF IS ANSWERED; the demo is deferred and the

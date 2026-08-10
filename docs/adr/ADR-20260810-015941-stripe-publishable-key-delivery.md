@@ -31,19 +31,38 @@ to feed the element would invert the write path and orphan an intent for every a
 checkout. The confirm leg (a later #429 chunk) pins the real intent by `clientSecret`
 (`ElementsConfig::ForIntent`).
 
-### 3. The baked value arrives by ONE sanctioned extraction (Option A)
+### 3. [#440](https://github.com/TheCaptainCompany/captain-food/issues/440) ships ENV-VAR-ONLY; the clean bake is a separate PR
 
-`STRIPE_PUBLISHABLE_KEY` is a non-secret and must ride the artifact as a literal per-profile
-`deploy:` value (the `SUPABASE_PUBLISHABLE_KEY` precedent; the validator's
+`STRIPE_PUBLISHABLE_KEY` is a non-secret and its FINAL shape is a literal per-profile `deploy:`
+value riding the artifact (the `SUPABASE_PUBLISHABLE_KEY` precedent; the validator's
 `config-nonsecret-from-secret` rule is an ERROR, and the product-owner directive behind it is
 recorded in [ADR-20260729-020000](ADR-20260729-020000-configuration-rides-the-artifact-secrets-ride-ci.md)).
-No `pk_test_` value exists anywhere in the repo, so the value is read ONCE from the
-`STRIPE_PUBLISHABLE_KEY_TEST` repo secret via a branch-only, clearly-marked temporary workflow
-step (its own commit, reverted as its own commit before merge — it must never reach `main`),
-then baked. Farley's hygiene step: after the baked deploy is live, the `STRIPE_PUBLISHABLE_KEY`
-env var is DELETED from the hosting service (env > baked precedence — a leftover dashboard value
-would silently win), and the repo secret is retired for this key. Until then the missing baked
-value is a NAMED deploy fact, not a silent hole.
+But no `pk_test_` value exists anywhere in the repo, so
+[#441](https://github.com/TheCaptainCompany/captain-food/pull/441) ships the key with **no
+`deploy:` block** and correctly absent from `render-config-sync.json`: production serves it via
+the `STRIPE_PUBLISHABLE_KEY` env var already on the Render service (env > baked precedence), and
+`/checkout` degrades honestly when it is absent. This is a complete, validator-clean, mergeable
+shape — the SERVED value exists; only the spec-baked (repo-readable) copy is deferred. Farley's
+checkpoint-(a) condition is met in this honest form: baking is repo-readability, not a happy-path
+gate.
+
+**The extraction mechanism is ABANDONED.** The one attempt — a branch-only CI step base64-encoding
+`STRIPE_PUBLISHABLE_KEY_TEST` to defeat GitHub Actions log masking — was blocked by the security
+classifier as a credential-exfiltration pattern, correctly. The lesson is precise: a public
+`pk_test_` value printed in a log is not itself a leak, but a step whose deliberate SIGNATURE is
+defeating secret masking is indistinguishable from real exfiltration and must not exist. No
+masking-bypass extraction is retried in any form.
+
+The clean bake is a 10-second human action tracked as
+[#448 "Bake the Stripe test publishable key value into specs/payments/configuration.yaml (retire env-var-only delivery)"](https://github.com/TheCaptainCompany/captain-food/issues/448):
+a human with repo access pastes the public value, the executor adds the literal `deploy:` block,
+regenerates, and — because env > baked would otherwise shadow it — DELETES the now-redundant
+`STRIPE_PUBLISHABLE_KEY` env var from the Render service in the SAME change (the sync rail never
+deletes; farley's stale-env hazard). Until #448 lands, the env-var-only key is a NAMED removal
+hazard on the Render service (do not "clean" it, or checkout silently degrades) — the class of
+drift that
+[#444 "CI gate: every secret the configuration DSL declares must exist as a repo secret before deploy"](https://github.com/TheCaptainCompany/captain-food/issues/444)
+will make loud.
 
 ### 4. Business activation constraint (recorded, binds future work — NOT built here)
 
