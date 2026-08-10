@@ -66,6 +66,58 @@ const DEFAULT_BATCH_SIZE: i64 = 500;
 // free-tier spin-down pauses the in-process worker after ~15 min) — keep it warm with a periodic
 // /ping — or, historically, a poison event that wedged the loop (now log-skipped below).
 
+/// Why ONE fold failed, classified at the site that produced it (#474 test 1).
+///
+/// The drain loop must treat two failures differently and the old code could not tell them apart:
+/// `apply_record` returned `DomainError`, and EVERY path built `DomainError::Repository` — a
+/// malformed payload, a panicking accessor and a `NOT NULL` violation were the same value. So
+/// log-and-skip applied to all three, and a schema/writer disagreement that fails EVERY event of a
+/// type (the [#451] shape) advanced the checkpoint past all of them while reporting a healthy drain.
+///
+/// This is an enum rather than a predicate over the error string on purpose (CLAUDE.md
+/// "compiler first"): the classification is a fact known where the error is CONSTRUCTED, so the
+/// compiler makes every new failure site declare which one it is, and no later refactor can
+/// silently reclassify by rewording a message.
+#[derive(Debug)]
+enum FoldFault {
+    /// This RECORD is bad — an unparseable payload, or a fold that panicked reading a legacy shape.
+    /// Genuinely per-event: the next event is unaffected, so skipping keeps the group live and the
+    /// checkpoint legitimately advances past it. This is the case [#230]'s log-and-skip was built
+    /// for and its behaviour is unchanged.
+    PayloadShape(DomainError),
+    /// The DATABASE rejected the write — constraint violation, cast error, missing column. Almost
+    /// never about this one record: it is the schema disagreeing with the writer, so the next event
+    /// of the same type fails identically and skipping silently destroys the read model.
+    Database(DomainError),
+}
+
+impl FoldFault {
+    fn error(self) -> DomainError {
+        match self {
+            Self::PayloadShape(e) | Self::Database(e) => e,
+        }
+    }
+}
+
+/// What the drain loop does when a fold fails with [`FoldFault::Database`].
+///
+/// A GATE, not a fix (CLAUDE.md gate-then-stabilize): [`Self::Skip`] is the default and reproduces
+/// today's behaviour exactly, so this change lands inert on every deployed path. [`Self::Halt`] is
+/// finished, tested behaviour that is not yet the default — flipping it is a separate, recorded
+/// decision, because halting has a real cost of its own (one genuinely-poisoned row wedges the
+/// group until an operator intervenes, which is the wedge [#230] removed on purpose).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DbFaultPolicy {
+    /// Log the failure and advance past it — the read model is permanently behind for that record
+    /// until a reprojection. Today's behaviour, unchanged.
+    #[default]
+    Skip,
+    /// Roll the batch back and return the error, leaving the checkpoint EXACTLY where it was. The
+    /// group retries the same slice next tick and the failure stays visible instead of scrolling
+    /// past. Nothing is lost: the events are still in `domain_events` behind an unmoved checkpoint.
+    Halt,
+}
+
 /// One materialized read model: resolves the aggregate id from the envelope, loads the current row via
 /// its store, folds the event through its generated `project_*` dispatch + hand-written `…Compute` impl,
 /// and upserts the result. Fed-but-unmatched events fall through the dispatch's `_ => state` arm.
@@ -513,6 +565,10 @@ pub struct ProjectionWorker {
     /// worker advances exactly the rows a full worker would for those groups, so monolith and
     /// per-scope deployments can hand over without a re-projection.
     scope: Option<&'static str>,
+    /// What a database-rejected fold does (#474). Defaults to [`DbFaultPolicy::Skip`] --
+    /// today's behaviour -- so this lands inert; see [`DbFaultPolicy`] for why the flip is a
+    /// separate decision.
+    db_fault_policy: DbFaultPolicy,
 }
 
 impl ProjectionWorker {
@@ -528,7 +584,16 @@ impl ProjectionWorker {
             batch_size,
             last_head: Arc::new(AtomicI64::new(-1)),
             scope: None,
+            db_fault_policy: DbFaultPolicy::default(),
         }
+    }
+
+    /// Choose what a database-rejected fold does (#474). Left at [`DbFaultPolicy::Skip`] everywhere
+    /// in production today; the halting arm is exercised by
+    /// `crates/infrastructure/tests/main/projection_checkpoint_halt.rs`.
+    pub fn with_db_fault_policy(mut self, policy: DbFaultPolicy) -> Self {
+        self.db_fault_policy = policy;
+        self
     }
 
     /// Test/tuning override of the per-transaction batch bound.
@@ -705,16 +770,33 @@ impl ProjectionWorker {
                 // "current transaction is aborted", turning one poison record into a wedge again.
                 let applied = match sqlx::Acquire::begin(&mut *tx).await {
                     Ok(mut sp) => match self.apply_record(&mut sp, group, record).await {
-                        Ok(()) => sp.commit().await.map_err(db_err),
+                        Ok(()) => sp.commit().await.map_err(|e| FoldFault::Database(db_err(e))),
                         Err(e) => {
                             let _ = sp.rollback().await;
                             Err(e)
                         }
                     },
-                    Err(e) => Err(db_err(e)),
+                    Err(e) => Err(FoldFault::Database(db_err(e))),
                 };
-                if let Err(e) = applied {
+                if let Err(fault) = applied {
                     let event_type: String = record.try_get("event_type").unwrap_or_default();
+                    // HALT (#474): a database fault is the schema disagreeing with the writer, so
+                    // the next event of this type fails identically. Return WITHOUT committing --
+                    // `tx` drops here and rolls back, so the checkpoint stays exactly where it was
+                    // and this slice is retried next tick with the failure still in front of us.
+                    // Advancing would report progress the read model did not make.
+                    if matches!(fault, FoldFault::Database(_)) && self.db_fault_policy == DbFaultPolicy::Halt {
+                        let e = fault.error();
+                        tracing::error!(
+                            projection_group = group.checkpoint,
+                            position,
+                            event_type = %event_type,
+                            error = %e,
+                            "PROJECTION HALTED -- database rejected this fold; checkpoint left at {checkpoint} rather than advancing past an event that did not land"
+                        );
+                        return Err(e);
+                    }
+                    let e = fault.error();
                     // A skipped event means the read model is now permanently behind the log for this
                     // record until a full reprojection. That is a deliberate liveness choice, not a
                     // non-event -- so it is an ERROR, and it names the position needed to replay it.
@@ -755,12 +837,16 @@ impl ProjectionWorker {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         group: &ProjectorGroup,
         record: &sqlx::postgres::PgRow,
-    ) -> Result<(), DomainError> {
-        let position: i64 = record.try_get("position").map_err(db_err)?;
-        let stream_name: String = record.try_get("stream_name").map_err(db_err)?;
-        let event_type: String = record.try_get("event_type").map_err(db_err)?;
-        let payload: serde_json::Value = record.try_get("payload").map_err(db_err)?;
-        let occurred_at: chrono::DateTime<Utc> = record.try_get("occurred_at").map_err(db_err)?;
+    ) -> Result<(), FoldFault> {
+        // Decoding the ENVELOPE columns is a database contract, not a payload shape: if
+        // `domain_events.position` stops decoding as `i64` every record fails, so it classifies
+        // with the database faults.
+        let db = |e: sqlx::Error| FoldFault::Database(db_err(e));
+        let position: i64 = record.try_get("position").map_err(db)?;
+        let stream_name: String = record.try_get("stream_name").map_err(db)?;
+        let event_type: String = record.try_get("event_type").map_err(db)?;
+        let payload: serde_json::Value = record.try_get("payload").map_err(db)?;
+        let occurred_at: chrono::DateTime<Utc> = record.try_get("occurred_at").map_err(db)?;
 
         // `$`-prefixed rows are TECHNICAL, envelope-level events (the deletion engine's
         // `$StreamTombstoned`, ADR-20260731-160000 §5) — not events.yaml vocabulary, nothing to
@@ -771,11 +857,14 @@ impl ProjectionWorker {
         }
 
         // Rebuild the typed event from the (event_type, payload) columns via the adjacent tag.
+        // The ONE genuinely per-record failure: this row's payload does not fit its event type.
         let event: DomainEvent = serde_json::from_value(serde_json::json!({
             "eventType": event_type,
             "payload": payload,
         }))
-        .map_err(|e| db_err(format!("position {position} ({event_type}): {e}")))?;
+        .map_err(|e| {
+            FoldFault::PayloadShape(db_err(format!("position {position} ({event_type}): {e}")))
+        })?;
 
         let env = Envelope { stream_name, position, occurred_at, event };
         // catch_unwind (not tokio::spawn — a spawned task cannot borrow the batch transaction) so
@@ -796,10 +885,16 @@ impl ProjectionWorker {
         .catch_unwind()
         .await
         {
-            Ok(result) => result,
-            Err(_panic) => Err(DomainError::Repository(format!(
+            // A fold error reaching here came out of a generated store's upsert: the database
+            // rejected the write.
+            Ok(result) => result.map_err(FoldFault::Database),
+            // A PANIC classifies as PayloadShape, keeping the liveness property #230 added it for:
+            // the observed case is a legacy payload hitting a panicking accessor, which is this
+            // record being bad, not the schema being wrong. Halting on it would restore exactly the
+            // boot-time refold wedge that motivated catch_unwind.
+            Err(_panic) => Err(FoldFault::PayloadShape(DomainError::Repository(format!(
                 "projector panicked at position {position}"
-            ))),
+            )))),
         }
     }
 
