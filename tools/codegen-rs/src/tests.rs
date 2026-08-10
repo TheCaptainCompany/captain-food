@@ -1447,9 +1447,9 @@ keys:
     /// instrumentation), and a span name can be typo'd at the call site (the span is still emitted, it
     /// just no longer satisfies the contract naming it). Neither shows up in a compile or a normal test.
     ///
-    /// Scoped to those two contracts deliberately: they are the ones the DoD names. The other nine
-    /// contracts are not yet emitted, and asserting them here would fail for work this issue does not
-    /// claim to have done.
+    /// Scoped to the EMITTED contracts deliberately (#191's two plus `cart-price` since #451): the
+    /// remaining contracts are not yet emitted, and asserting them here would fail for work no issue
+    /// claims to have done. When a contract's instrumentation lands, add its feature to the list.
     #[test]
     fn the_required_observability_contracts_are_actually_emitted() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -1497,7 +1497,7 @@ keys:
         );
 
         let mut missing: Vec<String> = Vec::new();
-        for feature in ["command-acceptance", "place-order"] {
+        for feature in ["command-acceptance", "place-order", "cart-price"] {
             let node = obs.get(feature).unwrap_or_else(|| {
                 panic!("specs/observability.yaml no longer declares the '{feature}' contract")
             });

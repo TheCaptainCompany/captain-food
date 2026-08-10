@@ -151,6 +151,25 @@ pub fn cart_read(aggregate_id: &str) -> Span {
     )
 }
 
+/// `cart.price` (INTERNAL) — ONE priced cart READ at the GraphQL resolver seam (`cart-price`
+/// contract, #451): the money-free Cart row priced fresh from the live catalog via `price_cart`.
+/// `business.aggregate_id` = the cartId being priced. `business.correlation_id` is MINTED at the
+/// seam (reads carry no command envelope — the `auth.read_scope` posture) and recorded by the
+/// caller via [`record_correlation_id`].
+pub fn cart_price(aggregate_id: &str) -> Span {
+    tracing::info_span!(
+        "cart.price",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+        business.correlation_id = Empty,
+    )
+}
+
+/// Record the read-path `business.correlation_id` minted at the resolver seam.
+pub fn record_correlation_id(span: &Span, correlation_id: &str) {
+    span.record(attr::CORRELATION_ID, correlation_id);
+}
+
 // --- late-bound recorders -----------------------------------------------------------------------
 //
 // Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`

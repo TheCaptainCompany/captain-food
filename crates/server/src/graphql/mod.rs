@@ -3,6 +3,10 @@
 //! types, QueryRoot) backs the schema; the real read resolvers land next.
 
 pub mod acl;
+/// The cart READ seam (#451): two-leg `current` lookup, by-id ownership narrowing, and the
+/// one `price_cart` path every cart resolver maps through — hand-written and unit-tested;
+/// the generated resolver literals only call it.
+pub mod cart_read;
 pub mod generated;
 pub mod routes;
 pub mod schema;

@@ -40,6 +40,10 @@ pub mod span {
     /// CLIENT — the customer claim stamp onto the auth provider's user (`customer-identification`
     /// contract, #437): admin GET+PUT inside the identity ACL, `business.result` stamped | failed.
     pub const CLAIMS_STAMP: &str = "claims.stamp";
+    /// INTERNAL — one priced cart READ at the GraphQL resolver seam (`cart-price` contract, #451):
+    /// the money-free Cart row priced fresh from the live catalog via `price_cart`. The pricer
+    /// itself stays SDK-free; only the resolver boundary constructs this span.
+    pub const CART_PRICE: &str = "cart.price";
 }
 
 /// Attribute keys. All business context is `business.*` per `docs/claude/observability.md`; the two
@@ -115,6 +119,14 @@ pub mod metric {
     /// claim_conflict | provider_error). Each one is a customer whose login silently stayed
     /// anonymous; alert on any sustained non-zero rate.
     pub const CUSTOMER_CLAIM_STAMP_FAILED_TOTAL: &str = "customer_claim_stamp_failed_total";
+    /// `cart-price` contract (#451): read-side pricing latency at the resolver seam — if it
+    /// drifts toward the budget, the per-request memoized catalog read is the lever.
+    pub const CART_PRICE_MS: &str = "cart_price_ms";
+    /// `cart-price` contract (#451): a cart whose price cannot be resolved at read — a DEFECT
+    /// counter (the checkout_degraded_render_total pattern), attribute `reason` (offer_gone |
+    /// policy_missing | stock_unknown). Each one is a customer who saw NO payable amount — a
+    /// sale silently lost; alert on any sustained non-zero rate.
+    pub const CART_PRICE_UNRESOLVABLE_TOTAL: &str = "cart_price_unresolvable_total";
 }
 
 /// Values for `business.journal_status` — the contract comments them as
