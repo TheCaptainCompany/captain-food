@@ -924,3 +924,17 @@ through the claim -> PR flow rather than riding a docs commit.
 containing `` `system` `` silently lost the word and committed the gap. The existing ASCII rule
 covers Makefile recipes; this is the same class one layer over. Write any commit message with
 backticks, `$`, or `!` to a file and use `git commit -F <file>`.
+
+## 18. A CI-workflow change: does it fit the job's timeout, and does it regress the rollback path?
+
+A mob briefing for a change to a `.github/workflows/*.yml` step must ask two questions no code lens
+raises on its own: **does the step fit the job's EXISTING `timeout-minutes`?** and **does it regress
+the ROLLBACK path** (the deploy job is what an incident runs to roll back — a slow step there is a
+slow rollback). [#444](https://github.com/TheCaptainCompany/captain-food/issues/444) added a
+`cargo build ... --bin secret-gate` as the first step of `deploy.yml`, and because the gate lived in
+`tools/codegen-rs`, that build dragged the guppy/determinator tree — a COLD compile of minutes on a
+cache miss, inside a `timeout-minutes: 10` job. Nobody at the briefing (farley included) asked either
+question; the review caught it post-merge, and the fix ([#453](https://github.com/TheCaptainCompany/captain-food/issues/453))
+was to extract the gate to a serde-only crate whose cold build is seconds. **The durable proof of
+"cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
+wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.

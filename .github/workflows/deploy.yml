@@ -58,10 +58,11 @@ jobs:
       # (populated out of band, #358 — a name here does not prove it was sealed into the cluster;
       # this gate proves the Actions -> Render/declared-source NAMING boundary).
       #
-      # BUILD LATENCY: the gate is one binary in tools/codegen-rs; its crate pulls guppy/determinator
-      # so a COLD compile is minutes. rust-cache amortizes that across deploys, and we build only
-      # `--bin secret-gate` (not the workspace). A deploy is a deliberate, infrequent, gated action —
-      # blocking a paid-order-losing mis-config is worth the one-time cold build.
+      # BUILD LATENCY: the gate lives in its OWN lean crate `tools/secret-gate` (#453), depending on
+      # serde/serde_json + std ONLY — it does NOT drag guppy/determinator/regex, so a COLD compile is
+      # SECONDS (~7s measured), not minutes. This is what keeps a rollback deploy comfortably inside
+      # this job's `timeout-minutes: 10` even on a cold cache: the tail risk of an incident rollback
+      # timing out on the gate build is gone. rust-cache still amortizes it across warm deploys.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Gate — every DECLARED repo secret must be present and non-empty
@@ -72,8 +73,9 @@ jobs:
           ALL_REPO_SECRETS: ${{ toJSON(secrets) }}
         run: |
           set -euo pipefail
-          # tools/codegen-rs is a root workspace member, so the binary lands in the repo-root target.
-          cargo build --manifest-path tools/codegen-rs/Cargo.toml --bin secret-gate
+          # captain-food-secret-gate is a root workspace member, so the binary lands in the repo-root
+          # target as ./target/debug/secret-gate (bin name preserved verbatim, #453).
+          cargo build -p captain-food-secret-gate
           # Present set piped on stdin (never an arg — no secret reaches the process table). Declared
           # side is the real generated artifact. Missing (declared absent/empty) -> non-zero exit ->
           # this step fails and the deploy is blocked; extra (present-but-undeclared) -> ::warning::.
