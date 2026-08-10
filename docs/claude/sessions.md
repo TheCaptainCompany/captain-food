@@ -926,6 +926,17 @@ two rounds of local gates had called green. Derive the list instead of recalling
 git diff origin/main...HEAD --name-only -- crates/ | cut -d/ -f2 | sort -u
 ```
 
+**A green `make rust` proves nothing about anything touching `migrations/**` or a `View_*`.** Every
+DB-gated suite SKIPS without `DATABASE_URL`, counting as passed, and `rust-test` (Makefile:70) does
+not set one. **Run those suites with `DATABASE_URL` set and `DB_TESTS_REQUIRED=1`** — the loud-skip
+flag already exists (#230, documented in the headers of
+`crates/infrastructure/tests/main/mailbox_activations.rs`, `mailbox_retention.rs` and
+`standalone_workers.rs`); it turns a silent skip into a panic. Without it, `cargo test -p
+infrastructure` reports a clean pass having executed none of the migration chain. On #451 that
+silence hid a migration that bricked the Cart projection through three local gate rounds; CI's
+Postgres job found it. A local Postgres is cheap — `initdb -A trust` + `pg_ctl start` in a writable
+dir, then point `DATABASE_URL` at it.
+
 **The reverse trap: `cargo check` is equally partial.** A STALE generated file compiles perfectly —
 `57b7330` built clean with `crates/server/src/graphql/generated/query.rs` still holding an
 `Err("not implemented")` stub for a resolver whose body the emitter already carried, because
@@ -960,12 +971,31 @@ ownership tests and the unresolvable-line test — were already written, in the 
 handoff described as unfinished. Trusting the list would have meant writing duplicates of tests
 that already existed and passed.
 
-The same applies in the other direction: a handoff (or a WIP commit message) claiming a test was
-"seen red" is only evidence if a run produced it — `57b7330`'s own message records that no gates
-were run on that tree, which contradicted the red-first provenance its test file asserted.
 **Before working any item a handoff says is owed, check the artifact**: `grep -n 'fn ' <test file>`
 for tests, `git show <commit> --stat` for what actually landed. Cost here was small; the cost of
-believing a provenance claim you cannot reproduce is a test suite nobody can trust.
+believing a claim you cannot reproduce is a test suite nobody can trust.
+
+### A "seen red" claim must name HOW the test was made to fail
+
+Not that it failed — **how**: the clause deleted, the fallback re-planted, the stub it ran against.
+A claim a reader cannot re-run is not evidence, and the repo already contains both kinds. The good
+ones say what was mutated — `crates/server/src/auth.rs` ("Seen RED by re-planting #430's
+fallbacks"), `crates/infrastructure/tests/main/scope_membership.rs` ("Seen RED by deleting the
+EXISTS clause from `PgOrderRepository::list`") — and neither names a commit, correctly, because the
+mutation was made by hand and never committed.
+
+Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
+`crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
+introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was
+proposed and abandoned after checking the corpus: the fictions and the honest records use the same
+trigger words, so a phrase rule would have failed the two checkable claims and passed anything
+containing seven hex characters.
+
+**If no red was observed, say so plainly.** `crates/application/src/pricing.rs` (the HONESTY NOTE on
+`a_line_with_an_option_at_quantity_two_prices_to_3400`) is the model: it states the test was born
+green, quotes the claim it previously made, explains why that claim was false, and then says what
+can honestly be said instead — that the evidence is ordinary, the assertion of specific values a
+wrong implementation would not produce.
 
 ### Do not push a feature branch while its executor is still working
 

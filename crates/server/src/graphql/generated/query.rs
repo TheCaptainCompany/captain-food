@@ -311,9 +311,12 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
-        // cart.price span of THIS request shares it. Absent = schema executed outside a request
-        // (there is no request to correlate to), so a local id keeps the span well-formed.
-        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // Ownership enforced server-side (#144): a CUSTOMER caller's customerId argument is IGNORED
@@ -352,9 +355,12 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
-        // cart.price span of THIS request shares it. Absent = schema executed outside a request
-        // (there is no request to correlate to), so a local id keeps the span well-formed.
-        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
         let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
             return Ok(None);
         };
@@ -379,9 +385,12 @@ impl QueryRoot {
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
-        // cart.price span of THIS request shares it. Absent = schema executed outside a request
-        // (there is no request to correlate to), so a local id keeps the span well-formed.
-        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. the session leg only -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // The anonymous-session correlator (validated at transport, `session.rs`): leg 2's key.

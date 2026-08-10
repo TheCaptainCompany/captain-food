@@ -234,11 +234,19 @@ mod tests {
     /// 2,00 EUR, quantity ×2 → line total and cart total 34,00 EUR, breakdown.total identical
     /// (the payment-intent amount), currency EUR throughout.
     ///
-    /// HONESTY NOTE (red-first): this test was BORN GREEN — `price_cart` already computed this
-    /// correctly for the checkout write path; the #451 bug was the projection stub that never
-    /// called it on reads. The RED for this dispatch lives in the fold test
-    /// (`projectors::cart::tests`, seen red against the stub fold) and in the resolver-path test
-    /// (red while `current` was `not implemented`).
+    /// HONESTY NOTE: this test was BORN GREEN — `price_cart` already computed this correctly for
+    /// the checkout write path; the #451 bug was the projection stub that never called it on reads.
+    ///
+    /// It previously claimed the dispatch's RED lived in `projectors::cart::tests` "seen red
+    /// against the stub fold". That is not true and was never observed: `main` carries no test
+    /// module in `projectors/cart.rs` at all, and `57b7330` added the fold AND its tests in the
+    /// same commit — the commit whose own message records that no gates were run on that tree. The
+    /// test therefore never existed against the stub it was said to have failed against.
+    ///
+    /// What can honestly be said: no red was observed anywhere in this slice. The evidence that
+    /// these tests can fail is the ordinary kind — they assert specific values (34,00 EUR, a
+    /// matching breakdown total) that a wrong implementation would not produce. Claiming a
+    /// red-green cycle that nobody ran is worth less than claiming nothing.
     #[tokio::test]
     async fn a_line_with_an_option_at_quantity_two_prices_to_3400() {
         let catalogs = SpecCatalogs::default();
