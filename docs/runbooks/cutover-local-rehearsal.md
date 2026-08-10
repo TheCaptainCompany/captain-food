@@ -43,6 +43,19 @@ PID from pipe: EOF`. Do not spend a minute on them; run k3s directly on the host
    pod. You see a dozen `ContainerStatusUnknown` replicas and no explanation.
    (Do **not** add `eviction-minimum-reclaim=...=0%`: the kubelet refuses to start on
    `eviction percentage minimum reclaim nodefs.available must be positive: 0%`.)
+
+   **Even with the flag, `DiskPressure` LATCHES.** Once it fires it does not clear when you free the
+   disk — this kubelet's stats path is broken here (the same restriction that makes `kubectl logs`
+   and `/stats/summary` return `EOF`), so the eviction manager never sees a fresh signal. Symptom:
+   9 G free and `0/1 nodes are available: 1 node(s) had untolerated taint
+   node.kubernetes.io/disk-pressure`. **The recovery is to restart k3s, not to wait.** And the image
+   garbage collector will have deleted your locally-imported image on the way out, so re-import it
+   (`k3s ctr -n k8s.io images import` — **`-n k8s.io` is required**; the default namespace is
+   invisible to the kubelet). CNPG recovers on its own and its PVC survives: the schema is still
+   there afterwards.
+
+   **Therefore: do not run a workspace `cargo build`/`cargo test` while the rehearsal stack is up.**
+   That is what fills the disk, and it costs a k3s restart plus an image rebuild every time.
 2. **`restrict_oom_score_adj`** — if the sandbox refuses a *negative* `/proc/self/oom_score_adj`
    (check: `echo -998 > /proc/self/oom_score_adj` returns `Permission denied`), then **every pod
    sandbox** fails with the identical `can't get final child's PID from pipe: EOF` that kind/k3d

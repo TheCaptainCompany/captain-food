@@ -5894,10 +5894,18 @@ fn the_deployed_monolith_has_a_generated_manifest() {
         !smoke.contains("https://api.${SMOKE_BASE_DOMAIN}"),
         "prod-smoke.sh must not hard-wire the `api.` host: the generated Ingress routes role paths per AUDIENCE host (ADR-0006)"
     );
-    for (var, host) in [("PUBLIC_BASE", "live."), ("ADMIN_BASE", "system.")] {
+    // Each audience base defaults to a host the generated Ingress actually serves. The host is
+    // taken FROM the rendered Ingress, not from a literal here, so moving an audience's host in
+    // the screens specs fails this test instead of silently unpointing the smoke.
+    for (var, label) in [("PUBLIC_BASE", "live"), ("ADMIN_BASE", "system")] {
         assert!(
-            smoke.contains(&format!("{var}=\"${{SMOKE_{}_BASE:-${{SMOKE_SCHEME}}://{host}", if var == "PUBLIC_BASE" { "PUBLIC" } else { "ADMIN" })),
-            "prod-smoke.sh {var} must default to the {host}<domain> audience host the Ingress serves"
+            bins_ingress.contains(&format!("- host: \"{label}.")),
+            "the generated Ingress no longer serves a '{label}.' host: prod-smoke.sh's {var} default is stale"
+        );
+        assert!(
+            smoke.contains(&format!("{var}=\"${{SMOKE_"))
+                && smoke.contains(&format!("://{label}.${{SMOKE_BASE_DOMAIN}}")),
+            "prod-smoke.sh {var} must default to {label}.<domain> -- the audience host the Ingress serves"
         );
     }
     // The Render branch is retired with the platform it reads (#358): a smoke whose auth comes
