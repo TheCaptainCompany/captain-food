@@ -270,6 +270,27 @@ trust the numbers above if they look off.
   shown to the product owner — chunk, phases, checkpoints, gates, out-of-scope fences,
   anticipated decision points — as transparency, never as a permission request
   ([ADR-20260810-114242](docs/adr/ADR-20260810-114242-loop-start-action-plan.md)).
+- **No polling, only pushing — polling is a graceful fallback until pushing works again**
+  (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-231300](docs/adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)):
+  *"no polling only pushing, polling as graceful fallback until pushing works again."* Push is the
+  primary transport for every state change one component must learn from another. **The second clause
+  is the usable half**: a poll is legitimate ONLY as a fallback that is (a) a **declared** degraded
+  mode, (b) **observably** degraded — an operator can tell from telemetry that it is polling rather
+  than pushing, under a `specs/observability.yaml` contract
+  (`mailbox_push_down_total{reason}` is the reference shape) — and (c) has a **path back that
+  something actively detects**. A poll with none of those is just a poll with an excuse, and a
+  *silent* fallback is worse than the poll it replaced: it turns a loud outage into a permanent
+  invisible latency tax. **"Pushing works again" is never detected by the absence of an error** — a
+  `LISTEN` through a transaction-mode pooler is accepted and then delivers nothing, so `recv()` never
+  fails and a connection-error-driven flag stays `true` forever. Detection must be a **positive
+  liveness proof on the push path itself**: `mailbox_wake.rs`'s 30 s self-`pg_notify` canary with a
+  required echo is the reference implementation. **Scope**: this governs state-change *propagation*,
+  not *time-triggered* work — nobody can `NOTIFY` "a deadline passed", so reminder promotion, TTL
+  expiry and retention sweeps are outside it (there, the discipline is *sleep until the next due row*,
+  not *scan on a fixed interval*). The tiebreaker at the boundary: **does any component know this fact
+  before the clock does?** If yes, it is propagation and must be pushed. Applies to the team's own
+  loop too — agent completions arrive as push, so **do not reintroduce a polling status cron**.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
