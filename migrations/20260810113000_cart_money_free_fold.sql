@@ -65,10 +65,8 @@
 -- the GDPR erasure scan by `MIN(position)` across projection checkpoints, so a Cart checkpoint
 -- sitting at 0 stalls erasure for EVERY subject — silently. Transient while the projector catches
 -- up; permanent if it cannot write at all, which is the failure this ALTER prevents. See #473.
--- #474 PLANT (temporary, removed before this branch lands): the two SET DEFAULTs below are
--- commented out to restore the exact pre-fix defect, so each new gate can be SEEN RED against it.
--- ALTER TABLE Cart ALTER COLUMN total_amount_cents SET DEFAULT 0,
---                  ALTER COLUMN currency SET DEFAULT 'EUR';
+ALTER TABLE Cart ALTER COLUMN total_amount_cents SET DEFAULT 0,
+                 ALTER COLUMN currency SET DEFAULT 'EUR';
 
 -- Restore-by-replay (the 20260720020500 pattern): existing rows carry the OLD priced `lines` shape;
 -- the fold is pure, so a rewind rebuilds every row in the new shape. DELETE (not TRUNCATE) keeps the
