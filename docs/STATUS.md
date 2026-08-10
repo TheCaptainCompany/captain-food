@@ -2,6 +2,36 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — `orders_placed_total{status="PLACED"}` NOW EMITS: the "a stranger paid us" BAM
+> alarm can finally fire** ([#456 "Emit orders_placed_total so the un-told-order alarm can fire"](https://github.com/TheCaptainCompany/captain-food/issues/456),
+> PR [#457](https://github.com/TheCaptainCompany/captain-food/pull/457), epic
+> [#429](https://github.com/TheCaptainCompany/captain-food/issues/429), mob protocol).
+> **The gap**: the counter `ORDERS_PLACED_TOTAL` and its emitter `telemetry::meters::place_order::placed`
+> existed since #191, but had **ZERO call sites** — the success side of the place-order BAM contract
+> (`specs/observability.yaml`) was declared and never wired, so no alert on "orders placed" could ever
+> trip. **The fix (counter only)**: one emit at the mailbox handler seam
+> (`crates/infrastructure/src/mailbox/handler.rs`, in the `Outcome::Completed` arm AFTER
+> `flush_staged_in_tx` succeeds), keyed on a pure predicate `staged_contains_order_placed(&[StagedAppend])`
+> — emit IFF this delivery's staged appends carry a `DomainEvent::OrderPlaced`. **Why the staged set,
+> not the outcome**: `OrderPlaced` is appended only when the place-order guard
+> `should_deliver_order_placed` (= `domain::order::fold(stream).is_none()`) is true; a re-delivery or
+> partial-reaction replay finds it false, stages nothing, and the predicate stays false — so the
+> staged set IS the guard's output transitively. Keying on `Outcome::Completed` (returned even on
+> replays that append nothing) would double-count a monotonic counter into a permanent lie — proved by
+> a planted-red spy reading `("PLACED", 4)` vs the correct `("PLACED", 1)` over four delivery shapes.
+> **Replay-safe, durable-first**: the count moves only once the append is in the completion
+> transaction. **SDK stays at the infra boundary** (c4-l3 `instrumented`); domain/application untouched.
+> **Tests**: a pure-predicate unit test (present/absent, no DB) plus a metric-spy binary
+> `crates/infrastructure/tests/orders_placed_metric.rs` — its OWN binary because `telemetry::meters`
+> binds the process meter once via `OnceLock` (the shared `main` integration binary cannot host a spy;
+> same reason as `checkout_degraded_metric.rs`), no DB (the emit is pure over the staged Vec; the
+> guard's replay staging is proved against real Postgres by `tests/main/pm_prepare_delivery.rs`).
+> **DEFERRED** (recorded, not built): the `Outcome{placed:bool}` flag refactor (a larger
+> equivalent-correctness change) and the place-order success-status SPAN CHAIN (coupled to the RED
+> pricing keystone [#451](https://github.com/TheCaptainCompany/captain-food/issues/451)). No new
+> status values beyond `PLACED` (the contract's `status` label is unbounded; `PLACED` is the success
+> value). No PENDING/enqueue-path emission.
+
 > ✅ **2026-08-10 — SECRET-GATE EXTRACTED TO ITS OWN LEAN CRATE: the deploy-path cold-compile tail
 > risk is gone** ([#453 "Extract secret-gate to a lean crate (fix #444 deploy-path cold-compile tail risk)"](https://github.com/TheCaptainCompany/captain-food/issues/453),
 > PR [#454](https://github.com/TheCaptainCompany/captain-food/pull/454), epic

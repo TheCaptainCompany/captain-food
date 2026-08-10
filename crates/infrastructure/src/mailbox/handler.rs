@@ -604,6 +604,12 @@ impl MailboxCommandHandler {
                 let staged = staging.take_staged();
                 match flush_staged_in_tx(tx, &staged).await {
                     Ok(()) => {
+                        // #456: the "a stranger paid us" BAM counter. Keyed on OrderPlaced being
+                        // in THIS delivery's staged set (the place-order guard's transitive
+                        // output) — NOT on `Outcome::Completed`, which a replay that appended
+                        // nothing also returns. Emitted after the flush so the count only moves
+                        // once the append is in the completion transaction.
+                        super::record_order_placements(&staged);
                         pm_delivery::flush_pm_rows_in_tx(
                             tx,
                             &payment_staging.take_staged(),

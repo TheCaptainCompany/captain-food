@@ -24,8 +24,35 @@ pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
 use application::ports::{version_conflict, Actor};
 use application::staging::StagedAppend;
+use domain::generated::events::DomainEvent;
 use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
+
+/// True iff any staged append in this delivery carries an `OrderPlaced`. This is the TRANSITIVE
+/// output of the place-order guard (`PlaceOrderHooks::should_deliver_order_placed` = the order
+/// fold is `None`, place_order.rs): a re-delivery or partial-reaction replay finds the guard
+/// false, stages NO `OrderPlaced`, and this stays false. The BAM counter keys on THIS — never on
+/// `Outcome::Completed`, which the handler returns even on a replay that appended nothing and
+/// would double-count a monotonic counter into a permanent lie.
+fn staged_contains_order_placed(staged: &[StagedAppend]) -> bool {
+    staged
+        .iter()
+        .flat_map(|append| append.events.iter())
+        .any(|event| matches!(event, DomainEvent::OrderPlaced(_)))
+}
+
+/// Emit `orders_placed_total{status="PLACED"}` once per delivery that actually placed an order —
+/// the "a stranger paid us" BAM signal (#456 "Emit orders_placed_total so the un-told-order alarm
+/// can fire"). Call AFTER [`flush_staged_in_tx`] succeeds, so the counter only advances once the
+/// `OrderPlaced` append is in the completion transaction (durable-first). Keying on the staged set
+/// rather than the delivery outcome is what makes it replay-safe — see
+/// [`staged_contains_order_placed`]. This is the infra/framework boundary the c4-l3 `instrumented`
+/// rule allows the telemetry SDK to live at; the domain and application layers stay SDK-free.
+pub fn record_order_placements(staged: &[StagedAppend]) {
+    if staged_contains_order_placed(staged) {
+        telemetry::meters::place_order::placed("PLACED");
+    }
+}
 
 /// Flush staged appends INTO the completion transaction — the same insert the pool-backed
 /// [`crate::persistence::PgEventStore`] performs, minus the commit (the runtime commits, fenced).
@@ -157,4 +184,96 @@ fn split_event_tagged(
         .to_owned();
     let payload = tagged.get("payload").cloned().unwrap_or_else(|| serde_json::json!({}));
     Ok((event_type, payload))
+}
+
+#[cfg(test)]
+mod order_placed_predicate_tests {
+    use super::*;
+    use domain::generated::entities as ent;
+    use domain::generated::events as evs;
+    use domain::generated::scalars as sc;
+
+    fn actor() -> Actor {
+        Actor {
+            user_id: uuid::Uuid::from_u128(0xC057),
+            user_type: "CUSTOMER".into(),
+            domain_id: None,
+            correlation_id: uuid::Uuid::from_u128(0xC0),
+            cause_id: None,
+        }
+    }
+
+    fn eur(cents: i64) -> ent::Money {
+        ent::Money { amount_cents: sc::MoneyCents(cents), currency: sc::CurrencyCode("EUR".into()) }
+    }
+
+    /// A real `OrderPlaced` fact — the append the place-order guard makes exactly once per order.
+    fn order_placed() -> DomainEvent {
+        DomainEvent::OrderPlaced(evs::OrderPlaced {
+            mode: None,
+            order_id: sc::OrderId(uuid::Uuid::from_u128(0x0AD1)),
+            r#ref: None,
+            restaurant_id: sc::RestaurantId(uuid::Uuid::from_u128(0x0E57)),
+            customer_id: sc::CustomerId(uuid::Uuid::from_u128(0xC057)),
+            customer_contact: ent::CustomerContact {
+                display_name: sc::CustomerDisplayName("Johnny".into()),
+                email: None,
+                phone: sc::PhoneNumber("+33612345678".into()),
+            },
+            service_type: sc::ServiceType::COLLECTION,
+            delivery_address: None,
+            items: Vec::new(),
+            total_amount: eur(1960),
+            breakdown: ent::PaymentBreakdown {
+                articles: eur(1960),
+                delivery: eur(0),
+                service_fee: eur(0),
+                total: eur(1960),
+                restaurant_contribution: eur(0),
+                restaurant_payout: eur(1960),
+                rider_payout: eur(0),
+                captain_net: eur(0),
+            },
+            note: None,
+            replacement_of: None,
+            payment_intent_id: Some(sc::PaymentIntentId("pi_test".into())),
+        })
+    }
+
+    /// A non-order append (a cart fact) — what a partial-reaction delivery might stage without ever
+    /// placing an order.
+    fn cart_started() -> DomainEvent {
+        DomainEvent::CartStarted(evs::CartStarted {
+            cart_id: sc::CartId(uuid::Uuid::from_u128(0xCA47)),
+            restaurant_id: sc::RestaurantId(uuid::Uuid::from_u128(0x0E57)),
+            session_id: sc::SessionId(uuid::Uuid::from_u128(0x5E55)),
+            customer_id: None,
+        })
+    }
+
+    fn staged(events: Vec<DomainEvent>) -> Vec<StagedAppend> {
+        vec![StagedAppend {
+            stream_name: "Order-0000".into(),
+            expected_version: 0,
+            events,
+            actor: actor(),
+        }]
+    }
+
+    #[test]
+    fn present_when_a_staged_append_carries_order_placed() {
+        assert!(staged_contains_order_placed(&staged(vec![order_placed()])));
+        // Also present when OrderPlaced sits alongside other appends (real placement stages more).
+        let mut appends = staged(vec![cart_started()]);
+        appends.extend(staged(vec![order_placed()]));
+        assert!(staged_contains_order_placed(&appends));
+    }
+
+    #[test]
+    fn absent_when_nothing_staged_or_only_non_order_appends() {
+        // The replay shape: the guard is false, nothing is staged.
+        assert!(!staged_contains_order_placed(&[]));
+        // And a staged set that never placed an order.
+        assert!(!staged_contains_order_placed(&staged(vec![cart_started()])));
+    }
 }
