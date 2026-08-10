@@ -2,6 +2,39 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📋 **2026-08-10 — the technical layer has NO observability contract; six decisions open**
+> ([PROP-20260810-005727](proposals/PROP-20260810-005727-platform-observability-the-technical-layer-has-no-contract.md),
+> tracking [#364 "Observability on MKS: OTel collector placement, symptom alerts that open issues, contracts extended"](https://github.com/TheCaptainCompany/captain-food/issues/364)).
+> A capacity question about Postgres disk on OVH had a small financial answer and a large structural
+> one. **Financial**: OVH's catalog prices `volume.high-speed` at **€0.086/GB/mo** and object storage
+> at **€0.007/GB/mo** with **€0 egress**, so the 20 Gi PVC costs ~€1.72/mo against the **€26.60**
+> recorded in ADR-20260807-114122 — which prices node + LB only. The real bill is ~€28.5/mo, ~7%
+> understated, and the runbook that ADR cites for "real catalog prices"
+> (`docs/runbooks/mks-bootstrap.md`) **does not exist**. **Structural**: `specs/observability.yaml`'s
+> twelve contracts are **all domain-bound** — nothing anywhere watches disk, connections, certificate
+> expiry, node pressure, GitOps sync or mailbox depth. Not an oversight in one file: ADR-20260807-114122
+> dropped the Prometheus stack to afford the single-node shape and moved alerting to Honeycomb, which
+> receives application OTel only. Three properties make this bite: **a PVC expands but never shrinks**
+> (and D6 of ADR-20260807-002705 deleted every dump-restore path, so the ratchet has no release), a
+> **WAL `ENOSPC` is `PANIC` not degradation** with no replica to promote at `instances: 1`, and
+> **usable capacity is provisioned minus the largest rewritable relation** — `domain_events` cannot
+> safely pass **~6 GB** on a 20 Gi volume, not 20. `migrations/20260730043500_enum_text_domain_events.sql`
+> records that this already happened once on the 2 GB Supabase disk. Everything proposed is a **PR
+> against an unapplied desired state** (`deploy/platform/README.md`: *"nothing applies this tree
+> today"*) — the same work after cutover costs a supervised console session. Two adjacent defects
+> found and NOT smuggled into the proposal: `migrations/20260717120000_domain_schema.sql:125`
+> duplicates the `UNIQUE (stream_name, version)` on line 123 (a redundant index written on every
+> append, forever), and `temp_file_limit` is unset while `bam.yaml` points analytics at the order
+> path's database.
+>
+> **Decisions awaiting the product owner** ([DECISIONS.md §25](proposals/DECISIONS.md)): D1 collection
+> mechanism · D2 what constitutes a page (every alert path today ends at a GitHub issue, which at
+> 20:30 Saturday is not a page) · D3 a narrow cause-alert exception to §2b practice 8's symptom-only
+> rule · D4 whether the platform contract lives in `specs/observability.yaml` as a new `platform:`
+> kind (**a DSL change — approval required**) · D5 disk thresholds 70/85 · D6 an emission-site
+> validator gate, because `orders_placed_total` has zero emission sites and **a declared metric that
+> cannot fire reads as health**.
+
 > ✅ **2026-08-09 (morning) — THE EIGHT-DECISION BRIEF IS ANSWERED; the demo is deferred and the
 > target is now production-with-test-data** ([ADR-20260809-050000](adr/ADR-20260809-050000-morning-brief-eight-decisions.md)).
 > The open-decision register went **21 → 8** in one sitting, by answering rather than appending.
