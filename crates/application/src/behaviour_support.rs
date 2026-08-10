@@ -230,10 +230,6 @@ impl TestBed {
                     customer_id: None,
                     status: CartStatus::OPEN,
                     lines: serde_json::json!([]),
-                    total_amount_cents: MoneyCents(0),
-                    currency: CurrencyCode("EUR".into()),
-                    estimated_breakdown: None,
-                    uber_comparison: None,
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                 });

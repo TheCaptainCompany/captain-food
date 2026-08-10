@@ -220,13 +220,27 @@ mint_token() {
 }
 
 # --- L1: edge -------------------------------------------------------------------------------------
+
+# The release this smoke's L4 cart assertion describes: #451, live cart pricing at read
+# (migration 20260810113000). The server self-reports the schema version its BINARY requires, so
+# comparing against it tells us WHICH CODE is deployed, not merely which schema is applied.
+SMOKE_MIN_SCHEMA_VERSION=20260810113000
+
 l1() {
-  local ping health
+  local ping health body required
   ping=$(curl -sS -m 15 "$API_BASE/ping" || true)
   [ "$ping" = "pong" ] || fail "L1: $API_BASE/ping returned '$ping' (expected 'pong')"
-  health=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "$API_BASE/health" || true)
-  [ "$health" = "200" ] || fail "L1: $API_BASE/health returned HTTP $health — body: $(curl -sS -m 15 "$API_BASE/health" || true)"
-  pass "L1 edge: /ping=pong, /health=200"
+  body=$(curl -sS -m 15 -w $'\n%{http_code}' "$API_BASE/health" || true)
+  health="${body##*$'\n'}"; body="${body%$'\n'*}"
+  [ "$health" = "200" ] || fail "L1: $API_BASE/health returned HTTP $health — body: $(printf '%s' "$body" | head -c 400)"
+  # Deploy ORDERING (#451): L4 now asserts a cart prices to > 0 through `current`, which a pre-#451
+  # binary cannot do — it has no `current` resolver and no read-side pricer. Without this check that
+  # shows up as a baffling assertion failure deep in L4; with it, the run says plainly that the
+  # smoke is ahead of the deployment. Smoke AFTER deploying, not before.
+  required=$(printf '%s' "$body" | jq -r '.requiredSchemaVersion // 0' 2>/dev/null || echo 0)
+  [ "$required" -ge "$SMOKE_MIN_SCHEMA_VERSION" ] 2>/dev/null \
+    || fail "L1: deployed binary requires schema $required, smoke expects >= $SMOKE_MIN_SCHEMA_VERSION — DEPLOY BEFORE SMOKING (this smoke asserts live cart pricing, #451)"
+  pass "L1 edge: /ping=pong, /health=200, binary at schema $required"
 }
 
 # --- L2: public GraphQL on the tenant host --------------------------------------------------------
@@ -394,12 +408,30 @@ l4() {
     "$(jq -cn --arg c "$cart_id" --arg r "$FIX_RESTAURANT_ID" --arg l "$line_id" --arg o "$FIX_OFFER_ID" --arg s "$session_id" \
       '{i:{cartId:$c, restaurantId:$r, sessionId:$s, line:{cartLineId:$l, offerId:$o, quantity:1}}}')" >/dev/null
 
-  # placeOrder reads the cart PROJECTION — wait for it.
+  # placeOrder reads the cart PROJECTION — wait for it, through the GUEST path.
+  #
+  # `current` + X-SESSION-ID, NOT `cart(input:{id})` (#451). The by-id read is now guarded
+  # [CUSTOMER, ADMIN], so the field is not in the PUBLIC schema at all; and even minting a customer
+  # token would not help, because this cart is anonymous (customer_id NULL) and the by-id resolver's
+  # claim-ownership narrowing resolves someone else's/unbound carts to null. The session leg is the
+  # only path this guest fixture can legally reach — which is the right thing to smoke anyway: it
+  # exercises the two-leg lookup, the live `price_cart` seam and the cart-price telemetry contract
+  # in one probe, on exactly the flow a real guest walks.
+  #
+  # The assertion is the WHOLE priced shape in one predicate, not just "a row exists". Before #451
+  # the projection carried a stubbed 0/NULL price, so a cart that projected but priced to nothing
+  # would have passed a status-only check while the customer saw no payable amount — the silent
+  # conversion failure this smoke exists to catch. amountCents MUST be > 0 for the seeded fixture.
   check_cart_projected() {
-    local r; r=$(gql "$API_BASE/public/graphql" "" 'query($id: CartId!){ cart(input:{id:$id}) { id status totalAmount { amountCents currency } } }' "$(jq -cn --arg id "$cart_id" '{id:$id}')")
-    [ "$(printf '%s' "$r" | jq -r '.data.cart.status // empty')" = "OPEN" ] && echo ok || printf '%s' "$r" | jq -c '.data' 2>/dev/null
+    local r; r=$(gql "$API_BASE/public/graphql" "" \
+      'query{ current { id status totalAmount { amountCents currency } } }' '{}' "$session_id")
+    [ "$(printf '%s' "$r" | jq -r '
+        (.data.current.status == "OPEN")
+        and (.data.current.totalAmount.amountCents > 0)
+        and (.data.current.totalAmount.currency == "EUR")
+      ' 2>/dev/null)" = "true" ] && echo ok || printf '%s' "$r" | jq -c '.data // .errors' 2>/dev/null
   }
-  wait_for "L4" "cart projection" 60 check_cart_projected
+  wait_for "L4" "cart projected and priced live" 60 check_cart_projected
 
   # 2. Checkout as the smoke CUSTOMER (TEST mode order against the TEST restaurant).
   #    Acceptance-first (ADR-20260720-015500): placeOrder returns only the acceptance envelope; the

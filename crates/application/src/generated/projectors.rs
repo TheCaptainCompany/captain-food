@@ -227,10 +227,6 @@ pub fn project_catalog<C: CatalogCompute>(c: &C, state: Option<CatalogRow>, env:
 pub trait CartCompute {
     fn status(&self, prev: Option<&CartRow>, env: &Envelope) -> CartStatus;
     fn lines(&self, prev: Option<&CartRow>, env: &Envelope) -> serde_json::Value;
-    fn total_amount_cents(&self, prev: Option<&CartRow>, env: &Envelope) -> MoneyCents;
-    fn currency(&self, prev: Option<&CartRow>, env: &Envelope) -> CurrencyCode;
-    fn estimated_breakdown(&self, prev: Option<&CartRow>, env: &Envelope) -> Option<serde_json::Value>;
-    fn uber_comparison(&self, prev: Option<&CartRow>, env: &Envelope) -> Option<serde_json::Value>;
 }
 
 pub fn project_cart<C: CartCompute>(c: &C, state: Option<CartRow>, env: &Envelope) -> Option<CartRow> {
@@ -243,16 +239,12 @@ pub fn project_cart<C: CartCompute>(c: &C, state: Option<CartRow>, env: &Envelop
             customer_id: e.customer_id.clone(),
             status: c.status(state.as_ref(), env),
             lines: c.lines(state.as_ref(), env),
-            total_amount_cents: c.total_amount_cents(state.as_ref(), env),
-            currency: c.currency(state.as_ref(), env),
-            estimated_breakdown: c.estimated_breakdown(state.as_ref(), env),
-            uber_comparison: c.uber_comparison(state.as_ref(), env),
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
-        DomainEvent::CartLineAdded(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; let v = c.total_amount_cents(Some(&row), env); row.total_amount_cents = v; let v = c.currency(Some(&row), env); row.currency = v; let v = c.estimated_breakdown(Some(&row), env); row.estimated_breakdown = v; let v = c.uber_comparison(Some(&row), env); row.uber_comparison = v; Some(row) },
-        DomainEvent::CartLineQuantityChanged(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; let v = c.total_amount_cents(Some(&row), env); row.total_amount_cents = v; let v = c.estimated_breakdown(Some(&row), env); row.estimated_breakdown = v; let v = c.uber_comparison(Some(&row), env); row.uber_comparison = v; Some(row) },
-        DomainEvent::CartLineRemoved(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; let v = c.total_amount_cents(Some(&row), env); row.total_amount_cents = v; let v = c.estimated_breakdown(Some(&row), env); row.estimated_breakdown = v; let v = c.uber_comparison(Some(&row), env); row.uber_comparison = v; Some(row) },
+        DomainEvent::CartLineAdded(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; Some(row) },
+        DomainEvent::CartLineQuantityChanged(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; Some(row) },
+        DomainEvent::CartLineRemoved(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; Some(row) },
         DomainEvent::CartCheckedOut(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::CartBoundToCustomer(e) => { let mut row = state?; row.customer_id = Some(e.customer_id.clone()); Some(row) },
         _ => return state,

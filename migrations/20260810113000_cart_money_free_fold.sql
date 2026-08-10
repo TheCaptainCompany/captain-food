@@ -1,0 +1,82 @@
+-- Cart becomes a MONEY-FREE pure fold (#451, PROP-20260810-231500 Option B, ADR-20260810-112836):
+-- the price a customer sees is computed AT READ TIME by application::pricing::price_cart against
+-- the live catalog — never materialized in the projection. `lines` (kept, jsonb) changes SHAPE to
+-- the repricing inputs only: [{ cart_line_id, offer_id, quantity, selected_option_ids }].
+--
+-- EXPAND HALF ONLY (#451 Phase 2b). The four now-unread priced columns —
+-- total_amount_cents, currency, estimated_breakdown, uber_comparison — are deliberately NOT dropped
+-- here. They were 0/NULL stubs in practice (the projector never priced them) and the new binary no
+-- longer selects them (`cart_store::COLUMNS`), so leaving them costs a few dead bytes per row and
+-- nothing else.
+--
+-- What dropping them here would cost: render.yaml is `plan: free`, ONE instance, so a deploy that
+-- fails after db-migrate rolls back to the PREVIOUS binary — which SELECTs those columns. The
+-- health gate (`applied >= REQUIRED_SCHEMA_VERSION`) would still answer 200, because the schema is
+-- ahead, not behind. Green health, every cart read 500ing, and no way back except rolling the
+-- schema forward under pressure. Keeping the columns makes that rollback boring.
+--
+-- The CONTRACT half (the four DROP COLUMNs) is issue #470 "Contract migration: drop the four Cart
+-- money columns once the money-free binary is stable" — a SEPARATE, LATER change, deliberately not
+-- a second file in this one: `db-migrate` applies all pending migrations in a single deploy, so a
+-- contract file added now would drop the columns in the very deploy this note exists to make
+-- reversible, and would also force REQUIRED_SCHEMA_VERSION forward (the codegen guard pins it to
+-- the newest migration). It ships once this binary has been smoked in production.
+--
+-- ROLLBACK NOTE. Rolling back to a pre-#451 binary is survivable but NOT clean. The old binary
+-- maps `lines: serde_json::from_value(row.lines).unwrap_or_default()`
+-- (`crates/server/src/graphql/generated/types.rs`), so rows written in the NEW money-free `lines`
+-- shape deserialize to an EMPTY vec: the customer sees a silent 0,00 EUR cart rather than an error.
+-- Bad, but recoverable, and strictly better than the alternative below. Roll FORWARD by preference.
+--
+-- OPS NOTE (#264 disk lesson): schedule OFF-PEAK (never Fri/Sat 19:00-21:30 Europe/Paris). The
+-- DELETE + checkpoint rewind below replays the Cart projection; Cart streams are small and
+-- retention-trimmed, but the replay still churns WAL — off-peak costs nothing, peak does.
+
+-- THE PRECONDITION FOR THE REWIND BELOW, and it must be SET DEFAULT — not DROP NOT NULL.
+--
+-- `total_amount_cents` and `currency` were created `NOT NULL` with no DEFAULT
+-- (20260717120000_domain_schema.sql:249-250) and no later migration relaxed them, while the
+-- money-free `cart_store::upsert` now inserts EIGHT columns and omits both. Without this ALTER the
+-- first event folded after the rewind fails with `23502 null value in column
+-- "total_amount_cents"` — verified by executing that exact INSERT against Postgres 16.
+--
+-- And the failure does NOT heal on retry. `crates/infrastructure/src/projection/worker.rs` folds
+-- each event in a SAVEPOINT and, on a per-event failure, LOGS IT, SKIPS IT, AND ADVANCES THE
+-- CHECKPOINT ANYWAY (deliberately — one poison record must not wedge a whole projector group). So
+-- every Cart event is skipped as poison, the checkpoint walks to head, and the Cart table stays
+-- EMPTY PERMANENTLY: recoverable only by a manual rewind PLUS a schema fix, never by a restart.
+-- `placeOrder` reads the cart projection, so no order can be placed at all — and `/health` keeps
+-- answering 200 throughout, because the failure is in the worker, not on the request path.
+--
+-- Why SET DEFAULT and not DROP NOT NULL: dropping the constraint lets the new binary write NULLs,
+-- and the pre-#451 binary decodes these columns as NON-optional
+-- (`MoneyCents(row.try_get("total_amount_cents")?)`, `CurrencyCode(row.try_get("currency")?)` in
+-- `crates/infrastructure/src/persistence/cart_store.rs`). `try_get::<i64>` on a NULL column is
+-- `UnexpectedNullError`, so a rolled-back binary would fail to decode EVERY row the new binary
+-- wrote — in its own projector's `load` and in every cart read. That turns the rollback this
+-- expand-only migration exists to protect into a harder outage than the one it prevents.
+-- SET DEFAULT instead writes exactly the stub values the old projector was already writing (0 and
+-- 'EUR' — the columns were never really priced), so BOTH directions decode cleanly, and NOT NULL
+-- survives as the standing guarantee that a rollback target can always read this table.
+-- Both variants were executed against Postgres 16: DROP NOT NULL stores (NULL, NULL); SET DEFAULT
+-- stores (0, 'EUR').
+--
+-- Consequence worth knowing while the replay runs: `crates/infrastructure/src/deletion.rs` bounds
+-- the GDPR erasure scan by `MIN(position)` across projection checkpoints, so a Cart checkpoint
+-- sitting at 0 stalls erasure for EVERY subject — silently. Transient while the projector catches
+-- up; permanent if it cannot write at all, which is the failure this ALTER prevents. See #473.
+ALTER TABLE Cart ALTER COLUMN total_amount_cents SET DEFAULT 0,
+                 ALTER COLUMN currency SET DEFAULT 'EUR';
+
+-- Restore-by-replay (the 20260720020500 pattern): existing rows carry the OLD priced `lines` shape;
+-- the fold is pure, so a rewind rebuilds every row in the new shape. DELETE (not TRUNCATE) keeps the
+-- statement transactional with the checkpoint rewind.
+DELETE FROM Cart;
+UPDATE projection_checkpoint SET position = 0 WHERE projector = 'Cart';
+
+-- The claim-resolved "most-recently-updated OPEN cart" lookup (queries/current) and the
+-- `by_customer` list: without this the per-customer newest-first read is a seq scan. Status is
+-- filtered in SQL (a two-value enum — leading columns stay the selective ones).
+-- Created AFTER the DELETE above, so it builds against an empty table instead of indexing rows the
+-- same transaction is about to discard.
+CREATE INDEX ON Cart (customer_id, updated_at);

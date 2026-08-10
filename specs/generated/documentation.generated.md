@@ -51,6 +51,7 @@ An authenticated person who orders food via Captain.Food.
 |  | SeeCheckoutBreakdown | [🔎 `cart`](#query-cart) |
 |  | CompareWithUberEats | [🔎 `cart`](#query-cart) |
 |  | ViewMyCarts | [🔎 `carts`](#query-carts) |
+|  | ViewCurrentCart | [🔎 `current`](#query-current) |
 |  | BrowseCategories | [🔎 `categories`](#query-categories) |
 |  | PlaceOrder | [✏️ `placeOrder`](#mutation-placeorder) |
 |  | PollOperationStatus | [🔎 `operationStatus`](#query-operationstatus) |
@@ -3141,7 +3142,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)._
 
-### 🧰 API operations _(36)_
+### 🧰 API operations _(35)_
 
 <a id="query-orderconversation"></a>
 #### 🔎 Query: `orderConversation`
@@ -3162,15 +3163,6 @@ The INTERNAL staff notes on one order's conversation — staff/rider/admin only,
 - **Input**: 🧩 `OrderConversationInternalNotesQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Returns**: [🧩 `ConversationInternalNotes`](#type-conversationinternalnotes) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
-
-<a id="query-cart"></a>
-#### 🔎 Query: `cart`
-
-A single cart by id (session-scoped; readable by the guest/customer who owns it).
-
-- **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
-- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
-- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 <a id="query-orders"></a>
 #### 🔎 Query: `orders`
@@ -3452,7 +3444,8 @@ The INTERNAL (staff-only) notes on an order's conversation — deliberately a SE
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
 
-A customer's in-progress selection for a single restaurant (priced by the projection).
+A customer's in-progress selection for a single restaurant. The stored read model is a money-free pure fold (identity, status, repricing inputs); every priced field below — lines, totalAmount, breakdown, uberComparison — is computed AT READ TIME from the live catalog by the same `price_cart` authority the write path uses, so the cart always shows the LIVE price and the ONE authoritative freeze stays at checkout (rules.yaml#/CheckoutSnapshotFrozenAtIntent; PROP-20260810-231500 Option B, ADR-20260810-112836).
+
 
 - **Read model**: [🗄️ `Cart`](#view-cart)
 
@@ -4109,8 +4102,8 @@ sequenceDiagram
 #### 🗄️ View: `Cart`
 
 - **Source**: [🎭 `Cart`](#actor-cart) · 🛶 V0
-- **Note**: Joined with the catalog for pricing (secondary source).
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
+- **Note**: MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only identity, status and the REPRICING INPUTS (per line: offer_id, quantity, selected_option_ids). A replay reproduces these rows exactly — the fold reads nothing outside the event stream. Prices are computed AT READ TIME by `application::pricing::price_cart` against the live catalog (the same authority the checkout write path uses); the authoritative price freeze happens once, on PaymentIntentCreated.CheckoutSnapshot. 
+- **Rules**: The fold is PURE and money-free: no price, currency, breakdown or comparison is stored — the read side prices the lines fresh on every read via price_cart (LIVE catalog), fail-closed on an unresolvable line (PriceUnresolvable → the honest no-price state, never a stale or client number). `customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout. The estimated PaymentBreakdown and UberComparison shown on the cart (ADR-0018/0022/0025) are READ-TIME computations from the freshly priced food total + PricingPolicy / Uber*Policy — same formulas as before, no longer materialized. Recomputed authoritatively on OrderPlaced.breakdown.
 - **Fed by**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout), [⚡ `CartBoundToCustomer`](#event-cartboundtocustomer)
 
 | Column | Type | Sourced from | Constraints | Notes |
@@ -4120,11 +4113,7 @@ sequenceDiagram
 | `session_id` | [🔤 `SessionId`](#scalar-sessionid) _(derived)_ | [⚡ `CartStarted`.`sessionId`](#event-cartstarted--sessionid) | index | The visitor session that started the cart; CartBindingProcess binds all OPEN carts of a session on CustomerIdentified. |
 | `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `CartStarted`.`customerId`](#event-cartstarted--customerid), [⚡ `CartBoundToCustomer`.`customerId`](#event-cartboundtocustomer--customerid) | nullable | NULL while guest; bound by CartBoundToCustomer (CartBindingProcess sends BindCartToCustomer per open cart of the identified session) or at checkout. |
 | `status` | [🔤 `CartStatus`](#scalar-cartstatus) | [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
-| `lines` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
-| `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
-| `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `CartLineAdded`](#event-cartlineadded) | — | From the catalog currency at pricing time (the restaurant's default_currency). |
-| `estimated_breakdown` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
-| `uber_comparison` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | UberComparison for the cart-level comparison (ADR-0022/0025), COMPUTED by the projection (see rules). Null when the restaurant has no cuisine_category. |
+| `lines` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | MONEY-FREE repricing inputs, folded verbatim from the cart events: [{ cart_line_id, offer_id, quantity, selected_option_ids }]. NO stored price/name fields — the read side resolves names and prices from the live catalog via price_cart. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -5773,7 +5762,7 @@ _A translation can only be recorded for a message that was actually posted to th
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
 
-_Cart lines are added/changed/removed and priced by the projection from the live catalog, never trusted from the client._
+_The cart price is LIVE: cart mutation events and the Cart read model carry NO money — the price a customer sees is computed ON READ from the live catalog by the SAME `price_cart` authority the write path uses (one code path), never stored in the fold and never trusted from the client. A restaurant price change is reflected on the next read; the one authoritative freeze happens at checkout (CheckoutSnapshotFrozenAtIntent). (PROP-20260810-231500 Option B, ADR-20260810-112836 — corrects the earlier impure-fold wording that had the projection reading the catalog.)_
 
 - **Verified by**: [🧪 `TestCartFirstLineAdded`](#test-testcartfirstlineadded), [🧪 `TestCartLineQuantityChanged`](#test-testcartlinequantitychanged), [🧪 `TestCartLineRemoved`](#test-testcartlineremoved)
 
@@ -5843,14 +5832,14 @@ _A customer can request a refund for an order._
 <a id="rule-serverpriceauthority"></a>
 #### 📐 Rule: `ServerPriceAuthority`
 
-_The server is the only price authority on the write path: order line totals, the order total and the payment-intent amount are recomputed at checkout from the live catalog (Offer prices, Option prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (PriceUnresolvable) — never a fallback to the client's number._
+_The server is the only price authority on the write path: order line totals, the order total and the payment-intent amount are recomputed at checkout from the live catalog (Offer prices, Option prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (PriceUnresolvable) — never a fallback to the client's number. LEGAL DISPLAY GUARANTEE (Code de la consommation L112-1/L221-5 posture): the total displayed at the commit moment equals the CheckoutSnapshot total — the price the consumer agreed to IS the price charged. The equality check on expectedTotal is the enforcement: a displayed total that drifted from the server's recomputation can never be charged, only rejected and re-confirmed._
 
 - **Verified by**: [🧪 `TestPlaceOrderRecomputesPriceServerSide`](#test-testplaceorderrecomputespriceserverside), [🧪 `TestPlaceOrderRejectsPriceMismatch`](#test-testplaceorderrejectspricemismatch), [🧪 `TestPlaceOrderRejectsUnresolvablePrice`](#test-testplaceorderrejectsunresolvableprice)
 
 <a id="rule-checkoutpricescartcreatespaymentintent"></a>
 #### 📐 Rule: `CheckoutPricesCartCreatesPaymentIntent`
 
-_Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
+_Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
 
@@ -6703,7 +6692,7 @@ _Checkout recomputes every line total and the order total from the live catalog;
 <a id="test-testplaceorderrejectspricemismatch"></a>
 #### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
 
-_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
+_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
@@ -6991,7 +6980,7 @@ _Checkout recomputes every line total and the order total from the live catalog;
 <a id="test-testplaceorderrejectspricemismatch"></a>
 #### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
 
-_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
+_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
@@ -7398,7 +7387,7 @@ _Refuses to requeue a mailbox row that does not exist_
 
 _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding._
 
-### 🧰 API operations _(21)_
+### 🧰 API operations _(23)_
 
 <a id="query-me"></a>
 #### 🔎 Query: `me`
@@ -7427,6 +7416,26 @@ A customer's carts (one OPEN cart per restaurant). Ownership enforced server-sid
 - **Input**: 🧩 `CartsQueryInput!` — `customerId`: [🔤 `CustomerId`](#scalar-customerid)
 - **Returns**: [🧩 `Cart`](#type-cart) (list) · **reads** [🗄️ `Cart`](#view-cart)
 - **Roles**: CUSTOMER, ADMIN · **slice** V0
+
+<a id="query-cart"></a>
+#### 🔎 Query: `cart`
+
+A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id. The GUEST path is not this query and not a gap: anonymous carts are session-keyed and read through `current`'s session leg (ADR-20260810-120531 — CartBindingProcess associates them to the customer on identification).
+
+
+- **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
+- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
+- **Roles**: CUSTOMER, ADMIN · **slice** V0
+
+<a id="query-current"></a>
+#### 🔎 Query: `current`
+
+The caller's CURRENT cart — the storefront cart/mini-cart read, TWO-LEG resolution (#451, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart (ReadScope::Customer, the `myReclamations` pattern). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
+
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
+- **Roles**: PUBLIC, CUSTOMER · **slice** V0
 
 <a id="query-myreclamations"></a>
 #### 🔎 Query: `myReclamations`
@@ -10378,7 +10387,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(7)_
+### 📡 Observability _(8)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -10409,6 +10418,31 @@ _criticality: **high**_
 - **Metrics**: `commands_accepted_total` _(counter)_, `command_duplicates_total` _(counter)_, `command_sync_conflicts_total` _(counter)_, `command_completion_ms` _(histogram)_, `mailbox_poison_failed_total` _(counter)_, `mailbox_push_down_total` _(counter)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `command.dispatch`]
 - **SLOs**: p95 ≤ 150ms · p99 ≤ 400ms · error rate ≤ 0.5%
+
+<a id="obs-cart-price"></a>
+#### 📡 Contract: `cart-price`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `cart.price` | `INTERNAL` | ✅ | — | `business.aggregate_id`*, `business.correlation_id`* |
+
+- **Metrics**: `cart_price_ms` _(histogram)_, `cart_price_unresolvable_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`cart.price`]
+- **SLOs**: p95 ≤ 300ms · p99 ≤ 600ms · error rate ≤ 1%
 
 <a id="obs-stripe-webhook-ingestion"></a>
 #### 📡 Contract: `stripe-webhook-ingestion`
@@ -10948,7 +10982,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 | Kind | UI need | GraphQL operation |
 | --- | --- | --- |
-| read | `cart.current` | [🔎 `cart`](#query-cart) |
+| read | `cart.current` | [🔎 `current`](#query-current) |
 | write | `change_cart_line_quantity` | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
 | write | `apply_promo_code` | ⚠️ _gap: No applyPromoCode mutation — promo codes / cart discount not modelled._ |
 | write | `set_delivery_mode` | ⚠️ _gap: Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder._ |
@@ -10978,7 +11012,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 | Kind | UI need | GraphQL operation |
 | --- | --- | --- |
-| read | `cart.current` | [🔎 `cart`](#query-cart) |
+| read | `cart.current` | [🔎 `current`](#query-current) |
 | read | `me.profile` | [🔎 `me`](#query-me) |
 | read | `paymentStatus.byOrder` | [🔎 `paymentStatus`](#query-paymentstatus) |
 | write | `place_order` | [✏️ `placeOrder`](#mutation-placeorder) |

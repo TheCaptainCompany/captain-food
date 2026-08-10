@@ -309,6 +309,14 @@ impl QueryRoot {
     async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // Ownership enforced server-side (#144): a CUSTOMER caller's customerId argument is IGNORED
@@ -330,17 +338,67 @@ impl QueryRoot {
             .into_iter()
             .map(|r| (r.restaurant_id.0, r))
             .collect();
-        Ok(rows
-            .into_iter()
-            .filter_map(|c| by_id.get(&c.restaurant_id.0).cloned().map(|r| Cart::from((c, r))))
-            .collect())
+        // Priced through the ONE `price_cart` seam (#451): each cart from ITS restaurant's live
+        // catalog, one memoized catalog read per cart; an unresolvable price errors the read
+        // (fail-closed, cart-price contract) rather than lying with a partial list.
+        let mut out = Vec::new();
+        for c in rows {
+            let Some(r) = by_id.get(&c.restaurant_id.0).cloned() else { continue };
+            out.push(crate::graphql::cart_read::priced(&**catalogs, c, r, correlation_id).await?);
+        }
+        Ok(out)
     }
-    /// A single cart by id (session-scoped; readable by the guest/customer who owns it).
-    #[graphql(name = "cart")]
+    /// A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id. The GUEST path is not this query and not a gap: anonymous carts are session-keyed and read through `current`'s session leg (ADR-20260810-120531 — CartBindingProcess associates them to the customer on identification).
+    #[graphql(name = "cart", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
     async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
         let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        // Claim-ownership narrowing (#144/#434, the #451 DONE-WHEN): a CUSTOMER reads only a cart
+        // bound to their claim-resolved id — anyone else's (or an unbound session cart) resolves
+        // null, no existence oracle; ADMIN reads any cart. Scope absent => Public => nothing.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
+        if !crate::graphql::cart_read::readable_by(&row, &scope) {
+            return Ok(None);
+        }
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
+    }
+    /// The caller's CURRENT cart — the storefront cart/mini-cart read, TWO-LEG resolution (#451, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart (ReadScope::Customer, the `myReclamations` pattern). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
+    #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
+    async fn current(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<Cart>> {
+        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = the schema was executed OUTSIDE a
+        // request (no transport, e.g. a direct unit-test execution), and the NIL uuid says exactly
+        // that: a random id would be indistinguishable from a real one in a trace, sending an
+        // operator hunting for a request that never existed. All three real paths -- HTTP POST, the
+        // WS connection_init and the SSR render -- inject one, so this is unreachable in production.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or(uuid::Uuid::nil());
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. the session leg only -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
+        // The anonymous-session correlator (validated at transport, `session.rs`): leg 2's key.
+        let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
+        let Some(row) = crate::graphql::cart_read::current_open_cart(&**carts, &scope, session)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
             return Ok(None);
         };
         let restaurant = restaurants
@@ -348,7 +406,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(Cart::from((row, restaurant))))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]

@@ -262,19 +262,32 @@ pub trait CatalogReadRepository: Send + Sync {
 /// plus CartBindingProcess's session read (`specs/processmanager.yaml#/CartBindingProcess`).
 #[async_trait]
 pub trait CartReadRepository: Send + Sync {
-    /// A customer's carts (one OPEN cart per restaurant), most recently updated first.
+    /// A customer's **OPEN** carts (one per restaurant), most recently updated first, bounded.
+    ///
+    /// OPEN-only is part of the PORT contract, not an adapter detail (#451): every consumer prices
+    /// what this returns against the LIVE catalog, and a CHECKED_OUT cart's money was frozen at
+    /// payment intent — repricing it would show a number that never matched what was charged.
+    /// Implementations must filter, and must bound the row count (the caller pays one catalog read
+    /// per row).
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
-    /// A single cart by id (session-scoped), or `None` if absent.
+    /// A single **OPEN** cart by id, or `None` when absent OR no longer open.
+    ///
+    /// OPEN-only for the same reason as [`Self::by_customer`] and stated here for the same reason:
+    /// it is a PORT obligation, so both lookups give the same answer to "may this be repriced?".
+    /// A CHECKED_OUT cart resolving `None` is correct, not a gap — post-checkout money is read from
+    /// the Order (the aggregate that owns what was charged), never re-derived from a cart.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;
 
-    /// The session's OPEN carts — CartBindingProcess's `read` step (`where: { session_id, status:
-    /// OPEN }`). PROVIDED, empty: existing implementations (query-side fakes owned by concurrent
-    /// workstreams) keep compiling and simply serve no carts to bind; the Pg adapter (and the saga
-    /// tests' fakes) override with the real predicate.
-    async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError> {
-        let _ = session_id;
-        Ok(Vec::new())
-    }
+    /// The session's OPEN carts, most recently updated first — CartBindingProcess's `read` step
+    /// (`where: { session_id, status: OPEN }`) AND leg 2 of `cart.current` (ADR-20260810-120531).
+    ///
+    /// REQUIRED, deliberately (#451 Phase 2b). This used to be a PROVIDED method returning
+    /// `Ok(Vec::new())` so in-flight fakes kept compiling. That default is a trap once `current`
+    /// depends on it: an implementation that simply forgets to override serves NO carts, so the
+    /// entire ANONYMOUS cart path — every guest mini-cart, the whole pre-identification flow —
+    /// silently resolves empty, with nothing to compile-fail and no error to observe. Making it
+    /// required turns "I forgot" into a build failure (compiler-first, ADR-20260803-234035).
+    async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError>;
 }
 
 /// Read port over the `Customer` projection table (ADR-0040) — the identity/lookup read model. Backs

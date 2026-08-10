@@ -114,14 +114,25 @@ async fn graphql_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid X-SESSION-ID (must be a UUID)").into_response(),
     };
     let trace = crate::graphql::session::trace_context(&headers);
+    // The ONE `request.correlation_id` of this request (#451): minted here, at the transport
+    // boundary, and shared by every read-path span the request opens (`auth.read_scope` below,
+    // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
+    // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
+    let correlation = crate::graphql::session::RequestCorrelationId::mint();
     // Per-instance authorization (#144/#433): resolve the verified Principal to a ReadScope ONCE
     // here — a PURE function of the token's claims (CARD-11), no lookup, no dependency that could
     // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
     // read ports without hand-written plumbing; a missing claim fails closed inside read_scope.
-    let scope = crate::auth::resolve_read_scope(&principal);
+    let scope = crate::auth::resolve_read_scope(&principal, correlation);
     let resp: GraphQLResponse = schema
         .execute(
-            req.into_inner().data(role).data(principal).data(session).data(trace).data(scope),
+            req.into_inner()
+                .data(role)
+                .data(principal)
+                .data(session)
+                .data(trace)
+                .data(correlation)
+                .data(scope),
         )
         .await
         .into();
@@ -212,10 +223,14 @@ async fn graphql_get(
                 })?;
                 let mut data = async_graphql::Data::default();
                 data.insert(role);
+                // One correlation id per CONNECTION here (the socket is the request): every
+                // read-path span served over it shares the id, same posture as POST.
+                let correlation = crate::graphql::session::RequestCorrelationId::mint();
+                data.insert(correlation);
                 // The socket resolves its ReadScope ONCE at connection init, from the same pure
                 // claims function the POST path uses — a subscription must not widen what a query
                 // would refuse (#144/#433).
-                data.insert(crate::auth::resolve_read_scope(&principal));
+                data.insert(crate::auth::resolve_read_scope(&principal, correlation));
                 data.insert(principal);
                 // A malformed session id rejects the connection (fail-visible, like a bad token).
                 let session = crate::graphql::session::session_header(&headers)

@@ -915,8 +915,96 @@ actually written.
 report gates. "Gates green" without saying which is not a claim about the diff. CI does build the
 workspace, so this bites as a late red on a PR you called ready, not as a bug in `main`.
 
+**Cover every crate the diff touches — ENUMERATE them, do not choose them.** Avoiding `cargo test
+--workspace` is a disk measure (§2), not a licence to test the crates that seem interesting. On
+#451 the instruction was "run `-p server` and `-p application`"; the branch actually touched six
+crates, and the failure was in the untested `crates/web` — a generated response key changed from
+`cart` to `current`, a hand-written SSR fixture still scripted the old key, and CI went red on work
+two rounds of local gates had called green. Derive the list instead of recalling it:
+
+```sh
+git diff origin/main...HEAD --name-only -- crates/ | cut -d/ -f2 | sort -u
+```
+
+**A green `make rust` proves nothing about anything touching `migrations/**` or a `View_*`.** Every
+DB-gated suite SKIPS without `DATABASE_URL`, counting as passed, and `rust-test` (Makefile:70) does
+not set one. **Run those suites with `DATABASE_URL` set and `DB_TESTS_REQUIRED=1`** — the loud-skip
+flag already exists (#230, documented in the headers of
+`crates/infrastructure/tests/main/mailbox_activations.rs`, `mailbox_retention.rs` and
+`standalone_workers.rs`); it turns a silent skip into a panic. Without it, `cargo test -p
+infrastructure` reports a clean pass having executed none of the migration chain. On #451 that
+silence hid a migration that bricked the Cart projection through three local gate rounds; CI's
+Postgres job found it. A local Postgres is cheap — `initdb -A trust` + `pg_ctl start` in a writable
+dir, then point `DATABASE_URL` at it.
+
+**The reverse trap: `cargo check` is equally partial.** A STALE generated file compiles perfectly —
+`57b7330` built clean with `crates/server/src/graphql/generated/query.rs` still holding an
+`Err("not implemented")` stub for a resolver whose body the emitter already carried, because
+nothing had re-run `make generate`. Only `check-drift` catches that. So the two gates cover
+disjoint failures and **neither subsumes the other**: `make rust` proves the specs and the
+generated tree agree, `cargo check`/`cargo test -p <crate>` prove the code you wrote works. A
+change to `crates/**` needs both, in that order (generate first, or check-drift fails on your own
+uncommitted regeneration).
+
 The executable fix (folding a workspace build+test into `rust`) is a Makefile change, so it goes
 through the claim -> PR flow rather than riding a docs commit.
+
+### Grepping for a type name does not find where that type is INJECTED
+
+Looking for where `SessionHeader` reaches the GraphQL context, a grep for `SessionHeader` across
+`crates/` returned the definition, the generated readers and a dozen tests — and **not
+`routes.rs`**, the file that actually injects it. The value arrives as `.data(session)`, where
+`session` came from `session_header(&headers)`; the type is never spelled. The near-conclusion was
+that the anonymous cart path was unwired in production, which would have produced a "fix" for a
+non-problem in a dispatch that had explicitly authorized wiring it.
+
+**Search the injection SHAPE at the transport boundary, not the type**: `grep -n '\.data(' ` in the
+route handlers and any `Data::default()` assembly (here: HTTP POST, the WS `connection_init`, and
+the in-process SSR transport). Then read those handlers top to bottom — the binding that carries
+the value is often three lines above the `.data(` call under a different name. Same trap applies to
+axum `Extension`, `tower` layers, and anything else registered by value rather than by name.
+
+### A handoff's "remaining work" list is a claim, not an inventory
+
+`docs/HANDOFF-451.md` listed four outstanding Phase-2 items. Two of them — the anonymous-leg
+ownership tests and the unresolvable-line test — were already written, in the very commit the
+handoff described as unfinished. Trusting the list would have meant writing duplicates of tests
+that already existed and passed.
+
+**Before working any item a handoff says is owed, check the artifact**: `grep -n 'fn ' <test file>`
+for tests, `git show <commit> --stat` for what actually landed. Cost here was small; the cost of
+believing a claim you cannot reproduce is a test suite nobody can trust.
+
+### A "seen red" claim must name HOW the test was made to fail
+
+Not that it failed — **how**: the clause deleted, the fallback re-planted, the stub it ran against.
+A claim a reader cannot re-run is not evidence, and the repo already contains both kinds. The good
+ones say what was mutated — `crates/server/src/auth.rs` ("Seen RED by re-planting #430's
+fallbacks"), `crates/infrastructure/tests/main/scope_membership.rs` ("Seen RED by deleting the
+EXISTS clause from `PgOrderRepository::list`") — and neither names a commit, correctly, because the
+mutation was made by hand and never committed.
+
+Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
+`crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
+introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was
+proposed and abandoned after checking the corpus: the fictions and the honest records use the same
+trigger words, so a phrase rule would have failed the two checkable claims and passed anything
+containing seven hex characters.
+
+**If no red was observed, say so plainly.** `crates/application/src/pricing.rs` (the HONESTY NOTE on
+`a_line_with_an_option_at_quantity_two_prices_to_3400`) is the model: it states the test was born
+green, quotes the claim it previously made, explains why that claim was false, and then says what
+can honestly be said instead — that the evidence is ordinary, the assertion of specific values a
+wrong implementation would not produce.
+
+### Do not push a feature branch while its executor is still working
+
+A stop-hook prompt reported an unpushed commit; the coordinator pushed it, the executor then
+amended that same commit (adding `.claude/loop-budget.json`), and local and remote diverged —
+identical content, different SHAs — needing a `--force-with-lease` to realign. **An
+unpushed-commit prompt is not a signal that the work is finished.** The coordinator pushes only
+after the executor reports the phase complete and the tree is clean; the executor says explicitly
+whether it intends to amend before handing back.
 
 ### One more shell trap in commit messages
 

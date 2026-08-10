@@ -229,6 +229,41 @@ pub mod read_authorization {
     }
 }
 
+/// Technical metrics for the `cart-price` contract (#451): the read-side pricing seam.
+pub mod cart_price {
+    use super::*;
+
+    fn duration_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| meter().f64_histogram(metric::CART_PRICE_MS).with_unit("ms").build())
+    }
+
+    fn unresolvable_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CART_PRICE_UNRESOLVABLE_TOTAL).build())
+    }
+
+    /// `cart_price_ms` — one priced cart read, resolver seam to priced shape. The budget lever is
+    /// the per-request memoized catalog read (`application::pricing::CatalogSnapshot`).
+    pub fn duration(elapsed_ms: f64) {
+        duration_histogram().record(elapsed_ms, &[]);
+    }
+
+    /// `cart_price_unresolvable_total{reason}` — a DEFECT counter (the
+    /// `place_order::degraded_render` pattern): the cart's price could not be resolved at read,
+    /// so the customer saw NO payable amount (the query errors — never a partial or wrong total)
+    /// and a sale is silently lost. `reason` is the contract's canonical bounded set:
+    /// `offer_gone` — a line's offer (or a selected option) no longer resolves in the live
+    /// catalog (emitted today); `policy_missing` | `stock_unknown` — reserved for the
+    /// fee/comparison-policy and orderability legs, unemitted until those land on this seam.
+    /// Classification: technical_error, never business_rejected — the customer asked to see
+    /// their cart (the write-path twin stays a rejection under place-order). Alert on any
+    /// sustained non-zero rate.
+    pub fn unresolvable(reason: &str) {
+        unresolvable_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
 /// Technical metrics for the `customer-identification` contract (#437).
 pub mod customer_identification {
     use super::*;
@@ -267,5 +302,7 @@ mod tests {
         super::read_authorization::bridge_unresolved("CUSTOMER");
         super::read_authorization::lag_positions(0);
         super::customer_identification::claim_stamp_failed("not_configured");
+        super::cart_price::duration(3.2);
+        super::cart_price::unresolvable("offer_gone");
     }
 }

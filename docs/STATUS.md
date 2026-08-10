@@ -2,6 +2,78 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
+> STILL CANNOT SEE IT**
+> ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
+> branch `claude/epic-429-production-test-order-9atwb8`, PR [#460](https://github.com/TheCaptainCompany/captain-food/pull/460), mob protocol).
+> **What now works, server-side.** `make generate` wired the three cart resolvers: `current` resolves
+> TWO-LEG (claim, then `X-SESSION-ID` with `customer_id IS NULL OR = claim`), the by-id `cart`
+> enforces claim-ownership in the BODY — retiring the live IDOR, the dispatch's hard DONE-WHEN — and
+> `carts` prices each row from its restaurant's live catalog. All three go through the ONE
+> `price_cart` seam (`crates/server/src/graphql/cart_read.rs`) over a one-read memoized catalog
+> snapshot. The generated `From<(CartRow, RestaurantRow)> for Cart` — which could only fabricate the
+> 0,00 EUR payable — is DELETED, so the fabrication is now unspellable rather than merely unused.
+> `by_customer` is OPEN-only + `LIMIT 50` in SQL (a CHECKED_OUT cart's money was frozen at intent;
+> repricing it is a receipt-adjacent lie, and one stale line used to error the customer's whole cart
+> list). `open_by_session` lost its `Ok(vec![])` trait default, so a fake that forgets it now fails
+> the build instead of silently emptying the entire anonymous path. Telemetry: `cart.price` declares
+> `otel.status_code` and records ERROR on the unresolvable branch (without it the contract's
+> `technical_error: any_span_errors` could never fire and every failure exported as a SUCCESS), the
+> empty-cart read emits its span + histogram like any other success, and one `RequestCorrelationId`
+> is minted per request and shared by every read-path span.
+>
+> **What does NOT work — the customer still sees no total.** Two independent reasons, both filed:
+> the cart screen's summary bindings name `cart.subtotal|deliveryFee|serviceFee|total` while the API
+> exposes `totalAmount` + `breakdown.{...}`, so the screen cannot render a price at all
+> ([#468 "The cart screen cannot render a price: every summary binding names a field the API does not have"](https://github.com/TheCaptainCompany/captain-food/issues/468));
+> and leg 1 cannot fire on the web client, because the public path never reads `captain_auth`
+> ([#469 "`current` leg 1 is dead on the web AND is not tenant-scoped — fix both together or neither"](https://github.com/TheCaptainCompany/captain-food/issues/469)).
+> The CHECKOUT shell's `cart_summary_mini` is a different block and does render a live total (proven
+> by `web::router::tests::the_checkout_shell_carries_the_cart_it_is_about_to_charge_for`). Also open:
+> [#470 "Contract migration: drop the four Cart money columns once the money-free binary is stable"](https://github.com/TheCaptainCompany/captain-food/issues/470)
+> (this change ships the EXPAND half only — the columns stay so a failed deploy on the single free-tier
+> instance can roll back to a binary that still selects them),
+> [#471 "Extend the observability test suite to the `cart-price` contract (span status, empty-cart span, unresolvable counter)"](https://github.com/TheCaptainCompany/captain-food/issues/471)
+> (the durable pin for the metrics; a bespoke spy binary was deliberately NOT built),
+> [#472 "A dead control stays live: the SDUI renderer evaluates no `visible_when`/`disabled_when` and swallows resolver errors"](https://github.com/TheCaptainCompany/captain-food/issues/472),
+> [#473 "Rewinding a projection checkpoint stalls the GDPR deletion engine's scan bound"](https://github.com/TheCaptainCompany/captain-food/issues/473),
+> plus [#465](https://github.com/TheCaptainCompany/captain-food/issues/465) (the CartLocked lifecycle)
+> and [#466](https://github.com/TheCaptainCompany/captain-food/issues/466) (the screen-roles ⊆
+> resolver-roles gate hole). Three open product-owner decisions ride in
+> [DECISIONS.md](proposals/DECISIONS.md) as rows **451-A** (the cart-screen bindings), **451-B** (the
+> `currency_mismatch` reason folded into `offer_gone`) and **451-C** (whether #451 keeps its now-stale
+> title). The prod smoke's L4 asserts the priced guest cart through `current` + `X-SESSION-ID` and
+> gates on the server's self-reported `requiredSchemaVersion`, so it **fails loudly against a
+> pre-#451 deployment** — deploy first, then smoke.
+
+> 🚧 **2026-08-10 — #451 PHASE 1 LANDED: THE AMBER SPEC SLICE OF THE CART-PRICING KEYSTONE**
+> ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
+> realizing [PROP-20260810-231500](proposals/PROP-20260810-231500-cart-current-priced.md) Option B /
+> LIVE, recorded in [ADR-20260810-112836 "Cart priced LIVE on read"](adr/ADR-20260810-112836-cart-priced-live-on-read.md);
+> branch `claude/epic-429-production-test-order-9atwb8`, mob protocol). **Spec truth now says LIVE**:
+> the `Cart` projection is a money-free pure fold (`projection_tables.yaml` money columns dropped,
+> `[customer_id, updated_at]` index added, migration `20260810113000_cart_money_free_fold.sql` +
+> schema-version bump); the zero-arg claim-resolved `current` query exists (`specs/ordering/api.yaml`
+> + `ViewCurrentCart` story step + the storefront SDUI `cart.current` resolver repointed); the
+> by-id `cart` query's live IDOR is retired at spec level (`roles: [CUSTOMER, ADMIN]`,
+> claim-ownership documented); the read-side pricing contract `cart-price` is in
+> `specs/observability.yaml` (`cart_price_ms`, `cart_price_unresolvable_total{reason}`); the
+> impure-fold wording is corrected everywhere (ADR-0028 §5 addendum, rules, entities/events
+> comments). **What does NOT yet work**: the `current` resolver is the generated
+> `not implemented` stub, the generated Cart→API mapping fills the degenerate unpriced shape
+> (empty lines, 0 EUR — exactly what the pre-#451 stub rendered), and the projector still folds no
+> lines. **Phase 2 (GREEN)** wires `price_cart` at the resolver seam, the line fold, the
+> claim-ownership narrowing in the `cart`/`current` bodies, and proves the `cart-price` metrics
+> firing. Phase 1 passed the fold-purity checkpoint (architect, 4/4 judgment calls sanctioned). Three
+> product-owner facts then corrected the design — carts are session-keyed BEFORE identification and
+> bound by `CartBindingProcess`, the cart is saved at intent as the CheckoutSnapshot, and the
+> intended cart LOCK is not modelled at all ([#465](https://github.com/TheCaptainCompany/captain-food/issues/465)).
+> `cart.current` is therefore TWO-LEG (claim, then session id with `customer_id IS NULL OR = claim`)
+> and `[PUBLIC, CUSTOMER]` — committed as `e9704a0`, which also repaired an anonymous-cart-read
+> break Phase 1 had introduced (gate hole filed as
+> [#466](https://github.com/TheCaptainCompany/captain-food/issues/466)). Phase 2 followed in the same
+> branch — see the entry above for what actually landed.
+
 > ✅ **2026-08-10 — STRIPE PUBLISHABLE KEY BAKED: the #440 env-var-only follow-up is closed**
 > ([#448 "Bake the Stripe TEST publishable key as a literal deploy value"](https://github.com/TheCaptainCompany/captain-food/issues/448),
 > spec-only, straight to `main`). The product owner supplied the authoritative `pk_test_…` value

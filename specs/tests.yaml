@@ -2159,7 +2159,7 @@ tests:
       - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
 
   TestPlaceOrderRejectsPriceMismatch:
-    name: "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)"
+    name: "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)"
     rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:

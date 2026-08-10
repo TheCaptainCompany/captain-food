@@ -2569,7 +2569,7 @@ async fn test_place_order_recomputes_price_server_side() {
     ]);
 }
 
-/// tests.yaml#/tests/TestPlaceOrderRejectsPriceMismatch — "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)"
+/// tests.yaml#/tests/TestPlaceOrderRejectsPriceMismatch — "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority; the displayed total the consumer agreed to is the only total that can be charged — L112-1/L221-5 posture)"
 /// rules: ServerPriceAuthority
 #[tokio::test]
 async fn test_place_order_rejects_price_mismatch() {

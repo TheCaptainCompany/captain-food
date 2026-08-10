@@ -7,7 +7,14 @@ description: >
 
 # --- Cart ---
 CartPricedFromLiveCatalog:
-  description: "Cart lines are added/changed/removed and priced by the projection from the live catalog, never trusted from the client."
+  description: >
+    The cart price is LIVE: cart mutation events and the Cart read model carry NO money — the
+    price a customer sees is computed ON READ from the live catalog by the SAME `price_cart`
+    authority the write path uses (one code path), never stored in the fold and never trusted
+    from the client. A restaurant price change is reflected on the next read; the one
+    authoritative freeze happens at checkout (CheckoutSnapshotFrozenAtIntent).
+    (PROP-20260810-231500 Option B, ADR-20260810-112836 — corrects the earlier impure-fold
+    wording that had the projection reading the catalog.)
 
 CartRejectsUnorderableOrInvalidLine:
   description: "Adding an unorderable offer or operating on an invalid/absent line is rejected."
@@ -51,10 +58,14 @@ ServerPriceAuthority:
     prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a
     confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line
     whose price cannot be resolved from the live catalog rejects the checkout fail-closed
-    (PriceUnresolvable) — never a fallback to the client's number.
+    (PriceUnresolvable) — never a fallback to the client's number. LEGAL DISPLAY GUARANTEE
+    (Code de la consommation L112-1/L221-5 posture): the total displayed at the commit moment
+    equals the CheckoutSnapshot total — the price the consumer agreed to IS the price charged.
+    The equality check on expectedTotal is the enforcement: a displayed total that drifted from
+    the server's recomputation can never be charged, only rejected and re-confirmed.
 
 CheckoutPricesCartCreatesPaymentIntent:
-  description: "Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
+  description: "Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
 
 OrderTestModeIsolation:
   description: "Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics."
