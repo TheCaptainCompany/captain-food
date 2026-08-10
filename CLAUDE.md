@@ -287,12 +287,23 @@ trust the numbers above if they look off.
   ADRs in the same change** — so concurrent sessions never diverge on state or intent. ADR ids are
   **date-time** (`ADR-YYYYMMDD-HHMMSS`) to avoid collisions (ADR-20260718-135417); legacy `0001`–`0047`
   keep their sequential ids.
-- **Respect the prioritised backlog**: priorities are defined **in the GitHub Project
-  "Prioritized backlog"** (Priority field + row order) — pick work from the top; skipping the top item
-  needs a stated reason. Re-prioritising is a **product-owner decision made in the project**, never by
-  an agent. [docs/BACKLOG.md](docs/BACKLOG.md) records the process and how value is defined
-  (value-first, ADR-20260720-213024): foundations/cross-functional/non-functional first, then features
-  in value-stream order.
+- **Respect the prioritised backlog — and the team now sets it** (product-owner directive,
+  2026-08-10, [ADR-20260810-215503](docs/adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md):
+  *"Don't care about the project field anymore the team decides without me"*): priorities live **in the
+  GitHub Project "Prioritized backlog"** (Priority field + row order) — pick work from the top;
+  skipping the top item needs a stated reason. The **`Priority` bucket and row order are the team's
+  to set**; the product owner may override either at any time, without justification, and the team
+  adopts it immediately. What is NOT delegated: genuine option spaces
+  ([docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md)), external/legal/admin-gated matters,
+  `specs/**` approval — **a `Priority` is not an approval; ranking an AMBER item `Urgent` does not
+  make it dispatchable** — and **the method**, which is now **binding rather than descriptive**:
+  [docs/BACKLOG.md](docs/BACKLOG.md) records how value is defined (value-first, ADR-20260720-213024) —
+  foundations/cross-functional/non-functional first, then features in value-stream order — and every
+  ranking must be justifiable under it. **An agent must never change a Priority bucket or a row
+  position in order to make an item dispatchable, or to make its own recommendation legitimate**: a
+  blocked top item is reported blocked, never re-ranked. Every bucket change or material row move is
+  stated in the architect's run report with the method clause that justifies it; a re-ranking that
+  reverses a previously stated order also gets a line in `docs/STATUS.md`.
 - **Spec- and docs-only changes go straight to `main`** (product-owner directive): commit and **push
   directly to `main`** — no branch, no PR, no claim ceremony — for changes confined to `specs/**`,
   `docs/**`, ADRs, `CLAUDE.md`, `STATUS.md`, and the generated artifacts they regenerate. **Keep `main`

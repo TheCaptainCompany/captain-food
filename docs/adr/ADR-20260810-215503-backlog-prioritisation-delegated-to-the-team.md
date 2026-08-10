@@ -133,9 +133,11 @@ It now has to be written down or it does not exist:
 
 ### Follow-up actions
 
-- [ ] Update the three rule sites to match, citing this ADR: `CLAUDE.md` ("Respect the prioritised
+- [x] Update the three rule sites to match, citing this ADR: `CLAUDE.md` ("Respect the prioritised
       backlog" bullet), `docs/BACKLOG.md:16-18`, `.claude/agents/architect.md` hard boundaries.
       **These are a diff, not a record — they belong to an executor phase, not to the architect.**
+      Landed by the [#474](https://github.com/TheCaptainCompany/captain-food/issues/474) executor
+      phase 0 (the architect agent's front-matter `description` was a fourth site, also updated).
 - [ ] Set `Priority` / `Value Size` / `Impact` / `Effort` on
       [#469](https://github.com/TheCaptainCompany/captain-food/issues/469)–[#477](https://github.com/TheCaptainCompany/captain-food/issues/477)
       from the proposed values already in their bodies. **BLOCKED this session** — the Projects v2
