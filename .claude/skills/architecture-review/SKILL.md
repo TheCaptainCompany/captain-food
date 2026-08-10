@@ -5,8 +5,9 @@ description: >
   against the current `main`, from the perspective of a 30-year food-and-delivery architect. Use when
   the user asks to review the system, audit for gaps or holes, check for regressions or drift, or on
   the scheduled daily run. Reports what CHANGED, files only genuinely NEW findings as issues, and
-  writes proposals (the lasting artifact) for anything that carries a real design decision. Never
-  modifies `specs/**`, never claims or starts work on an issue.
+  writes proposals (the lasting artifact) for anything that carries a real design decision. Does not
+  modify `specs/**` itself (the executor does — the freeze was lifted 2026-08-10), never claims or
+  starts work on an issue.
 ---
 
 # Architecture review — Captain.Food
@@ -16,7 +17,10 @@ is only a tracking point that disappears when the work is done.
 
 ## Non-negotiables
 
-- **Never modify `specs/**`.** DSL changes are plan-mode-only, with approval (CLAUDE.md).
+- **You do not edit `specs/**` — but the team now does** (ADR-20260810-221840; the freeze is lifted).
+  The architect audits and hands off; DSL edits are the executor's. Classify a spec need as AMBER only
+  when a **recorded decision** is missing/contradicted or the shape is already emitted, stored or
+  promised — never merely because it touches `specs/**`.
 - **Never claim or start work** on an issue. Prioritisation is a product-owner decision made in the
   GitHub Project.
 - **Proposals and docs go to `main` directly** — no branch, no PR (product-owner directive). Run

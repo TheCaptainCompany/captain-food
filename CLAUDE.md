@@ -172,9 +172,26 @@ trust the numbers above if they look off.
 
 ### Non-negotiable rules
 
-- DSL source files (`specs/**`) are **never** modified by autonomous/execution loops — only plan mode
-  proposes DSL changes, with approval. C4 (`specs/architecture/*.yaml`) and observability contracts
-  (`specs/observability.yaml`) are **source** DSL, not generated.
+- **`specs/**` is the team's work** (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-221840](docs/adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)):
+  *"I'm surprise that I read that the spec was untouchable now that we have the team working together
+  we don't need to have this constraint anymore … I'm pretty sure the team will ensure the right
+  naming and scope. Just keep me informed."* The freeze is **lifted, not narrowed** — execution loops
+  may add and amend DSL content **and structure** under the ordinary gates. The boundary is **not**
+  content-vs-structure (a file move between scopes rewrites no refs and is free; a one-word type
+  change on an emitted event is irreversible). Three questions, in order: **(1) does it contradict or
+  create a recorded decision?** (`docs/proposals/DECISIONS.md`, `docs/adr/`) — if yes it is a decision
+  reversal, not a spec edit: stop and file a register row, whatever the diff size. **(2) Is the shape
+  already emitted, stored or promised?** (`domain_events`, a shipped client, an alert route, a partner
+  contract, a legal artifact) — if yes it is a **migration**, and the versioning story is recorded
+  before it lands: stored events are immutable, upcasting never mutation. **(3) Otherwise it is the
+  team's** — including `specs/common/`, which is a high-fan-out shared kernel, not a no-go zone;
+  freezing it would freeze the one place "one name = one dedicated scalar" is enforced. Structure gets
+  no separate gate: proportionality already routes any real option space to a proposal + register row,
+  which *is* the discussion offered. **Reporting is the obligation that replaces the freeze**: every
+  landed spec change writes one sentence in [docs/SPEC-LOG.md](docs/SPEC-LOG.md) — what the product now
+  promises differently — in the **same commit**. C4 (`specs/architecture/*.yaml`) and observability
+  contracts (`specs/observability.yaml`) are **source** DSL, not generated.
 - **Proposals are committed to the repo** (ADR-20260724-135945, product-owner directive): every
   proposal presented for approval lands in [docs/proposals/](docs/proposals/) as
   `PROP-YYYYMMDD-HHMMSS-<slug>.md` — the proposal as presented, alternatives considered, the

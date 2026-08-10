@@ -177,8 +177,8 @@ Only after the picture is current. Answer: **what should be worked on next, and 
 
 | Lane | Test | Autonomous? |
 |---|---|---|
-| 🟢 **GREEN** | Touches only `crates/**`, `tools/**`, `migrations/**`, `.github/**`, `docs/**`. No unanswered product decision. | **Yes** |
-| 🟠 **AMBER** | Needs a `specs/**` change (command, event, error, rule, test, story, screen, DSL field). | **No** — `specs/**` is frozen for autonomous loops; only plan mode proposes DSL changes, with approval |
+| 🟢 **GREEN** | Touches `crates/**`, `tools/**`, `migrations/**`, `.github/**`, `docs/**` **and/or `specs/**`**. No unanswered product decision. | **Yes** |
+| 🟠 **AMBER** | A **recorded decision** is missing or would be contradicted (`DECISIONS.md`, `docs/adr/`), **or** the shape is already emitted/stored/promised (`domain_events`, a shipped client, an alert route, a partner contract, a legal artifact) and the versioning story is not recorded. | **No** — file the register row, or record the migration story first |
 | 🔴 **RED** | Its proposal is not `Approved`, has an unanswered question in [`docs/proposals/DECISIONS.md`](../../docs/proposals/DECISIONS.md), or another open issue blocks it. | **No** — report who owes the decision, and for how long |
 
 **The approval gate is absolute.** Implementation never starts from a proposal whose `Status` is not
@@ -186,10 +186,13 @@ Only after the picture is current. Answer: **what should be worked on next, and 
 has been answered. A partially-approved proposal may dispatch **only** the slices whose decisions are
 marked decided.
 
-Two traps: **ADR-0032 completeness pulls work into AMBER** (a new command also needs its event, error,
-rule, test and story — all `specs/**`), and **a GREEN issue can have an AMBER half** — dispatch it
-scoped to the green half and say plainly what is deferred, so the executor does not hit the wall
-mid-run.
+Both old traps are **retired by the lifted freeze** (ADR-20260810-221840): ADR-0032 completeness no
+longer pulls work into AMBER — a new command with its event, error, rule, test and story is one GREEN
+change — and the "GREEN issue with an AMBER half" split no longer exists for spec reasons, so a
+validator rule and the spec fix that keeps it green land **together**, which is what "keep `main`
+green" required all along. The trap that replaces them: **a spec edit that quietly reverses a recorded
+decision**. Every gate stays green while it happens — check `DECISIONS.md` before dispatching, not
+after.
 
 ## Procedure
 
@@ -266,7 +269,9 @@ checkable-against-source, applied to this repo. Never invent an opinion for them
 
 # Hard boundaries
 
-- **Never edit `specs/**`.** Plan-mode-only, with approval (CLAUDE.md, non-negotiable).
+- **Never edit `specs/**` yourself** — you audit and hand off; the executor writes every diff. The
+  *freeze* is gone (ADR-20260810-221840): the team may edit the DSL, so never report a spec need as
+  blocked merely because it is a spec need.
 - **Never claim an issue** (`status/in-progress`), open a work branch, or implement. You hand off.
 - **Never re-prioritise.** You read `Priority` and row order; you never set them. If the order looks
   wrong, say so in the report — reordering is a product-owner decision made in the Project.

@@ -70,8 +70,15 @@ one catalog is a validation error (`scope-duplicate-item`).
 
 ## Hard rules
 
-- **Autonomous/execution loops never modify `specs/**`** — only plan mode proposes DSL changes, with
-  approval.
+- **`specs/**` is ordinary work** (product-owner directive 2026-08-10,
+  [ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)) —
+  the freeze is lifted; execution loops may add and amend DSL content **and structure**. Three
+  questions before any edit lands: **(1)** does it contradict or create a recorded decision
+  (`docs/proposals/DECISIONS.md`, `docs/adr/`)? → stop, file a register row. **(2)** Is the shape
+  already emitted, stored or promised (`domain_events`, a shipped client, an alert route, a partner
+  contract, a legal artifact)? → it is a **migration**: record the versioning story first (upcasting,
+  never mutation). **(3)** Otherwise it is the team's, `specs/common/` included. Every landed spec
+  change writes its one-sentence row in [docs/SPEC-LOG.md](../SPEC-LOG.md) in the **same commit**.
 - Commands derive from **use cases** (story map), not mechanically one-per-event (see `CLAUDE.md`).
 - If a behaviour test fails, fix the generator or runtime — **do not weaken the test**.
 - **Completeness is enforced (ADR-0032), not optional:** a new command/event/error needs a behaviour test

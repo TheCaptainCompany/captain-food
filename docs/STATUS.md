@@ -2,6 +2,47 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔓 **2026-08-10 (night) — THE `specs/**` FREEZE IS LIFTED: THE DSL IS THE TEAM'S WORK**
+> ([ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md),
+> product-owner directive: *"I'm surprise that I read that the spec was untouchable now that we have
+> the team working together we don't need to have this constraint anymore… I'm pretty sure the team
+> will ensure the right naming and scope. Just keep me informed."*). The last of four delegations in
+> three days, and the one that reaches the work: prioritisation (ADR-20260810-215503), self-starting
+> sessions (ADR-20260810-011500) and product ownership (ADR-20260808-144738) each delegated
+> *judgement*; this delegates *capability*.
+>
+> **The boundary is NOT content-vs-structure** — that split is anti-correlated with risk in both
+> directions (a scope-folder move rewrites no refs and is free, because `$ref`s are kind-logical; a
+> one-word type change on an emitted event is irreversible). It is **three questions in order**:
+> (1) does it contradict or create a **recorded decision**? → stop, file a `DECISIONS.md` row;
+> (2) is the shape already **emitted, stored or promised**? → it is a **migration**, record the
+> versioning story first (upcasting, never mutation); (3) otherwise it is the team's, **including
+> structure and including `specs/common/`** (a high-fan-out shared kernel, not a no-go zone — freezing
+> it would freeze the one place "one name = one dedicated scalar" is enforced). Structure gets **no
+> separate gate**: proportionality already routes any real option space to a proposal + register row,
+> which *is* the discussion the product owner offered.
+>
+> **Reporting replaces the freeze**: [docs/SPEC-LOG.md](SPEC-LOG.md) is created and usable now — one
+> sentence per landed spec change, in product language, in the **same commit**. No cadence, no digest
+> to send; it is a pull surface kept current by a gate. The gate's shape is `DECISIONS.md` **§26
+> SPEC-1** (recommendation (d), ~30 seconds to answer); until it lands the page is prose.
+>
+> **Queue effect, measured**: 8 open issues carried an explicit AMBER flag and 4 more routed a
+> sub-task to plan mode — [#468](https://github.com/TheCaptainCompany/captain-food/issues/468),
+> [#476](https://github.com/TheCaptainCompany/captain-food/issues/476),
+> [#466](https://github.com/TheCaptainCompany/captain-food/issues/466) and the already-approved
+> 451-B `currency_mismatch` line are now **GREEN and dispatchable**. The "one plan-mode window for
+> #468 + #476" recommendation **dissolves** — the window was the only thing binding them, and #476
+> touches a key with **0 occurrences** in `specs/screens/**` and `specs/*/api.yaml`. #466 and #468
+> still sequence together (same validator area; a rule and the spec fix that keeps it green must land
+> in one change), #476 is independent.
+>
+> ⚠️ **Newly load-bearing and absent**: `event_version` has **zero occurrences** across `specs/`,
+> `crates/`, `migrations/` and `tools/`, while PROP-170000 D2 decided *"add `event_version` now
+> (cheaper before the log grows)"* on 2026-08-08. The freeze was silently standing in for it — a
+> payload nobody could change needed no versioning story. This is the structural work the delegation
+> calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
+
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
 > ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
