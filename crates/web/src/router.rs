@@ -459,8 +459,12 @@ mod tests {
         use crate::graphql::test_support::FakeTransport;
         use serde_json::json;
 
+        // The response key is `current`, not `cart` (#451): the storefront checkout binds
+        // `cart.current`, whose GraphQL field is `current` — `data_layer::response_key` unwraps
+        // THAT. A fixture keyed `cart` binds nothing and renders the empty shell, which is how
+        // this test caught the Phase-1 rebinding.
         let cart = || {
-            json!({ "cart": {
+            json!({ "current": {
                 "id": "cart-1", "restaurantId": "r-1", "status": "OPEN",
                 "lines": [
                     { "offerId": "o1", "name": "Burger maison", "quantity": 2 },
@@ -521,7 +525,9 @@ mod tests {
         use serde_json::json;
         let scripted = || {
             FakeTransport::scripted(vec![
-                Ok(json!({ "cart": {
+                // Keyed `current` like the checkout's real read (#451) — this fixture asserts
+                // nothing about the cart, so a stale key would have gone on passing silently.
+                Ok(json!({ "current": {
                     "lines": [{ "offerId": "o1" }],
                     "totalAmount": { "amountCents": 1000, "currency": "EUR" },
                 }})),
