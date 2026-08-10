@@ -92,6 +92,12 @@ pub use auth::Principal;
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
 pub use graphql::schema as graphql_schema;
+// #440: the checkout-degrade EMISSION is proved through the real render path from its own test
+// PROCESS (tests/checkout_degraded_metric.rs) — the meters bind `opentelemetry::global::meter`
+// once per process, so the spy provider must be installed before the first metric call, a
+// guarantee the parallel in-crate harness cannot give. These three are that test's entry points.
+pub use hosts::{host_root, TenantLookup};
+pub use web_ssr::SsrExec;
 
 /// Minimal health/edge-proof: lets the `desktop` (Tauri) shell embed the server in-process and proves the
 /// server → shared_types edge (ADR-0035). The real DI graph is built in `router()`.

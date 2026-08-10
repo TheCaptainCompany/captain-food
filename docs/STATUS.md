@@ -2,6 +2,28 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — THE STRIPE PUBLISHABLE KEY REACHES /checkout AND THE PAYMENT ELEMENT CAN
+> MOUNT** ([#440 "Stripe publishable key: StripePublishableKeyTest scalar + payments configuration key, SSR-delivered to /checkout so the payment element can mount"](https://github.com/TheCaptainCompany/captain-food/issues/440),
+> PR [#441](https://github.com/TheCaptainCompany/captain-food/pull/441), mob protocol; decisions in
+> [ADR-20260810-015941](adr/ADR-20260810-015941-stripe-publishable-key-delivery.md)). The first
+> #429 blocker ("no publishable key exists anywhere") is closed at the code level:
+> `StripePublishableKeyTest` (`^pk_test_` — a live or secret key is unspellable in the slot),
+> `STRIPE_PUBLISHABLE_KEY` declared in `specs/payments/configuration.yaml` (NOT secret,
+> presence-gated: absent ⇒ boot never fails, `/checkout` degrades honestly), and the delivery seam
+> server config → `SsrExec` → `RenderContext` → `data-pk` on the mount div → hydrate →
+> `PaymentElement::mount` in Stripe's DEFERRED posture (no intent can exist at landing —
+> acceptance-first). stripe.js ships in the checkout shell ONLY and only when the key exists.
+> Key-less/invalid ⇒ `payment_unavailable_state` (fr/en) + DISABLED pay button + zero Stripe
+> requests, counted by `checkout_degraded_render_total{reason=stripe_key_absent}` — emitted at the
+> SSR boundary and **proved firing** by `crates/server/tests/checkout_degraded_metric.rs` (the
+> repo's first spy-observed metric emission). Smoke gains L3b (/checkout must carry
+> `data-pk="pk_test_…"`, outage-honest). **Still open on this chunk**: the baked `deploy:` value
+> (one sanctioned extraction from `STRIPE_PUBLISHABLE_KEY_TEST`, then delete the service env var —
+> ADR §3), the surface-bins config-closure follow-up (#385 track), and the recorded activation
+> constraint (first real-restaurant activation mechanically impossible while checkout serves
+> `pk_test_` — ADR §4, binds future activation work).
+>
+
 > ✅ **2026-08-09 (morning) — THE EIGHT-DECISION BRIEF IS ANSWERED; the demo is deferred and the
 > target is now production-with-test-data** ([ADR-20260809-050000](adr/ADR-20260809-050000-morning-brief-eight-decisions.md)).
 > The open-decision register went **21 → 8** in one sitting, by answering rather than appending.
