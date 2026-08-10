@@ -24,14 +24,28 @@ impl PgCartRepository {
 
 #[async_trait]
 impl CartReadRepository for PgCartRepository {
-    /// The customer's carts, most recently updated first.
+    /// The customer's OPEN carts, most recently updated first, bounded.
+    ///
+    /// The `status = OPEN` predicate is LOAD-BEARING, not a convenience (#451): every consumer of
+    /// this port prices what it returns through `price_cart` against TODAY's catalog, and a
+    /// CHECKED_OUT cart's money was frozen at payment intent (`PaymentIntentCreated.checkout`) —
+    /// repricing it would render a receipt-adjacent number that never matched what was charged.
+    /// Historical price belongs to the CheckoutSnapshot, a read this port does not perform; so the
+    /// honest fix is that a non-OPEN row never enters the pricing path at all. It also stops ONE
+    /// historical cart holding a since-deleted offer from erroring the customer's WHOLE cart list
+    /// (the `carts` literal pushes `priced(..).await?` per row — one unresolvable line fails all).
+    ///
+    /// `LIMIT 50` bounds the pricing fan-out: the response costs one catalog read per row, so an
+    /// unbounded list is an unbounded read amplification on a request path. Fifty open carts is
+    /// already far past any real customer (one open cart per restaurant).
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError> {
         let sql = format!(
-            "SELECT {} FROM cart WHERE customer_id = $1 ORDER BY updated_at DESC",
+            "SELECT {} FROM cart WHERE customer_id = $1 AND status = $2 ORDER BY updated_at DESC LIMIT 50",
             cart_store::COLUMNS
         );
         let rows = sqlx::query(&sql)
             .bind(customer_id.0)
+            .bind(CartStatus::OPEN.to_text())
             .fetch_all(&self.pool)
             .await
             .map_err(db_err)?;

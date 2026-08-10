@@ -262,7 +262,13 @@ pub trait CatalogReadRepository: Send + Sync {
 /// plus CartBindingProcess's session read (`specs/processmanager.yaml#/CartBindingProcess`).
 #[async_trait]
 pub trait CartReadRepository: Send + Sync {
-    /// A customer's carts (one OPEN cart per restaurant), most recently updated first.
+    /// A customer's **OPEN** carts (one per restaurant), most recently updated first, bounded.
+    ///
+    /// OPEN-only is part of the PORT contract, not an adapter detail (#451): every consumer prices
+    /// what this returns against the LIVE catalog, and a CHECKED_OUT cart's money was frozen at
+    /// payment intent — repricing it would show a number that never matched what was charged.
+    /// Implementations must filter, and must bound the row count (the caller pays one catalog read
+    /// per row).
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
     /// A single cart by id (session-scoped), or `None` if absent.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;

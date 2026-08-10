@@ -24,6 +24,28 @@ pub struct SessionHeader(pub Option<uuid::Uuid>);
 #[derive(Debug, Clone)]
 pub struct TraceContext(pub Option<String>);
 
+/// The ONE correlation id of this request — `request.correlation_id`, the source every READ-path
+/// observability contract names (`cart-price`, `read-authorization`).
+///
+/// Reads carry no command envelope, so nothing upstream supplies a correlation id; the server
+/// mints it, ONCE, at the transport boundary and injects it into the GraphQL execution data. Every
+/// read-path span in that request records the SAME value, which is the entire point: a customer
+/// whose cart rendered without a price and who then abandoned checkout is one `business.correlation_id`
+/// away from being findable. A span that mints its own id per call correlates to nothing — it is
+/// the attribute present and the capability absent.
+///
+/// Minted per REQUEST, not per operation and not per resolver call: a `carts` read prices N carts
+/// and all N `cart.price` spans must share the id.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestCorrelationId(pub uuid::Uuid);
+
+impl RequestCorrelationId {
+    /// Mint this request's id. Called exactly once per request, at the transport boundary.
+    pub fn mint() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
 /// Why a present `X-SESSION-ID` was rejected (fail-visible: a malformed session id is a client bug
 /// and must 400, never be silently dropped into anonymous-without-session).
 #[derive(Debug, Clone, PartialEq, Eq)]

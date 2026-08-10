@@ -21,7 +21,7 @@ use serde_json::Value;
 use crate::auth::Principal;
 use crate::graphql::acl::RequestRole;
 use crate::graphql::schema::CaptainSchema;
-use crate::graphql::session::{SessionHeader, TraceContext};
+use crate::graphql::session::{RequestCorrelationId, SessionHeader, TraceContext};
 use web::graphql::{Transport, TransportError};
 
 /// The BFF's SSR executor: the schema + the anonymous PUBLIC context, shared with the host
@@ -57,7 +57,11 @@ impl Transport for SchemaTransport {
             .data(RequestRole::Public)
             .data(Principal::anonymous())
             .data(SessionHeader(None))
-            .data(TraceContext(None));
+            .data(TraceContext(None))
+            // One render is one request: its read-path spans share a correlation id like any HTTP
+            // read. This says nothing about identity — the transport stays PUBLIC, anonymous and
+            // sessionless per the module contract above.
+            .data(RequestCorrelationId::mint());
         let response = self.schema.execute(request).await;
         if !response.errors.is_empty() {
             // Same envelope rule as the HTTP transport: anything in `errors` fails the whole read

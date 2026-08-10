@@ -82,24 +82,60 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
 /// (rules.yaml#/CartPricedFromLiveCatalog): parse the row's repricing inputs, load the live
 /// catalog ONCE ([`CatalogSnapshot`] — N lines, 1 read), price via `price_cart`, and map into
 /// the API shape. Under the `cart-price` contract, emitted HERE at the framework boundary:
-/// - span `cart.price` (business.aggregate_id = cartId; business.correlation_id minted at the
-///   seam — reads carry no command envelope, the `auth.read_scope` posture);
+/// - span `cart.price` (business.aggregate_id = cartId; business.correlation_id = the REQUEST's
+///   id, passed in — reads carry no command envelope, so the server mints one per request);
 /// - histogram `cart_price_ms`;
-/// - on an unresolvable price: counter `cart_price_unresolvable_total{reason}` and an ERROR —
-///   technical_error classification, never business_rejected (ADR-20260810-112836): the
-///   customer asked to see their cart and must see no price rather than a partial/wrong total.
+/// - on an unresolvable price: counter `cart_price_unresolvable_total{reason}` AND OTel ERROR
+///   status on the span — technical_error classification, never business_rejected
+///   (ADR-20260810-112836): the customer asked to see their cart and must see no price rather
+///   than a partial/wrong total.
 ///
-/// An EMPTY open cart (all lines removed) prices to the true sum of zero lines — 0 EUR, no
-/// breakdown — without touching the catalog; that is arithmetic, not a fabricated payable (the
-/// platform is EUR-only in V0, the same posture as the checkout's degenerate breakdown legs).
+/// **Every success emits the span and the histogram, including the empty cart.** An EMPTY open
+/// cart (all lines removed) prices to the true sum of zero lines — 0 EUR, no breakdown — without
+/// touching the catalog; that is arithmetic, not a fabricated payable (the platform is EUR-only in
+/// V0, the same posture as the checkout's degenerate breakdown legs). It is nonetheless a priced
+/// read: the contract's `status_rules.success.required_spans: ["cart.price"]` admits no
+/// exceptions, and empty open carts are COMMON (every first storefront visit after a clear), so
+/// short-circuiting before the span would have made the most frequent success in the flow a
+/// contract-missing one — and dragged the p95 the histogram exists to watch downward with reads
+/// that did no work.
 pub async fn priced(
     catalogs: &dyn CatalogReadRepository,
     row: CartRow,
     restaurant: RestaurantRow,
+    correlation_id: uuid::Uuid,
 ) -> async_graphql::Result<Cart> {
     let lines: Vec<CartLineItem> = serde_json::from_value(row.lines.clone())
         .map_err(|e| async_graphql::Error::new(format!("cart lines are malformed: {e}")))?;
-    if lines.is_empty() {
+
+    let span = telemetry::spans::cart_price(&row.cart_id.0.to_string());
+    telemetry::spans::record_correlation_id(&span, &correlation_id.to_string());
+    let started = std::time::Instant::now();
+    let result = async {
+        if lines.is_empty() {
+            return Ok(None);
+        }
+        let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
+        price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await.map(Some)
+    }
+    .instrument(span.clone())
+    .await;
+    telemetry::meters::cart_price::duration(started.elapsed().as_secs_f64() * 1000.0);
+
+    let priced = result.map_err(|e| {
+        if e.code() == Some("PriceUnresolvable") {
+            // Canonical reason set (specs/observability.yaml cart-price): offer_gone covers a
+            // line's offer OR selected option no longer resolving (and the currency-clash defect);
+            // policy_missing / stock_unknown are reserved for legs not yet on this seam.
+            telemetry::meters::cart_price::unresolvable("offer_gone");
+        }
+        // The span's ERROR status is what makes the contract's `technical_error: any_span_errors`
+        // rule fire. Without it the counter above would tick while the trace exported a SUCCESS.
+        telemetry::spans::record_cart_price_error(&span);
+        async_graphql::Error::new(e.to_string())
+    })?;
+
+    let Some(priced) = priced else {
         return Ok(Cart {
             id: row.cart_id.into(),
             restaurant_id: row.restaurant_id.into(),
@@ -115,28 +151,7 @@ pub async fn priced(
             updated_at: row.updated_at,
             restaurant: restaurant.into(),
         });
-    }
-
-    let span = telemetry::spans::cart_price(&row.cart_id.0.to_string());
-    telemetry::spans::record_correlation_id(&span, &uuid::Uuid::new_v4().to_string());
-    let started = std::time::Instant::now();
-    let result = async {
-        let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
-        price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
-    }
-    .instrument(span)
-    .await;
-    telemetry::meters::cart_price::duration(started.elapsed().as_secs_f64() * 1000.0);
-
-    let priced = result.map_err(|e| {
-        if e.code() == Some("PriceUnresolvable") {
-            // Canonical reason set (specs/observability.yaml cart-price): offer_gone covers a
-            // line's offer OR selected option no longer resolving (and the currency-clash defect);
-            // policy_missing / stock_unknown are reserved for legs not yet on this seam.
-            telemetry::meters::cart_price::unresolvable("offer_gone");
-        }
-        async_graphql::Error::new(e.to_string())
-    })?;
+    };
 
     // Domain → API shapes share the serde spelling (camelCase) — the same round-trip the Order
     // read model uses for its jsonb items.

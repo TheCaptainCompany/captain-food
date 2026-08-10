@@ -1150,31 +1150,6 @@ impl From<(CatalogRow, RestaurantRow)> for Catalog {
     }
 }
 
-/// Read-model rows → API type: the money-free Cart fold row plus the joined Restaurant row
-/// (non-null `restaurant` navigation field). The priced fields (lines/totalAmount/breakdown/
-/// uberComparison) are NOT in the row (ADR-20260810-112836): they are computed at read time via
-/// price_cart. TODO(#451 Phase 2): price at the resolver seam; this From impl fills the degenerate
-/// unpriced shape (empty lines, 0 EUR, no breakdown) exactly as the pre-#451 stub projector did.
-impl From<(CartRow, RestaurantRow)> for Cart {
-    fn from((row, restaurant): (CartRow, RestaurantRow)) -> Self {
-        Self {
-            id: row.cart_id.into(),
-            restaurant_id: row.restaurant_id.into(),
-            customer_id: row.customer_id.map(Into::into),
-            status: row.status.into(),
-            lines: Vec::new(),
-            total_amount: Money {
-                amount_cents: MoneyCents(0),
-                currency: CurrencyCode("EUR".into()),
-            },
-            breakdown: None,
-            uber_comparison: None,
-            updated_at: row.updated_at,
-            restaurant: restaurant.into(),
-        }
-    }
-}
-
 /// Minor-units column + the row's currency → the Money value object.
 fn order_money(cents: ds::MoneyCents, currency: &ds::CurrencyCode) -> Money {
     Money { amount_cents: cents.into(), currency: currency.clone().into() }

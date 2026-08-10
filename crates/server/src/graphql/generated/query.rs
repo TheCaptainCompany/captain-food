@@ -310,6 +310,10 @@ impl QueryRoot {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = schema executed outside a request
+        // (there is no request to correlate to), so a local id keeps the span well-formed.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // Ownership enforced server-side (#144): a CUSTOMER caller's customerId argument is IGNORED
@@ -337,7 +341,7 @@ impl QueryRoot {
         let mut out = Vec::new();
         for c in rows {
             let Some(r) = by_id.get(&c.restaurant_id.0).cloned() else { continue };
-            out.push(crate::graphql::cart_read::priced(&**catalogs, c, r).await?);
+            out.push(crate::graphql::cart_read::priced(&**catalogs, c, r, correlation_id).await?);
         }
         Ok(out)
     }
@@ -347,6 +351,10 @@ impl QueryRoot {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = schema executed outside a request
+        // (there is no request to correlate to), so a local id keeps the span well-formed.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
         let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
             return Ok(None);
         };
@@ -362,7 +370,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
     }
     /// The caller's CURRENT cart — the storefront cart/mini-cart read, TWO-LEG resolution (#451, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart (ReadScope::Customer, the `myReclamations` pattern). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
     #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
@@ -370,6 +378,10 @@ impl QueryRoot {
         let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        // The ONE request-scoped correlation id (#451, contract `request.correlation_id`): every
+        // cart.price span of THIS request shares it. Absent = schema executed outside a request
+        // (there is no request to correlate to), so a local id keeps the span well-formed.
+        let correlation_id = ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0).unwrap_or_else(uuid::Uuid::new_v4);
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. the session leg only -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // The anonymous-session correlator (validated at transport, `session.rs`): leg 2's key.
@@ -385,7 +397,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]

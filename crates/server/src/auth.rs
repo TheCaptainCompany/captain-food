@@ -702,13 +702,22 @@ pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
     }
 }
 
-/// [`read_scope`] under the contract's `auth.read_scope` span (ONE per request), with the
-/// request's correlation id MINTED here (reads carry no command envelope —
-/// `request.correlation_id` in the contract). This is the transport entry point; the pure
-/// function above is the logic.
-pub fn resolve_read_scope(principal: &Principal) -> application::queries::ReadScope {
+/// [`read_scope`] under the contract's `auth.read_scope` span (ONE per request), stamped with the
+/// request's correlation id. This is the transport entry point; the pure function above is the
+/// logic.
+///
+/// The id is PASSED IN, never minted here (#451 Phase 2b): reads carry no command envelope, so the
+/// server mints `request.correlation_id` once at the transport boundary
+/// ([`crate::graphql::session::RequestCorrelationId`]) and every read-path span of that request —
+/// `auth.read_scope` here, `cart.price` at the pricing seam — records the SAME value. Minting one
+/// per span made a single request emit several unrelated ids, which is the attribute present and
+/// the correlation absent.
+pub fn resolve_read_scope(
+    principal: &Principal,
+    correlation_id: crate::graphql::session::RequestCorrelationId,
+) -> application::queries::ReadScope {
     let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role));
-    span.record("business.correlation_id", uuid::Uuid::new_v4().to_string().as_str());
+    span.record("business.correlation_id", correlation_id.0.to_string().as_str());
     let scope = span.in_scope(|| read_scope(principal));
     telemetry::spans::record_bridge_resolved(
         &span,

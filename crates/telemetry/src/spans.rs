@@ -153,16 +153,31 @@ pub fn cart_read(aggregate_id: &str) -> Span {
 
 /// `cart.price` (INTERNAL) — ONE priced cart READ at the GraphQL resolver seam (`cart-price`
 /// contract, #451): the money-free Cart row priced fresh from the live catalog via `price_cart`.
-/// `business.aggregate_id` = the cartId being priced. `business.correlation_id` is MINTED at the
-/// seam (reads carry no command envelope — the `auth.read_scope` posture) and recorded by the
-/// caller via [`record_correlation_id`].
+/// `business.aggregate_id` = the cartId being priced. `business.correlation_id` is the
+/// REQUEST-scoped id (contract `run_identity.correlation_id.source: request.correlation_id`),
+/// recorded by the caller via [`record_correlation_id`].
+///
+/// `otel.status_code` is late-bound and DECLARED here for the same reason `claims.stamp` declares
+/// it: the contract classifies an unresolvable price as `technical_error` via
+/// `status_rules.technical_error.any_span_errors`, and a span that never carries an ERROR status
+/// can never satisfy that rule — every failed price would export as a plain success and the
+/// "alert on any sustained non-zero rate" posture would be watching a counter with no span-side
+/// twin. A field not declared at construction cannot be `record`ed later by `tracing`.
 pub fn cart_price(aggregate_id: &str) -> Span {
     tracing::info_span!(
         "cart.price",
         otel.kind = "internal",
         business.aggregate_id = aggregate_id,
         business.correlation_id = Empty,
+        otel.status_code = Empty,
     )
+}
+
+/// Mark a priced-cart read as FAILED (the `PriceUnresolvable` branch). Sets OTel ERROR status so
+/// the `cart-price` contract's `technical_error: any_span_errors` rule can classify the run — the
+/// counter twin is `cart_price_unresolvable_total{reason}`.
+pub fn record_cart_price_error(span: &Span) {
+    span.record("otel.status_code", "ERROR");
 }
 
 /// Record the read-path `business.correlation_id` minted at the resolver seam.
@@ -365,6 +380,21 @@ mod tests {
             sf.field("otel.status_code").is_some(),
             "otel.status_code is late-bound but declared -- without it a failed stamp could not export ERROR status"
         );
+
+        let price = cart_price("cart-1");
+        record_correlation_id(&price, "corr-1");
+        record_cart_price_error(&price);
+        let cf = price.metadata().unwrap().fields();
+        assert!(
+            cf.field(attr::CORRELATION_ID).is_some(),
+            "business.correlation_id is late-bound but declared"
+        );
+        assert!(
+            cf.field("otel.status_code").is_some(),
+            "otel.status_code is late-bound but declared -- without it the cart-price contract's \
+             technical_error rule (any_span_errors) could NEVER fire and every unresolvable price \
+             would classify as a success"
+        );
     }
 
     /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
@@ -386,6 +416,7 @@ mod tests {
             payment_intent_create(),
             pricing_compute(),
             cart_read("a"),
+            cart_price("a"),
             auth_read_scope("CUSTOMER"),
             auth_scope_membership("ORDER", "CUSTOMER"),
             claims_stamp(),
