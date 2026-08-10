@@ -7420,7 +7420,7 @@ A customer's carts (one OPEN cart per restaurant). Ownership enforced server-sid
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
 
-A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id; guests get NO by-id cart read (no guest session scope on reads — ADR-20260720-213000 §3 posture; the guest mini-cart is a recorded gap).
+A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id. The GUEST path is not this query and not a gap: anonymous carts are session-keyed and read through `current`'s session leg (ADR-20260810-120531 — CartBindingProcess associates them to the customer on identification).
 
 
 - **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
@@ -7430,12 +7430,12 @@ A single cart by id — the per-restaurant cart a customer picked from their car
 <a id="query-current"></a>
 #### 🔎 Query: `current`
 
-The authenticated customer's CURRENT cart: their most-recently-updated OPEN cart, or null when none exists (#451, PROP-20260810-231500). Zero args — ownership by construction: the customer id comes from the verified claim (ReadScope::Customer, the `myReclamations` pattern), never from a client argument or a route param, so a caller can only ever resolve their own cart. Priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
+The caller's CURRENT cart — the storefront cart/mini-cart read, TWO-LEG resolution (#451, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart (ReadScope::Customer, the `myReclamations` pattern). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
 
 
 - **Input**: _(none)_
 - **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
-- **Roles**: CUSTOMER · **slice** V0
+- **Roles**: PUBLIC, CUSTOMER · **slice** V0
 
 <a id="query-myreclamations"></a>
 #### 🔎 Query: `myReclamations`

@@ -1772,7 +1772,7 @@ type Query {
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   cart(input: CartQueryInput!): Cart @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
-  current: Cart @auth(requires: [CUSTOMER]) @reads(views: ["Cart"])
+  current: Cart @auth(requires: [PUBLIC, CUSTOMER]) @reads(views: ["Cart"])
   orders(input: OrdersQueryInput): [Order!]! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
   order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
   restaurantDeliverySatisfaction(input: RestaurantDeliverySatisfactionQueryInput!): [DeliverySatisfaction!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_DeliverySatisfaction"])
