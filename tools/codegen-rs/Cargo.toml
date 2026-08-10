@@ -20,6 +20,15 @@ path = "src/main.rs"
 name = "determinator"
 path = "src/determinator_gate/main.rs"
 
+# The #444 pre-deploy secret-PRESENCE gate (epic #429): a pure comparison of the repo secrets the
+# configuration DSL DECLARES (deploy/generated/secret-keys.json `from_github_secret` names) against
+# the ones the reachable deploy target actually holds. Fatal on a declared secret absent/empty;
+# non-fatal report on present-but-undeclared. Reads generated artifacts + a toJSON(secrets) object,
+# not the spec model — self-contained, unit-tested in its own module.
+[[bin]]
+name = "secret-gate"
+path = "src/secret_gate/main.rs"
+
 [dependencies]
 regex = "1"
 serde = { version = "1", features = ["derive"] }
