@@ -48,12 +48,21 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   # Working tree + index + everything this branch adds on top of main: a turn that already
   # committed its work must not slip past the gate because `git status` is clean.
   base="$(git -C "$ROOT" merge-base HEAD origin/main 2>/dev/null || echo '')"
-  changed="$(
-    {
-      git -C "$ROOT" status --porcelain --untracked-files=all | sed 's/^...//'
-      [ -n "$base" ] && git -C "$ROOT" diff --name-only "$base"...HEAD
-    } 2>/dev/null | sort -u
-  )"
+  if [ -z "$base" ]; then
+    # No `origin/main` to compare against (a fresh single-branch clone, a shallow CI checkout, a
+    # detached worktree whose remote ref was pruned): the branch-diff half above would evaluate to
+    # NOTHING and a turn that already committed its work would slip through on a clean
+    # `git status` -- the exact case the comment above says this covers. Fail SAFE, like the
+    # no-git path below: scope cannot be computed, so do not guess -- run the suite.
+    changed="crates/UNKNOWN"
+  else
+    changed="$(
+      {
+        git -C "$ROOT" status --porcelain --untracked-files=all | sed 's/^...//'
+        git -C "$ROOT" diff --name-only "$base"...HEAD
+      } 2>/dev/null | sort -u
+    )"
+  fi
 else
   # No git (a tarball checkout, a sandbox): scope cannot be computed, so do not guess -- run it.
   changed="crates/UNKNOWN"

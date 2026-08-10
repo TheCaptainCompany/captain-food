@@ -78,6 +78,13 @@ const DEFAULT_BATCH_SIZE: i64 = 500;
 /// "compiler first"): the classification is a fact known where the error is CONSTRUCTED, so the
 /// compiler makes every new failure site declare which one it is, and no later refactor can
 /// silently reclassify by rewording a message.
+///
+/// There is deliberately **no `From<DomainError>`**. A blanket conversion would let `?` choose a
+/// class on the author's behalf, which is the whole property this type is for — and is exactly how
+/// the first cut of it went wrong: `apply_record` wrapped every fold error in one
+/// `map_err(FoldFault::Database)`, so `aggregate_uuid_of`'s per-record resolution failure was
+/// reported as a schema fault and would have wedged its group under [`DbFaultPolicy::Halt`]. Adding
+/// a `From` impl re-opens that hole for every future call site at once.
 #[derive(Debug)]
 enum FoldFault {
     /// This RECORD is bad — an unparseable payload, or a fold that panicked reading a legacy shape.
@@ -157,7 +164,7 @@ impl ReadModelProjector {
     /// `multiplicity: ">= 1"` for this span, i.e. one per projection touched, and the group for an
     /// `Order-` event fans out to several projectors. A batch-level span would collapse all of them
     /// into one and lose which read model was slow or failing — the only thing the span is for.
-    async fn apply(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), DomainError> {
+    async fn apply(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), FoldFault> {
         let span = telemetry::spans::event_consume_projection(&self.projection_name());
         self.apply_inner(conn, env).instrument(span).await
     }
@@ -165,42 +172,53 @@ impl ReadModelProjector {
     /// Runs on the BATCH TRANSACTION's connection: loads see the batch's own uncommitted upserts
     /// (read-your-writes within a batch — event N+1 for a row folds over event N's result), and
     /// every upsert commits (or rolls back) with the batch checkpoint.
-    async fn apply_inner(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), DomainError> {
+    ///
+    /// Returns [`FoldFault`], not `DomainError`, so the CLASSIFICATION is made where the failure
+    /// happens. There is deliberately no `From<DomainError> for FoldFault`: `?` therefore cannot
+    /// pick a class on the author's behalf, and every fallible step here has to say which one it
+    /// is — a store call is `Database`, a row key that will not resolve is `PayloadShape`. That is
+    /// the property the enum's own doc claims ("the compiler makes every new failure site declare
+    /// which one it is"), and until this signature changed it was not true: the caller wrapped the
+    /// WHOLE of this function in one `map_err(FoldFault::Database)`, so `aggregate_uuid_of`'s
+    /// per-record resolution failure was reported as a database rejection and, under
+    /// [`DbFaultPolicy::Halt`], one unparseable stream name would have wedged its group forever —
+    /// the [#230] wedge, in the code added to avoid it.
+    async fn apply_inner(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), FoldFault> {
         match self {
             Self::Restaurant => {
                 let id = RestaurantId(aggregate_uuid_of(env, "Restaurant-", "restaurantId")?);
-                let state = restaurant_store::load(&mut *conn, id).await?;
+                let state = restaurant_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_restaurant(&RestaurantProjector, state, env) {
-                    restaurant_store::upsert(&mut *conn, &next).await?;
+                    restaurant_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::ProspectionPipeline => {
                 let id = RestaurantId(aggregate_uuid_of(env, "Restaurant-", "restaurantId")?);
-                let state = prospection_store::load(&mut *conn, id).await?;
+                let state = prospection_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_prospection_pipeline(&ProspectionPipelineProjector, state, env)
                 {
-                    prospection_store::upsert(&mut *conn, &next).await?;
+                    prospection_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Customer => {
                 let id = CustomerId(aggregate_uuid_of(env, "Customer-", "customerId")?);
-                let state = customer_store::load(&mut *conn, id).await?;
+                let state = customer_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_customer(&CustomerProjector, state, env) {
-                    customer_store::upsert(&mut *conn, &next).await?;
+                    customer_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Catalog => {
                 let id = CatalogId(aggregate_uuid_of(env, "Catalog-", "catalogId")?);
-                let state = catalog_store::load(&mut *conn, id).await?;
+                let state = catalog_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_catalog(&CatalogProjector, state, env) {
-                    catalog_store::upsert(&mut *conn, &next).await?;
+                    catalog_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Cart => {
                 let id = CartId(aggregate_uuid_of(env, "Cart-", "cartId")?);
-                let state = cart_store::load(&mut *conn, id).await?;
+                let state = cart_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_cart(&CartProjector, state, env) {
-                    cart_store::upsert(&mut *conn, &next).await?;
+                    cart_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::OrderTracking => {
@@ -229,9 +247,9 @@ impl ReadModelProjector {
                     }
                 };
                 let id = OrderId(uuid);
-                let state = order_tracking_store::load(&mut *conn, id).await?;
+                let state = order_tracking_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_order_tracking(&OrderTrackingProjector, state, env) {
-                    order_tracking_store::upsert(&mut *conn, &next).await?;
+                    order_tracking_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::OrderConversation => {
@@ -259,9 +277,9 @@ impl ReadModelProjector {
                     }
                 };
                 let id = OrderId(uuid);
-                let state = order_conversation_store::load(&mut *conn, id).await?;
+                let state = order_conversation_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_order_conversation(&OrderConversationProjector, state, env) {
-                    order_conversation_store::upsert(&mut *conn, &next).await?;
+                    order_conversation_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::SlugAlias => {
@@ -271,9 +289,9 @@ impl ReadModelProjector {
                     DomainEvent::RestaurantSlugReconfigured(e) => e.previous_slug.clone(),
                     _ => return Ok(()),
                 };
-                let state = slug_alias_store::load(&mut *conn, previous_slug).await?;
+                let state = slug_alias_store::load(&mut *conn, previous_slug).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_slug_alias(&SlugAliasProjector, state, env) {
-                    slug_alias_store::upsert(&mut *conn, &next).await?;
+                    slug_alias_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::ScopeMembership => {
@@ -292,8 +310,8 @@ impl ReadModelProjector {
                 // An unresolved lookup yields NO change (the pure layer's choice) — see the fold's
                 // orphan-cancel note for why that is allow-stale-but-acceptable, not deny-safe.
                 let resolved = scope_membership::Resolved {
-                    order_id: resolve_cancelled_delivery_order(&mut *conn, env).await?,
-                    restaurant_account_id: resolve_restaurant_account(&mut *conn, env).await?,
+                    order_id: resolve_cancelled_delivery_order(&mut *conn, env).await.map_err(FoldFault::Database)?,
+                    restaurant_account_id: resolve_restaurant_account(&mut *conn, env).await.map_err(FoldFault::Database)?,
                 };
                 let changes = scope_membership::membership_changes(env, &resolved);
                 // All of one event's changes ride the SAME transaction (the per-event savepoint):
@@ -315,7 +333,7 @@ impl ReadModelProjector {
                                 *member_id,
                                 env.occurred_at,
                             )
-                            .await?;
+                            .await.map_err(FoldFault::Database)?;
                         }
                         scope_membership::MembershipChange::RevokeRole {
                             scope_type,
@@ -344,7 +362,7 @@ impl ReadModelProjector {
                                     error = %e,
                                     "SCOPE-MEMBERSHIP REVOKE FAILED -- if the batch skips this event a STALE GRANT STANDS until a ScopeMembership checkpoint-reset replay"
                                 );
-                                return Err(e);
+                                return Err(FoldFault::Database(e));
                             }
                         }
                     }
@@ -354,11 +372,11 @@ impl ReadModelProjector {
                 // Single-stream: the ledger lives on `CustomerCredit-{customerId}`; both fed events
                 // carry customerId, so the row key resolves from the stream uuid (payload fallback).
                 let id = CustomerId(aggregate_uuid_of(env, "CustomerCredit-", "customerId")?);
-                let state = customer_credit_balance_store::load(&mut *conn, id).await?;
+                let state = customer_credit_balance_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) =
                     project_customer_credit_balance(&CustomerCreditBalanceProjector, state, env)
                 {
-                    customer_credit_balance_store::upsert(&mut *conn, &next).await?;
+                    customer_credit_balance_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
         }
@@ -880,14 +898,17 @@ impl ProjectionWorker {
             for projector in group.projectors {
                 projector.apply(conn, &env).await?;
             }
-            Ok::<(), DomainError>(())
+            Ok::<(), FoldFault>(())
         })
         .catch_unwind()
         .await
         {
-            // A fold error reaching here came out of a generated store's upsert: the database
-            // rejected the write.
-            Ok(result) => result.map_err(FoldFault::Database),
+            // Already classified at the site that produced it -- `apply` returns `FoldFault`, so
+            // there is nothing to guess here. This arm used to be `map_err(FoldFault::Database)`,
+            // which asserted that every fold error "came out of a generated store's upsert"; it did
+            // not (`aggregate_uuid_of` reached it too), and one blanket conversion silently
+            // reclassified a per-record failure as a schema fault.
+            Ok(result) => result,
             // A PANIC classifies as PayloadShape, keeping the liveness property #230 added it for:
             // the observed case is a legacy payload hitting a panicking accessor, which is this
             // record being bad, not the schema being wrong. Halting on it would restore exactly the
@@ -902,17 +923,26 @@ impl ProjectionWorker {
 
 /// The aggregate id an event belongs to: parsed from the `<Category>-<uuid>` stream name, falling back
 /// to the payload's own id field (every same-stream event carries its aggregate id).
-fn aggregate_uuid_of(env: &Envelope, prefix: &str, payload_key: &str) -> Result<uuid::Uuid, DomainError> {
+///
+/// Failure is [`FoldFault::PayloadShape`], never `Database`: BOTH halves of the resolution are
+/// per-record reads of THIS envelope — a stream name that does not end in a uuid and a payload that
+/// does not carry the key. No database is involved, the next event is unaffected, and the failure is
+/// structurally the same as a payload that will not deserialize into its event type. Classifying it
+/// as a database fault (which the caller's blanket `map_err` used to do) would, under
+/// [`DbFaultPolicy::Halt`], let one hand-repaired or mis-routed stream name wedge its whole group
+/// until an operator intervened — exactly the wedge [#230] removed and `PayloadShape` exists to
+/// avoid.
+fn aggregate_uuid_of(env: &Envelope, prefix: &str, payload_key: &str) -> Result<uuid::Uuid, FoldFault> {
     if let Some(suffix) = env.stream_name.strip_prefix(prefix) {
         if let Ok(id) = uuid::Uuid::parse_str(suffix) {
             return Ok(id);
         }
     }
     payload_uuid_of(env, payload_key).ok_or_else(|| {
-        DomainError::Repository(format!(
+        FoldFault::PayloadShape(DomainError::Repository(format!(
             "cannot resolve {payload_key} for stream {}",
             env.stream_name
-        ))
+        )))
     })
 }
 
@@ -1022,7 +1052,19 @@ mod tests {
             }),
         );
         assert_eq!(payload_uuid_of(&env, "orderId"), None);
-        assert!(aggregate_uuid_of(&env, "Order-", "orderId").is_err());
+        // ...and it fails as PAYLOAD SHAPE, not as a database fault. The class is what decides the
+        // liveness of the whole group under `DbFaultPolicy::Halt`: a row key that will not resolve
+        // is one bad record, so the group must skip it and keep draining. Until the blanket
+        // `map_err(FoldFault::Database)` in `apply_record` was deleted, this failure arrived at the
+        // drain loop as a schema fault and would have frozen the group on it forever.
+        assert!(
+            matches!(
+                aggregate_uuid_of(&env, "Order-", "orderId"),
+                Err(FoldFault::PayloadShape(_))
+            ),
+            "an unresolvable row key is per-record, not a database rejection: {:?}",
+            aggregate_uuid_of(&env, "Order-", "orderId")
+        );
     }
 
     /// PaymentRefunded always carries its order id, so the Order row key always resolves.

@@ -1737,7 +1737,7 @@ keys:
         );
     }
 
-    /// The #474 HONEST-GATE guard, in two halves — both of them things the compiler cannot see.
+    /// The #474 HONEST-GATE guard, in three halves — all of them things the compiler cannot see.
     ///
     /// **Half 1: only the gate crate may spell the skip decision.** Before #474 the
     /// `DATABASE_URL` / `DB_TESTS_REQUIRED` dance was hand-written at 17 call sites across 5
@@ -1748,14 +1748,24 @@ keys:
     /// and weakening an executable rule to make a refactor tidy is not on the table. A THIRD copy
     /// is what this half prevents.
     ///
+    /// **Half 1b: nor may a test suite read `DATABASE_URL` to decide whether to run.** Half 1 keys
+    /// on `DB_TESTS_REQUIRED`, so it is blind to the shape that actually existed 17 times before
+    /// #474 — `let Ok(_) = std::env::var("DATABASE_URL") else { return; };` — which never mentions
+    /// the opt-out variable at all. A suite written in that PRE-#474 pattern today would pass half 1
+    /// unchallenged while silently skipping with no panic and no receipt: the false signal, back in
+    /// the one place the gate was built to cover. So a `DATABASE_URL` read under `crates/**/tests/**`
+    /// is an offence too, with its own allowlist and its own reasons.
+    ///
     /// **Half 2: the Stop hook must actually invoke the workspace suite.** `make rust` is the spec
     /// gate and runs no `crates/**` test at all; the hook's `make test-crates` call is the only
     /// thing that makes the workspace suite mandatory before a turn completes. Deleting that call
     /// would restore the exact false signal #474 exists to remove, and nothing else would notice.
     ///
-    /// Both halves are text scans, which CLAUDE.md ranks as the fallback below a type-level answer
+    /// All of it is text scanning, which CLAUDE.md ranks as the fallback below a type-level answer
     /// (ADR-20260803-234035) — accepted here because the boundary is a cross-crate manifest rule and
-    /// a shell hook, neither of which the type system can reach.
+    /// a shell hook, neither of which the type system can reach. The reach is honest rather than
+    /// total: an aliased `use std::env::var as v` still evades it, which is why the allowlists name
+    /// files rather than pretending to prove absence.
     #[test]
     fn only_the_db_test_gate_spells_the_database_skip_polarity() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1790,25 +1800,87 @@ keys:
         walk(&root.join("crates"), &mut files);
         assert!(!files.is_empty(), "found no Rust sources under crates/ — the scan went blind");
 
+        // Half 1b: a TEST file that reads `DATABASE_URL` decides for itself whether it runs — the
+        // pre-#474 shape. Two files legitimately read it; neither of them DECIDES with it.
+        const URL_ALLOWED: &[(&str, &str)] = &[
+            (
+                "crates/actor_runtime/tests/common/mod.rs",
+                "the sanctioned local copy of the gate (see above)",
+            ),
+            (
+                "crates/infrastructure/tests/main/common.rs",
+                "reads the url only from a LIVE TestDb witness, i.e. after db_test_gate already \
+                 said yes -- it is not a skip decision",
+            ),
+        ];
+
         let mut offenders: Vec<String> = Vec::new();
+        let mut url_offenders: Vec<String> = Vec::new();
         for f in &files {
             let Ok(text) = std::fs::read_to_string(f) else { continue };
+            let rel = f
+                .strip_prefix(&root)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // Test trees only: `crates/*/src/**` reads `DATABASE_URL` to CONNECT, which is its job.
+            // `/tests/` matches both layouts in the repo (`tests/foo.rs`, `tests/main/foo.rs`).
+            if rel.contains("/tests/")
+                && text.contains("var(\"DATABASE_URL\")")
+                && !URL_ALLOWED.iter().any(|(p, _)| *p == rel)
+            {
+                url_offenders.push(rel.clone());
+            }
             // A READ of the variable, not a mention of it: doc comments naming the contract are
             // exactly what we want more of. `var("DB_TESTS_REQUIRED")` catches `std::env::var`,
             // `env::var` and any aliased import of it, which are the three shapes in this repo.
             if !text.contains("var(\"DB_TESTS_REQUIRED\")") {
                 continue;
             }
-            let rel = f
-                .strip_prefix(&root)
-                .unwrap_or(f)
-                .to_string_lossy()
-                .replace('\\', "/");
             if ALLOWED.iter().any(|(p, _)| *p == rel) {
                 continue;
             }
             offenders.push(rel);
         }
+        // An allowlist entry that no longer names a real file is an allowlist that quietly excuses
+        // nothing while the scan believes it is covered — the failure mode
+        // `mailbox_entry_is_constructed_only_behind_the_typed_doors` guards the same way. Assert
+        // each entry still exists AND still contains the read it excuses, so a rename fails LOUDLY
+        // here instead of widening the rule in silence.
+        for (rel, var) in ALLOWED
+            .iter()
+            .map(|(p, _)| (*p, "var(\"DB_TESTS_REQUIRED\")"))
+            .chain(URL_ALLOWED.iter().map(|(p, _)| (*p, "var(\"DATABASE_URL\")")))
+        {
+            let text = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| {
+                panic!("#474 gate allowlist names {rel}, which cannot be read ({e}) -- if the file \
+                        moved, update the allowlist; do NOT let the scan silently excuse nothing")
+            });
+            assert!(
+                text.contains(var),
+                "#474 gate allowlist excuses {rel} for reading {var}, but it no longer does -- \
+                 drop the entry rather than leaving a hole nobody is watching"
+            );
+        }
+
+        assert!(
+            url_offenders.is_empty(),
+            "these test files read DATABASE_URL themselves instead of calling the shared gate:\n  \
+             {}\n\
+             Fix: call `db_test_gate::database_url(\"<suite>\")` -- Some(url) to run, None to skip, \
+             and a PANIC when a database is required and none is configured.\n\
+             Why: the pre-#474 pattern `let Ok(_) = std::env::var(\"DATABASE_URL\") else {{ return; }};` \
+             never mentions DB_TESTS_REQUIRED, so it slips past the polarity scan above while doing \
+             the exact thing #474 removed -- skipping silently, with no panic and no receipt, over a \
+             defect that bricks a projection.\n\
+             The only permitted exceptions are:\n  {}",
+            url_offenders.join("\n  "),
+            URL_ALLOWED
+                .iter()
+                .map(|(p, why)| format!("{p} -- {why}"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
         assert!(
             offenders.is_empty(),
             "these files read DB_TESTS_REQUIRED themselves instead of calling the shared gate:\n  \

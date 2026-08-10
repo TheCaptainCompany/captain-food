@@ -135,6 +135,46 @@ async fn a_malformed_payload_still_skips_and_advances_even_under_halt() {
     );
 }
 
+/// The classification's third case, and the one the first cut got WRONG: a row key that cannot be
+/// resolved from the envelope.
+///
+/// `aggregate_uuid_of` fails when the stream name does not end in a uuid AND the payload does not
+/// carry the key — a hand-repaired or imported stream, or an event that never belonged on this
+/// category's stream. No database is involved: it is this record's envelope being unusable, which
+/// is structurally the same as a payload that will not deserialize. Until the blanket
+/// `map_err(FoldFault::Database)` came out of `apply_record`, it arrived at the drain loop as a
+/// DATABASE fault, so under `Halt` one such row would have frozen its group forever — the #230
+/// wedge, inside the code added to avoid it.
+#[tokio::test]
+async fn an_unresolvable_row_key_still_skips_and_advances_even_under_halt() {
+    let Some(db) = crate::common::TestDb::acquire("projection_checkpoint_halt_rowkey").await else { return };
+    let pool = db.pool();
+
+    // A well-formed event whose payload carries no `cartId`, on a `Cart-` stream whose suffix is
+    // not a uuid: BOTH halves of the resolution fail, which is the only way to reach the error.
+    let position = append(
+        &pool,
+        "Cart-legacy-import-42",
+        1,
+        "OrderPreparationStarted",
+        serde_json::json!({ "orderId": uuid::Uuid::new_v4(), "restaurantId": uuid::Uuid::new_v4() }),
+    )
+    .await;
+
+    ProjectionWorker::new(pool.clone())
+        .with_db_fault_policy(DbFaultPolicy::Halt)
+        .run_once()
+        .await
+        .expect("an unresolvable row key is one bad record, not a reason to stop the group");
+
+    assert_eq!(
+        checkpoint(&pool, "Cart").await,
+        Some(position),
+        "a record whose row key will not resolve must be skipped and passed, or one unparseable \
+         stream name wedges the Cart group until an operator intervenes"
+    );
+}
+
 /// The gate's OTHER arm, pinned so the flip is a visible diff rather than a drift: the default
 /// policy still does exactly what it does today -- advance past the rejected write and report a
 /// clean drain. This assertion documents the lie #451 shipped behind; the day the default flips it

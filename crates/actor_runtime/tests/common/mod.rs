@@ -14,8 +14,18 @@
 //! and this one — so a third copy cannot appear silently, and the table below is asserted by the
 //! same cases the shared crate asserts.
 //!
-//! The contract is identical to `db_test_gate`: a database is REQUIRED by default; only the four
-//! literal spellings `0` / `false` / `no` / `off` opt out; anything else fails loudly.
+//! The contract is identical to `db_test_gate`, INCLUDING the receipt: a database is REQUIRED by
+//! default; only the four literal spellings `0` / `false` / `no` / `off` opt out; anything else
+//! fails loudly; and an opt-out appends the suite name to the same receipt file, in the same
+//! format, so `make test-crates` names it in the summary.
+//!
+//! The receipt half is not cosmetic. Without it this crate's five DB-gated binaries
+//! (`concurrency`, `discipline`, `mailbox`, `poison`, `rebalance`) skipped INVISIBLY under an
+//! opt-out: libtest swallows a passing test's stderr, so the `eprintln!` below never reached any
+//! log, and `make test-crates` printed "skipped N suite(s): …" over a run where MORE suites had
+//! skipped than the line named. A reader who looked for `rebalance` in that list and did not find
+//! it could only conclude it had run — which is precisely the false signal #474 exists to remove,
+//! reintroduced inside the fix for it.
 
 /// The four literal opt-out spellings, compared case-insensitively (see the module docs).
 const OPT_OUT: [&str; 4] = ["0", "false", "no", "off"];
@@ -42,11 +52,66 @@ pub(crate) fn database_url(suite: &str) -> Option<String> {
          Run it for real:  DATABASE_URL=postgres://... make test-crates\n\
          Opt out loudly:   DB_TESTS_REQUIRED=0 make test-crates"
     );
+    // Trimmed like the shared gate's `Verdict::SkipByOptOut`, so the two receipts are comparable.
+    let opt_out = flag.as_deref().map(str::trim).unwrap_or("");
+    // Visible under `--nocapture` only; the receipt below is what actually survives libtest.
     eprintln!(
-        "SKIP[db] {suite}: no DATABASE_URL, skipped by DB_TESTS_REQUIRED={} \
-         -- this suite exercised NO database behaviour.",
-        flag.unwrap_or_default()
+        "SKIP[db] {suite}: no DATABASE_URL, skipped by DB_TESTS_REQUIRED={opt_out} \
+         -- this suite exercised NO database behaviour."
     );
+    append_receipt(suite, opt_out);
+    None
+}
+
+/// Append one skipped suite to the receipt `make test-crates` reads back — the local half of
+/// `db_test_gate::append_receipt`, byte-identical in format (`<suite>\t<opt-out>\n`).
+///
+/// Best-effort by design, exactly like the shared crate: every write failure is swallowed. The
+/// enforcement path is the `assert!` above, which no capture can hide; the receipt is visibility,
+/// and failing a suite because a log file was unwritable would trade a real gate for a flaky one.
+///
+/// ONE `write_all` of a pre-built line, NOT `writeln!`. O_APPEND makes a single small write atomic
+/// across processes; `writeln!` does not, because `fmt::Write` issues a separate syscall per format
+/// fragment, so parallel test binaries interleave mid-line. Measured on the first #474 receipt run:
+/// a bare `0` and a fused `mailbox_retentionmailbox_delivery` among 42 suites. These five binaries
+/// run in parallel with the rest of the workspace, so the hazard is live here too.
+fn append_receipt(suite: &str, opt_out: &str) {
+    use std::io::Write as _;
+    let Some(path) = receipt_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let line = format!("{suite}\t{opt_out}\n");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// Where the receipt lives, in the SAME precedence order as `db_test_gate::receipt_path`:
+/// 1. `DB_TEST_SKIP_RECEIPT` — an absolute path; what `make test-crates` sets.
+/// 2. `$CARGO_TARGET_DIR/db-test-skips.log`.
+/// 3. `<workspace root>/target/db-test-skips.log`, the workspace root being the first ancestor of
+///    `CARGO_MANIFEST_DIR` holding a `Cargo.lock` (cargo sets it for test binaries, so a bare
+///    `cargo test -p actor_runtime` lands in the same file as a full `make test-crates`).
+fn receipt_path() -> Option<std::path::PathBuf> {
+    if let Ok(explicit) = std::env::var("DB_TEST_SKIP_RECEIPT") {
+        if !explicit.trim().is_empty() {
+            return Some(std::path::PathBuf::from(explicit));
+        }
+    }
+    if let Ok(target) = std::env::var("CARGO_TARGET_DIR") {
+        if !target.trim().is_empty() {
+            return Some(std::path::Path::new(&target).join("db-test-skips.log"));
+        }
+    }
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+    let mut dir: Option<&std::path::Path> = Some(std::path::Path::new(&manifest));
+    while let Some(d) = dir {
+        if d.join("Cargo.lock").is_file() {
+            return Some(d.join("target").join("db-test-skips.log"));
+        }
+        dir = d.parent();
+    }
     None
 }
 

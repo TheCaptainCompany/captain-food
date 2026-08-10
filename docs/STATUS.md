@@ -15,16 +15,24 @@
 > silently vanishes. **Polarity inverted** (`crates/db_test_gate`, new dev-only crate): a database is
 > REQUIRED by default, a missing `DATABASE_URL` PANICS with the command to fix it, and the only way
 > out is `DB_TESTS_REQUIRED=0`, which leaves a receipt `make test-crates` reads back into a summary
-> naming all 42 skipped suites. The receipt exists because **libtest swallows a passing test's
-> stderr**: `grep -c SKIP` over the 990-test baseline log returns **0**, so the old per-suite SKIP
-> lines were not merely quiet, they were unobservable. The decision was hand-written at 17 call sites
-> across 5 crates and now lives in one place, guarded by a codegen rule; `actor_runtime` keeps one
-> local copy because `dependency_rule.rs` forbids ANY path dependency into the workspace
-> (ADR-20260730-234918), and the allowlist names both files with their reasons.
+> naming **every** skipped suite — count it with
+> `cut -f1 target/db-test-skips.log | sort -u | wc -l` rather than trusting a number in prose. The
+> receipt exists because **libtest swallows a passing test's stderr**: `grep -c SKIP` over the
+> 990-test baseline log returns **0**, so the old per-suite SKIP lines were not merely quiet, they
+> were unobservable. The decision was hand-written at 17 call sites across 5 crates and now lives in
+> one place, guarded by a codegen rule that also rejects the PRE-#474 shape
+> (`std::env::var("DATABASE_URL")` under `crates/**/tests/**`, which never mentions the opt-out
+> variable and so slipped past the polarity scan); `actor_runtime` keeps one local copy because
+> `dependency_rule.rs` forbids ANY path dependency into the workspace (ADR-20260730-234918), and the
+> allowlist names each file with its reason. That copy **also writes the receipt** — until it did,
+> its five DB-gated binaries skipped without appearing in the summary, so the line named fewer
+> suites than had actually skipped.
 > **Two new gates, both seen RED against a deliberately re-planted #451**: the checkpoint no longer
 > advances past a fold the DATABASE rejected (`FoldFault::{PayloadShape,Database}` — a compiler-
 > enforced classification the loop never had, since every failure used to collapse to
-> `DomainError::Repository`), **shipped GATED**: `DbFaultPolicy::Skip` remains the default and today's
+> `DomainError::Repository`; there is deliberately no `From<DomainError>`, so `?` cannot pick a class
+> and a row key that will not resolve is `PayloadShape`, which keeps one unparseable stream name from
+> wedging its group), **shipped GATED**: `DbFaultPolicy::Skip` remains the default and today's
 > behaviour is unchanged on every deployed path — flipping it is a separate decision
 > ([ADR-20260810-225036](adr/ADR-20260810-225036-projection-db-fault-policy-gated-halt.md)); and
 > validator §16 `schema-writer-missing-column` proves, with no database and in under a second, that

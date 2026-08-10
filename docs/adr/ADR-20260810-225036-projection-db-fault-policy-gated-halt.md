@@ -32,6 +32,19 @@ no reword can silently reclassify. A PANIC classifies as `PayloadShape` — the 
 legacy payload, and halting on it would restore exactly the boot-refold wedge `catch_unwind` exists
 to prevent.
 
+**1b. The classification reaches the whole fold, and there is no `From<DomainError>`.**
+`ReadModelProjector::apply`/`apply_inner` return `FoldFault`, so every fallible step inside a
+projector — each store `load`/`upsert`, each lookup, each row-key resolution — states its class at
+the call. Without a `From` impl, `?` cannot choose one on the author's behalf; a new projector arm
+does not compile until it says which failure it is. This is what makes §1's claim true. The first
+cut did not have it: the drain loop wrapped the entire fold in one `map_err(FoldFault::Database)`,
+so `aggregate_uuid_of`'s per-record resolution failure ("cannot resolve `<key>` for stream `<name>`",
+reachable from ten arms) was reported as a schema fault — under `Halt`, a single unparseable or
+mis-routed stream name would have wedged its group until an operator intervened, which is the #230
+wedge inside the code added to avoid it. A row key that will not resolve is `PayloadShape`: both
+halves of the resolution read only THIS envelope, no database is involved, and it is structurally
+the same failure as a payload that will not deserialize.
+
 **2. `PayloadShape` still skips and advances.** It is genuinely per-record: the next event is
 unaffected. [#230](https://github.com/TheCaptainCompany/captain-food/issues/230)'s behaviour is
 unchanged, deliberately.
@@ -66,14 +79,16 @@ pins the current arm so the flip is a visible deletion in a diff rather than a d
 
 **Positive.** The loop can no longer claim progress it did not make, once the policy is on. The
 distinction is compiler-enforced, so a new failure site cannot inherit the wrong class by accident.
-Three tests pin the classification rather than only the halt, and they manufacture the #451
-condition themselves (`ALTER TABLE … DROP DEFAULT`) instead of depending on a planted defect — a
-test that only fails against a plant dies with the plant.
+`projection_checkpoint_halt.rs` pins the classification rather than only the halt — database fault
+halts, malformed payload skips, unresolvable row key skips, current default advances — and each case
+manufactures the #451 condition itself (`ALTER TABLE … DROP DEFAULT`) instead of depending on a
+planted defect: a test that only fails against a plant dies with the plant.
 
 **Negative.** Two behaviours now exist where there was one, and until the default flips, production
 still advances past rejected writes — the honest state, written down rather than assumed away.
 
-**Follow-up.** (a) Decide the default flip, with the gated form smoked. (b) Consider the quarantine
+**Follow-up.** (a) Decide the default flip, with the gated form smoked — §1b is a **precondition**
+of that decision and is now met, so what remains is the arbitration itself. (b) Consider the quarantine
 table, which would let `Halt` be safe unconditionally. (c) `revoke_role`'s named-skip special case
 (ADR-20260809-160000 addendum) is a `Database` fault under this classification and would be covered
 by the flip — worth revisiting there when it happens.

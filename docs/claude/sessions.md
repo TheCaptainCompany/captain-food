@@ -965,8 +965,18 @@ is no longer something to remember, and the two gates still cover disjoint failu
 
 **A database is now REQUIRED, not optional.** The #230 polarity is inverted: with no `DATABASE_URL`
 a DB-gated suite PANICS with the command to run it, and the only way out is an explicit
-`DB_TESTS_REQUIRED=0`, which prints a summary naming all 42 skipped suites. So there is nothing to
+`DB_TESTS_REQUIRED=0`, which prints a summary naming every skipped suite. So there is nothing to
 set in the happy path — just export `DATABASE_URL` (the ~40s `initdb` recipe is §above).
+
+**Derive that count, never quote it** — it moves with every DB-gated test added, and it was already
+wrong twice in one branch (prose said 42 while the run printed 45; the run printed 45 while 50 suites
+had really skipped, because `actor_runtime`'s local copy of the gate was not writing the receipt):
+
+```sh
+cut -f1 target/db-test-skips.log | sort -u | wc -l   # how many skipped, after a DB_TESTS_REQUIRED=0 run
+cut -f1 target/db-test-skips.log | sort -u           # ...and which
+awk '/^test result:/{p+=$4; f+=$6} END{print p, f}' <log>   # the pass/fail totals, same reason
+```
 
 **Why that needed a receipt file rather than a louder `eprintln!`: libtest captures a passing test's
 stderr as well as its stdout.** The per-suite `SKIP` lines this repo relied on since #230 were not
