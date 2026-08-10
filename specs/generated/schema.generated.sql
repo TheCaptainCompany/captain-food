@@ -415,14 +415,11 @@ CREATE TABLE Cart (
   customer_id UUID,
   status TEXT NOT NULL,
   lines JSONB NOT NULL,
-  total_amount_cents BIGINT NOT NULL,
-  currency TEXT NOT NULL,
-  estimated_breakdown JSONB,
-  uber_comparison JSONB,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX ON Cart (session_id);
+CREATE INDEX ON Cart (customer_id, updated_at);
 
 CREATE TABLE OrderTracking (
   order_id UUID PRIMARY KEY,

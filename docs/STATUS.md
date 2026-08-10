@@ -2,6 +2,26 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🚧 **2026-08-10 — #451 PHASE 1 LANDED: THE AMBER SPEC SLICE OF THE CART-PRICING KEYSTONE**
+> ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
+> realizing [PROP-20260810-231500](proposals/PROP-20260810-231500-cart-current-priced.md) Option B /
+> LIVE, recorded in [ADR-20260810-112836 "Cart priced LIVE on read"](adr/ADR-20260810-112836-cart-priced-live-on-read.md);
+> branch `claude/epic-429-production-test-order-9atwb8`, mob protocol). **Spec truth now says LIVE**:
+> the `Cart` projection is a money-free pure fold (`projection_tables.yaml` money columns dropped,
+> `[customer_id, updated_at]` index added, migration `20260810113000_cart_money_free_fold.sql` +
+> schema-version bump); the zero-arg claim-resolved `current` query exists (`specs/ordering/api.yaml`
+> + `ViewCurrentCart` story step + the storefront SDUI `cart.current` resolver repointed); the
+> by-id `cart` query's live IDOR is retired at spec level (`roles: [CUSTOMER, ADMIN]`,
+> claim-ownership documented); the read-side pricing contract `cart-price` is in
+> `specs/observability.yaml` (`cart_price_ms`, `cart_price_unresolvable_total{reason}`); the
+> impure-fold wording is corrected everywhere (ADR-0028 §5 addendum, rules, entities/events
+> comments). **What does NOT yet work**: the `current` resolver is the generated
+> `not implemented` stub, the generated Cart→API mapping fills the degenerate unpriced shape
+> (empty lines, 0 EUR — exactly what the pre-#451 stub rendered), and the projector still folds no
+> lines. **Phase 2 (GREEN)** wires `price_cart` at the resolver seam, the line fold, the
+> claim-ownership narrowing in the `cart`/`current` bodies, and proves the `cart-price` metrics
+> firing. Paused at the fold-purity checkpoint for the architect's diff read.
+
 > ✅ **2026-08-10 — CART-PRICING KEYSTONE APPROVED (Option B / LIVE); BUILD STARTING**
 > ([PROP-20260810-231500 "cart.current: the authenticated customer's PRICED cart"](proposals/PROP-20260810-231500-cart-current-priced.md),
 > tracking [#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),

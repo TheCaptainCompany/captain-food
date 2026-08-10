@@ -33,8 +33,7 @@ mod projector_dispatch_tests {
     use super::*;
     use domain::generated::events::{CartStarted, DomainEvent, RestaurantAccountDeleted};
     use domain::generated::scalars::{
-        CartId, CartStatus, CurrencyCode, CustomerId, MoneyCents, RestaurantAccountId, RestaurantId,
-        SessionId,
+        CartId, CartStatus, CustomerId, RestaurantAccountId, RestaurantId, SessionId,
     };
 
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
@@ -45,15 +44,12 @@ mod projector_dispatch_tests {
         Envelope { stream_name: "cart-1".into(), position: 1, occurred_at: ts(at), event }
     }
 
-    // The hand-written business logic — only Cart's complex columns; the mechanical ones are generated.
+    // The hand-written business logic — only Cart's complex columns; the mechanical ones are
+    // generated. The fold is MONEY-FREE (ADR-20260810-112836): no price columns exist to compute.
     struct Compute;
     impl CartCompute for Compute {
         fn status(&self, _p: Option<&CartRow>, _e: &Envelope) -> CartStatus { CartStatus::OPEN }
         fn lines(&self, _p: Option<&CartRow>, _e: &Envelope) -> serde_json::Value { serde_json::json!([]) }
-        fn total_amount_cents(&self, _p: Option<&CartRow>, _e: &Envelope) -> MoneyCents { MoneyCents(0) }
-        fn currency(&self, _p: Option<&CartRow>, _e: &Envelope) -> CurrencyCode { CurrencyCode("EUR".into()) }
-        fn estimated_breakdown(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<serde_json::Value> { None }
-        fn uber_comparison(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<serde_json::Value> { None }
     }
 
     #[test]

@@ -824,7 +824,7 @@ pub struct Prospect {
     pub restaurant: Restaurant,
 }
 
-/// A customer's in-progress selection for a single restaurant (priced by the projection).
+/// A customer's in-progress selection for a single restaurant. The stored read model is a money-free pure fold (identity, status, repricing inputs); every priced field below — lines, totalAmount, breakdown, uberComparison — is computed AT READ TIME from the live catalog by the same `price_cart` authority the write path uses, so the cart always shows the LIVE price and the ONE authoritative freeze stays at checkout (rules.yaml#/CheckoutSnapshotFrozenAtIntent; PROP-20260810-231500 Option B, ADR-20260810-112836).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Cart {
@@ -1150,9 +1150,11 @@ impl From<(CatalogRow, RestaurantRow)> for Catalog {
     }
 }
 
-/// Read-model rows → API type: the Cart row plus the joined Restaurant row (non-null `restaurant`
-/// navigation field). jsonb columns deserialize into the typed structs (serde camelCase); the priced
-/// columns are whatever the projector computed (documented TODO(runtime) until the pricing ports land).
+/// Read-model rows → API type: the money-free Cart fold row plus the joined Restaurant row
+/// (non-null `restaurant` navigation field). The priced fields (lines/totalAmount/breakdown/
+/// uberComparison) are NOT in the row (ADR-20260810-112836): they are computed at read time via
+/// price_cart. TODO(#451 Phase 2): price at the resolver seam; this From impl fills the degenerate
+/// unpriced shape (empty lines, 0 EUR, no breakdown) exactly as the pre-#451 stub projector did.
 impl From<(CartRow, RestaurantRow)> for Cart {
     fn from((row, restaurant): (CartRow, RestaurantRow)) -> Self {
         Self {
@@ -1160,13 +1162,13 @@ impl From<(CartRow, RestaurantRow)> for Cart {
             restaurant_id: row.restaurant_id.into(),
             customer_id: row.customer_id.map(Into::into),
             status: row.status.into(),
-            lines: serde_json::from_value(row.lines).unwrap_or_default(),
+            lines: Vec::new(),
             total_amount: Money {
-                amount_cents: row.total_amount_cents.into(),
-                currency: row.currency.into(),
+                amount_cents: MoneyCents(0),
+                currency: CurrencyCode("EUR".into()),
             },
-            breakdown: row.estimated_breakdown.and_then(|v| serde_json::from_value(v).ok()),
-            uber_comparison: row.uber_comparison.and_then(|v| serde_json::from_value(v).ok()),
+            breakdown: None,
+            uber_comparison: None,
             updated_at: row.updated_at,
             restaurant: restaurant.into(),
         }

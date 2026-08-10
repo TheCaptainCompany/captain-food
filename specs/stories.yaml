@@ -55,6 +55,7 @@ customer:
         SeeCheckoutBreakdown: { $ref: 'api.yaml#/queries/cart' }   # transparent fee breakdown before paying (ADR-0018)
         CompareWithUberEats: { $ref: 'api.yaml#/queries/cart' }   # labelled Uber Eats price + who-gets-what comparison (ADR-0022/0025); also on catalog offers + the order receipt
         ViewMyCarts: { $ref: 'api.yaml#/queries/carts' }   # one OPEN cart per restaurant
+        ViewCurrentCart: { $ref: 'api.yaml#/queries/current' }   # my most-recent OPEN cart, claim-resolved (no args), priced LIVE at read — what /checkout and the mini-cart render (#451)
         BrowseCategories: { $ref: 'api.yaml#/queries/categories' }   # category tree for filtering/discovery
         PlaceOrder: { $ref: 'api.yaml#/mutations/placeOrder' }
         PollOperationStatus: { $ref: 'api.yaml#/queries/operationStatus' }   # by messageId — pull counterpart of the operationStatusChanged subscription

@@ -1,13 +1,16 @@
-//! The 12-column `cart` table ↔ [`CartRow`] mapping, both directions — shared by the read repository
+//! The 8-column `cart` table ↔ [`CartRow`] mapping, both directions — shared by the read repository
 //! (decode) and the projection worker (load current state + upsert the folded row).
 //!
+//! The row is a MONEY-FREE pure fold (ADR-20260810-112836): identity, status and the repricing
+//! inputs (`lines` jsonb: `[{ cart_line_id, offer_id, quantity, selected_option_ids }]`) — no price
+//! columns exist; the read side prices via `application::pricing::price_cart`.
+//!
 //! Column conventions (ADR-20260728/0040): `status` is a TEXT value (see
-//! [`crate::persistence::enum_sql`]); `lines`/`estimated_breakdown`/`uber_comparison` are jsonb columns
-//! carrying `serde_json::Value`; `total_amount_cents` is a BIGINT bound via the `MoneyCents` newtype's
-//! inner `.0`; the other scalar newtypes bind via `.0` too.
+//! [`crate::persistence::enum_sql`]); `lines` is a jsonb column carrying `serde_json::Value`; the
+//! scalar newtypes bind via `.0`.
 
 use application::queries::CartRow;
-use domain::generated::scalars::{CartId, CurrencyCode, CustomerId, MoneyCents, RestaurantId, SessionId};
+use domain::generated::scalars::{CartId, CustomerId, RestaurantId, SessionId};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
@@ -16,13 +19,8 @@ use super::db_err;
 use super::enum_sql::EnumText;
 
 /// The full column list, in `CartRow` field order — keep SELECTs and the upsert in sync with it.
-pub(crate) const COLUMNS: &str = "cart_id, restaurant_id, session_id, customer_id, status, lines, \
-     total_amount_cents, currency, estimated_breakdown, uber_comparison, created_at, updated_at";
-
-/// Normalize a nullable jsonb: a JSON `null` in the column (or in the row) means "no value".
-fn opt_json(v: Option<serde_json::Value>) -> Option<serde_json::Value> {
-    v.filter(|j| !j.is_null())
-}
+pub(crate) const COLUMNS: &str =
+    "cart_id, restaurant_id, session_id, customer_id, status, lines, created_at, updated_at";
 
 /// Decode one `cart` row into the generated read-model DTO.
 pub(crate) fn decode(row: &PgRow) -> Result<CartRow, DomainError> {
@@ -36,10 +34,6 @@ pub(crate) fn decode(row: &PgRow) -> Result<CartRow, DomainError> {
             .map(CustomerId),
         status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
         lines: row.try_get("lines").map_err(db_err)?,
-        total_amount_cents: MoneyCents(row.try_get("total_amount_cents").map_err(db_err)?),
-        currency: CurrencyCode(row.try_get("currency").map_err(db_err)?),
-        estimated_breakdown: opt_json(row.try_get("estimated_breakdown").map_err(db_err)?),
-        uber_comparison: opt_json(row.try_get("uber_comparison").map_err(db_err)?),
         created_at: row.try_get("created_at").map_err(db_err)?,
         updated_at: row.try_get("updated_at").map_err(db_err)?,
     })
@@ -52,20 +46,16 @@ pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: CartId) -> Result<Option<
     row.as_ref().map(decode).transpose()
 }
 
-/// Write the folded row: `INSERT … ON CONFLICT (cart_id) DO UPDATE` over all 11 columns.
+/// Write the folded row: `INSERT … ON CONFLICT (cart_id) DO UPDATE` over all columns.
 pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CartRow) -> Result<(), DomainError> {
     let sql = format!(
-        "INSERT INTO cart ({COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+        "INSERT INTO cart ({COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
          ON CONFLICT (cart_id) DO UPDATE SET \
          restaurant_id = EXCLUDED.restaurant_id, \
          session_id = EXCLUDED.session_id, \
          customer_id = EXCLUDED.customer_id, \
          status = EXCLUDED.status, \
          lines = EXCLUDED.lines, \
-         total_amount_cents = EXCLUDED.total_amount_cents, \
-         currency = EXCLUDED.currency, \
-         estimated_breakdown = EXCLUDED.estimated_breakdown, \
-         uber_comparison = EXCLUDED.uber_comparison, \
          created_at = EXCLUDED.created_at, \
          updated_at = EXCLUDED.updated_at"
     );
@@ -76,10 +66,6 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CartRow) -> Result<()
         .bind(row.customer_id.as_ref().map(|v| v.0))
         .bind(row.status.to_text())
         .bind(row.lines.clone())
-        .bind(row.total_amount_cents.0)
-        .bind(row.currency.0.clone())
-        .bind(opt_json(row.estimated_breakdown.clone()))
-        .bind(opt_json(row.uber_comparison.clone()))
         .bind(row.created_at)
         .bind(row.updated_at)
         .execute(exec)

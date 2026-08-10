@@ -227,6 +227,69 @@ place-order:
   error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
+# cart-price — READ-side pricing on the checkout hot path (#451, PROP-20260810-231500 Concern)
+# cart.current / cart / carts resolve a money-free Cart row -> price_cart (LIVE catalog) ->
+#   priced Cart | PriceUnresolvable (fail-closed, the honest no-price state).
+# Every /checkout render and every mini-cart runs this seam — at peak (Fri/Sat 19:00-21:30) it
+# is the hottest read in the product, and a per-line unresolvable is a SILENT conversion killer
+# (screen 3c: the customer sees no payable amount and walks). Binds the graphql read surface
+# (like read-authorization): there is no command/saga — the pricer is SDK-free application code
+# (`application::pricing::price_cart`); the span lives at the GRAPHQL RESOLVER seam, the
+# framework boundary, per the implementation rule above.
+# =====================================================================
+cart-price:
+  feature: cart-price
+  criticality: high
+  workflow:
+    surface: graphql   # read-path binding — no single command/saga/aggregate (validator §8)
+
+  run_identity:
+    # Reads carry no command envelope: the correlation id is the request-scoped one minted at the
+    # server boundary (same posture as read-authorization).
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # ONE span per priced cart read, at the resolver seam (the pricer itself stays SDK-free).
+    # business.aggregate_id = the cartId being priced; correlate a bad render to the checkout
+    # attempt that followed via business.correlation_id.
+    - name: "cart.price"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.aggregate_id", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+
+  metrics:
+    # Read-side pricing latency: an in-memory fold over already-loaded offers — if this histogram
+    # drifts toward the budget, the per-request memoized catalog read (PROP §8) is the lever, and
+    # this metric is what tells us BEFORE it hurts at peak.
+    - { name: "cart_price_ms", type: histogram, attributes: [] }
+    # DEFECT counter (the checkout_degraded_render_total pattern): a cart whose price cannot be
+    # resolved at read renders the honest no-price state — a sale silently lost, never an error
+    # the customer reports. `reason` is the canonical bounded set:
+    #   offer_gone     — a line's offer (or a selected option) no longer resolves in the live catalog
+    #   policy_missing — the fee/comparison policy needed to complete the priced shape is absent
+    #   stock_unknown  — the offer resolves but its orderability/stock state cannot be established
+    # Alert on ANY sustained non-zero rate.
+    - { name: "cart_price_unresolvable_total", type: counter, attributes: ["reason"] }
+
+  status_rules:
+    success:
+      required_spans: ["cart.price"]
+    # CLASSIFICATION (recorded, deliberate): an unresolvable price at READ is a technical_error,
+    # never business_rejected — the customer asked to see their cart and got no price (a defect in
+    # what we serve), not a domain rule refusing a request. The write-path twin (PriceUnresolvable
+    # rejecting PlaceOrder) stays a rejection under the place-order contract.
+    technical_error:
+      any_span_errors: true
+
+  # INITIAL budgets — set from the write-path pricing seam's share of place-order, TUNABLE once
+  # cart_price_ms carries real traffic; revisit after the first peak (Fri/Sat 19:00-21:30) window.
+  latency_budget: { max_p95_ms: 300, max_p99_ms: 600 }
+  error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
 # refund — the compensation saga (Stripe refund driven by RefundProcess)
 # OrderRejected/Cancelled* or RefundRequested -> [Stripe refund] -> PaymentRefunded (recorded)
 # =====================================================================

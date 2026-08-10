@@ -27,7 +27,8 @@ CartBoundToCustomer:
 # Cart
 # =====================================================================
 # Pre-checkout selection. High-churn and often abandoned, so payloads stay minimal (ids +
-# quantity); display prices are derived by the read projection, not carried here.
+# quantity); display prices are computed at read time via price_cart (ADR-20260810-112836),
+# never carried here and never stored in the fold.
 
 CartStarted:
   description: "A new cart was created for a restaurant (emitted with the first line added)."

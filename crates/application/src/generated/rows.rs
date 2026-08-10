@@ -89,7 +89,7 @@ pub struct CatalogRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Joined with the catalog for pricing (secondary source).
+/// MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only identity, status and the REPRICING INPUTS (per line: offer_id, quantity, selected_option_ids). A replay reproduces these rows exactly — the fold reads nothing outside the event stream. Prices are computed AT READ TIME by `application::pricing::price_cart` against the live catalog (the same authority the checkout write path uses); the authoritative price freeze happens once, on PaymentIntentCreated.CheckoutSnapshot. 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CartRow {
     pub cart_id: CartId,
@@ -98,10 +98,6 @@ pub struct CartRow {
     pub customer_id: Option<CustomerId>,
     pub status: CartStatus,
     pub lines: serde_json::Value,
-    pub total_amount_cents: MoneyCents,
-    pub currency: CurrencyCode,
-    pub estimated_breakdown: Option<serde_json::Value>,
-    pub uber_comparison: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

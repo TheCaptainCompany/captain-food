@@ -69,7 +69,7 @@ resolvers:
   categories.all:       { query: { $ref: 'api.yaml#/queries/categories' } }
   restaurant.bySlug:    { query: { $ref: 'api.yaml#/queries/restaurant' } }
   catalog.byRestaurant: { query: { $ref: 'api.yaml#/queries/catalog' } }
-  cart.current:         { query: { $ref: 'api.yaml#/queries/cart' } }
+  cart.current:         { query: { $ref: 'api.yaml#/queries/current' } }   # #451: claim-resolved zero-arg current cart — /checkout carries no route params; priced LIVE at read
   carts.mine:           { query: { $ref: 'api.yaml#/queries/carts' } }
   order.byId:           { query: { $ref: 'api.yaml#/queries/order' } }
   orders.mine:          { query: { $ref: 'api.yaml#/queries/orders' } }

@@ -336,8 +336,10 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 ### `Cart` · 🛶 V0 · source aggregate `Cart`
 
 - **Fed by**: `CartStarted`, `CartLineAdded`, `CartLineQuantityChanged`, `CartLineRemoved`, `CartCheckedOut`, `CartBoundToCustomer`
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
-- **Note**: Joined with the catalog for pricing (secondary source).
+- **Rules**: The fold is PURE and money-free: no price, currency, breakdown or comparison is stored — the read side prices the lines fresh on every read via price_cart (LIVE catalog), fail-closed on an unresolvable line (PriceUnresolvable → the honest no-price state, never a stale or client number). `customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout. The estimated PaymentBreakdown and UberComparison shown on the cart (ADR-0018/0022/0025) are READ-TIME computations from the freshly priced food total + PricingPolicy / Uber*Policy — same formulas as before, no longer materialized. Recomputed authoritatively on OrderPlaced.breakdown.
+- **Note**: MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only identity, status and the REPRICING INPUTS (per line: offer_id, quantity, selected_option_ids). A replay reproduces these rows exactly — the fold reads nothing outside the event stream. Prices are computed AT READ TIME by `application::pricing::price_cart` against the live catalog (the same authority the checkout write path uses); the authoritative price freeze happens once, on PaymentIntentCreated.CheckoutSnapshot.
+
+- **Indexes**: `(customer_id, updated_at)`
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -346,11 +348,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `session_id` | `SessionId` | `UUID` | index | The visitor session that started the cart; CartBindingProcess binds all OPEN carts of a session on CustomerIdentified. |
 | `customer_id` | `CustomerId` | `UUID` | nullable | NULL while guest; bound by CartBoundToCustomer (CartBindingProcess sends BindCartToCustomer per open cart of the identified session) or at checkout. |
 | `status` | `CartStatus` | `TEXT` | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
-| `lines` | `jsonb` | `JSONB` | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
-| `total_amount_cents` | `MoneyCents` | `BIGINT` | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
-| `currency` | `CurrencyCode` | `TEXT` | — | From the catalog currency at pricing time (the restaurant's default_currency). |
-| `estimated_breakdown` | `jsonb` | `JSONB` | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
-| `uber_comparison` | `jsonb` | `JSONB` | nullable | UberComparison for the cart-level comparison (ADR-0022/0025), COMPUTED by the projection (see rules). Null when the restaurant has no cuisine_category. |
+| `lines` | `jsonb` | `JSONB` | — | MONEY-FREE repricing inputs, folded verbatim from the cart events: [{ cart_line_id, offer_id, quantity, selected_option_ids }]. NO stored price/name fields — the read side resolves names and prices from the live catalog via price_cart. |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 

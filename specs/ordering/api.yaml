@@ -7,17 +7,24 @@ description: >
 types:
 
   Cart:
-    description: "A customer's in-progress selection for a single restaurant (priced by the projection)."
+    description: >
+      A customer's in-progress selection for a single restaurant. The stored read model is a
+      money-free pure fold (identity, status, repricing inputs); every priced field below —
+      lines, totalAmount, breakdown, uberComparison — is computed AT READ TIME from the live
+      catalog by the same `price_cart` authority the write path uses, so the cart always shows
+      the LIVE price and the ONE authoritative freeze stays at checkout
+      (rules.yaml#/CheckoutSnapshotFrozenAtIntent; PROP-20260810-231500 Option B,
+      ADR-20260810-112836).
     reads: [{ $ref: 'database/tables/projection_tables.yaml#/Cart' }]
     properties:
       id: { $ref: 'scalars.yaml#/CartId' }
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
       customerId: { $ref: 'scalars.yaml#/CustomerId', nullable: true }
       status: { $ref: 'scalars.yaml#/CartStatus' }
-      lines: { $ref: 'entities.yaml#/OrderLineItem', array: true }   # read lines are priced (same shape as order lines)
-      totalAmount: { $ref: 'entities.yaml#/Money' }   # food sub-total (the cart's items)
-      breakdown: { $ref: 'entities.yaml#/PaymentBreakdown', nullable: true }   # estimated checkout fee breakdown (ADR-0018)
-      uberComparison: { $ref: 'entities.yaml#/UberComparison', nullable: true }   # estimated Uber Eats price/split for this cart (ADR-0022/0025); null if no cuisine
+      lines: { $ref: 'entities.yaml#/OrderLineItem', array: true }   # priced at read time via price_cart (same shape as order lines); NOT stored priced
+      totalAmount: { $ref: 'entities.yaml#/Money' }   # food sub-total, computed at read from the live catalog
+      breakdown: { $ref: 'entities.yaml#/PaymentBreakdown', nullable: true }   # estimated checkout fee breakdown (ADR-0018), computed at read (V0 degenerate shape, same as checkout)
+      uberComparison: { $ref: 'entities.yaml#/UberComparison', nullable: true }   # estimated Uber Eats price/split for this cart (ADR-0022/0025), computed at read; null if no cuisine
       updatedAt: { type: string, format: date-time }
 
   Order:
@@ -105,10 +112,33 @@ queries:
     slice: V0
 
   cart:
-    description: "A single cart by id (session-scoped; readable by the guest/customer who owns it)."
+    description: >
+      A single cart by id — the per-restaurant cart a customer picked from their carts list
+      (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership
+      enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the
+      caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart.
+      This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id
+      — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the
+      customer story steps legitimately read a specific cart by id; guests get NO by-id cart read
+      (no guest session scope on reads — ADR-20260720-213000 §3 posture; the guest mini-cart is a
+      recorded gap).
     args:
       id: { $ref: 'scalars.yaml#/CartId', required: true }
     returns: { $ref: '#/types/Cart', nullable: true }
+    roles: [CUSTOMER, ADMIN]
+    slice: V0
+
+  current:
+    description: >
+      The authenticated customer's CURRENT cart: their most-recently-updated OPEN cart, or null
+      when none exists (#451, PROP-20260810-231500). Zero args — ownership by construction: the
+      customer id comes from the verified claim (ReadScope::Customer, the `myReclamations`
+      pattern), never from a client argument or a route param, so a caller can only ever resolve
+      their own cart. Priced fresh on every read via the shared `price_cart` authority (LIVE
+      price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the
+      client renders the empty state, never a fabricated 0,00 EUR payable.
+    returns: { $ref: '#/types/Cart', nullable: true }
+    roles: [CUSTOMER]
     slice: V0
 
 

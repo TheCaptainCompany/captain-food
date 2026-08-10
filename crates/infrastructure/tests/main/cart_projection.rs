@@ -61,18 +61,18 @@ async fn cart_events_fold_into_the_read_model() {
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once (started)");
 
-    // The row materialized, OPEN, under the group's own 'Cart' checkpoint. The priced columns hold the
-    // projector's documented defaults (lines [], total 0 EUR — pricing is TODO(runtime)).
-    let (status, total, currency, projected_session): (String, i64, String, uuid::Uuid) = sqlx::query_as(
-        "SELECT status, total_amount_cents, currency, session_id FROM cart WHERE cart_id = $1",
+    // The row materialized, OPEN, under the group's own 'Cart' checkpoint. The fold is MONEY-FREE
+    // (ADR-20260810-112836): no price columns exist — `lines` holds the repricing inputs (empty
+    // until the Phase-2 line fold lands; the read side prices via price_cart).
+    let (status, lines, projected_session): (String, serde_json::Value, uuid::Uuid) = sqlx::query_as(
+        "SELECT status, lines, session_id FROM cart WHERE cart_id = $1",
     )
     .bind(cart_id)
     .fetch_one(&pool)
     .await
     .expect("projected cart row");
     assert_eq!(status, "OPEN"); // CartStatus::OPEN
-    assert_eq!(total, 0);
-    assert_eq!(currency, "EUR");
+    assert_eq!(lines, serde_json::json!([]));
     assert_eq!(projected_session, session_id);
     let checkpoint: i64 =
         sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Cart'")

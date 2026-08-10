@@ -25,6 +25,7 @@ pub const OPERATION_SCOPES: &[(&str, &str, &str)] = &[
     ("query", "prospectionPipeline", "network"),
     ("query", "carts", "ordering"),
     ("query", "cart", "ordering"),
+    ("query", "current", "ordering"),
     ("query", "orders", "ordering"),
     ("query", "order", "ordering"),
     ("query", "restaurantDeliverySatisfaction", "ordering"),

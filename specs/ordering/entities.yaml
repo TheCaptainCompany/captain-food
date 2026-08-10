@@ -45,8 +45,9 @@ Tip:
 
 # --- Cart ---
 # Pre-checkout selection, built (possibly by a guest) before a Customer exists. Stored as
-# intent (ids + quantity) only; display prices/totals are computed by the read projection from
-# the live catalog, never stored on the cart — same rule as orders (client prices not trusted).
+# intent (ids + quantity) only; display prices/totals are computed AT READ TIME from the live
+# catalog via price_cart (ADR-20260810-112836), never stored on the cart or in its fold — same
+# rule as orders (client prices not trusted).
 # Converted to an Order at checkout (CartCheckedOut); Cart and Order stay distinct aggregates.
 
 CartLineItem:
