@@ -412,6 +412,23 @@ screens:
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:
           - { type: stripe_express_checkout_element, id: stripe_payment, payment_intent_source: "{{ payment_status.clientSecret }}", on_confirm: { type: confirm_payment } }
+          # Test-mode banner (#440): while the delivered publishable key is `pk_test_` (all of them,
+          # pre-launch — scalars.yaml#/StripePublishableKeyTest anchors the slot), the pay step says
+          # so persistently. Derived client-side from the key's own prefix, never a separate flag.
+          - { type: text, id: test_mode_banner, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.test_mode.banner' }, visible_when: "stripe_mode == 'test'", style: { size: sm } }
+      # PAYMENT UNAVAILABLE state (#440, presence-gated key): no usable publishable key reaches the
+      # shell (absent, empty or malformed — all one state), so the Stripe element CANNOT mount.
+      # Renders INSTEAD of the element — a dead payment control is worse than no control — with
+      # `place_order_btn` disabled and the cart untouched ("your cart is saved" is a promise the
+      # system keeps: nothing was placed, the cart stays OPEN). Counted server-side as
+      # checkout_degraded_render_total{reason=stripe_key_absent} (observability.yaml, place-order).
+      - type: conditional_section
+        id: payment_unavailable_state
+        visible_when: "stripe_publishable_key == null"
+        content:
+          - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_unavailable.title' }, style: { weight: bold } }
+          - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_unavailable.body' } }
+          - { type: button, id: payment_unavailable_back_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment_failed.back_to_cart' }, variant: outline, full_width: true, action: { type: navigate, route: "/cart" } }
       # PAYMENT FAILED state (#348 quick win; PROP-20260808-141817 §1d/§3): the saga outcome
       # PaymentFailed → run FAILED, nothing placed, the cart stays OPEN
       # (TestPlaceOrderPaymentFailedPlacesNothing) — so the copy can promise "your cart is

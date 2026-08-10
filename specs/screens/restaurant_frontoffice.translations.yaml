@@ -113,6 +113,11 @@ checkout.payment_failed.title: { messages: { en: "Payment failed", fr: "Paiement
 checkout.payment_failed.body:  { messages: { en: "Your card was not charged. Your cart is intact.", fr: "Votre carte n'a pas été débitée. Votre panier est intact." } }
 checkout.payment_failed.retry: { messages: { en: "Retry payment", fr: "Réessayer le paiement" } }
 checkout.payment_failed.back_to_cart: { messages: { en: "Back to cart", fr: "Revenir au panier" } }
+# Payment UNAVAILABLE (#440, presence-gated publishable key): no usable key => no element, honest copy.
+checkout.payment_unavailable.title: { messages: { en: "Payment temporarily unavailable", fr: "Paiement momentanément indisponible" } }
+checkout.payment_unavailable.body:  { messages: { en: "Online payment is temporarily unavailable — your cart is saved, try again in a few minutes.", fr: "Le paiement en ligne est momentanément indisponible — votre panier est conservé, réessayez dans quelques minutes." } }
+# Test-mode banner (#440): shown while the delivered key is pk_test_ — pre-launch, that is always.
+checkout.test_mode.banner: { messages: { en: "Test mode — no real charges", fr: "Mode test — aucun débit réel" } }
 
 # ── order tracking + history ─────────────────────────────────────────────────
 order.tracking_title: { messages: { en: "Order tracking", fr: "Suivi de commande" } }

@@ -168,7 +168,10 @@ impl HandWrittenScreen {
     ) -> String {
         match self {
             HandWrittenScreen::Checkout => crate::checkout::render_checkout_html(
-                crate::checkout::CheckoutViewState::from_resolved(&ctx.data, tenant, locale),
+                crate::checkout::CheckoutViewState::from_resolved(&ctx.data, tenant, locale)
+                    // The delivery seam (#440): the parsed key rides the RenderContext from the
+                    // server's config into the shell; None = the degraded state.
+                    .with_publishable_key(ctx.stripe_publishable_key.clone()),
                 locale,
             ),
             HandWrittenScreen::OrderTracking => crate::tracking::render_tracking_html(
@@ -234,23 +237,84 @@ pub mod mount {
         wasm_bindgen_futures::spawn_local(async move {
             let ctx = resolve_requirements(&transport, &matched, &locale).await;
             match hand_written {
-                HandWrittenScreen::Checkout => {
-                    let state = crate::checkout::CheckoutViewState::from_resolved(
-                        &ctx.data,
-                        tenant.as_deref(),
-                        &locale,
-                    );
-                    leptos::mount::mount_to_body(move || {
-                        crate::checkout::CheckoutScreen(crate::checkout::CheckoutScreenProps {
-                            state: state.clone(),
-                        })
-                    });
-                }
+                HandWrittenScreen::Checkout => mount_checkout(tenant, locale, ctx),
                 HandWrittenScreen::OrderTracking => {
                     mount_tracking(matched, transport, origin, role, session, locale, ctx)
                 }
             }
         });
+    }
+
+    /// Checkout in the browser (#440): read the publishable key back off the SSR shell's mount div
+    /// (`data-pk` — the server wrote it there iff a mountable key was configured), re-render with
+    /// live data, then attach the Stripe payment element.
+    ///
+    /// The element mounts in Stripe's DEFERRED posture (`mode: payment` + the cart's own total):
+    /// acceptance-first means no PaymentIntent exists yet on the /checkout landing, and the intent
+    /// created after PlaceOrder is what the confirm leg will pin by clientSecret. A mount FAILURE
+    /// (stripe.js blocked/unloaded, Stripe threw) degrades to the SAME `payment_unavailable_state`
+    /// the key-less shell renders — honestly, via the state signal — and is logged to the console
+    /// only: no beacon exists (no OTel in WASM), which is why the contract's
+    /// `stripe_js_load_failed`/`mount_threw` reasons are documented-for-future, not emitted.
+    fn mount_checkout(tenant: Option<String>, locale: String, ctx: RenderContext) {
+        let document = web_sys::window().and_then(|w| w.document());
+        let publishable_key = crate::stripe::PublishableKey::parse(
+            document
+                .as_ref()
+                .and_then(|d| d.get_element_by_id(crate::stripe::MOUNT_ID))
+                .and_then(|el| el.get_attribute(crate::stripe::MOUNT_KEY_ATTR))
+                .as_deref(),
+        );
+        // The deferred mount needs the cart's own total (display-level; the charge is always the
+        // server-side intent). No resolved total ⇒ nothing to mount against — the element div
+        // stays empty and the degrade state is NOT shown (the copy would lie: payment is not
+        // "unavailable", the cart is empty/unresolved and the pay button leads nowhere anyway).
+        let total = ctx.data.get("cart").and_then(|c| c.get("totalAmount"));
+        let amount_cents =
+            total.and_then(|t| t.get("amountCents")).and_then(serde_json::Value::as_i64);
+        let currency = total
+            .and_then(|t| t.get("currency"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+
+        let state = crate::checkout::CheckoutViewState::from_resolved(
+            &ctx.data,
+            tenant.as_deref(),
+            &locale,
+        )
+        .with_publishable_key(publishable_key.clone());
+        let state = RwSignal::new(state);
+        leptos::mount::mount_to_body(move || {
+            view! {
+                {move || crate::checkout::CheckoutScreen(crate::checkout::CheckoutScreenProps {
+                    state: state.get(),
+                })}
+            }
+        });
+
+        let Some(pk) = publishable_key else { return };
+        let (Some(amount_cents), Some(currency)) = (amount_cents, currency) else {
+            web_sys::console::warn_1(
+                &"checkout: no resolved cart total — payment element not mounted".into(),
+            );
+            return;
+        };
+        if amount_cents <= 0 {
+            return;
+        }
+        let config = crate::stripe::ElementsConfig::Deferred { amount_cents, currency };
+        match crate::stripe::browser::PaymentElement::mount(pk.as_str(), &config) {
+            // The mounted element lives in the DOM (a Stripe-hosted iframe); dropping OUR handle
+            // does not unmount it. The confirm leg (a later #429 chunk) is what will need to hold
+            // a PaymentElement across the submit flow.
+            Ok(_element) => {}
+            Err(e) => {
+                web_sys::console::warn_1(
+                    &format!("checkout: stripe.js mount failed — degrading honestly: {e}").into(),
+                );
+                state.update(|s| s.publishable_key = None);
+            }
+        }
     }
 
     /// The screen's DECLARED `data_requirements`, resolved through the browser's own transport —

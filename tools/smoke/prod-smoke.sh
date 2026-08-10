@@ -7,6 +7,8 @@
 #   L3  fixture      — a dedicated TEST-mode smoke restaurant (slug `smoke-test`) with one
 #                      product/offer exists; created via the real GraphQL mutations (ADMIN role)
 #                      when missing. Idempotent: fixed fixture UUIDs, existence-checked first.
+#   L3b checkout     — the served /checkout shell carries a pk_test_ publishable key on the Stripe
+#                      mount div (#440); the DEGRADED shell fails with the named deploy fact.
 #   L4  money path   — cart -> placeOrder (CUSTOMER role, ACCEPTANCE-FIRST: MutationAcceptance ->
 #                      poll operationStatus(messageId) to SUCCEEDED, ADR-20260720-015500) -> find
 #                      the Stripe PaymentIntent by its orderId metadata -> server-side confirm with
@@ -324,6 +326,27 @@ l3() {
   pass "L3 fixture: restaurant '$SMOKE_TENANT_SLUG' ACTIVE with offer $FIX_OFFER_ID (created)"
 }
 
+# --- L3b: the checkout shell delivers the Stripe publishable TEST key (#440) ----------------------
+# The browser-side twin of L4's sk_test_ refusal: the payment element can only mount if the served
+# shell carries a pk_test_ key on the Stripe mount div (data-pk). Outage-honest: an unreachable
+# host or a non-checkout body fails as ITS OWN diagnosis before any key assertion — a 404 or the
+# claim landing must never read as "key missing"; and the shell's own DEGRADED state is named as
+# the #440 deploy fact (STRIPE_PUBLISHABLE_KEY absent/unusable on the service), not a generic miss.
+l3b() {
+  local out code body
+  out=$(curl -sS -m 20 -w $'\n%{http_code}' "$TENANT_BASE/checkout" || true)
+  code="${out##*$'\n'}"; body="${out%$'\n'*}"
+  [ "$code" = "200" ] || fail "L3b: $TENANT_BASE/checkout returned HTTP $code — body: $(printf '%s' "$body" | head -c 300)"
+  printf '%s' "$body" | grep -q 'data-hydrate="checkout"' \
+    || fail "L3b: /checkout did not serve the checkout shell (misroute/outage, not a key problem): $(printf '%s' "$body" | head -c 300)"
+  if printf '%s' "$body" | grep -q 'payment_unavailable_state'; then
+    fail "L3b: checkout serves the DEGRADED shell — STRIPE_PUBLISHABLE_KEY is missing or unusable on the service (the #440 named deploy fact; also counted as checkout_degraded_render_total{reason=stripe_key_absent})"
+  fi
+  printf '%s' "$body" | grep -q 'data-pk="pk_test_' \
+    || fail "L3b: checkout shell carries no pk_test_ key on the Stripe mount div (neither degraded nor configured — renderer drift?): $(printf '%s' "$body" | head -c 300)"
+  pass "L3b checkout shell: pk_test_ publishable key delivered on the Stripe mount div"
+}
+
 # --- L4b: the read guard, executed in production (#144/#433) --------------------------------------
 # The only executable proof the closed vulnerability stays closed where it matters: a caller who is
 # NOT the order's member reads NOTHING — no by-id row, no list dump. Since #433 this runs as a
@@ -481,5 +504,6 @@ say "Captain.Food production smoke — $API_BASE (tenant $TENANT_BASE) — Strip
 l1
 l2
 l3
+l3b
 l4
 say "ALL LAYERS PASS"

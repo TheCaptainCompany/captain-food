@@ -51,6 +51,9 @@ web-sys = { version = "0.3", features = [
     "Window", "Storage", "Location", "WebSocket", "MessageEvent", "CloseEvent",
     "Document", "Element", "HtmlElement", "MouseEvent", "Event", "EventTarget",
     "CustomEvent", "CustomEventInit", "Node", "NodeList", "HtmlInputElement",
+    # console: the checkout mount's HONEST degrade log (#440) — a stripe.js failure has no beacon
+    # (no OTel in WASM), so the console line is the only client-side trace until one exists.
+    "console",
 ] }
 
 [features]

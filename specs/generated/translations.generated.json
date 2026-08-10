@@ -647,6 +647,14 @@
     "en": "Payment failed",
     "fr": "Paiement refusé"
   },
+  "checkout.payment_unavailable.body": {
+    "en": "Online payment is temporarily unavailable — your cart is saved, try again in a few minutes.",
+    "fr": "Le paiement en ligne est momentanément indisponible — votre panier est conservé, réessayez dans quelques minutes."
+  },
+  "checkout.payment_unavailable.title": {
+    "en": "Payment temporarily unavailable",
+    "fr": "Paiement momentanément indisponible"
+  },
   "checkout.phone": {
     "en": "Phone",
     "fr": "Téléphone"
@@ -662,6 +670,10 @@
   "checkout.processing": {
     "en": "Processing…",
     "fr": "Traitement…"
+  },
+  "checkout.test_mode.banner": {
+    "en": "Test mode — no real charges",
+    "fr": "Mode test — aucun débit réel"
   },
   "checkout.title": {
     "en": "Checkout",

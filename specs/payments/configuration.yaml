@@ -65,6 +65,10 @@ keys:
     type: string
     scalar:
       $ref: 'scalars.yaml#/StripePublishableKeyTest'
+    # mode_of is INERT on a non-secret today: the boot-report emitter derives the test/live mode
+    # only for `secret` keys (tools/codegen-rs config emitter). Declared anyway as the final
+    # vision — mode reporting extends to non-secrets when the LIVE publishable key arrives
+    # (ADR-20260809-050000 decision 5) — and so pk/sk mode-coherence is stated where both keys live.
     mode_of: stripe
     gates: >
       Stripe PUBLISHABLE key the checkout SSR shell delivers to the browser so stripe.js can MOUNT

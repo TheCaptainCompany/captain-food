@@ -10971,6 +10971,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 │ checkout_section — Order summary         │
 │ checkout_section — Payment               │
 │ conditional_section                      │
+│ conditional_section                      │
 │ sticky_bottom_bar                        │
 └──────────────────────────────────────────┘
 ```
@@ -11441,6 +11442,9 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-checkout-payment_failed-body"></a>`checkout.payment_failed.body` | — | Your card was not charged. Your cart is intact. | Votre carte n'a pas été débitée. Votre panier est intact. |
 | <a id="translation-checkout-payment_failed-retry"></a>`checkout.payment_failed.retry` | — | Retry payment | Réessayer le paiement |
 | <a id="translation-checkout-payment_failed-back_to_cart"></a>`checkout.payment_failed.back_to_cart` | — | Back to cart | Revenir au panier |
+| <a id="translation-checkout-payment_unavailable-title"></a>`checkout.payment_unavailable.title` | — | Payment temporarily unavailable | Paiement momentanément indisponible |
+| <a id="translation-checkout-payment_unavailable-body"></a>`checkout.payment_unavailable.body` | — | Online payment is temporarily unavailable — your cart is saved, try again in a few minutes. | Le paiement en ligne est momentanément indisponible — votre panier est conservé, réessayez dans quelques minutes. |
+| <a id="translation-checkout-test_mode-banner"></a>`checkout.test_mode.banner` | — | Test mode — no real charges | Mode test — aucun débit réel |
 | <a id="translation-order-tracking_title"></a>`order.tracking_title` | — | Order tracking | Suivi de commande |
 | <a id="translation-order-status-placed-title"></a>`order.status.placed.title` | — | Order placed! | Commande passée ! |
 | <a id="translation-order-status-placed-body"></a>`order.status.placed.body` | `restaurant` | Your order is being sent to {restaurant}. | Votre commande est envoyée à {restaurant}. |
