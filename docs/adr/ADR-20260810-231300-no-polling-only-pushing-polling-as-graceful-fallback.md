@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — product-owner directive, 2026-08-10.
+Accepted — product-owner directive, 2026-08-10; **refined the same day** by the product owner in
+response to this ADR's first draft, adding the monitoring carve-out (see *Second carve-out*).
 
 ## Context
 
@@ -91,6 +92,64 @@ component knows the fact earlier than the clock does. A timer whose deadline is 
 change (an acceptance timeout armed at order placement) is time-triggered in its firing and
 push-driven in its arming — and its arming must not be discovered by a scan.
 
+### Second carve-out: MONITORING keeps a poll, permanently
+
+Refined by the product owner on the same day, in response to the first draft of this ADR, verbatim:
+
+> *"Perhaps the smoke test is different because it's to monitor frequently the production"*
+> *"Monitoring could be excluded from this principle if we cannot design it pushable"*
+> *"In any case for monitoring will have a polling as fallback"*
+
+Read precisely, because the clauses differ in force. This is **not** a blanket exemption:
+
+1. **Try to make monitoring pushable.** The default still applies; a monitor that could subscribe is
+   not excused.
+2. **Monitoring may poll where push genuinely cannot be designed** — conditional.
+3. **Monitoring keeps a poll fallback in every case** — *unconditional*, including where push works.
+
+Clause 3 is **stronger than the general principle and deliberately inverts it**: everywhere else a
+fallback is a degraded mode you intend to leave, and condition (c) demands a path back. **For
+monitoring the poll is permanent by design, and has no exit.** Where the two conflict, clause 3 wins.
+
+**The reason is stronger than frequency**, and it is the reason that makes the carve-out narrow rather
+than vague. **For a monitor, absence of signal is ambiguous in a way it is not for anything else.** A
+push-only monitor cannot distinguish *"healthy, nothing to report"* from *"dead, reporting nothing"* —
+silence means both. Every other push consumer in this system resolves that ambiguity with a **durable
+backstop it can reconcile against**: `domain_events` + `projection_checkpoint`, `inbound_messages` +
+`status='RECEIVED'`. A monitor observing an external black box has none, because **the thing it
+watches is the thing that would tell it**. The poll is therefore not a concession to difficulty; it is
+the only way a monitor can *prove* liveness instead of assuming it.
+
+**The carve-out applies where the observer is outside the system it observes and has no durable record
+to reconcile against.** It does NOT license polling in a monitor that watches something it could
+subscribe to and reconcile with — an internal consumer with a checkpoint is not a monitor for this
+purpose, whatever it is named.
+
+**This is the mirror image of the failure this ADR exists to prevent**, and the two clauses are one
+insight from opposite ends. The recurring defect in this repo is not *"we polled"* — it is *"we fell
+back and nobody could tell"*: `event_wake`'s degraded mode is invisible AND self-reinforcing, because
+a deaf listener reports push as live and therefore parks LONGER. The monitoring clause says the one
+place a permanent poll is **mandatory** is precisely the place where invisible silence would otherwise
+be indistinguishable from health. Same ambiguity, opposite remedy.
+
+Two consequences follow, and both are already true in the tree:
+
+- **`tools/smoke/prod-smoke.sh`'s `wait_for`** (`:268-275`) is correct under an explicit principle now,
+  not merely under a reviewer's judgement: it observes production from outside, over a black box, with
+  no record to reconcile against.
+- **`mailbox_wake.rs`'s canary IS this clause, already implemented** — and it is the reference example
+  for both carve-outs at once. It is a **push mechanism driven on a timer**: the `pg_notify` is the
+  thing monitored, the 30 s tick is the monitor. It exists because the listener cannot tell "no
+  notifications because nothing happened" from "no notifications because I am deaf". That is the
+  monitoring ambiguity exactly, inside the process. A permanent, unconditional, never-exiting poll —
+  correct by clause 3, not an exception to it.
+
+**The defect class this creates.** Under clause 3, a monitoring path with **no** poll — one that can
+only fire when a signal arrives — is now a finding, because its silence is unreadable. Threshold
+alerts on a metric are the common instance: if export stops, the metric is absent, the threshold is
+never crossed, and the alert never fires. Anything that watches liveness needs something that fails
+LOUDLY when it sees nothing (a dead-man's-switch), not something that stays quiet.
+
 ### The same principle one level up: the team's own operating loop
 
 A 5-minute status cron polled for agent completions. Agent completions **already arrive as push
@@ -121,6 +180,16 @@ shorter cron is the excuse, not the fix.
   #314 review's MAJOR-1 rejected. A deaf-but-errorless `LISTEN` leaves the safety net *stretched*
   because the flag says push is live — so the failure makes the system slower and reports it as
   healthy.
+- **A blanket "monitoring is exempt" carve-out.** Rejected — and the product owner's own wording
+  rejects it, since clause 1 keeps the default and clause 2 is conditional. "Monitoring" is an
+  elastic word; without the outside-the-system-and-no-durable-record test, every consumer that
+  reports a number could claim it. The ambiguity justification is what makes the carve-out
+  falsifiable: ask whether silence is readable, not whether the component is called a monitor.
+- **Justifying the monitoring carve-out on FREQUENCY** (the product owner's stated reason: the smoke
+  monitors production often). Rejected as the *recorded* reason, though it points the right way. It
+  does not survive its own example — `prod-smoke.yml` runs **daily** (`schedule: "17 6 * * *"`), which
+  is not frequent, and it is still correct. Frequency is a tuning parameter of a monitor; the
+  ambiguity of silence is what makes it a monitor at all.
 
 ## Consequences
 
@@ -131,16 +200,24 @@ shorter cron is the excuse, not the fix.
   a fallback that cannot exit. Both are worse than the poll they replaced.
 - Gives the missing-signal case a home: a degraded mode with no telemetry contract is a finding
   against `specs/observability.yaml`, which is already a blocking gate.
-- Draws the honest boundary at time-triggered work, so the principle is not applied where it produces
-  a worse system.
+- Draws two honest boundaries — time-triggered work and monitoring — so the principle is not applied
+  where it produces a worse system. They are **separate** carve-outs and must not blur: time-triggered
+  work is excluded because there is no producer; monitoring keeps a permanent poll because silence is
+  unreadable. A sweep is not a monitor and a monitor is not a timer.
+- Makes a **new defect class** nameable: a monitoring path that can only fire on a signal. Absent
+  clause 3 there was no vocabulary for "this alert cannot fire when the thing is most broken".
 
 ### Negative
 - Condition 2 makes new work: each push path needs a `push_down`-shaped contract, and `domain_events`
   does not have one today.
 - Condition 3's canary costs one notification per interval per listening process, and one connection
   slot. That is the price of not silently degrading; it is paid deliberately.
-- The boundary invites litigation at its edge. The tiebreaker is the question, not the label: *does any
-  component know this fact before the clock does?* If yes, it is propagation and must be pushed.
+- The boundaries invite litigation at their edges. Two tiebreakers, and both are questions rather than
+  labels: for time-triggered work, *does any component know this fact before the clock does?*; for
+  monitoring, *is the observer outside what it observes, with no durable record to reconcile against?*
+- Clause 3 costs a permanent poll on every monitoring path, forever, by design — including where push
+  works. That is not a compromise to be optimized away later, and a future session proposing to "finish
+  the migration" by deleting a monitor's poll is proposing a regression.
 
 ### Follow-up actions
 - Audit findings against this principle are reported separately and filed as issues; this ADR does not
@@ -152,3 +229,10 @@ shorter cron is the excuse, not the fix.
   decided and unbuilt; the role gateway answers WebSocket upgrades `501`
   (`crates/gateway_runtime/src/lib.rs:316-322`). Under this principle the missing client-side fallback
   is as much of the work as the transport.
+- **Clause 3's defect class is live and unfiled at the time of writing**: `specs/observability.yaml`
+  declares spans, metrics, `status_rules`, `latency_budget` and `error_budget` — and **no alert of any
+  kind**, absence-based or otherwise (alerting is prose in comments, e.g. *"Alert on ANY sustained
+  non-zero rate"* at `:211`, plus the one out-of-band Honeycomb trigger still open on
+  [#317](https://github.com/TheCaptainCompany/captain-food/issues/317)). Combined with telemetry that
+  *degrades, never gates* (ADR-20260729-183000 — a missing ingest key silently drops the exporter),
+  every alert the platform has can only fire when signal arrives. Filed separately.

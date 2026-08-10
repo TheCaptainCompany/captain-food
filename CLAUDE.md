@@ -291,6 +291,21 @@ trust the numbers above if they look off.
   not *scan on a fixed interval*). The tiebreaker at the boundary: **does any component know this fact
   before the clock does?** If yes, it is propagation and must be pushed. Applies to the team's own
   loop too — agent completions arrive as push, so **do not reintroduce a polling status cron**.
+  **Second carve-out — MONITORING keeps a poll, permanently** (product-owner refinement, same ADR):
+  *"Monitoring could be excluded from this principle if we cannot design it pushable. In any case for
+  monitoring will have a polling as fallback."* Still try to make it pushable; it may poll where push
+  cannot be designed; and it **keeps a poll in every case, even where push works** — this clause is
+  *stronger* than the general principle and has **no exit**, inverting condition (c). The reason is not
+  frequency, it is that **for a monitor, silence is ambiguous**: a push-only monitor cannot tell
+  "healthy, nothing to report" from "dead, reporting nothing". Every other push consumer resolves that
+  with a durable backstop to reconcile against (`domain_events` + `projection_checkpoint`,
+  `inbound_messages` + status); a monitor watching a black box has none, because the thing it watches
+  is the thing that would tell it. **Narrow test**: the observer is outside what it observes and has no
+  durable record to reconcile against — it does NOT license polling in a monitor that could subscribe
+  and reconcile. `mailbox_wake.rs`'s canary is this clause already implemented (a push mechanism driven
+  on a timer); `tools/smoke/prod-smoke.sh`'s `wait_for` is correct under it. **New defect class**: a
+  monitoring path that can only fire when a signal ARRIVES — a threshold alert goes quiet when export
+  stops, which is exactly when it should scream. Liveness needs a dead-man's-switch, not a threshold.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
