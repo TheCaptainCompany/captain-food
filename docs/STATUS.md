@@ -2,6 +2,23 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — CART-PRICING KEYSTONE APPROVED (Option B / LIVE); BUILD STARTING**
+> ([PROP-20260810-231500 "cart.current: the authenticated customer's PRICED cart"](proposals/PROP-20260810-231500-cart-current-priced.md),
+> tracking [#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
+> epic [#429 "Production with test data"](https://github.com/TheCaptainCompany/captain-food/issues/429)).
+> **Decision (product owner, 2026-08-10)**: DECISION 1 = **Option B — LIVE**. `cart.current` is priced
+> fresh on every read via the existing `application::pricing::price_cart`; the `Cart` projection stays
+> a **money-free fold** (drops the impure-fold price columns). DECISION 2 sub-defaults stand:
+> claim-resolved **zero-arg** `cart.current` (reuses #434 `ReadScope::Customer`), and "current" = the
+> **most-recently-updated OPEN cart**. This settles [DECISIONS.md §1 row G](proposals/DECISIONS.md)
+> (register 8 → 7 open) and fills the two #429 blockers "the cart total never computes" +
+> "/checkout carries no route params". **The one Concern — a read-side pricing observability contract
+> in `specs/observability.yaml` — is NOT a PO gate; it is folded into the #451 build chunk as DoD.**
+> The keystone has an AMBER (spec) half and a GREEN (code) half; the spec changes are plan-mode with
+> approval. **Consumer-mediator registration DEFERRED to first real order** per the PO (against the
+> team's "start now" recommendation). **Solida rebrand still PENDING** — class-42 unresolved and **no
+> entity name chosen yet**, which also gates the entity-path/rebrand work; [#411](https://github.com/TheCaptainCompany/captain-food/issues/411) stays blocked.
+
 > 🚧 **2026-08-10 — `orders_placed_total{status="PLACED"}` EMIT WIRED ON THE PM-MAILBOX PATH —
 > ARMS WITH THE `PM_MAILBOX_DELIVERY` FLIP, DOES NOT FIRE IN THE CURRENT DEFAULT POSTURE**
 > ([#456 "Emit orders_placed_total so the un-told-order alarm can fire"](https://github.com/TheCaptainCompany/captain-food/issues/456),

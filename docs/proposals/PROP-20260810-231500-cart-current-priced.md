@@ -1,11 +1,12 @@
 # PROP-20260810-231500 — `cart.current`: the authenticated customer's PRICED cart
 
-- **Status**: Proposed
+- **Status**: Approved
 - **Date**: 2026-08-10
 - **Tracking issue**: [#451 "cart.current returns the authenticated customer's priced cart (#429 keystone: total computes + no route params)"](https://github.com/TheCaptainCompany/captain-food/issues/451)
 - **Realized by**: _(filled at completion — PR + ADR)_
+- **Decision (2026-08-10, product owner)**: **DECISION 1 = Option B — LIVE.** `cart.current` is priced fresh on every read via the existing `application::pricing::price_cart`; the `Cart` projection stays a **money-free fold**. The two DECISION 2 sub-defaults **stand**: resolver input = **claim-resolved zero-arg `cart.current`** (reuses #434 `ReadScope::Customer`), and "current" cart = the **most-recently-updated OPEN cart** when a customer holds several. Recorded in [DECISIONS.md §1 row G](DECISIONS.md). The §9 sub-points (which-cart disambiguation, degenerate V0 breakdown shape) are build details, not PO gates; §2's option tables remain as the option-space record (living-doc: rationale stays, the decision lives here + in the register).
 - **Concerns**:
-  - [ ] read-side pricing observability: a read-time pricing seam has NO `specs/observability.yaml` contract; `cart.current` prices on every render of `/checkout` and the cart summary, and a per-line unresolvable at read is a silent conversion killer. A contract (latency percentile + `cart_price_unresolvable_total{reason}`) must exist before `Approved`. See §Concerns.
+  - [x] read-side pricing observability — **RESOLVED as a BUILD TASK, not a PO gate (2026-08-10)**: the missing read-side contract is real, but it is DoD for the #451 chunk, not an approval blocker. Folded into the build: add the read-side pricing contract to `specs/observability.yaml` (checkout-render pricing latency percentile + `cart_price_unresolvable_total{reason}`) and prove the metric firing via the `checkout_degraded_metric.rs`-style spy, in the same chunk. Tracked in §7 DoD so it cannot be lost. Original text: a read-time pricing seam has NO `specs/observability.yaml` contract; `cart.current` prices on every render of `/checkout` and the cart summary, and a per-line unresolvable at read is a silent conversion killer.
 
 > History lives in `git log -p` on this file (ADR-20260801-020000): this file always holds the clean CURRENT state of the design.
 
@@ -281,14 +282,17 @@ logic; `price_cart` already exists). Effort **Medium**.
    the read path emits the same degenerate shape as checkout until the ADR-0016/0017 fee policy lands
    in `price_cart` (it must, to keep "one code path" true).
 
-## Concerns (blocking `Approved`)
+## Concerns (resolved — folded into the build chunk, NOT a PO gate)
 
-- [ ] **Read-side pricing observability contract absent.** `specs/observability.yaml` has a
-  `pricing.compute` span only on the write-path `place-order` workflow (lines 168-173). A read-time
-  pricer on the checkout hot path has **no** contract — no latency percentile, no
-  `cart_price_unresolvable_total{reason}` for the 3c failure that silently loses the sale. Per the
-  standing rule *"every critical workflow must have an observability contract,"* this must be added
-  and the metric proved firing (the `checkout_degraded_metric.rs` spy pattern) before `Approved`.
+- [x] **Read-side pricing observability contract absent — RESOLVED 2026-08-10 as a build task.**
+  `specs/observability.yaml` has a `pricing.compute` span only on the write-path `place-order`
+  workflow (lines 168-173). A read-time pricer on the checkout hot path has **no** contract — no
+  latency percentile, no `cart_price_unresolvable_total{reason}` for the 3c failure that silently
+  loses the sale. Per the standing rule *"every critical workflow must have an observability
+  contract,"* this contract is **added inside the #451 chunk** (read-side pricing latency percentile
+  + `cart_price_unresolvable_total{reason}`) and the metric **proved firing** via the
+  `checkout_degraded_metric.rs` spy pattern — it is DoD (§7), not an approval blocker. The product
+  owner's approval does not wait on it.
 
 ## Refs
 
