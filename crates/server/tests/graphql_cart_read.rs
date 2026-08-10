@@ -6,9 +6,21 @@
 //! - the priced shape: a cart of (offer 15,00 EUR + option 2,00 EUR) × 2 answers 34,00 EUR —
 //!   never the pre-#451 fabricated 0,00 EUR.
 //!
-//! Beck red-first: written BEFORE the resolvers were wired. Seen RED as: `current` errored
-//! "not implemented" (both legs), the stranger's by-id read returned the FULL cart (the IDOR's
-//! last breath — spec-gated but not yet body-enforced), and the admin's by-id read priced to 0.
+//! PROVENANCE, stated precisely because the honest-telemetry rule this file enforces applies to
+//! the file itself. These tests were written BEFORE the resolvers were wired, in commit `57b7330`,
+//! whose own message records that NO gates were run on that tree. So nobody watched them fail, and
+//! this file makes no claim that anyone did.
+//!
+//! What IS verifiable from the tree rather than from memory: in `57b7330` the generated
+//! `crates/server/src/graphql/generated/query.rs` still carried `async fn current(&self) ->
+//! ... Err(async_graphql::Error::new("not implemented"))`, and the by-id `cart` body had no
+//! ownership check at all. Those resolvers could not have satisfied the assertions below. The
+//! wiring landed separately, in Phase 2a, by regenerating from the emitter — and the first
+//! OBSERVED run of this file is the green one that followed.
+//!
+//! The distinction matters: "seen red then green" is evidence a test can fail, and only an actual
+//! run produces it. Reconstructing it afterwards from what the code must have done is an
+//! inference wearing the costume of an observation.
 
 use async_graphql::{Request, Variables};
 use async_trait::async_trait;
@@ -407,7 +419,8 @@ fn cart_vars(cart: u8) -> Variables {
 
 /// Leg 1 through the REAL path: an identified customer's bound cart prices to 34,00 EUR — the
 /// known-price fixture (offer 15,00 + option 2,00, × 2) — with breakdown.total identical.
-/// SEEN RED: `current` answered "not implemented".
+/// Pre-wiring, the generated `current` resolver was the `not implemented` stub (see the module
+/// header on provenance): it could not have answered this.
 #[tokio::test]
 async fn leg1_the_customers_bound_cart_prices_live_to_3400() {
     let restaurant = ds::RestaurantId(uid(90));
@@ -432,7 +445,7 @@ async fn leg1_the_customers_bound_cart_prices_live_to_3400() {
 /// X-SESSION-ID resolves the unbound session cart, priced LIVE — the storefront guest mini-cart
 /// (the flow Phase 1 broke). A different session id resolves null, and no session header
 /// resolves null (the empty state, never a fabricated 0,00 EUR).
-/// SEEN RED: "not implemented".
+/// Pre-wiring, `current` was the `not implemented` stub.
 #[tokio::test]
 async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
     let restaurant = ds::RestaurantId(uid(90));
@@ -458,7 +471,7 @@ async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
 
 /// Leg 2's NULL-or-claim filter through the REAL path: once the cart is BOUND to customer 5, an
 /// anonymous replay of the same session id sees null — the session id is a correlator, not an
-/// identity. SEEN RED: "not implemented".
+/// identity. Pre-wiring, `current` was the `not implemented` stub.
 #[tokio::test]
 async fn leg2_a_bound_cart_is_invisible_to_an_anonymous_session_replay() {
     let restaurant = ds::RestaurantId(uid(90));
@@ -468,6 +481,53 @@ async fn leg2_a_bound_cart_is_invisible_to_an_anonymous_session_replay() {
         .await;
     assert!(resp.errors.is_empty());
     assert_eq!(resp.data.into_json().unwrap()["current"], json!(null));
+}
+
+/// The same filter under a FOREIGN CLAIM, through the REAL path: customer 6 authenticates and
+/// rides session 10, whose cart is bound to customer 5. Both legs must refuse it — leg 1 because
+/// customer 6 owns no cart, leg 2 because the row's `customer_id` is neither NULL nor 6.
+///
+/// This duplicates the seam unit test at `cart_read::tests` DELIBERATELY, one layer up. That test
+/// proves the PREDICATE; this one proves the predicate is still reached with the caller's real
+/// claim after the resolver has assembled the context. A resolver that dropped the ReadScope on
+/// the way in — passing `Public`, say — would leave the unit test green and hand customer 6 a leak
+/// only this test can see. Session hijacking by cookie replay is precisely the attack the
+/// NULL-or-claim filter exists to stop, so the wiring deserves its own witness.
+#[tokio::test]
+async fn leg2_a_bound_cart_is_invisible_to_a_different_customers_claim_on_that_session() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let schema = schema_over(vec![cart_row(1, restaurant, 10, Some(5), vec![line_3400()], 100)], restaurant);
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Customer)
+                .data(ReadScope::Customer(ds::CustomerId(uid(6))))
+                .data(SessionHeader(Some(uid(10)))),
+        )
+        .await;
+    assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
+    assert_eq!(
+        resp.data.into_json().unwrap()["current"],
+        json!(null),
+        "customer 6 riding customer 5's session must see nothing"
+    );
+
+    // The control: the SAME request as its rightful owner resolves the cart, priced. Without this
+    // the assertion above would also pass if `current` were broken for everyone.
+    let owner = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Customer)
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(SessionHeader(Some(uid(10)))),
+        )
+        .await;
+    assert!(owner.errors.is_empty(), "no errors expected, got {:?}", owner.errors);
+    assert_eq!(
+        owner.data.into_json().unwrap()["current"]["totalAmount"]["amountCents"],
+        json!(3400),
+        "the owner still reads their own cart, priced live"
+    );
 }
 
 /// An EMPTY open cart (every line removed) is the true sum of zero lines: 0 EUR, no breakdown —
@@ -493,8 +553,9 @@ async fn an_empty_open_cart_answers_zero_with_no_breakdown() {
 /// The by-id narrowing DONE-WHEN, all four verdicts through the REAL path: the owner reads their
 /// cart (priced 34,00), a STRANGER customer reads null (no existence oracle), ADMIN reads any
 /// cart priced, and an unbound session cart is by-id invisible even to a customer.
-/// SEEN RED: the stranger got the FULL cart (body not yet enforcing the spec's narrowing) and
-/// the admin's read priced to 0.
+/// Pre-wiring, the by-id body carried NO ownership check and no pricing: it returned every
+/// caller the full cart via the fabricating `Cart::from` (0,00 EUR) — the IDOR the spec had
+/// already closed on paper but the body had not.
 #[tokio::test]
 async fn by_id_cart_admits_the_owner_and_admin_only() {
     let restaurant = ds::RestaurantId(uid(90));

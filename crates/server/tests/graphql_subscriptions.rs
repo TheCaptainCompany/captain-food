@@ -132,6 +132,13 @@ impl CartReadRepository for Empty {
     async fn by_id(&self, _id: ds::CartId) -> Result<Option<CartRow>, DomainError> {
         Ok(None)
     }
+    /// Explicitly empty, like every other read on this fake — `Empty` exists to prove the
+    /// SUBSCRIPTION wiring, not carts. Spelled out rather than inherited from a trait default:
+    /// the default is gone precisely so that "serves no session carts" is always a choice
+    /// somebody made, never something a fake fell into.
+    async fn open_by_session(&self, _s: ds::SessionId) -> Result<Vec<CartRow>, DomainError> {
+        Ok(Vec::new())
+    }
 }
 #[async_trait]
 impl CustomerReadRepository for Empty {

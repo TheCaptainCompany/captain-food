@@ -915,8 +915,66 @@ actually written.
 report gates. "Gates green" without saying which is not a claim about the diff. CI does build the
 workspace, so this bites as a late red on a PR you called ready, not as a bug in `main`.
 
+**Cover every crate the diff touches — ENUMERATE them, do not choose them.** Avoiding `cargo test
+--workspace` is a disk measure (§2), not a licence to test the crates that seem interesting. On
+#451 the instruction was "run `-p server` and `-p application`"; the branch actually touched six
+crates, and the failure was in the untested `crates/web` — a generated response key changed from
+`cart` to `current`, a hand-written SSR fixture still scripted the old key, and CI went red on work
+two rounds of local gates had called green. Derive the list instead of recalling it:
+
+```sh
+git diff origin/main...HEAD --name-only -- crates/ | cut -d/ -f2 | sort -u
+```
+
+**The reverse trap: `cargo check` is equally partial.** A STALE generated file compiles perfectly —
+`57b7330` built clean with `crates/server/src/graphql/generated/query.rs` still holding an
+`Err("not implemented")` stub for a resolver whose body the emitter already carried, because
+nothing had re-run `make generate`. Only `check-drift` catches that. So the two gates cover
+disjoint failures and **neither subsumes the other**: `make rust` proves the specs and the
+generated tree agree, `cargo check`/`cargo test -p <crate>` prove the code you wrote works. A
+change to `crates/**` needs both, in that order (generate first, or check-drift fails on your own
+uncommitted regeneration).
+
 The executable fix (folding a workspace build+test into `rust`) is a Makefile change, so it goes
 through the claim -> PR flow rather than riding a docs commit.
+
+### Grepping for a type name does not find where that type is INJECTED
+
+Looking for where `SessionHeader` reaches the GraphQL context, a grep for `SessionHeader` across
+`crates/` returned the definition, the generated readers and a dozen tests — and **not
+`routes.rs`**, the file that actually injects it. The value arrives as `.data(session)`, where
+`session` came from `session_header(&headers)`; the type is never spelled. The near-conclusion was
+that the anonymous cart path was unwired in production, which would have produced a "fix" for a
+non-problem in a dispatch that had explicitly authorized wiring it.
+
+**Search the injection SHAPE at the transport boundary, not the type**: `grep -n '\.data(' ` in the
+route handlers and any `Data::default()` assembly (here: HTTP POST, the WS `connection_init`, and
+the in-process SSR transport). Then read those handlers top to bottom — the binding that carries
+the value is often three lines above the `.data(` call under a different name. Same trap applies to
+axum `Extension`, `tower` layers, and anything else registered by value rather than by name.
+
+### A handoff's "remaining work" list is a claim, not an inventory
+
+`docs/HANDOFF-451.md` listed four outstanding Phase-2 items. Two of them — the anonymous-leg
+ownership tests and the unresolvable-line test — were already written, in the very commit the
+handoff described as unfinished. Trusting the list would have meant writing duplicates of tests
+that already existed and passed.
+
+The same applies in the other direction: a handoff (or a WIP commit message) claiming a test was
+"seen red" is only evidence if a run produced it — `57b7330`'s own message records that no gates
+were run on that tree, which contradicted the red-first provenance its test file asserted.
+**Before working any item a handoff says is owed, check the artifact**: `grep -n 'fn ' <test file>`
+for tests, `git show <commit> --stat` for what actually landed. Cost here was small; the cost of
+believing a provenance claim you cannot reproduce is a test suite nobody can trust.
+
+### Do not push a feature branch while its executor is still working
+
+A stop-hook prompt reported an unpushed commit; the coordinator pushed it, the executor then
+amended that same commit (adding `.claude/loop-budget.json`), and local and remote diverged —
+identical content, different SHAs — needing a `--force-with-lease` to realign. **An
+unpushed-commit prompt is not a signal that the work is finished.** The coordinator pushes only
+after the executor reports the phase complete and the tree is clean; the executor says explicitly
+whether it intends to amend before handing back.
 
 ### One more shell trap in commit messages
 
