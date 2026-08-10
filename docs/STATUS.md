@@ -24,7 +24,8 @@
 > `prod-smoke.sh`. (2) The **K8s `captain-secrets` sealed store** — populated out of band (#358), not
 > from Actions; a name here does not prove it was sealed into the cluster. This gate proves the
 > Actions → Render/declared-source NAMING boundary; the K8s store remains a NAMED RESIDUAL GAP
-> (checkable once an Actions-reachable apply path exists — follow-up). **`toJSON(secrets)` fidelity**:
+> (checkable once an Actions-reachable apply path exists), tracked by
+> [#452 "Secret gate: extend to K8s captain-secrets name-presence + front the deploy-bins/#366 Argo path"](https://github.com/TheCaptainCompany/captain-food/issues/452). **`toJSON(secrets)` fidelity**:
 > an UNSET Actions secret is ABSENT from the object (→ reported Absent), and GitHub's UI forbids
 > empty secret VALUES, so the `Empty` branch's guaranteed reach is the declared-side/defensive case
 > and any future present-set that can hold blanks (e.g. a kubectl-read cluster secret), not a routine
