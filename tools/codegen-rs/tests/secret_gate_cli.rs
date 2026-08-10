@@ -1,0 +1,97 @@
+//! Integration test for the `secret-gate` binary (#444, epic #429): run the REAL compiled binary
+//! against the REAL generated artifact `deploy/generated/secret-keys.json`. A unit fixture proves
+//! the comparison logic; only this proves the binary parses the artifact's actual schema and exits
+//! correctly — if the emitter ever changed the `keys.*.from_github_secret` shape, the unit tests
+//! would stay green while the deploy gate silently broke. `CARGO_BIN_EXE_secret-gate` is the path
+//! Cargo hands integration tests to the built binary.
+
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The declared repo-secret names of the real artifact, so the fixture can drop exactly one and
+/// present the rest — robust to the catalog gaining keys over time.
+fn declared_github_secrets() -> Vec<String> {
+    let path = repo_root().join("deploy/generated/secret-keys.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let v: serde_json::Value = serde_json::from_str(&text).expect("secret-keys.json is valid JSON");
+    let mut names: Vec<String> = v["keys"]
+        .as_object()
+        .expect("keys object")
+        .values()
+        .map(|e| e["from_github_secret"].as_str().expect("from_github_secret is a string").to_string())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// A declared secret ABSENT from the present set is FATAL and the binary NAMES it. Runs the real
+/// binary with the real `--declared` artifact and a present set built from it minus one name.
+#[test]
+fn missing_declared_secret_fails_the_gate_and_names_it() {
+    let names = declared_github_secrets();
+    assert!(!names.is_empty(), "the real artifact must declare at least one repo secret");
+    let dropped = names[0].clone();
+    // Present set = every declared name non-empty EXCEPT the dropped one -> exactly one missing.
+    let present: serde_json::Map<String, serde_json::Value> = names
+        .iter()
+        .filter(|n| **n != dropped)
+        .map(|n| (n.clone(), serde_json::Value::String("present".into())))
+        .collect();
+    let present_json = serde_json::to_string(&serde_json::Value::Object(present)).unwrap();
+
+    let declared = repo_root().join("deploy/generated/secret-keys.json");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_secret-gate"))
+        .args(["--declared", declared.to_str().unwrap(), "--present", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn secret-gate");
+    child.stdin.take().unwrap().write_all(present_json.as_bytes()).unwrap();
+    let out = child.wait_with_output().expect("wait secret-gate");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        !out.status.success(),
+        "a declared secret absent from the deploy target must fail the gate (exit != 0); \
+         stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&dropped),
+        "the failure must NAME the missing repo secret '{dropped}'; stderr was:\n{stderr}"
+    );
+}
+
+/// The green path through the real binary: every declared secret present and non-empty -> exit 0.
+/// Pins that a fully-satisfied deploy target passes, so the fatal test above is not vacuous.
+#[test]
+fn all_declared_present_passes_the_gate() {
+    let names = declared_github_secrets();
+    let present: serde_json::Map<String, serde_json::Value> = names
+        .iter()
+        .map(|n| (n.clone(), serde_json::Value::String("present".into())))
+        .collect();
+    let present_json = serde_json::to_string(&serde_json::Value::Object(present)).unwrap();
+
+    let declared = repo_root().join("deploy/generated/secret-keys.json");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_secret-gate"))
+        .args(["--declared", declared.to_str().unwrap(), "--present", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn secret-gate");
+    child.stdin.take().unwrap().write_all(present_json.as_bytes()).unwrap();
+    let out = child.wait_with_output().expect("wait secret-gate");
+    assert!(
+        out.status.success(),
+        "all declared secrets present -> gate passes; stderr was:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

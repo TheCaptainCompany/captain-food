@@ -44,6 +44,44 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # PRE-DEPLOY SECRET GATE (#444, epic #429). A secret the configuration DSL DECLARES as the
+      # source for a deployed key (deploy/generated/secret-keys.json `from_github_secret`, a
+      # deterministic fold of specs/**/configuration.yaml) but which this repo does NOT hold — or
+      # holds BLANK — fails the deploy before Render is ever told to pull. That is the failure that
+      # otherwise wedges a pod on a missing secretKeyRef, or has render-config-sync report a key as
+      # "not set" that an operator believed configured. Runs FIRST so a mis-named secret costs no
+      # GHCR round-trip.
+      #
+      # WHAT IT DOES NOT CATCH — and this is stated in the tool's own output too: VALUES (a name
+      # present but garbage — a pk_test where prod needs sk_live — PASSES; mis-NAMING and ABSENCE
+      # only, the value-level verdict stays prod-smoke.sh), and the K8s captain-secrets sealed store
+      # (populated out of band, #358 — a name here does not prove it was sealed into the cluster;
+      # this gate proves the Actions -> Render/declared-source NAMING boundary).
+      #
+      # BUILD LATENCY: the gate is one binary in tools/codegen-rs; its crate pulls guppy/determinator
+      # so a COLD compile is minutes. rust-cache amortizes that across deploys, and we build only
+      # `--bin secret-gate` (not the workspace). A deploy is a deliberate, infrequent, gated action —
+      # blocking a paid-order-losing mis-config is worth the one-time cold build.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Gate — every DECLARED repo secret must be present and non-empty
+        env:
+          # EVERY repo secret, as one JSON object (same technique as render-config-sync.yml): the
+          # manifest is the ONLY list of names, and toJSON keeps values masked in logs. An UNSET
+          # secret is simply ABSENT from this object (GitHub omits it) — the gate reports it Absent.
+          ALL_REPO_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          set -euo pipefail
+          # tools/codegen-rs is a root workspace member, so the binary lands in the repo-root target.
+          cargo build --manifest-path tools/codegen-rs/Cargo.toml --bin secret-gate
+          # Present set piped on stdin (never an arg — no secret reaches the process table). Declared
+          # side is the real generated artifact. Missing (declared absent/empty) -> non-zero exit ->
+          # this step fails and the deploy is blocked; extra (present-but-undeclared) -> ::warning::.
+          printf '%s' "$ALL_REPO_SECRETS" \
+            | ./target/debug/secret-gate \
+                --declared deploy/generated/secret-keys.json \
+                --present -
+
       - name: Log in to GHCR (read — resolve the tag's digest)
         uses: docker/login-action@v3
         with:
