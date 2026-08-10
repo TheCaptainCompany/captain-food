@@ -2,12 +2,37 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — SECRET-GATE EXTRACTED TO ITS OWN LEAN CRATE: the deploy-path cold-compile tail
+> risk is gone** ([#453 "Extract secret-gate to a lean crate (fix #444 deploy-path cold-compile tail risk)"](https://github.com/TheCaptainCompany/captain-food/issues/453),
+> PR [#454](https://github.com/TheCaptainCompany/captain-food/pull/454), epic
+> [#429](https://github.com/TheCaptainCompany/captain-food/issues/429), mob protocol).
+> **The regression**: #444 wired `cargo build ... --bin secret-gate` as the FIRST step of
+> `deploy.yml`, but the gate lived in `tools/codegen-rs`, so that build dragged the
+> guppy/determinator/regex/sha2/camino/serde_yaml tree — a COLD compile of MINUTES on a cache miss,
+> inside a `timeout-minutes: 10` job that an incident rollback also runs. **The fix**: a pure move
+> (no logic change) to a new top-level workspace member `tools/secret-gate` depending on
+> serde/serde_json + std ONLY; `compare_secrets` stays the one unit-tested source of truth, the 6
+> unit + 2 `CARGO_BIN_EXE` integration tests move with it and stay green, and the bin name
+> `secret-gate` is preserved verbatim (deploy.yml invocation + test env-var key on it). `deploy.yml`
+> now builds `cargo build -p captain-food-secret-gate`; the binary still lands at
+> `./target/debug/secret-gate` so the invocation line is unchanged. **Before/after**: OLD path
+> cold-compiled the codegen-rs guppy/determinator tree (minutes); NEW `cargo build -p
+> captain-food-secret-gate` cold = ~7s — the durable verdict is `cargo tree -p
+> captain-food-secret-gate` = serde/serde_json + their tiny direct deps ONLY (no guppy/determinator/
+> cargo-metadata/regex/camino/sha2), NOT a warm-cache wall-clock. **`timeout-minutes: 10` left
+> unchanged** (farley's belt call): the budget is now comfortably sufficient and a bump would signal
+> a fragility that no longer exists. Process lesson recorded in
+> [docs/claude/sessions.md §18](claude/sessions.md): a mob briefing for a CI-workflow change must ask
+> whether the step fits the job's existing timeout and whether it regresses the rollback path — #444
+> asked neither and the review caught it post-merge.
+
 > ✅ **2026-08-10 — PRE-DEPLOY SECRET-PRESENCE GATE: a declared secret missing/mis-named in the
 > deploy target now FAILS the deploy before Render is told to pull**
 > ([#444 "CI gate: declared secrets must exist as repo secrets before deploy"](https://github.com/TheCaptainCompany/captain-food/issues/444),
 > PR [#450](https://github.com/TheCaptainCompany/captain-food/pull/450), epic
 > [#429](https://github.com/TheCaptainCompany/captain-food/issues/429), mob protocol). New binary
-> `secret-gate` (`tools/codegen-rs/src/secret_gate/main.rs`): a PURE comparison
+> `secret-gate` (`tools/secret-gate/src/main.rs` since #453; originally
+> `tools/codegen-rs/src/secret_gate/main.rs`): a PURE comparison
 > `compare_secrets(declared, present)` of the repo secrets the configuration DSL DECLARES as
 > deployed-key sources — `deploy/generated/secret-keys.json` `from_github_secret` names, itself a
 > deterministic fold of `specs/**/configuration.yaml` (the **superset-by-construction** declared

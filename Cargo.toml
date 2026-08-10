@@ -8,6 +8,11 @@
 resolver = "2"
 members = [
     "tools/codegen-rs",        # spec validator + generator (ADR-0034) — tooling, not part of the app graph
+    "tools/secret-gate",       # pre-deploy secret-PRESENCE gate (#444, epic #429) — tooling, not part
+                               # of the app graph. Its OWN lean crate (#453): serde/serde_json + std
+                               # ONLY, so its cold compile on deploy.yml is seconds, not minutes — it
+                               # never drags codegen-rs's guppy/determinator tree (the incident-rollback
+                               # timeout tail risk). The one unit-tested `compare_secrets` lives here.
     "crates/domains/*",        # PER-SCOPE GENERATED domain crates + the `domain-common` kernel (#373,
                                # ADR-20260807-183024 step 2): one crate per specs/{scope}/, manifest
                                # included, [dependencies] DERIVED from the spec's cross-scope $ref

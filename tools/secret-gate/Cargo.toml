@@ -1,0 +1,24 @@
+[package]
+name = "captain-food-secret-gate"
+version = "0.1.0"
+edition = "2021"
+description = "Captain.Food pre-deploy secret-PRESENCE gate (#444, epic #429) — a pure comparison of the repo secrets the configuration DSL DECLARES against the ones the reachable deploy target actually holds. Extracted to its OWN lean crate (#453) so its cold compile on deploy.yml drops from minutes to seconds: it depends on serde/serde_json + std ONLY, never dragging codegen-rs's guppy/determinator/regex tree — the tail risk being an incident rollback that times out on deploy.yml's timeout-minutes: 10."
+
+# Bin name preserved VERBATIM as `secret-gate` (#453): the deploy.yml invocation and the integration
+# test's `CARGO_BIN_EXE_secret-gate` env var key on this exact name — a rename to `secret_gate` would
+# silently break both.
+[[bin]]
+name = "secret-gate"
+path = "src/main.rs"
+
+# serde/serde_json + std ONLY (#453). The WHOLE POINT of the extraction is that the heavy codegen-rs
+# tree (regex/determinator/guppy/sha2/camino/serde_yaml) does NOT follow — proven by `cargo tree -p
+# captain-food-secret-gate` being serde + serde_json + their direct deps and nothing else.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline. Required of
+# every member — enforced by the codegen test `lint_floor_covers_every_member`.
+[lints]
+workspace = true
