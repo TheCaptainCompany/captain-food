@@ -230,6 +230,20 @@ trust the numbers above if they look off.
   [#424](https://github.com/TheCaptainCompany/captain-food/issues/424), where a post-hoc UX pass
   found the built checkout state **could not render at all** — a finding that would have changed
   the work, for free, if the lens had been in the briefing.
+- **Team ownership — sessions start by themselves, and the coordinator never authors the diff**
+  (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-011500](docs/adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)):
+  *"every next session start to work by itself without asking permission because the team has the
+  ownership of the product"* — *"never do the job yourself, only the team agents have the ownership
+  of the product, you are playing the role of assistant."* A session begins working WITHOUT being
+  asked: CLAUDE.md → STATUS → the **architect agent** names the next chunk from the prioritised
+  backlog → claim → the full mob loop above, with the **executor agent** writing EVERY phase of the
+  diff (code, specs under recorded approval, records). The session lead is a COORDINATOR only:
+  briefs, checkpoints, relaying, GitHub mechanics — never the product diff. The only thing brought
+  to the product owner is the **decision queue** (genuine option spaces, external/legal actions,
+  admin-gated provisioning), presented with options + trade-offs + a recommendation — never
+  "shall I proceed?". The observable compliance signature: mob evidence in the PR body,
+  executor-authored commits, coordinator pushes limited to claim commits and GitHub surfaces.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
