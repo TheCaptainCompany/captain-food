@@ -43,6 +43,34 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 📏 **2026-08-11 — BUSINESS METRICS BECOME A DECLARED, GATED OBLIGATION — AND 26 OF THE 29 WE
+> ALREADY DECLARE EMIT NOTHING**
+> ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
+> [ADR-20260810-234225](adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md),
+> [PROP-20260810-234225](proposals/PROP-20260810-234225-business-metrics-for-every-persona.md);
+> docs-only, no code moved).
+> Product-owner directive (Jeff Patton): *"we must have business metrics for all features for each
+> persona … must be developed with the test and the code."* Auditing the slot that already exists
+> found it almost empty: **`specs/observability.yaml` declares 29 `business_metrics` across 14
+> contracts, and 26 have ZERO occurrences in `crates/`, `tools/` or `deploy/`** — no constant, no
+> instrument, no call site. Exactly three are emitted (`orders_placed_total`,
+> `checkout_payment_failures_total`, `scope_membership_lag_positions`). The gate that should have
+> caught it (`tools/codegen-rs/src/tests.rs:1500`) covers **3 of 14 contracts** by a hardcoded
+> allowlist and asserts only that the metric NAME exists as a string constant — two of those three
+> contracts declare no business metrics at all, so its effective coverage is **2 of 29**.
+> **The recorded principle**: the unit is the persona **ACTIVITY** (8 personas, 25 activities), not
+> the story step (144 — two of which `$ref` the same query and one of which is a poll loop); a
+> metric declares the **question** it answers; attributes are bounded sets, never entity ids.
+> **Declaration is enforced like ADR-0032 and emission is not** — `make validate` cannot see a call
+> site — so the chain is validator (coverage) → **generated instruments** (names, attribute types,
+> arity; deletes the scanner's metric half) → **`InMemoryMetricExporter` behaviour test** (it fires,
+> once, not on a replay). No source-text scanner is added.
+> **Sequencing**: gate forward now with an enumerated, monotone-shrinking `unmeasured:` waiver list,
+> backfill in value-stream order — a one-sweep backfill was already run at this scale and the 26 dead
+> declarations are its receipt. Register: [DECISIONS §27](proposals/DECISIONS.md) (D1–D7 team-owned,
+> **Q7 product-owner-owed**); §22's *"Business-signal observability contracts"* row closed by
+> subsumption. The per-persona metric GRID is the `ux-designer` lens's parallel deliverable, not this.
+
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
 > ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),

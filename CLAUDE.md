@@ -309,6 +309,20 @@ trust the numbers above if they look off.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
+- **Business metrics for every feature and every persona** (product-owner directive, 2026-08-10,
+  verbatim in [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)):
+  *"Follow Jeff Patton … we must have business metrics for all features for each persona … must be
+  developed with the test and the code."* The unit is the **persona ACTIVITY** in `specs/stories.yaml`
+  (8 personas, 25 activities), not the story step — a step is an operation call, an activity is an
+  outcome. A metric is not done until it is **declared, emitted and asserted by a test**, and it
+  declares the **question** it answers; attributes are bounded sets, never entity ids (ids belong on
+  spans). **Declaration is enforced like ADR-0032 and emission is not** — `make validate` cannot see a
+  call site, which is why 26 of the 29 `business_metrics` declared today have zero occurrences
+  anywhere in `crates/`. So: validator for coverage, **generated instruments** for names and attribute
+  types (compiler-first — never a source-text scanner), and an `InMemoryMetricExporter` behaviour test
+  for "it actually fires, once, and not on a replay"
+  (`crates/infrastructure/tests/orders_placed_metric.rs`). Mechanism and the open decisions:
+  [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md).
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - **Completeness is part of every change (ADR-0032):** a new command/event/error also needs a behaviour
