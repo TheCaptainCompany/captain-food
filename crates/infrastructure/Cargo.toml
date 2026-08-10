@@ -75,6 +75,12 @@ actor_client = { path = "../actor_client", features = ["test-fixtures"] }
 # Test-only actor reach (#306): `mailbox_wake` drives a Cart lane. A dev-dependency is the right
 # grant — the release graph must not gain an actor because a test needed one.
 client-cart = { path = "../clients/cart" }
+# #456: the `orders_placed_total` spy test installs an in-memory SdkMeterProvider to PROVE the emit
+# fires, in its OWN test binary (the process-global meter binds once via OnceLock — the `main`
+# binary cannot host it; same reason server/tests/checkout_degraded_metric.rs stands alone). The
+# `testing` feature is what exposes InMemoryMetricExporter. Versions pinned to server's.
+opentelemetry = { version = "0.32", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is

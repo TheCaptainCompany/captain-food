@@ -2951,6 +2951,8 @@ dependencies = [
  "futures",
  "hex",
  "hmac",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "reqwest",
  "serde",
  "serde_json",
