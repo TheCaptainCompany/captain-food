@@ -2,6 +2,37 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — THE LOCAL TEST GATE IS HONEST: `make test-crates` RUNS FROM THE STOP HOOK, AND A
+> MISSING DATABASE NOW FAILS**
+> ([#474 "`make rust` runs no workspace tests at all, and DB-gated tests skip silently — \"local gates green\" is a false signal"](https://github.com/TheCaptainCompany/captain-food/issues/474),
+> branch `474-honest-test-gate`, mob protocol).
+> **The hole**: `make rust` = `rust-build rust-test validate check-drift`, and `rust-test` is the
+> **codegen crate alone** — the documented pre-push gate never ran a line of `crates/**`. #451's
+> migration defect passed `cargo check`, six hand-run suites and three green `make rust` rounds.
+> **Now**: `make test-crates` (`cargo test --workspace --no-fail-fast`) is invoked by
+> `.claude/hooks/stop-gate.sh` whenever the turn's diff touches `migrations/ | crates/ | the
+> emitters | Cargo.{toml,lock}` — scope decides whether the DB half is MANDATORY, never whether it
+> silently vanishes. **Polarity inverted** (`crates/db_test_gate`, new dev-only crate): a database is
+> REQUIRED by default, a missing `DATABASE_URL` PANICS with the command to fix it, and the only way
+> out is `DB_TESTS_REQUIRED=0`, which leaves a receipt `make test-crates` reads back into a summary
+> naming all 42 skipped suites. The receipt exists because **libtest swallows a passing test's
+> stderr**: `grep -c SKIP` over the 990-test baseline log returns **0**, so the old per-suite SKIP
+> lines were not merely quiet, they were unobservable. The decision was hand-written at 17 call sites
+> across 5 crates and now lives in one place, guarded by a codegen rule; `actor_runtime` keeps one
+> local copy because `dependency_rule.rs` forbids ANY path dependency into the workspace
+> (ADR-20260730-234918), and the allowlist names both files with their reasons.
+> **Two new gates, both seen RED against a deliberately re-planted #451**: the checkpoint no longer
+> advances past a fold the DATABASE rejected (`FoldFault::{PayloadShape,Database}` — a compiler-
+> enforced classification the loop never had, since every failure used to collapse to
+> `DomainError::Repository`), **shipped GATED**: `DbFaultPolicy::Skip` remains the default and today's
+> behaviour is unchanged on every deployed path — flipping it is a separate decision
+> ([ADR-20260810-225036](adr/ADR-20260810-225036-projection-db-fault-policy-gated-halt.md)); and
+> validator §16 `schema-writer-missing-column` proves, with no database and in under a second, that
+> every `NOT NULL`-without-`DEFAULT` column appears in its writer's insert list. Measured red set on
+> the real repo: **exactly the two planted columns**, no pre-existing violations anywhere on the
+> projection surface. Gates: `make rust` green, `make validate` **0 errors / 37 warnings, warning
+> profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 is stale — re-measure, as it says).
+
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
 > ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
