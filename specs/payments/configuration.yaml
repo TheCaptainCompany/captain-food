@@ -79,8 +79,19 @@ keys:
       counted by checkout_degraded_render_total. Must be switched together with STRIPE_SECRET_KEY
       (`mode_of: stripe`): a pk/sk mode mismatch mounts an element whose PaymentIntents can never
       confirm.
-    # NO BAKED VALUE YET — unlike the Supabase precedent there is no `deploy:` block, because no
-    # `pk_test_` value is recorded anywhere in this repo (verified 2026-08-10: zero hits outside a
-    # regex test fixture). Production is served solely by the STRIPE_PUBLISHABLE_KEY env var already
-    # sitting UNDECLARED on the hosting service (env > baked precedence). Reading the value off the
-    # Stripe dashboard and baking it per-profile is a named follow-up on issue #440, not a silent hole.
+    deploy:
+      # LITERAL and baked (issue #448, product-owner-provided value, 2026-08-10) — the
+      # SUPABASE_PUBLISHABLE_KEY posture: a `pk_test_` publishable key ships in every browser by
+      # design, so hiding it in Actions secrets would be configuration nobody can read (and the
+      # `config-nonsecret-from-secret` rule forbids `from_secret` on a non-secret anyway). TEST-mode
+      # for BOTH profiles, matching STRIPE_SECRET_KEY's reality today; the LIVE `pk_live_` value
+      # lands with go-live (issue #254), in the SAME change as STRIPE_SECRET_KEY_PROD
+      # (`mode_of: stripe` coherence).
+      #
+      # ⚠️ FOR THIS TO GOVERN, the STRIPE_PUBLISHABLE_KEY env var sitting on the Render service is
+      # now REDUNDANT and must be DELETED after the next deploy. Precedence is env > baked, so the
+      # leftover dashboard value silently wins and this digest stops determining behaviour. The sync
+      # is upsert-only (D1) and will never delete it — a product-owner dashboard click, recorded as
+      # the deploy-day fact.
+      production: "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"
+      staging: "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"
