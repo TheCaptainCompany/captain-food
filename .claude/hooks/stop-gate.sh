@@ -31,6 +31,41 @@ step() { echo "→ $*"; "$@" || fail=1; }
 # (§1–§11: schema + actor wiring + behaviour/rules coverage + observability + C4); exits 1 on errors.
 step "${CARGO[@]}" run --quiet --manifest-path "$MANIFEST" -- --check --specs "$SPECS"
 
+# --- The workspace test gate (#474), DIFF-SCOPED. ---
+#
+# `make rust` above is the SPEC gate: it builds and tests tools/codegen-rs only, so it proves
+# nothing about crates/**. A migration defect that permanently bricks the Cart projection passed
+# THREE green `make rust` rounds on the #451 branch and went red only in CI. Documentation is not a
+# gate; in this repo the contributor is an agent and this hook is its muscle memory.
+#
+# Scoped to the paths whose behaviour lives in the workspace suites — a docs- or specs-only turn
+# must stay fast, and CLAUDE.md explicitly allows skipping the heavy gate for those. Scoping decides
+# whether the suite is MANDATORY, never whether it silently vanishes: when it is in scope it runs,
+# and `db-test-gate` makes a missing database a failure rather than a skip.
+CODE_GLOBS='^(migrations/|crates/|tools/codegen-rs/src/emit/|Cargo\.toml|Cargo\.lock)'
+changed=""
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  # Working tree + index + everything this branch adds on top of main: a turn that already
+  # committed its work must not slip past the gate because `git status` is clean.
+  base="$(git -C "$ROOT" merge-base HEAD origin/main 2>/dev/null || echo '')"
+  changed="$(
+    {
+      git -C "$ROOT" status --porcelain --untracked-files=all | sed 's/^...//'
+      [ -n "$base" ] && git -C "$ROOT" diff --name-only "$base"...HEAD
+    } 2>/dev/null | sort -u
+  )"
+else
+  # No git (a tarball checkout, a sandbox): scope cannot be computed, so do not guess -- run it.
+  changed="crates/UNKNOWN"
+fi
+
+if printf '%s\n' "$changed" | grep -Eq "$CODE_GLOBS"; then
+  echo "-> make test-crates (diff touches migrations/ | crates/ | emitters -- #474)"
+  ( cd "$ROOT" && make test-crates ) || fail=1
+else
+  echo "stop-gate: no migrations/ | crates/ | emitter changes -- workspace tests not required for this turn (#474)."
+fi
+
 # Optional app-level gates — only if a root package.json defines them (no-op until apps/ exists).
 if [ -f "$ROOT/package.json" ]; then
   if grep -q '"test"' "$ROOT/package.json"; then ( cd "$ROOT" && npm test --silent ) || fail=1; fi

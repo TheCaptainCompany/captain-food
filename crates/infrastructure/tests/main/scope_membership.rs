@@ -2,7 +2,7 @@
 //! PROP-20260725-185140): events → ScopeMembership projector group → `scopemembership` rows →
 //! the SCOPED `PgOrderRepository`. Needs a real Postgres (`DATABASE_URL`); SKIPS offline like the
 //! rest of this binary — the authorization done-bar therefore requires a run WITH the database
-//! (`DB_TESTS_REQUIRED=1`), a green without it is a skip wearing a pass.
+//! (since #474 a run with no database FAILS rather than reporting a skip as a pass).
 
 use application::queries::{OrderFilter, OrderReadRepository as _, ReadScope};
 use domain::generated::scalars::{CustomerId, OrderId, RestaurantId, ScopeType, UserType};

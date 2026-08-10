@@ -15,9 +15,10 @@
 //!    here either — which is the point (the recorded eternal-retry incident was a suite leaning
 //!    on a sibling suite's leftover table).
 //!
-//! The DB gate itself is unchanged (#230): no `DATABASE_URL` ⇒ the test SKIPS (loudly failing
-//! instead if `DB_TESTS_REQUIRED` is set). [`embedded_migration_manifest_matches_the_migrations_directory`]
-//! keeps the embedded chain from silently drifting when a new migration lands.
+//! The DB gate is now the shared `db-test-gate` crate and the polarity is INVERTED (#474): no
+//! `DATABASE_URL` ⇒ the suite FAILS, unless `DB_TESTS_REQUIRED` carries an explicit opt-out, which
+//! leaves a receipt. [`embedded_migration_manifest_matches_the_migrations_directory`] keeps the
+//! embedded chain from silently drifting when a new migration lands.
 
 use sqlx::PgPool;
 use tokio::sync::{Mutex, MutexGuard};
@@ -86,20 +87,10 @@ pub(crate) struct TestDb {
 
 impl TestDb {
     /// The one pool constructor. `None` = skip (no `DATABASE_URL`; loud under
-    /// `DB_TESTS_REQUIRED`, #230). Otherwise: take the binary-wide lock, connect, and reset the
+    /// an explicit `DB_TESTS_REQUIRED=0`, #474). Otherwise: take the binary-wide lock, connect, reset the
     /// schema from the real migration chain.
     pub(crate) async fn acquire(suite: &str) -> Option<TestDb> {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                assert!(
-                    std::env::var("DB_TESTS_REQUIRED").is_err(),
-                    "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-                );
-                eprintln!("SKIP {suite}: DATABASE_URL not set");
-                return None;
-            }
-        };
+        let url = db_test_gate::database_url(suite)?;
         let guard = DB_GATE.lock().await;
         let pool = PgPool::connect(&url).await.expect("connect Postgres");
         reset_schema(&pool).await;

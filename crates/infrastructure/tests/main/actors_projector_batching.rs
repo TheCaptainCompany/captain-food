@@ -21,7 +21,7 @@
 //! 4. **Graceful drain**: flipping the shutdown channel releases every lane (`claimed_by NULL`).
 //!
 //! Needs `DATABASE_URL` (docker `postgres:16-alpine` or any real Postgres); skips otherwise
-//! (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! (since #474 a missing database FAILS; only `DB_TESTS_REQUIRED=0` skips, with a receipt).
 
 use std::sync::Arc;
 

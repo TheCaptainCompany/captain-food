@@ -67,6 +67,10 @@ base64 = "0.22"
 aes-gcm = "0.10"
 
 [dev-dependencies]
+# The #474 database-test gate: DB-gated suites are REQUIRED by default and skip only under an
+# explicit `DB_TESTS_REQUIRED=0`, which leaves a receipt. Dev-only -- the release graph never
+# links it (std-only, no build cost).
+db-test-gate = { path = "../db_test_gate" }
 # The D5 `test-fixtures` gate (PROP-20260802-130500): the DB-gated reminder tests exercise the
 # reference `schedule_reminder`/`cancel_reminder` implementations against the real DDL, and the
 # integration tests seed mailbox rows through the EntryFixture conversion — test-only doors a

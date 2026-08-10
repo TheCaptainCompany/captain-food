@@ -26,10 +26,12 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test smoke-prod
+.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates smoke-prod
 
 help:
-	@echo "targets: validate generate typecheck review gate night-loop budgeted-loop budget-check docs"
+	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
+	@echo "         test-crates = the WORKSPACE test gate (#474): cargo test --workspace with the DB"
+	@echo "         suites REQUIRED. 'make rust' is the spec gate and runs NO crates/** test."
 	@echo "         c4-render (Structurizr Lite + docs/ADRs) | c4-export (validate/export DSL)"
 	@echo "         (validate-schema test-behaviour test-observability c4-validate -> all fold into 'validate')"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
@@ -71,6 +73,36 @@ rust-test:
 	$(CARGO) test --manifest-path $(CODEGEN_RS)/Cargo.toml
 rust: rust-build rust-test validate check-drift
 	@echo "rust: build + test + validate + generate(+diff) OK"
+	@echo "rust: NOTE -- this gate does NOT run crates/** tests. For a code change run 'make test-crates'."
+
+# --- The workspace test gate (#474). ---
+#
+# `make rust` is the SPEC gate: it builds and tests tools/codegen-rs ONLY. It proves nothing about
+# crates/**. Measured on the #474 branch, against a deliberately planted migration defect that
+# permanently bricks the Cart projection and kills placeOrder: `make rust` exited 0, and
+# `cargo test --workspace` with no DATABASE_URL reported 990 passed / 0 failed. The same command
+# with a real Postgres failed. This target is the honest half.
+#
+# DB_TESTS_REQUIRED is REQUIRED-by-default since #474 (crates/db_test_gate): with no DATABASE_URL
+# the run FAILS unless the caller opts out with DB_TESTS_REQUIRED=0, and an opt-out leaves a
+# receipt this target reads back so the summary survives libtest's output capture (a passing test's
+# stderr is swallowed -- the old SKIP lines never appeared in any log).
+#
+# --no-fail-fast on purpose: without it cargo stops launching further test binaries after the first
+# failure, so the pass TOTAL silently shrinks and two runs are not comparable (990 vs 744 was
+# measured exactly this way).
+DB_TEST_RECEIPT = target/db-test-skips.log
+test-crates:
+	@rm -f $(DB_TEST_RECEIPT)
+	@mkdir -p target
+	DB_TEST_SKIP_RECEIPT=$(abspath $(DB_TEST_RECEIPT)) $(CARGO) test --workspace --no-fail-fast; \
+	  status=$$?; \
+	  if [ -s $(DB_TEST_RECEIPT) ]; then \
+	    echo "test-crates: DB-GATED SUITES SKIPPED -- this run exercised NO database behaviour."; \
+	    echo "test-crates: skipped $$(cut -f1 $(DB_TEST_RECEIPT) | sort -u | wc -l) suite(s): $$(cut -f1 $(DB_TEST_RECEIPT) | sort -u | tr '\n' ' ')"; \
+	    echo "test-crates: re-run with DATABASE_URL set to exercise them (see docs/claude/sessions.md)."; \
+	  fi; \
+	  exit $$status
 
 # Compile-check the wasm32 hydrate build of crates/web (split 4/4 of #21). The real bundle
 # (wasm-bindgen output) is produced in the Docker image build; this is the fast CI/local gate that

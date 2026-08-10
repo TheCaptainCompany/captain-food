@@ -75,6 +75,12 @@ members = [
                                # crate. Sits OUTSIDE the domain graph on purpose: `domain` and
                                # `application` must not depend on it (enforced by a test), because
                                # instrumentation belongs at boundaries, never in an aggregate.
+    "crates/db_test_gate",     # the DB-TEST GATE (#474) -- the ONE place that decides whether a
+                               # database-gated suite may skip. DEV-DEPENDENCY ONLY: nothing in the
+                               # app graph links it and it links nothing (std only). It replaced 17
+                               # hand-copied env dances across 5 crates, each of which was a chance
+                               # for the polarity to drift; since #474 the polarity is REQUIRED by
+                               # default and an opt-out leaves a receipt.
     "crates/shared_types",     # serde DTOs (+ UniFFI later)
     "crates/core",             # Crux core over domain — depends on domain, shared_types
     "crates/server",           # Axum BFF — depends on application, infrastructure, shared_types

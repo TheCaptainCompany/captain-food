@@ -1044,9 +1044,21 @@ keys:
         assert!(!declared.is_empty(), "no keys parsed from configuration.yaml");
 
         // Platform-injected or tooling-only names the APP never reads through its own config.
-        let exempt: BTreeSet<&str> = ["DB_TESTS_REQUIRED", "CARGO_MANIFEST_DIR", "OUT_DIR"]
-            .into_iter()
-            .collect();
+        // `DB_TEST_SKIP_RECEIPT` and `CARGO_TARGET_DIR` join the list for the same reason
+        // `DB_TESTS_REQUIRED` is already on it (#474): they are read ONLY by `crates/db_test_gate`,
+        // a dev-dependency no production profile links, to decide where the skip receipt is written.
+        // No deployed binary reads them, so declaring them in configuration.yaml would put a
+        // test-harness knob into the boot report and every derived deployment manifest — the
+        // opposite of what this gate is protecting.
+        let exempt: BTreeSet<&str> = [
+            "DB_TESTS_REQUIRED",
+            "DB_TEST_SKIP_RECEIPT",
+            "CARGO_MANIFEST_DIR",
+            "CARGO_TARGET_DIR",
+            "OUT_DIR",
+        ]
+        .into_iter()
+        .collect();
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -1723,6 +1735,122 @@ keys:
              assignments) may keep non-ASCII; only tab-indented command text is affected.",
             offenders.join("\n")
         );
+    }
+
+    /// The #474 HONEST-GATE guard, in two halves — both of them things the compiler cannot see.
+    ///
+    /// **Half 1: only the gate crate may spell the skip decision.** Before #474 the
+    /// `DATABASE_URL` / `DB_TESTS_REQUIRED` dance was hand-written at 17 call sites across 5
+    /// crates: 17 chances for the polarity to drift, and no way to flip it in one place. It now
+    /// lives in `crates/db_test_gate/src/lib.rs`. Exactly ONE other file may restate it —
+    /// `crates/actor_runtime/tests/common/mod.rs` — because `actor_runtime/tests/dependency_rule.rs`
+    /// forbids ANY path dependency into the workspace (ADR-20260730-234918, extraction-readiness),
+    /// and weakening an executable rule to make a refactor tidy is not on the table. A THIRD copy
+    /// is what this half prevents.
+    ///
+    /// **Half 2: the Stop hook must actually invoke the workspace suite.** `make rust` is the spec
+    /// gate and runs no `crates/**` test at all; the hook's `make test-crates` call is the only
+    /// thing that makes the workspace suite mandatory before a turn completes. Deleting that call
+    /// would restore the exact false signal #474 exists to remove, and nothing else would notice.
+    ///
+    /// Both halves are text scans, which CLAUDE.md ranks as the fallback below a type-level answer
+    /// (ADR-20260803-234035) — accepted here because the boundary is a cross-crate manifest rule and
+    /// a shell hook, neither of which the type system can reach.
+    #[test]
+    fn only_the_db_test_gate_spells_the_database_skip_polarity() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        // The two files allowed to read DB_TESTS_REQUIRED, each with the reason it is allowed.
+        const ALLOWED: &[(&str, &str)] = &[
+            ("crates/db_test_gate/src/lib.rs", "the gate itself"),
+            (
+                "crates/actor_runtime/tests/common/mod.rs",
+                "actor_runtime may take no path dependency into the workspace \
+                 (tests/dependency_rule.rs, ADR-20260730-234918)",
+            ),
+        ];
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        assert!(!files.is_empty(), "found no Rust sources under crates/ — the scan went blind");
+
+        let mut offenders: Vec<String> = Vec::new();
+        for f in &files {
+            let Ok(text) = std::fs::read_to_string(f) else { continue };
+            // A READ of the variable, not a mention of it: doc comments naming the contract are
+            // exactly what we want more of. `var("DB_TESTS_REQUIRED")` catches `std::env::var`,
+            // `env::var` and any aliased import of it, which are the three shapes in this repo.
+            if !text.contains("var(\"DB_TESTS_REQUIRED\")") {
+                continue;
+            }
+            let rel = f
+                .strip_prefix(&root)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if ALLOWED.iter().any(|(p, _)| *p == rel) {
+                continue;
+            }
+            offenders.push(rel);
+        }
+        assert!(
+            offenders.is_empty(),
+            "these files read DB_TESTS_REQUIRED themselves instead of calling the shared gate:\n  \
+             {}\n\
+             Fix: call `db_test_gate::database_url(\"<suite>\")` (add `db-test-gate` to the crate's \
+             [dev-dependencies]). It returns Some(url) to run, None to skip, and PANICS when a \
+             database is required and none is configured.\n\
+             Why: #474 — the polarity was hand-written 17 times, and a single copy left on the old \
+             polarity silently restores the failure this issue exists to remove (with no database, \
+             `cargo test --workspace` reported 990 passed over a migration defect that permanently \
+             bricks the Cart projection).\n\
+             The only permitted exceptions are:\n  {}",
+            offenders.join("\n  "),
+            ALLOWED
+                .iter()
+                .map(|(p, why)| format!("{p} -- {why}"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+
+        // Half 2 — the hook must still call the workspace suite, and still scope it to code paths.
+        let hook_path = root.join(".claude/hooks/stop-gate.sh");
+        let hook = std::fs::read_to_string(&hook_path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {} ({e}) — if the hook moved, fix this guard; do NOT let it silently \
+                 pass",
+                hook_path.display()
+            )
+        });
+        assert!(
+            hook.contains("make test-crates"),
+            ".claude/hooks/stop-gate.sh no longer invokes `make test-crates` (#474). `make rust` \
+             runs NO crates/** test, so without this call nothing exercises the workspace suite \
+             before a turn completes — which is exactly the false signal #474 removed."
+        );
+        for path in ["migrations/", "crates/"] {
+            assert!(
+                hook.contains(path),
+                ".claude/hooks/stop-gate.sh no longer scopes the #474 workspace gate to `{path}` \
+                 — a change under it would complete a turn with no test having run."
+            );
+        }
     }
 
     /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1; #290 phase 1,

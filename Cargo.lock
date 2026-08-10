@@ -1533,6 +1533,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "db-test-gate"
+version = "0.1.0"
+
+[[package]]
 name = "debug-ignore"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,6 +2685,7 @@ dependencies = [
  "client-catalog",
  "client-restaurant",
  "client-restaurant-account",
+ "db-test-gate",
  "domain",
  "hex",
  "hmac",
@@ -2947,6 +2952,7 @@ dependencies = [
  "chrono",
  "client-cart",
  "client-restaurant",
+ "db-test-gate",
  "domain",
  "futures",
  "hex",
@@ -4722,6 +4728,7 @@ dependencies = [
  "client-restaurant-account",
  "client-rider",
  "coopcycle-adapter",
+ "db-test-gate",
  "domain",
  "gateway_runtime",
  "hubrise-adapter",
@@ -4903,6 +4910,7 @@ name = "sirene_ingest"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "db-test-gate",
  "hex",
  "reqwest",
  "serde",

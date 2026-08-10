@@ -111,14 +111,7 @@ fn record_with_siret(siret: &str) -> SireneRecord {
 #[tokio::test]
 async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 
@@ -194,14 +187,7 @@ async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
 #[tokio::test]
 async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 
@@ -280,14 +266,7 @@ async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
 #[tokio::test]
 async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP staging_batch_upsert_falls_back_to_row_by_row_on_batch_error: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("staging_batch_upsert_falls_back_to_row_by_row_on_batch_error") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 
@@ -317,14 +296,7 @@ async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
 #[tokio::test]
 async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP an_unchanged_processed_row_does_not_get_its_payload_written_back: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("an_unchanged_processed_row_does_not_get_its_payload_written_back") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 
@@ -363,14 +335,7 @@ async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
 #[tokio::test]
 async fn a_changed_record_gets_its_payload_written_again() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP a_changed_record_gets_its_payload_written_again: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("a_changed_record_gets_its_payload_written_again") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 
@@ -407,14 +372,7 @@ async fn a_changed_record_gets_its_payload_written_again() {
 #[tokio::test]
 async fn a_changed_record_releases_a_poisoned_row() {
     let _suite = serialize_suite();
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP a_changed_record_releases_a_poisoned_row: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("a_changed_record_releases_a_poisoned_row") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 

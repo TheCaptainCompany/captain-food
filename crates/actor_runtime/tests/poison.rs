@@ -10,7 +10,8 @@
 //! 3. **Cap 0 (the rollback lever)**: attempts keep counting, the row never flips — exactly the
 //!    pre-#313 posture, kept executable so the lever cannot silently rot.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::Arc;
 
@@ -18,6 +19,8 @@ use actor_runtime::{
     Delivery, HandlerVerdict, InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+
+mod common;
 
 const ACTOR_TYPE: &str = "Conversation";
 const LANE: i16 = 2;
@@ -50,17 +53,7 @@ impl MessageHandler for PoisonedHeadHandler {
 static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn database_url() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP poison: DATABASE_URL not set");
-            None
-        }
-    }
+    common::database_url("poison")
 }
 
 async fn setup(pool: &PgPool) {

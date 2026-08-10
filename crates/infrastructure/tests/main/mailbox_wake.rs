@@ -11,7 +11,8 @@
 //!    posture) enqueues; the consuming side's LISTEN connection nudges the worker and the row is
 //!    delivered while the heartbeat is far too slow to explain it.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::Arc;
 use std::time::Duration;

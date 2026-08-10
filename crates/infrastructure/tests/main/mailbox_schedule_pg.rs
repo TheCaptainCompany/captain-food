@@ -9,7 +9,8 @@
 //! (PROP-20260802-130500 D1) moved the constructors into the `actor_client` boundary crate; the
 //! reference implementations (`schedule_reminder`/`cancel_reminder`) are reachable here through
 //! the D5 `test-fixtures` feature — dev-dependencies only, CI-guarded.
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use actor_client::{cancel_reminder, reminder_message_id, schedule_reminder, ScheduleOutcome};
 use domain::generated::scalars::InboundMessageStatus;
