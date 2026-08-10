@@ -386,6 +386,10 @@ pub struct StripeSecretKeyTest(pub String);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StripeSecretKeyLive(pub String);
 
+/// A Stripe TEST-mode PUBLISHABLE key. Public by design — it ships to every browser that loads the checkout shell and can only initialise stripe.js, never move money — which is why it is not secret-classed. The `^pk_test_` anchor makes a LIVE publishable key or ANY secret key unspellable in this slot, mirroring the sk_ scalars rejecting `pk_`. Go-live deliberately requires a spec change here: the live publishable key gets its own scalar and mode witness (ADR-20260809-050000 decision 5), so production cannot start fronting live-mode Stripe by a dashboard edit alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StripePublishableKeyTest(pub String);
+
 /// A Stripe webhook signing secret. Stripe issues a DIFFERENT one per mode, so it must be switched together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed — the customer is charged and the restaurant is never told.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StripeWebhookSecret(pub String);

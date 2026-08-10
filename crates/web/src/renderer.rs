@@ -32,11 +32,17 @@ use crate::i18n;
 pub struct RenderContext {
     pub data: Map<String, Value>,
     pub locale: String,
+    /// The Stripe publishable TEST key the server was configured with, already PARSED (#440):
+    /// `None` = absent/empty/malformed = the checkout shell renders its degraded state. Carried on
+    /// the render context (not resolver data, not a window global, not GraphQL) because it is a
+    /// server-side deployment fact the page needs at render time — the same seam a future
+    /// runtime fact would ride. Only the checkout screen reads it today.
+    pub stripe_publishable_key: Option<crate::stripe::PublishableKey>,
 }
 
 impl RenderContext {
     pub fn new(locale: &str) -> Self {
-        Self { data: Map::new(), locale: locale.to_string() }
+        Self { data: Map::new(), locale: locale.to_string(), stripe_publishable_key: None }
     }
 
     /// Store one resolver result under its spec key + template aliases (see type docs).

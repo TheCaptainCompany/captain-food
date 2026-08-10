@@ -29,6 +29,12 @@ use web::graphql::{Transport, TransportError};
 #[derive(Clone)]
 pub struct SsrExec {
     pub schema: CaptainSchema,
+    /// The Stripe publishable TEST key the checkout shell delivers to the browser (#440), parsed
+    /// ONCE at the composition root: `None` = absent/empty/malformed (all one state — the
+    /// development profile continues past an INVALID config value, so re-gating at this seam is
+    /// what keeps a bad value from ever reaching stripe.js). `None` renders the degraded checkout
+    /// and is counted at the render boundary (`hosts::app_page`).
+    pub stripe_publishable_key: Option<web::stripe::PublishableKey>,
 }
 
 impl SsrExec {
@@ -70,7 +76,7 @@ mod tests {
 
     #[tokio::test]
     async fn executes_against_the_schema_without_http() {
-        let exec = SsrExec { schema: build_schema(None, None, None) };
+        let exec = SsrExec { schema: build_schema(None, None, None), stripe_publishable_key: None };
         let data = exec
             .transport()
             .execute("query { __schema { queryType { name } } }", serde_json::json!({}))
@@ -81,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn graphql_errors_fail_the_read_like_the_http_transport() {
-        let exec = SsrExec { schema: build_schema(None, None, None) };
+        let exec = SsrExec { schema: build_schema(None, None, None), stripe_publishable_key: None };
         let err = exec
             .transport()
             .execute("query { notAField }", serde_json::json!({}))

@@ -144,6 +144,23 @@ pub mod place_order {
     pub fn payment_failure(reason: &str) {
         payment_failures_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
     }
+
+    fn degraded_render_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CHECKOUT_DEGRADED_RENDER_TOTAL).build())
+    }
+
+    /// `checkout_degraded_render_total{reason}` (#440) — a DEFECT counter, the
+    /// `customer_identification::claim_stamp_failed` pattern: the checkout shell rendered WITHOUT a
+    /// mountable payment element, so the customer cannot even try and the place-order contract sees
+    /// ZERO runs by construction. `reason` is bounded (the contract's canonical set):
+    /// `stripe_key_absent` — emitted today, at the SSR render boundary (the only server-observable
+    /// leg); `stripe_js_load_failed` | `mount_threw` — reserved for the client legs, unemitted until
+    /// a browser beacon exists (no OTel in WASM). Alert on any sustained non-zero rate. NOT
+    /// [`payment_failure`], which counts payments that RAN and failed.
+    pub fn degraded_render(reason: &str) {
+        degraded_render_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
 }
 
 /// Technical + BAM metrics for the `read-authorization` contract (#144).

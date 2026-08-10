@@ -91,6 +91,14 @@ pub mod metric {
     pub const PLACE_ORDER_DURATION_MS: &str = "place_order_duration_ms";
     pub const ORDERS_PLACED_TOTAL: &str = "orders_placed_total";
     pub const CHECKOUT_PAYMENT_FAILURES_TOTAL: &str = "checkout_payment_failures_total";
+    /// `place-order` contract (#440): the checkout shell rendered WITHOUT a mountable payment
+    /// element — a DEFECT counter (the customer_claim_stamp_failed_total pattern), attribute
+    /// `reason`. A degraded render produces ZERO place-order runs (the customer cannot even try),
+    /// so the saga contract cannot see it by construction; alert on any sustained non-zero rate.
+    /// Emitted from the checkout render/mount seam (the framework boundary that owns it), never
+    /// from domain code. Distinct from CHECKOUT_PAYMENT_FAILURES_TOTAL, which counts payments that
+    /// RAN and failed.
+    pub const CHECKOUT_DEGRADED_RENDER_TOTAL: &str = "checkout_degraded_render_total";
     /// `read-authorization` contract (#144). Denials only ever fire on by-id/subscription paths —
     /// the list path enforces via a fused SQL predicate, so a list "denial" is structurally
     /// invisible (rows are simply absent); see the contract comment before "fixing" that.

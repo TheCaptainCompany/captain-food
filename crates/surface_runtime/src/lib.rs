@@ -100,7 +100,13 @@ fn ssr_transport(gateway_url: &str) -> web::graphql::HttpTransport {
 }
 
 async fn ssr_page(gateway_url: &str, raw_host: &str, path: &str, locale: &str) -> Option<String> {
-    web::router::render_path_with(&ssr_transport(gateway_url), raw_host, path, locale).await
+    // No publishable key in the surface bins YET (#440, named gap): STRIPE_PUBLISHABLE_KEY's
+    // origin scope is `payments`, and the fo-* bins' scope-filtered generated Configs
+    // (ADR-20260807-183024 D5) do not carry it — so in the split topology the storefront bin
+    // would serve the DEGRADED checkout. Wiring the key into the bin that SSRs checkout is a
+    // deploy-surface decision (widen the bin's scopes, or re-home/consume the key), recorded on
+    // #440 rather than smuggled in here. The deployed monolith threads it (server::hosts).
+    web::router::render_path_with(&ssr_transport(gateway_url), raw_host, path, locale, None).await
 }
 
 /// Router fallback: resolve the request `Host` + path for THIS audience and serve the SDUI app —

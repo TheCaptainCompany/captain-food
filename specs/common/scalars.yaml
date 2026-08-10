@@ -575,6 +575,19 @@ StripeSecretKeyLive:
     silently kept test credentials cannot boot as if it were taking real payments.
 
 
+StripePublishableKeyTest:
+  type: string
+  pattern: "^pk_test_[A-Za-z0-9]+$"
+  description: >
+    A Stripe TEST-mode PUBLISHABLE key. Public by design — it ships to every browser that loads the
+    checkout shell and can only initialise stripe.js, never move money — which is why it is not
+    secret-classed. The `^pk_test_` anchor makes a LIVE publishable key or ANY secret key
+    unspellable in this slot, mirroring the sk_ scalars rejecting `pk_`. Go-live deliberately
+    requires a spec change here: the live publishable key gets its own scalar and mode witness
+    (ADR-20260809-050000 decision 5), so production cannot start fronting live-mode Stripe by a
+    dashboard edit alone.
+
+
 StripeWebhookSecret:
   type: string
   pattern: "^whsec_[A-Za-z0-9_-]+$"

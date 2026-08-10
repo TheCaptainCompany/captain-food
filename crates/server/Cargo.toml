@@ -96,6 +96,11 @@ async-trait = { workspace = true }
 [dev-dependencies]
 # In-memory read-repository stand-ins for the subscription tests (no DB needed).
 async-trait = { workspace = true }
+# The #440 emission proof (tests/checkout_degraded_metric.rs): a real SdkMeterProvider with the
+# SDK's own in-memory exporter observes checkout_degraded_render_total actually firing through
+# the production render path — the first declared metric in this repo proved emitted, not assumed.
+opentelemetry = { version = "0.32", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 # The D5 `test-fixtures` gate (PROP-20260802-130500): the typed-send freeze test destructures the
 # EntryFixture mirror exhaustively, and the write-path tests seed mailbox rows through it — a
 # release build of the server never sees these doors.

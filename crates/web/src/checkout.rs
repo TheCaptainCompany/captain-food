@@ -260,6 +260,12 @@ pub struct CheckoutViewState {
     /// (a pre-existing gap); the failure copy is translated because it is the one place on this
     /// page where the wrong language costs a conversion at the worst possible moment.
     pub locale: String,
+    /// The mountable Stripe publishable key (#440), or `None` = the presence-gated degraded state:
+    /// the payment section renders `payment_unavailable_state` INSTEAD of the element (a dead
+    /// payment control is worse than no control), and `place_order_btn` is disabled. Set from the
+    /// render context by [`with_publishable_key`](Self::with_publishable_key) — it is a deployment
+    /// fact, never resolver data.
+    pub publishable_key: Option<crate::stripe::PublishableKey>,
 }
 
 impl CheckoutViewState {
@@ -315,7 +321,19 @@ impl CheckoutViewState {
             is_delivery,
             payment_failed,
             locale: locale.to_string(),
+            publishable_key: None,
         }
+    }
+
+    /// Attach the delivery-seam fact (#440): the parsed publishable key from the render context.
+    /// Separate from [`from_resolved`](Self::from_resolved) because the key is server
+    /// configuration riding the RenderContext, not data any resolver returns.
+    pub fn with_publishable_key(
+        mut self,
+        key: Option<crate::stripe::PublishableKey>,
+    ) -> Self {
+        self.publishable_key = key;
+        self
     }
 }
 
@@ -333,6 +351,15 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     let summary = format!("{} items - {}", state.cart_line_count, state.formatted_total);
     let locale = state.locale.clone();
     let t = move |key: &str| crate::i18n::resolve(key, &locale);
+    // The delivery seam's last hop (#440): the key rides a DATA ATTRIBUTE on the mount div (the
+    // hydrate path reads it back via stripe::MOUNT_KEY_ATTR — pinned to the literal below by
+    // `stripe::tests::the_mount_id_is_a_stable_dom_contract`). No key ⇒ no element, no dead
+    // control: the payment section renders `payment_unavailable_state` and the pay button is
+    // disabled. `payment_unavailable` also covers a browser-side degrade (stripe.js failed) —
+    // the hydrate mount flips the same state rather than inventing a second one.
+    let mount_key = state.publishable_key.as_ref().map(|k| k.as_str().to_string());
+    let test_mode = state.publishable_key.as_ref().is_some_and(|k| k.is_test_mode());
+    let payment_unavailable = state.publishable_key.is_none();
     view! {
         <main id="app" data-hydrate="checkout">
             <header data-c="back_button_header"><h1>"Checkout"</h1></header>
@@ -352,8 +379,37 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 <div data-c="cart_summary_mini">{summary}" from "{state.restaurant_name}</div>
             </section>
             <section data-c="checkout_section" data-s="payment">
-                // The Stripe mount point: stripe.rs attaches the element here on hydrate.
-                <div data-c="stripe_express_checkout_element" id=crate::stripe::MOUNT_ID></div>
+                // The Stripe mount point: stripe.rs attaches the element here on hydrate, reading
+                // the publishable key off the `data-pk` attribute. Rendered ONLY when a mountable
+                // key exists — an element div that nothing can ever mount is a dead control.
+                {mount_key.map(|pk| view! {
+                    <div data-c="stripe_express_checkout_element" id=crate::stripe::MOUNT_ID data-pk=pk></div>
+                })}
+                // Test-mode banner (#440): persistent on the pay step while the key is pk_test_.
+                {test_mode.then(|| view! {
+                    <p data-c="text" id="test_mode_banner" data-size="sm">{t("checkout.test_mode.banner")}</p>
+                })}
+                // `payment_unavailable_state` (spec: screens/restaurant_frontoffice.yaml#checkout,
+                // #440): the presence-gated degrade — no usable key reached the shell (or stripe.js
+                // failed browser-side). "Your cart is saved" is a promise the system keeps: nothing
+                // was placed, the cart stays OPEN. Counted server-side as
+                // checkout_degraded_render_total{reason=stripe_key_absent}; the pay button below is
+                // disabled in the same state.
+                {payment_unavailable.then(|| view! {
+                    <section data-c="conditional_section" id="payment_unavailable_state">
+                        <p data-c="text" data-weight="bold">{t("checkout.payment_unavailable.title")}</p>
+                        <p data-c="text">{t("checkout.payment_unavailable.body")}</p>
+                        <button
+                            data-c="button"
+                            id="payment_unavailable_back_btn"
+                            data-variant="outline"
+                            data-action="navigate"
+                            data-route="/cart"
+                        >
+                            {t("checkout.payment_failed.back_to_cart")}
+                        </button>
+                    </section>
+                })}
             </section>
             // `payment_failed_state` (spec: screens/restaurant_frontoffice.yaml#checkout). The saga
             // keeps the cart OPEN and places nothing on PaymentFailed, so "your cart is intact" is
@@ -396,7 +452,9 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 </section>
             })}
             <footer data-c="sticky_bottom_bar">
-                <button data-c="button" id="place_order_btn" data-variant="primary">
+                // Disabled while payment is unavailable (#440): a pay button over an unmountable
+                // element would place an order nothing can pay for.
+                <button data-c="button" id="place_order_btn" data-variant="primary" disabled=payment_unavailable>
                     "Place order - "{state.formatted_total}
                 </button>
             </footer>
@@ -405,13 +463,23 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
 }
 
 /// Server-side render the checkout page to a full document (the `ssr` build).
+///
+/// The stripe.js `<script>` tag is injected into THIS shell only, and only when a mountable key
+/// exists (#440 — checkout-only over every-page: privacy over Stripe's fraud-signal preference;
+/// no key, no Stripe request leaves the customer's browser at all).
 #[cfg(feature = "ssr")]
 pub fn render_checkout_html(mut state: CheckoutViewState, lang: &str) -> String {
     let lang = crate::i18n::normalize_locale(lang).unwrap_or(crate::i18n::DEFAULT_LOCALE);
     // ONE source of truth for the language: the document's `lang` is also what the copy resolves in.
     state.locale = lang.to_string();
+    let with_stripe_js = state.publishable_key.is_some();
     let body = CheckoutScreen(CheckoutScreenProps { state }).to_html();
-    crate::renderer::page_html("Checkout - Captain.Food", lang, &body)
+    let doc = crate::renderer::page_html("Checkout - Captain.Food", lang, &body);
+    if with_stripe_js {
+        doc.replace("</head>", &format!("{}</head>", crate::stripe::STRIPE_JS_TAG))
+    } else {
+        doc
+    }
 }
 
 #[cfg(test)]
@@ -581,6 +649,16 @@ mod tests {
         assert_eq!(sent["input"]["orderId"], serde_json::json!(order_id));
     }
 
+    /// The opening tag of the element with this id — so an attribute assertion (`disabled`) reads
+    /// THE control it is about, not the whole page (the phone input is disabled by design).
+    #[cfg(feature = "ssr")]
+    fn element_tag<'a>(html: &'a str, id: &str) -> &'a str {
+        let at = html.find(&format!("id=\"{id}\"")).expect("element exists");
+        let open = html[..at].rfind('<').expect("tag start");
+        let close = at + html[at..].find('>').expect("tag end");
+        &html[open..=close]
+    }
+
     #[cfg(feature = "ssr")]
     fn view_state(is_delivery: bool, payment_failed: bool) -> CheckoutViewState {
         CheckoutViewState {
@@ -590,6 +668,9 @@ mod tests {
             is_delivery,
             payment_failed,
             locale: "fr".into(),
+            // No key — the presence-gated default; tests that need the configured state attach
+            // one via `with_publishable_key`.
+            publishable_key: None,
         }
     }
 
@@ -681,10 +762,16 @@ mod tests {
         assert!(!empty.payment_failed);
     }
 
+    /// The configured state (#440): a mountable key exists, so the spec tree INCLUDES the Stripe
+    /// element. Before #440 this test ran on a key-less state and still passed its
+    /// `data-c="stripe_express_checkout_element"` check — satisfied by the CSS SELECTOR in
+    /// app.css inside `<style>`, not by any DOM — which is why the assertions below pin the
+    /// mount div by `id=` + `data-pk=` (attribute syntax CSS text cannot fake).
     #[cfg(feature = "ssr")]
     #[test]
     fn checkout_renders_the_spec_component_tree() {
-        let html = render_checkout_html(view_state(true, false), "fr");
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let html = render_checkout_html(view_state(true, false).with_publishable_key(key), "fr");
         for tag in [
             "back_button_header",
             "checkout_section",
@@ -695,9 +782,68 @@ mod tests {
             assert!(html.contains(&format!("data-c=\"{tag}\"")), "missing {tag}: {html}");
         }
         assert!(html.contains("data-hydrate=\"checkout\""));
-        assert!(html.contains(crate::stripe::MOUNT_ID), "the Stripe mount point must exist");
+        assert!(
+            html.contains(&format!("id=\"{}\"", crate::stripe::MOUNT_ID)),
+            "the Stripe mount point must exist when a key is delivered: {html}"
+        );
+        // The delivery seam's last hop: the key rides the mount div as a data attribute, and the
+        // stripe.js tag ships in THIS shell's head (checkout-only by decision).
+        assert!(html.contains("data-pk=\"pk_test_abc123\""), "{html}");
+        assert!(html.contains(crate::stripe::STRIPE_JS_TAG), "{html}");
+        // The pay step says TEST MODE while the key is pk_test_ — persistent, translated.
+        assert!(html.contains("id=\"test_mode_banner\""), "{html}");
+        assert!(html.contains("Mode test — aucun débit réel"), "{html}");
+        // No degrade state and an ENABLED pay button when payment can actually mount. (The
+        // `disabled` check is scoped to the button's own tag: the phone input is disabled by
+        // design, so a page-wide `contains` would always fire.)
+        assert!(!html.contains("payment_unavailable_state"), "{html}");
+        assert!(!element_tag(&html, "place_order_btn").contains("disabled"), "pay button must be live: {html}");
         // COLLECTION hides the delivery sections.
         let collection = render_checkout_html(view_state(false, false), "fr");
         assert!(!collection.contains("data-s=\"delivery_details\""));
+    }
+
+    /// #440, the designed red made permanent: the KEY-ABSENT render. This test's ancestor asserted
+    /// "the Stripe mount point must exist" unconditionally and went red the moment the shell became
+    /// presence-gated — this is that assertion's new life as the degrade contract. Absent key ⇒ NO
+    /// element div, NO data-pk, NO stripe.js request (privacy: nothing leaves the browser), the
+    /// spec's `payment_unavailable_state` with resolved copy, and a DISABLED pay button — never a
+    /// dead control.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_key_less_checkout_degrades_honestly_instead_of_rendering_a_dead_element() {
+        // view_state() carries no key — exactly what production builds when the config is unset
+        // (and, on the development profile, when it is set but malformed: parse maps both to None).
+        let html = render_checkout_html(view_state(true, false), "fr");
+        assert!(
+            !html.contains(&format!("id=\"{}\"", crate::stripe::MOUNT_ID)),
+            "no mount div may render when nothing can ever mount into it: {html}"
+        );
+        assert!(!html.contains("data-pk="), "{html}");
+        assert!(
+            !html.contains("js.stripe.com"),
+            "no key ⇒ no stripe.js ⇒ no Stripe request from the customer's browser: {html}"
+        );
+        assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
+        assert!(html.contains("data-c=\"conditional_section\""), "{html}");
+        // The copy, resolved in the page's language — with the promise the system actually keeps.
+        assert!(html.contains("Paiement momentanément indisponible"), "{html}");
+        assert!(
+            html.contains("votre panier est conservé, réessayez dans quelques minutes"),
+            "{html}"
+        );
+        assert!(!html.contains("[checkout.payment_unavailable"), "no `[key]` fallback: {html}");
+        // A way out (outline, the renderer's own navigate contract) + a pay button that cannot lie.
+        assert!(html.contains("id=\"payment_unavailable_back_btn\""), "{html}");
+        assert!(html.contains("data-route=\"/cart\""), "{html}");
+        assert!(
+            element_tag(&html, "place_order_btn").contains("disabled"),
+            "place_order_btn must be disabled: {html}"
+        );
+        assert!(!html.contains("id=\"test_mode_banner\""), "no banner without a key: {html}");
+
+        // English keeps the same structure.
+        let en = render_checkout_html(view_state(true, false), "en");
+        assert!(en.contains("Payment temporarily unavailable"), "{en}");
     }
 }

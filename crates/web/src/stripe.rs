@@ -21,12 +21,64 @@
 /// mounts into — the one string both sides must agree on.
 pub const MOUNT_ID: &str = "stripe-payment-element";
 
-/// What we configure `stripe.elements(...)` with. The clientSecret pins the elements instance to
-/// THE PaymentIntent the PlaceOrderProcess created — amount/currency live server-side on the
-/// intent, so the client cannot even express a different charge.
+/// The data attribute the SSR shell writes the publishable key into on the mount div, and the
+/// hydrate path reads back — the second half of the DOM contract next to [`MOUNT_ID`] (#440).
+/// The `view!` macro needs the literal `data-pk`, so a test pins the two spellings together.
+pub const MOUNT_KEY_ATTR: &str = "data-pk";
+
+/// The stripe.js `<script>` tag, injected into the CHECKOUT shell only, and only when a usable
+/// publishable key is present (#440 — checkout-only over every-page: privacy over Stripe's
+/// fraud-signal preference; the Stripe-cookie consent line is #400's). Stripe requires their
+/// hosted bundle — no npm/wasm packaging of it exists by policy.
+pub const STRIPE_JS_TAG: &str = "<script src=\"https://js.stripe.com/v3/\"></script>";
+
+/// A publishable key the shell may actually hand to `Stripe(pk)`: trimmed, `pk_test_`-prefixed,
+/// alphanumeric tail — the `scalars.yaml#/StripePublishableKeyTest` anchor re-applied at the LAST
+/// hop. The ONLY constructor maps absent, empty and malformed all to `None` (#440 architect pin:
+/// the generated config validation passes `Some("")` through, and the development profile
+/// CONTINUES past an INVALID value — so "present in config" is not "mountable", and this type is
+/// what makes the difference unspellable downstream: a degraded shell cannot be asked to mount,
+/// and a `pk_live_` / `sk_*` / garbage value cannot reach stripe.js). At go-live the LIVE key gets
+/// its own scalar and mode witness (ADR-20260809-050000 decision 5) — a sibling type then, never a
+/// loosening here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ElementsConfig {
-    pub client_secret: String,
+pub struct PublishableKey(String);
+
+impl PublishableKey {
+    /// Parse a raw configured value; anything not mountable is `None` (= render the degraded shell).
+    pub fn parse(raw: Option<&str>) -> Option<Self> {
+        let v = raw?.trim();
+        let tail = v.strip_prefix("pk_test_")?;
+        (!tail.is_empty() && tail.bytes().all(|b| b.is_ascii_alphanumeric()))
+            .then(|| Self(v.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether this key is a TEST-mode key — drives the checkout pay-step banner ("Mode test —
+    /// aucun débit réel"). Structurally always true today (the parser only admits `pk_test_`);
+    /// kept as a METHOD so the banner follows the KEY when the live sibling type arrives, rather
+    /// than a constant someone must remember to flip.
+    pub fn is_test_mode(&self) -> bool {
+        self.0.starts_with("pk_test_")
+    }
+}
+
+/// What we configure `stripe.elements(...)` with — the two mount postures the flow needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElementsConfig {
+    /// `elements({clientSecret})`: pinned to THE PaymentIntent the PlaceOrderProcess created —
+    /// amount/currency live server-side on the intent, so the client cannot even express a
+    /// different charge.
+    ForIntent { client_secret: String },
+    /// `elements({mode: 'payment', amount, currency})`: Stripe's documented DEFERRED-intent
+    /// posture — the element mounts BEFORE any intent exists, which is the /checkout landing
+    /// state by construction (acceptance-first: the intent is only created after PlaceOrder).
+    /// Amount/currency drive the element's wallet DISPLAY only; the charge is always the
+    /// server-side intent, whose clientSecret pins the confirm leg.
+    Deferred { amount_cents: i64, currency: String },
 }
 
 /// What `stripe.confirmPayment` is called with. `return_url` is where Stripe lands redirect-based
@@ -94,17 +146,27 @@ pub mod browser {
     }
 
     impl PaymentElement {
-        /// `Stripe(pk)` + `elements({clientSecret})` + `create('expressCheckout').mount('#…')` —
-        /// the element renders Stripe's wallet/card UI inside [`super::MOUNT_ID`].
+        /// `Stripe(pk)` + `elements({…})` + `create('expressCheckout').mount('#…')` — the element
+        /// renders Stripe's wallet/card UI inside [`super::MOUNT_ID`]. The options object follows
+        /// [`ElementsConfig`]: `clientSecret` when an intent exists, the deferred
+        /// `mode/amount/currency` triple when checkout is still pre-order.
         pub fn mount(publishable_key: &str, config: &ElementsConfig) -> Result<Self, StripeJsError> {
             let stripe = stripe_js(publishable_key).map_err(js_err)?;
             let options = js_sys::Object::new();
-            js_sys::Reflect::set(
-                &options,
-                &"clientSecret".into(),
-                &config.client_secret.as_str().into(),
-            )
-            .map_err(js_err)?;
+            let set = |k: &str, v: JsValue| {
+                js_sys::Reflect::set(&options, &k.into(), &v).map_err(js_err).map(|_| ())
+            };
+            match config {
+                ElementsConfig::ForIntent { client_secret } => {
+                    set("clientSecret", client_secret.as_str().into())?;
+                }
+                ElementsConfig::Deferred { amount_cents, currency } => {
+                    set("mode", "payment".into())?;
+                    set("amount", JsValue::from_f64(*amount_cents as f64))?;
+                    // Stripe wants the lowercase ISO code ("eur"), the domain speaks "EUR".
+                    set("currency", currency.to_lowercase().into())?;
+                }
+            }
             let elements = stripe.elements(&options).map_err(js_err)?;
             let element = elements.create("expressCheckout").map_err(js_err)?;
             element.mount(&format!("#{}", super::MOUNT_ID)).map_err(js_err)?;
@@ -156,5 +218,37 @@ mod tests {
     fn the_mount_id_is_a_stable_dom_contract() {
         // checkout.rs renders this id; the driver mounts `#<id>`. A rename must break a test.
         assert_eq!(MOUNT_ID, "stripe-payment-element");
+        // checkout.rs's view! writes the literal `data-pk`; the hydrate read uses the const. The
+        // two spellings must never drift (#440).
+        assert_eq!(MOUNT_KEY_ATTR, "data-pk");
+    }
+
+    /// #440 red-first (architect pin + beck's invalid-as-absent case): "present in config" is not
+    /// "mountable". The only constructor maps every unusable shape to `None` — including the
+    /// empty string the generated validation passes through as `Some("")`, and the invalid values
+    /// the DEVELOPMENT profile continues past — so the type makes "mount with a bad key"
+    /// unspellable, not merely unlikely.
+    #[test]
+    fn only_a_real_pk_test_key_is_mountable_everything_else_is_absent() {
+        assert!(PublishableKey::parse(Some("pk_test_abc123")).is_some());
+        // Whitespace from a dashboard copy-paste is trimmed, not fatal.
+        let k = PublishableKey::parse(Some("  pk_test_abc123  ")).expect("trimmed key parses");
+        assert_eq!(k.as_str(), "pk_test_abc123");
+        assert!(k.is_test_mode());
+
+        for unusable in [
+            None,                    // key never configured
+            Some(""),                // architect pin: generated validation passes Some("")
+            Some("   "),             // whitespace-only
+            Some("pk_test_"),        // prefix with no tail
+            Some("pk_live_abc123"),  // LIVE key in the test slot — must degrade, never mount
+            Some("sk_test_abc123"),  // a SECRET key pasted where a browser value goes
+            Some("pk_test_abc 123"), // corrupted paste
+        ] {
+            assert!(
+                PublishableKey::parse(unusable).is_none(),
+                "{unusable:?} must be absent (degrade), never a mountable value"
+            );
+        }
     }
 }

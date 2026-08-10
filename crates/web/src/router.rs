@@ -194,17 +194,23 @@ const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } f
 ///     day the BFF's SSR transport carries the caller's identity, the confirmation page is right on
 ///     first paint with no further change here. (The #107 OOM is unrelated: that was the DEFAULT
 ///     host branch, which still serves through the data-less [`render_path`].)
+///
+/// `stripe_publishable_key` (#440) is the server's configured checkout delivery fact, already
+/// parsed to "mountable or absent" — it rides the [`RenderContext`] into the checkout shell
+/// (a data attribute on the Stripe mount div), never a window global and never GraphQL.
 #[cfg(feature = "ssr")]
 pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     transport: &T,
     host: &str,
     path: &str,
     locale: &str,
+    stripe_publishable_key: Option<&crate::stripe::PublishableKey>,
 ) -> Option<String> {
     use crate::renderer::RenderContext;
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
     let mut ctx = RenderContext::new(locale);
+    ctx.stripe_publishable_key = stripe_publishable_key.cloned();
     for resolver in matched.screen.data_requirements {
         let mut vars = serde_json::Map::new();
         for (k, v) in matched.param_args(*resolver) {
@@ -366,7 +372,7 @@ mod tests {
                         "address": { "city": "Tours" } }] })),
             Ok(json!({ "restaurants": [] })),
         ]);
-        let html = render_path_with(&fake, "captain.food", "/", "fr").await.expect("home renders");
+        let html = render_path_with(&fake, "captain.food", "/", "fr", None).await.expect("home renders");
         // The SSR HTML carries the restaurant — no client fetch needed for first paint (#92).
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
@@ -383,7 +389,7 @@ mod tests {
         let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Errors(
             "Unauthorized: orders requires CUSTOMER".into(),
         ))]);
-        let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr")
+        let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr", None)
             .await
             .expect("order history renders");
         assert!(html.contains("data-hydrate=\"order_history\""));
@@ -417,7 +423,7 @@ mod tests {
         // element is not a page that tells anybody anything.
         for (locale, sentence) in [("fr", "Commande acceptée"), ("en", "Order accepted")] {
             let fake = FakeTransport::scripted(vec![Ok(order())]);
-            let html = render_path_with(&fake, "chez-test.captain.food", path, locale)
+            let html = render_path_with(&fake, "chez-test.captain.food", path, locale, None)
                 .await
                 .expect("the confirmation route renders");
             assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
@@ -436,7 +442,7 @@ mod tests {
         // A read the transport cannot answer degrades to the not-found hero — never a 500, never a
         // blank page (the SSR contract), and never a claim about an order we could not see.
         let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null }))]);
-        let html = render_path_with(&fake, "chez-test.captain.food", path, "fr")
+        let html = render_path_with(&fake, "chez-test.captain.food", path, "fr", None)
             .await
             .expect("the confirmation route still renders");
         assert!(html.contains("data-status=\"UNKNOWN\""), "{html}");
@@ -470,7 +476,7 @@ mod tests {
             Ok(profile()),
             Ok(json!({ "paymentStatus": null })),
         ]);
-        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
             .expect("the checkout route renders");
         assert_eq!(fake.call_count(), 3, "one read per declared resolver");
@@ -491,7 +497,7 @@ mod tests {
                 "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED",
             }})),
         ]);
-        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr")
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
             .expect("the checkout route renders");
         assert!(html.contains("id=\"payment_failed_state\""), "{html}");
@@ -501,6 +507,46 @@ mod tests {
             !html.contains("[checkout.payment_failed"),
             "no `[key]` fallback marker: {html}"
         );
+    }
+
+    /// #440: the delivery seam end to end at the router layer — the parsed key given to
+    /// `render_path_with` reaches the checkout shell as the mount div's `data-pk` (plus the
+    /// checkout-only stripe.js tag); no key ⇒ the degraded state, no attribute, no Stripe request.
+    /// The type is the gate: this entry takes `Option<&PublishableKey>`, so an empty or malformed
+    /// value is UNSPELLABLE here — it died at `PublishableKey::parse` in the composition root.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn the_checkout_shell_delivers_the_publishable_key_only_when_configured() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        let scripted = || {
+            FakeTransport::scripted(vec![
+                Ok(json!({ "cart": {
+                    "lines": [{ "offerId": "o1" }],
+                    "totalAmount": { "amountCents": 1000, "currency": "EUR" },
+                }})),
+                Ok(json!({ "me": null })),
+                Ok(json!({ "paymentStatus": null })),
+            ])
+        };
+
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let fake = scripted();
+        let html =
+            render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", key.as_ref())
+                .await
+                .expect("checkout renders");
+        assert!(html.contains("data-pk=\"pk_test_abc123\""), "{html}");
+        assert!(html.contains("js.stripe.com"), "the checkout shell carries stripe.js: {html}");
+        assert!(!html.contains("payment_unavailable_state"), "{html}");
+
+        let fake = scripted();
+        let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
+            .await
+            .expect("checkout renders");
+        assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
+        assert!(!html.contains("data-pk="), "{html}");
+        assert!(!html.contains("js.stripe.com"), "no key, no Stripe request: {html}");
     }
 
     #[cfg(feature = "ssr")]

@@ -198,6 +198,18 @@ place-order:
 
   metrics:
     - { name: "place_order_duration_ms", type: histogram, attributes: ["result"] }
+    # DEFECT counter (the customer_claim_stamp_failed_total pattern): a checkout shell that renders
+    # WITHOUT a mountable payment element produces ZERO place-order runs — the customer cannot even
+    # try — so this contract cannot see the failure by construction. The defect is counted at the
+    # render/mount seam instead. `reason` is the canonical bounded set:
+    #   stripe_key_absent    — emitted TODAY, server-side at the SSR render boundary (hosts.rs):
+    #                          no usable publishable key, the shell ships the degraded state.
+    #   stripe_js_load_failed | mount_threw — the client-side legs, DOCUMENTED-FOR-FUTURE: the
+    #                          browser degrades honestly but no beacon exists (no OTel in WASM),
+    #                          so these values are reserved, not yet emitted.
+    # Alert on ANY sustained non-zero rate. Distinct from checkout_payment_failures_total below,
+    # the saga's business metric for payments that RAN and failed.
+    - { name: "checkout_degraded_render_total", type: counter, attributes: ["reason"] }
   business_metrics:
     - { name: "orders_placed_total", type: counter, attributes: ["status"] }
     - { name: "checkout_payment_failures_total", type: counter, attributes: ["reason"] }

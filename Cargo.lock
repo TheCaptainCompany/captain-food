@@ -4717,6 +4717,8 @@ dependencies = [
  "hubrise-adapter",
  "infrastructure",
  "jsonwebtoken",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "regex",
  "reqwest",
  "serde",

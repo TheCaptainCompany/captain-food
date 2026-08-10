@@ -92,6 +92,12 @@ pub use auth::Principal;
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
 pub use graphql::schema as graphql_schema;
+// #440: the checkout-degrade EMISSION is proved through the real render path from its own test
+// PROCESS (tests/checkout_degraded_metric.rs) — the meters bind `opentelemetry::global::meter`
+// once per process, so the spy provider must be installed before the first metric call, a
+// guarantee the parallel in-crate harness cannot give. These three are that test's entry points.
+pub use hosts::{host_root, TenantLookup};
+pub use web_ssr::SsrExec;
 
 /// Minimal health/edge-proof: lets the `desktop` (Tauri) shell embed the server in-process and proves the
 /// server → shared_types edge (ADR-0035). The real DI graph is built in `router()`.
@@ -1276,7 +1282,14 @@ pub async fn router() -> Router {
     };
 
     let schema = graphql::schema::build_schema(read_deps, write_deps, Some(event_bus));
-    let ssr_exec = web_ssr::SsrExec { schema: schema.clone() };
+    let ssr_exec = web_ssr::SsrExec {
+        schema: schema.clone(),
+        // #440: parsed once, here — empty and malformed collapse to None (degrade), so no
+        // downstream consumer can be handed a key that cannot mount.
+        stripe_publishable_key: web::stripe::PublishableKey::parse(
+            config.stripe_publishable_key.as_deref(),
+        ),
+    };
 
     base.merge(graphql::routes::graphql_routes(schema))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
@@ -1654,6 +1667,9 @@ mod tests {
             ("^sk_(test|live)_[A-Za-z0-9]+$", "sk_live_abc123", true),
             ("^sk_(test|live)_[A-Za-z0-9]+$", "pk_test_abc123", false), // publishable in a secret slot
             ("^sk_test_[A-Za-z0-9]+$", "sk_live_abc123", false),        // LIVE key in the test slot
+            ("^pk_test_[A-Za-z0-9]+$", "pk_test_abc123", true),
+            ("^pk_test_[A-Za-z0-9]+$", "pk_live_abc123", false),        // LIVE publishable in the TEST slot (#440)
+            ("^pk_test_[A-Za-z0-9]+$", "sk_test_abc123", false),        // a SECRET key where a browser value goes (#440)
             ("^whsec_[A-Za-z0-9_-]+$", "whsec_abc123", true),
             ("^whsec_[A-Za-z0-9_-]+$", "sk_test_abc123", false),        // wrong secret entirely
             ("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", &"a".repeat(64), true),

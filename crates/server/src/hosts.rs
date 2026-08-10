@@ -70,7 +70,25 @@ pub async fn host_root(
 /// SSR one app page with live data (#92): the screen's `data_requirements` resolve through the
 /// in-process transport before rendering.
 async fn app_page(ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, locale: &str) -> Option<String> {
-    web::router::render_path_with(&ssr.transport(), raw_host, path, locale).await
+    // The SSR degrade boundary (#440): about to render the checkout shell with NO mountable
+    // publishable key — a degraded render that produces ZERO place-order runs, which the saga
+    // contract cannot see by construction. Counted HERE, the framework boundary, because `web`
+    // compiles to wasm and stays telemetry-free (specs/observability.yaml, place-order metrics).
+    if ssr.stripe_publishable_key.is_none() {
+        if let (_, Some(m)) = web::router::resolve(raw_host, path) {
+            if m.screen.id == "checkout" {
+                telemetry::meters::place_order::degraded_render("stripe_key_absent");
+            }
+        }
+    }
+    web::router::render_path_with(
+        &ssr.transport(),
+        raw_host,
+        path,
+        locale,
+        ssr.stripe_publishable_key.as_ref(),
+    )
+    .await
 }
 
 /// The tenant branch (#98): registered → storefront; positively-absent → the claim landing;
@@ -220,7 +238,19 @@ mod tests {
 
     fn ssr() -> crate::web_ssr::SsrExec {
         // A dep-less schema: PUBLIC reads resolve empty, which is exactly the SSR degrade contract.
-        crate::web_ssr::SsrExec { schema: crate::graphql::schema::build_schema(None, None, None) }
+        // No publishable key — the checkout-degrade default; `ssr_with_key` is the configured twin.
+        crate::web_ssr::SsrExec {
+            schema: crate::graphql::schema::build_schema(None, None, None),
+            stripe_publishable_key: None,
+        }
+    }
+
+    /// The #440 configured state: what production is with STRIPE_PUBLISHABLE_KEY set.
+    fn ssr_with_key(raw: &str) -> crate::web_ssr::SsrExec {
+        crate::web_ssr::SsrExec {
+            schema: crate::graphql::schema::build_schema(None, None, None),
+            stripe_publishable_key: web::stripe::PublishableKey::parse(Some(raw)),
+        }
     }
 
     async fn body_of(response: Response) -> String {
@@ -301,6 +331,48 @@ mod tests {
         // No database at all (dev): same fail-open behaviour.
         let response = tenant_page(&TenantLookup(None), &ssr(), "any-slug", "any-slug.captain.food", "/", "fr").await;
         assert!(body_of(response).await.contains("data-hydrate=\"restaurant\""));
+    }
+
+    /// #440 end to end through production's own call path (`tenant_page` → `app_page` →
+    /// `render_path_with`): the configured key reaches the served /checkout BODY as the mount
+    /// div's data attribute; unconfigured (and — the architect pin — EMPTY, which the generated
+    /// config validation lets through as `Some("")`) serves the degraded shell instead.
+    #[tokio::test]
+    async fn the_served_checkout_body_carries_the_key_iff_the_service_is_configured() {
+        let lookup = TenantLookup(Some(Arc::new(StubRestaurants {
+            registered: "chez-test",
+            erroring: false,
+            renamed_from: None,
+        })));
+        let page = |exec: crate::web_ssr::SsrExec| {
+            let lookup = &lookup;
+            async move {
+                let response = tenant_page(
+                    lookup,
+                    &exec,
+                    "chez-test",
+                    "chez-test.captain.food",
+                    "/checkout",
+                    "fr",
+                )
+                .await;
+                body_of(response).await
+            }
+        };
+
+        let html = page(ssr_with_key("pk_test_abc123")).await;
+        assert!(html.contains("data-pk=\"pk_test_abc123\""), "{html}");
+        assert!(html.contains("js.stripe.com"), "{html}");
+        assert!(!html.contains("payment_unavailable_state"), "{html}");
+
+        // Unset, empty, and malformed are ONE state — parse in the composition root collapses
+        // them — and all three serve the honest degrade, never a dead element.
+        for exec in [ssr(), ssr_with_key(""), ssr_with_key("pk_live_abc123")] {
+            let html = page(exec).await;
+            assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
+            assert!(!html.contains("data-pk="), "{html}");
+            assert!(!html.contains("js.stripe.com"), "{html}");
+        }
     }
 
     #[test]
