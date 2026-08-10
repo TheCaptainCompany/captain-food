@@ -59,3 +59,24 @@ keys:
         # closed: the customer is charged and the restaurant is never told. Tracked as issue #254.
         production: STRIPE_WEBHOOK_SECRET
         staging: STRIPE_WEBHOOK_SECRET
+
+
+  STRIPE_PUBLISHABLE_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripePublishableKeyTest'
+    mode_of: stripe
+    gates: >
+      Stripe PUBLISHABLE key the checkout SSR shell delivers to the browser so stripe.js can MOUNT
+      the payment element (issue #440). Public by design — the SUPABASE_PUBLISHABLE_KEY posture:
+      NOT secret-classed, because a value that ships to every browser hidden in Actions secrets is
+      configuration nobody can read. Deliberately OPTIONAL (presence-gated, issue #440): absent,
+      boot NEVER fails and /checkout degrades honestly — no payment element, no dead control —
+      counted by checkout_degraded_render_total. Must be switched together with STRIPE_SECRET_KEY
+      (`mode_of: stripe`): a pk/sk mode mismatch mounts an element whose PaymentIntents can never
+      confirm.
+    # NO BAKED VALUE YET — unlike the Supabase precedent there is no `deploy:` block, because no
+    # `pk_test_` value is recorded anywhere in this repo (verified 2026-08-10: zero hits outside a
+    # regex test fixture). Production is served solely by the STRIPE_PUBLISHABLE_KEY env var already
+    # sitting UNDECLARED on the hosting service (env > baked precedence). Reading the value off the
+    # Stripe dashboard and baking it per-profile is a named follow-up on issue #440, not a silent hole.

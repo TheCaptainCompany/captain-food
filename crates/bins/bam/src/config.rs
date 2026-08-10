@@ -308,6 +308,8 @@ pub struct Config {
     pub stripe_secret_key: String,
     /// HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY.
     pub stripe_webhook_secret: String,
+    /// Stripe PUBLISHABLE key the checkout SSR shell delivers to the browser so stripe.js can MOUNT the payment element (issue #440). Public by design — the SUPABASE_PUBLISHABLE_KEY posture: NOT secret-classed, because a value that ships to every browser hidden in Actions secrets is configuration nobody can read. Deliberately OPTIONAL (presence-gated, issue #440): absent, boot NEVER fails and /checkout degrades honestly — no payment element, no dead control — counted by checkout_degraded_render_total. Must be switched together with STRIPE_SECRET_KEY (`mode_of: stripe`): a pk/sk mode mismatch mounts an element whose PaymentIntents can never confirm.
+    pub stripe_publishable_key: Option<String>,
 }
 
 impl Config {
@@ -475,6 +477,7 @@ impl Config {
             problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
+        let stripe_publishable_key = raw("STRIPE_PUBLISHABLE_KEY");
         if let Some(v) = hubrise_api_base_url.as_deref() {
             if !v.is_empty() && !matches_pattern("^https?://", v) {
                 problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
@@ -550,6 +553,11 @@ impl Config {
                 problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: "^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
             }
         }
+        if let Some(v) = stripe_publishable_key.as_deref() {
+            if !v.is_empty() && !matches_pattern("^pk_test_[A-Za-z0-9]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_PUBLISHABLE_KEY", scalar: "StripePublishableKeyTest", pattern: "^pk_test_[A-Za-z0-9]+$", gates: "Stripe PUBLISHABLE key the checkout SSR shell delivers to the browser so stripe.js can MOUNT the payment element (issue #440). Public by design — the SUPABASE_PUBLISHABLE_KEY posture: NOT secret-classed, because a value that ships to every browser hidden in Actions secrets is configuration nobody can read. Deliberately OPTIONAL (presence-gated, issue #440): absent, boot NEVER fails and /checkout degrades honestly — no payment element, no dead control — counted by checkout_degraded_render_total. Must be switched together with STRIPE_SECRET_KEY (`mode_of: stripe`): a pk/sk mode mismatch mounts an element whose PaymentIntents can never confirm." });
+            }
+        }
         (
             Self {
                 profile,
@@ -616,6 +624,7 @@ impl Config {
                 order_retention_window_days,
                 stripe_secret_key,
                 stripe_webhook_secret,
+                stripe_publishable_key,
             },
             problems,
         )
@@ -700,12 +709,13 @@ impl Config {
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
         out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  STRIPE_PUBLISHABLE_KEY     = {}\n", self.stripe_publishable_key.as_deref().unwrap_or("unset")));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 63;
+pub const KEY_COUNT: usize = 64;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -773,6 +783,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ORDER_RETENTION_WINDOW_DAYS",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PUBLISHABLE_KEY",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR

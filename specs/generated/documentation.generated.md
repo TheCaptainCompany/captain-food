@@ -7216,7 +7216,7 @@ _criticality: **high**_
 | `event.publish` | `PRODUCER` | ✅ | — | `messaging.system`*, `business.event_type`* |
 | `event.consume.projection` | `CONSUMER` | ✅ | `>= 1` | `business.projection_name`* |
 
-- **Metrics**: `place_order_duration_ms` _(histogram)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
+- **Metrics**: `place_order_duration_ms` _(histogram)_, `checkout_degraded_render_total` _(counter)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
 - **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `pricing.compute`, `payment.intent.create`, `event.store.append`, `event.publish`, `event.consume.projection`]
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 1500ms · error rate ≤ 1%
 
@@ -10304,7 +10304,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(52)_
+### 🔤 Scalars _(53)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10352,6 +10352,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-stripesecretkey"></a>🔤 `StripeSecretKey` | string `^sk_(test|live)_[A-Za-z0-9]+$` | A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.  |
 | <a id="scalar-stripesecretkeytest"></a>🔤 `StripeSecretKeyTest` | string `^sk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).  |
 | <a id="scalar-stripesecretkeylive"></a>🔤 `StripeSecretKeyLive` | string `^sk_live_[A-Za-z0-9]+$` | A Stripe LIVE-mode secret key. The counterpart slot: it rejects a test key, so a go-live that silently kept test credentials cannot boot as if it were taking real payments.  |
+| <a id="scalar-stripepublishablekeytest"></a>🔤 `StripePublishableKeyTest` | string `^pk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode PUBLISHABLE key. Public by design — it ships to every browser that loads the checkout shell and can only initialise stripe.js, never move money — which is why it is not secret-classed. The `^pk_test_` anchor makes a LIVE publishable key or ANY secret key unspellable in this slot, mirroring the sk_ scalars rejecting `pk_`. Go-live deliberately requires a spec change here: the live publishable key gets its own scalar and mode witness (ADR-20260809-050000 decision 5), so production cannot start fronting live-mode Stripe by a dashboard edit alone.  |
 | <a id="scalar-stripewebhooksecret"></a>🔤 `StripeWebhookSecret` | string `^whsec_[A-Za-z0-9_-]+$` | A Stripe webhook signing secret. Stripe issues a DIFFERENT one per mode, so it must be switched together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed — the customer is charged and the restaurant is never told.  |
 | <a id="scalar-authsessionkey"></a>🔤 `AuthSessionKey` | string `^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$` | The AES-256-GCM key encrypting parked auth sessions: exactly 32 bytes, as 64 hex chars or standard base64. A key of the wrong length currently makes the store fall back to the no-op, so login SILENTLY degrades to anonymous-only — the pattern turns that into a startup failure.  |
 | <a id="scalar-postgresurl"></a>🔤 `PostgresUrl` | string `^postgres(ql)?://` | A PostgreSQL connection string. On Supabase this must be the SESSION POOLER host (IPv4); the direct `db.<ref>.supabase.co` host is IPv6-only and unreachable from Render — a distinction the URL shape cannot express, so it stays documented in the key's `gates`.  |

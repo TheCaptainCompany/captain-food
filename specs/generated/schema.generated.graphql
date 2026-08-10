@@ -60,6 +60,7 @@ scalar ConfigBoolean
 scalar StripeSecretKey
 scalar StripeSecretKeyTest
 scalar StripeSecretKeyLive
+scalar StripePublishableKeyTest
 scalar StripeWebhookSecret
 scalar AuthSessionKey
 scalar PostgresUrl
