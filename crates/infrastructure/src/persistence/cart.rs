@@ -52,8 +52,34 @@ impl CartReadRepository for PgCartRepository {
         rows.iter().map(cart_store::decode).collect()
     }
 
+    /// One OPEN cart by id, or `None`.
+    ///
+    /// Same OPEN-only rule as `by_customer`, in the same place, for the same reason (#451): the
+    /// caller prices what this returns against TODAY's catalog, and a CHECKED_OUT cart's money was
+    /// frozen at payment intent. One rule enforced on one path and not the other is how a diff
+    /// ends up asserting two different answers to the same question.
+    ///
+    /// Post-checkout money is NOT this port's to answer: the aggregate that owns "what was
+    /// charged" is the Order, and the frozen amount lives in the CheckoutSnapshot on
+    /// `PaymentIntentCreated`. A cart read model answering a receipt question is a wrong-aggregate
+    /// read — so `None` here is the final shape, not a gap awaiting a snapshot lookup.
+    ///
+    /// Deliberately NOT delegating to `cart_store::load` any more: that function is also the
+    /// PROJECTOR's read-modify-write (`projection/worker.rs` loads prior state before folding the
+    /// next event), so an OPEN predicate there would stop a CHECKED_OUT cart from ever folding
+    /// another event onto itself. The narrowing belongs to the READ port only.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError> {
-        cart_store::load(&self.pool, id).await
+        let sql = format!(
+            "SELECT {} FROM cart WHERE cart_id = $1 AND status = $2",
+            cart_store::COLUMNS
+        );
+        let row = sqlx::query(&sql)
+            .bind(id.0)
+            .bind(CartStatus::OPEN.to_text())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.as_ref().map(cart_store::decode).transpose()
     }
 
     /// The session's OPEN carts (CartBindingProcess's `read` step): a real SQL predicate over the

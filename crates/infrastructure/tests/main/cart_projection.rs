@@ -94,17 +94,70 @@ async fn cart_events_fold_into_the_read_model() {
     worker.run_once().await.expect("run_once (no-op)");
 
     // 3) The read repository sees the folded state through the typed row.
+    //
+    // `by_customer` is OPEN-ONLY as of #451 — a real SQL predicate, not a courtesy. Every consumer
+    // prices what this port returns against TODAY's catalog, and this cart's money was frozen when
+    // it checked out, so repricing it would render a number that never matched what was charged.
+    // The cart just went CHECKED_OUT above, so the list is now EMPTY: that is the contract working,
+    // not the projection losing a row.
     let repo = PgCartRepository::new(pool.clone());
     let carts = repo.by_customer(CustomerId(customer_id)).await.expect("by_customer");
-    assert_eq!(carts.len(), 1);
-    assert_eq!(carts[0].cart_id.0, cart_id);
-    assert_eq!(carts[0].status, CartStatus::CHECKED_OUT);
-    assert_eq!(carts[0].restaurant_id.0, restaurant_id);
-    assert_eq!(carts[0].lines, serde_json::json!([]));
+    assert!(
+        carts.is_empty(),
+        "a CHECKED_OUT cart must not appear in the priced-list port (#451): {carts:?}"
+    );
 
-    let by_id = repo.by_id(CartId(cart_id)).await.expect("by_id").expect("cart exists by id");
-    assert_eq!(by_id.customer_id.map(|c| c.0), Some(customer_id));
-    assert!(by_id.created_at <= by_id.updated_at);
+    // by-id is OPEN-only too (#451): ONE rule, both lookups. A CHECKED_OUT cart is `None` here —
+    // post-checkout money is read from the Order, the aggregate that owns what was charged, never
+    // re-derived from a cart against today's catalog.
+    assert!(
+        repo.by_id(CartId(cart_id)).await.expect("by_id").is_none(),
+        "a CHECKED_OUT cart must not be readable through the priced by-id port (#451)"
+    );
+
+    // But the ROW is still there and still correctly folded — read beneath the port so the
+    // emptiness above is provably the STATUS PREDICATE and not a lost projection. This assertion
+    // is also what fails if the money-free upsert cannot write (the pre-#451 NOT NULL columns):
+    // it is the difference between "filtered" and "the projector never wrote anything".
+    let (raw_status, raw_lines, raw_restaurant): (String, serde_json::Value, uuid::Uuid) =
+        sqlx::query_as("SELECT status, lines, restaurant_id FROM cart WHERE cart_id = $1")
+            .bind(cart_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the checked-out row is still projected");
+    assert_eq!(raw_status, "CHECKED_OUT");
+    assert_eq!(raw_lines, serde_json::json!([]));
+    assert_eq!(raw_restaurant, restaurant_id);
+
+    // And while it was still OPEN the same ports DID return it — otherwise "empty" above would pass
+    // even if they were broken outright. Fold a second, still-OPEN cart to prove the positive half
+    // against the real SQL, through BOTH lookups.
+    let open_cart = uuid::Uuid::new_v4();
+    let open_stream = format!("Cart-{open_cart}");
+    append_event(
+        &pool,
+        &open_stream,
+        1,
+        "CartStarted",
+        serde_json::json!({
+            "cartId": open_cart, "restaurantId": restaurant_id,
+            "sessionId": uuid::Uuid::new_v4(), "customerId": customer_id,
+        }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (second cart)");
+    let carts = repo.by_customer(CustomerId(customer_id)).await.expect("by_customer (open)");
+    assert_eq!(carts.len(), 1, "the OPEN cart is returned: {carts:?}");
+    assert_eq!(carts[0].cart_id.0, open_cart);
+    assert_eq!(carts[0].status, CartStatus::OPEN);
+
+    let open_by_id =
+        repo.by_id(CartId(open_cart)).await.expect("by_id (open)").expect("the OPEN cart by id");
+    assert_eq!(open_by_id.cart_id.0, open_cart);
+    assert_eq!(open_by_id.status, CartStatus::OPEN);
+    assert_eq!(open_by_id.restaurant_id.0, restaurant_id);
+    assert_eq!(open_by_id.customer_id.map(|c| c.0), Some(customer_id));
+    assert!(open_by_id.created_at <= open_by_id.updated_at);
 
     let absent = repo.by_id(CartId(uuid::Uuid::new_v4())).await.expect("by_id (absent)");
     assert!(absent.is_none());

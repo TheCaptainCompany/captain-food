@@ -270,7 +270,12 @@ pub trait CartReadRepository: Send + Sync {
     /// Implementations must filter, and must bound the row count (the caller pays one catalog read
     /// per row).
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
-    /// A single cart by id (session-scoped), or `None` if absent.
+    /// A single **OPEN** cart by id, or `None` when absent OR no longer open.
+    ///
+    /// OPEN-only for the same reason as [`Self::by_customer`] and stated here for the same reason:
+    /// it is a PORT obligation, so both lookups give the same answer to "may this be repriced?".
+    /// A CHECKED_OUT cart resolving `None` is correct, not a gap — post-checkout money is read from
+    /// the Order (the aggregate that owns what was charged), never re-derived from a cart.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;
 
     /// The session's OPEN carts, most recently updated first — CartBindingProcess's `read` step
