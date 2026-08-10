@@ -67,8 +67,13 @@ impl CartReadRepository for MemCarts {
         rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(rows)
     }
+    /// OPEN-only, mirroring the Pg adapter's predicate (#451).
     async fn by_id(&self, id: ds::CartId) -> Result<Option<CartRow>, DomainError> {
-        Ok(self.0.iter().find(|r| r.cart_id == id).cloned())
+        Ok(self
+            .0
+            .iter()
+            .find(|r| r.cart_id == id && r.status == ds::CartStatus::OPEN)
+            .cloned())
     }
     async fn open_by_session(&self, session_id: ds::SessionId) -> Result<Vec<CartRow>, DomainError> {
         let mut rows: Vec<CartRow> = self
@@ -651,6 +656,42 @@ async fn an_unresolvable_line_errors_the_read_instead_of_lying() {
     assert!(
         resp.errors[0].message.contains("PriceUnresolvable"),
         "the typed code surfaces: {:?}",
+        resp.errors[0].message
+    );
+}
+
+/// A projection row whose `lines` jsonb does not match the repricing-input shape ERRORS the read
+/// rather than rendering anything. This is the failure mode a bad fold or a half-applied migration
+/// produces, and it is on a money path: the customer must see no price, never a cart silently
+/// missing the lines that could not be parsed.
+///
+/// It is also the exit that used to sit BEFORE the `cart.price` span existed, so it returned an
+/// error to the customer while the trace exported a clean success. The span placement itself is
+/// pinned durably by the observability suite (#471); this test pins the customer-visible half —
+/// that the read fails closed at all.
+#[tokio::test]
+async fn a_malformed_lines_row_errors_the_read_instead_of_rendering_a_partial_cart() {
+    let restaurant = ds::RestaurantId(uid(90));
+    let mut row = cart_row(1, restaurant, 10, Some(5), vec![line_3400()], 100);
+    // Shaped like something, but not like CartLineItem — a quantity where the object should be.
+    row.lines = json!([{ "cartLineId": "not-a-uuid", "quantity": "two" }]);
+    let schema = schema_over(vec![row], restaurant);
+
+    let resp = schema
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Customer)
+                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+        )
+        .await;
+    assert!(
+        !resp.errors.is_empty(),
+        "malformed lines must ERROR the read, got data {:?}",
+        resp.data.into_json()
+    );
+    assert!(
+        resp.errors[0].message.contains("cart lines are malformed"),
+        "the failure names its cause: {:?}",
         resp.errors[0].message
     );
 }

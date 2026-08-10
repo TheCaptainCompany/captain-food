@@ -39,14 +39,26 @@ pub struct SsrExec {
 
 impl SsrExec {
     /// The transport one page render executes through.
+    ///
+    /// The render's correlation id is minted HERE, once, and carried on the transport — NOT inside
+    /// `execute`. A page render resolves EVERY screen binding through this one transport
+    /// (`web::router::render_path_with` loops `execute_resolver` once per `data_requirements`
+    /// entry — three calls for the checkout screen), so minting per `execute` would emit N
+    /// unrelated ids for a single render and correlate none of them to each other. That is the
+    /// exact defect this type was introduced to fix on the HTTP path.
     pub fn transport(&self) -> SchemaTransport {
-        SchemaTransport { schema: self.schema.clone() }
+        SchemaTransport {
+            schema: self.schema.clone(),
+            correlation_id: RequestCorrelationId::mint(),
+        }
     }
 }
 
-/// One render's transport: PUBLIC + anonymous + sessionless, per the module contract.
+/// One render's transport: PUBLIC + anonymous + sessionless, per the module contract, carrying the
+/// ONE correlation id shared by every binding that render resolves.
 pub struct SchemaTransport {
     schema: CaptainSchema,
+    correlation_id: RequestCorrelationId,
 }
 
 #[async_trait]
@@ -58,10 +70,10 @@ impl Transport for SchemaTransport {
             .data(Principal::anonymous())
             .data(SessionHeader(None))
             .data(TraceContext(None))
-            // One render is one request: its read-path spans share a correlation id like any HTTP
-            // read. This says nothing about identity — the transport stays PUBLIC, anonymous and
-            // sessionless per the module contract above.
-            .data(RequestCorrelationId::mint());
+            // The RENDER's id, minted once in `transport()` and shared by every binding this render
+            // resolves — see the note there. Says nothing about identity: the transport stays
+            // PUBLIC, anonymous and sessionless per the module contract above.
+            .data(self.correlation_id);
         let response = self.schema.execute(request).await;
         if !response.errors.is_empty() {
             // Same envelope rule as the HTTP transport: anything in `errors` fails the whole read

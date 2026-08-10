@@ -105,82 +105,110 @@ pub async fn priced(
     restaurant: RestaurantRow,
     correlation_id: uuid::Uuid,
 ) -> async_graphql::Result<Cart> {
-    let lines: Vec<CartLineItem> = serde_json::from_value(row.lines.clone())
-        .map_err(|e| async_graphql::Error::new(format!("cart lines are malformed: {e}")))?;
-
     let span = telemetry::spans::cart_price(&row.cart_id.0.to_string());
     telemetry::spans::record_correlation_id(&span, &correlation_id.to_string());
     let started = std::time::Instant::now();
-    let result = async {
+
+    // EVERY fallible step of the read lives inside the span, and the timing closes only after the
+    // last of them. The span answers exactly one question — "did this customer get a price?" — so
+    // any exit that returns a GraphQL error has to be inside it. Three used to sit outside (the
+    // `lines` parse before it, and the two API-shape mappings after it), each returning an error to
+    // the customer while the trace exported a clean SUCCESS. The serde mapping is inside the
+    // customer's wait too, so leaving it outside the timer also understated `cart_price_ms`.
+    let outcome = async {
+        // The repricing inputs, as the money-free fold stores them. Malformed `lines` is a real
+        // technical failure on a money path, not a parse detail.
+        let lines: Vec<CartLineItem> = serde_json::from_value(row.lines.clone())
+            .map_err(|e| async_graphql::Error::new(format!("cart lines are malformed: {e}")))?;
+
+        // An EMPTY open cart: the true sum of zero lines, no catalog read needed. Still a priced
+        // read, and still a success the contract requires a span for.
         if lines.is_empty() {
-            return Ok(None);
+            return Ok(unpriced_empty(&row, restaurant));
         }
-        let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
-        price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await.map(Some)
-    }
-    .instrument(span.clone())
-    .await;
-    telemetry::meters::cart_price::duration(started.elapsed().as_secs_f64() * 1000.0);
 
-    let priced = result.map_err(|e| {
-        if e.code() == Some("PriceUnresolvable") {
-            // Canonical reason set (specs/observability.yaml cart-price): offer_gone covers a
-            // line's offer OR selected option no longer resolving (and the currency-clash defect);
-            // policy_missing / stock_unknown are reserved for legs not yet on this seam.
-            telemetry::meters::cart_price::unresolvable("offer_gone");
+        let priced = async {
+            let snapshot = CatalogSnapshot::load(catalogs, row.restaurant_id).await?;
+            price_cart(&snapshot, row.cart_id, row.restaurant_id, &lines).await
         }
-        // The span's ERROR status is what makes the contract's `technical_error: any_span_errors`
-        // rule fire. Without it the counter above would tick while the trace exported a SUCCESS.
-        telemetry::spans::record_cart_price_error(&span);
-        async_graphql::Error::new(e.to_string())
-    })?;
+        .await
+        .map_err(|e| {
+            if e.code() == Some("PriceUnresolvable") {
+                // Canonical reason set (specs/observability.yaml cart-price): offer_gone covers a
+                // line's offer OR selected option no longer resolving (and the currency-clash
+                // defect); policy_missing / stock_unknown are reserved for legs not yet on this
+                // seam. Only THIS branch is reason-coded — a catalog-load failure is not an
+                // unresolvable price, though it does fail the read (and marks the span ERROR
+                // below, like every other failure).
+                telemetry::meters::cart_price::unresolvable("offer_gone");
+            }
+            async_graphql::Error::new(e.to_string())
+        })?;
 
-    let Some(priced) = priced else {
-        return Ok(Cart {
+        // Domain → API shapes share the serde spelling (camelCase) — the same round-trip the Order
+        // read model uses for its jsonb items.
+        let lines = serde_json::to_value(&priced.items)
+            .ok()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .ok_or_else(|| async_graphql::Error::new("priced lines failed to map to the API shape"))?;
+        let total_amount = Money {
+            amount_cents: MoneyCents(priced.total_amount.amount_cents.0),
+            currency: CurrencyCode(priced.total_amount.currency.0.clone()),
+        };
+        let breakdown = serde_json::to_value(&priced.breakdown)
+            .ok()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .ok_or_else(|| async_graphql::Error::new("breakdown failed to map to the API shape"))?;
+        Ok(Cart {
             id: row.cart_id.into(),
             restaurant_id: row.restaurant_id.into(),
             customer_id: row.customer_id.map(Into::into),
             status: row.status.into(),
-            lines: Vec::new(),
-            total_amount: Money {
-                amount_cents: MoneyCents(0),
-                currency: CurrencyCode("EUR".into()),
-            },
-            breakdown: None,
+            lines,
+            total_amount,
+            breakdown: Some(breakdown),
+            // The Uber-comparison estimate is a policy read this seam does not perform yet (#463
+            // owns the impure survivors; the degenerate shape ships — same as checkout).
             uber_comparison: None,
             updated_at: row.updated_at,
             restaurant: restaurant.into(),
-        });
-    };
+        })
+    }
+    .instrument(span.clone())
+    .await;
 
-    // Domain → API shapes share the serde spelling (camelCase) — the same round-trip the Order
-    // read model uses for its jsonb items.
-    let lines = serde_json::to_value(&priced.items)
-        .ok()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .ok_or_else(|| async_graphql::Error::new("priced lines failed to map to the API shape"))?;
-    let total_amount = Money {
-        amount_cents: MoneyCents(priced.total_amount.amount_cents.0),
-        currency: CurrencyCode(priced.total_amount.currency.0.clone()),
-    };
-    let breakdown = serde_json::to_value(&priced.breakdown)
-        .ok()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .ok_or_else(|| async_graphql::Error::new("breakdown failed to map to the API shape"))?;
-    Ok(Cart {
+    telemetry::meters::cart_price::duration(started.elapsed().as_secs_f64() * 1000.0);
+
+    // ONE choke point decides the span's status for the whole read. Every failure above — malformed
+    // lines, catalog load, unresolvable price, either API-shape mapping — marks the span ERROR, so
+    // the contract's `technical_error: any_span_errors` rule classifies all of them and none can
+    // export as a success. A new failure mode added inside the block inherits this by construction
+    // rather than by remembering.
+    outcome.map_err(|e| {
+        telemetry::spans::record_cart_price_error(&span);
+        e
+    })
+}
+
+/// The zero-lines cart: the honest sum of nothing, not a fabricated payable. Shares one
+/// construction with nothing else on purpose — the PRICED shape is built from `price_cart`'s
+/// output and must never be reachable from a path that did not price.
+fn unpriced_empty(row: &CartRow, restaurant: RestaurantRow) -> Cart {
+    Cart {
         id: row.cart_id.into(),
         restaurant_id: row.restaurant_id.into(),
         customer_id: row.customer_id.map(Into::into),
         status: row.status.into(),
-        lines,
-        total_amount,
-        breakdown: Some(breakdown),
-        // The Uber-comparison estimate is a policy read this seam does not perform yet (#463
-        // owns the impure survivors; the degenerate shape ships — same as checkout).
+        lines: Vec::new(),
+        total_amount: Money {
+            amount_cents: MoneyCents(0),
+            currency: CurrencyCode("EUR".into()),
+        },
+        breakdown: None,
         uber_comparison: None,
         updated_at: row.updated_at,
         restaurant: restaurant.into(),
-    })
+    }
 }
 
 #[cfg(test)]
@@ -226,8 +254,14 @@ mod tests {
             rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
             Ok(rows)
         }
+        /// OPEN-only, like the Pg adapter (#451) -- a double that answers a question the real
+        /// port refuses would make every by-id test above vacuous.
         async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError> {
-            Ok(self.0.iter().find(|r| r.cart_id == id).cloned())
+            Ok(self
+                .0
+                .iter()
+                .find(|r| r.cart_id == id && r.status == CartStatus::OPEN)
+                .cloned())
         }
         async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError> {
             let mut rows: Vec<CartRow> = self
