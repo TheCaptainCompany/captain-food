@@ -50,6 +50,14 @@ pub enum MissingReason {
     /// The deploy target has the name, mapped to the empty string. Empty == missing: the
     /// "never written empty" doctrine (render-config-sync.yml) — a key that LOOKS configured but is
     /// blank is worse than one plainly absent, so it is fatal exactly as an absence is.
+    ///
+    /// FIDELITY NOTE (architect, #444). With the `toJSON(secrets)` present-set, this branch is
+    /// mostly defensive: an UNSET Actions secret is OMITTED from the object (→ `Absent`, not
+    /// `Empty`), and GitHub's UI forbids empty secret VALUES (the REST API requires an
+    /// `encrypted_value`), so a secret-side empty is an API-only edge. The `Empty` branch's
+    /// guaranteed reach is the declared-side/defensive case and any FUTURE present-set that can hold
+    /// blanks (e.g. a kubectl-read cluster secret) — it does not claim to catch a routine
+    /// Actions-side empty.
     Empty,
 }
 
@@ -192,7 +200,10 @@ fn main() -> ExitCode {
     };
 
     if !drift.extra.is_empty() {
-        eprintln!("secret-gate: {} present-but-undeclared secret(s) (non-fatal report):", drift.extra.len());
+        // NON-FATAL (GitHub `::warning::` annotation): RENDER_API_KEY, GITHUB_TOKEN,
+        // RENDER_DEPLOY_HOOK_URL, MKS_KUBECONFIG are legitimately present and declared by no
+        // deployed key — a report, never a failure.
+        eprintln!("::warning::secret-gate: {} present-but-undeclared secret(s) (non-fatal report)", drift.extra.len());
         for name in &drift.extra {
             eprintln!("  UNDECLARED  {name}  [in the deploy target, declared by no deployed key]");
         }
@@ -231,7 +242,10 @@ mod tests {
     #[test]
     fn renamed_pair_absent_is_fatal_and_names_the_github_secret() {
         let declared = map(&[("STRIPE_SECRET_KEY_PROD", "STRIPE_SECRET_KEY")]);
-        let present = map(&[("SOMETHING_ELSE", "x")]);
+        // The DECOY (mutation-kill, beck): the env key `STRIPE_SECRET_KEY` IS present. A mutant
+        // that looked up `present.get(env_key)` would find "decoy" and wrongly pass. The gate keys
+        // on the `from_github_secret` name (STRIPE_SECRET_KEY_PROD), which is absent -> fatal.
+        let present = map(&[("STRIPE_SECRET_KEY", "decoy"), ("SOMETHING_ELSE", "x")]);
         let drift = compare_secrets(&declared, &present);
         assert!(drift.is_fatal(), "an absent declared repo secret must be fatal");
         assert_eq!(drift.missing.len(), 1);

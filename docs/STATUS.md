@@ -2,6 +2,36 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-10 — PRE-DEPLOY SECRET-PRESENCE GATE: a declared secret missing/mis-named in the
+> deploy target now FAILS the deploy before Render is told to pull**
+> ([#444 "CI gate: declared secrets must exist as repo secrets before deploy"](https://github.com/TheCaptainCompany/captain-food/issues/444),
+> PR [#450](https://github.com/TheCaptainCompany/captain-food/pull/450), epic
+> [#429](https://github.com/TheCaptainCompany/captain-food/issues/429), mob protocol). New binary
+> `secret-gate` (`tools/codegen-rs/src/secret_gate/main.rs`): a PURE comparison
+> `compare_secrets(declared, present)` of the repo secrets the configuration DSL DECLARES as
+> deployed-key sources — `deploy/generated/secret-keys.json` `from_github_secret` names, itself a
+> deterministic fold of `specs/**/configuration.yaml` (the **superset-by-construction** declared
+> source; farley-verified) — against the ones the reachable deploy target holds. Declared-but-absent
+> **or present-but-empty** (never-written-empty doctrine) ⇒ FATAL, names each repo secret;
+> present-but-undeclared ⇒ NON-FATAL `::warning::` (`RENDER_API_KEY`/`GITHUB_TOKEN`/
+> `RENDER_DEPLOY_HOOK_URL`/`MKS_KUBECONFIG` are legitimately undeclared). Wired into `deploy.yml`
+> (the authoritative Render path) as the FIRST step, present-set from `${{ toJSON(secrets) }}` piped
+> on stdin. Unit-tested (comparison + a mutation-kill decoy proving it keys on `from_github_secret`,
+> not the env key) plus a `CARGO_BIN_EXE` integration test running the real binary against the real
+> artifact. **WHAT IT DOES NOT COVER — stated loudly in the tool's own output, the workflow comment,
+> and here**: (1) **VALUES** — a name present but GARBAGE (a `pk_test` where prod needs `sk_live`,
+> an expired token) PASSES; mis-NAMING and ABSENCE only, the value-level verdict stays
+> `prod-smoke.sh`. (2) The **K8s `captain-secrets` sealed store** — populated out of band (#358), not
+> from Actions; a name here does not prove it was sealed into the cluster. This gate proves the
+> Actions → Render/declared-source NAMING boundary; the K8s store remains a NAMED RESIDUAL GAP
+> (checkable once an Actions-reachable apply path exists — follow-up). **`toJSON(secrets)` fidelity**:
+> an UNSET Actions secret is ABSENT from the object (→ reported Absent), and GitHub's UI forbids
+> empty secret VALUES, so the `Empty` branch's guaranteed reach is the declared-side/defensive case
+> and any future present-set that can hold blanks (e.g. a kubectl-read cluster secret), not a routine
+> Actions secret-side empty. **Scope fences held** (#329 trap): NOT asserting
+> `secret-keys.json` vs `render-config-sync.json` production-set equality (compiler-owned, same
+> emitter run, false-fails when worker consumers widen the set), NOT checking the cluster-side store.
+
 > ✅ **2026-08-10 — THE STRIPE PUBLISHABLE KEY REACHES /checkout AND THE PAYMENT ELEMENT CAN
 > MOUNT** ([#440 "Stripe publishable key: StripePublishableKeyTest scalar + payments configuration key, SSR-delivered to /checkout so the payment element can mount"](https://github.com/TheCaptainCompany/captain-food/issues/440),
 > PR [#441](https://github.com/TheCaptainCompany/captain-food/pull/441), mob protocol; decisions in
