@@ -22,10 +22,14 @@
 > records that this already happened once on the 2 GB Supabase disk. Everything proposed is a **PR
 > against an unapplied desired state** (`deploy/platform/README.md`: *"nothing applies this tree
 > today"*) — the same work after cutover costs a supervised console session. Two adjacent defects
-> found and NOT smuggled into the proposal: `migrations/20260717120000_domain_schema.sql:125`
-> duplicates the `UNIQUE (stream_name, version)` on line 123 (a redundant index written on every
-> append, forever), and `temp_file_limit` is unset while `bam.yaml` points analytics at the order
-> path's database.
+> found and filed separately rather than smuggled into the proposal:
+> [#442 "domain_events carries a redundant (stream_name, version) index — written on every append, forever"](https://github.com/TheCaptainCompany/captain-food/issues/442)
+> and [#443 "temp_file_limit is unset while BAM analytics shares the order path's database — one query can fill the money path's volume"](https://github.com/TheCaptainCompany/captain-food/issues/443).
+> One concern on the proposal is already **resolved**: net new PostgreSQL connections are **zero**
+> (the collector scrapes CNPG's HTTP endpoint, and `claude_ro`'s `connectionLimit: 3` is already
+> inside the 220). The node-memory concern **shrank** on the finding that PVC utilisation comes from
+> the kubelet's `kubelet_volume_stats_*`, so kube-state-metrics is not needed for the storage signal
+> at all.
 >
 > **Decisions awaiting the product owner** ([DECISIONS.md §25](proposals/DECISIONS.md)): D1 collection
 > mechanism · D2 what constitutes a page (every alert path today ends at a GitHub issue, which at

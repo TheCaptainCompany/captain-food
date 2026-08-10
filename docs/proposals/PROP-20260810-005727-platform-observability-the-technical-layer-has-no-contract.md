@@ -5,9 +5,9 @@
 - **Tracking issue**: [#364 "Observability on MKS: OTel collector placement, symptom alerts that open issues, contracts extended"](https://github.com/TheCaptainCompany/captain-food/issues/364)
 - **Realized by**: _(filled at completion)_
 - **Concerns**:
-  - [ ] node-memory-budget: D1's collector + kube-state-metrics add ~300-400 Mi to a node ADR-20260807-114122 already calls snug (~5.5 Gi of ~6.3 Gi allocatable) — the sizing must be re-measured before this is applied, or the collector displaces a bin.
-  - [ ] honeycomb-event-volume: infrastructure metrics are high-cardinality by nature (per-pod, per-container, per-volume). The EU plan's monthly event ceiling must be checked against the proposed scrape set BEFORE the firehose is pointed at it, or the first month's bill is the alert.
-  - [ ] connection-budget: `max_connections: 220` against ~185 at bin cutover (37 db-needing bins x 5) leaves ~16% headroom. Every new database-touching probe in §4 must be counted into that budget, not added beside it.
+  - [ ] node-memory-budget: D1's collector adds to a node ADR-20260807-114122 already calls snug (~5.5 Gi of ~6.3 Gi allocatable). **Sharpened 2026-08-10** — smaller than first written: the disk signal that triggered this proposal is `kubelet_volume_stats_available_bytes`, served by the **kubelet**, so kube-state-metrics is NOT required for §4 A and can be dropped from the first cut. A collector alone is ~256 Mi against ~800 Mi spare. Still unchecked because it is a real trade — it spends roughly a third of the remaining headroom, and the product owner owns what that displaces.
+  - [ ] honeycomb-event-volume: infrastructure metrics are high-cardinality by nature (per-pod, per-container, per-volume). **Sharpened 2026-08-10**: the §4 scrape set is ~40 series across ~60 pods; at 60s resolution that is order 10^6 events/month, at 15s order 4x that. The number to check is the plan ceiling, which this session cannot read (the Honeycomb MCP server needs an interactive OAuth flow). Resolution is one look at the EU plan — **set the scrape interval from that number, not the other way round**.
+  - [x] connection-budget: **resolved 2026-08-10 — net new PostgreSQL connections are zero.** The collector scrapes CNPG's **HTTP** metrics endpoint, not the database, so it adds no backend. The CronJob prober connects as `claude_ro`, whose `connectionLimit: 3` is already declared in `cluster.yaml:90` and therefore already inside the 220. Nothing in §4 widens the budget; the ~185-at-cutover ceiling question stands on its own (it is `max_connections`' problem, not this proposal's).
 
 > History lives in `git log -p` on this file (ADR-20260801-020000) — this document always holds the
 > clean CURRENT state of the design.
@@ -185,6 +185,11 @@ Legend: **P** = paging (D2's SEV-1 set) · **W** = warn, opens an issue · **T**
 "exists" marks what the tree already does — five of these are already built and working.
 
 ### A. Storage and capacity — the trigger for this proposal
+
+Source note (added 2026-08-10, and it lowers D1's cost): PVC utilisation comes from the **kubelet**'s
+`kubelet_volume_stats_available_bytes` / `_capacity_bytes`, not from kube-state-metrics. The signal
+that triggered this entire proposal therefore needs a scrape target every cluster already runs — no
+extra exporter, no extra pod.
 
 | signal | why it matters here | level |
 |---|---|---|
@@ -456,10 +461,13 @@ Vertical slices of the **same** shape, not different shapes (ADR-20260808-235113
 5. **SEV-1 SMS path** (D2 B) — last, because it is worthless until the signals it carries exist, and
    it needs its own does-the-alert-path-work check.
 
-Two things that are **not** in this proposal but were found while writing it, and belong on their own
-issues rather than being smuggled in here: the redundant `domain_events (stream_name, version)` index
-(`migrations/20260717120000_domain_schema.sql:125` duplicates the `UNIQUE` on line 123), and
-`temp_file_limit` being unset while `bam.yaml` points analytics at the order path's database.
+Two things that are **not** in this proposal but were found while writing it, filed on their own
+issues rather than smuggled in here:
+
+- [#442 "domain_events carries a redundant (stream_name, version) index — written on every append, forever"](https://github.com/TheCaptainCompany/captain-food/issues/442)
+- [#443 "temp_file_limit is unset while BAM analytics shares the order path's database — one query can fill the money path's volume"](https://github.com/TheCaptainCompany/captain-food/issues/443)
+
+Both are cheap now for the same reason this proposal is: the tree they touch is not applied yet.
 
 ## 8. Drawbacks — why we might regret the whole thing
 

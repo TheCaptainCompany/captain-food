@@ -924,3 +924,25 @@ through the claim -> PR flow rather than riding a docs commit.
 containing `` `system` `` silently lost the word and committed the gap. The existing ASCII rule
 covers Makefile recipes; this is the same class one layer over. Write any commit message with
 backticks, `$`, or `!` to a file and use `git commit -F <file>`.
+
+### Provider prices come from the catalog API, not the pricing page
+
+`WebFetch` on OVH's pricing pages (`/en/public-cloud/prices/`, `/fr/…`, the Block Storage product
+page) returns navigation chrome and `[Content truncated]` where the price tables should be — they are
+JS-rendered. Four fetches produced zero numbers. The public **order catalog API** returns all of them
+as JSON, unauthenticated:
+
+```bash
+curl -sS "https://api.ovh.com/v1/order/catalog/public/cloud?ovhSubsidiary=FR" -o cat.json   # ~8 MB
+# addons[].planCode + .pricings[].price (price is in 1e-8 units: 8600000 -> EUR 0.086)
+```
+
+`planCode` is the key: `volume.high-speed.monthly.postpaid`, `storage-standard.monthly.postpaid`,
+`snapshot.monthly.postpaid`, `d2-8.monthly.postpaid`, `bandwidth_*_out.consumption` (all `0` —
+egress really is free). Prices are ex-VAT for the `ovhSubsidiary` you ask for.
+
+Why it earned a rule: ADR-20260807-114122 prices the hosting shape at EUR 26.60/mo and cites
+`docs/runbooks/mks-bootstrap.md §2` for "real catalog prices" — **a file that does not exist**, so the
+block-storage and object-storage line items are recorded nowhere. Any session re-deriving a cost
+number will hit the same JS-rendered wall. The same shape applies to other providers: look for the
+order/catalog API before the marketing page.
