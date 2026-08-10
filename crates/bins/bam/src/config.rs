@@ -477,7 +477,7 @@ impl Config {
             problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
-        let stripe_publishable_key = raw("STRIPE_PUBLISHABLE_KEY");
+        let stripe_publishable_key = raw("STRIPE_PUBLISHABLE_KEY").or_else(|| baked("STRIPE_PUBLISHABLE_KEY", profile).map(str::to_string));
         if let Some(v) = hubrise_api_base_url.as_deref() {
             if !v.is_empty() && !matches_pattern("^https?://", v) {
                 problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
@@ -817,4 +817,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_DELIVERY_OFFER_TIMEOUT", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),
     ("RUN_SIRENE_WORKER", "staging", "true"),
+    ("STRIPE_PUBLISHABLE_KEY", "production", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
+    ("STRIPE_PUBLISHABLE_KEY", "staging", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
 ];

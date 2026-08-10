@@ -92,8 +92,10 @@ New: `crates/server/src/graphql/cart_read.rs` (two-leg seam + `readable_by` + un
 ## Other open state (not #451)
 
 - [#448 "bake the Stripe test publishable key"](https://github.com/TheCaptainCompany/captain-food/issues/448)
-  — **PAUSED on a product-owner answer**: were the Stripe TEST keys rotated along with the others?
-  Do not bake the previously pasted `pk_test` value without that answer; it may be stale.
+  — **DONE**, spec-only on `main` (`836f885`); the product owner supplied the authoritative value.
+  One product-owner action remains from it: delete the now-redundant `STRIPE_PUBLISHABLE_KEY` env
+  var from the Render dashboard after the next deploy (env shadows the baked value; the sync never
+  deletes).
 - Leaked infra secrets: the product owner said rotation was "done for the keys" — treated as handled
   unless contradicted.
 - [#463](https://github.com/TheCaptainCompany/captain-food/issues/463) impure-fold survivors outside

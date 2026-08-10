@@ -244,6 +244,10 @@ trust the numbers above if they look off.
   admin-gated provisioning), presented with options + trade-offs + a recommendation — never
   "shall I proceed?". The observable compliance signature: mob evidence in the PR body,
   executor-authored commits, coordinator pushes limited to claim commits and GitHub surfaces.
+  The loop still starts unasked, AND its start is always accompanied by a compact action plan
+  shown to the product owner — chunk, phases, checkpoints, gates, out-of-scope fences,
+  anticipated decision points — as transparency, never as a permission request
+  ([ADR-20260810-114242](docs/adr/ADR-20260810-114242-loop-start-action-plan.md)).
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.

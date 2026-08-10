@@ -20,7 +20,32 @@
 > (empty lines, 0 EUR — exactly what the pre-#451 stub rendered), and the projector still folds no
 > lines. **Phase 2 (GREEN)** wires `price_cart` at the resolver seam, the line fold, the
 > claim-ownership narrowing in the `cart`/`current` bodies, and proves the `cart-price` metrics
-> firing. Paused at the fold-purity checkpoint for the architect's diff read.
+> firing. Phase 1 passed the fold-purity checkpoint (architect, 4/4 judgment calls sanctioned). Three
+> product-owner facts then corrected the design — carts are session-keyed BEFORE identification and
+> bound by `CartBindingProcess`, the cart is saved at intent as the CheckoutSnapshot, and the
+> intended cart LOCK is not modelled at all ([#465](https://github.com/TheCaptainCompany/captain-food/issues/465)).
+> `cart.current` is therefore TWO-LEG (claim, then session id with `customer_id IS NULL OR = claim`)
+> and `[PUBLIC, CUSTOMER]` — committed as `e9704a0`, which also repaired an anonymous-cart-read
+> break Phase 1 had introduced (gate hole filed as
+> [#466](https://github.com/TheCaptainCompany/captain-food/issues/466)). Phase-2 code is pushed as
+> WIP with NO gates run (`57b7330`); the session handed off on budget exhaustion —
+> [`docs/HANDOFF-451.md`](HANDOFF-451.md) carries the resume instructions.
+
+> ✅ **2026-08-10 — STRIPE PUBLISHABLE KEY BAKED: the #440 env-var-only follow-up is closed**
+> ([#448 "Bake the Stripe TEST publishable key as a literal deploy value"](https://github.com/TheCaptainCompany/captain-food/issues/448),
+> spec-only, straight to `main`). The product owner supplied the authoritative `pk_test_…` value
+> (2026-08-10) and it is now a literal `deploy:` block on `STRIPE_PUBLISHABLE_KEY` in
+> `specs/payments/configuration.yaml` (production + staging, TEST mode for both — matching
+> STRIPE_SECRET_KEY's reality; the SUPABASE_PUBLISHABLE_KEY baked-non-secret posture, no
+> `from_github_secret`). Regeneration compiles it into the per-profile `BAKED` tables of the
+> generated configs (`crates/server/src/generated/config.rs` + the payments-scope consumer bins) —
+> baked non-secrets ship IN the binary, not via `render-config-sync.json` (that rail syncs
+> `from_secret` names only; the Supabase baked literals follow the same shape). **Remaining
+> hygiene click**: the
+> `STRIPE_PUBLISHABLE_KEY` env var on the Render service is now REDUNDANT and shadows the baked
+> value (env > baked; the sync never deletes) — it must be deleted from the dashboard after the
+> next deploy, a product-owner action recorded as the deploy-day fact. The go-live constraint is
+> unchanged: the `pk_live_` swap lands with `STRIPE_SECRET_KEY_PROD` (issue #254).
 
 > ✅ **2026-08-10 — CART-PRICING KEYSTONE APPROVED (Option B / LIVE); BUILD STARTING**
 > ([PROP-20260810-231500 "cart.current: the authenticated customer's PRICED cart"](proposals/PROP-20260810-231500-cart-current-priced.md),
@@ -158,15 +183,14 @@
 > requests, counted by `checkout_degraded_render_total{reason=stripe_key_absent}` — emitted at the
 > SSR boundary and **proved firing** by `crates/server/tests/checkout_degraded_metric.rs` (the
 > repo's first spy-observed metric emission). Smoke gains L3b (/checkout must carry
-> `data-pk="pk_test_…"`, outage-honest). **Ships ENV-VAR-ONLY**: `STRIPE_PUBLISHABLE_KEY` is
-> declared non-secret with **no `deploy:` block** (validator-clean, absent from
-> `render-config-sync.json`), so production serves it via the existing Render env var and degrades
-> honestly when absent — the served value exists, the spec-baked copy does not yet. The one
-> extraction attempt (a CI step base64-defeating log masking) was correctly blocked by the security
-> classifier and is ABANDONED — no masking-bypass retry (ADR §3). **Still open**: the clean bake
-> ([#448](https://github.com/TheCaptainCompany/captain-food/issues/448) — human pastes the public
-> value, add the literal `deploy:` block, delete the shadowing Render env var in the same change;
-> until then the env var is a NAMED removal hazard); the surface-bins config-closure follow-up
+> `data-pk="pk_test_…"`, outage-honest). **Shipped ENV-VAR-ONLY at the time**:
+> `STRIPE_PUBLISHABLE_KEY` was declared non-secret with no `deploy:` block, production served by
+> the Render env var alone — **CLOSED 2026-08-10 by
+> [#448 "Bake the Stripe TEST publishable key as a literal deploy value"](https://github.com/TheCaptainCompany/captain-food/issues/448)**
+> (PO-provided value baked; see the #448 entry above — the Render env-var deletion is the remaining
+> hygiene click). The one extraction attempt (a CI step base64-defeating log masking) was correctly
+> blocked by the security classifier and is ABANDONED — no masking-bypass retry (ADR §3).
+> **Still open**: the surface-bins config-closure follow-up
 > (#385 track); and the recorded activation constraint (first real-restaurant activation
 > mechanically impossible while checkout serves `pk_test_` — ADR §4, binds future activation work).
 >

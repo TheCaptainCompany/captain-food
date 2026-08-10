@@ -411,7 +411,7 @@ impl Config {
             problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
-        let stripe_publishable_key = raw("STRIPE_PUBLISHABLE_KEY");
+        let stripe_publishable_key = raw("STRIPE_PUBLISHABLE_KEY").or_else(|| baked("STRIPE_PUBLISHABLE_KEY", profile).map(str::to_string));
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -661,4 +661,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
+    ("STRIPE_PUBLISHABLE_KEY", "production", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
+    ("STRIPE_PUBLISHABLE_KEY", "staging", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
 ];
