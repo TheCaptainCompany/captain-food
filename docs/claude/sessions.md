@@ -15,10 +15,21 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 | `specs/**` | `make validate`, then `make rust` before pushing | seconds, then minutes |
 | `crates/**`, `tools/**`, CI, deploy | `make rust` | minutes — **much** worse from a cold cache |
 
-`make rust` is `cargo build --workspace` + validate + generate + drift check. On a warm cache it is
-slow; on a cold one it rebuilds the whole workspace. Do not reach for it to prove a Markdown edit.
+`make rust` is `rust-build` + validate + generate + drift check — and `rust-build` is
+`cargo build --manifest-path tools/codegen-rs/Cargo.toml`, i.e. **the codegen tool only, not
+`crates/**`** (codegen-rs is a workspace member but is "tooling, not part of the app graph",
+`Cargo.toml:10`). It is still slow on a cold cache. Do not reach for it to prove a Markdown edit.
 CLAUDE.md already permits skipping it for docs-only changes — the point here is that the saving is
 minutes per invocation, so it is worth being deliberate.
+
+**CLAUDE.md's architecture summary can be STALE — check it against `docs/STATUS.md` whenever
+hosting, storage or deployment topology matters.** Nothing regenerates that paragraph and no gate
+covers it, so it drifts silently in the one file every session reads first. Measured cost: on
+2026-08-10 it still said *"Managed Postgres"* and cited the superseded `ADR-20260731-061609` for
+hosting, when the decision has been **CNPG in-cluster on OVH MKS** since `ADR-20260807-002705` — the
+product owner had to correct a session by hand on a fact the repo should have supplied. The cheap
+tell: **an ADR id cited in prose whose own `Status:` line says Superseded.** STATUS.md is the live
+state; CLAUDE.md is a summary of it, and summaries rot.
 
 **`make rust` does NOT run the workspace test suite.** `rust-test` is `cargo test --manifest-path
 tools/codegen-rs/Cargo.toml` — the codegen/validator tests ONLY. CI runs `cargo test --workspace`

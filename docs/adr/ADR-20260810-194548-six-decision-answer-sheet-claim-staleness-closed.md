@@ -118,3 +118,31 @@ gate proves the validator, the emitters and drift, and nothing about `crates/**`
   it without re-asking.
 - Two obligations leave this ADR and must not be lost: **DPIA / privacy notice / terms do not exist**
   (legal blocker), and the **Platform Work Directive transposition date is VERIFY-FIRST**.
+
+## Revision — the second answer sheet (2026-08-10, same day)
+
+A second sheet arrived and **revised two of the six answers**. Both originals are kept above: an ADR
+records what was decided *and when it changed*, never a rewrite that hides the first answer.
+
+1. **The `from:` collision — REVISED.** The first sheet answered "Approve as recommended" (= (c),
+   the team picks). The second answers **"Different choice"** with the note **"A"**: the product
+   owner picks **(a), rename the SCREENS input-source key**, and does not delegate it. api.yaml keeps
+   `from:` for scope-binding. The rename must land **before both DSLs ship the key**; after that it
+   is a migration, not a rename.
+2. **#474 — (b) is an INTERIM, not a closure.** Verbatim: *"Ok for b, for now but we need to find a
+   solution to have an honest test"*. So `make rust` stays the fast gate **for now**, and **an honest
+   gate is a requirement**: the issue closes when the Stop-hook invocation, the inverted skip polarity
+   and the two missing tests land — not when (b) ships. The product owner has now asked for this twice
+   in different words ("It's a big issue", then "we need to find a solution"); it does not read as
+   optional.
+3. **Claim staleness — the closure STANDS.** The note *"We will not use Supabase for the business
+   data / Supabase will be used for identify / Postgres will be in Kubernetes on OVH"* reads as a
+   correction aimed at the business lens's decisive fact, but that fact is about **identity**, which
+   the note itself confirms stays Supabase. Business data is CNPG in-cluster
+   ([ADR-20260807-002705](ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)). Nothing in the
+   reasoning depended on Supabase holding business data, so the row stays closed.
+
+**What that note actually exposed** is a defect in the repo, not in the decision: `CLAUDE.md`'s
+architecture summary still said *"Managed Postgres"* and cited the superseded
+`ADR-20260731-061609` for hosting. The product owner had to tell a session something the file every
+session reads FIRST should have told it correctly. Corrected in the same commit as this revision.

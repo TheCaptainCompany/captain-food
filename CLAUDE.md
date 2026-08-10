@@ -94,9 +94,14 @@ BFF: GraphQL, SDUI, tenant middleware) · `actor_runtime` (generic mailbox: leas
 head-of-line) · `shared_types`/`core`/`web`/`desktop` (UniFFI/Crux/Leptos/Tauri). Frontend =
 Leptos→WASM SDUI over GraphQL. Backend = CQRS-light + event log: mutations enqueue on the actor
 mailbox (acceptance-first, PENDING) and workers append to `domain_events`; queries read `View_*`
-read models, never the raw log. Managed Postgres; multi-tenant by `Host`
+read models, never the raw log. **Self-hosted Postgres — CloudNativePG in-cluster on OVH MKS
+(Paris)**: ≥3 instances, anti-affinity, WAL archiving to Object Storage, executed restore drills
+(ADR-20260807-002705, superseding the Clever Cloud and OVH-VPS hosting ADRs); operations are
+GitOps-only (Argo CD over GENERATED manifests). Multi-tenant by `Host`
 (`{slug}.captain.food`); integrations: Stripe, HubRise, delivery partners, Supabase Auth
-(wrapped, identity-only — ADR-20260731-061609 moved hosting to OVH). Dependency rule:
+(**wrapped, identity-only — Supabase holds no business data**). The monolith `server` bin is still
+the DEPLOYED runtime until the #358 cutover points traffic at the per-surface/per-actor bins
+(ADR-20260807-183024). Dependency rule:
 outer→inner only. Current runtime state: [docs/STATUS.md](docs/STATUS.md).
 
 ## Important conventions
