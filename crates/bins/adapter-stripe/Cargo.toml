@@ -8,13 +8,14 @@
 # `use ... as _;` lines in src/main.rs keep every declared link a compile-checked fact rather
 # than a comment (compiler-first, ADR-20260803-234035).
 #
-# It is NOT A CLAIM ABOUT THE DEPLOYABLE, and here the two differ. `bin_runtime` below pulls
-# application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's
-# vocabulary is linked into this image whatever this list says. What holds this pod to its slice
-# at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared
-# runtime (`with_only`, `with_scope`). A filed, decided gap -- the recorded blast-radius cost
-# whose exits are the per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)
-# -- so read the list as this bin's DECLARED surface, not as a wall the build stands up.
+# It is NOT A CLAIM ABOUT THE DEPLOYABLE for the DOMAIN half: `bin_runtime` +
+# `infrastructure` below pull the `domain` facade -> every domain-* crate, so every scope's
+# vocabulary is linked into this image whatever this list says. The PARTNER half is different and
+# IS a link fact: only this partner's ACL crate is declared, so no other partner's ingestor,
+# client or secret type is nameable in this bin (one bin per adapter, ADR-20260808-062432).
+# Nothing scopes the DOMAIN reach at runtime either -- an adapter verifies, mirrors, ACLs and
+# ENQUEUEs; the owning actor bin is what applies the command. Exits for the domain half are the
+# per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475).
 #
 # BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
 # `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
@@ -28,8 +29,9 @@ publish = false
 description = "Captain.Food `adapter-stripe` deployable: partner webhook ingestion bin for `stripe` -- verify, mirror, ACL, ENQUEUE on the shared mailbox; holds ONLY this partner's secrets (one bin per adapter, ADR-20260808-062432) (ADR-20260807-183024)."
 
 [dependencies]
-# (no domain crates -- this family holds NO domain vocabulary; an added domain crate
-#  here is a boundary violation to review, not a convenience)
+# (no domain crate DECLARED here -- but bin_runtime/infrastructure below link the `domain`
+#  facade, so this IMAGE does carry every scope's vocabulary (#475). Declaring one here would
+#  still be a boundary violation to review, not a convenience)
 # ADAPTER bin (one bin per partner ACL, ADR-20260808-062432): hosts ONLY the `stripe`
 # ingestor -- verify, mirror, ACL, ENQUEUE on the shared mailbox; the owning actor bins
 # deliver (woken by the INSERT's pg_notify). ANOTHER partner's crate appearing here is the

@@ -25,8 +25,9 @@ publish = false
 description = "Captain.Food `gateway-external` deployable: role gateway for /external/graphql -- thin generated top-level routing, no DB access, no business logic, no state (D8) (ADR-20260807-183024)."
 
 [dependencies]
-# (no domain crates -- this family holds NO domain vocabulary; an added domain crate
-#  here is a boundary violation to review, not a convenience)
+# (no domain crates -- and none anywhere in this family's resolved graph: a gateway image
+#  holds NO domain vocabulary at all. An added domain crate here is a boundary violation to
+#  review, not a convenience)
 # GATEWAY runtime (#385 API-tier wiring, D8): top-level-field routing to the owning
 # subgraphs from the embedded composition table. DELIBERATELY no server, no infrastructure,
 # no database -- auth lives at the subgraph (the schema boundary); a domain crate appearing

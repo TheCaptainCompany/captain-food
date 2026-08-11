@@ -359,8 +359,9 @@ pub(crate) fn bin_topology(model: &Model) -> Vec<BinSpec> {
     // adapter-{partner}: ONE BIN PER PARTNER ACL (ADR-20260808-062432), derived from the
     // adapter-crate list scanned at model load (`crates/adapters/*`) — never a hand list: a
     // sixth adapter crate produces a sixth bin the day it exists, and §15 then requires its
-    // c4-l2 container. No domain crates: an adapter translates and records, it never holds
-    // domain vocabulary.
+    // c4-l2 container. No domain crates DECLARED: an adapter translates and records, so it never
+    // NAMES a domain type -- though its image still links the facade behind `infrastructure`
+    // (#475), which is why its manifest header says so.
     for dir in &model.adapter_crates {
         out.push(BinSpec {
             name: format!("adapter-{}", partner_slug(dir)),
@@ -393,10 +394,16 @@ pub(crate) struct BinCrate {
 }
 
 /// One line of purpose per family, for the manifest description and the main.rs doc.
+///
+/// THIS LINE IS SUBJECT TO THE SAME RULE AS THE HEADER (#475): it lands in the manifest
+/// `description` and in the `src/main.rs` module doc, fourteen lines below the header's measured
+/// scope claim, so a purpose line that asserts deployable isolation contradicts the header in the
+/// same file. It may state what the bin ROUTES; it may not state what the image cannot NAME unless
+/// `bin_manifest_scope_claim_matches_the_measured_closure` can prove it of the resolved graph.
 fn family_purpose(b: &BinSpec) -> String {
     match b.family {
         "actor" => format!(
-            "mailbox worker realizing the `{}` aggregate -- drains ONLY its own lanes (the scoping is the linker)",
+            "mailbox worker realizing the `{}` aggregate -- drains ONLY its own lanes (the LANES const it hands the shared fleet, not a link fact)",
             b.actor.as_deref().unwrap_or("?")
         ),
         "pm" => format!(
@@ -415,7 +422,7 @@ fn family_purpose(b: &BinSpec) -> String {
             "role gateway for /{}/graphql -- thin generated top-level routing, no DB access, no business logic, no state (D8)",
             b.role.as_deref().map(role_path).unwrap_or_default()
         ),
-        "surface" => "surface bin -- assets/SSR; speaks to its role gateway, holds no domain vocabulary and no broad views access".to_string(),
+        "surface" => "surface bin -- assets/SSR; speaks to its role gateway, so no database and no views access (the `domain` facade still rides in behind surface_runtime -> web, #475)".to_string(),
         "adapter" => format!(
             "partner webhook ingestion bin for `{}` -- verify, mirror, ACL, ENQUEUE on the shared mailbox; holds ONLY this partner's secrets (one bin per adapter, ADR-20260808-062432)",
             b.partner.as_deref().map(partner_slug).unwrap_or_default()
@@ -457,9 +464,17 @@ fn bin_manifest(b: &BinSpec) -> String {
         deps.push_str(&format!("{} = {{ path = \"../../domains/{}\" }}\n", domain_crate_name(s), s));
     }
     if deps.is_empty() {
-        deps.push_str(
-            "# (no domain crates -- this family holds NO domain vocabulary; an added domain crate\n#  here is a boundary violation to review, not a convenience)\n",
-        );
+        // "declares no domain crate" and "has no domain vocabulary" are DIFFERENT facts, and the
+        // note used to state the second for all 21 families that declare none (#475). It is true
+        // of the 7 gateways ONLY -- their whole resolved graph is domain-free. A surface reaches
+        // the facade through surface_runtime -> web; an adapter and a cron worker reach it through
+        // bin_runtime/infrastructure. The closure gate holds each of these sentences to the
+        // measured graph.
+        deps.push_str(match b.family {
+            "gateway" => "# (no domain crates -- and none anywhere in this family's resolved graph: a gateway image\n#  holds NO domain vocabulary at all. An added domain crate here is a boundary violation to\n#  review, not a convenience)\n",
+            "surface" => "# (no domain crate DECLARED here -- but surface_runtime -> web -> app-core links the\n#  `domain` facade, so this IMAGE does carry every scope's vocabulary (#475). Declaring one\n#  here would still be a boundary violation to review, not a convenience)\n",
+            _ => "# (no domain crate DECLARED here -- but bin_runtime/infrastructure below link the `domain`\n#  facade, so this IMAGE does carry every scope's vocabulary (#475). Declaring one here would\n#  still be a boundary violation to review, not a convenience)\n",
+        });
     }
     if wired(b) {
         let common = "tokio = { workspace = true }\nserde_json = { workspace = true }\ntracing = \"0.1\"\n# The generated scope-filtered Config reader (src/config.rs, #374 Q4) validates values\n# against their scalars' regexes at startup.\nregex = \"1\"\n";
@@ -561,8 +576,13 @@ fn bin_manifest(b: &BinSpec) -> String {
             "subgraph" => format!("# It is {no}, and this family is the widest case in the topology.\n# `server` below is the monolith's entire GraphQL surface: `bin_support::subgraph_app` registers\n# EVERY actor mailbox (infrastructure::generated::command_router::ACTOR_MAILBOXES) and then\n# slices the master schema by the SCOPE string -- so a subgraph meant to hold one domain can\n# enqueue to any aggregate, and the `domain` facade rides in with `server`. That is a runtime\n# filter over a fully linked graph, not a boundary. Filed with the rest on #475; a scope-built\n# schema and the per-scope infrastructure split (#423) are its exits."),
             // fo-*/bo-*: no server and no infrastructure (true), but SSR still folds domain rows.
             "surface" => format!("# It is {no}. The deps note below is right that no server and no\n# infrastructure are linked -- a surface reads only over GraphQL -- but surface_runtime -> web ->\n# app-core -> the `domain` facade still carries every scope into this image. Nothing ROUTES them\n# here; nothing makes them unnameable either. Filed with the rest on #475."),
-            // actor/pm/projector/worker/adapter: the composition kit carries the spine.
-            _ => format!("# It is {no}, and here the two differ. `bin_runtime` below pulls\n# application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's\n# vocabulary is linked into this image whatever this list says. What holds this pod to its slice\n# at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared\n# runtime (`with_only`, `with_scope`). A filed, decided gap -- the recorded blast-radius cost\n# whose exits are the per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)\n# -- so read the list as this bin's DECLARED surface, not as a wall the build stands up."),
+            // adapter: same linked spine, but its PARTNER slice really is a link fact -- the one
+            // place in this family where the manifest proves something about the deployable.
+            "adapter" => format!("# It is {no} for the DOMAIN half: `bin_runtime` +\n# `infrastructure` below pull the `domain` facade -> every domain-* crate, so every scope's\n# vocabulary is linked into this image whatever this list says. The PARTNER half is different and\n# IS a link fact: only this partner's ACL crate is declared, so no other partner's ingestor,\n# client or secret type is nameable in this bin (one bin per adapter, ADR-20260808-062432).\n# Nothing scopes the DOMAIN reach at runtime either -- an adapter verifies, mirrors, ACLs and\n# ENQUEUEs; the owning actor bin is what applies the command. Exits for the domain half are the\n# per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)."),
+            // Cron workers: no lane, no PM, no scope const -- the bound is the pass, not a filter.
+            "worker" if b.schedule.is_some() => format!("# It is {no}, and no runtime filter narrows it\n# either. `bin_runtime` + `infrastructure` below pull the `domain` facade -> every domain-*\n# crate, so every scope's vocabulary is linked into this image whatever this list says. Unlike\n# the mailbox families a cron bin declares no LANES/PM/SCOPE const: what bounds it is the ONE\n# pass src/main.rs calls per Job -- its windows and its row selection live in the SQL function\n# or the implementation crate, never here. Read the list as this bin's DECLARED surface, and\n# that single call as its actual reach."),
+            // actor/pm/projector/bam: the composition kit carries the spine; a const routes the pod.
+            _ => format!("# It is {no}, and here the two differ. `bin_runtime` below pulls\n# application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's\n# vocabulary is linked into this image whatever this list says. What holds this pod to its slice\n# at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared\n# runtime (`spawn_actor_fleet(.., LANES, ..)`, `with_only(PM)`, `with_scope(SCOPE)`). A filed,\n# decided gap -- the recorded blast-radius cost whose exits are the per-scope infrastructure\n# split (#423) and decomposing `bin_runtime` (#475) -- so read the list as this bin's DECLARED\n# surface, not as a wall the build stands up."),
         }
     };
     let posture = if wired(b) {
@@ -737,7 +757,7 @@ fn wired_main(b: &BinSpec) -> String {
     );
     match b.family {
         "actor" => consts.push_str(&format!(
-            "/// The mailbox lane(s) this deployable drains -- the scoping is the linker AND this list.\nconst LANES: &[&str] = &[\"{}\"];\n",
+            "/// The mailbox lane(s) this deployable drains -- and the WHOLE of its scoping: the image\n/// links every domain crate behind `bin_runtime`, so this list is a routing fact, not a link one\n/// (#475).\nconst LANES: &[&str] = &[\"{}\"];\n",
             b.actor.as_deref().unwrap_or("?")
         )),
         "pm" => {

@@ -12,9 +12,10 @@
 # application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's
 # vocabulary is linked into this image whatever this list says. What holds this pod to its slice
 # at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared
-# runtime (`with_only`, `with_scope`). A filed, decided gap -- the recorded blast-radius cost
-# whose exits are the per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)
-# -- so read the list as this bin's DECLARED surface, not as a wall the build stands up.
+# runtime (`spawn_actor_fleet(.., LANES, ..)`, `with_only(PM)`, `with_scope(SCOPE)`). A filed,
+# decided gap -- the recorded blast-radius cost whose exits are the per-scope infrastructure
+# split (#423) and decomposing `bin_runtime` (#475) -- so read the list as this bin's DECLARED
+# surface, not as a wall the build stands up.
 #
 # BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
 # `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
@@ -25,7 +26,7 @@ version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Captain.Food `actor-cart` deployable: mailbox worker realizing the `Cart` aggregate -- drains ONLY its own lanes (the scoping is the linker) (ADR-20260807-183024)."
+description = "Captain.Food `actor-cart` deployable: mailbox worker realizing the `Cart` aggregate -- drains ONLY its own lanes (the LANES const it hands the shared fleet, not a link fact) (ADR-20260807-183024)."
 
 [dependencies]
 domain-common = { path = "../../domains/common" }

@@ -207,7 +207,10 @@ containers:
     technology: "Rust — generated gateway bin"
     description: "/external/graphql: top-level field routing for the integration ACLs (token-authenticated)."
 
-  # -- actor bins (one per aggregate: drains ONLY its own mailbox lanes — the scoping is the linker) --
+  # -- actor bins (one per aggregate: drains ONLY its own mailbox lanes — the scoping is the LANES
+  #    const each bin hands the shared fleet, NOT the linker: every actor image links the whole
+  #    `domain` facade behind `bin_runtime` (#475), so a lane list routes work, it does not
+  #    restrict what the deployable can reach) --
   actor-restaurant-account:
     technology: "Rust — mailbox worker bin"
     description: "Drains RestaurantAccount lanes; appends its domain events."

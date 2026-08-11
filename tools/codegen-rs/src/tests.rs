@@ -5761,13 +5761,52 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// ⇒ it carries the strong one. Both directions are load-bearing — when `bin_runtime` is
 /// decomposed and a family becomes genuinely isolated, this fails until its header is upgraded to
 /// say so, so the prose can never lag the graph in either direction.
+///
+/// IT COVERS THE WHOLE EMITTED TEXT, NOT THE HEADER (#475 review): the first cut checked the
+/// header sentinel only, and the retired claim survived verbatim in the manifest `description`
+/// fourteen lines below it, in the `src/main.rs` module doc and on the `LANES` const — 40 files
+/// where a green test sat beside a false sentence. So EVERY phrase this emitter has ever used to
+/// assert that a DEPLOYABLE is scope-isolated is bound to the same measured closure, in both
+/// artifacts. That cannot prove the absence of a NEWLY invented false sentence — no test can read
+/// prose — but it does make the retired wording unable to come back by copy-paste (which is
+/// exactly how it survived four families' wiring) and makes the surviving wording unable to
+/// outlive its truth.
+///
+/// Why a test and not the emitter deriving the sentence from the graph directly: the crates being
+/// emitted ARE the workspace members, so `cargo metadata` can only resolve a closure for bins that
+/// already exist on disk. Deriving at emit time would make a NEW bin's first generation depend on
+/// its own output. Measuring after the fact is the honest order.
 #[test]
 fn bin_manifest_scope_claim_matches_the_measured_closure() {
     use guppy::graph::DependencyDirection;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let model = load_model(&root.join("specs")).expect("load real specs");
     let crates = emit_bin_crates(&model);
-    assert!(crates.len() >= 49, "expected the full bin matrix, found {}", crates.len());
+    // Not a floor: a hard-coded minimum is a second, drifting copy of the topology count (the
+    // first one tolerated losing 8 bins while claiming to check "the full bin matrix"). The
+    // matrix's own completeness is `deploy_tree_is_complete_both_ways`; what must hold HERE is
+    // that every derived container was emitted and so got measured.
+    let topology = bin_topology(&model);
+    assert!(!topology.is_empty(), "real specs must derive a non-empty bin topology");
+    assert_eq!(
+        crates.len(),
+        topology.len(),
+        "every c4-l2-derived bin must be emitted, or its prose escapes this gate"
+    );
+
+    // Every phrase the bin emitter has used to say "this DEPLOYABLE cannot reach that scope".
+    // A bin whose image links the `domain` facade may carry none of them, anywhere in its
+    // manifest or its `src/main.rs`; a domain-free bin may carry them all. Matched
+    // case-insensitively so `NO`/`no` variants cannot slip through.
+    const ISOLATION_PHRASES: &[&str] = &[
+        // The sentinel the header itself carries.
+        CLAIM_ISOLATED,
+        // Retired by #475: emitted for every actor bin's purpose line and LANES doc, where the
+        // linker enforces nothing — the LANES const routes, it does not restrict what is linked.
+        "the scoping is the linker",
+        // True of the 7 gateways only; was emitted for surfaces, adapters and cron workers too.
+        "holds no domain vocabulary",
+    ];
 
     let mut cmd = guppy::MetadataCommand::new();
     cmd.current_dir(&root);
@@ -5805,11 +5844,19 @@ fn bin_manifest_scope_claim_matches_the_measured_closure() {
                  -- missing '{CLAIM_NOT_ISOLATED}'",
                 c.name
             );
-            assert!(
-                !c.manifest.contains(CLAIM_ISOLATED),
-                "{}: header claims deployable isolation its own closure contradicts",
-                c.name
-            );
+            // The header AND everything else the bin ships: description, module doc, const docs.
+            for (artifact, text) in [("Cargo.toml", &c.manifest), ("src/main.rs", &c.main)] {
+                let lower = text.to_lowercase();
+                for phrase in ISOLATION_PHRASES {
+                    assert!(
+                        !lower.contains(&phrase.to_lowercase()),
+                        "{}/{artifact}: claims deployable scope isolation ('{phrase}') that its own \
+                         closure contradicts -- the image links crates/domain, so every scope's \
+                         vocabulary is in it. State what this bin ROUTES, not what it cannot name.",
+                        c.name
+                    );
+                }
+            }
         } else {
             assert!(
                 c.manifest.contains(CLAIM_ISOLATED),

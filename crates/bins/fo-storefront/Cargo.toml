@@ -22,11 +22,12 @@ version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Captain.Food `fo-storefront` deployable: surface bin -- assets/SSR; speaks to its role gateway, holds no domain vocabulary and no broad views access (ADR-20260807-183024)."
+description = "Captain.Food `fo-storefront` deployable: surface bin -- assets/SSR; speaks to its role gateway, so no database and no views access (the `domain` facade still rides in behind surface_runtime -> web, #475) (ADR-20260807-183024)."
 
 [dependencies]
-# (no domain crates -- this family holds NO domain vocabulary; an added domain crate
-#  here is a boundary violation to review, not a convenience)
+# (no domain crate DECLARED here -- but surface_runtime -> web -> app-core links the
+#  `domain` facade, so this IMAGE does carry every scope's vocabulary (#475). Declaring one
+#  here would still be a boundary violation to review, not a convenience)
 # SURFACE runtime (#385 API-tier wiring, D8): audience host serving + SSR of the
 # generated screens THROUGH THE ROLE GATEWAY + the wasm /assets dir. DELIBERATELY no
 # database, no server, no infrastructure -- a surface reads only over GraphQL.
