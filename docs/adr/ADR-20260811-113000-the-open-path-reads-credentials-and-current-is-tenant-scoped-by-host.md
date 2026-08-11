@@ -177,6 +177,21 @@ elsewhere" surface is the existing `carts` query.
   Harmless today (that transport is anonymous and sessionless, and the monolith is the deployed
   runtime), and a silent tenant loss the day the cutover points traffic at the surface bins. The
   cutover must forward the tenant host on that transport.
+- **The `no-store` measure above is absent at the split topology's browser edge — a second cutover
+  precondition of the same kind** (reviewer, medium and non-blocking at merge). The gateway rebuilds
+  each subgraph response from status + `content-type` + body ALONE
+  (`crates/gateway_runtime/src/lib.rs:268-285`), discarding every other header — including the
+  `Cache-Control: private, no-store` the subgraph's own `graphql_routes` layer has just set — and its
+  own error paths emit none either (`:244-255` routing rejection, `:292-301` `subgraph_unreachable`).
+  In the monolith this is invisible: the `server` bin answers `/public/graphql` itself, so the
+  response layer applies. After the #358 cutover the GATEWAY *is* the browser-facing
+  `/public/graphql`, so the technical measure that replaces "nothing fronts POSTs with a cache" would
+  be missing at precisely the hop where a shared cache would sit, on responses that now vary by the
+  `captain_auth` cookie — the same Art. 32(1)(b) / Art. 33 exposure the layer was introduced to close.
+  Exposure today is ZERO (the monolith is the deployed runtime and nothing fronts it with a cache),
+  which is why this is a precondition rather than a defect: `gateway_runtime` must propagate
+  `Cache-Control` from the subgraph response and set `private, no-store` on its own error paths
+  before the gateway serves browser traffic.
 - **`X-Forwarded-Host` is now an AUTHORIZATION input from a client-forgeable header.** The read site
   prefers it over `Host` (mirroring the pre-existing SSR chain), and the impact is bounded — a caller
   can at most surface their OWN cart, or an unbound cart whose session id they already hold, at

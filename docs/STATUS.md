@@ -678,7 +678,13 @@
 > answers `Cache-Control: private, no-store` — one response layer, not per-handler, so a new route
 > cannot forget it; serving one customer's cart to another out of a shared cache would be an
 > Art. 32(1)(b) confidentiality failure, and "nothing fronts POSTs with a cache" is an assumption
-> about deployments we have not made yet, not a technical measure.
+> about deployments we have not made yet, not a technical measure. **That guarantee holds for the
+> MONOLITH only**: the gateway rebuilds each subgraph response from status + `content-type` + body
+> alone (`crates/gateway_runtime/src/lib.rs:268-285`) and sets none on its own error paths
+> (`:244-255`, `:292-301`), so once the #358 cutover makes the gateway the browser-facing
+> `/public/graphql` the header is stripped exactly where a shared cache would sit — propagating it
+> there is a **cutover precondition** (recorded in the ADR beside the tenant-host one). Exposure
+> today is zero: the monolith is the deployed runtime and nothing fronts it with a cache.
 >
 > **Three things independent review added, all landed here.** (1) A verified CUSTOMER token with no
 > `captain_customer_id` — the pre-claim-stamp window, i.e. EVERY signed-in customer for one token
