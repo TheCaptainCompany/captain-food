@@ -84,6 +84,25 @@
 > **Not swept, deliberately**: the existing bare-name sites (`data_requirements:`/`actions_used:` 40,
 > `roles:` 112) are each covered by a bespoke validator rule today. Their conversion is its own
 > sequenced issue (MET-T2), not part of this.
+> **Follow-up answered, no design change (MET-S2).** Product owner: *"this kind of counter must be
+> computed once the order is completed so a process manager can handle it."* **The first half is right
+> and is already what the entity-grain design does** — the fold `set`s status, the metric asks
+> `countRows where status equals DELIVERED`, so the count comes from the terminal event and nothing
+> else; there is no increment to compensate. **But taken literally as a fold shape it does not work**:
+> **no terminal event carries `serviceType`** (`OrderDelivered` = `[orderId, restaurantId]`), so
+> completion-only hits the same wall — the entity grain is what solves it. It would also be **strictly
+> weaker**: with no row until completion, *"which orders are placed and still unaccepted right now"*
+> becomes unanswerable, and that is the platform's worst failure mode. The shape is **one projection
+> read two ways**. ⚠️ **The process-manager half is the wrong tool and is refused on the record**: PMs
+> here are state-table orchestrators in the actor mailbox with leases, fencing and head-of-line, so a
+> counter there could **stall an order lane**, and a PM **is not replayable** — it carries a live state
+> row and issues commands, so "rebuild the metric" would re-drive Stripe. Replayability is the one
+> property the whole reversal chose projections for. **And no new event**: `OrderDelivered` already IS
+> the completion fact for both service types; adding `serviceType` to it would denormalise the log so a
+> projection need not do its job. **The instinct does brush a real gap though** — `OrderCompleted`,
+> `Receipt` and `Invoice` are **zero hits across every `specs/*/events.yaml`**, and a compliant receipt
+> is a French legal precondition. That is [#200](https://github.com/TheCaptainCompany/captain-food/issues/200)
+> + legal work with its own decision, deliberately not folded in here.
 
 > ♻️ **2026-08-11 — A BUSINESS METRIC IS A PROJECTION, NOT A COUNTER — THE TEAM CHANGED ITS OWN
 > RECOMMENDATION, AND FILED THE REVERSAL RATHER THAN EXECUTING IT**

@@ -356,6 +356,82 @@ missing field. What it actually does here is **tell you your grain is wrong** �
 aggregate-grained declaration and goes quiet on the entity-grained one, without anyone having to
 notice the `serviceType` asymmetry by hand.
 
+#### D8b — "Count it once the order is completed, so a process manager can handle it"
+
+The product owner's follow-up on `serviceType`, verbatim:
+*"For the case if service type this kind of counter must be computed once the order is completed so a
+process manager can handle it."* Two separable claims. **The first is right and is already what D8a
+does. The second names the wrong tool, and the reason is worth recording so nobody builds it.**
+
+**Claim 1 — "computed once the order is completed". Correct as a principle, and already satisfied.**
+
+Neither the proposal nor its review questioned *when* the count happens: both assumed
+increment-on-placed plus compensate-on-cancel, then argued about how to make the compensation
+addressable. *"Do not count a thing that has not finished"* is the sharper framing, and it is right.
+
+Under D8a it is **already how it works, by construction**. The fold `set`s `status` per lifecycle
+event; the metric asks `countRows where status equals DELIVERED`. So a completed-order count is
+computed **from the terminal event and from nothing else** — there is no increment to compensate,
+because there was never an increment.
+
+**But taken literally as a fold shape — "only react to the terminal event" — it does not work, and the
+measurement is unambiguous:**
+
+| Terminal event | Payload |
+|---|---|
+| `OrderDelivered` (both service types — `MarkCollected` maps to `markOrderDelivered`, `specs/stories.yaml:187`) | `orderId`, `restaurantId` |
+| `OrderCancelledByCustomer` · `OrderCancelledByRestaurant` · `OrderRejectedByRestaurant` | `orderId`, `restaurantId`, `reason` |
+| `OrderExpired` | `orderId` |
+
+**No terminal event carries `serviceType`.** A completion-only fold keyed by
+`(restaurantId, serviceType, day)` hits exactly the same wall as the placed-then-decrement fold —
+same missing field, different event. What actually solves it is the **entity grain**: the projection
+folds the whole `Order-{id}` stream, so `serviceType` is on the row from `OrderPlaced` and the
+terminal event only has to carry `orderId` to find it. The completion-grain principle rides on top of
+that; it does not replace it.
+
+**And terminal-only would be strictly weaker**, in the place this product can least afford it. There
+would be **no row until the order finished**, so nothing could answer *"which orders are placed and
+still unaccepted right now"* — a paid order nobody has acknowledged is the platform's worst failure
+mode (CLAUDE.md's domain lens says so in as many words), and it is a question about an order **in
+flight**. Under D8a that row exists from `OrderPlaced` and the question is
+`countRows where status equals PLACED and placedAt older than N minutes`.
+
+So the answer is not "completion-grain **or** entity-grain". It is **one projection read two ways**:
+entity-grained rows, outcome counts filtered on terminal status, in-flight counts filtered on
+non-terminal status. That is the whole benefit of moving the grouping to read time (D4), and this
+question is the first place it pays.
+
+**Claim 2 — "so a process manager can handle it". This is the wrong tool, and it would be actively
+harmful.**
+
+| Option | Pros | Cons |
+|---|---|---|
+| **The `bam` projector maintains it — a read-side fold, as D4/D8a already specify** ✅ **recommended** | A rebuild is safe and is the *designed* restore path, so the metric replays with the log. It cannot affect an order's processing. It is what the C4 already declares (F12) | None that the PM option does not have worse |
+| A process manager maintains the counter | It is a component that reacts to events, which is superficially the same shape | **Three specific harms.** (1) **A metric could stall an order.** PMs here are *"state-table orchestrators"* running in the actor mailbox with leases, fencing and **head-of-line** delivery (`specs/ordering/processmanager.yaml:9-16`, `crates/actor_runtime`). A counter that throws would block the lane — a *metric* becoming the paid-order-nobody-was-told-about failure. (2) **It is not replayable, and that is the point of the whole reversal.** A PM issues commands and carries a live state row (*"one live run per cart"*, `processmanager.yaml:15`); re-running it re-runs side effects. "Rebuild the metric" would mean re-driving Stripe. A projector rebuild is safe by construction — which is the single property D4 chose projections for. (3) It puts a read concern on the write path, which is the boundary CQRS exists to draw. Vernon's process managers coordinate cross-aggregate *policy*; Young's projections are *folds*. A metric is a fold |
+
+**The valuable reading of Claim 2 — should completion emit a business fact carrying the outcome?**
+Considered seriously, and the answer is **no, for the metric's sake** — with one genuine gap named
+separately.
+
+- **The completion fact already exists.** `OrderDelivered` is it, for both service types
+  (`specs/stories.yaml:187`). A new `OrderCompleted` beside it would be **two events for one fact** —
+  and that is the definition of a metric wearing an event's clothes.
+- **Adding `serviceType` to `OrderDelivered` would denormalise the log so a projection does not have
+  to do its job.** The projection folds the whole `Order-{id}` stream and *already holds*
+  `serviceType` from `OrderPlaced`. An event carries the **decision that was made**, not a convenience
+  copy of prior state the consumer can fold — Vernon's reference-by-identity and Young's left-fold
+  both put the resolution on the reader. It is also a payload shape change, i.e. a versioning story,
+  paid for nothing.
+- **The instinct does brush against a real gap, and it is not this one.** `OrderCompleted`, `Receipt`
+  and `Invoice` are **zero hits across every `specs/*/events.yaml`**. VAT computation and a compliant
+  receipt are a French legal precondition, not a metrics concern. **If** a completion fact should be
+  enriched or added, that is the reason — and it belongs to
+  [#200 "Epic: catalog compliance and merchandising"](https://github.com/TheCaptainCompany/captain-food/issues/200)
+  and the legal track, with its own decision. It is deliberately **not** folded into this proposal:
+  adding an event because a read model would find it handy is how an event log rots, and adding one
+  under a metrics heading is how the real reason gets lost.
+
 **Validator rules (all ERROR).** R1–R4 are the four already in D3; these are the fold's own.
 
 | # | Rule | What it refuses |
