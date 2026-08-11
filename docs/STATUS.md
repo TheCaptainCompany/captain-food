@@ -152,11 +152,17 @@
 > domain-free end to end. The emitted manifest header claimed the opposite for all 57 ("linking a
 > domain crate is the ONLY way that scope's vocabulary exists in this deployable … *unspellable*
 > rather than merely unrouted") — **this supersedes the "step-2's facade limit is now closed FOR THE
-> BINS" line in the #382/#383 entry below**, which was true of each bin's SOURCE and never of its
+> BINS" line in the [#382 "Bin crates: per-actor/per-PM/per-projector/per-subgraph/per-gateway/per-surface
+> binaries from the c4-l2 topology"](https://github.com/TheCaptainCompany/captain-food/issues/382) /
+> [PR #383 "Bin crates: per-deployable binaries emitted from the c4-l2 topology (ADR-20260807-183024
+> step 3)"](https://github.com/TheCaptainCompany/captain-food/pull/383) entry below**, which was true
+> of each bin's SOURCE and never of its
 > image. The header now separates the two: the crate's own source still cannot NAME an undeclared
 > scope (real, compiler-first), while what bounds the pod today is a runtime string — but only for
 > the families that HAVE one: `spawn_actor_fleet(LANES)` / `with_only(PM)` / `with_scope(SCOPE)` on
-> the 37 spine bins, **nothing at all** on the 5 `adapter-*` and 4 cron `worker-*` bins (an adapter's
+> the 28 mailbox/projection bins (15 `actor-*`, 5 `pm-*`, 7 `projector-*`, `bam`), **nothing at all**
+> on the other 9 of the 37 that reach the facade through `bin_runtime` — the 5 `adapter-*` and 4 cron
+> `worker-*` bins (an adapter's
 > one real link fact is its partner slice; a cron bin is bounded by the single pass it calls per
 > Job). For the subgraphs, `bin_support::subgraph_app` registers EVERY actor mailbox and slices the
 > master schema by a scope string, so one can enqueue to any aggregate.

@@ -5766,8 +5766,14 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// header sentinel only, and the retired claim survived verbatim in the manifest `description`
 /// fourteen lines below it, in the `src/main.rs` module doc and on the `LANES` const — 40 files
 /// where a green test sat beside a false sentence. So EVERY phrase this emitter has ever used to
-/// assert that a DEPLOYABLE is scope-isolated is bound to the same measured closure, in both
-/// artifacts. That cannot prove the absence of a NEWLY invented false sentence — no test can read
+/// assert that a DEPLOYABLE is scope-isolated is FORBIDDEN, in both artifacts, wherever the closure
+/// reaches `crates/domain`. Note the asymmetry, which is deliberate and is NOT an iff: only the
+/// SENTINEL pair is bidirectional (domain-free ⇒ the header must carry `CLAIM_ISOLATED`); the other
+/// phrases are one-directional — banned where they would be false, never REQUIRED where they happen
+/// to be true. Dropping "holds no domain vocabulary" from the gateway deps note would leave this
+/// test green, and that is correct: which true things a domain-free bin chooses to say is an
+/// editorial call, while saying a false one is the defect. That cannot prove the absence of a
+/// NEWLY invented false sentence — no test can read
 /// prose — but it does make the retired wording unable to come back by copy-paste (which is
 /// exactly how it survived four families' wiring) and makes the surviving wording unable to
 /// outlive its truth.
@@ -5782,17 +5788,17 @@ fn bin_manifest_scope_claim_matches_the_measured_closure() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let model = load_model(&root.join("specs")).expect("load real specs");
     let crates = emit_bin_crates(&model);
-    // Not a floor: a hard-coded minimum is a second, drifting copy of the topology count (the
-    // first one tolerated losing 8 bins while claiming to check "the full bin matrix"). The
-    // matrix's own completeness is `deploy_tree_is_complete_both_ways`; what must hold HERE is
-    // that every derived container was emitted and so got measured.
-    let topology = bin_topology(&model);
-    assert!(!topology.is_empty(), "real specs must derive a non-empty bin topology");
-    assert_eq!(
-        crates.len(),
-        topology.len(),
-        "every c4-l2-derived bin must be emitted, or its prose escapes this gate"
-    );
+    // No count assertion here, deliberately, and NOT a hard-coded floor either: a floor is a
+    // second, drifting copy of the topology count (the first one tolerated losing 8 bins while
+    // claiming to check "the full bin matrix"). Its replacement -- `crates.len() ==
+    // bin_topology(&model).len()` -- was worse: `emit_bin_crates` IS `bin_topology(model).iter()
+    // .map(..)` with no filter (`emit/bins.rs`), so the equality cannot go red without editing the
+    // emitter. An assertion that has never failed and structurally cannot reads as coverage while
+    // proving nothing. The completeness of the bin matrix is owned by
+    // `deploy_tree_is_complete_both_ways`; what this test owns is that every emitted bin's PROSE
+    // matches its measured closure -- which the loop below asserts per bin, so a bin that vanished
+    // from the topology is caught there, by the spec->deploy gate, not by counting our own map.
+    assert!(!crates.is_empty(), "real specs must emit at least one bin crate to measure");
 
     // Every phrase the bin emitter has used to say "this DEPLOYABLE cannot reach that scope".
     // A bin whose image links the `domain` facade may carry none of them, anywhere in its
