@@ -43,6 +43,41 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> ♻️ **2026-08-11 — A BUSINESS METRIC IS A PROJECTION, NOT A COUNTER — THE TEAM CHANGED ITS OWN
+> RECOMMENDATION, AND FILED THE REVERSAL RATHER THAN EXECUTING IT**
+> ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
+> [PROP-20260810-234225](proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) D4/D6/D8/D9,
+> [DECISIONS §27bis MET-R](proposals/DECISIONS.md); docs-only).
+> The product owner held their own design back until the proposal existed, so the two would be
+> independent: *"for the metrics I have in mind the approach of the projection… we will have to create
+> a query in the graphql to allow access to these metrics."* **The team evaluated it and moved.** Not
+> out of deference — the generated-instrument design recommended one day earlier loses on four
+> measured points. **(1) It forfeits replay by construction**: `crates/infrastructure/tests/orders_placed_metric.rs:129`
+> asserts the counter does **not** fire on a rebuild, so a metric added later would carry **zero
+> history**, where a fold replays the whole log. The team's own audit standard — *"a `View_*` whose
+> restore path is not replay is a finding"* — rejects the design the team wrote. **(2) Ratios and
+> distinct-identity denominators are structurally inexpressible** as monotonic counters, so the
+> counter design needs an escape hatch for the most interesting questions; under a fold they are
+> ordinary and the plain counter becomes a one-line `value:`. **(3) It had diverged from the C4**,
+> which already declares `bam` as a **projector** with a schema in read-models
+> (`c4-l2.yaml:343,370,484`) — a schema with **zero tables** (`grep bam specs/database/` = 0).
+> **(4) Erasure**: identity-bearing metrics are personal data either way, and in our Postgres they are
+> inside the deletion engine's path instead of a vendor store with no per-subject deletion API.
+> **The mechanical question is answered** (D8): a `projections:` block declaring `key` / `measures` /
+> `fold` (`increment`/`decrement`/`add`/`subtract`/`set`/`max`/`min` per event), and a `metrics:` block
+> declaring `over` / `groupBy` / `value` / `exposedAs` — every field reference a `$ref` into the
+> **specific event**, so the validator proves the field exists there. **The rule that earns the whole
+> shape fails on `main` today**: `serviceType` is on `OrderPlaced` and on **no other Order event**
+> (`OrderExpired` carries `orderId` alone), so a projection keyed by it **cannot be decremented by a
+> cancellation** — a counter design cannot even see that, and ships two numbers that quietly disagree.
+> ⚠️ **Two clauses of [ADR-20260810-234225](adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
+> are contradicted** (*"never entity ids"* — relaxed to *bounded declared population*, which is what
+> makes `groupBy: [restaurantId]` and the restaurant-facing panel possible; and *"generated
+> instruments"*). The ADR is `Accepted`, so this is a **decision reversal**: filed as MET-R, **not
+> executed**, and the ADR will be **superseded, never rewritten**. Its principle is untouched.
+> **Q7 (a hosted analytics SDK) is now recommended for CLOSURE as "no"** — the projection design kills
+> its order-side motivation and the behaviour store kills its browse-side one.
+
 > 🔍 **2026-08-11 — BEHAVIOUR EVENT TRACKING GETS A DECLARATION SITE — AND THE ARTICLE 9 EXPOSURE
 > IS ALREADY IN THE SPEC, NOT IN THE FUTURE**
 > ([#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485),
@@ -82,6 +117,17 @@
 > already exists, `crates/server/src/graphql/session.rs:1-15`) and Q2 (does the restaurant see its own
 > storefront's behaviour data) are product-owner-owed.** Every legal claim is **VERIFY-FIRST**; no
 > licensed-counsel review has taken place.
+> **Independent convergence on the write path** (D10): the product owner's own design for this half —
+> *"name the interaction and the properties… the principal context will be sent with the jwt. A
+> mutation should be exposed to send these events"* — matches the proposal on the name and properties,
+> and the **JWT clause is D8 option A reached from the other direction**. It is also ADR-0041's
+> envelope doctrine applied to a non-domain write without being asked. ⚠️ **One measured blocker**:
+> `op-missing-command` is an **ERROR** and all **86** mutations bind a command handled by an actor
+> (`tools/codegen-rs/src/validate/core.rs:292,295,301`), so a mutation today **cannot** be a
+> non-command — declaring `recordBehaviourEvent` the only way the validator accepts would enqueue it
+> on the actor mailbox and append it to `domain_events`, **silently, with the gate green**. The fix is
+> a small api.yaml shape: a mutation declaring **`sink:`** where a command declares `command:` — *this
+> write is recorded, not decided*. It must land before this half is buildable.
 
 > 📏 **2026-08-11 — BUSINESS METRICS BECOME A DECLARED, GATED OBLIGATION — AND 26 OF THE 29 WE
 > ALREADY DECLARE EMIT NOTHING**

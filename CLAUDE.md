@@ -323,6 +323,14 @@ trust the numbers above if they look off.
   for "it actually fires, once, and not on a replay"
   (`crates/infrastructure/tests/orders_placed_metric.rs`). Mechanism and the open decisions:
   [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md).
+  ⚠️ **The MECHANISM half of this bullet is under an open reversal** ([DECISIONS §27 row MET-R](docs/proposals/DECISIONS.md)):
+  the product owner's own design is **metrics as PROJECTIONS** — a declared `fold:` over
+  `domain_events` maintained by the `bam` projector the C4 already declares, read through a
+  tenant-scoped GraphQL query — which contradicts *"generated instruments"* and *"never entity ids"*
+  above. The PRINCIPLE (unit = persona activity, declared + emitted + asserted, states its question)
+  is unaffected. Until the reversal is decided, read the proposal's D4/D6/D8 as the current design and
+  this bullet's mechanism as the superseded one; do not implement either half without the register row
+  being closed.
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - **Completeness is part of every change (ADR-0032):** a new command/event/error also needs a behaviour

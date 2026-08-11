@@ -47,6 +47,8 @@
 | F13 | **A business-activity projector already exists and is the right neighbour, not the right home.** The C4 declares a `bam` container — *"Business Activity Monitoring projection… business_metrics only"* — consuming `domain_events` | `specs/architecture/c4-l3.yaml:102-105` · `c4-l2.yaml:370,484` |
 | F14 | **Sharing the order path's database with analytics is already a filed risk.** `deploy/generated/manifests/bins/bam.yaml` points BAM at the same `DATABASE_URL` as the order path with `temp_file_limit` unset | [#443](https://github.com/TheCaptainCompany/captain-food/issues/443) |
 | F15 | **The domain already stitches anonymous to authenticated, without any analytics identifier.** `CustomerIdentified` carries `sessionId` precisely so *"the visitor's OPEN guest carts can be bound to the customerId"*; `CartBindingProcess` performs the association | `specs/customer/events.yaml:50-70` · `specs/ordering/api.yaml:136` |
+| F16 | **A GraphQL mutation in this system is structurally a COMMAND that routes to an actor.** `op-missing-command` is an **ERROR** — *"mutation declares no command."* — and `mutation-command-unhandled` requires an actor to handle it. All **86** mutations bind a `commands.yaml` `$ref`; **zero** do not. So a mutation, declared the only way the DSL currently allows, enqueues on the actor mailbox and its handler appends to `domain_events` | `tools/codegen-rs/src/validate/core.rs:292,295,301`; measured over `specs/*/api.yaml` |
+| F17 | **The acting principal is already envelope metadata, never payload.** ADR-0041: `user_id`/`user_type` are recorded on `domain_events` by infrastructure, and *"the actor/user who performed an event is envelope metadata… not a payload field"* | `CLAUDE.md` conventions · `specs/database/tables/eventstore.yaml:18-19` |
 
 ### 1.2 The consequence, plainly
 
@@ -245,6 +247,42 @@ storage that currently has exactly one.
 be the question that actually decides the product, C is a deliberate later decision with its own DPIA
 amendment, and R8 keeps it from arriving by accident. **B should be refused explicitly**, because it
 is the one a hurried implementer would pick.
+
+> **Independent convergence, worth recording as strongly as a disagreement.** The product owner's own
+> design for this half — withheld until this proposal existed, precisely so the two would be
+> independent — specifies *"the principal context will be sent with the jwt"*. That is option A
+> arrived at from the other direction: an authenticated mutation carrying principal context is
+> server-side capture with no analytics identifier and no terminal-equipment read for an analytics
+> purpose. It is also ADR-0041's envelope doctrine applied to a non-domain write without being asked.
+> Two independent routes to the same answer is the strongest evidence available that A is right, and
+> it means Q1 below is narrower than it looked: the question left is not *"which option"* but
+> *"do we ever want C's anonymous funnel badly enough to accept a banner"*. See D10 for the one place
+> the mutation instruction meets a shape the DSL does not have yet.
+
+### D10 — The write path: a GraphQL mutation, and the one shape the DSL does not have yet
+
+The product owner's independent design for this half converged with §3 D1/D3/D8 on every point:
+*"we can name the interaction name and the properties we want to share inside the event, of course the
+principal context will be sent with the jwt. A mutation should be exposed to send these events."*
+Interaction name → `kind: INTERACTION` plus a declared event id. Declared properties → `attributes:`.
+**Principal from the JWT rather than the payload → this is D8 option A reached from the other
+direction**, and it is also the repo's own envelope doctrine applied without being asked (F17,
+ADR-0041: the acting user is envelope metadata, never a payload field). An authenticated mutation
+carrying principal context *is* server-side capture with no analytics identifier. Recorded as a
+convergence, not a concession.
+
+The mutation is a better answer than this proposal's original "BFF tracking boundary", because it
+inherits the role-path routing, the ACL, and the `op-uncovered-by-story` completeness gate. **But F16
+is the trap**: as the DSL stands, a mutation *cannot* be anything but a command handled by an actor —
+so declaring `recordBehaviourEvent` the only way the validator currently accepts would enqueue it on
+the actor mailbox and append it to `domain_events`, which is precisely what D5 refuses. It would
+happen silently, by default, and `make validate` would be green.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **A mutation that declares `sink:` where a command declares `command:` — a new, small api.yaml shape meaning "this write is recorded, not decided". `op-missing-command` becomes "declares neither `command:` nor `sink:`"; a `sink:` mutation is refused an actor, refused the mailbox, and generated straight to the `BehaviourEventSink` port** ✅ **recommended** | Keeps everything the product owner wanted — one authenticated mutation, JWT principal, the existing GraphQL surface — while making the D5 boundary a **type-level fact rather than a review note**: a `sink:` mutation has no aggregate to reach and no `domain_events` append to make. The distinction it encodes is the real one and is worth a keyword: a command can be **rejected**, a sink write cannot. It also generalises honestly — the same shape is what any future "record a fact we did not decide" write needs | A new key in the api DSL, which is a real (small) design change and needs its own validator rules: a `sink:` mutation must not appear in any actor's inbox, must not be reachable by a process manager, and must declare its target store. Until it exists, this half of the work is **structurally blocked** — which is worth knowing now rather than at implementation time |
+| Declare `recordBehaviourEvent` as an ordinary mutation with a command, and rely on the handler not appending | Ships with zero DSL change; validator green today | Puts behaviour events on the actor mailbox and gives them an aggregate they do not have. Every one of D5's objections applies, and the *only* thing standing between the spec and `domain_events` would be a handler someone remembers not to write. This is the option a hurried implementer picks precisely because the validator demands it |
+| A plain HTTP endpoint outside GraphQL, JWT-authenticated | No DSL change at all; trivially cannot reach the mailbox | Loses the role-path routing, the ACL, the generated client and the story-map completeness gate, so the one write in the product that most needs a declared, reviewable surface is the one with none. It also splits the front end's write path in two for a reason a reader cannot see |
 
 ### D9 — Is there a version of this that serves THIS product? **(unprompted judgement; product-owner-owed in part)**
 
@@ -510,7 +548,7 @@ sequenceDiagram
     end
     box infrastructure adapters
     participant Web as crates/web -- generated emit fn
-    participant BFF as server -- tracking boundary (instrumented)
+    participant BFF as server -- recordBehaviourEvent mutation<br/>declares sink:, NOT command: (D10)
     participant Ad as PgBehaviourStore (adapter)
     participant DB as behaviour_events -- OWN database, RANGE partitioned by day
     participant Sweep as retention sweeper
@@ -518,9 +556,10 @@ sequenceDiagram
 
     C->>Web: taps checkout_btn
     Web->>Web: generated fn -- attributes are TYPED params, bounded sets only
-    Web->>BFF: record checkout_started { serviceType: DELIVERY }
-    BFF->>BFF: attach principal -- identifierClass CUSTOMER, else NONE
+    Web->>BFF: mutation recordBehaviourEvent { name, properties }
+    BFF->>BFF: principal from the JWT -- never from the payload (ADR-0041)
     Note over BFF: no X-SESSION-ID read for this purpose (D8 option A)<br/>the cart correlator keeps its single purpose
+    Note over BFF: a sink: mutation has NO actor and NO mailbox enqueue.<br/>Today EVERY mutation must bind a command, so without D10<br/>this write lands in domain_events by default -- silently, gate green
     BFF->>Port: record(event)
     Port->>Ad: implemented by
     Ad->>DB: INSERT into today's partition
@@ -529,7 +568,7 @@ sequenceDiagram
     Note over Sweep,DB: erasure is a partition drop, not a row scan --<br/>the reason this store is separate (D5)
 ```
 
-<a href="https://mermaid.live/view#pako:eNptVGFv2jAQ_Ssn9mEgwfphnTShqRKQdELaABG2rtKk6hIfYJHYnu20Q6j_fXcJlKosn5Kc3_O9d88-dAqrqDOETqA_NZmCEo0bj9VvA_xgHa2pq5z88buI1sMEMMCkDtFWp0Ju_wI6V-oCo7YGCuuprTj0URfaoYmwsD4KdkxbfNS29ukjmZhps4Ou41qvhZBRZ1Zt1h5D9HURa0-ACl0kHy7J7ygX7sJjpHD1xF-DAWzIkPxQQJWOsDaXuPHtreAC-Ufygokei502G96-Ngr9HrraSAcVN0uqd0kxUsKw2Lzoytgmgu6x2f8gkrEg8tP6BxIjguw-v5uBwog5BurDcjT7mrZI8ZV15Hsu7y8ZsyciJ6SeInPJEIL8Ok2oMbV9nQxubtitIUR0bNiWip2t40Mej3WunVac_Vsb6Q5j9Dqv2WFAVri6X6SJtIFV6Ld-8dJALMWacv-ajm0ecm8cDHXeMkRWwIhDY78uaLV3NIQk_Tb9mS7v4bllYOyJgRvAYgvOayPCS2lKKxG81uQnJQaO5o9sNf-eLvtAZSCYzWdpyzOzkcDKmBsuY-HXIEuzbDqfDaYJd4eskwMetzqAq72zDO8mn8G6xtBR70vur27ilqDgxiXlnkqUM7FjqwNoFh44OiWd4K8FSPxPHnSbiR-TIQWuj9QQdOVKaoPGo27LI8XFZDyE6SxLlys-EtFCtByD9-GcjbcSBWBI3pStUJtXGWPh3FuD6stHMw9nmbffCORfi-lqCaqO-2bB2pbqg3CDaOf2mdVh3PL-cjSQ7w3ovru-_ngU1ITx2HSynC9gMVqupiv2GZiJxGE0DZeiouQkqXNs3-pouPrCxEkMcgfwcPCsG5S3TrrkqwW8fYJQoGT1ZVQ81mBNO9TQHEx5IUltlPF-6nX60OGrjF1SfBUeOoyqmktR0RrrMnaen_8B7369mg" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+<a href="https://mermaid.live/view#pako:eNptVWFv2zgM_StE7sNSwNk6rAccgkOBtM6G7EMSJMH1BgwYaItJhNqSJ9HNgqL_faTsNNvafIpEvadH8lF-HJTe0GAMg0jfW3Il5RZ3AeuvDuSHLXvX1gWFfl2yD3ALGOG2jezrU6DwPwCbprIlsvUOSh-oizQY2Ja2Qcew9IEVe0N7fLC-DdMHcry27h6GjcQuOgg5c2a1bhswcmhLbgMBGmyYQnxJfkeFcpcBmeK7g6xGI9iRI90wQLVl2LqXuJuPHxUXKTxQUEwgUW9-1wh1yymzf4vw7tpQWWEgAYn0cQbzxUYyrmt0ZgzD_P3lxctrJkZvWe6eeddSSoJhn9AriPxGEcXp_DdSIVEVLu7mYJCxwEgZrCbzT9MOqQol1-Io4eNLxvWBqFHSQCxc2qioW6cupsJ3f29H19dS0TEwNlLUPZX3vuVvBfdxiZ1OnGu8daoOmYMtWukCSJFg82U5zVUG1jGTlrbOyNFIkop31fFXOmnF-LnSr_fhERzWknQTvMhmK5c8dRQCPlE0wTpNuYJt8DXwnuDz3Ua1OdImP-82eKw8GhhO8tXo8vLqfd-GuWcCr0cTn_Pw_2g9Xa9ni_lolosywWxlEnhvIzRtaHyUVub_gG-S9MlF8oleUUr9dRwCVajDcy_1jmA5mWdX0Qn-6sXYOexck700b77o51DsposabaWTQk4muKW36eqNFwfA9L_p6ssZXcvMQmEFhie_ZhA9HCzvpbsgzu11S1qHYEVLJWdErgPj5R53MqE6jLbYVqxVjbaS3eqYwU58ALtA5H5tis79uO_nMDH0ddaAxCcyNrZuKqollPzbhSdGgvnNGGbz9XS1ERnsgTWzN_Fs-D8rp4Cuz79r1vZ7kFonVKaL5OvGC2-WEpet5WyzAtPyMR3Y-sq8Ve5kF5EvrA3y_o3WJDLKgwnDv66uPvQJpQnrReerxRKWk9VmthHfgDCROgZd4urfEHOexT_zSFyZMsl4RX38pCt4zhuMzICqlDcVgj9ALFEH8Nl6YtPoXWfSmF4b_UM6iqx2_ftikMFA3nCpkpFvwONAUHX6GvTNHTw9_QR-WhMl" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ### 5.3 Why the screens spec is the only artifact that can refuse an Article 9 event
 
