@@ -43,6 +43,46 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 🔍 **2026-08-11 — BEHAVIOUR EVENT TRACKING GETS A DECLARATION SITE — AND THE ARTICLE 9 EXPOSURE
+> IS ALREADY IN THE SPEC, NOT IN THE FUTURE**
+> ([#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485),
+> [PROP-20260811-000946](proposals/PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md);
+> docs-only, no code and no spec moved).
+> Product-owner directive: *"We need to integrate the metrics in the spec. And integrate the behaviour
+> event tracking inside the screens spec."* The first clause **endorses the §27 metrics work below**
+> and changes none of it; this is the second.
+> **The finding that shapes it is not the absence of tracking — that is expected. It is that
+> special-category-adjacent data is ALREADY declared and ALREADY stored**:
+> `SetCustomerPreferences.dietaryTags` is `array<Tag>`, `Tag` is a free-form `string` with
+> `maxLength: 80` and **no enum**, persisted to `View_Customer.preferences` jsonb
+> (`specs/customer/commands.yaml:179-182`, `specs/common/scalars.yaml:145-148`,
+> `specs/database/tables/projection_tables.yaml:337`). **`halal` and `kosher` are spellable values
+> today.** No screen binds it, so nothing is running — but no review caught it, because no artifact
+> existed that would make anyone look.
+> **Why the screens spec is the right location, and it is not aesthetic**: `specs/screens/**` is the
+> **only** artifact in the repo that knows a `filter_bar` is an allergen filter — the api layer sees
+> an argument, the store sees a string, an analytics SDK sees a payload. So it is the only place the
+> rule *"this control may never be tracked"* can be written. **The window is open now and closes
+> soon**: `allergen` has **zero occurrences in `specs/catalog/*.yaml`** while the model is
+> decided-and-unbuilt ([#184](https://github.com/TheCaptainCompany/captain-food/issues/184),
+> ADR-20260808-171056), so the refusal can be built **before** the control exists.
+> **Shape**: a root `specs/behaviour_events.yaml` (legal fields — `purpose`, `lawfulBasis`,
+> `retention`, `identifierClass`, `specialCategoryRisk`, `dpia` — required, no defaults) bound by a
+> `tracking:` `$ref` on screen/action nodes; `kind:` is `VIEW | INTERACTION` and **`IMPRESSION` and
+> session replay are absent from the grammar, not discouraged in a comment**; records go to their
+> **own time-partitioned store**, never `domain_events` (a behaviour event is not a decided fact, so
+> the left-fold invariant would stop holding) and never the order path's instance
+> ([#443](https://github.com/TheCaptainCompany/captain-food/issues/443)); ten ERROR rules, of which
+> **R10 makes the emitter produce nothing while no DPIA exists** — the build gate that turns
+> "sequenced behind [#194](https://github.com/TheCaptainCompany/captain-food/issues/194)" from a
+> promise into a failure.
+> **First slice is the mechanism with ZERO live events**: instrumentation before a DPIA is processing
+> that should not have started. Register: [DECISIONS §28](proposals/DECISIONS.md) — D1–D7 team-owned;
+> **Q1 (client storage, and therefore whether a consent banner exists at all — note `X-SESSION-ID`
+> already exists, `crates/server/src/graphql/session.rs:1-15`) and Q2 (does the restaurant see its own
+> storefront's behaviour data) are product-owner-owed.** Every legal claim is **VERIFY-FIRST**; no
+> licensed-counsel review has taken place.
+
 > 📏 **2026-08-11 — BUSINESS METRICS BECOME A DECLARED, GATED OBLIGATION — AND 26 OF THE 29 WE
 > ALREADY DECLARE EMIT NOTHING**
 > ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
