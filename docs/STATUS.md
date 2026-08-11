@@ -330,6 +330,21 @@
 > `user_id`/`user_type = CUSTOMER` instead of `PUBLIC`. SSR stays anonymous ON PURPOSE (identity there
 > would emit personalised HTML with no `Cache-Control`), and `/public` GraphQL responses now vary by
 > cookie — safe today (no cache in front of POST), recorded because it is now load-bearing.
+>
+> **Three things independent review added, all landed here.** (1) A verified CUSTOMER token with no
+> `captain_customer_id` — the pre-claim-stamp window, i.e. EVERY signed-in customer for one token
+> lifetime after rollout — now degrades to anonymous and is counted `public_credential_degraded_total{reason=claim_absent}`,
+> instead of falling through to `read_authorization_bridge_unresolved_total`, whose contract says
+> *"never ordinary user denial"*: a normal rollout would otherwise have bumped a provisioning-gap
+> counter on every storefront GraphQL request and read to an operator as an incident. (2) The
+> envelope widening reaches the **mailbox handler** (`resolve_actor` branches on `user_type ==
+> "CUSTOMER"`): one extra `by_auth_ref` read per delivery on the cart mutations at peak, and a
+> Customer-projection outage can now stall cart writes already accepted PENDING — outcomes
+> unaffected, since every `domain_id` consumer is unreachable from `/public`. (3) The stored
+> identity now lands on streams with **no erasure path** (`Cart-*`, `Customer-*`, `Restaurant-*`;
+> only `Order` declares one and the deletion engine is stream-keyed) — structural rather than
+> volumetric: those streams were an erasure-free zone and are now subject-attributable, which widens
+> what [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) must answer for.
 
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**

@@ -1077,6 +1077,15 @@ read-authorization:
     #                          identified customers are being served the anonymous view.
     #   role_not_customer    — a verified ADMIN/RESTAURANT/RIDER token presented to /public, which
     #                          stays anonymous by design ("role = path", ADR-0047).
+    #   claim_absent         — a verified CUSTOMER token carrying no (or a malformed)
+    #                          captain_customer_id: the pre-claim-stamp window, EXPECTED and
+    #                          high-volume for one token lifetime after a rollout. It is counted
+    #                          HERE rather than as read_authorization_bridge_unresolved_total
+    #                          precisely so that window cannot read as a provisioning incident — on
+    #                          /public such a caller is served the anonymous view and DENIED
+    #                          nothing, which is not what that counter means. Expect a burst that
+    #                          decays toward zero; a floor that does NOT decay is a claim-stamping
+    #                          failure, and customer_claim_stamp_failed_total is where that lives.
     - { name: "public_credential_degraded_total", type: counter, attributes: ["reason"] }
     - { name: "read_authorization_check_ms", type: histogram, attributes: ["scope_type"] }
 

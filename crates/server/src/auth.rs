@@ -102,13 +102,20 @@ impl Principal {
     /// `role: Customer` is the PRINCIPAL's role, i.e. who the caller IS; the per-field ACL keeps
     /// running against the PATH role (`RequestRole::Public`), which is injected separately, so this
     /// widens no field's visibility — only the row scope of reads the open path already served.
-    pub(crate) fn public_customer(sub: String, customer_id: Option<uuid::Uuid>) -> Self {
+    ///
+    /// `customer_id` is **not optional** (reviewer S3): a CUSTOMER principal without its domain
+    /// claim resolves to `ReadScope::Public` anyway — it serves no cart, matches no ownership and
+    /// fires no leg — so on the open path that is not a weaker identity, it is a DEGRADE, and it is
+    /// handled as one (`claim_absent`, see [`AuthContext::public_principal`]). Taking the id by
+    /// value is what stops the claimless state being reconstructible here and quietly reaching
+    /// `read_scope`'s provisioning-gap counter.
+    pub(crate) fn public_customer(sub: String, customer_id: uuid::Uuid) -> Self {
         Self {
             user_id: Some(sub),
             role: RequestRole::Customer,
             restaurant_id: None,
             restaurant_account_id: None,
-            customer_id,
+            customer_id: Some(customer_id),
             rider_id: None,
         }
     }
@@ -280,7 +287,7 @@ impl AuthContext {
     /// anonymous browsing down with it. Friday 19:00 with zero orders from an auth dependency the
     /// storefront never had is the failure this shape exists to prevent.
     ///
-    /// Two degradations, both counted (`public_credential_degraded_total{reason}`) so the
+    /// Three degradations, all counted (`public_credential_degraded_total{reason}`) so the
     /// degradation is visible rather than silent:
     /// - **the credential does not verify** (absent-kid, expired, tampered, JWKS unreachable) —
     ///   `invalid_token` / `verifier_unavailable`;
@@ -290,6 +297,18 @@ impl AuthContext {
     ///   path, and elevating here would turn a dead claim leg into privilege escalation on the one
     ///   path anyone can reach. Staff lose nothing — their surfaces talk to `/restaurant`,
     ///   `/rider`, `/admin`, which are unchanged.
+    /// - **the CUSTOMER token carries no `captain_customer_id`** — `claim_absent` (reviewer S3).
+    ///   This is the KNOWN LIMITATION recorded on [`Principal`]: a token minted BEFORE the claim
+    ///   stamp, i.e. every signed-in customer for one token lifetime after rollout. Such a caller
+    ///   resolves to `ReadScope::Public` whichever way it is spelled — no cart, no ownership match,
+    ///   no leg — so it is a degrade, and it is counted as one HERE rather than falling through to
+    ///   `read_scope`'s `read_authorization_bridge_unresolved_total`. That counter's contract says
+    ///   it is *"a provisioning gap or staleness — never ordinary user denial"*, and a normal
+    ///   rollout bumping it on EVERY storefront GraphQL request would read to an operator as an
+    ///   incident: exactly the misreading `public_credential_degraded_total` exists to prevent.
+    ///   `bridge_unresolved` keeps its meaning — an authenticated caller on a ROLE path who is
+    ///   consequently DENIED something — which is why the counter is re-routed rather than the
+    ///   contract text widened.
     ///
     /// A request with NO credential at all short-circuits before any I/O: anonymous browsing costs
     /// exactly what it cost before this change (no JWKS fetch, no verification).
@@ -317,7 +336,14 @@ impl AuthContext {
             telemetry::meters::read_authorization::public_credential_degraded("role_not_customer");
             return Principal::anonymous();
         }
-        Principal::public_customer(claims.sub, claim_uuid(&claims.app_metadata.captain_customer_id))
+        // No domain claim (or a malformed one) = nothing this path can act on: serve anonymous and
+        // count it here, so the pre-claim-stamp window is a visible degrade rather than a
+        // provisioning-gap alarm on every storefront request.
+        let Some(customer_id) = claim_uuid(&claims.app_metadata.captain_customer_id) else {
+            telemetry::meters::read_authorization::public_credential_degraded("claim_absent");
+            return Principal::anonymous();
+        };
+        Principal::public_customer(claims.sub, customer_id)
     }
 
     /// Verify a JWT's signature (asymmetric, key + algorithm from the JWKS) and reserved claims.
@@ -782,6 +808,97 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 application::queries::ReadScope::Public,
                 "{role}: a staff token on /public reads exactly what an anonymous browser reads"
             );
+        }
+    }
+
+    /// #469, reviewer S3: a verified CUSTOMER token with NO `captain_customer_id` — the
+    /// pre-claim-stamp window, which is EVERY signed-in customer for one token lifetime after
+    /// rollout — degrades to anonymous and is counted as `claim_absent`, rather than becoming a
+    /// `role: Customer, customer_id: None` principal.
+    ///
+    /// The assertion that carries the point is `role == Public`: `read_scope`'s
+    /// `unresolved("CUSTOMER")` arm — which bumps `read_authorization_bridge_unresolved_total`, a
+    /// counter whose contract says *"never ordinary user denial"* — is reachable ONLY through
+    /// `role: Customer`. A principal that never claims that role cannot reach it, so a normal
+    /// rollout cannot bump a provisioning-gap counter on every storefront GraphQL request. A
+    /// MALFORMED claim is the same state by design (fail closed, indistinguishable from absent).
+    #[tokio::test]
+    async fn a_customer_token_without_its_claim_degrades_instead_of_alarming() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA3).to_string();
+
+        for (case, app_metadata) in [
+            ("claim absent", serde_json::json!({ "captain_role": "CUSTOMER" })),
+            (
+                "claim malformed",
+                serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": "not-a-uuid" }),
+            ),
+        ] {
+            let jwt = signed_jwt(&sub, app_metadata, 3600);
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: the open path must never refuse"));
+            assert_eq!(
+                principal.role,
+                RequestRole::Public,
+                "{case}: an unusable claim is a DEGRADE, not a claimless Customer principal"
+            );
+            assert_eq!(principal.customer_id, None, "{case}");
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Public,
+                "{case}: the same scope either way -- so the only difference would have been the alarm"
+            );
+        }
+    }
+
+    /// #469, reviewer N1: `parse_role`'s catch-all (`_ => CUSTOMER`, the least-privilege
+    /// authenticated baseline) is reached by an UNKNOWN role string and by an ABSENT `captain_role`
+    /// — two branches the loop in `a_staff_token_on_the_open_path_stays_anonymous` cannot cover,
+    /// because it enumerates the five explicit non-CUSTOMER roles. Pinned so that an edit to that
+    /// arm cannot silently change what the open path grants.
+    ///
+    /// The documented outcome: such a caller is treated as a CUSTOMER and gets THEIR OWN customer
+    /// scope — never a tenant one, even though the token carries every tenant claim.
+    #[tokio::test]
+    async fn an_unknown_or_absent_role_claim_is_the_customer_baseline_never_a_tenant_scope() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA4).to_string();
+        let customer = uuid::Uuid::from_u128(0x469C);
+        let tenant = uuid::Uuid::from_u128(0xBEEF);
+
+        let with_claims = |role: Option<&str>| {
+            let mut meta = serde_json::json!({
+                "captain_customer_id": customer.to_string(),
+                "captain_restaurant_id": tenant.to_string(),
+                "captain_restaurant_account_id": tenant.to_string(),
+                "captain_rider_id": tenant.to_string(),
+            });
+            if let Some(role) = role {
+                meta["captain_role"] = serde_json::json!(role);
+            }
+            meta
+        };
+
+        for (case, role) in
+            [("empty", Some("")), ("unknown", Some("SUPERADMIN")), ("absent", None)]
+        {
+            let jwt = signed_jwt(&sub, with_claims(role), 3600);
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: the open path must never refuse"));
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Customer(
+                    domain::generated::scalars::CustomerId(customer)
+                ),
+                "{case}: the catch-all is the CUSTOMER baseline -- the caller's OWN scope"
+            );
+            assert_eq!(principal.restaurant_id, None, "{case}: no tenant claim survives");
+            assert_eq!(principal.restaurant_account_id, None, "{case}");
+            assert_eq!(principal.rider_id, None, "{case}");
         }
     }
 

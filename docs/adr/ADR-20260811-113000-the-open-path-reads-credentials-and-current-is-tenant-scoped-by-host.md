@@ -76,6 +76,29 @@ elsewhere" surface is the existing `carts` query.
   other open read (`catalog`, `categories`, `restaurants`, `restaurant`) consumes neither datum and
   is unchanged; every guarded operation still runs its `RoleGuard` against the PATH role and stays
   forbidden and invisible on `/public`.
+- **The write-path widening reaches the MAILBOX HANDLER, not only the resolvers** (reviewer S1).
+  `infrastructure/src/mailbox/handler.rs::resolve_actor` branches on `message.user_type ==
+  "CUSTOMER"`, and the seven open mutations now take that branch **at delivery time**, where they
+  previously short-circuited to `domain_id: None`. Two operational consequences: **(a)** one extra
+  `customers.by_auth_ref(sub)` read per delivery on the storefront's hottest write path — the three
+  cart mutations, at Friday peak; **(b)** `resolve_actor` returns `Err` on a read-model failure and
+  that **aborts the delivery** (the row stays RECEIVED for redelivery — the right protection against
+  a wrong-class terminal verdict), so a Customer-projection outage can now stall cart writes that
+  were already accepted PENDING, a dependency an open-path cart command could not previously reach.
+  Command OUTCOMES are unaffected: every `domain_id` consumer sits on a guarded operation,
+  unreachable from `/public`. The `claim_absent` degrade in decision (1) bounds the exposure — a
+  pre-claim customer is `user_type = PUBLIC` and never takes the branch, so only claim-stamped
+  customers, precisely the population whose `by_auth_ref` resolves, pay the extra read. Worth
+  recording *why* the first radius missed this: it was enumerated from the generated resolvers,
+  which structurally cannot show a change that lands in the mailbox handler.
+- **The stored-identity widening lands on streams with NO erasure path** (reviewer S2). Only
+  `Order` declares a deletion policy and the deletion engine is stream-keyed, so it cannot reach
+  `Cart-*`, `Customer-*` or `Restaurant-*`
+  ([#194 "GDPR Article 17 has no technical answer: PII lives in an immutable event log with no erasure path, and no DPIA/privacy policy/terms exist"](https://github.com/TheCaptainCompany/captain-food/issues/194)).
+  The change is **structural rather than volumetric**: the marginal PII is small, but cart and
+  listing streams were previously an erasure-free ZONE and after this essentially every stream is
+  subject-attributable. That widens what #194 must answer for, which is why this is a bullet rather
+  than a note about "more PII".
 - **SSR stays anonymous, deliberately.** `web_ssr::SchemaTransport` still injects
   `Principal::anonymous()` although the SSR request does carry the cookie. Making it
   identity-aware would emit personalised HTML from a path that sets no `Cache-Control` — a caching

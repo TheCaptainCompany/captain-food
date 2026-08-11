@@ -34,12 +34,24 @@ Structure is not a tier. A structural change with a real option space is routed 
 the product owner offered. A structural change with no option space (a file move that rewrites no
 `$ref`s, because refs are kind-logical) is a Tier 0 like any other.
 
+> **Known blind spot: the tier test is applied to the `specs/**` diff, so a stored-shape change
+> arriving through CODE is invisible to it** (found in review of
+> [#469](https://github.com/TheCaptainCompany/captain-food/issues/469), 2026-08-11). That change
+> widened what is written to `domain_events` envelopes — every open-path command now stamps a
+> `user_id`/`user_type` it did not carry before — while its `specs/**` diff is two descriptions and
+> a metric, i.e. a correct **Tier 0** on both its rows. Tier 1 asks "is the shape already emitted or
+> stored?", but it only ever gets asked of the YAML. Until a gate closes this, ask the tier question
+> of the **change**, not of the diff: if the code half alters what lands in `domain_events`, in a
+> shipped client, in an alert route or in a legal artifact, it is a Tier 1 conversation whatever the
+> YAML says.
+
 ---
 
 ## Rows
 
 | Date | What the product now promises differently | Tier | Change | `make validate` |
 |---|---|---|---|---|
+| 2026-08-11 | A customer signed in **before** we started stamping their domain id on their token is served the anonymous view on a storefront rather than a half-identity, and that window is now counted as its own thing. It is expected, it lasts one token lifetime after a release, and it must not be read as customers being denied anything — so it no longer bumps the counter that means "someone's account is not properly provisioned". | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/observability.yaml` read-authorization: `public_credential_degraded_total` gains `reason=claim_absent`, with the contract text saying why it is not `bridge_unresolved` | 0 errors |
 | 2026-08-11 | **`current` is now the cart AT THIS STOREFRONT.** A customer with open carts at two restaurants is served — and priced for — the one belonging to the restaurant whose address they are on; the tenant comes from the web address, never from anything the client can assert, and a page that names no restaurant (the marketplace, an unknown address) shows no cart rather than the most recent one from somewhere else. Carts at other restaurants remain readable through `carts`, which is what that query is for. | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/ordering/api.yaml` `current`: description now states the Host-derived tenant bound on both legs | 0 errors |
 | 2026-08-11 | A customer who is signed in on a restaurant's storefront is now recognised there — the anonymous web path READS the credential the browser already sends, so their cart is theirs rather than a stranger's empty one; when that credential cannot be honoured (expired cookie, identity provider down, or a staff token, which stays anonymous on purpose) they are served the anonymous view rather than an error, and **we now count every one of those silent degrades** — so "identified customers are being served anonymous" can no longer look like "customers stopped having carts". | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/observability.yaml` read-authorization: `public_credential_degraded_total{reason}` | 0 errors |
 
