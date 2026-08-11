@@ -29,16 +29,31 @@ use crate::auth::AuthContext;
 use super::acl::RequestRole;
 use super::schema::CaptainSchema;
 
+/// What a GraphQL request is served from: the schema, plus the read the edge resolves this
+/// request's `Host` through to a tenant (#469).
+///
+/// The lookup is a **required argument of [`graphql_routes`]**, not an `Extension` layered on
+/// afterwards, deliberately (compiler-first, ADR-20260803-234035): a forgotten extension surfaces as
+/// a runtime 500 — or, if it were made lenient, as a silently untenanted read, which is the exact
+/// bug this change closes — whereas a parameter makes "mounted the GraphQL surface with no way to
+/// resolve the tenant" fail to compile. Both mount sites (the monolith router and the
+/// `graphql-{scope}` subgraph bins) already hold a `TenantLookup` from the same composition root.
+#[derive(Clone)]
+pub struct GraphqlState {
+    schema: CaptainSchema,
+    tenants: crate::hosts::TenantLookup,
+}
+
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
-/// schema is applied as state) so it can be merged into the main router.
-pub fn graphql_routes(schema: CaptainSchema) -> Router {
+/// schema + tenant lookup are applied as state) so it can be merged into the main router.
+pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
         .route("/{role}/voyager", get(voyager))
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
-        .with_state(schema)
+        .with_state(GraphqlState { schema, tenants })
 }
 
 /// Internal trigger endpoints (ADR-0045) — NOT part of the GraphQL surface, mounted here alongside it.
@@ -88,12 +103,13 @@ async fn sirene_drain(
 }
 
 async fn graphql_handler(
-    State(schema): State<CaptainSchema>,
+    State(state): State<GraphqlState>,
     Extension(auth): Extension<Arc<AuthContext>>,
     Path(role_seg): Path<String>,
     headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
+    let GraphqlState { schema, tenants } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -124,6 +140,11 @@ async fn graphql_handler(
     // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
     // read ports without hand-written plumbing; a missing claim fails closed inside read_scope.
     let scope = crate::auth::resolve_read_scope(&principal, correlation);
+    // The request's TENANT (#469), resolved ONCE here from the `Host` — its OWN datum beside the
+    // ReadScope, never folded into it (different provenance: claims vs host, and legitimately
+    // absent on the marketplace). Tenant-scoped reads take it from the context, so no operation can
+    // accept the tenant as a client argument and none can forget to be bounded by it.
+    let tenant = crate::graphql::tenant::resolve_tenant(&headers, &tenants).await;
     let resp: GraphQLResponse = schema
         .execute(
             req.into_inner()
@@ -132,7 +153,8 @@ async fn graphql_handler(
                 .data(session)
                 .data(trace)
                 .data(correlation)
-                .data(scope),
+                .data(scope)
+                .data(tenant),
         )
         .await
         .into();
@@ -180,11 +202,12 @@ fn ws_auth_headers(mut headers: HeaderMap, payload: &serde_json::Value) -> Heade
 /// into the connection data, so the generated per-field `guard`/`visible` ACL applies identically to
 /// every operation on the socket; a failed verification rejects the connection at init.
 async fn graphql_get(
-    State(schema): State<CaptainSchema>,
+    State(state): State<GraphqlState>,
     Extension(auth): Extension<Arc<AuthContext>>,
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
+    let GraphqlState { schema, tenants } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -231,6 +254,10 @@ async fn graphql_get(
                 // claims function the POST path uses — a subscription must not widen what a query
                 // would refuse (#144/#433).
                 data.insert(crate::auth::resolve_read_scope(&principal, correlation));
+                // The socket's TENANT, resolved ONCE at init from the UPGRADE request's Host —
+                // same posture as the ReadScope beside it (#469). A live cart or tracking socket
+                // must not read wider than the POST that opened the page could.
+                data.insert(crate::graphql::tenant::resolve_tenant(&headers, &tenants).await);
                 data.insert(principal);
                 // A malformed session id rejects the connection (fail-visible, like a bad token).
                 let session = crate::graphql::session::session_header(&headers)

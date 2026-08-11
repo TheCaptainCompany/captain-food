@@ -14,6 +14,10 @@ pub mod schema;
 /// master schema restricted to its own scope's operations via the generated composition table.
 pub mod scope_slice;
 pub mod session;
+/// The request's TENANT (#469): `Host` -> `{slug}` -> `RestaurantId`, resolved ONCE at the
+/// transport boundary and injected beside the `ReadScope`. Multi-tenancy by host reached the SSR
+/// page renderer and nothing else until this module existed.
+pub mod tenant;
 
 /// The Runtime D1 flip gate (`PM_MAILBOX_DELIVERY`, #272 / ADR-20260801-023000), injected as
 /// schema data: the generated process-manager resolvers (placeOrder / approveRefund / denyRefund)

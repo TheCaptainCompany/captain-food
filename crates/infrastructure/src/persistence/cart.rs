@@ -3,7 +3,7 @@
 
 use application::queries::{CartReadRepository, CartRow};
 use async_trait::async_trait;
-use domain::generated::scalars::{CartId, CartStatus, CustomerId, SessionId};
+use domain::generated::scalars::{CartId, CartStatus, CustomerId, RestaurantId, SessionId};
 use domain::shared::errors::DomainError;
 use sqlx::PgPool;
 
@@ -91,6 +91,58 @@ impl CartReadRepository for PgCartRepository {
         );
         let rows = sqlx::query(&sql)
             .bind(session_id.0)
+            .bind(CartStatus::OPEN.to_text())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?;
+        rows.iter().map(cart_store::decode).collect()
+    }
+
+    /// Leg 1 of `cart.current` (#469): the customer's OPEN carts AT ONE RESTAURANT.
+    ///
+    /// `restaurant_id = $2` — the tenant the request's `Host` resolved to — is the load-bearing
+    /// predicate, and it lives HERE, in the store, on purpose: a caller-side filter over
+    /// `by_customer` would prove a Rust `if` while unfiltered SQL shipped, and would still read
+    /// every OTHER restaurant's cart for that customer before discarding it. `LIMIT 5` is
+    /// `by_customer`'s read-amplification bound, tightened because a customer holds at most one
+    /// OPEN cart per restaurant: the rows past the first exist only so a duplicate cannot silently
+    /// change which cart is served.
+    async fn open_by_customer_at(
+        &self,
+        customer_id: CustomerId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        let sql = format!(
+            "SELECT {} FROM cart WHERE customer_id = $1 AND restaurant_id = $2 AND status = $3 \
+             ORDER BY updated_at DESC LIMIT 5",
+            cart_store::COLUMNS
+        );
+        let rows = sqlx::query(&sql)
+            .bind(customer_id.0)
+            .bind(restaurant_id.0)
+            .bind(CartStatus::OPEN.to_text())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?;
+        rows.iter().map(cart_store::decode).collect()
+    }
+
+    /// Leg 2 of `cart.current` (#469): the session's OPEN carts AT ONE RESTAURANT. The claim-relative
+    /// "unbound, or mine" narrowing stays with the caller (it is a function of the caller's verified
+    /// claim, not of the store); the TENANT is SQL, for the reason above.
+    async fn open_by_session_at(
+        &self,
+        session_id: SessionId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        let sql = format!(
+            "SELECT {} FROM cart WHERE session_id = $1 AND restaurant_id = $2 AND status = $3 \
+             ORDER BY updated_at DESC LIMIT 5",
+            cart_store::COLUMNS
+        );
+        let rows = sqlx::query(&sql)
+            .bind(session_id.0)
+            .bind(restaurant_id.0)
             .bind(CartStatus::OPEN.to_text())
             .fetch_all(&self.pool)
             .await

@@ -85,6 +85,47 @@ impl CartReadRepository for MemCarts {
         rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(rows)
     }
+    /// Tenant-scoped leg 1 (#469): the restaurant predicate is a PORT obligation, so the double
+    /// honours it. That the SQL honours it too is asserted where it has to be — against a real
+    /// Postgres (`infrastructure/tests/main/cart_projection.rs`), because a well-behaved fake is
+    /// precisely what would let unfiltered SQL ship green.
+    async fn open_by_customer_at(
+        &self,
+        customer_id: ds::CustomerId,
+        restaurant_id: ds::RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        let mut rows: Vec<CartRow> = self
+            .0
+            .iter()
+            .filter(|r| {
+                r.customer_id == Some(customer_id)
+                    && r.restaurant_id == restaurant_id
+                    && r.status == ds::CartStatus::OPEN
+            })
+            .cloned()
+            .collect();
+        rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(rows)
+    }
+    /// Tenant-scoped leg 2 (#469), same obligation.
+    async fn open_by_session_at(
+        &self,
+        session_id: ds::SessionId,
+        restaurant_id: ds::RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        let mut rows: Vec<CartRow> = self
+            .0
+            .iter()
+            .filter(|r| {
+                r.session_id == session_id
+                    && r.restaurant_id == restaurant_id
+                    && r.status == ds::CartStatus::OPEN
+            })
+            .cloned()
+            .collect();
+        rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(rows)
+    }
 }
 
 /// A catalog store serving ONE projected row whose `tree` is built from the REAL entity types
@@ -230,6 +271,18 @@ fn line_3400() -> CartLineItem {
         cart_line_id: ds::CartLineId(uid(10)),
         offer_id: ds::OfferId(uid(20)),
         quantity: 2,
+        selected_option_ids: vec![ds::OptionId(uid(30))],
+    }
+}
+
+/// The same fixture menu, ONE unit: 17,00 EUR. Exists so the two storefronts in the #469 path test
+/// answer DIFFERENT totals -- an assertion on the cart id alone would pass an implementation that
+/// serves the right row and prices it from the wrong restaurant's menu.
+fn line_1700() -> CartLineItem {
+    CartLineItem {
+        cart_line_id: ds::CartLineId(uid(11)),
+        offer_id: ds::OfferId(uid(20)),
+        quantity: 1,
         selected_option_ids: vec![ds::OptionId(uid(30))],
     }
 }
@@ -411,10 +464,17 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
     )
 }
 
-const CURRENT_Q: &str = "query { current { id status totalAmount { amountCents currency } \
+const CURRENT_Q: &str = "query { current { id restaurantId status totalAmount { amountCents currency } \
                          breakdown { total { amountCents } } \
                          lines { quantity lineTotal { amountCents } } } }";
 const CART_Q: &str = "query($id: CartId!) { cart(input: { id: $id }) { id totalAmount { amountCents } } }";
+
+/// The tenant the HTTP edge resolves from the `Host` (#469). The schema-level tests below supply
+/// it directly because they execute the SCHEMA; the PATH-level tests at the end of this file supply
+/// a `Host` instead and prove the edge resolves it -- which is the half no `.data()` can assert.
+fn tenant_of(restaurant: ds::RestaurantId) -> server::graphql_tenant::TenantScope {
+    server::graphql_tenant::TenantScope::Restaurant(restaurant)
+}
 
 fn cart_vars(cart: u8) -> Variables {
     Variables::from_json(json!({ "id": uid(cart) }))
@@ -434,7 +494,8 @@ async fn leg1_the_customers_bound_cart_prices_live_to_3400() {
         .execute(
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
@@ -457,19 +518,31 @@ async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
     let schema = schema_over(vec![cart_row(1, restaurant, 10, None, vec![line_3400()], 100)], restaurant);
 
     let own = schema
-        .execute(Request::new(CURRENT_Q).data(RequestRole::Public).data(SessionHeader(Some(uid(10)))))
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Public)
+                .data(SessionHeader(Some(uid(10))))
+                .data(tenant_of(restaurant)),
+        )
         .await;
     assert!(own.errors.is_empty(), "no errors expected, got {:?}", own.errors);
     let data = own.data.into_json().unwrap();
     assert_eq!(data["current"]["totalAmount"]["amountCents"], json!(3400));
 
     let other = schema
-        .execute(Request::new(CURRENT_Q).data(RequestRole::Public).data(SessionHeader(Some(uid(11)))))
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Public)
+                .data(SessionHeader(Some(uid(11))))
+                .data(tenant_of(restaurant)),
+        )
         .await;
     assert!(other.errors.is_empty());
     assert_eq!(other.data.into_json().unwrap()["current"], json!(null), "session B sees nothing");
 
-    let headerless = schema.execute(Request::new(CURRENT_Q).data(RequestRole::Public)).await;
+    let headerless = schema
+        .execute(Request::new(CURRENT_Q).data(RequestRole::Public).data(tenant_of(restaurant)))
+        .await;
     assert!(headerless.errors.is_empty());
     assert_eq!(headerless.data.into_json().unwrap()["current"], json!(null));
 }
@@ -482,7 +555,12 @@ async fn leg2_a_bound_cart_is_invisible_to_an_anonymous_session_replay() {
     let restaurant = ds::RestaurantId(uid(90));
     let schema = schema_over(vec![cart_row(1, restaurant, 10, Some(5), vec![line_3400()], 100)], restaurant);
     let resp = schema
-        .execute(Request::new(CURRENT_Q).data(RequestRole::Public).data(SessionHeader(Some(uid(10)))))
+        .execute(
+            Request::new(CURRENT_Q)
+                .data(RequestRole::Public)
+                .data(SessionHeader(Some(uid(10))))
+                .data(tenant_of(restaurant)),
+        )
         .await;
     assert!(resp.errors.is_empty());
     assert_eq!(resp.data.into_json().unwrap()["current"], json!(null));
@@ -507,7 +585,8 @@ async fn leg2_a_bound_cart_is_invisible_to_a_different_customers_claim_on_that_s
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
                 .data(ReadScope::Customer(ds::CustomerId(uid(6))))
-                .data(SessionHeader(Some(uid(10)))),
+                .data(SessionHeader(Some(uid(10))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(resp.errors.is_empty(), "no errors expected, got {:?}", resp.errors);
@@ -524,7 +603,8 @@ async fn leg2_a_bound_cart_is_invisible_to_a_different_customers_claim_on_that_s
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
-                .data(SessionHeader(Some(uid(10)))),
+                .data(SessionHeader(Some(uid(10))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(owner.errors.is_empty(), "no errors expected, got {:?}", owner.errors);
@@ -545,7 +625,8 @@ async fn an_empty_open_cart_answers_zero_with_no_breakdown() {
         .execute(
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(resp.errors.is_empty(), "{:?}", resp.errors);
@@ -577,7 +658,8 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
             Request::new(CART_Q)
                 .variables(cart_vars(1))
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(owner.errors.is_empty(), "{:?}", owner.errors);
@@ -607,7 +689,8 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
             Request::new(CART_Q)
                 .variables(cart_vars(2))
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(session_cart_by_id.errors.is_empty());
@@ -645,7 +728,8 @@ async fn an_unresolvable_line_errors_the_read_instead_of_lying() {
         .execute(
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(
@@ -681,7 +765,8 @@ async fn a_malformed_lines_row_errors_the_read_instead_of_rendering_a_partial_ca
         .execute(
             Request::new(CURRENT_Q)
                 .data(RequestRole::Customer)
-                .data(ReadScope::Customer(ds::CustomerId(uid(5)))),
+                .data(ReadScope::Customer(ds::CustomerId(uid(5))))
+                .data(tenant_of(restaurant)),
         )
         .await;
     assert!(
@@ -694,4 +779,237 @@ async fn a_malformed_lines_row_errors_the_read_instead_of_rendering_a_partial_ca
         "the failure names its cause: {:?}",
         resp.errors[0].message
     );
+}
+
+// --- the PATH-level test (#469) ----------------------------------------------------------------
+//
+// Everything above executes the SCHEMA and injects `ReadScope` (and now `TenantScope`) by hand.
+// That is the right shape for the pricing and lookup semantics — and it is exactly why the two
+// #469 defects survived a green suite: nothing exercised
+// `POST /{role}/graphql -> authorize -> resolve_read_scope -> resolve_tenant -> resolver`, so a
+// `/public` path that returned `Principal::anonymous()` WITHOUT reading the cookie, and a claim leg
+// bounded by nothing, both looked fine.
+//
+// The rule this section adopts, stated where the next person will read it: **a test of an
+// auth-derived value may not `.data()` that value.** These drive a real HTTP request through the
+// production router — cookie, `Host`, JWKS verification and all — and inject nothing.
+
+/// TEST-ONLY ES256 keypair. Deliberately the SAME material as `crates/server/src/auth.rs`'s unit
+/// fixture and duplicated rather than shared: `#[cfg(test)]` items in the lib are invisible to an
+/// integration test, and the alternatives (a public test-support module, or a cargo feature) would
+/// put a signing fixture in the crate's PUBLIC API to save four lines. Never a deployed key.
+const TEST_EC_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTCTNdGfegiVKVsm+
+vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
+5bKnk8sNetDUBHLVIGpXoxBRFJVNSeDN6QB9IHl6rqDLaZR4iqLatScL
+-----END PRIVATE KEY-----
+";
+
+/// The public half of that key, as the JWKS the verifier fetches.
+fn jwks_body() -> serde_json::Value {
+    json!({"keys":[{"kty":"EC","crv":"P-256","use":"sig","kid":"captain-test-es256","alg":"ES256",
+        "x":"baNA5O-X8ZdiMi8fPb8L41FpCQG_6eWyp5PLDXrQ1AQ","y":"ctUgalejEFEUlU1J4M3pAH0geXquoMtplHiKotq1Jws"}]})
+}
+
+/// A loopback JWKS endpoint, so `AuthContext` is built exactly as production builds it
+/// (`from_config`) instead of through a test-only door into its private cache. Returns the URL.
+async fn jwks_endpoint() -> String {
+    let app = axum::Router::new().route("/jwks", axum::routing::get(|| async { axum::Json(jwks_body()) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}/jwks")
+}
+
+/// The credential a signed-in storefront customer's browser actually sends: a Supabase-shaped JWT
+/// whose `sub` is the auth subject and whose `app_metadata.captain_customer_id` is the DOMAIN id —
+/// two DIFFERENT uuids, so an implementation deriving identity from `sub` cannot pass.
+fn signed_customer_jwt(sub: uuid::Uuid, customer: uuid::Uuid) -> String {
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+    header.kid = Some("captain-test-es256".into());
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs()
+        + 3600;
+    let claims = json!({
+        "sub": sub.to_string(),
+        "aud": "authenticated",
+        "exp": exp,
+        "app_metadata": { "captain_role": "CUSTOMER", "captain_customer_id": customer.to_string() },
+    });
+    let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+        .expect("test EC key parses");
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+}
+
+/// Two storefronts on two hosts, over ONE read model — the multi-tenant shape the bug lives in.
+#[derive(Clone)]
+struct TwoRestaurants(RestaurantRow, RestaurantRow);
+
+#[async_trait]
+impl RestaurantReadRepository for TwoRestaurants {
+    async fn list(&self, _f: RestaurantFilter) -> Result<Vec<RestaurantRow>, DomainError> {
+        Ok(vec![self.0.clone(), self.1.clone()])
+    }
+    /// The host resolution the edge performs — slug in, restaurant out. Unknown slugs are absent.
+    async fn by_slug(&self, s: ds::Slug) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok([&self.0, &self.1].into_iter().find(|r| r.slug.as_ref() == Some(&s)).cloned())
+    }
+    async fn by_id(&self, id: ds::RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok([&self.0, &self.1].into_iter().find(|r| r.restaurant_id == id).cloned())
+    }
+    async fn by_previous_slug(&self, _s: ds::Slug) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok(None)
+    }
+}
+
+/// A catalog store over several restaurants (each storefront prices from its own menu).
+struct ManyCatalogs(Vec<CatalogRow>);
+
+#[async_trait]
+impl CatalogReadRepository for ManyCatalogs {
+    async fn by_restaurant(&self, id: ds::RestaurantId) -> Result<Option<CatalogRow>, DomainError> {
+        Ok(self.0.iter().find(|c| c.restaurant_id == id).cloned())
+    }
+}
+
+fn named_restaurant(id: ds::RestaurantId, slug: &str) -> RestaurantRow {
+    let mut row = restaurant_row(id.0);
+    row.slug = Some(ds::Slug(slug.into()));
+    row
+}
+
+/// The production router: the real `graphql_routes` + the real JWT verifier + the real tenant
+/// lookup. Nothing here is a test seam — the request below is the browser's request.
+async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
+    let a = named_restaurant(ds::RestaurantId(uid(90)), "resto-a");
+    let b = named_restaurant(ds::RestaurantId(uid(91)), "resto-b");
+    let restaurants = Arc::new(TwoRestaurants(a.clone(), b.clone()));
+    let schema = build_schema(
+        Some(ReadDeps {
+            restaurants: restaurants.clone(),
+            prospection: Arc::new(Empty),
+            pricing_policy: Arc::new(Empty),
+            uber_estimation_policy: Arc::new(Empty),
+            uber_split_policy: Arc::new(Empty),
+            catalogs: Arc::new(ManyCatalogs(vec![
+                catalog_row(a.restaurant_id),
+                catalog_row(b.restaurant_id),
+            ])),
+            carts: Arc::new(MemCarts(carts)),
+            orders: Arc::new(Empty),
+            order_conversations: Arc::new(Empty),
+            customers: Arc::new(Empty),
+            deliveries: Arc::new(Empty),
+            refunds: Arc::new(Empty),
+            delivery_satisfaction: Arc::new(Empty),
+            delivery_partner_availabilities: Arc::new(Empty),
+            reclamations: Arc::new(Empty),
+            customer_credit: Arc::new(Empty),
+            mailbox_lanes: Arc::new(Empty),
+        }),
+        None,
+        None,
+    );
+    server::graphql_routes(schema, server::TenantLookup(Some(restaurants)))
+        .layer(axum::Extension(server::AuthContext::from_config(jwks_endpoint().await, String::new())))
+}
+
+/// `POST /public/graphql` as the storefront sends it: the anonymous role path, the `captain_auth`
+/// cookie (the browser's ONLY credential — no Authorization header exists on this request), and the
+/// tenant carried where it belongs, in the `Host`.
+async fn post_current(router: axum::Router, host: &str, jwt: Option<&str>) -> serde_json::Value {
+    use tower::ServiceExt;
+    let mut req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/public/graphql")
+        .header(axum::http::header::HOST, host)
+        .header(axum::http::header::CONTENT_TYPE, "application/json");
+    if let Some(jwt) = jwt {
+        req = req.header(axum::http::header::COOKIE, format!("captain_auth={jwt}"));
+    }
+    let body = json!({ "query": CURRENT_Q }).to_string();
+    let response = router
+        .oneshot(req.body(axum::body::Body::from(body)).expect("request builds"))
+        .await
+        .expect("router answers");
+    assert_eq!(response.status(), axum::http::StatusCode::OK, "the open path always answers 200");
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.expect("body");
+    serde_json::from_slice(&bytes).expect("json response")
+}
+
+/// **The test the suite structurally could not express** (#469). One customer, two open carts at
+/// two restaurants, one browser: each STOREFRONT HOST serves its own cart, priced from its own
+/// menu — and the identity comes from the cookie the browser sends, not from a `.data()` call.
+///
+/// This is red on `main` twice over: leg 1 never fired (so both hosts answered `null`), and had it
+/// fired it was bounded by nothing (so both hosts would have answered with whichever cart was
+/// touched last). The assertion is on the PRICED payload — `restaurantId` and the line total —
+/// because the harm in this issue is being priced for restaurant A's cart on restaurant B.
+#[tokio::test]
+async fn the_storefront_host_decides_which_of_the_customers_carts_is_served_and_priced() {
+    let customer = uid(5);
+    let jwt = signed_customer_jwt(uid(0xA0), customer);
+    // Two OPEN carts: A's is older, B's newer — so "newest OPEN anywhere" would serve B on BOTH.
+    let carts = vec![
+        cart_row(1, ds::RestaurantId(uid(90)), 10, Some(5), vec![line_3400()], 100),
+        cart_row(2, ds::RestaurantId(uid(91)), 10, Some(5), vec![line_1700()], 300),
+    ];
+
+    let on_a =
+        post_current(storefront_router(carts.clone()).await, "resto-a.captain.food", Some(&jwt)).await;
+    let cart_a = &on_a["data"]["current"];
+    assert!(on_a.get("errors").is_none(), "unexpected errors: {on_a}");
+    assert_eq!(cart_a["id"], json!(uid(1).to_string()), "resto-a serves A's cart: {on_a}");
+    assert_eq!(cart_a["restaurantId"], json!(uid(90).to_string()), "priced AS resto-a's cart");
+    assert_eq!(cart_a["totalAmount"]["amountCents"], json!(3400), "A's total, not B's");
+    assert_eq!(cart_a["lines"][0]["lineTotal"]["amountCents"], json!(3400));
+
+    let on_b = post_current(storefront_router(carts).await, "resto-b.captain.food", Some(&jwt)).await;
+    let cart_b = &on_b["data"]["current"];
+    assert_eq!(cart_b["id"], json!(uid(2).to_string()), "resto-b serves B's cart: {on_b}");
+    assert_eq!(cart_b["restaurantId"], json!(uid(91).to_string()));
+    assert_eq!(cart_b["totalAmount"]["amountCents"], json!(1700), "B's total, not A's");
+}
+
+/// The DECOY-FREE case at the path level (mob, testing lens 3): with a cart at resto-A **only**,
+/// resto-B's storefront serves `null`. An implementation of "this host's cart, else the newest
+/// anywhere" passes the two-cart test above and fails here — which is the whole point of it.
+#[tokio::test]
+async fn a_cart_at_another_storefront_is_never_served_as_a_fallback() {
+    let jwt = signed_customer_jwt(uid(0xA0), uid(5));
+    let carts = vec![cart_row(1, ds::RestaurantId(uid(90)), 10, Some(5), vec![line_3400()], 100)];
+
+    let on_b = post_current(storefront_router(carts).await, "resto-b.captain.food", Some(&jwt)).await;
+    assert!(on_b.get("errors").is_none(), "unexpected errors: {on_b}");
+    assert_eq!(on_b["data"]["current"], json!(null), "no cart HERE is null, never A's cart: {on_b}");
+}
+
+/// The marketplace host names no restaurant, so `current` is null there — decided explicitly
+/// (#469), not "newest anywhere" wearing a fallback's clothes. Same request, same cookie, same
+/// carts; only the `Host` differs.
+#[tokio::test]
+async fn the_marketplace_host_serves_no_cart_at_all() {
+    let jwt = signed_customer_jwt(uid(0xA0), uid(5));
+    let carts = vec![cart_row(1, ds::RestaurantId(uid(90)), 10, Some(5), vec![line_3400()], 100)];
+
+    for host in ["live.captain.food", "nobody.captain.food"] {
+        let resp = post_current(storefront_router(carts.clone()).await, host, Some(&jwt)).await;
+        assert!(resp.get("errors").is_none(), "{host}: unexpected errors: {resp}");
+        assert_eq!(resp["data"]["current"], json!(null), "{host}: no tenant in the host, no cart");
+    }
+}
+
+/// The credential is what makes leg 1 fire: the SAME request without the cookie — and with no
+/// `X-SESSION-ID` either — is anonymous, and an anonymous browser sees no bound cart. Keeps the
+/// test above honest about WHY it passes (it is not the host alone doing the work).
+#[tokio::test]
+async fn without_the_cookie_the_same_request_is_anonymous() {
+    let carts = vec![cart_row(1, ds::RestaurantId(uid(90)), 10, Some(5), vec![line_3400()], 100)];
+    let resp = post_current(storefront_router(carts).await, "resto-a.captain.food", None).await;
+    assert!(resp.get("errors").is_none(), "unexpected errors: {resp}");
+    assert_eq!(resp["data"]["current"], json!(null), "no credential, no claim leg: {resp}");
 }

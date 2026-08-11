@@ -291,6 +291,46 @@
 > profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 was stale; re-measured on `main`
 > at `d7087fb` and repinned to 37 when `main` was merged into this branch — re-measure, as it says).
 
+> ✅ **2026-08-11 — #469: THE OPEN PATH READS CREDENTIALS, AND `current` IS TENANT-SCOPED BY HOST**
+> ([#469 "`current` leg 1 is dead on the web AND is not tenant-scoped — fix both together or neither"](https://github.com/TheCaptainCompany/captain-food/issues/469),
+> branch `469-auth-leg-and-tenant-scope`, PR [#488](https://github.com/TheCaptainCompany/captain-food/pull/488),
+> [ADR-20260811-113000](adr/ADR-20260811-113000-the-open-path-reads-credentials-and-current-is-tenant-scoped-by-host.md)).
+> Both halves land together because either alone is worse than neither: the auth half on its own
+> ships a live cross-tenant cart.
+>
+> **Half 1 — `/public` is no longer credential-blind.** It reads the `captain_auth` cookie/bearer and
+> verifies it, and it is the ONE path that DEGRADES instead of refusing: absent, expired, tampered,
+> JWKS-unreachable and non-CUSTOMER credentials all serve `200` anonymous (a stale cookie is the
+> common case; `/public` worked with no JWKS at all before and still must). Each degrade is counted —
+> `public_credential_degraded_total{reason}` — and the JWKS fetch is now bounded at 3 s, because key
+> refresh has moved onto the storefront's critical path. **It grants at most the CUSTOMER identity**:
+> a verified ADMIN/RESTAURANT/RIDER token there stays anonymous, enforced by construction
+> (`Principal::public_customer` takes the customer claim and nothing else), not by review.
+>
+> **Half 2 — the tenant is a request datum.** `Host` → `{slug}` → `RestaurantId` resolved ONCE at the
+> GraphQL edge (POST and WebSocket) and injected beside `ReadScope`, never folded into it; `current`
+> stays ZERO-ARGUMENT (an argument would let a client assert the tenant) and both legs are bounded by
+> the tenant **in SQL**, through two port methods whose signatures make it non-optional. A host that
+> names no restaurant serves `null`, never "the newest cart anywhere"; `carts` remains the
+> across-restaurants query. `graphql_routes` now TAKES the tenant lookup, so mounting the surface
+> without one does not compile.
+>
+> **The test that could not previously exist.** Every cart test injected `ReadScope` by hand, which is
+> exactly how a dead auth leg survived a green suite. `tests/graphql_cart_read.rs` now drives a real
+> `POST /public/graphql` — signed cookie, `Host`, loopback JWKS — through the production router and
+> asserts the PRICED payload per host. **Standing rule: a test of an auth-derived value may not
+> `.data()` that value.** Each half was mutation-tested separately (restore `Principal::anonymous()`
+> ⇒ the auth test reds with `null`; drop the host filter ⇒ the tenant tests red showing restaurant
+> B's cart and total on A's storefront; neutralise the SQL predicate ⇒ the DB test reds with 2 rows
+> where 1 is expected).
+>
+> **Blast radius, named** (ADR §Consequences): on `/public` a signed-in customer now also reaches
+> `paymentStatus` ownership by claim, matches `operationStatus`/`operationStatusChanged` ownership by
+> their own `sub`, and the open mutations' journal/`domain_events` envelope stamps
+> `user_id`/`user_type = CUSTOMER` instead of `PUBLIC`. SSR stays anonymous ON PURPOSE (identity there
+> would emit personalised HTML with no `Cache-Control`), and `/public` GraphQL responses now vary by
+> cookie — safe today (no cache in front of POST), recorded because it is now load-bearing.
+
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
 > ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),

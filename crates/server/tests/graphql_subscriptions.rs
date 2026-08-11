@@ -139,6 +139,21 @@ impl CartReadRepository for Empty {
     async fn open_by_session(&self, _s: ds::SessionId) -> Result<Vec<CartRow>, DomainError> {
         Ok(Vec::new())
     }
+    /// The tenant-scoped legs of `cart.current` (#469) — same explicit emptiness, same reason.
+    async fn open_by_customer_at(
+        &self,
+        _c: ds::CustomerId,
+        _r: ds::RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        Ok(Vec::new())
+    }
+    async fn open_by_session_at(
+        &self,
+        _s: ds::SessionId,
+        _r: ds::RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError> {
+        Ok(Vec::new())
+    }
 }
 #[async_trait]
 impl CustomerReadRepository for Empty {
