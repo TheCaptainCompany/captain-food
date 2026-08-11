@@ -4,7 +4,7 @@
 //! test SKIPS (prints and returns) so `cargo test` stays green offline.
 
 use application::queries::CartReadRepository as _;
-use domain::generated::scalars::{CartId, CartStatus, CustomerId};
+use domain::generated::scalars::{CartId, CartStatus, CustomerId, RestaurantId, SessionId};
 use infrastructure::{PgCartRepository, ProjectionWorker};
 use sqlx::PgPool;
 
@@ -161,4 +161,90 @@ async fn cart_events_fold_into_the_read_model() {
 
     let absent = repo.by_id(CartId(uuid::Uuid::new_v4())).await.expect("by_id (absent)");
     assert!(absent.is_none());
+}
+
+/// #469 — the TENANT predicate of `cart.current`'s two legs, **through the real SQL**.
+///
+/// This is the assertion a fake cannot make. Both new lookups exist so the tenant filter lives in
+/// the STORE; an implementation that filtered in Rust (or forgot to filter at all) would pass every
+/// in-memory double in the repository — the doubles honour the port contract precisely because a
+/// port contract is what they are — while shipping SQL that hands a customer another restaurant's
+/// cart. So the predicate is proved where it runs.
+///
+/// The shape is the incident's: ONE customer, ONE session id, TWO restaurants, both carts OPEN. The
+/// cart at B is folded LAST, so it is the newest — which is exactly what an unbounded
+/// `ORDER BY updated_at DESC` lookup would return on A's storefront.
+#[tokio::test]
+async fn the_current_lookups_are_bounded_by_the_restaurant_in_sql() {
+    let Some(db) = crate::common::TestDb::acquire("cart_tenant_scope").await else { return };
+    let pool = db.pool();
+
+    let customer_id = uuid::Uuid::new_v4();
+    let session_id = uuid::Uuid::new_v4();
+    let resto_a = uuid::Uuid::new_v4();
+    let resto_b = uuid::Uuid::new_v4();
+    let cart_a = uuid::Uuid::new_v4();
+    let cart_b = uuid::Uuid::new_v4();
+
+    // A first, B second: B's row is the more recently updated of the two.
+    for (cart, restaurant) in [(cart_a, resto_a), (cart_b, resto_b)] {
+        append_event(
+            &pool,
+            &format!("Cart-{cart}"),
+            1,
+            "CartStarted",
+            serde_json::json!({
+                "cartId": cart, "restaurantId": restaurant,
+                "sessionId": session_id, "customerId": customer_id,
+            }),
+        )
+        .await;
+    }
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (two carts)");
+
+    let repo = PgCartRepository::new(pool.clone());
+
+    // Leg 1, per storefront: each host's SQL sees its own cart and ONLY its own.
+    let on_a = repo
+        .open_by_customer_at(CustomerId(customer_id), RestaurantId(resto_a))
+        .await
+        .expect("open_by_customer_at (A)");
+    assert_eq!(on_a.len(), 1, "exactly the cart at A: {on_a:?}");
+    assert_eq!(on_a[0].cart_id.0, cart_a, "A's storefront must not see B's newer cart");
+
+    let on_b = repo
+        .open_by_customer_at(CustomerId(customer_id), RestaurantId(resto_b))
+        .await
+        .expect("open_by_customer_at (B)");
+    assert_eq!(on_b.len(), 1);
+    assert_eq!(on_b[0].cart_id.0, cart_b);
+
+    // The control that keeps the two assertions above from passing vacuously: UNBOUNDED, both carts
+    // are there and B is first — so the narrowing is the restaurant predicate doing work, not an
+    // empty read model.
+    let everywhere = repo.by_customer(CustomerId(customer_id)).await.expect("by_customer");
+    assert_eq!(everywhere.len(), 2, "both carts exist and are OPEN: {everywhere:?}");
+    assert_eq!(everywhere[0].cart_id.0, cart_b, "newest-first, so B leads the unbounded read");
+
+    // Leg 2, same session id across both restaurants — the native-app case, where one session id
+    // genuinely does span storefronts (the web's per-origin localStorage does not).
+    let session_a = repo
+        .open_by_session_at(SessionId(session_id), RestaurantId(resto_a))
+        .await
+        .expect("open_by_session_at (A)");
+    assert_eq!(session_a.len(), 1);
+    assert_eq!(session_a[0].cart_id.0, cart_a);
+
+    // A restaurant with no cart for this customer/session reads NOTHING — never a fallback.
+    let elsewhere = RestaurantId(uuid::Uuid::new_v4());
+    assert!(repo
+        .open_by_customer_at(CustomerId(customer_id), elsewhere)
+        .await
+        .expect("open_by_customer_at (third restaurant)")
+        .is_empty());
+    assert!(repo
+        .open_by_session_at(SessionId(session_id), elsewhere)
+        .await
+        .expect("open_by_session_at (third restaurant)")
+        .is_empty());
 }

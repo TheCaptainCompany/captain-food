@@ -86,6 +86,17 @@ mod hosts;
 /// execute the schema under a specific role (the HTTP layer injects it from the URL path).
 pub use graphql::acl as graphql_acl;
 pub use graphql::session as graphql_session;
+/// The request's TENANT seam (#469), re-exported for the same reason as the session seam: a test
+/// that executes the schema directly must supply the datum the HTTP edge resolves from the `Host`.
+pub use graphql::tenant as graphql_tenant;
+/// The GraphQL router (#469): mounted by the composition root, and by the PATH-level test that
+/// drives a real `POST /public/graphql` — cookie, `Host` and all — through the same
+/// `graphql_routes` production runs. Every cart test before it injected `ReadScope` by hand, which
+/// is exactly why a dead auth leg could survive a green suite.
+pub use graphql::routes::graphql_routes;
+/// The JWT verifier the edge authorizes through — the PATH-level test builds one over a loopback
+/// JWKS, so its request is authenticated the way a browser's is.
+pub use auth::AuthContext;
 // The verified request principal — exposed for the subscription-ownership integration tests
 // (the generated resolvers reach it as crate::auth::Principal).
 pub use auth::Principal;
@@ -1291,7 +1302,7 @@ pub async fn router() -> Router {
         ),
     };
 
-    base.merge(graphql::routes::graphql_routes(schema))
+    base.merge(graphql::routes::graphql_routes(schema, tenant_lookup.clone()))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.

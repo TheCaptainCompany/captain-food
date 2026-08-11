@@ -1509,7 +1509,12 @@ keys:
         );
 
         let mut missing: Vec<String> = Vec::new();
-        for feature in ["command-acceptance", "place-order", "cart-price"] {
+        // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
+        // (crates/server/tests/public_credential_degraded_metric.rs proves both branches), so
+        // leaving the contract that governs them outside this guard would let a rename of
+        // `public_credential_degraded_total` or `read_authorization_bridge_unresolved_total` drift
+        // from the spec in silence.
+        for feature in ["command-acceptance", "place-order", "cart-price", "read-authorization"] {
             let node = obs.get(feature).unwrap_or_else(|| {
                 panic!("specs/observability.yaml no longer declares the '{feature}' contract")
             });

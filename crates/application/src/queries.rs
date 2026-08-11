@@ -288,6 +288,40 @@ pub trait CartReadRepository: Send + Sync {
     /// silently resolves empty, with nothing to compile-fail and no error to observe. Making it
     /// required turns "I forgot" into a build failure (compiler-first, ADR-20260803-234035).
     async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError>;
+
+    /// The customer's OPEN carts **at ONE restaurant**, most recently updated first — leg 1 of
+    /// `cart.current` (#469).
+    ///
+    /// A SEPARATE method rather than an optional filter on [`Self::by_customer`], deliberately: the
+    /// tenant is not optional here. `current` is served on a storefront host and must answer with
+    /// THAT restaurant's cart or with nothing — a customer with an open cart at `b.captain.food`
+    /// seeing it, being priced for it and paying for it on `a.captain.food` is precisely what this
+    /// signature makes unspellable. `by_customer` stays unbounded because the query IT serves
+    /// (`carts`, "my carts") legitimately spans restaurants; the distinction lives in the type
+    /// rather than in a caller remembering to pass `Some(id)`.
+    ///
+    /// Implementations MUST filter on the restaurant in the STORE, not in the caller: a Rust-side
+    /// filter over an unbounded read would let unfiltered SQL ship under a passing fake.
+    async fn open_by_customer_at(
+        &self,
+        customer_id: CustomerId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError>;
+
+    /// The session's OPEN carts **at ONE restaurant**, most recently updated first — leg 2 of
+    /// `cart.current` (#469). Same store-side tenant obligation as [`Self::open_by_customer_at`].
+    ///
+    /// The anonymous leg is not cross-tenant REACHABLE on the web (the session id lives in
+    /// per-origin `localStorage`, so two tenant hosts never share one), and it is scoped anyway:
+    /// the scoping of a read must not rest on a client-side storage detail staying true, and the
+    /// native app — one session id across restaurants — is the case where it does not.
+    /// [`Self::open_by_session`] stays unscoped for CartBindingProcess, which binds every cart of a
+    /// session at identification and is right to span restaurants.
+    async fn open_by_session_at(
+        &self,
+        session_id: SessionId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<CartRow>, DomainError>;
 }
 
 /// Read port over the `Customer` projection table (ADR-0040) — the identity/lookup read model. Backs

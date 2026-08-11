@@ -43,7 +43,7 @@ impl SubscriptionRoot {
         );
         let principal_uuid = ctx
             .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.as_deref())
+            .and_then(|p| p.user_id())
             .and_then(|s| uuid::Uuid::parse_str(s).ok());
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
         // Watch BEFORE the snapshot read (the subscribe/complete race stays closed): the typed

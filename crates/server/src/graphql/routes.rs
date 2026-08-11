@@ -29,16 +29,52 @@ use crate::auth::AuthContext;
 use super::acl::RequestRole;
 use super::schema::CaptainSchema;
 
+/// What a GraphQL request is served from: the schema, plus the read the edge resolves this
+/// request's `Host` through to a tenant (#469).
+///
+/// The lookup is a **required argument of [`graphql_routes`]**, not an `Extension` layered on
+/// afterwards, deliberately (compiler-first, ADR-20260803-234035): a forgotten extension surfaces as
+/// a runtime 500 — or, if it were made lenient, as a silently untenanted read, which is the exact
+/// bug this change closes — whereas a parameter makes "mounted the GraphQL surface with no way to
+/// resolve the tenant" fail to compile. Both mount sites (the monolith router and the
+/// `graphql-{scope}` subgraph bins) already hold a `TenantLookup` from the same composition root.
+#[derive(Clone)]
+pub struct GraphqlState {
+    schema: CaptainSchema,
+    tenants: crate::hosts::TenantLookup,
+}
+
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
-/// schema is applied as state) so it can be merged into the main router.
-pub fn graphql_routes(schema: CaptainSchema) -> Router {
+/// schema + tenant lookup are applied as state) so it can be merged into the main router.
+pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
         .route("/{role}/voyager", get(voyager))
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
-        .with_state(schema)
+        .with_state(GraphqlState { schema, tenants })
+        .layer(axum::middleware::map_response(private_no_store))
+}
+
+/// Every response of the GraphQL surface is `Cache-Control: private, no-store` (#469, legal lens).
+///
+/// Since #469 a `/public/graphql` response VARIES by the `captain_auth` cookie — the same query on
+/// the same host returns this customer's cart or nobody's. Nothing in the tree said so: a shared
+/// cache (a future CDN/ingress rule, a corporate proxy, a service worker) that took a GraphQL POST
+/// as cacheable could serve one customer's cart to another — GDPR Art. 32(1)(b) confidentiality,
+/// and an Art. 33 notifiable breach when it happens. Today's safety rests on "nothing fronts this
+/// with a cache" and "POSTs aren't cached by default", which are organisational assumptions about
+/// deployments we have not made yet; this header is the technical measure that replaces them.
+///
+/// Applied as ONE response layer over the whole surface rather than at the handler's return
+/// statements: a new route, or a new early return, cannot forget it.
+async fn private_no_store(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
 }
 
 /// Internal trigger endpoints (ADR-0045) — NOT part of the GraphQL surface, mounted here alongside it.
@@ -88,12 +124,13 @@ async fn sirene_drain(
 }
 
 async fn graphql_handler(
-    State(schema): State<CaptainSchema>,
+    State(state): State<GraphqlState>,
     Extension(auth): Extension<Arc<AuthContext>>,
     Path(role_seg): Path<String>,
     headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
+    let GraphqlState { schema, tenants } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -124,6 +161,11 @@ async fn graphql_handler(
     // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
     // read ports without hand-written plumbing; a missing claim fails closed inside read_scope.
     let scope = crate::auth::resolve_read_scope(&principal, correlation);
+    // The request's TENANT (#469), resolved ONCE here from the `Host` — its OWN datum beside the
+    // ReadScope, never folded into it (different provenance: claims vs host, and legitimately
+    // absent on the marketplace). Tenant-scoped reads take it from the context, so no operation can
+    // accept the tenant as a client argument and none can forget to be bounded by it.
+    let tenant = crate::graphql::tenant::resolve_tenant(&headers, &tenants).await;
     let resp: GraphQLResponse = schema
         .execute(
             req.into_inner()
@@ -132,7 +174,8 @@ async fn graphql_handler(
                 .data(session)
                 .data(trace)
                 .data(correlation)
-                .data(scope),
+                .data(scope)
+                .data(tenant),
         )
         .await
         .into();
@@ -180,11 +223,12 @@ fn ws_auth_headers(mut headers: HeaderMap, payload: &serde_json::Value) -> Heade
 /// into the connection data, so the generated per-field `guard`/`visible` ACL applies identically to
 /// every operation on the socket; a failed verification rejects the connection at init.
 async fn graphql_get(
-    State(schema): State<CaptainSchema>,
+    State(state): State<GraphqlState>,
     Extension(auth): Extension<Arc<AuthContext>>,
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
+    let GraphqlState { schema, tenants } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -231,6 +275,10 @@ async fn graphql_get(
                 // claims function the POST path uses — a subscription must not widen what a query
                 // would refuse (#144/#433).
                 data.insert(crate::auth::resolve_read_scope(&principal, correlation));
+                // The socket's TENANT, resolved ONCE at init from the UPGRADE request's Host —
+                // same posture as the ReadScope beside it (#469). A live cart or tracking socket
+                // must not read wider than the POST that opened the page could.
+                data.insert(crate::graphql::tenant::resolve_tenant(&headers, &tenants).await);
                 data.insert(principal);
                 // A malformed session id rejects the connection (fail-visible, like a bad token).
                 let session = crate::graphql::session::session_header(&headers)
@@ -344,5 +392,36 @@ mod tests {
         let out = ws_auth_headers(HeaderMap::new(), &json!({}));
         assert!(out.get(AUTHORIZATION).is_none());
         assert!(out.get(crate::graphql::session::SESSION_HEADER).is_none());
+    }
+
+    /// #469, legal lens: a `/public/graphql` response now varies by the `captain_auth` cookie, so
+    /// it must never be stored by a shared cache. Asserted on the REAL router (the layer, not a
+    /// handler's return statement), and on the anonymous request too — a response that carries no
+    /// cart today is served from the same URL as one that does, and a cache does not re-read the
+    /// policy per request.
+    #[tokio::test]
+    async fn every_graphql_response_forbids_shared_caching() {
+        use tower::ServiceExt;
+        let router = graphql_routes(
+            crate::graphql::schema::build_schema(None, None, None),
+            crate::hosts::TenantLookup(None),
+        )
+        .layer(Extension(crate::auth::AuthContext::from_config(
+            String::new(),
+            String::new(),
+        )));
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/public/graphql")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(json!({ "query": "{ __typename }" }).to_string()))
+            .expect("request builds");
+        let response = router.oneshot(request).await.expect("router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+            Some("private, no-store"),
+            "a credential-varying response must not be storable by a shared cache"
+        );
     }
 }

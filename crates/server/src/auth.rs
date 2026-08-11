@@ -8,6 +8,14 @@
 //! (absent ⇒ CUSTOMER), else `403`. Missing/invalid token on a non-public path ⇒ `401`; if JWKS is
 //! unreachable we **fail closed** (`503`) rather than allow.
 //!
+//! **Open is not credential-blind (#469).** `/public` also READS whatever credential the request
+//! carries, because the storefront IS the open path (`web::router` pins the customer surfaces to
+//! `Role::Public`): without that, an identified customer arrives as `ReadScope::Public` and
+//! `cart.current`'s claim leg is unreachable from a browser. It is the ONLY path that degrades
+//! instead of refusing — invalid, expired, absent-verifier and non-CUSTOMER credentials all serve
+//! the anonymous view with a `200` (see [`AuthContext::public_principal`]) — and it grants at most
+//! the CUSTOMER identity: a staff token there is anonymous, never elevated.
+//!
 //! Security notes: the verification algorithm is taken from the matched **JWK** (not the attacker-controlled
 //! header) and restricted to asymmetric families, closing the classic `alg`-confusion hole (an attacker
 //! can't downgrade to HS256 and sign with the public key).
@@ -32,34 +40,78 @@ use crate::graphql::acl::RequestRole;
 /// How long a fetched JWKS is trusted before a refresh (key rotation is also handled by a forced refetch
 /// when a token's `kid` is not in the cached set).
 const JWKS_TTL: Duration = Duration::from_secs(3600);
+/// Hard ceiling on ONE JWKS fetch (see [`jwks_client`]): the open path now verifies credentials, so
+/// an unbounded fetch would be an unbounded storefront request.
+const JWKS_FETCH_TIMEOUT: Duration = Duration::from_secs(3);
+/// After a FAILED fetch, no other request re-attempts one for this long (#469 review round 2, peak
+/// risk). Without it, a Supabase blip at Friday 19:00 costs EVERY cookie-carrying storefront
+/// request the full [`JWKS_FETCH_TIMEOUT`] before it degrades — a 3 s tax on the whole storefront,
+/// repeated per request. With it, one request pays and everyone else degrades instantly, so the
+/// outage costs a lost identity (a cart that reads anonymous) rather than a lost dinner service.
+const JWKS_FAILURE_BACKOFF: Duration = Duration::from_secs(10);
+/// Minimum spacing between two ROTATION-driven refetches (an unknown `kid`). A `kid` is
+/// attacker-supplied on the open path, so "unknown kid ⇒ refetch" is an unauthenticated request
+/// amplifier: one forged token, one outbound JWKS fetch. Rotation still absorbs within this window
+/// — the price is that a token signed with a brand-new key can be refused for at most this long
+/// after the key appears, which is bounded and self-healing; the alternative is not.
+const JWKS_ROTATION_REFETCH_MIN_INTERVAL: Duration = Duration::from_secs(5);
 /// Supabase issues user tokens with this audience.
 const SUPABASE_AUDIENCE: &str = "authenticated";
 
-/// The authenticated caller injected into the GraphQL context. `user_id` is the Supabase `sub` (`None` for
-/// anonymous PUBLIC). `role` is the (verified) role this request is authorized to act as.
+/// The authenticated caller injected into the GraphQL context: ONE private field, an [`Identity`],
+/// with the role and its domain binding travelling together.
 ///
-/// `allow(dead_code)`: the fields are consumed by resolvers and the per-field `@auth` guard (ADR-0006),
-/// which are still deferred — the request already carries the verified identity so wiring them is a pure add.
+/// **Why a wrapper and not a bag of fields** (reviewer round 2 on #469): the previous shape was
+/// `pub struct Principal { pub role, pub customer_id, … }`, and a struct literal is not a
+/// constructor — `Principal { role: RequestRole::Customer, customer_id: None, .. }` compiled
+/// inside AND outside this crate, so the "escalation is unspellable" claim documented on
+/// [`Principal::public_customer`] constrained exactly one helper and nothing else. The field is
+/// private and every constructor is `pub(crate)`, so the type — not a review, not a doc comment —
+/// is what makes the illegal states illegal.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Principal {
-    pub user_id: Option<String>,
-    pub role: RequestRole,
-    /// Tenant claims (#144/#433), verified with the rest of the token — the login-to-domain bridge
-    /// lives in JWT claims for EVERY role (ADR-20260809-050000 CARD-11; product-owner correction on
-    /// #430: "this information is provided in the jwt"). The claim IS the domain id; the auth
-    /// subject stays `sub` (PROP-20260725-185140 §3.2.1 — a binding, not a subject swap). No
-    /// per-request lookup resolves read scope anywhere.
-    ///
-    /// KNOWN LIMITATION (proposal §6.4, register row "claim staleness", open by explicit decision):
-    /// a claim is frozen until token refresh. For customers/riders the only transition is
-    /// null -> set at mint time, so the #429 bearer-token item carries the BLOCKING precondition
-    /// that the client obtains its token AFTER the claim stamp (or forces one refresh) — otherwise
-    /// the first paid session is the one denied its tracking screen.
-    pub restaurant_id: Option<uuid::Uuid>,
-    pub restaurant_account_id: Option<uuid::Uuid>,
-    pub customer_id: Option<uuid::Uuid>,
-    pub rider_id: Option<uuid::Uuid>,
+    identity: Identity,
+}
+
+/// Who the caller IS, as ONE value. A role never travels without the claim that gives it meaning,
+/// so "role says CUSTOMER, claim absent" is not a field combination anybody can spell by accident:
+/// it is [`Identity::Unbound`], a NAMED state that reads as what it is — an authenticated caller on
+/// a ROLE path whose token carries no domain binding, i.e. the population
+/// `read_authorization_bridge_unresolved_total` exists to count.
+///
+/// Module-private on purpose: the whole point is that the variants are reachable only through the
+/// four constructors below, which are the only places a claim becomes an identity.
+///
+/// Tenant claims (#144/#433) are verified with the rest of the token — the login-to-domain bridge
+/// lives in JWT claims for EVERY role (ADR-20260809-050000 CARD-11; product-owner correction on
+/// #430: "this information is provided in the jwt"). The claim IS the domain id; the auth subject
+/// stays `sub` (PROP-20260725-185140 §3.2.1 — a binding, not a subject swap). No per-request lookup
+/// resolves read scope anywhere.
+///
+/// KNOWN LIMITATION (proposal §6.4, register row "claim staleness", open by explicit decision):
+/// a claim is frozen until token refresh. For customers/riders the only transition is
+/// null -> set at mint time, so the #429 bearer-token item carries the BLOCKING precondition
+/// that the client obtains its token AFTER the claim stamp (or forces one refresh) — otherwise
+/// the first paid session is the one denied its tracking screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Identity {
+    /// No credential — or one that did not survive the open path's verification. Reads exactly what
+    /// an anonymous browser reads.
+    Anonymous,
+    /// A machine caller on `/external`: the pre-shared service token (no subject) or a Supabase
+    /// token whose `captain_role` is EXTERNAL.
+    External { sub: Option<String> },
+    /// Platform staff. ADMIN carries no domain binding — its scope IS the role.
+    Admin { sub: String },
+    Customer { sub: String, customer_id: uuid::Uuid },
+    Restaurant { sub: String, restaurant_id: uuid::Uuid },
+    RestaurantAccount { sub: String, restaurant_account_id: uuid::Uuid },
+    Rider { sub: String, rider_id: uuid::Uuid },
+    /// Verified on a ROLE path, but the token carries no usable `captain_*` claim for that role
+    /// (absent, or malformed — indistinguishable by design). Denies everything scoped and is
+    /// counted as a provisioning gap by [`read_scope`]. Unreachable from `/public`, which degrades
+    /// such a caller to [`Identity::Anonymous`] instead (see [`AuthContext::public_principal`]).
+    Unbound { sub: String, role: RequestRole },
 }
 
 impl Principal {
@@ -67,13 +119,107 @@ impl Principal {
     /// (#92: a document GET carries no credentials, so server-side data resolution is by
     /// construction the anonymous view).
     pub(crate) fn anonymous() -> Self {
-        Self {
-            user_id: None,
-            role: RequestRole::Public,
-            restaurant_id: None,
-            restaurant_account_id: None,
-            customer_id: None,
-            rider_id: None,
+        Self { identity: Identity::Anonymous }
+    }
+
+    /// A machine caller that presented a valid pre-shared `X-External-Api-Key` — authenticated, but
+    /// no Supabase subject exists for it.
+    pub(crate) fn external_service() -> Self {
+        Self { identity: Identity::External { sub: None } }
+    }
+
+    /// The identified CUSTOMER on the OPEN path (#469): a verified `captain_auth` cookie / bearer
+    /// presented to `/public/graphql`, which the storefront is pinned to (`web::router` serves the
+    /// customer surfaces as `Role::Public`). Before #469 the open path skipped credential reading
+    /// entirely, so `cart.current`'s claim leg could never fire from a browser.
+    ///
+    /// **Escalation is unspellable here by CONSTRUCTION**: the only identity this constructor can
+    /// produce is [`Identity::Customer`], which has room for the customer claim and for nothing
+    /// else — there is no `restaurant_id` to set, correctly or otherwise. A token carrying
+    /// `captain_restaurant_id` cannot leak a `ReadScope::Restaurant` onto the one path everyone can
+    /// reach, whatever the caller sends, and a non-CUSTOMER `captain_role` never reaches this
+    /// constructor at all (see [`AuthContext::public_principal`], which degrades it to
+    /// [`Principal::anonymous`]). The principal's role is who the caller IS; the per-field ACL keeps
+    /// running against the PATH role (`RequestRole::Public`), injected separately, so this widens no
+    /// field's visibility — only the row scope of reads the open path already served.
+    ///
+    /// `customer_id` is **not optional** (reviewer S3), and now the type agrees: a CUSTOMER without
+    /// its domain claim resolves to `ReadScope::Public` anyway — it serves no cart, matches no
+    /// ownership and fires no leg — so on the open path that is not a weaker identity, it is a
+    /// DEGRADE, handled as one (`claim_absent`). [`Identity::Unbound`] is the state that spells it,
+    /// and this path cannot reach it.
+    pub(crate) fn public_customer(sub: String, customer_id: uuid::Uuid) -> Self {
+        Self { identity: Identity::Customer { sub, customer_id } }
+    }
+
+    /// The verified principal of a ROLE path (`/customer`, `/restaurant`, `/rider`, …): the claim
+    /// that MATCHES the path role becomes the identity, and every other claim in the token is
+    /// dropped rather than carried along. A `/restaurant` token's `captain_customer_id` was never
+    /// read by anything — now it cannot even be held.
+    ///
+    /// `path_role` has already been checked equal to the token's granted role by
+    /// [`AuthContext::authorize`]. `Public` cannot arrive here (the open path returns before), and
+    /// maps to the anonymous identity if it ever did — fail closed, never a silent elevation.
+    ///
+    /// Module-private (not even `pub(crate)`): it takes the token's raw `app_metadata`, so the only
+    /// caller that can reach it is the verifier that produced them.
+    fn role_path(path_role: RequestRole, sub: String, meta: &AppMetadata) -> Self {
+        let bind = |claim: &Option<String>, f: fn(String, uuid::Uuid) -> Identity| match claim_uuid(
+            claim,
+        ) {
+            Some(id) => f(sub.clone(), id),
+            None => Identity::Unbound { sub: sub.clone(), role: path_role },
+        };
+        let identity = match path_role {
+            RequestRole::Admin => Identity::Admin { sub },
+            RequestRole::External => Identity::External { sub: Some(sub) },
+            RequestRole::Customer => bind(&meta.captain_customer_id, |sub, customer_id| {
+                Identity::Customer { sub, customer_id }
+            }),
+            RequestRole::Restaurant => bind(&meta.captain_restaurant_id, |sub, restaurant_id| {
+                Identity::Restaurant { sub, restaurant_id }
+            }),
+            RequestRole::RestaurantAccount => {
+                bind(&meta.captain_restaurant_account_id, |sub, restaurant_account_id| {
+                    Identity::RestaurantAccount { sub, restaurant_account_id }
+                })
+            }
+            RequestRole::Rider => {
+                bind(&meta.captain_rider_id, |sub, rider_id| Identity::Rider { sub, rider_id })
+            }
+            RequestRole::Public => Identity::Anonymous,
+        };
+        Self { identity }
+    }
+
+    /// The Supabase `sub` — the AUTH subject, never a domain identity (#433). `None` for an
+    /// anonymous caller and for a service-token EXTERNAL one.
+    pub fn user_id(&self) -> Option<&str> {
+        match &self.identity {
+            Identity::Anonymous => None,
+            Identity::External { sub } => sub.as_deref(),
+            Identity::Admin { sub }
+            | Identity::Customer { sub, .. }
+            | Identity::Restaurant { sub, .. }
+            | Identity::RestaurantAccount { sub, .. }
+            | Identity::Rider { sub, .. }
+            | Identity::Unbound { sub, .. } => Some(sub),
+        }
+    }
+
+    /// The verified role this caller acts as — DERIVED from the identity, so it can never disagree
+    /// with the claim beside it. An [`Identity::Unbound`] caller keeps its role (that is precisely
+    /// what makes its denial attributable, and what stamps `user_type` on its commands).
+    pub fn role(&self) -> RequestRole {
+        match &self.identity {
+            Identity::Anonymous => RequestRole::Public,
+            Identity::External { .. } => RequestRole::External,
+            Identity::Admin { .. } => RequestRole::Admin,
+            Identity::Customer { .. } => RequestRole::Customer,
+            Identity::Restaurant { .. } => RequestRole::Restaurant,
+            Identity::RestaurantAccount { .. } => RequestRole::RestaurantAccount,
+            Identity::Rider { .. } => RequestRole::Rider,
+            Identity::Unbound { role, .. } => *role,
         }
     }
 }
@@ -154,6 +300,14 @@ pub struct AuthContext {
     external_tokens: Vec<String>,
     http: reqwest::Client,
     cache: RwLock<Option<CachedJwks>>,
+    /// Single-flight gate: at most ONE JWKS fetch is in flight per process. Everything else that
+    /// wants fresh keys queues here and takes the winner's result. Before this, the hourly TTL
+    /// boundary let every concurrent request fetch independently — a self-inflicted burst at
+    /// exactly the moment the storefront is busiest.
+    refresh_lock: tokio::sync::Mutex<()>,
+    /// When the last fetch FAILED (negative cache, [`JWKS_FAILURE_BACKOFF`]). `None` = no failure
+    /// standing.
+    last_failure: RwLock<Option<Instant>>,
 }
 
 impl AuthContext {
@@ -184,16 +338,19 @@ impl AuthContext {
             jwks_url,
             issuer,
             external_tokens,
-            http: reqwest::Client::new(),
+            http: jwks_client(),
             cache: RwLock::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            last_failure: RwLock::new(None),
         })
     }
 
-    /// Authorize a request for `path_role`. `/public` is always allowed (anonymous); every other path
-    /// requires a valid bearer token whose `captain_role` equals `path_role`.
+    /// Authorize a request for `path_role`. `/public` is always allowed and NEVER fails — it reads
+    /// whatever credential is present and degrades to anonymous ([`Self::public_principal`]); every
+    /// other path requires a valid bearer token whose `captain_role` equals `path_role`.
     pub async fn authorize(&self, path_role: RequestRole, headers: &HeaderMap) -> Result<Principal, AuthError> {
         if path_role == RequestRole::Public {
-            return Ok(Principal::anonymous());
+            return Ok(self.public_principal(headers).await);
         }
         // EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs) present a pre-shared service token via
         // the `X-External-Api-Key` header instead of a user JWT. If a key header is present it is
@@ -202,14 +359,7 @@ impl AuthContext {
         if path_role == RequestRole::External {
             if let Some(key) = headers.get("x-external-api-key").and_then(|v| v.to_str().ok()) {
                 return if self.external_key_valid(key) {
-                    Ok(Principal {
-                        user_id: None,
-                        role: RequestRole::External,
-                        restaurant_id: None,
-                        restaurant_account_id: None,
-                        customer_id: None,
-                        rider_id: None,
-                    })
+                    Ok(Principal::external_service())
                 } else {
                     Err(AuthError::Unauthorized)
                 };
@@ -224,17 +374,75 @@ impl AuthContext {
             .map(parse_role)
             .unwrap_or(RequestRole::Customer);
         if role_permitted(path_role, granted) {
-            Ok(Principal {
-                restaurant_id: claim_uuid(&claims.app_metadata.captain_restaurant_id),
-                restaurant_account_id: claim_uuid(&claims.app_metadata.captain_restaurant_account_id),
-                customer_id: claim_uuid(&claims.app_metadata.captain_customer_id),
-                rider_id: claim_uuid(&claims.app_metadata.captain_rider_id),
-                user_id: Some(claims.sub),
-                role: path_role,
-            })
+            Ok(Principal::role_path(path_role, claims.sub, &claims.app_metadata))
         } else {
             Err(AuthError::Forbidden)
         }
+    }
+
+    /// The OPEN path's identity resolution (#469): attempt verification, **degrade to anonymous on
+    /// every failure**. Returns a `Principal`, never a `Result` — `/public` cannot 401, 403 or 503,
+    /// whatever arrives, because a stale cookie is the COMMON case and a JWKS outage must not take
+    /// anonymous browsing down with it. Friday 19:00 with zero orders from an auth dependency the
+    /// storefront never had is the failure this shape exists to prevent.
+    ///
+    /// Three degradations, all counted (`public_credential_degraded_total{reason}`) so the
+    /// degradation is visible rather than silent:
+    /// - **the credential does not verify** (absent-kid, expired, tampered, JWKS unreachable) —
+    ///   `invalid_token` / `verifier_unavailable`;
+    /// - **the credential verifies but is not a CUSTOMER** — `role_not_customer`. An ADMIN /
+    ///   RESTAURANT / RESTAURANT_ACCOUNT / RIDER token on the open path is anonymous, NOT elevated:
+    ///   "role = path" (ADR-0047) is the whole reason staff must present their token to their own
+    ///   path, and elevating here would turn a dead claim leg into privilege escalation on the one
+    ///   path anyone can reach. Staff lose nothing — their surfaces talk to `/restaurant`,
+    ///   `/rider`, `/admin`, which are unchanged.
+    /// - **the CUSTOMER token carries no `captain_customer_id`** — `claim_absent` (reviewer S3).
+    ///   This is the KNOWN LIMITATION recorded on [`Principal`]: a token minted BEFORE the claim
+    ///   stamp, i.e. every signed-in customer for one token lifetime after rollout. Such a caller
+    ///   resolves to `ReadScope::Public` whichever way it is spelled — no cart, no ownership match,
+    ///   no leg — so it is a degrade, and it is counted as one HERE rather than falling through to
+    ///   `read_scope`'s `read_authorization_bridge_unresolved_total`. That counter's contract says
+    ///   it is *"a provisioning gap or staleness — never ordinary user denial"*, and a normal
+    ///   rollout bumping it on EVERY storefront GraphQL request would read to an operator as an
+    ///   incident: exactly the misreading `public_credential_degraded_total` exists to prevent.
+    ///   `bridge_unresolved` keeps its meaning — an authenticated caller on a ROLE path who is
+    ///   consequently DENIED something — which is why the counter is re-routed rather than the
+    ///   contract text widened.
+    ///
+    /// A request with NO credential at all short-circuits before any I/O: anonymous browsing costs
+    /// exactly what it cost before this change (no JWKS fetch, no verification).
+    async fn public_principal(&self, headers: &HeaderMap) -> Principal {
+        let Some(session_token) = token(headers) else {
+            return Principal::anonymous();
+        };
+        let claims = match self.verify(session_token).await {
+            Ok(claims) => claims,
+            Err(e) => {
+                telemetry::meters::read_authorization::public_credential_degraded(match e {
+                    AuthError::Unavailable => "verifier_unavailable",
+                    _ => "invalid_token",
+                });
+                return Principal::anonymous();
+            }
+        };
+        let granted = claims
+            .app_metadata
+            .captain_role
+            .as_deref()
+            .map(parse_role)
+            .unwrap_or(RequestRole::Customer);
+        if granted != RequestRole::Customer {
+            telemetry::meters::read_authorization::public_credential_degraded("role_not_customer");
+            return Principal::anonymous();
+        }
+        // No domain claim (or a malformed one) = nothing this path can act on: serve anonymous and
+        // count it here, so the pre-claim-stamp window is a visible degrade rather than a
+        // provisioning-gap alarm on every storefront request.
+        let Some(customer_id) = claim_uuid(&claims.app_metadata.captain_customer_id) else {
+            telemetry::meters::read_authorization::public_credential_degraded("claim_absent");
+            return Principal::anonymous();
+        };
+        Principal::public_customer(claims.sub, customer_id)
     }
 
     /// Verify a JWT's signature (asymmetric, key + algorithm from the JWKS) and reserved claims.
@@ -262,6 +470,12 @@ impl AuthContext {
     /// JWKS outage), keep using the cached keys rather than locking everyone out — signing keys rotate
     /// rarely, so the TTL is a freshness hint, not a hard expiry. A genuinely unknown `kid` still forces a
     /// refetch and **fails closed** if it can't be resolved.
+    ///
+    /// **Bounded at peak** (#469 review round 2): both refetch paths go through the single-flight
+    /// [`Self::refresh`], and the rotation path additionally refuses to refetch more often than
+    /// [`JWKS_ROTATION_REFETCH_MIN_INTERVAL`]. The `kid` is attacker-supplied on the open path, so
+    /// an unthrottled "unknown kid ⇒ fetch" would let an anonymous caller drive one outbound
+    /// request per inbound one.
     async fn key_for(&self, kid: &str) -> Result<Jwk, AuthError> {
         if self.stale().await {
             if let Err(e) = self.refresh().await {
@@ -275,8 +489,13 @@ impl AuthContext {
         if let Some(jwk) = self.lookup(kid).await {
             return Ok(jwk);
         }
-        // Unknown kid (e.g. a just-rotated key): force one refetch to absorb rotation; fail closed if it
-        // still can't be resolved.
+        // Unknown kid (e.g. a just-rotated key): absorb the rotation with ONE refetch, but only if
+        // the set we are holding is old enough to plausibly predate it. Keys fetched seconds ago do
+        // not gain a member by asking again — that request would exist purely because someone sent
+        // us a `kid` we never issued.
+        if !self.rotation_refetch_due().await {
+            return Err(AuthError::Unauthorized);
+        }
         self.refresh().await?;
         self.lookup(kid).await.ok_or(AuthError::Unauthorized)
     }
@@ -288,23 +507,56 @@ impl AuthContext {
         }
     }
 
+    /// May an UNKNOWN kid trigger a refetch? Only if the cached set is older than the rotation
+    /// interval (or there is none at all).
+    async fn rotation_refetch_due(&self) -> bool {
+        match &*self.cache.read().await {
+            Some(c) => c.fetched.elapsed() >= JWKS_ROTATION_REFETCH_MIN_INTERVAL,
+            None => true,
+        }
+    }
+
     async fn lookup(&self, kid: &str) -> Option<Jwk> {
         self.cache.read().await.as_ref().and_then(|c| c.set.find(kid).cloned())
     }
 
+    /// Fetch the key set — **single-flight, with a negative cache**.
+    ///
+    /// Callers that arrive while a fetch is running queue on `refresh_lock` and then take that
+    /// fetch's result (`fetched > arrived`) instead of issuing their own: N concurrent requests at
+    /// the TTL boundary cost ONE outbound fetch, not N. A fetch that FAILED silences the next
+    /// [`JWKS_FAILURE_BACKOFF`] of attempts, so a JWKS outage costs one request the timeout and
+    /// costs everyone else nothing — the difference between a degraded storefront and a 3-s-per-
+    /// request storefront on a Friday evening.
     async fn refresh(&self) -> Result<(), AuthError> {
         let url = self.jwks_url.as_deref().ok_or(AuthError::Unavailable)?;
-        let set = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|_| AuthError::Unavailable)?
-            .json::<JwkSet>()
-            .await
-            .map_err(|_| AuthError::Unavailable)?;
-        *self.cache.write().await = Some(CachedJwks { set, fetched: Instant::now() });
-        Ok(())
+        let arrived = Instant::now();
+        let _flight = self.refresh_lock.lock().await;
+        // Someone else's fetch completed while we queued: it IS our fetch.
+        if matches!(&*self.cache.read().await, Some(c) if c.fetched > arrived) {
+            return Ok(());
+        }
+        // A failure is still standing: fail immediately rather than pay the timeout again.
+        if matches!(*self.last_failure.read().await, Some(at) if at.elapsed() < JWKS_FAILURE_BACKOFF)
+        {
+            return Err(AuthError::Unavailable);
+        }
+        let fetched = async {
+            let response = self.http.get(url).send().await.map_err(|_| AuthError::Unavailable)?;
+            response.json::<JwkSet>().await.map_err(|_| AuthError::Unavailable)
+        }
+        .await;
+        match fetched {
+            Ok(set) => {
+                *self.cache.write().await = Some(CachedJwks { set, fetched: Instant::now() });
+                *self.last_failure.write().await = None;
+                Ok(())
+            }
+            Err(e) => {
+                *self.last_failure.write().await = Some(Instant::now());
+                Err(e)
+            }
+        }
     }
 }
 
@@ -313,6 +565,18 @@ impl AuthContext {
     fn external_key_valid(&self, presented: &str) -> bool {
         self.external_tokens.iter().any(|t| ct_eq(t.as_bytes(), presented.as_bytes()))
     }
+}
+
+/// The JWKS fetch client — **bounded**, deliberately (#469). Key refresh is a once-an-hour call on
+/// a request's critical path, and since the open path started verifying credentials that path is
+/// the STOREFRONT's. An unreachable-but-not-refusing JWKS host (a black-holed TCP connection) would
+/// otherwise hang every cookie-carrying public request for as long as the socket stays open; the
+/// timeout converts that into the honest `verifier_unavailable` degrade to anonymous, in seconds.
+fn jwks_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(JWKS_FETCH_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 /// Constant-time byte equality — no early return on the first differing byte, so a matching-prefix key
@@ -487,6 +751,8 @@ mod tests {
             external_tokens: Vec::new(),
             http: reqwest::Client::new(),
             cache: RwLock::new(Some(CachedJwks { set, fetched })),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            last_failure: RwLock::new(None),
         }
     }
 
@@ -497,6 +763,8 @@ mod tests {
             external_tokens: tokens.iter().map(|t| t.to_string()).collect(),
             http: reqwest::Client::new(),
             cache: RwLock::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            last_failure: RwLock::new(None),
         }
     }
 
@@ -558,6 +826,93 @@ mod tests {
         assert!(ctx.key_for("rotated-unknown-kid").await.is_err(), "unknown key must fail closed");
     }
 
+    /// A JWKS endpoint that COUNTS what it is asked for — the only way to assert fan-out rather
+    /// than assume it. `failing` serves `500`s, i.e. the Supabase blip.
+    async fn counting_jwks(failing: bool) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/jwks",
+            axum::routing::get(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    if failing {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "jwks down").into_response()
+                    } else {
+                        axum::Json(serde_json::json!({"keys":[{"kty":"EC","crv":"P-256","use":"sig",
+                            "kid":"captain-test-es256","alg":"ES256",
+                            "x":"baNA5O-X8ZdiMi8fPb8L41FpCQG_6eWyp5PLDXrQ1AQ",
+                            "y":"ctUgalejEFEUlU1J4M3pAH0geXquoMtplHiKotq1Jws"}]}))
+                        .into_response()
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/jwks"), hits)
+    }
+
+    /// #469 review round 2, PEAK RISK: the storefront — not a handful of staff — is now the caller
+    /// of this verifier, so the hourly TTL boundary lands on every concurrent cookie-carrying
+    /// request at once. Fifty of them cost ONE outbound fetch, not fifty.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_cold_requests_cost_exactly_one_jwks_fetch() {
+        use std::sync::atomic::Ordering;
+        let (url, hits) = counting_jwks(false).await;
+        let ctx = AuthContext::from_config(url, String::new());
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..50 {
+            let ctx = ctx.clone();
+            tasks.spawn(async move { ctx.key_for("captain-test-es256").await.is_ok() });
+        }
+        while let Some(done) = tasks.join_next().await {
+            assert!(done.expect("task joins"), "every caller gets the key");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "single-flight: one fetch serves them all");
+    }
+
+    /// The same shape when the JWKS is DOWN: the first caller pays the fetch, the rest degrade
+    /// instantly off the negative cache. Without it, a Supabase blip taxes every storefront
+    /// request `JWKS_FETCH_TIMEOUT` — 3 s each, at 19:00 on a Friday.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_failed_fetch_is_not_re_attempted_by_the_next_request() {
+        use std::sync::atomic::Ordering;
+        let (url, hits) = counting_jwks(true).await;
+        let ctx = AuthContext::from_config(url, String::new());
+
+        for _ in 0..5 {
+            assert!(ctx.key_for("captain-test-es256").await.is_err(), "a down JWKS fails closed");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "one attempt stands for the backoff window");
+    }
+
+    /// An unknown `kid` is ATTACKER-SUPPLIED on the open path. One forged token must not buy one
+    /// outbound JWKS fetch: after a set has just been fetched, an unknown kid is refused without
+    /// asking again.
+    #[tokio::test]
+    async fn an_unknown_kid_cannot_drive_a_fetch_per_request() {
+        use std::sync::atomic::Ordering;
+        let (url, hits) = counting_jwks(false).await;
+        let ctx = AuthContext::from_config(url, String::new());
+
+        for _ in 0..10 {
+            assert!(ctx.key_for("forged-kid").await.is_err(), "an unknown kid fails closed");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "the cold fetch only -- no per-request refetch");
+        // …and the real key is still served from that one fetch.
+        assert!(
+            ctx.key_for("captain-test-es256").await.is_ok(),
+            "rotation-throttling is not a lockout"
+        );
+    }
+
     /// TEST-ONLY ES256 keypair (generated for this test file, never a deployed key): the PEM signs,
     /// [`signing_set`] is its public point as a JWKS. Unlike [`test_set`]'s dummy material this
     /// key VERIFIES — it exists so [`cookie_delivered_jwt_yields_the_customer_principal_and_scope`]
@@ -582,25 +937,269 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
     /// uuid from the claim — an implementation deriving identity from `sub` cannot pass), the
     /// domain identity is `app_metadata.captain_customer_id` (#433/#437).
     fn signed_customer_jwt(sub: &str, customer_id: uuid::Uuid) -> String {
+        signed_jwt(
+            sub,
+            serde_json::json!({
+                "captain_role": "CUSTOMER",
+                "captain_customer_id": customer_id.to_string(),
+            }),
+            3600,
+        )
+    }
+
+    /// A Supabase-shaped JWT with an arbitrary `app_metadata` and lifetime, signed by the test key.
+    /// `ttl_secs` is signed: a NEGATIVE value produces an EXPIRED token (the stale-cookie case,
+    /// which is the common one on the open path, not an exotic one).
+    fn signed_jwt(sub: &str, app_metadata: serde_json::Value, ttl_secs: i64) -> String {
         let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
         header.kid = Some("captain-test-es256".into());
-        let exp = std::time::SystemTime::now()
+        let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_secs()
-            + 3600;
+            .as_secs() as i64;
         let claims = serde_json::json!({
             "sub": sub,
             "aud": SUPABASE_AUDIENCE,
-            "exp": exp,
-            "app_metadata": {
-                "captain_role": "CUSTOMER",
-                "captain_customer_id": customer_id.to_string(),
-            },
+            "exp": now + ttl_secs,
+            "app_metadata": app_metadata,
         });
         let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
             .expect("test EC key parses");
         jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
+    /// The storefront's own request shape: a cookie-delivered credential, no Authorization header.
+    fn cookie_headers(jwt: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::COOKIE, format!("captain_auth={jwt}").parse().unwrap());
+        h
+    }
+
+    /// #469 half 1, the fix itself at the auth seam: the OPEN path READS the credential the
+    /// storefront actually sends (`web::router` pins the customer surfaces to `Role::Public`), so a
+    /// signed-in customer arrives as `ReadScope::Customer` and `cart.current`'s claim leg can fire.
+    /// Before this, `/public` returned `Principal::anonymous()` without reading any credential, and
+    /// leg 1 was unreachable from a browser.
+    #[tokio::test]
+    async fn the_open_path_reads_the_customer_credential_it_used_to_ignore() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA0).to_string();
+        let customer = uuid::Uuid::from_u128(0x469);
+
+        let principal = ctx
+            .authorize(RequestRole::Public, &cookie_headers(&signed_customer_jwt(&sub, customer)))
+            .await
+            .expect("the open path never fails");
+        assert_eq!(
+            principal.identity,
+            Identity::Customer { sub: sub.clone(), customer_id: customer },
+            "the verified claim IS the identity, and `sub` stays the auth subject beside it"
+        );
+        assert_eq!(
+            read_scope(&principal),
+            application::queries::ReadScope::Customer(domain::generated::scalars::CustomerId(
+                customer
+            )),
+            "leg 1 of cart.current is reachable from the storefront's own request shape"
+        );
+    }
+
+    /// #469 half 1, the escalation pin (mob: testing lens 4a + API lens 3, reached independently).
+    /// Once `/public` reads credentials, an ADMIN / RESTAURANT / RESTAURANT_ACCOUNT / RIDER token
+    /// presented there must degrade to ANONYMOUS — never yield `ReadScope::Admin`/`Restaurant`/
+    /// `Rider`, and never 401. Elevating here would convert a dead claim leg into privilege
+    /// escalation on the one path anyone can reach, and would silently widen every role-omitted
+    /// read (an omitted `roles` key is open to every role path — specs/common/api.yaml).
+    #[tokio::test]
+    async fn a_staff_token_on_the_open_path_stays_anonymous() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA1).to_string();
+        let tenant = uuid::Uuid::from_u128(0xBEEF);
+
+        for role in ["ADMIN", "RESTAURANT", "RESTAURANT_ACCOUNT", "RIDER", "EXTERNAL"] {
+            // The token carries EVERY tenant claim at once: if the open path copied claims
+            // wholesale instead of constructing a customer-only principal, this is what would leak.
+            let jwt = signed_jwt(
+                &sub,
+                serde_json::json!({
+                    "captain_role": role,
+                    "captain_restaurant_id": tenant.to_string(),
+                    "captain_restaurant_account_id": tenant.to_string(),
+                    "captain_rider_id": tenant.to_string(),
+                    "captain_customer_id": tenant.to_string(),
+                }),
+                3600,
+            );
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{role}: the open path must never refuse"));
+            assert_eq!(
+                principal.identity,
+                Identity::Anonymous,
+                "{role}: not elevated, no identity and no tenant claim survives on the open path"
+            );
+            assert_eq!(principal.role(), RequestRole::Public, "{role}: not elevated");
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Public,
+                "{role}: a staff token on /public reads exactly what an anonymous browser reads"
+            );
+        }
+    }
+
+    /// #469, reviewer S3: a verified CUSTOMER token with NO `captain_customer_id` — the
+    /// pre-claim-stamp window, which is EVERY signed-in customer for one token lifetime after
+    /// rollout — degrades to anonymous and is counted as `claim_absent`, rather than becoming a
+    /// `role: Customer, customer_id: None` principal.
+    ///
+    /// The assertion that carries the point is `role == Public`: `read_scope`'s
+    /// `unresolved("CUSTOMER")` arm — which bumps `read_authorization_bridge_unresolved_total`, a
+    /// counter whose contract says *"never ordinary user denial"* — is reachable ONLY through
+    /// `role: Customer`. A principal that never claims that role cannot reach it, so a normal
+    /// rollout cannot bump a provisioning-gap counter on every storefront GraphQL request. A
+    /// MALFORMED claim is the same state by design (fail closed, indistinguishable from absent).
+    #[tokio::test]
+    async fn a_customer_token_without_its_claim_degrades_instead_of_alarming() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA3).to_string();
+
+        for (case, app_metadata) in [
+            ("claim absent", serde_json::json!({ "captain_role": "CUSTOMER" })),
+            (
+                "claim malformed",
+                serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": "not-a-uuid" }),
+            ),
+        ] {
+            let jwt = signed_jwt(&sub, app_metadata, 3600);
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: the open path must never refuse"));
+            assert_eq!(
+                principal.identity,
+                Identity::Anonymous,
+                "{case}: an unusable claim is a DEGRADE, not an Unbound CUSTOMER principal"
+            );
+            assert_eq!(principal.role(), RequestRole::Public, "{case}");
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Public,
+                "{case}: the same scope either way -- so the only difference would have been the alarm"
+            );
+        }
+    }
+
+    /// #469, reviewer N1: `parse_role`'s catch-all (`_ => CUSTOMER`, the least-privilege
+    /// authenticated baseline) is reached by an UNKNOWN role string and by an ABSENT `captain_role`
+    /// — two branches the loop in `a_staff_token_on_the_open_path_stays_anonymous` cannot cover,
+    /// because it enumerates the five explicit non-CUSTOMER roles. Pinned so that an edit to that
+    /// arm cannot silently change what the open path grants.
+    ///
+    /// The documented outcome: such a caller is treated as a CUSTOMER and gets THEIR OWN customer
+    /// scope — never a tenant one, even though the token carries every tenant claim.
+    #[tokio::test]
+    async fn an_unknown_or_absent_role_claim_is_the_customer_baseline_never_a_tenant_scope() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA4).to_string();
+        let customer = uuid::Uuid::from_u128(0x469C);
+        let tenant = uuid::Uuid::from_u128(0xBEEF);
+
+        let with_claims = |role: Option<&str>| {
+            let mut meta = serde_json::json!({
+                "captain_customer_id": customer.to_string(),
+                "captain_restaurant_id": tenant.to_string(),
+                "captain_restaurant_account_id": tenant.to_string(),
+                "captain_rider_id": tenant.to_string(),
+            });
+            if let Some(role) = role {
+                meta["captain_role"] = serde_json::json!(role);
+            }
+            meta
+        };
+
+        for (case, role) in
+            [("empty", Some("")), ("unknown", Some("SUPERADMIN")), ("absent", None)]
+        {
+            let jwt = signed_jwt(&sub, with_claims(role), 3600);
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: the open path must never refuse"));
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Customer(
+                    domain::generated::scalars::CustomerId(customer)
+                ),
+                "{case}: the catch-all is the CUSTOMER baseline -- the caller's OWN scope"
+            );
+            assert_eq!(
+                principal.identity,
+                Identity::Customer { sub: sub.clone(), customer_id: customer },
+                "{case}: no tenant claim survives -- the identity has nowhere to put one"
+            );
+        }
+    }
+
+    /// #469 half 1, the availability pin (mob: testing lens 4b + API lens 3). A stale cookie is the
+    /// COMMON case and a JWKS outage is a platform one; neither may take anonymous browsing down.
+    /// Expired, tampered, unsigned-by-us and unverifiable-because-no-JWKS all serve the anonymous
+    /// view — 200, never 401/503.
+    #[tokio::test]
+    async fn an_unverifiable_credential_on_the_open_path_degrades_never_refuses() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA2).to_string();
+        let customer = uuid::Uuid::from_u128(0x469);
+
+        // 1. EXPIRED — the stale cookie of a customer who left the tab open overnight.
+        let expired = signed_jwt(
+            &sub,
+            serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": customer.to_string() }),
+            -3600,
+        );
+        // 2. TAMPERED — a flipped payload byte, i.e. a forged claim.
+        let valid = signed_customer_jwt(&sub, customer);
+        let tampered = {
+            let mut parts: Vec<String> = valid.split('.').map(str::to_string).collect();
+            let p = &mut parts[1];
+            let last = p.pop().expect("payload non-empty");
+            p.push(if last == 'A' { 'B' } else { 'A' });
+            parts.join(".")
+        };
+        for (case, jwt) in [("expired", expired), ("tampered", tampered), ("garbage", "not.a.jwt".into())] {
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: /public must serve 200 anonymous, never 401"));
+            assert_eq!(principal.identity, Identity::Anonymous, "{case}");
+        }
+
+        // 3. The VERIFIER ITSELF is unavailable (no JWKS configured, empty cache — a cold instance
+        //    during a Supabase outage): still anonymous, still 200. `/public` worked with no JWKS
+        //    at all before this change and must keep working.
+        let no_verifier = AuthContext {
+            jwks_url: None,
+            issuer: None,
+            external_tokens: Vec::new(),
+            http: jwks_client(),
+            cache: RwLock::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            last_failure: RwLock::new(None),
+        };
+        let principal = no_verifier
+            .authorize(RequestRole::Public, &cookie_headers(&valid))
+            .await
+            .expect("a JWKS outage must not take anonymous browsing down");
+        assert_eq!(principal.identity, Identity::Anonymous);
+
+        // 4. NO credential at all: anonymous without touching the verifier (the cost of anonymous
+        //    browsing is unchanged — `jwks_url: None` here means any fetch attempt would fail, and
+        //    the assertion above it would too).
+        let anonymous = no_verifier
+            .authorize(RequestRole::Public, &HeaderMap::new())
+            .await
+            .expect("no credential is the ordinary anonymous request");
+        assert_eq!(anonymous.identity, Identity::Anonymous);
     }
 
     /// The end-to-end link every pure test stops short of (#437): a REAL signature verified
@@ -622,11 +1221,12 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
 
         let principal =
             ctx.authorize(RequestRole::Customer, &h).await.expect("cookie-carried JWT authorizes");
-        assert_eq!(principal.customer_id, Some(customer), "the verified claim IS the identity");
-        assert_eq!(principal.rider_id, None, "no cross-field leakage (the transposition trap)");
-        assert_eq!(principal.restaurant_id, None);
-        assert_eq!(principal.restaurant_account_id, None);
-        assert_eq!(principal.user_id.as_deref(), Some(sub.as_str()), "sub stays the auth subject");
+        assert_eq!(
+            principal.identity,
+            Identity::Customer { sub: sub.clone(), customer_id: customer },
+            "the verified claim IS the identity, `sub` stays the auth subject, and no cross-field \
+             leakage is possible: the CUSTOMER identity has no rider/restaurant slot to leak into"
+        );
         assert_eq!(
             read_scope(&principal),
             application::queries::ReadScope::Customer(domain::generated::scalars::CustomerId(customer)),
@@ -676,29 +1276,36 @@ pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
     use application::queries::ReadScope;
     use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
 
-    let unresolved = |role: &str| {
-        telemetry::meters::read_authorization::bridge_unresolved(role);
-        ReadScope::Public
-    };
-    match principal.role {
-        RequestRole::Admin => ReadScope::Admin,
-        RequestRole::Restaurant => match principal.restaurant_id {
-            Some(id) => ReadScope::Restaurant(RestaurantId(id)),
-            None => unresolved("RESTAURANT"),
-        },
-        RequestRole::RestaurantAccount => match principal.restaurant_account_id {
-            Some(id) => ReadScope::RestaurantAccount(RestaurantAccountId(id)),
-            None => unresolved("RESTAURANT_ACCOUNT"),
-        },
-        RequestRole::Customer => match principal.customer_id {
-            Some(id) => ReadScope::Customer(CustomerId(id)),
-            None => unresolved("CUSTOMER"),
-        },
-        RequestRole::Rider => match principal.rider_id {
-            Some(id) => ReadScope::Rider(RiderId(id)),
-            None => unresolved("RIDER"),
-        },
-        RequestRole::Public | RequestRole::External => ReadScope::Public,
+    match &principal.identity {
+        Identity::Admin { .. } => ReadScope::Admin,
+        Identity::Restaurant { restaurant_id, .. } => ReadScope::Restaurant(RestaurantId(*restaurant_id)),
+        Identity::RestaurantAccount { restaurant_account_id, .. } => {
+            ReadScope::RestaurantAccount(RestaurantAccountId(*restaurant_account_id))
+        }
+        Identity::Customer { customer_id, .. } => ReadScope::Customer(CustomerId(*customer_id)),
+        Identity::Rider { rider_id, .. } => ReadScope::Rider(RiderId(*rider_id)),
+        Identity::Anonymous | Identity::External { .. } => ReadScope::Public,
+        // The one arm that can be a DEFECT rather than a decision: an authenticated caller on a
+        // role path with no domain binding. The claim/role pair cannot disagree here — the identity
+        // carries both — so this counts exactly the population the contract names.
+        Identity::Unbound { role, .. } => {
+            telemetry::meters::read_authorization::bridge_unresolved(role_label(*role));
+            ReadScope::Public
+        }
+    }
+}
+
+/// The `role` label of the bridge-unresolved counter — the scalars.yaml UserType text, matching the
+/// generated `role_text` on the write side.
+fn role_label(role: RequestRole) -> &'static str {
+    match role {
+        RequestRole::Public => "PUBLIC",
+        RequestRole::Customer => "CUSTOMER",
+        RequestRole::RestaurantAccount => "RESTAURANT_ACCOUNT",
+        RequestRole::Restaurant => "RESTAURANT",
+        RequestRole::Rider => "RIDER",
+        RequestRole::Admin => "ADMIN",
+        RequestRole::External => "EXTERNAL",
     }
 }
 
@@ -716,14 +1323,14 @@ pub fn resolve_read_scope(
     principal: &Principal,
     correlation_id: crate::graphql::session::RequestCorrelationId,
 ) -> application::queries::ReadScope {
-    let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role));
+    let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role()));
     span.record("business.correlation_id", correlation_id.0.to_string().as_str());
     let scope = span.in_scope(|| read_scope(principal));
     telemetry::spans::record_bridge_resolved(
         &span,
         !matches!(scope, application::queries::ReadScope::Public)
-            || principal.role == RequestRole::Public
-            || principal.role == RequestRole::External,
+            || principal.role() == RequestRole::Public
+            || principal.role() == RequestRole::External,
     );
     scope
 }
@@ -735,15 +1342,24 @@ mod read_scope_tests {
 
     use super::*;
 
-    fn principal(role: RequestRole, sub: Option<&str>) -> Principal {
-        Principal {
-            user_id: sub.map(str::to_string),
-            role,
-            restaurant_id: None,
-            restaurant_account_id: None,
-            customer_id: None,
-            rider_id: None,
-        }
+    /// A role-path principal built the way `authorize()` builds one — the verified `sub` plus the
+    /// token's `app_metadata`. Nothing here reaches inside the type: since the identity is a single
+    /// private value, a test CANNOT hand-assemble a role/claim pair the constructor would refuse,
+    /// which is the guarantee the previous field-bag shape could not give.
+    fn principal(role: RequestRole, sub: &str, claim: Option<uuid::Uuid>) -> Principal {
+        let claim = claim.map(|c| c.to_string());
+        let meta = match role {
+            RequestRole::Customer => AppMetadata { captain_customer_id: claim, ..Default::default() },
+            RequestRole::Rider => AppMetadata { captain_rider_id: claim, ..Default::default() },
+            RequestRole::Restaurant => {
+                AppMetadata { captain_restaurant_id: claim, ..Default::default() }
+            }
+            RequestRole::RestaurantAccount => {
+                AppMetadata { captain_restaurant_account_id: claim, ..Default::default() }
+            }
+            _ => AppMetadata::default(),
+        };
+        Principal::role_path(role, sub.to_string(), &meta)
     }
 
     /// The pure claims function, per role. The load-bearing data shape (beck): `sub` and the claim
@@ -757,44 +1373,62 @@ mod read_scope_tests {
 
         // Claim present -> the DOMAIN id, verbatim — never the subject.
         let customer_claim = uuid::Uuid::from_u128(2);
-        let mut p = principal(RequestRole::Customer, Some(&sub));
-        p.customer_id = Some(customer_claim);
+        let p = principal(RequestRole::Customer, &sub, Some(customer_claim));
         assert_eq!(read_scope(&p), ReadScope::Customer(CustomerId(customer_claim)));
+        assert_eq!(p.user_id(), Some(sub.as_str()), "the subject rides along, unused as identity");
 
         let rider_claim = uuid::Uuid::from_u128(4);
-        let mut p = principal(RequestRole::Rider, Some(&sub));
-        p.rider_id = Some(rider_claim);
+        let p = principal(RequestRole::Rider, &sub, Some(rider_claim));
         assert_eq!(read_scope(&p), ReadScope::Rider(RiderId(rider_claim)));
 
         let rid = uuid::Uuid::from_u128(11);
-        let mut p = principal(RequestRole::Restaurant, Some("s"));
-        p.restaurant_id = Some(rid);
+        let p = principal(RequestRole::Restaurant, "s", Some(rid));
         assert_eq!(read_scope(&p), ReadScope::Restaurant(RestaurantId(rid)));
-        let mut p = principal(RequestRole::RestaurantAccount, Some("s"));
-        p.restaurant_account_id = Some(rid);
+        let p = principal(RequestRole::RestaurantAccount, "s", Some(rid));
         assert_eq!(read_scope(&p), ReadScope::RestaurantAccount(RestaurantAccountId(rid)));
 
         // Claim ABSENT -> Public, even with a perfectly parseable sub: sub is never an identity.
+        // The role SURVIVES the absence (`Identity::Unbound`) — that is what makes the denial
+        // attributable to a role in `read_authorization_bridge_unresolved_total{role}`.
+        let unbound = principal(RequestRole::Customer, &sub, None);
+        assert_eq!(read_scope(&unbound), ReadScope::Public, "sub is never an identity (customer)");
+        assert_eq!(unbound.role(), RequestRole::Customer, "the unbound caller keeps its role");
         assert_eq!(
-            read_scope(&principal(RequestRole::Customer, Some(&sub))),
-            ReadScope::Public,
-            "sub is never an identity (customer)"
-        );
-        assert_eq!(
-            read_scope(&principal(RequestRole::Rider, Some(&sub))),
+            read_scope(&principal(RequestRole::Rider, &sub, None)),
             ReadScope::Public,
             "sub is never an identity (rider — #430's placeholder must stay dead)"
         );
-        assert_eq!(read_scope(&principal(RequestRole::Restaurant, Some("s"))), ReadScope::Public);
+        assert_eq!(read_scope(&principal(RequestRole::Restaurant, "s", None)), ReadScope::Public);
         assert_eq!(
-            read_scope(&principal(RequestRole::RestaurantAccount, Some("s"))),
+            read_scope(&principal(RequestRole::RestaurantAccount, "s", None)),
             ReadScope::Public
         );
 
         // Role decisions, no claims involved.
-        assert_eq!(read_scope(&principal(RequestRole::Admin, None)), ReadScope::Admin);
-        assert_eq!(read_scope(&principal(RequestRole::Public, None)), ReadScope::Public);
-        assert_eq!(read_scope(&principal(RequestRole::External, None)), ReadScope::Public);
+        assert_eq!(read_scope(&principal(RequestRole::Admin, "s", None)), ReadScope::Admin);
+        assert_eq!(read_scope(&Principal::anonymous()), ReadScope::Public);
+        assert_eq!(read_scope(&principal(RequestRole::External, "s", None)), ReadScope::Public);
+        assert_eq!(read_scope(&Principal::external_service()), ReadScope::Public);
+    }
+
+    /// The claim that does NOT match the path role is dropped at construction, not merely ignored
+    /// downstream (#469 review round 2). A `/restaurant` token carrying `captain_customer_id` used
+    /// to keep it on the principal; now the RESTAURANT identity has nowhere to put it.
+    #[test]
+    fn a_role_path_principal_keeps_only_the_claim_of_its_own_role() {
+        let every_claim = AppMetadata {
+            captain_role: Some("RESTAURANT".into()),
+            captain_restaurant_id: Some(uuid::Uuid::from_u128(11).to_string()),
+            captain_restaurant_account_id: Some(uuid::Uuid::from_u128(12).to_string()),
+            captain_customer_id: Some(uuid::Uuid::from_u128(13).to_string()),
+            captain_rider_id: Some(uuid::Uuid::from_u128(14).to_string()),
+        };
+        let p = Principal::role_path(RequestRole::Restaurant, "sub".into(), &every_claim);
+        assert_eq!(
+            p.identity,
+            Identity::Restaurant { sub: "sub".into(), restaurant_id: uuid::Uuid::from_u128(11) }
+        );
+        assert_eq!(read_scope(&p), ReadScope::Restaurant(RestaurantId(uuid::Uuid::from_u128(11))));
     }
 
     /// The serde seam the pure test cannot reach: a misspelled `captain_*` field name would

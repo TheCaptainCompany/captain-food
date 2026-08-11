@@ -2,6 +2,112 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗄️ **2026-08-11 — THE STORAGE SPLIT IS COSTED, AND IT FOUND TWO DEFECTS THAT ARE NOT ABOUT THE
+> SPLIT**
+> ([PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md),
+> [#494 "Storage boundaries and least-privilege database users: the write-side transactional unit, the five-database split, and the last five View_*"](https://github.com/TheCaptainCompany/captain-food/issues/494),
+> register rows STO-1..STO-6 in [DECISIONS.md §32](proposals/DECISIONS.md)). Product-owner directive:
+> five databases (`DomainEventLogDb`, `DomainCommonDb`, `CatalogDb`, `OrderDb`,
+> `BehaviorEventTrackingDb`) plus a per-app least-privilege database user derived from the spec. The
+> access model is **accepted and correct**; the dba lens completed it, priced it, and named where it
+> does not close.
+>
+> **The `View_*` blast radius is real and small — and it points the other way.** Measured: **5** SQL
+> fold views vs **11** already-materialized projection tables; **9 of 32** GraphQL queries break if
+> `domain_events` leaves the read database, **23 survive**, and **zero of the broken ones are on the
+> money path** (`Cart`, `OrderTracking`, `Catalog`, `Restaurant`, `Customer` are all tables already).
+> The five stragglers are the rider board, the restaurant delivery board, claims, the refund queue and
+> the timeliness insight. Recommended way out: **convert them to materialized projection tables** —
+> which the product owner's own rule already implies (*"the writing of the read side is done only by
+> the projectors"* is vacuous for a SQL VIEW nobody writes). `postgres_fdw` and logical replication are
+> rejected with reasons in the proposal.
+>
+> **Defect 1 — the erasure engine fails OPEN.** `crates/infrastructure/src/deletion.rs:229-233` bounds
+> its scan at `COALESCE(MIN(position), i64::MAX) FROM projection_checkpoint`, clamped to log head. A
+> database with **zero** checkpoint rows therefore erases at head with **no** fold verification —
+> exactly the database the split creates, and exactly what a start-clean production is. Fix: a
+> `projection_watermark` table in the write DB, heartbeated monotonically by each projector, with a
+> **fail-closed** default. Precondition for the split; worth landing even without it.
+>
+> **Defect 2 — 8 indexes that do not exist.** The 5 views declare 8 secondary indexes; a Postgres view
+> cannot be indexed and `views.generated.sql` emits **zero** `CREATE INDEX`. `myDeliveries` therefore
+> folds every delivery job in history to return the 3 a rider holds: at ~120 jobs/day, month 6 is
+> ~21,600 jobs × 8 correlated subqueries ≈ **173,000 index probes per call**, polled by every rider at
+> Friday peak. This is due whether or not the split happens.
+>
+> **The one thing the directive must change**: `DomainEventLogDb` cannot hold the log alone.
+> `actor_runtime/src/completion.rs:71-100` commits appends + PM state + reminders + the
+> `inbound_messages` flip + the fenced `mailbox_partitions` advance in ONE transaction — separating log
+> from mailbox does not weaken atomicity, it **deletes the fencing token** (a paused pod waking at
+> 20:40 with a stolen lease would have its appends commit). Widen it to `captain-write`. The
+> transaction the product owner *asked* about — projector fold + checkpoint — **survives the split
+> untouched**, because a co-located checkpoint plus an idempotent fold is at-least-once + idempotence,
+> not 2PC.
+>
+> **Also priced**: one CNPG cluster with five databases (five clusters do not fit the node), a
+> **session-mode** pooler as a prerequisite (the split puts the fleet at ~235 against
+> `max_connections: 220`; transaction mode silently kills `LISTEN`), five migration chains with
+> `REQUIRED_SCHEMA_VERSION` becoming a map, and behaviour tracking at **~17.5 GB/yr — ~13× the business
+> log** — which needs a declared retention policy shipping *with* its first table, not after.
+>
+> **Reconciled on landing, and both matter to whoever generates the grants.** (1) It pairs with
+> [PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+> ([DECISIONS §31](proposals/DECISIONS.md)) — **boundaries decide which units exist, storage decides
+> what shares a recovery posture and a buffer pool** — and storage deliberately does **not** follow the
+> boundary one-to-one (BND-3), with the stop condition worth becoming a validator rule: *if any app's
+> `GRANT` spans two boundaries' schemas outside the declared exceptions, the shared database has
+> silently become an integration database.* (2) ⚠️ **The permission matrix omitted the mailbox, and the
+> omission is load-bearing**: GraphQL mutation resolvers write `inbound_messages`
+> (`crates/server/src/graphql/generated/mutation.rs:42`), so *"the writing of the write side is done
+> only by the actors"*, taken literally as a `GRANT`, **makes every mutation fail at runtime**. The
+> matrix now names the mutation-resolver row explicitly — CONNECT to `captain-write` plus **INSERT and
+> SELECT** on `inbound_messages` and nothing else (SELECT because `RETURNING` needs it, and because the
+> idempotent-retry arm is a plain `SELECT`) — proposal §6.1.1, which also flags that the directive's
+> fourth bullet is a transcription slip for the **write** side and must be confirmed before it becomes
+> a role.
+
+> 🗂️ **2026-08-11 — THE 57-APP LIST, AND THE PER-APP KNOWLEDGE THAT LIVES IN RUST**
+> ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md),
+> [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491),
+> [DECISIONS §30](proposals/DECISIONS.md); docs-only, no `specs/**` touched.)
+> Product-owner request: *"Give me the app list to be on the same page… create a sub folder for each
+> app/worker and indicate what it contains."* **Half of it needed no decision** — the 57 apps grouped
+> by family, with what each family contains, are §1 of the proposal (15 `actor-*` · 5 `pm-*` ·
+> 7 `projector-*` · 8 `graphql-*` · 7 `gateway-*` · 5 `fo-*`/`bo-*` · 5 `adapter-*` · 4 `worker-*` ·
+> `bam`).
+> **The other half is a "no" inside a "yes".** The app list already exists as source
+> (`specs/architecture/c4-l2.yaml` `containers:`), and a folder in `specs/**` **cannot** make a scope
+> boundary real — only the crate graph does, which is
+> [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)'s
+> job and is untouched. So the recommendation is deliberately narrower than the request: **source for
+> deploy-owned facts only, generated for everything derivable, and the `containers:` block MOVED
+> rather than copied** — a folder that restates the derivation is a drift surface, which is the one
+> outcome worse than doing nothing.
+> **What the folder is genuinely FOR**: the per-app knowledge that today lives in **Rust, inside the
+> generator** — `worker_config_consumers()` is a literal `match name { "worker-sirene-sync" => … }`
+> (`tools/codegen-rs/src/emit/bins.rs:217-224`), the grant narrowings are per-family `if`s (`:111-139`),
+> and `replicas: 1` / `strategy: Recreate` are string literals (`tools/codegen-rs/src/emit/deploy.rs:335-340`)
+> under a comment promising *"Flipping either value is a SPEC change"* while **no spec key exists to
+> flip**.
+> ⚠️ **The measured finding is a credential boundary, not a code one.** `adapter-stripe` — the pod
+> whose stated reason to exist is *"holds ONLY this partner's secrets"* (`c4-l2.yaml:125`,
+> `emit/bins.rs:415`) — carries **13** secrets in its generated pod env, including `AUTH_SESSION_KEY`,
+> `SUPABASE_SECRET_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN` and the four `OVH_*` SMS
+> credentials; `gateway-public` (*"no DB access, no business logic, no state"*) carries **10**;
+> `bam` carries **18**, including `STRIPE_SECRET_KEY`. The narrowing mechanism exists and works —
+> `worker-erasure` carries exactly **2** (`worker_key_allowed`, `emit/bins.rs:131-139`) — it is applied
+> to one family. The derivation is also too NARROW somewhere: `worker-sirene-sync`'s pod env has no
+> `INSEE_API_TOKEN`, and `SireneClient::from_env` returns `Err` without it
+> (`crates/sirene_ingest/src/client.rs:100-102`) — correct today, a live trap at the #358 cutover.
+> **Sequencing is the one product-owner row** (§30 APP-1), because this and the 2026-08-11 enforcement
+> directive compete for the same weeks; recommended answer is slice A1 (the generated app index, no
+> source moved) now and the rest after §29 slice 1, so nothing displaces the enforcement track.
+> **[#490 "Scope-closure ratchet"](https://github.com/TheCaptainCompany/captain-food/issues/490) is
+> unaffected and stays dispatchable** — with one accuracy note for its executor: recomputing the
+> closure over the workspace manifests gives **49** violating bins, not 50, and the clean set is the
+> 7 `gateway-*` **plus `bam`** (which declares all 8 domain crates, so under the issue's own equality
+> rule it passes — listing it in `PENDING_DECOMPOSITION` would land the ratchet red).
+
 > ⚖️ **2026-08-11 — THE ERASURE-FREE ZONE, CORRECTLY FRAMED: THE STREAMS WERE **ALREADY** PERSONAL
 > DATA, AND TWO FORWARD TRAPS ARE NOW ON THE RECORD**
 > ([BRIEF-20260811-erasure-zone-and-retention.md](legal/BRIEF-20260811-erasure-zone-and-retention.md);
@@ -561,6 +667,96 @@
 > projection surface. Gates: `make rust` green, `make validate` **0 errors / 37 warnings, warning
 > profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 was stale; re-measured on `main`
 > at `d7087fb` and repinned to 37 when `main` was merged into this branch — re-measure, as it says).
+
+> ✅ **2026-08-11 — #469: THE OPEN PATH READS CREDENTIALS, AND `current` IS TENANT-SCOPED BY HOST**
+> ([#469 "`current` leg 1 is dead on the web AND is not tenant-scoped — fix both together or neither"](https://github.com/TheCaptainCompany/captain-food/issues/469),
+> branch `469-auth-leg-and-tenant-scope`, PR [#488](https://github.com/TheCaptainCompany/captain-food/pull/488),
+> [ADR-20260811-113000](adr/ADR-20260811-113000-the-open-path-reads-credentials-and-current-is-tenant-scoped-by-host.md)).
+> Both halves land together because either alone is worse than neither: the auth half on its own
+> ships a live cross-tenant cart.
+>
+> **Half 1 — `/public` is no longer credential-blind.** It reads the `captain_auth` cookie/bearer and
+> verifies it, and it is the ONE path that DEGRADES instead of refusing: absent, expired, tampered,
+> JWKS-unreachable and non-CUSTOMER credentials all serve `200` anonymous (a stale cookie is the
+> common case; `/public` worked with no JWKS at all before and still must). Each degrade is counted —
+> `public_credential_degraded_total{reason}` — and the JWKS fetch is now bounded at 3 s, because key
+> refresh has moved onto the storefront's critical path — and the refresh itself is **single-flight
+> with a negative cache** (N concurrent requests at the TTL boundary cost ONE fetch; a failed fetch
+> silences retries for 10 s; an attacker-supplied unknown `kid` can drive a refetch at most once per
+> 5 s), because a Supabase blip at Friday 19:00 would otherwise tax every storefront request 3 s.
+> **It grants at most the CUSTOMER identity**: a verified ADMIN/RESTAURANT/RIDER token there stays
+> anonymous, enforced **by the type**: `Principal` holds ONE private `Identity` enum whose role is
+> DERIVED from the identity, so "role says CUSTOMER, claim absent" is not a field combination anyone
+> can spell — it is the named `Identity::Unbound`, which `/public` cannot reach. (Round 2 of review
+> corrected an overstatement here: the previous `pub`-fields struct made that state a legal literal
+> inside AND outside the crate, so the guarantee lived in a doc comment, not in the compiler.)
+>
+> **Half 2 — the tenant is a request datum.** `Host` → `{slug}` → `RestaurantId` resolved ONCE at the
+> GraphQL edge (POST and WebSocket) and injected beside `ReadScope`, never folded into it; `current`
+> stays ZERO-ARGUMENT (an argument would let a client assert the tenant) and both legs are bounded by
+> the tenant **in SQL**, through two port methods whose signatures make it non-optional. A host that
+> names no restaurant serves `null`, never "the newest cart anywhere"; `carts` remains the
+> across-restaurants query. `graphql_routes` now TAKES the tenant lookup, so mounting the surface
+> without one does not compile.
+>
+> **The test that could not previously exist.** Every cart test injected `ReadScope` by hand, which is
+> exactly how a dead auth leg survived a green suite. `tests/graphql_cart_read.rs` now drives a real
+> `POST /public/graphql` — signed cookie, `Host`, loopback JWKS — through the production router and
+> asserts the PRICED payload per host. **Standing rule: a test of an auth-derived value may not
+> `.data()` that value.** Each half was mutation-tested separately (restore `Principal::anonymous()`
+> ⇒ the auth test reds with `null`; drop the host filter ⇒ the tenant tests red showing restaurant
+> B's cart and total on A's storefront; neutralise the SQL predicate ⇒ the DB test reds with 2 rows
+> where 1 is expected).
+>
+> **Blast radius, named** (ADR §Consequences): on `/public` a signed-in customer now also reaches
+> `paymentStatus` ownership by claim, matches `operationStatus`/`operationStatusChanged` ownership by
+> their own `sub` — **only once claim-stamped**: those two read `user_id` directly, so for the
+> pre-claim window ownership rests solely on `X-SESSION-ID`, exactly as on `main` — and the open
+> mutations' journal/`domain_events` envelope stamps `user_id`/`user_type = CUSTOMER` instead of
+> `PUBLIC`. SSR stays anonymous ON PURPOSE (identity there would emit personalised HTML with no
+> `Cache-Control`). `/public` GraphQL responses now vary by cookie, so the whole GraphQL surface
+> answers `Cache-Control: private, no-store` — one response layer, not per-handler, so a new route
+> cannot forget it; serving one customer's cart to another out of a shared cache would be an
+> Art. 32(1)(b) confidentiality failure, and "nothing fronts POSTs with a cache" is an assumption
+> about deployments we have not made yet, not a technical measure. **That guarantee holds for the
+> MONOLITH only**: the gateway rebuilds each subgraph response from status + `content-type` + body
+> alone (`crates/gateway_runtime/src/lib.rs:268-285`) and sets none on its own error paths
+> (`:244-255`, `:292-301`), so once the #358 cutover makes the gateway the browser-facing
+> `/public/graphql` the header is stripped exactly where a shared cache would sit — propagating it
+> there is a **cutover precondition** (recorded in the ADR beside the tenant-host one). Exposure
+> today is zero: the monolith is the deployed runtime and nothing fronts it with a cache.
+>
+> **Three things independent review added, all landed here.** (1) A verified CUSTOMER token with no
+> `captain_customer_id` — the pre-claim-stamp window, i.e. EVERY signed-in customer for one token
+> lifetime after rollout — now degrades to anonymous and is counted `public_credential_degraded_total{reason=claim_absent}`,
+> instead of falling through to `read_authorization_bridge_unresolved_total`, whose contract says
+> *"never ordinary user denial"*: a normal rollout would otherwise have bumped a provisioning-gap
+> counter on every storefront GraphQL request and read to an operator as an incident. **Both branches
+> are now PROVED emitted** (`crates/server/tests/public_credential_degraded_metric.rs`): the same
+> claimless token bumps `claim_absent` on `/public` while leaving the bridge counter silent, and bumps
+> the bridge counter on `/customer` — so the "stays zero" half is an observation, not a metric name
+> nobody checked. `read-authorization` also joined the codegen guard's contract list, so a rename of
+> either counter now fails the build. (2) The envelope widening reaches the **mailbox handler**
+> (`resolve_actor` branches on `user_type == "CUSTOMER"` ALONE — so a claim-stamped customer with a
+> lagging projection takes the branch too): one extra `by_auth_ref` read per delivery on the cart
+> mutations at peak. A lagging projection returns `Ok(None)`, not `Err`, so it does NOT abort the
+> delivery; only a genuine read-model failure does. Outcomes are unaffected either way — the single
+> `domain_id` consumer is unreachable from `/public`. (3) The stored identity now puts an **external
+> IdP identifier** (the Supabase `sub`) into the immutable write envelope of `Cart-*`, `Customer-*`
+> and `Restaurant-*`, where it **survives deletion of the Supabase identity** — and those streams have
+> no erasure path (only `Order` declares one; the deletion engine is stream-keyed). They were NOT
+> "made subject-attributable" — `CartStarted` already requires `sessionId` and `CustomerRegistered`
+> already requires `phone`; what is new is narrower and different in kind. The production log is empty
+> by decision, so this is an unmet launch precondition already filed as
+> [#194](https://github.com/TheCaptainCompany/captain-food/issues/194), not a pre-existing breach.
+>
+> **Round 2 of review also landed**: the `Identity` reshape above; the JWKS single-flight + negative
+> cache; `Cache-Control: private, no-store` across the GraphQL surface; and three recorded
+> consequences the code cannot enforce — the `captain_auth` cookie is **host-only**, so identity is
+> per-storefront (cross-storefront identity is an open authn-scope decision, not taken here);
+> `X-Forwarded-Host` is now an authorization input, so the ingress must OVERWRITE it rather than
+> append; and in the #358 surface-bin topology the SSR transport drops `Host`, which would resolve
+> every tenant-scoped read to `TenantScope::None`.
 
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
