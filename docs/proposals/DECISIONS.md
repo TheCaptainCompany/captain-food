@@ -1050,9 +1050,11 @@ as **confirm-or-redirect**, not as open questions: `CustomerCredit` → `order`,
 `PUBLIC` as a **role of** the customer boundary, not a member of it — anonymous browsing reads
 catalog and network data through a customer-side path, so "public belongs to customer" is true of the
 surface and false of the data. `DeliveryJob` → `delivery` is the team's call and is decided by
-writers: **all 16 of its inbox messages come from a rider or a partner ACL; not one from the order
-side** (`specs/delivery/actors.yaml:74-148`). All 57 apps are homed in the proposal's §5 — 39 to
-boundaries, 18 to `platform` — with no app left unassigned.
+writers: **no order-side aggregate or process manager ever sends it a command.** Measured over its
+five mutations (`specs/delivery/api.yaml:91-114`), three are `[RIDER]` and two are
+`[RESTAURANT, …, ADMIN]` — none is `[CUSTOMER]`, and the restaurant-issued ones reach a
+delivery-boundary aggregate through a **role path**, which is what gateways are for. All 57 apps are
+homed in the proposal's §5 — 39 to boundaries, 18 to `platform` — with no app left unassigned.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
