@@ -144,7 +144,7 @@
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
 > 🧾 **2026-08-11 — PER-BIN SCOPE ISOLATION: THE MANIFESTS NOW SAY WHAT THE BUILD ENFORCES**
-> ([#475 "The bin manifest scope header states an enforcement the build does not provide"](https://github.com/TheCaptainCompany/captain-food/issues/475), comment half). Measured on
+> ([#475 "Per-bin scope isolation is nominal: every actor/pm/projector bin transitively links all 8 domain scopes…"](https://github.com/TheCaptainCompany/captain-food/issues/475), comment half). Measured on
 > the resolved dependency graph: **50 of the 57 bins link the `domain` facade** — hence all eight
 > scope crates — behind their own scope list, through `bin_runtime` (actor/pm/projector/worker/
 > adapter), `server` (the 8 `graphql-*` subgraphs) or `web` → `app-core` (the 5 `fo-*`/`bo-*`
@@ -168,12 +168,12 @@
 > decomposed. **The measurement also resized the program**: PROP-20260811-090000
 > and DECISIONS §29 said 45, counting the 5 surfaces as clean because their manifest's *true* note
 > ("no database, no server, no infrastructure") reads as isolation — so the debt ledger
-> ([#490 "Ratchet: a bin's declared scopes must equal its measured closure"](https://github.com/TheCaptainCompany/captain-food/issues/490)) starts at **49 rows**
+> ([#490 "Scope-closure ratchet: a bin's transitive domain set must equal its declared set…"](https://github.com/TheCaptainCompany/captain-food/issues/490)) starts at **49 rows**
 > (50 bins reach the facade; under #490's *equality* rule `bam` is honest — it declares all 8 and
 > its closure is those 8 — so it is fat by design, not lying), and
 > the proposal gains a **slice 5** for the surface family, whose path no other slice touches.
 > Structural half (decompose `bin_runtime`, per-scope `infrastructure`
-> [#423 "Design record for the per-scope infrastructure split"](https://github.com/TheCaptainCompany/captain-food/issues/423), `crates/clients/*`) stays
+> [#423 "Design record for the per-scope infrastructure split…"](https://github.com/TheCaptainCompany/captain-food/issues/423), `crates/clients/*`) stays
 > open on #475. Validate 0 errors / 37 warnings — equal to the freshly measured `482fa76` baseline,
 > same six kinds.
 

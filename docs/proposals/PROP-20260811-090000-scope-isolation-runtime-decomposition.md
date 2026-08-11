@@ -15,7 +15,7 @@ Every one of the 57 bin manifests carried a header asserting that *"linking a do
 ONLY way that scope's vocabulary exists in this deployable, so the wrong coupling is **unspellable**
 rather than merely unrouted"* (`tools/codegen-rs/src/emit/bins.rs`). For **50 of them** the opposite
 is true. The sentence itself is being corrected by the honesty fix dispatched off this proposal
-([#475 "The bin manifest scope header states an enforcement the build does not provide"](https://github.com/TheCaptainCompany/captain-food/issues/475)), which restates the header per
+([#475 "Per-bin scope isolation is nominal: every actor/pm/projector bin transitively links all 8 domain scopes…"](https://github.com/TheCaptainCompany/captain-food/issues/475)), which restates the header per
 family and gates it against the measured closure — but that changes only what the comment *says*.
 The coupling below is untouched by it, and the declared dependency is not merely insufficient — it is
 **unused**:
@@ -97,7 +97,7 @@ reachable: they link neither `bin_runtime`, nor `server`, nor `surface_runtime`,
 honest today. They are also the only family of which that holds.
 
 **Not in scope of this finding**: the 17 `crates/clients/*` crates also depend on the `domain`
-facade. That is folded into [#475 "The bin manifest scope header states an enforcement the build does not provide"](https://github.com/TheCaptainCompany/captain-food/issues/475)
+facade. That is folded into [#475 "Per-bin scope isolation is nominal: every actor/pm/projector bin transitively links all 8 domain scopes…"](https://github.com/TheCaptainCompany/captain-food/issues/475)
 already and its fix is the same shape; it is not the enforcement mechanism, because a client crate
 is not a deployable.
 
@@ -209,7 +209,7 @@ of (a)–(c) — it is sequenced last only because its cut asks a question nobod
    measurement used everywhere else in this document and in the manifest header gate), but under
    slice 0's **equality** rule `bam` is honest — it declares all 8 domain crates and its closure is
    those same 8, so it is fat by design, not lying, and takes no row. 49 is what
-   [#490 "Ratchet: a bin's declared scopes must equal its measured closure"](https://github.com/TheCaptainCompany/captain-food/issues/490)
+   [#490 "Scope-closure ratchet: a bin's transitive domain set must equal its declared set…"](https://github.com/TheCaptainCompany/captain-food/issues/490)
    counts. **No bin may join the list.** Also delete the `use domain_x as _;` shims' justification
    note once a bin is honest.
 2. **Slice 1 — projectors (D2a).** `projection_runtime` (scope-agnostic; `sqlx` + `domain-common`)
