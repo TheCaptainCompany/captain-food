@@ -1056,6 +1056,17 @@ unpushed-commit prompt is not a signal that the work is finished.** The coordina
 after the executor reports the phase complete and the tree is clean; the executor says explicitly
 whether it intends to amend before handing back.
 
+### The claim-time draft PR needs an empty commit first — the REST API refuses a zero-commit branch
+
+ADR-20260720-233000 mandates the draft PR **before any code**, and `POST /repos/{o}/{r}/pulls`
+rejects exactly that: a branch pointing at the same sha as `main` gets
+`422 Unprocessable Entity — No commits between main and <branch>`. There is no flag for it. Push a
+`git commit --allow-empty -m "chore(NN): claim -- <title>"` first and open the PR against that.
+
+This container has **no `gh` on PATH**, so every session drives the API with `curl` and meets the
+hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
+names the branch, so it reads like a bad ref rather than a missing commit.
+
 ### One more shell trap in commit messages
 
 `git commit -m "…"` with **backticks** inside the double quotes runs command substitution: a message

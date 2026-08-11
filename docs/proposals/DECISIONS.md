@@ -974,11 +974,18 @@ other functional subject"* — re-prioritised under
 [ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md).
 The design record is [PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md),
 which is also the deliverable [#423 "Design record for the per-scope infrastructure split"](https://github.com/TheCaptainCompany/captain-food/issues/423)
-has been asking for since 2026-08-09. **Measured**: 45 of 57 bins link all 8 domain scopes
-(`cargo tree -p projector-catalog`), and the declared scope crate is imported as `use domain_catalog as _;`
-(`crates/bins/projector-catalog/src/main.rs:16`) purely to appease `cargo machete` — the manifest's
-"SCOPE ASSERTION" is not used by the bin at all. The mechanism ranking (D1) and the first family
-(D2) are the proposal's; the rows below are what the proposal cannot decide for itself.
+has been asking for since 2026-08-09. **Measured, all 57 bins enumerated**: **50 of 57** carry all 8
+domain scopes, by three separate paths — `bin_runtime` (37 bins), `server` (8 subgraphs) and
+`surface_runtime → web → app-core` (**5 `fo-*`/`bo-*` surfaces**) — and only the 7 `gateway-*` bins
+are domain-free (`cargo tree -e normal`). The declared scope crate is imported as
+`use domain_catalog as _;` (`crates/bins/projector-catalog/src/main.rs:16`) purely to appease
+`cargo machete` — the manifest's "SCOPE ASSERTION" is not used by the bin at all. ⚠️ **The first
+reading of this said 45**, counting the surfaces as clean because their manifest note *"DELIBERATELY
+no database, no server, no infrastructure"* is **true** — and reads as isolation while SSR still
+folds domain rows through `app-core`. That is a 5-row resize of the ledger and it adds a **slice 5**
+to the program: no amount of `bin_runtime` or `server` decomposition removes those five, so the
+proposal's exit condition was unreachable as first written. The mechanism ranking (D1) and the first
+family (D2) are the proposal's; the rows below are what the proposal cannot decide for itself.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|

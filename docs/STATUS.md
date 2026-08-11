@@ -159,9 +159,15 @@
 > actor mailbox and slices the master schema by a scope string, so one can enqueue to any aggregate.
 > A codegen test (`bin_manifest_scope_claim_matches_the_measured_closure`) now derives the sentence
 > from the guppy closure in **both** directions, so the prose cannot lag the graph once
-> `bin_runtime` is decomposed. Structural half (decompose `bin_runtime`, per-scope `infrastructure`
+> `bin_runtime` is decomposed. **The measurement also resized the program**: PROP-20260811-090000
+> and DECISIONS §29 said 45, counting the 5 surfaces as clean because their manifest's *true* note
+> ("no database, no server, no infrastructure") reads as isolation — so the debt ledger
+> ([#490](https://github.com/TheCaptainCompany/captain-food/issues/490)) starts at **50 rows**, and
+> the proposal gains a **slice 5** for the surface family, whose path no other slice touches.
+> Structural half (decompose `bin_runtime`, per-scope `infrastructure`
 > [#423](https://github.com/TheCaptainCompany/captain-food/issues/423), `crates/clients/*`) stays
-> open on #475. Validate 0 errors / 37 warnings (baseline).
+> open on #475. Validate 0 errors / 37 warnings — equal to the freshly measured `482fa76` baseline,
+> same six kinds.
 
 > 🧭 **2026-08-11 — BEHAVIOUR TRACKING IS ISOLATED END TO END, AND A FAULTED WORKER PRE-DIAGNOSES
 > ITSELF — BUT "SAY IT IN /health" WOULD TAKE THE STOREFRONT DOWN AS STATED**
