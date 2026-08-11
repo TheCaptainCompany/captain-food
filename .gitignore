@@ -9,3 +9,10 @@ tools/codegen-rs/out/
 
 # Agent worktrees (temporary, auto-managed)
 .claude/worktrees/
+
+# Agent worktrees created inside the repo. Sessions have repeatedly made these as
+# `wt2/`, `wt-main/`, `wt7/` ... An in-repo worktree shows up as untracked, and a
+# `git add -A` would commit an entire second checkout into the tree. Ignoring them
+# makes that mistake unspellable rather than merely discouraged. Prefer /tmp for a
+# worktree; this is the safety net for when someone does not.
+wt*/
