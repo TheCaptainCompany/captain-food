@@ -2,6 +2,59 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⏱️ **2026-08-11 — THE ETA IS THE PRODUCT, AND NOTHING COMPUTES IT; PLUS: ONE EVENT LOG**
+> ([PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+> D9/D10/D13/D14,
+> [#493 "Two partitions, one domain: boundedContexts and specs/{scope}/ home 6 of 20 actors differently, and nothing reconciles them"](https://github.com/TheCaptainCompany/captain-food/issues/493),
+> register rows BND-5..BND-7 in [DECISIONS.md §31](proposals/DECISIONS.md)). **Four questions that had
+> been surfaced to the product owner are answered by the team instead** -- they were answerable from
+> doctrine plus the code and should not have been routed out.
+>
+> **The headline: nothing computes an ETA anywhere, and two shipped surfaces already promise one.**
+> Zero repo-wide hits for an ETA function. **No pre-order estimate exists at all** -- the two
+> `estimated*` values the system holds both arrive AFTER the customer has paid (`estimatedReadyAt` <--
+> `OrderAcceptedByRestaurant`; `estimatedDropoffAt` <-- `DeliveryAcceptedByPartner`, and that one is
+> **unfed on the partner path**, `projection/worker.rs:441-444`). Meanwhile:
+> `specs/screens/restaurant_frontoffice.yaml:490` renders an `eta_bar` labelled *"Estimated arrival" /
+> "Arrivee estimee"* bound to `{{ order.estimatedReadyAt }}` -- the KITCHEN READY time -- and it is
+> visible during `OUT_FOR_DELIVERY`, exactly when ready-at is already in the past; the right field
+> (`estimatedDropoffAt`) sits unused on the same GraphQL type (`specs/ordering/api.yaml:62`). And
+> `specs/screens/captain_frontoffice.yaml:206` offers four marketplace sort options including
+> `delivery_time_asc` over `queries/restaurants`, which declares 11 args and **no sort**
+> (`specs/network/api.yaml:66-83`). **A wrong ETA outranks a missing one.** Both are screen-spec
+> defects independent of every boundary question.
+>
+> **D13 -- the ETA is a READ-SIDE COMPOSITION owned by `order`, frozen onto `OrderPlaced` at
+> checkout.** Not a projection: Young's fold rule (current state is a left fold of the event stream)
+> kills it, because the pre-order estimate depends on *now* -- queue depth, rider supply, an address
+> typed thirty seconds ago and in no stream -- so a replay cannot reproduce it. Not a process manager:
+> a PM's output is commands, and the ETA changes nothing. It is the pattern this repo already proved
+> for pricing -- `price_cart` live on every read, authoritative freeze once at checkout, fail-closed to
+> an honest no-value state. **Its durable output is naming the THIRD sanctioned cross-boundary
+> mechanism the architecture was missing -- a read-time query contract** -- beside the projection fold
+> and the PM bridge.
+>
+> **D14 -- ONE event log; boundaries are write-isolated and read-shared on it.** Stated because it was
+> only ever implied. `domain_events.position` is the global total order and **two** projection groups
+> fold across boundaries on it (`Order` at `worker.rs:447-450`, `ScopeMembership` at `:507-510`), and
+> **no boundary reshape removes them** -- so a per-boundary log would break replay determinism.
+> **REP-4 is orthogonal** (storage is already untyped). **ISO-3 is no longer orthogonal and rises in
+> priority**: under a shared log, write-exclusivity per stream category IS the write-side boundary,
+> and `EventStore::append` takes a bare `stream_name: &str`.
+>
+> **D9 -- `CartBindingProcess` -> `order`**, the one member that makes the two partitions identical.
+> The losing side has a concrete price: a customer-boundary PM would need the system's first `GRANT`
+> spanning two boundaries. **D10 -- notification is THREE parts, not two**: policy in `order` (the
+> `reminders:` mechanism is already declared on `Order` at `specs/ordering/actors.yaml:92-96` and used
+> only for GDPR retention, while `OrderPlaced` schedules **nothing**), **recipient contract in
+> `restaurant`** (absent entirely), transport in `platform`.
+>
+> **Two genuinely product-owner-owed rows are new**: **BND-6** (what the customer sees pre-order when
+> the travel leg cannot resolve) and **BND-7** (is the frozen ETA a promise with a remedy, or an
+> estimate?) -- BND-7 **before** the freeze lands, since adding a field to an already-stored event is a
+> migration and it is nearly free before the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
+> cutover. **BND-1 (the boundary set) is still unrecorded and remains the top of the register.**
+
 > 📦 **2026-08-11 — REPOSITORY CRATES: TWO OPEN ROWS CLOSE, AND THE COUPLING NOBODY HAD NAMED**
 > ([PROP-20260811-173223](proposals/PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
 > [#497 "Repository crates and the dissolution of `infrastructure`: read and write are separate crates, and \"inherit\" is right on the log and wrong on the read model"](https://github.com/TheCaptainCompany/captain-food/issues/497),

@@ -348,6 +348,34 @@ ISO-1 was framed around the `EventWaiter`; the sharper coupling is this one, and
 no upcaster — because the wire and storage shapes are untouched. That should be stated in the change
 itself, because "we are changing the event enum" reads like a migration and is not one here.
 
+**What REP-4 does NOT decide, added on the D14 pass and load-bearing for anyone implementing it.**
+The question *"does a per-boundary event TYPE split force or forbid a per-boundary event LOG?"* has a
+clean answer: **neither — they are orthogonal**, and
+[PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+**D14** now records the log-side property in full. The short form:
+
+> **The event log is ONE log with ONE total order. Boundaries are write-isolated (a boundary appends
+> only its own stream categories) and read-shared (any projector may read the whole log).**
+
+- The type split is a Rust change over a storage format that is **already untyped** — `event_type`
+  TEXT + `payload` jsonb (fact 9) — so it neither enables nor blocks a log split. The obstacle to
+  splitting the log was never the union; it is `domain_events.position`, the global total order that
+  cross-boundary projection groups checkpoint on.
+- **The set of consumers needing an explicit multi-boundary union is now measured, and it is smaller
+  than the "3 cross-boundary projection groups" this row assumed.** After the boundary reshape only
+  **two** groups still cross — `Order` (`Order-`/`Payment-`/`DeliveryJob-` → order+delivery,
+  `crates/infrastructure/src/projection/worker.rs:447-450`) and `ScopeMembership`
+  (order+delivery+restaurant, `:507-510`); `OrderConversation` becomes fully intra-boundary. Plus
+  `bam` and `pm-delivery-dispatch`. **That is the whole set the declared unions must cover**, and it
+  is permanent — no further reshape removes it.
+- **The consequence for ISO-3.** Under a shared log, write-exclusivity per stream category **is** the
+  write-side boundary — and it has no enforcement: `EventStore::append` takes `stream_name: &str`
+  (`ports.rs:54-60`) with no capability witness, so any holder of `Arc<dyn EventStore>` may append to
+  any boundary's streams. ISO-3 is therefore not orthogonal to the boundary work, as previously
+  recorded; **it is the mechanism that makes the boundary real on the write side**, and the
+  compiler-first answer is a typed stream-category witness with a `pub(crate)` constructor rather
+  than a runtime check.
+
 ### D5 — Crate graph vs database role: which axis is authoritative? *(recommendation: **both, derived from one declaration** — the disagreement is the real risk)*
 
 The brief asks whether two mechanisms disagreeing about what a boundary is would be worse than either

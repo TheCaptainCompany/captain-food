@@ -97,6 +97,27 @@ And the divergence is almost trivially closable, which is the good news:
 **Recommended set: 5 business boundaries + 1 platform bucket + the kernel** — `customer` · `order` ·
 `restaurant` · `catalog` · `delivery`, plus `platform`, plus `common` (kernel, not a boundary).
 
+**Two things the boundary set silently decides, now decided explicitly (D13, D14).** Both were raised
+as open product-owner questions and both are answerable from doctrine plus the code, so both are
+closed here rather than routed to the register:
+
+- **D13 — the ETA is a READ-SIDE COMPOSITION owned by `order`, not a projection and not a process
+  manager**, frozen onto `OrderPlaced` at checkout as the promise. Young's fold rule eliminates the
+  projection answer outright: the pre-order estimate depends on *now*, so a replay cannot reproduce
+  it. **The row also names the third sanctioned cross-boundary mechanism the proposal was missing —
+  a read-time query contract** — alongside the fold and the PM bridge. Measured on the way:
+  **nothing computes an ETA anywhere** (0 hits repo-wide), **no pre-order estimate exists at all**,
+  and two shipped surfaces already promise one — an `eta_bar` labelled *"Estimated arrival"* bound to
+  the kitchen **ready** time (`specs/screens/restaurant_frontoffice.yaml:490`) and four marketplace
+  sort options, including `delivery_time_asc`, over a query with **no sort argument**
+  (`captain_frontoffice.yaml:206` vs `specs/network/api.yaml:66-83`).
+- **D14 — ONE event log. Boundaries are write-isolated and read-shared on it.** Two projection groups
+  fold across boundaries on the log's global `position` and **no boundary reshape removes them**, so
+  a per-boundary log would break replay determinism. The REP-4 event-type split is **orthogonal** —
+  the storage format is already untyped — and the isolation that replaces a separate log is
+  **write-exclusivity per stream category**, which has **no enforcement today** (`EventStore::append`
+  takes a bare `&str`). That raises ISO-3 from orthogonal to load-bearing.
+
 **The uncomfortable answer on sequencing, stated plainly: this does not unblock
 [PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md) slice 1. It
 adds a gate upstream of ISO-1 and ISO-2.** Slice 1 builds `projections-{scope}` × 7. If the boundary
@@ -310,12 +331,53 @@ name is a legitimate product-owner call; the reasoning is offered, not imposed.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **(a) `order`** ✅ **recommended** | **The PM's entire job is to write a `Cart`** — it reacts to `CustomerIdentified` and sends the binding command to the Cart aggregate. One-writer-per-aggregate says the boundary that owns the *written* aggregate owns the policy that writes it. It is also where the folder puts it today (`specs/ordering/processmanager.yaml:120`), so (a) is a zero-diff answer on the spec side | Contradicts `c4-l2.yaml:65`, which puts it in `customer` — so the C4 must change |
+| **(a) `order`** ✅ **recommended** | **The PM's entire job is to write a `Cart`** — it reacts to `CustomerIdentified` and sends the binding command to the Cart aggregate. One-writer-per-aggregate says the boundary that owns the *written* aggregate owns the policy that writes it. It is also where the folder puts it today (`specs/ordering/processmanager.yaml:119`), so (a) is a zero-diff answer on the spec side | Contradicts `c4-l2.yaml:65`, which puts it in `customer` — so the C4 must change |
 | (b) `customer` | Its trigger is a customer fact; the C4 already says so; the decision *"identification implies cart adoption"* is arguably a customer-boundary policy | The customer boundary would own a policy whose only effect is on another boundary's aggregate, which inverts the PM doctrine — *"aggregates own the facts; a process manager delivers events for the owning aggregate to record"* (`specs/common/processmanager.yaml:7-9`) |
 
 **Recommendation: (a).** This is genuinely 50/50 on intuition and decided by doctrine, not taste.
 **It is also the single most valuable row in this proposal per unit of effort**: it is the one member
 whose home makes the two partitions identical.
+
+**The doctrine, named and sourced — because this is the one row where the masters genuinely pull in
+opposite directions.**
+
+- **Vernon (*Implementing Domain-Driven Design*, the aggregate-design and process-manager chapters):
+  a process manager is stateful coordination whose output is COMMANDS, and coordination belongs with
+  the aggregate whose transaction it drives.** Measured against the spec, this PM's every output is a
+  Cart output: it reads the `Cart` read model (`specs/ordering/processmanager.yaml:128-134`,
+  `read: model → projection_tables.yaml#/Cart` keyed on `session_id` + `status: OPEN`) and sends
+  `BindCartToCustomer` **to `actors.yaml#/Cart`** (`:135-138`). **It never sends `Customer` anything.**
+  Its whole failure surface — duplicate `CustomerIdentified` delivery, lease contention, head-of-line
+  blocking — is the *Cart lane's* failure surface, and under Vernon's actor rule
+  (*Reactive Messaging Patterns*: the mailbox is the serialization point) the lane and the policy that
+  feeds it belong to one owner.
+- **Evans (*Domain-Driven Design*, part IV): a translating concept belongs to the context whose
+  ubiquitous language it speaks.** The PM's vocabulary is `OPEN cart`, `session_id`, `bind` — cart
+  language throughout. `CustomerIdentified` enters it as a **foreign fact**, which is precisely what a
+  context edge looks like.
+- **Where they conflict, and it is a real conflict.** Evans's context-mapping instinct points the
+  other way: an anticorruption/translation concept is often drawn on the *upstream* side, and
+  "identification implies cart adoption" is legible as a customer-side policy about what
+  identification MEANS. A reader with Evans in hand can honestly land on `customer`. **We follow
+  Vernon here, and the tie-break is that Vernon's rule is the one this runtime actually enforces**:
+  the mailbox gives one writer per aggregate at runtime, so a boundary that owns a policy it cannot
+  serialize owns nothing.
+
+**What the losing side costs, concretely rather than aesthetically.** Homing it in `customer` makes
+`pm-cart-binding` a customer-boundary app that needs, under the least-privilege grants of
+[PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md):
+
+1. `SELECT` on the **order** boundary's `Cart` projection table (`:128-134`), and
+2. `INSERT` into the **order** boundary's mailbox lane to send `BindCartToCustomer` (`:135-138`).
+
+That is a single app whose `GRANT` spans two boundaries' schemas — **the exact stop condition D11
+names as the signal that a shared database has silently become an integration database.** It would be
+the first such grant in the system and it would be issued on day one, by choice. Under (a) the grant
+is intra-boundary and the stop condition holds.
+
+**Therefore this row is closed by the team and is NOT a product-owner question.** The only artifact it
+produces is a one-line edit to `c4-l2.yaml:65` moving `CartBindingProcess` from `customer` to `order`,
+landing in B2 with the rest of the reconciliation.
 
 ### D10 — Where does the notification port live? *(recommendation: **transport in `platform`, policy in `order`**)*
 
@@ -332,11 +394,74 @@ four `OVH_SMS_*` credentials.
 | (b) Everything in `platform` — a notification service that decides what to send | One home | *"Nobody is told"* becomes a platform bug that **no boundary owns**, which is exactly how the worst failure mode of this domain stays unowned. A platform service would also have to know order semantics (accepted/ready/late), i.e. import the order model — a boundary violation by construction |
 | (c) A notification adapter per boundary | Each boundary owns its own sends end to end | Four copies of vendor plumbing and four credential grants for one vendor, contradicting [ADR-20260808-062432](../adr/ADR-20260808-062432-one-bin-per-adapter.md)'s one-adapter-per-partner rule |
 
-**Recommendation: (a).** The missing artifact is also an observability finding under
-[ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md): there is no
-`specs/observability.yaml` contract for notification delivery, so once this exists there will be no
-signal for *"the order was placed and the restaurant was never reached"* — the one number this
-domain most needs. Name the contract in the same change that names the service.
+**Recommendation: (a), REFINED into three parts rather than two.** The original two-part answer
+(transport in `platform`, policy in `order`) was challenged on a good ground — *the recipient of the
+most important notification is a restaurant, so should policy not live with the party being
+notified?* The challenge is half right, and the half that is right is the part the two-part answer
+was missing.
+
+**Why policy stays in `order`.** The challenge conflates **recipient** with **owner**. Under Evans a
+context is defined by the model and language it owns, not by who reads its output — otherwise every
+context that renders data would own the model behind it, and `bo-rider` rendering order data would
+make `delivery` the owner of `Order`. Under Vernon, policy lives with the aggregate whose state the
+policy is a function of. Write the condition out and every term is order-boundary state:
+
+> `Order.status == PLACED` **∧** `now − placedAt > deadline`
+
+Neither term is restaurant state. The restaurant is where the *consequence* lands, which is what
+makes it the worst failure mode — not what makes it the owner.
+
+**And the decisive evidence is that the mechanism already exists, in `order`, one line short of the
+guarantee.** `specs/ordering/actors.yaml:92-96` declares a first-class `reminders:` block **on the
+`Order` aggregate**:
+
+```yaml
+  reminders:
+    OrderExpired:
+      payload: { $ref: 'events.yaml#/OrderExpired' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place
+```
+
+A durable timer, declared on the aggregate, delivered by the promotion pass, and — the part that
+matters under Young — **recorded as a business event the projections fold**, rather than fired as an
+engine-internal timer (`:88-91` says exactly this: *"the expiry must be a recorded business fact
+projections can fold to tombstone … an engine-internal timer would erase read models without a
+foldable cause in the log"*). It is used today for **one** thing: the GDPR retention window.
+
+**`OrderPlaced` (`specs/ordering/actors.yaml:105-107`) declares no `schedules:` at all.** Every
+`schedules:` in the file hangs off a *terminal* transition (`:137,144,151,158`). So the acceptance
+deadline is **not a missing capability — it is an unused one**, on the Order aggregate, in the order
+boundary, whose semantics (recorded fact, reschedule-in-place, config-driven window) are already
+exactly what an acceptance timeout needs. Moving the policy to `restaurant` would mean a
+restaurant-boundary process manager subscribing to an order-boundary aggregate's reminder. That
+settles the placement empirically rather than by taste.
+
+**What the challenge gets right, and what it adds as a third part.** The **recipient** genuinely is
+restaurant-boundary data — which channel, which phone, which staff member, quiet hours, and the
+escalation chain when the first target does not answer. None of that is order state and none of it
+should be resolved by a platform transport guessing. **So the shape is three parts, not two:**
+
+| Part | Boundary | Why | Exists today? |
+|---|---|---|---|
+| **Policy** — who must be told, by when, and what happens if nobody acts | **`order`** | The trigger condition is entirely order state; the timer mechanism is already declared on `Order` | Mechanism ✅ (`actors.yaml:92-96`), use ❌ (`OrderPlaced` schedules nothing) |
+| **Recipient contract** — the notification target(s) for a restaurant, with escalation | **`restaurant`** | Contact routing, staffing and quiet hours are restaurant model, published to `order` as a read contract (Evans: **open host service / published language**, not a shared kernel — `order` must not co-own the restaurant's contact model) | ❌ absent entirely; no notification-target field on `Restaurant` (`specs/network/entities.yaml`) |
+| **Transport** — the SMS/push/email send itself | **`platform`** | A vendor is a foreign model and gets an ACL like every other partner — the shape `payment`/`delivery`/`identity` already use, and ADR-20260808-062432's one-adapter-per-partner rule | ❌ absent; `ports.rs` has 4 traits, none a notifier |
+
+**The chain this closes, stated once because it is the compounding one.** Order placed at 19:40 →
+`OrderPlaced` schedules nothing → no deadline elapses → no policy fires → no recipient is resolved →
+no transport exists → the restaurant is never told → and the payment authorization stays captured
+because the release [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) put
+on `PlaceOrderProcess` has no trigger either. **Six absent links, one missing `schedules:` line at
+the head of them.** That is the sequencing argument: the policy leg is cheap and it is what makes the
+other two legs testable.
+
+**The missing observability contract, unchanged and now sharper.** `specs/observability.yaml`
+declares nothing for notification delivery, so *"the order was placed and the restaurant was never
+reached"* has no signal — and under
+[ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md)
+that is itself a finding, because it is a question evidence should answer and cannot. Name the
+contract in the same change that names the service.
 
 ### D11 — Does storage follow the domain boundary one-to-one? *(recommendation: **no — and the deviation is stated, not inherited**)*
 
@@ -420,6 +545,225 @@ work. **What changes about the first cut: nothing about ISO-1's answer, everythi
 prerequisite.** Both axes are per-boundary. Cutting crates per-scope (8) while issuing roles
 per-boundary (5) leaves two enforcement mechanisms that disagree about what a boundary is — the
 AXIS-DISAGREEMENT concern in the header. **The boundary set must be recorded before either lands.**
+
+### D13 — The ETA spans three boundaries and nothing computes it *(recommendation: **a read-side composition owned by `order`, frozen onto `OrderPlaced`** — NOT a projection, NOT a process manager)*
+
+CLAUDE.md's domain lens opens with *"The ETA is the product. The estimate a customer sees before
+ordering is the number they decide on."* Under any boundary set on the table that estimate is
+inherently cross-boundary: prep capacity is **restaurant**, travel and rider supply are **delivery**,
+and it is surfaced during checkout in **order**. **No proposal has said how it is computed, and the
+boundary decision silently determines the answer.** So it is decided here.
+
+#### D13.1 — What exists today, measured
+
+| # | Fact | Evidence |
+|---|---|---|
+| 1 | **Nothing computes an ETA anywhere.** Zero functions repo-wide | `grep -rni "fn.*eta\|estimate_arrival\|compute_eta" crates/` → **0 hits**. Every `estimated_*` identifier in Rust is a generated pass-through field |
+| 2 | **There is no pre-order estimate of any kind.** Both `estimated*` values the system holds arrive **after** the customer has paid | `estimatedReadyAt` ← `OrderAcceptedByRestaurant` (`specs/ordering/events.yaml:187`; restaurant-supplied, post-acceptance). `estimatedDropoffAt` ← `DeliveryAcceptedByPartner` (`specs/database/tables/projection_tables.yaml:671-675`; partner-supplied, post-dispatch) |
+| 3 | The one input that COULD feed a pre-order estimate exists and is rendered on **no customer screen** | `preparationTimeMinutes` on `Restaurant` (`specs/network/entities.yaml:198-202`, fed by `RestaurantRegistered`/`RestaurantUpdated`, projected at `projection_tables.yaml:171-174`, exposed at `specs/network/api.yaml:43`). Grep of `specs/screens/*.yaml` for `prep`: **only** restaurant-backoffice "Start preparing" button labels. **Zero customer-facing uses** |
+| 4 | **The only customer-facing ETA widget in the repo shows the wrong number.** Labelled *"Estimated arrival" / "Arrivée estimée"*, bound to the KITCHEN READY time | `specs/screens/restaurant_frontoffice.yaml:490` — `{ type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: … #/order.eta }`, and `restaurant_frontoffice.translations.yaml:146` `order.eta: { en: "Estimated arrival", fr: "Arrivée estimée" }` |
+| 5 | The **right** field is on the same GraphQL type and is used by no screen | `specs/ordering/api.yaml:62` `estimatedDropoffAt: … # partner-reported ETA`. Zero `estimatedDropoffAt` hits in `specs/screens/**` |
+| 6 | …and it is **unfed on the partner path anyway** | `crates/infrastructure/src/projection/worker.rs:441-444`: *"`DeliveryAcceptedByPartner` is in the fedBy (it feeds courier/estimated_dropoff_at) yet carries no `orderId`, so it keys to nothing and those two columns stay unfed on a partner delivery"* — [#420](https://github.com/TheCaptainCompany/captain-food/issues/420) owns closing it |
+| 7 | **The marketplace offers a sort by delivery time over a query that has no sort argument** | `specs/screens/captain_frontoffice.yaml:206` offers `value: delivery_time_asc` (with `recommended`, `rating_desc`, `price_asc`); resolver `restaurants.all` (`:75`) passes no args; `queries/restaurants` (`specs/network/api.yaml:66-83`) declares 11 args and **none is a sort** |
+
+**Read facts 4 and 7 together and the class is the one CLAUDE.md names explicitly — *a control that
+renders but does nothing is worse than no control*.** Fact 7 is four live sort options bound to
+nothing. Fact 4 is worse than nothing: it is a number that renders, is labelled as the arrival time,
+and is the *ready* time — during `OUT_FOR_DELIVERY`, when ready-at is already in the past. On a
+delivery order the two differ by the entire travel leg. **That is a wrong ETA, not a missing one**,
+and a wrong ETA is the one thing this domain cannot afford to ship. Both are screen-spec defects
+independent of the boundary decision and should be filed as such.
+
+#### D13.2 — The decision: what KIND of thing is the ETA?
+
+| Option | Pros | Cons |
+|---|---|---|
+| **(a) A read-side composition owned by `order`, computed fresh per read from two published contracts (`restaurant` prep-time, `delivery` travel-time), and FROZEN onto `OrderPlaced` at checkout as the promise** ✅ **recommended** | **It is the only option consistent with Young's fold rule** (see below), because the pre-order ETA is not a function of the log. **It reuses a pattern this repo already chose and proved** — pricing: `price_cart` computes fresh on every read against the LIVE catalog, never materialized, and *"the authoritative freeze happens once, at checkout"* (`specs/ordering/api.yaml:124` and `projection_tables.yaml:420`). The ETA has identical semantics: live before, frozen at commitment. It fails closed the same way (`PriceUnresolvable` → *"the honest no-price state, never a stale or client number"*, `projection_tables.yaml:419`) — an unavailable travel estimate must yield **no ETA**, never a guessed one. And it makes the promise a **recorded, immutable business fact**, which is what lateness must be measured against | Read-time composition on the checkout path has a latency budget, and it fans out to two boundaries at Friday peak. Needs an explicit timeout-and-degrade rule (which is the fail-closed behaviour above, so it is bounded design work, not open-ended) |
+| (b) A projection folding events from all three boundaries into an `ETA` read model | Cheap to describe; matches how every other read model here is built; one checkpoint, one row per restaurant | **It cannot work, and the reason is doctrinal not practical.** Young: *current state is a left fold of the event stream* — a projection must be reproducible by replay. The pre-order ETA is a function of **now** (current kitchen queue depth, current rider supply, travel time to an address the customer typed thirty seconds ago and which is in no stream). Fold it and a rebuild reproduces a **different, stale** number — the projector has hidden state outside the fold, which this proposal's own channel calls a finding *regardless of whether it works today*. It also stores a number that is wrong the moment it is written |
+| (c) A process manager that maintains the estimate | PMs already bridge these boundaries (`pm-delivery-dispatch`) | Category error. Vernon: a process manager is stateful coordination whose **output is commands** — it exists to change state. The pre-order ETA changes nothing; it is a **query**. A PM that emits no command is a projection wearing the wrong hat, and inherits (b)'s replay problem plus a mailbox lane it does not need |
+| (d) A read model owned by `order` and **written** by `restaurant` and `delivery` | Keeps the read cheap; single row to query | Two boundaries writing into a third boundary's read model is the integration-database shape at table granularity — the `GRANT` spans boundaries and D11's stop condition fires. It also inverts ownership: `order` would own a promise whose inputs it cannot see |
+| (e) Buy it — the delivery partner's ETA API is the ETA | Partners already compute travel time well; zero model | Only answers the **travel** leg, only **after** a job exists, and only for partner deliveries (fact 6 shows even that is unfed). Answers nothing pre-order, which is the whole product question. It is an **input** to (a), not a substitute |
+
+#### D13.3 — Recommendation: (a), and the doctrine it rests on
+
+**Young — *projections are a left fold the replay must reproduce* (his CQRS/ES documents and
+talks).** This is the argument that eliminates (b) and (c) outright, and it is worth stating as a
+rule the team can reuse: **a number that depends on `now` is a read-side computation, never a
+projection.** The corollary is the read/write asymmetry Young insists on — the read side is permitted
+to do work (compose, call out, degrade) that the write side may not.
+
+**Young — *stored events are immutable contracts*.** This is what makes the *frozen* half of (a)
+correct: the estimate **you showed the customer** is a fact that happened, it is exactly what the
+order should be judged against, and it belongs on `OrderPlaced` as a payload field. The estimate you
+would compute today is not a fact and must never be stored. **The distinction between "the promise"
+and "the current estimate" is the whole design**, and it is the same distinction the repo already
+draws between the frozen `OrderPlaced.breakdown` and the live `price_cart`.
+
+**Evans — cross-context integration patterns (*Domain-Driven Design*, part IV).** The two inputs are
+**published contracts from an open host service**, not a shared kernel:
+
+- `restaurant` publishes a **prep-time estimate** (today: the static `preparationTimeMinutes`;
+  later: queue-aware). `order` consumes it and does **not** co-own it.
+- `delivery` publishes a **travel-time estimate** (today: nothing; later: partner APIs behind the
+  existing ACLs, which is what an ACL is for — the partner's model must not become ours).
+
+A **shared kernel** would be wrong here and it is worth saying why, because it is the tempting
+answer: a shared kernel is a model two contexts **jointly own and jointly change**, and neither
+prep-time nor travel-time is jointly owned — each has exactly one owner who changes it for its own
+reasons. Putting them in `specs/common/` would repeat precisely the kernel-as-escape-hatch pattern
+D6 measures and reverses (2 of 3 kernel events exist only as a boundary bridge).
+
+**Vernon — small aggregates, reference by identity.** The composition holds `RestaurantId` and a
+destination, not restaurant or delivery aggregate state. Nothing about the ETA enlarges an aggregate.
+
+#### D13.4 — The consequence for the boundary decision, stated plainly
+
+**The ETA does NOT argue for merging `delivery` into `order`, and this is the answer to "the boundary
+decision silently determines how the number is computed."** It argues for something the proposal was
+missing: **there are THREE sanctioned cross-boundary mechanisms here, and §D2 named only two.**
+
+| Mechanism | Direction | Used for | Declared where |
+|---|---|---|---|
+| Projection fold (co-checkpointed group) | read | Historical facts already in the log | `worker.rs` group registry |
+| Process manager bridge | write | Cross-aggregate policy that issues commands | `processmanager.yaml` |
+| **Read-time query contract** *(this row adds it)* | **read** | **Live values that are not a function of the log** | **`{scope}/api.yaml` — a published, `@auth`-scoped query** |
+
+Without the third, a reader facing a cross-boundary read has only "fold it" available and reaches
+(b) — the wrong answer — because the architecture appeared to offer nothing else. **Naming the third
+mechanism is the durable output of this row.** D2's conclusion stands unchanged and is now better
+supported: `order`'s relationship to `delivery` is a fold, a PM bridge, and a read contract — three
+sanctioned conversations, no absorption.
+
+#### D13.5 — What this makes buildable, in order
+
+Sequenced so each step is verifiable before the next, and so nothing ships a number it cannot stand
+behind:
+
+1. **Fix the two lies first** (independent of everything else, and both are screen-spec one-liners):
+   bind the `eta_bar` to the arrival estimate rather than the ready time, or relabel it; and either
+   remove the unbacked sort options or add the `sort` argument. **A wrong ETA outranks a missing one.**
+2. **`restaurant` publishes prep-time** — the field already exists (fact 3); it needs a read contract
+   and a customer-facing surface.
+3. **`order` composes and shows a pre-order ETA at checkout**, fail-closed to "no estimate" when
+   either input is unavailable.
+4. **Freeze the promise onto `OrderPlaced`.** ⚠️ This is an `events.yaml` payload change on an event
+   that is **already emitted and stored**, so under CLAUDE.md question 2 it is a **migration**: the
+   versioning story (upcasting — old events have no promise, and the reader must say so rather than
+   default to a value) is recorded **before** it lands. Cheap now, irreversible later — and cheapest
+   of all before the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover puts
+   real orders in the log.
+5. **`delivery` publishes travel-time**, replacing the prep-only estimate with a full one.
+
+**And the observability contract that must exist by step 4**: `specs/observability.yaml` declares
+nothing about estimate-versus-actual. Once the promise is frozen, *promised-vs-actual ready* and
+*promised-vs-actual dropoff* are the two numbers that tell the team whether the product's most
+important number is any good — and under
+[ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md)
+a needed signal that does not exist is itself a finding. **Step 4 without it freezes a promise nobody
+can grade.**
+
+### D14 — One event log or one per boundary? *(recommendation: **ONE log — boundaries are write-isolated and read-shared on it**; and the property must be STATED, because it is currently only implied)*
+
+The product owner's storage message names a single `DomainEventLogDb`. Projections routinely fold
+*other* boundaries' events, and `bam` does so by design. **That combination is a real architectural
+property that nobody has written down**, and it interacts with both the storage split (§32/STO-1) and
+[PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md)'s
+**REP-4** (one `DomainEvent` union over all eight scopes). State it:
+
+> **The event log is ONE log with ONE total order. A boundary owns exclusive WRITE access to its own
+> stream categories, and every boundary may READ the whole log. Boundaries are write-isolated and
+> read-shared on `domain_events`.**
+
+#### D14.1 — Why one log, and why the alternative is not available
+
+`domain_events.position` is `bigint identity` and its own note says *"$all total order; projections
+checkpoint on it"* (`specs/database/tables/eventstore.yaml:12`). **Projection groups depend on that
+total order across boundaries — measurably**, over all 9 groups in
+`crates/infrastructure/src/projection/worker.rs:408-511`:
+
+| Group | Stream prefixes | Boundaries (recommended set) | Crosses? |
+|---|---|---|---|
+| `Restaurant` (`:410-413`) | `Restaurant-` | restaurant | — |
+| `Customer` (`:416-419`) | `Customer-` | customer | — |
+| `Catalog` (`:422-425`) | `Catalog-` | catalog | — |
+| `Cart` (`:428-431`) | `Cart-` | order | — |
+| **`Order` (`:447-450`)** | `Order-`, `Payment-`, **`DeliveryJob-`** | order + **delivery** | ✅ **crosses** |
+| `OrderConversation` (`:459-462`) | `Conversation-`, `Order-`, `Reclamation-` | order (all three, after D4) | — |
+| `SlugAlias` (`:469-472`) | `Restaurant-` | restaurant | — |
+| `CustomerCreditBalance` (`:478-481`) | `CustomerCredit-` | order (after D3) | — |
+| **`ScopeMembership` (`:507-510`)** | `Order-`, `DeliveryJob-`, `Restaurant-` | order + **delivery** + **restaurant** | ✅ **crosses** |
+
+The code states the dependency in its own words at `:434-436`: *"Same 'Order' checkpoint = one ordered
+fold"*, and at `:463-464`: *"keeping the message timeline, folded status and claim entries ordered by
+global `position`"*.
+
+**Split the log per boundary and this breaks — not degrades, breaks.** Two logs are two independent
+`identity` sequences with **no defined interleaving**, so a fold over both is no longer a
+deterministic function of the stored data. **Under Young that is fatal**: current state is a left
+fold of the event stream, and a fold whose result depends on which log the reader happened to poll
+first cannot be reproduced by replay. A rebuild would produce a different `OrderTracking` than the
+live one, and the rebuild is the thing that makes projections disposable in the first place. The
+`ScopeMembership` group makes this permanent rather than transitional: it spans **three** of the five
+boundaries and no boundary reshape removes it.
+
+**This is also the one place the masters genuinely disagree**, and it should be named rather than
+papered over. **Vernon and Evans both push toward context autonomy** — a bounded context owning its
+own persistence is close to the definition of the pattern, and "one shared log" reads like the
+integration database Evans warns against. **Young's fold requirement pushes the other way**, and here
+it wins, on a checkable ground rather than a preference: **the folds that already exist require the
+total order.** The Evans objection is answered not by ignoring it but by where the isolation is
+enforced instead — **write-exclusivity per stream category**, which gives a boundary the thing
+autonomy is *for* (nobody else may write my facts) without the thing that breaks replay (a private
+sequence). Read-sharing is not an integration database, because **nobody writes anyone else's
+streams**; an integration database is defined by shared *write*.
+
+#### D14.2 — Does the REP-4 type split force or forbid a per-boundary log? **Neither — and it depends on the log staying one.**
+
+**They are orthogonal, and the reason is that the log is already untyped.** `domain_events` stores
+`event_type text` + `payload jsonb` (`specs/database/tables/eventstore.yaml:20-21`), and the adapter
+does `serde_json::to_value(event)` → `(event_type, payload)` at
+`crates/infrastructure/src/persistence/event_store.rs:203`, rebuilding by re-tagging at `:187-193`.
+So:
+
+- **A per-boundary event TYPE split (REP-4(a)) changes Rust types over an unchanged storage format.**
+  It touches no stored contract, needs no upcaster and no versioning story — which
+  [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) D4
+  already says, and which this row confirms from the storage side.
+- **It does not enable a per-boundary log**, because the obstacle to splitting the log was never the
+  Rust union — it is the total order the folds consume.
+- **It does not forbid one either.** The types are simply not the binding constraint in either
+  direction.
+
+**But there is a consequence REP-4 must absorb, and it is the useful part of this row.** If each
+boundary gets its own union, the **two cross-boundary projection groups above still need to read
+events from more than one boundary**. REP-4(a) already anticipates this (*"the 5 cross-boundary PM
+bridges and the 3 cross-boundary projection groups genuinely need more than one boundary's union —
+they take an explicit, declared, reviewable union"*). This row supplies the exact set it must cover
+and corrects the count:
+
+> **After the boundary reshape, the explicit cross-boundary unions are needed by exactly TWO
+> projection groups — `Order` (order+delivery) and `ScopeMembership` (order+delivery+restaurant) —
+> plus `bam`, plus `pm-delivery-dispatch`.** Everything else becomes single-boundary.
+
+**Consequences of the property, stated so they are not rediscovered:**
+
+1. **`DomainEventLogDb` is one database and one table.** Per-boundary logs are off the table; the
+   isolation lives in `GRANT`s, not in separate stores.
+2. **The `GRANT` shape follows directly**: every boundary's actors get `INSERT` on `domain_events`
+   constrained to their own stream categories, and **`SELECT` on the whole table** for projectors.
+   This is a **narrower-write / wider-read** grant, which is *not* the shape D11's stop condition
+   assumes, and PROP-20260811-093000 §6.1.1 must say so explicitly — otherwise a reviewer reads a
+   cross-boundary `SELECT` on the log as the integration-database signal when it is the design.
+3. **Write-exclusivity per stream category is the isolation that replaces a separate log, and it has
+   no enforcement today.** `EventStore::append` takes `stream_name: &str`
+   (`crates/application/src/ports.rs:54-60`) with no capability witness — **any holder of
+   `Arc<dyn EventStore>` can append to any stream in any boundary.** This is ISO-3, already tracked
+   and untracked-by-issue, and **D14 raises its priority**: under a shared log, ISO-3 *is* the
+   boundary on the write side. Compiler-first says the answer is a typed stream-category witness with
+   a `pub(crate)` constructor, not a runtime check.
+4. **Cross-boundary reporting stays possible without an integration database** — which was the
+   original instinct behind the question, and it is right: `bam` reads the whole log honestly
+   (declaring all 7 non-kernel domain crates) rather than needing a copy of everyone's data.
 
 ---
 
@@ -825,7 +1169,7 @@ A cheap, generated tightening for whoever next touches the deploy emitters, not 
 | Kernel events that exist only as a boundary bridge | 2 of 3 (`PaymentIntentCreated`, `RefundApproved`) | **0 of 1** |
 | Refund vocabulary split across scopes | 3 scopes (`ordering`, `common`, `payments`) | **1 boundary** |
 | Declared cross-boundary PM bridges | 5 | **2** (`pm-cart-binding` if D9 goes the other way; `pm-delivery-dispatch`) — and under D9(a), **1** |
-| Projection groups slicing more than one boundary | 3 of 9 | **1 of 9** (`ScopeMembership` only) |
+| Projection groups slicing more than one boundary | 3 of 9 | **2 of 9** — `Order` (order+delivery, via the `DeliveryJob-` prefix) and `ScopeMembership` (order+delivery+restaurant). `OrderConversation` becomes fully intra-boundary. **Corrected on the D14 pass**: an earlier draft of this row said *"1 of 9 (`ScopeMembership` only)"*, which overlooked that the `Order` group's `DeliveryJob-` prefix (`worker.rs:448`) still crosses into `delivery` under the recommended set. The gain is real but smaller, and the residue is **permanent, not transitional** — which is exactly why D14's single-log property is load-bearing rather than a migration convenience |
 | `projections-{X}` crates in PROP-090000 slice 1 | 7 | **5** — ~29% less slice-1 work, and the first consumer ([#485](https://github.com/TheCaptainCompany/captain-food/issues/485)) is born in the final shape |
 | Deployable apps | 57 | **53** |
 | Boundary definitions in the repo | **2, unreconciled** | **1, gated** |
@@ -899,12 +1243,46 @@ the other three. It is one sitting, not a program.
   ([PROP-20260725-120055](PROP-20260725-120055-generic-file-attachment-framework.md)) will land inside
   the order boundary. If messaging genuinely grows a distinct model later, extracting it is a third
   boundary decision.
-- **The `order` boundary becomes large** — 6 aggregates, 4 PMs, 17 apps. Vernon's "design small
-  aggregates" is untouched (no aggregate merges), but a large boundary is a large blast radius for a
-  deploy, and it is the Friday-peak boundary. Naming this now so it is not discovered at peak.
+- **The `order` boundary becomes large** — 6 aggregates, 4 PMs, 17 apps — and it is simultaneously
+  the **hottest write path at Friday peak**. Vernon's "design small aggregates" is untouched (no
+  aggregate merges). Stating it as a deployment fact rather than letting it be discovered at 19:40 on
+  a Friday, and **sharpening two things that are easy to get wrong about it**:
+
+  1. **Boundary size is a CODE blast radius, not a POD blast radius, and the distinction is the whole
+     mitigation.** Since [ADR-20260807-002705](../adr/ADR-20260807-002705-cloudnativepg-on-ovh-mks.md)
+     / PROP-20260806-223656 §D5 this system deploys **per-surface binaries and per-actor workers**.
+     `actor-order`, `actor-payment` and `pm-place-order` are separate Deployments with separate
+     mailbox lanes whether or not they share a boundary, so **merging scopes does not merge deploy
+     units and does not widen a restart**. What a large boundary genuinely widens is the *rebuild*
+     surface — a `domain-order` change recompiles 17 bins and reships 17 images — and the CI/rollout
+     cost of that is real. It is not a peak-availability risk.
+  2. **"Splitting payments out would put a boundary hop on the money path" is directionally right but
+     overstates latency and understates coupling — the honest version is the second half.** The hop
+     is a **mailbox hop, and it exists either way**: §4.2's own diagram says *"still a mailbox hop,
+     still one writer per aggregate, now INSIDE one boundary"*. `PlaceOrderProcess` →
+     `PaymentIntentCreated` → mailbox → `Payment` lane is the same number of hops before and after
+     the merge, because one-writer-per-aggregate requires it (Vernon: one aggregate per transaction).
+     **So the merge buys no latency.** What it buys, measurably, is (i) the elimination of the two
+     kernel events that exist *only* to bridge ordering↔payments — 2 of the kernel's 3 (fact 6) — and
+     (ii) no cross-boundary `GRANT` on the money path, which is D11's stop condition holding on the
+     one path where a wrong grant means a wrong charge. **Argue the merge on kernel purity and grant
+     shape, not on speed** — the speed claim is checkable and would not survive checking.
 
 ## 10. Unresolved questions
 
+**Closed on the 2026-08-11 D13/D14 pass, recorded so they are not re-opened**: *which boundary owns
+`CartBindingProcess`* (D9 — `order`, by Vernon's coordination-follows-the-commanded-aggregate rule,
+and the losing side costs the system its first cross-boundary `GRANT`); *what kind of thing the ETA
+is* (D13 — a read-side composition, frozen at checkout); *whether notification policy follows the
+recipient* (D10 — no; policy in `order`, **recipient contract in `restaurant`**, transport in
+`platform`); *one log or one per boundary* (D14 — one, write-isolated and read-shared).
+
+- **The `OrderPlaced` promise freeze (D13.5 step 4) is a MIGRATION, and its versioning story is not
+  written.** Adding `promisedReadyAt`/`promisedDropoffAt` to an event that is already emitted and
+  stored needs an upcasting story before it lands (CLAUDE.md question 2; Young: stored events are
+  immutable contracts). It is nearly free **before** the
+  [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover and a real migration
+  after — the same externally-timed window as B4.
 - **Does the `platform` bucket get a folder** (`specs/platform/`), or does `MailboxSupervision` stay
   in `specs/common/` with `platform` existing only as a C4 context and a deploy grouping? The kernel
   and the platform bucket must not share a name (D6), but they could share a folder.
