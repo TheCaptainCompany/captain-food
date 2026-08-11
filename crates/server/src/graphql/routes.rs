@@ -54,6 +54,27 @@ pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
         .with_state(GraphqlState { schema, tenants })
+        .layer(axum::middleware::map_response(private_no_store))
+}
+
+/// Every response of the GraphQL surface is `Cache-Control: private, no-store` (#469, legal lens).
+///
+/// Since #469 a `/public/graphql` response VARIES by the `captain_auth` cookie — the same query on
+/// the same host returns this customer's cart or nobody's. Nothing in the tree said so: a shared
+/// cache (a future CDN/ingress rule, a corporate proxy, a service worker) that took a GraphQL POST
+/// as cacheable could serve one customer's cart to another — GDPR Art. 32(1)(b) confidentiality,
+/// and an Art. 33 notifiable breach when it happens. Today's safety rests on "nothing fronts this
+/// with a cache" and "POSTs aren't cached by default", which are organisational assumptions about
+/// deployments we have not made yet; this header is the technical measure that replaces them.
+///
+/// Applied as ONE response layer over the whole surface rather than at the handler's return
+/// statements: a new route, or a new early return, cannot forget it.
+async fn private_no_store(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
 }
 
 /// Internal trigger endpoints (ADR-0045) — NOT part of the GraphQL surface, mounted here alongside it.
@@ -371,5 +392,36 @@ mod tests {
         let out = ws_auth_headers(HeaderMap::new(), &json!({}));
         assert!(out.get(AUTHORIZATION).is_none());
         assert!(out.get(crate::graphql::session::SESSION_HEADER).is_none());
+    }
+
+    /// #469, legal lens: a `/public/graphql` response now varies by the `captain_auth` cookie, so
+    /// it must never be stored by a shared cache. Asserted on the REAL router (the layer, not a
+    /// handler's return statement), and on the anonymous request too — a response that carries no
+    /// cart today is served from the same URL as one that does, and a cache does not re-read the
+    /// policy per request.
+    #[tokio::test]
+    async fn every_graphql_response_forbids_shared_caching() {
+        use tower::ServiceExt;
+        let router = graphql_routes(
+            crate::graphql::schema::build_schema(None, None, None),
+            crate::hosts::TenantLookup(None),
+        )
+        .layer(Extension(crate::auth::AuthContext::from_config(
+            String::new(),
+            String::new(),
+        )));
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/public/graphql")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(json!({ "query": "{ __typename }" }).to_string()))
+            .expect("request builds");
+        let response = router.oneshot(request).await.expect("router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+            Some("private, no-store"),
+            "a credential-varying response must not be storable by a shared cache"
+        );
     }
 }

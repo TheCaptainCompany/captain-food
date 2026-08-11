@@ -107,7 +107,7 @@ impl QueryRoot {
     async fn me(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerProfile>> {
         // The verified session identity (ADR-0047), injected per-request by the HTTP layer. No
         // principal (schema executed outside a request) or an anonymous one → no profile, not an error.
-        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id().map(str::to_string)) else {
             return Ok(None);
         };
         let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
@@ -153,7 +153,7 @@ impl QueryRoot {
         // no jobs, not an error.
         let Some(rider_id) = ctx
             .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.as_deref())
+            .and_then(|p| p.user_id())
             .and_then(|s| uuid::Uuid::parse_str(s).ok())
         else {
             return Ok(Vec::new());

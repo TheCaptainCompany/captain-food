@@ -44,6 +44,20 @@ pub enum TenantScope {
 /// the fallback — the SAME chain the SSR fallback uses (`hosts::host_root`), deliberately, because
 /// a page rendered for one tenant whose GraphQL reads resolved another tenant is precisely the
 /// class of bug this module exists to close.
+///
+/// **INFRASTRUCTURE PRECONDITION** (#469 review round 2): since #469 this value is an
+/// AUTHORIZATION input, and `X-Forwarded-Host` is client-forgeable. The ingress (OVH MKS) MUST
+/// **overwrite** it, never append to a client-supplied one. Impact if it does not is bounded — a
+/// caller surfaces at most their OWN cart, or an unbound cart whose session id they already hold, at
+/// another tenant, because the row scope still comes from verified claims — but it is a real
+/// dependency of this function on a deployment setting, recorded where the value is read.
+///
+/// **Split-topology caveat** (live for the #358 cutover): the justification above holds for the
+/// MONOLITH, where SSR resolves in-process. With per-surface bins, SSR reads through the gateway
+/// over HTTP (`surface_runtime`'s `HttpTransport`) and `web::graphql` forwards only `X-SESSION-ID` —
+/// no `Host` — so every tenant-scoped read on that transport would resolve [`TenantScope::None`].
+/// Harmless while that transport is anonymous and sessionless; the cutover must forward the tenant
+/// host before it carries storefront reads.
 pub fn raw_host(headers: &HeaderMap) -> &str {
     headers
         .get("x-forwarded-host")
