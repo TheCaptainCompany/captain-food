@@ -5748,6 +5748,83 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
     assert!(facade.contains("pub use domain_ordering::errors::*;"), "{}", facade);
 }
 
+/// THE MANIFEST HEADER MUST MATCH THE MEASURED DEPENDENCY GRAPH (#475). A bin manifest's scope
+/// assertion is a fact about the CRATE — Rust resolves no path to an undeclared crate — and the
+/// header used to state it as a fact about the DEPLOYABLE ("linking a domain crate is the ONLY way
+/// that scope's vocabulary exists in this deployable … unspellable rather than merely unrouted").
+/// That is false wherever the image reaches the `domain` facade behind the list, through
+/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written. A comment
+/// claiming an enforcement the build does not provide is worse than no comment: it stops the next
+/// reviewer looking (CLAUDE.md), which is exactly how the sentence survived four families' wiring.
+/// So the sentence is DERIVED, not trusted: resolved closure reaches `crates/domain` ⇒ the emitted
+/// header must carry the honest sentinel and must NOT carry the strong one; closure is domain-free
+/// ⇒ it carries the strong one. Both directions are load-bearing — when `bin_runtime` is
+/// decomposed and a family becomes genuinely isolated, this fails until its header is upgraded to
+/// say so, so the prose can never lag the graph in either direction.
+#[test]
+fn bin_manifest_scope_claim_matches_the_measured_closure() {
+    use guppy::graph::DependencyDirection;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let crates = emit_bin_crates(&model);
+    assert!(crates.len() >= 49, "expected the full bin matrix, found {}", crates.len());
+
+    let mut cmd = guppy::MetadataCommand::new();
+    cmd.current_dir(&root);
+    let graph = cmd.build_graph().expect("workspace graph builds");
+    // Workspace-relative dirs of a bin's transitive workspace closure — the same measurement the
+    // determinator gate hashes, so "what the image links" has ONE definition in this repo.
+    let closure_dirs = |bin: &str| -> BTreeSet<String> {
+        let member = graph.workspace().member_by_name(bin).expect("bin is a workspace member");
+        let ws_root = graph.workspace().root();
+        graph
+            .query_forward(std::iter::once(member.id()))
+            .expect("closure query")
+            .resolve()
+            .packages(DependencyDirection::Forward)
+            .filter(|p| p.in_workspace())
+            .map(|p| {
+                p.manifest_path()
+                    .parent()
+                    .expect("manifest has a parent dir")
+                    .strip_prefix(ws_root)
+                    .expect("crate dir inside the workspace")
+                    .as_str()
+                    .replace('\\', "/")
+            })
+            .collect()
+    };
+
+    let mut isolated: Vec<&str> = Vec::new();
+    for c in &crates {
+        let dirs = closure_dirs(&c.name);
+        if dirs.contains("crates/domain") {
+            assert!(
+                c.manifest.contains(CLAIM_NOT_ISOLATED),
+                "{}: the image links the `domain` facade (every scope), so the header must say so \
+                 -- missing '{CLAIM_NOT_ISOLATED}'",
+                c.name
+            );
+            assert!(
+                !c.manifest.contains(CLAIM_ISOLATED),
+                "{}: header claims deployable isolation its own closure contradicts",
+                c.name
+            );
+        } else {
+            assert!(
+                c.manifest.contains(CLAIM_ISOLATED),
+                "{}: closure is domain-free -- the header may and should say so, missing \
+                 '{CLAIM_ISOLATED}'",
+                c.name
+            );
+            isolated.push(&c.name);
+        }
+    }
+    // The strong branch must stay exercised: text no bin carries is text that rots unnoticed
+    // (today: the seven `gateway-*` bins, whose closure really is domain-free).
+    assert!(!isolated.is_empty(), "no bin exercises the isolated header branch");
+}
+
 // ─── The generated deployment (#349, ADR-20260807-183024 step 4) ────────────────────────────────
 
 /// Every deployable maps to exactly one image, one pin file, one manifest — and back

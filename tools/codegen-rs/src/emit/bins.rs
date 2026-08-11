@@ -6,13 +6,17 @@
 //! (ADR-20260808-062432) and the `bam` worker (PROP-20260806-223656 §2b D5 addendum container
 //! list).
 //!
-//! WHAT THE SPLIT BUYS. Each bin's `Cargo.toml` links ONLY the domain-scope crates its entry in
-//! the derived crate graph declares — the manifest IS the lane/scope assertion (compiler-first,
-//! ADR-20260803-234035): `actor-order` cannot spell a catalog type, a gateway cannot spell any
-//! domain type at all, and a new cross-scope edge lands as a reviewable manifest diff, never an
-//! import nobody notices. This removes step (2)'s recorded limit for the bins: the monolith
-//! consumers still couple to every scope through the `domain` facade, but the deployables no
-//! longer do.
+//! WHAT THE SPLIT BUYS — AND WHAT IT DOES NOT (#475). Each bin's `Cargo.toml` lists ONLY the
+//! domain-scope crates its entry in the derived crate graph declares, so the bin's OWN SOURCE
+//! cannot NAME a scope outside that list (`actor-order` cannot spell a catalog type: `domain` is
+//! transitive, not nameable), and a new cross-scope edge lands as a reviewable manifest diff
+//! rather than an import nobody notices (compiler-first, ADR-20260803-234035). That is a fact
+//! about the CRATE. It is NOT a fact about the DEPLOYABLE: every wired family except `gateway-*`
+//! links `bin_runtime`/`server`/`web`, each of which reaches the `domain` facade and therefore
+//! every scope crate — so step (2)'s facade coupling is narrowed for the source and still open
+//! for the image, which is the blast-radius half of #475 (exits: the per-scope `infrastructure`
+//! split #423, decomposing `bin_runtime`). The emitted manifest header says exactly this, per
+//! family, and `determinator_gate::closure` holds it to the measured dependency graph.
 //!
 //! WHAT THE BINS ARE (and are not) AT THIS STEP — gate-then-stabilize: PROBE-SERVING SHELLS
 //! (#349, step 4 — upgraded from step 3's print-and-exit skeletons). Each `main` binds `$PORT`
@@ -22,8 +26,9 @@
 //! their mailbox worker, per-scope projection filtering, subgraph schema slices, gateway
 //! composition tables) is tracked on #349 and blocks the steps (6)–(7) flip. What is REAL now is
 //! the topology (buildable, workspace-membered, pruned when the spec drops a deployable), the
-//! scope containment (compile-checked via `use … as _;` so the linker cannot silently strip an
-//! asserted dependency), and the probe contract the manifests point at.
+//! scope DECLARATION (compile-checked via `use … as _;` so the linker cannot silently strip an
+//! asserted dependency — a declaration about the crate, not containment of the image: see above),
+//! and the probe contract the manifests point at.
 //!
 //! DERIVATION — one source per family, cross-checked against `architecture/c4-l2.yaml` by the
 //! §15 validator (`c4-bin-*` rules) so the container list and the emitted crates cannot drift:
@@ -537,6 +542,29 @@ fn bin_manifest(b: &BinSpec) -> String {
             "# The probe shell (step 4, #349): serves the /health + /ping the generated Deployment probes.\naxum = { workspace = true }\ntokio = { workspace = true }\n",
         );
     }
+    // WHAT THE HEADER MAY CLAIM (#475). The manifest proves a fact about THIS CRATE'S SOURCE
+    // (an undeclared crate is not nameable); it proves nothing about the IMAGE, which links
+    // whatever the bin's runtime dependencies drag in. Stating the second while proving only the
+    // first is worse than stating nothing -- it stops the next reviewer looking (CLAUDE.md) --
+    // so each family states its own measured truth, and the closure gate in
+    // determinator_gate::closure holds the sentence to the resolved dependency graph.
+    let yes = CLAIM_ISOLATED;
+    let no = CLAIM_NOT_ISOLATED;
+    let scope_claim = if !wired(b) {
+        format!("# Here it is {yes} -- the shell links only the probe runtime (axum +\n# tokio), so no domain crate rides in behind this list. Re-check that when this family gets its\n# business wiring: for every WIRED family the same claim is currently false (#475).")
+    } else {
+        match b.family {
+            // The only family whose whole resolved graph is domain-free -- the claim the other
+            // families cannot make is exactly true here, so it is worth making.
+            "gateway" => format!("# Here it is {yes}: this family's resolved graph (gateway_runtime +\n# bin_probes) contains no domain crate at all, so no domain type exists in this image to reach.\n# It is the ONLY family in the topology of which that holds today -- every other bin reaches the\n# `domain` facade transitively (#475)."),
+            // Widest case: the whole monolith surface, sliced by a string.
+            "subgraph" => format!("# It is {no}, and this family is the widest case in the topology.\n# `server` below is the monolith's entire GraphQL surface: `bin_support::subgraph_app` registers\n# EVERY actor mailbox (infrastructure::generated::command_router::ACTOR_MAILBOXES) and then\n# slices the master schema by the SCOPE string -- so a subgraph meant to hold one domain can\n# enqueue to any aggregate, and the `domain` facade rides in with `server`. That is a runtime\n# filter over a fully linked graph, not a boundary. Filed with the rest on #475; a scope-built\n# schema and the per-scope infrastructure split (#423) are its exits."),
+            // fo-*/bo-*: no server and no infrastructure (true), but SSR still folds domain rows.
+            "surface" => format!("# It is {no}. The deps note below is right that no server and no\n# infrastructure are linked -- a surface reads only over GraphQL -- but surface_runtime -> web ->\n# app-core -> the `domain` facade still carries every scope into this image. Nothing ROUTES them\n# here; nothing makes them unnameable either. Filed with the rest on #475."),
+            // actor/pm/projector/worker/adapter: the composition kit carries the spine.
+            _ => format!("# It is {no}, and here the two differ. `bin_runtime` below pulls\n# application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's\n# vocabulary is linked into this image whatever this list says. What holds this pod to its slice\n# at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared\n# runtime (`with_only`, `with_scope`). A filed, decided gap -- the recorded blast-radius cost\n# whose exits are the per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)\n# -- so read the list as this bin's DECLARED surface, not as a wall the build stands up."),
+        }
+    };
     let posture = if wired(b) {
         "# BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith\n# `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358\n# cutover) point traffic and the mailbox at these pods."
     } else {
@@ -547,9 +575,13 @@ fn bin_manifest(b: &BinSpec) -> String {
 # (ADR-20260807-183024 steps 3+4 and #385; container list per PROP-20260806-223656 s2b D5 addendum).
 #
 # PER-DEPLOYABLE BIN CRATE: `{name}` ({family}). The domain [dependencies] below are this bin's
-# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json -- linking
-# a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
-# coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
+# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json. What it
+# proves is REAL but NARROW, and worth stating exactly: THIS CRATE'S OWN SOURCE cannot NAME a
+# scope missing from the list -- Rust resolves no path to an undeclared crate -- and the
+# `use ... as _;` lines in src/main.rs keep every declared link a compile-checked fact rather
+# than a comment (compiler-first, ADR-20260803-234035).
+#
+{scope_claim}
 #
 {posture}
 [package]
@@ -570,9 +602,20 @@ workspace = true
         family = b.family,
         desc = family_purpose(b),
         deps = deps,
+        scope_claim = scope_claim,
         posture = posture,
     )
 }
+
+/// The sentinel a bin manifest carries when its DEPLOYABLE is NOT scope-isolated — i.e. when the
+/// image links the `domain` facade behind the manifest's own list (#475). Shared with the closure
+/// gate (`determinator_gate::closure`) so the emitted sentence and the test that measures the real
+/// dependency graph cannot drift apart.
+pub(crate) const CLAIM_NOT_ISOLATED: &str = "NOT A CLAIM ABOUT THE DEPLOYABLE";
+
+/// The sentinel for a bin whose whole resolved graph really is domain-free (the `gateway-*`
+/// family today), where the manifest's assertion holds of the image as well as of the source.
+pub(crate) const CLAIM_ISOLATED: &str = "TRUE OF THE DEPLOYABLE TOO";
 
 /// The `src/main.rs` of a WIRED bin (#385): a thin parameter list over `bin_runtime` — config
 /// gate, telemetry, pool, the family spawn, the probe server. No business logic: every helper

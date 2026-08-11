@@ -143,6 +143,26 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 🧾 **2026-08-11 — PER-BIN SCOPE ISOLATION: THE MANIFESTS NOW SAY WHAT THE BUILD ENFORCES**
+> ([#475](https://github.com/TheCaptainCompany/captain-food/issues/475), comment half). Measured on
+> the resolved dependency graph: **50 of the 57 bins link the `domain` facade** — hence all eight
+> scope crates — behind their own scope list, through `bin_runtime` (actor/pm/projector/worker/
+> adapter), `server` (the 8 `graphql-*` subgraphs) or `web` → `app-core` (the 5 `fo-*`/`bo-*`
+> surfaces, which really do hold no server/infrastructure). Only the **7 `gateway-*` bins** are
+> domain-free end to end. The emitted manifest header claimed the opposite for all 57 ("linking a
+> domain crate is the ONLY way that scope's vocabulary exists in this deployable … *unspellable*
+> rather than merely unrouted") — **this supersedes the "step-2's facade limit is now closed FOR THE
+> BINS" line in the #382/#383 entry below**, which was true of each bin's SOURCE and never of its
+> image. The header now separates the two: the crate's own source still cannot NAME an undeclared
+> scope (real, compiler-first), while what bounds the pod today is a runtime string (`LANES`,
+> `with_only`, `with_scope`) — and for the subgraphs, `bin_support::subgraph_app` registers EVERY
+> actor mailbox and slices the master schema by a scope string, so one can enqueue to any aggregate.
+> A codegen test (`bin_manifest_scope_claim_matches_the_measured_closure`) now derives the sentence
+> from the guppy closure in **both** directions, so the prose cannot lag the graph once
+> `bin_runtime` is decomposed. Structural half (decompose `bin_runtime`, per-scope `infrastructure`
+> [#423](https://github.com/TheCaptainCompany/captain-food/issues/423), `crates/clients/*`) stays
+> open on #475. Validate 0 errors / 37 warnings (baseline).
+
 > 🧭 **2026-08-11 — BEHAVIOUR TRACKING IS ISOLATED END TO END, AND A FAULTED WORKER PRE-DIAGNOSES
 > ITSELF — BUT "SAY IT IN /health" WOULD TAKE THE STOREFRONT DOWN AS STATED**
 > ([ADR-20260811-120828](adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md),

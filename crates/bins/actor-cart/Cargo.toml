@@ -2,9 +2,19 @@
 # (ADR-20260807-183024 steps 3+4 and #385; container list per PROP-20260806-223656 s2b D5 addendum).
 #
 # PER-DEPLOYABLE BIN CRATE: `actor-cart` (actor). The domain [dependencies] below are this bin's
-# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json -- linking
-# a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
-# coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
+# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json. What it
+# proves is REAL but NARROW, and worth stating exactly: THIS CRATE'S OWN SOURCE cannot NAME a
+# scope missing from the list -- Rust resolves no path to an undeclared crate -- and the
+# `use ... as _;` lines in src/main.rs keep every declared link a compile-checked fact rather
+# than a comment (compiler-first, ADR-20260803-234035).
+#
+# It is NOT A CLAIM ABOUT THE DEPLOYABLE, and here the two differ. `bin_runtime` below pulls
+# application + infrastructure -> the `domain` facade -> every domain-* crate, so every scope's
+# vocabulary is linked into this image whatever this list says. What holds this pod to its slice
+# at RUNTIME is a string, not a type: the LANES/PM/SCOPE const src/main.rs hands to the shared
+# runtime (`with_only`, `with_scope`). A filed, decided gap -- the recorded blast-radius cost
+# whose exits are the per-scope infrastructure split (#423) and decomposing `bin_runtime` (#475)
+# -- so read the list as this bin's DECLARED surface, not as a wall the build stands up.
 #
 # BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
 # `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
