@@ -43,6 +43,59 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 🧭 **2026-08-11 — BEHAVIOUR TRACKING IS ISOLATED END TO END, AND A FAULTED WORKER PRE-DIAGNOSES
+> ITSELF — BUT "SAY IT IN /health" WOULD TAKE THE STOREFRONT DOWN AS STATED**
+> ([ADR-20260811-120828](adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md),
+> [DECISIONS §27bis](proposals/DECISIONS.md) TRK-ISO / HEALTH-2 / HEALTH-2a / HEALTH-2b; docs-only).
+> **TRK-ISO — behaviour tracking gets its own database AND its own projector worker**, *"completely
+> isolated… to avoid dependencies between the behaviour event tracking and the business events"*. That
+> is **further than [PROP-20260811-000946](proposals/PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md)
+> D5** asked, and it matters more under the halt decision than it did before it: now that a rejected
+> fold halts its group, a **shared** worker would let a malformed behaviour event wedge a group sitting
+> beside the order read models. Separate workers make that unspellable rather than unlikely. The
+> distinction is settled — behaviour events: own database, own worker, written by the UI through a
+> `sink:` mutation, never `domain_events`; **business metrics: the `bam` schema and the `bam`
+> projector**, a fold over `domain_events`. **C4 owes a new container plus edges**, and
+> `specs/architecture/*.yaml` is **source DSL, not generated** — an executor spec change when the work
+> lands.
+> **HEALTH-2 — a faulted worker reports unhealthy and is NOT restarted.** *"K8s does not need to
+> restart the worker"* is **independently the same conclusion** the team reached from the failure
+> analysis (a deterministic fault re-fails after a restart, so liveness gives CrashLoopBackOff and
+> takes sibling groups down) — the convergence is recorded, not just noted. And *"it's a pre
+> diagnostic"* is the substantive requirement: **the payload is the deliverable, the status code is
+> only the transport.** A health endpoint returning `{"status":"unhealthy"}` satisfies the code and
+> fails the requirement, so the per-group breakdown — group, `haltedSince`, position, `eventType`,
+> stream, error — becomes the point of the feature. **This is
+> [no polling, only pushing](adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)
+> applied one layer up**: the failure pushes its own diagnosis into a surface already being watched,
+> instead of a human polling pod logs to reconstruct it. On `500` — k8s treats any non-2xx as a failed
+> probe, so **keep the existing `503`**, which is also semantically right; nobody should "fix" it for
+> literal compliance.
+> ⚠️ **HEALTH-2a — the edge, reported rather than discovered at cutover.** Verified on `37642cd`: the
+> monolith runs the API **and** the projection worker in **one process** (`RUN_PROJECTOR`, default on,
+> `crates/server/src/lib.rs:641-648`), serves `/{role}/graphql`, **has a `Service`**, and its `/health`
+> is the ADR-0043 **deploy interlock** knowing only DB reachability and schema version (`:1503-1526`).
+> So *"say it in `/health`"* there would make the **API** unready because a **read model** halted — a
+> degraded projection turned into a **customer-facing outage**, and a halted projection blocking the
+> deploy that would fix it. **The rule is restated so the edge cannot occur**: *the endpoint a pod's
+> **readiness probe points at** returns non-2xx when a component **that pod is responsible for** is
+> faulted* — not "`/health` returns 500". Projector bins probe `/projector`; the monolith keeps
+> `/health` on API components only, with its in-process projector observable at `/projector`, **which
+> is not its probe**. Final shape after cutover: which components a deployable hosts is already
+> declared, so the probe path and the health composition can both be **generated from that
+> declaration**.
+> ⚠️ **HEALTH-2b — "any worker" does not apply unchanged, and the reason is a real asymmetry.** The
+> actor-mailbox workers **already quarantine**: a repeatedly-failing message hits the delivery-attempts
+> cap and is parked as poison (`journals.yaml:69`), **the lane keeps draining**, and an operator
+> requeues it (`common/api.yaml:158,170,202`). Making them *stop* would turn a parked message into a
+> **stopped order lane** — the platform's worst failure mode. **The principle: halt is right where
+> there is no quarantine, and quarantine is better wherever it exists** — projections halt precisely
+> *because* they have none, which is why quarantine stays their tracked follow-up. Actor workers still
+> owe the pre-diagnostic half: poison data is reachable **only through the admin GraphQL API** today
+> (**no `/mailbox`, no `MailboxStatus` — verified absent**), so the monitoring app cannot see a
+> poisoned lane without admin auth. A `/mailbox` surface is owed, **report-only — it must not gate
+> readiness**, because a poisoned message is a normal recoverable state, not an unhealthy pod.
+
 > 🛑 **2026-08-11 — A REJECTED FOLD NOW HALTS ITS GROUP — AND THE FLIP CANNOT LAND ALONE, BECAUSE A
 > HALTED PROJECTOR CURRENTLY REPORTS ITSELF HEALTHY**
 > ([ADR-20260811-105024](adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md),

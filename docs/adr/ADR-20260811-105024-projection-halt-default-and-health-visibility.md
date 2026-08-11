@@ -1,6 +1,6 @@
 # ADR-20260811-105024 — A database-rejected fold HALTS its projection group, and a halted group must be visible to Kubernetes
 
-- **Status**: Accepted
+- **Status**: Accepted — **extended (not reversed) by [ADR-20260811-120828](ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md)**, which confirms the readiness-not-liveness finding below from the product owner's own *"K8s does not need to restart the worker"*, makes the per-group payload of §3 **the deliverable rather than a nicety**, and scopes the rule across worker kinds (it does **not** apply to the actor-mailbox workers, which already quarantine)
 - **Date**: 2026-08-11
 - **Source**: product-owner decision (verbatim below), overruling the team's recommendation to build quarantine first
 - **Flips the default set by**: [#474](https://github.com/TheCaptainCompany/captain-food/issues/474) / [#478](https://github.com/TheCaptainCompany/captain-food/pull/478), which landed `DbFaultPolicy` **gated and inert** (`DbFaultPolicy::Skip` = the pre-existing behaviour)
