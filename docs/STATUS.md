@@ -628,6 +628,90 @@
 > profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 was stale; re-measured on `main`
 > at `d7087fb` and repinned to 37 when `main` was merged into this branch — re-measure, as it says).
 
+> ✅ **2026-08-11 — #469: THE OPEN PATH READS CREDENTIALS, AND `current` IS TENANT-SCOPED BY HOST**
+> ([#469 "`current` leg 1 is dead on the web AND is not tenant-scoped — fix both together or neither"](https://github.com/TheCaptainCompany/captain-food/issues/469),
+> branch `469-auth-leg-and-tenant-scope`, PR [#488](https://github.com/TheCaptainCompany/captain-food/pull/488),
+> [ADR-20260811-113000](adr/ADR-20260811-113000-the-open-path-reads-credentials-and-current-is-tenant-scoped-by-host.md)).
+> Both halves land together because either alone is worse than neither: the auth half on its own
+> ships a live cross-tenant cart.
+>
+> **Half 1 — `/public` is no longer credential-blind.** It reads the `captain_auth` cookie/bearer and
+> verifies it, and it is the ONE path that DEGRADES instead of refusing: absent, expired, tampered,
+> JWKS-unreachable and non-CUSTOMER credentials all serve `200` anonymous (a stale cookie is the
+> common case; `/public` worked with no JWKS at all before and still must). Each degrade is counted —
+> `public_credential_degraded_total{reason}` — and the JWKS fetch is now bounded at 3 s, because key
+> refresh has moved onto the storefront's critical path — and the refresh itself is **single-flight
+> with a negative cache** (N concurrent requests at the TTL boundary cost ONE fetch; a failed fetch
+> silences retries for 10 s; an attacker-supplied unknown `kid` can drive a refetch at most once per
+> 5 s), because a Supabase blip at Friday 19:00 would otherwise tax every storefront request 3 s.
+> **It grants at most the CUSTOMER identity**: a verified ADMIN/RESTAURANT/RIDER token there stays
+> anonymous, enforced **by the type**: `Principal` holds ONE private `Identity` enum whose role is
+> DERIVED from the identity, so "role says CUSTOMER, claim absent" is not a field combination anyone
+> can spell — it is the named `Identity::Unbound`, which `/public` cannot reach. (Round 2 of review
+> corrected an overstatement here: the previous `pub`-fields struct made that state a legal literal
+> inside AND outside the crate, so the guarantee lived in a doc comment, not in the compiler.)
+>
+> **Half 2 — the tenant is a request datum.** `Host` → `{slug}` → `RestaurantId` resolved ONCE at the
+> GraphQL edge (POST and WebSocket) and injected beside `ReadScope`, never folded into it; `current`
+> stays ZERO-ARGUMENT (an argument would let a client assert the tenant) and both legs are bounded by
+> the tenant **in SQL**, through two port methods whose signatures make it non-optional. A host that
+> names no restaurant serves `null`, never "the newest cart anywhere"; `carts` remains the
+> across-restaurants query. `graphql_routes` now TAKES the tenant lookup, so mounting the surface
+> without one does not compile.
+>
+> **The test that could not previously exist.** Every cart test injected `ReadScope` by hand, which is
+> exactly how a dead auth leg survived a green suite. `tests/graphql_cart_read.rs` now drives a real
+> `POST /public/graphql` — signed cookie, `Host`, loopback JWKS — through the production router and
+> asserts the PRICED payload per host. **Standing rule: a test of an auth-derived value may not
+> `.data()` that value.** Each half was mutation-tested separately (restore `Principal::anonymous()`
+> ⇒ the auth test reds with `null`; drop the host filter ⇒ the tenant tests red showing restaurant
+> B's cart and total on A's storefront; neutralise the SQL predicate ⇒ the DB test reds with 2 rows
+> where 1 is expected).
+>
+> **Blast radius, named** (ADR §Consequences): on `/public` a signed-in customer now also reaches
+> `paymentStatus` ownership by claim, matches `operationStatus`/`operationStatusChanged` ownership by
+> their own `sub` — **only once claim-stamped**: those two read `user_id` directly, so for the
+> pre-claim window ownership rests solely on `X-SESSION-ID`, exactly as on `main` — and the open
+> mutations' journal/`domain_events` envelope stamps `user_id`/`user_type = CUSTOMER` instead of
+> `PUBLIC`. SSR stays anonymous ON PURPOSE (identity there would emit personalised HTML with no
+> `Cache-Control`). `/public` GraphQL responses now vary by cookie, so the whole GraphQL surface
+> answers `Cache-Control: private, no-store` — one response layer, not per-handler, so a new route
+> cannot forget it; serving one customer's cart to another out of a shared cache would be an
+> Art. 32(1)(b) confidentiality failure, and "nothing fronts POSTs with a cache" is an assumption
+> about deployments we have not made yet, not a technical measure.
+>
+> **Three things independent review added, all landed here.** (1) A verified CUSTOMER token with no
+> `captain_customer_id` — the pre-claim-stamp window, i.e. EVERY signed-in customer for one token
+> lifetime after rollout — now degrades to anonymous and is counted `public_credential_degraded_total{reason=claim_absent}`,
+> instead of falling through to `read_authorization_bridge_unresolved_total`, whose contract says
+> *"never ordinary user denial"*: a normal rollout would otherwise have bumped a provisioning-gap
+> counter on every storefront GraphQL request and read to an operator as an incident. **Both branches
+> are now PROVED emitted** (`crates/server/tests/public_credential_degraded_metric.rs`): the same
+> claimless token bumps `claim_absent` on `/public` while leaving the bridge counter silent, and bumps
+> the bridge counter on `/customer` — so the "stays zero" half is an observation, not a metric name
+> nobody checked. `read-authorization` also joined the codegen guard's contract list, so a rename of
+> either counter now fails the build. (2) The envelope widening reaches the **mailbox handler**
+> (`resolve_actor` branches on `user_type == "CUSTOMER"` ALONE — so a claim-stamped customer with a
+> lagging projection takes the branch too): one extra `by_auth_ref` read per delivery on the cart
+> mutations at peak. A lagging projection returns `Ok(None)`, not `Err`, so it does NOT abort the
+> delivery; only a genuine read-model failure does. Outcomes are unaffected either way — the single
+> `domain_id` consumer is unreachable from `/public`. (3) The stored identity now puts an **external
+> IdP identifier** (the Supabase `sub`) into the immutable write envelope of `Cart-*`, `Customer-*`
+> and `Restaurant-*`, where it **survives deletion of the Supabase identity** — and those streams have
+> no erasure path (only `Order` declares one; the deletion engine is stream-keyed). They were NOT
+> "made subject-attributable" — `CartStarted` already requires `sessionId` and `CustomerRegistered`
+> already requires `phone`; what is new is narrower and different in kind. The production log is empty
+> by decision, so this is an unmet launch precondition already filed as
+> [#194](https://github.com/TheCaptainCompany/captain-food/issues/194), not a pre-existing breach.
+>
+> **Round 2 of review also landed**: the `Identity` reshape above; the JWKS single-flight + negative
+> cache; `Cache-Control: private, no-store` across the GraphQL surface; and three recorded
+> consequences the code cannot enforce — the `captain_auth` cookie is **host-only**, so identity is
+> per-storefront (cross-storefront identity is an open authn-scope decision, not taken here);
+> `X-Forwarded-Host` is now an authorization input, so the ingress must OVERWRITE it rather than
+> append; and in the #358 surface-bin topology the SSR transport drops `Host`, which would resolve
+> every tenant-scoped read to `TenantScope::None`.
+
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
 > ([#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451),
