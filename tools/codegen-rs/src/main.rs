@@ -55,6 +55,9 @@ fn repo_root(specs: &std::path::Path) -> PathBuf {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
+    // §17: refresh the committed warning ratchet instead of asserting it (`make warning-baseline`).
+    // The ONLY way the artifact changes, so "the number moved" is always a deliberate, reviewable act.
+    let write_baseline = args.iter().any(|a| a == "--write-warning-baseline");
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -139,6 +142,10 @@ fn main() {
         "    - proposals: {} docs/proposals/PROP-*.md — Status header, tracking-issue link, Concerns resolved before Approved, Approved names an ADR",
         proposals.len()
     );
+    eprintln!(
+        "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",
+        WARNING_BASELINE_PATH
+    );
 
     if !issues.is_empty() {
         eprintln!("• checks: {} error(s), {} warning(s)", errors.len(), warnings.len());
@@ -150,8 +157,34 @@ fn main() {
         eprintln!("• checks: all cross-references resolve, no warnings");
     }
 
+    // ─── §17 — the warning RATCHET (see validate/warning_baseline.rs) ──────────────────────────
+    // "0 errors and no NEW warning" is now asserted by the gate against a committed artifact,
+    // instead of being re-derived by hand against a pristine `main` worktree once per session.
+    let live_profile = warning_profile(&issues);
+    if write_baseline {
+        let path = root.join(WARNING_BASELINE_PATH);
+        if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
+            eprintln!("✗ write {}: {}", path.display(), e);
+            std::process::exit(1);
+        }
+        eprintln!(
+            "✓ wrote {} ({} warning(s), {} kind(s)) — commit it with the change that moved it.",
+            path.display(),
+            live_profile.values().sum::<usize>(),
+            live_profile.len()
+        );
+        return;
+    }
+    let baseline_failure = check_warning_baseline(&root, &live_profile).err();
+    if let Some(msg) = &baseline_failure {
+        eprint!("{}", msg);
+    }
+
     if !errors.is_empty() {
         eprintln!("\n✗ validation failed — fix the errors above before generating.");
+        std::process::exit(1);
+    }
+    if baseline_failure.is_some() {
         std::process::exit(1);
     }
 

@@ -89,8 +89,11 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
 
 ## Validation must stay green
 
-- 0 errors is required. The only accepted warnings are the known view design-holes
-  (`view-fedby-unused`, `view-column-no-source` ×3). Any new warning is a real signal — fix or justify.
+- 0 errors is required. The accepted warnings are whatever `tools/codegen-rs/warning-baseline.json`
+  records — the validator's §17 ratchet asserts that file against every run, in both directions, so a
+  new warning is a gate failure rather than something a reader has to notice. Fix it, or bank it with
+  `make warning-baseline` in the same commit and justify it in the PR body. (Listing the kinds here
+  instead is what went stale three times; see CLAUDE.md.)
 - When you add a spec concept, add its validation rule in the same change (the model must not be able to
   drift silently). Adding a new source file = add it to `SOURCE_FILES` so its `$ref`s are checked.
 - Prefer total access on the YAML `Value` tree: `.get(...).and_then(...)` with explicit fallbacks over
