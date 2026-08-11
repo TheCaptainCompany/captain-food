@@ -43,6 +43,84 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 🛑 **2026-08-11 — A REJECTED FOLD NOW HALTS ITS GROUP — AND THE FLIP CANNOT LAND ALONE, BECAUSE A
+> HALTED PROJECTOR CURRENTLY REPORTS ITSELF HEALTHY**
+> ([ADR-20260811-105024](adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md),
+> [DECISIONS §27bis](proposals/DECISIONS.md) MET-G/MET-G2; docs-only).
+> Product owner, verbatim: *"A. The projector has to stop and indicates it in the health. So k8s will
+> detect it and we will be informed."* `DbFaultPolicy` flips **`Skip` → `Halt`** — the
+> gate-then-stabilize default flip, the gated form having shipped inert in
+> [#478](https://github.com/TheCaptainCompany/captain-food/pull/478). The team recommended building
+> quarantine first and was **overruled**; recorded as a choice, not a concession — `Skip` leaves a read
+> model permanently and *silently wrong*, which for a money- or authorization-bearing projection is
+> worse than stuck.
+> ⚠️ **Verified on `5fdc519`, and this is a precondition rather than a caveat**: under `Halt` the
+> worker does **not** stop — the slice rolls back and the loop keeps ticking
+> (`worker.rs:800-816,688-700`) — so `running` stays `true` (`:688`), so `/projector` returns
+> **`200 OK`** (`server/src/lib.rs:1377-1392`); **and neither Kubernetes probe looks at projection
+> status at all**, because projector bins probe `readinessProbe: /health` (the DB+schema gate) and
+> `livenessProbe: /ping` (*"process is up; touches nothing"*)
+> (`deploy/generated/manifests/bins/projector-ordering.yaml:102-111`). **Flipping today would produce a
+> projector that wedges permanently and reports itself completely healthy on both probes** — turning a
+> silent-wrong-answer failure into a silent-no-answer one. So the flip and the health surface land
+> together.
+> **The health design, settled in the ADR**: **halt stays PER-GROUP with the process alive** (already
+> true by construction — process-level would turn one poisoned read model into a *scope-wide*
+> projection outage, since `projector-ordering` hosts every ordering group); **READINESS, not
+> liveness** — projector bins have **no `Service`**, so readiness is a **pure signal channel with no
+> side effect** (visible to `kubectl`, Argo CD and `kube_pod_status_ready`), whereas liveness kills and
+> restarts, a restart cannot fix a deterministic schema fault, and the resulting **CrashLoopBackOff
+> stops every sibling group** — manufacturing exactly the outage the per-group shape prevents; re-point
+> readiness to `/projector`; and the payload gains a **per-group** breakdown naming the halted group,
+> position, `eventType` and error, because `ProjectionStatus` is per-worker today
+> (`projection/mod.rs:13-28`) and structurally cannot say *which* group halted. **The signal does not
+> exist**: `specs/observability.yaml` declares **no projection contract at all** (`:11`, prose only).
+> ⚠️ **Known consequence accepted by flipping now (MET-G2) — the role-revocation wedge.**
+> `ScopeMembership` is *"the single index every read-side authorization question resolves against, for
+> every role and every surface"* (`projection_tables.yaml:801-810`) — **and it is a projection**. A
+> halted group freezes read-side authorization: grants stop arriving and **revocations stop applying**,
+> so a removed staff member or deactivated rider keeps access until a human clears the fault. That
+> touches the *"explicit and immediate"* revocation guarantee of the §6.4 closure
+> ([ADR-20260810-194548](adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)).
+> **Accepted, not solved** — under `Skip` the event is skipped and the index left permanently *wrong*,
+> worse in kind for an authorization index. **Quarantine remains the real fix** and stays a tracked
+> follow-up; until then a halted `ScopeMembership` is an **incident, not a ticket**.
+
+> ✅ **2026-08-11 — THREE MORE DECISIONS SETTLED; ONE IS WITH LEGAL**
+> ([DECISIONS §27bis](proposals/DECISIONS.md) MET-Q7 / COOP / MET-W / TRK-scope; docs-only).
+> **MET-Q7 — approved as recommended: no hosted analytics SDK.** Ours, server-side. **Plus an addition
+> that matters architecturally**: *"We will use a different database from the business database to
+> isolate the activity."* Behavioural data lands in a **separate database from the business data**,
+> which independently arrives at the legal lens's instruction and **confirms
+> [PROP-20260811-000946](proposals/PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md)
+> D5** — its own time-partitioned store, so erasure is a partition drop rather than an immutability
+> problem. **One distinction not to conflate**: this is the *behaviour* store. **Business metrics stay a
+> fold over `domain_events` in the `bam` schema**, because they are business data derived from business
+> facts. **Implication to carry**: the C4 needs a **new container** for the behaviour database and its
+> edges — and `specs/architecture/*.yaml` is **source DSL, not generated**, so that is an executor spec
+> change when the work lands, not a regeneration.
+> **COOP — approved as recommended**: all three cooperative properties are designed in **now**, in the
+> first slice — the customer reads their own trail, the **restaurant** is the beneficiary of the
+> aggregate, and the taxonomy refuses things checkably so it can be published
+> ([#377](https://github.com/TheCaptainCompany/captain-food/issues/377)). They belong in slice 1 for the
+> reason they were raised: each is a property of the **declaration mechanism**, so retrofitting them onto
+> an undeclared firehose is a project while on a declared taxonomy it is a rendering.
+> **MET-W — approved as recommended**: a **named catalog of approved retention windows**, sequenced
+> **with** the erasure work ([#194](https://github.com/TheCaptainCompany/captain-food/issues/194)) rather
+> than ahead of it.
+> **TRK-scope — still OPEN, and it is with LEGAL, not with the product owner.** Their idea: *"using a
+> generated identifier uncorrelated to the person… without the need to know the person is doing what
+> but a persona"*, plus a clarification that **changes an earlier legal finding** — the "help AI agents"
+> sentence was **internal**, explaining to the team why the data is wanted, **not** a user-facing
+> personalisation feature. Legal is working out whether a pseudonymous journey identifier fits the
+> **audience-measurement exemption** or whether per-journey continuity exceeds it. **The proposals are
+> deliberately NOT amended until legal reports.** The mechanical half is being thought about but not
+> committed: if the answer is *"lawful provided the join never happens"*, then **"never joined" has to
+> be structural rather than promised** — the separate database (MET-Q7) does most of it, plus no foreign
+> key, no shared column name the validator would accept, and an `identifierClass` that **cannot** be
+> `CUSTOMER` for an anonymous-funnel event. Note this pulls against D8 option A, so the two are
+> alternatives **per event kind**, not one answer.
+
 > ✅ **2026-08-11 — THE REVERSAL IS CONFIRMED, AND THE SPEC GETS STRONGLY TYPED**
 > ([ADR-20260811-014129](adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md),
 > [DECISIONS §27bis](proposals/DECISIONS.md); docs-only).
