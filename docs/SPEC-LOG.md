@@ -40,6 +40,7 @@ the product owner offered. A structural change with no option space (a file move
 
 | Date | What the product now promises differently | Tier | Change | `make validate` |
 |---|---|---|---|---|
+| 2026-08-11 | A customer who is signed in on a restaurant's storefront is now recognised there — the anonymous web path READS the credential the browser already sends, so their cart is theirs rather than a stranger's empty one; when that credential cannot be honoured (expired cookie, identity provider down, or a staff token, which stays anonymous on purpose) they are served the anonymous view rather than an error, and **we now count every one of those silent degrades** — so "identified customers are being served anonymous" can no longer look like "customers stopped having carts". | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/observability.yaml` read-authorization: `public_credential_degraded_total{reason}` | 0 errors |
 | — | *(nothing has landed under the lifted freeze yet; the first row belongs to whoever lands the next `specs/**` change)* | — | [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md) | — |
 
 ---

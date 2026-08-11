@@ -111,6 +111,12 @@ pub mod metric {
     pub const READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL: &str =
         "read_authorization_bridge_unresolved_total";
     pub const READ_AUTHORIZATION_CHECK_MS: &str = "read_authorization_check_ms";
+    /// `read-authorization` contract (#469): the OPEN path read a credential and could not act on
+    /// it, so the request was served ANONYMOUS — attribute `reason` (invalid_token |
+    /// verifier_unavailable | role_not_customer). `invalid_token` is ordinary (a stale cookie);
+    /// `verifier_unavailable` is identified customers silently getting the anonymous view — the
+    /// storefront's cart disappearing with nothing else logged.
+    pub const PUBLIC_CREDENTIAL_DEGRADED_TOTAL: &str = "public_credential_degraded_total";
     /// BAM gauge: projection lag on the ACL index — while it lags, a just-placed order's own
     /// customer is DENIED their order (`read-authorization` business_metrics).
     pub const SCOPE_MEMBERSHIP_LAG_POSITIONS: &str = "scope_membership_lag_positions";

@@ -8,6 +8,14 @@
 //! (absent ⇒ CUSTOMER), else `403`. Missing/invalid token on a non-public path ⇒ `401`; if JWKS is
 //! unreachable we **fail closed** (`503`) rather than allow.
 //!
+//! **Open is not credential-blind (#469).** `/public` also READS whatever credential the request
+//! carries, because the storefront IS the open path (`web::router` pins the customer surfaces to
+//! `Role::Public`): without that, an identified customer arrives as `ReadScope::Public` and
+//! `cart.current`'s claim leg is unreachable from a browser. It is the ONLY path that degrades
+//! instead of refusing — invalid, expired, absent-verifier and non-CUSTOMER credentials all serve
+//! the anonymous view with a `200` (see [`AuthContext::public_principal`]) — and it grants at most
+//! the CUSTOMER identity: a staff token there is anonymous, never elevated.
+//!
 //! Security notes: the verification algorithm is taken from the matched **JWK** (not the attacker-controlled
 //! header) and restricted to asymmetric families, closing the classic `alg`-confusion hole (an attacker
 //! can't downgrade to HS256 and sign with the public key).
@@ -32,6 +40,9 @@ use crate::graphql::acl::RequestRole;
 /// How long a fetched JWKS is trusted before a refresh (key rotation is also handled by a forced refetch
 /// when a token's `kid` is not in the cached set).
 const JWKS_TTL: Duration = Duration::from_secs(3600);
+/// Hard ceiling on ONE JWKS fetch (see [`jwks_client`]): the open path now verifies credentials, so
+/// an unbounded fetch would be an unbounded storefront request.
+const JWKS_FETCH_TIMEOUT: Duration = Duration::from_secs(3);
 /// Supabase issues user tokens with this audience.
 const SUPABASE_AUDIENCE: &str = "authenticated";
 
@@ -73,6 +84,31 @@ impl Principal {
             restaurant_id: None,
             restaurant_account_id: None,
             customer_id: None,
+            rider_id: None,
+        }
+    }
+
+    /// The identified CUSTOMER on the OPEN path (#469): a verified `captain_auth` cookie / bearer
+    /// presented to `/public/graphql`, which the storefront is pinned to (`web::router` serves the
+    /// customer surfaces as `Role::Public`). Before #469 the open path skipped credential reading
+    /// entirely, so `cart.current`'s claim leg could never fire from a browser.
+    ///
+    /// **Escalation is unspellable here, by construction, not by review**: this constructor takes
+    /// the CUSTOMER claim and nothing else, and hard-sets `restaurant_id` /
+    /// `restaurant_account_id` / `rider_id` to `None`. A token carrying `captain_restaurant_id`
+    /// cannot leak a `ReadScope::Restaurant` onto the one path everyone can reach, whatever the
+    /// caller sends — and a non-CUSTOMER `captain_role` never reaches this constructor at all (see
+    /// [`AuthContext::public_principal`], which degrades it to [`Principal::anonymous`]).
+    /// `role: Customer` is the PRINCIPAL's role, i.e. who the caller IS; the per-field ACL keeps
+    /// running against the PATH role (`RequestRole::Public`), which is injected separately, so this
+    /// widens no field's visibility — only the row scope of reads the open path already served.
+    pub(crate) fn public_customer(sub: String, customer_id: Option<uuid::Uuid>) -> Self {
+        Self {
+            user_id: Some(sub),
+            role: RequestRole::Customer,
+            restaurant_id: None,
+            restaurant_account_id: None,
+            customer_id,
             rider_id: None,
         }
     }
@@ -184,16 +220,17 @@ impl AuthContext {
             jwks_url,
             issuer,
             external_tokens,
-            http: reqwest::Client::new(),
+            http: jwks_client(),
             cache: RwLock::new(None),
         })
     }
 
-    /// Authorize a request for `path_role`. `/public` is always allowed (anonymous); every other path
-    /// requires a valid bearer token whose `captain_role` equals `path_role`.
+    /// Authorize a request for `path_role`. `/public` is always allowed and NEVER fails — it reads
+    /// whatever credential is present and degrades to anonymous ([`Self::public_principal`]); every
+    /// other path requires a valid bearer token whose `captain_role` equals `path_role`.
     pub async fn authorize(&self, path_role: RequestRole, headers: &HeaderMap) -> Result<Principal, AuthError> {
         if path_role == RequestRole::Public {
-            return Ok(Principal::anonymous());
+            return Ok(self.public_principal(headers).await);
         }
         // EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs) present a pre-shared service token via
         // the `X-External-Api-Key` header instead of a user JWT. If a key header is present it is
@@ -235,6 +272,52 @@ impl AuthContext {
         } else {
             Err(AuthError::Forbidden)
         }
+    }
+
+    /// The OPEN path's identity resolution (#469): attempt verification, **degrade to anonymous on
+    /// every failure**. Returns a `Principal`, never a `Result` — `/public` cannot 401, 403 or 503,
+    /// whatever arrives, because a stale cookie is the COMMON case and a JWKS outage must not take
+    /// anonymous browsing down with it. Friday 19:00 with zero orders from an auth dependency the
+    /// storefront never had is the failure this shape exists to prevent.
+    ///
+    /// Two degradations, both counted (`public_credential_degraded_total{reason}`) so the
+    /// degradation is visible rather than silent:
+    /// - **the credential does not verify** (absent-kid, expired, tampered, JWKS unreachable) —
+    ///   `invalid_token` / `verifier_unavailable`;
+    /// - **the credential verifies but is not a CUSTOMER** — `role_not_customer`. An ADMIN /
+    ///   RESTAURANT / RESTAURANT_ACCOUNT / RIDER token on the open path is anonymous, NOT elevated:
+    ///   "role = path" (ADR-0047) is the whole reason staff must present their token to their own
+    ///   path, and elevating here would turn a dead claim leg into privilege escalation on the one
+    ///   path anyone can reach. Staff lose nothing — their surfaces talk to `/restaurant`,
+    ///   `/rider`, `/admin`, which are unchanged.
+    ///
+    /// A request with NO credential at all short-circuits before any I/O: anonymous browsing costs
+    /// exactly what it cost before this change (no JWKS fetch, no verification).
+    async fn public_principal(&self, headers: &HeaderMap) -> Principal {
+        let Some(session_token) = token(headers) else {
+            return Principal::anonymous();
+        };
+        let claims = match self.verify(session_token).await {
+            Ok(claims) => claims,
+            Err(e) => {
+                telemetry::meters::read_authorization::public_credential_degraded(match e {
+                    AuthError::Unavailable => "verifier_unavailable",
+                    _ => "invalid_token",
+                });
+                return Principal::anonymous();
+            }
+        };
+        let granted = claims
+            .app_metadata
+            .captain_role
+            .as_deref()
+            .map(parse_role)
+            .unwrap_or(RequestRole::Customer);
+        if granted != RequestRole::Customer {
+            telemetry::meters::read_authorization::public_credential_degraded("role_not_customer");
+            return Principal::anonymous();
+        }
+        Principal::public_customer(claims.sub, claim_uuid(&claims.app_metadata.captain_customer_id))
     }
 
     /// Verify a JWT's signature (asymmetric, key + algorithm from the JWKS) and reserved claims.
@@ -313,6 +396,18 @@ impl AuthContext {
     fn external_key_valid(&self, presented: &str) -> bool {
         self.external_tokens.iter().any(|t| ct_eq(t.as_bytes(), presented.as_bytes()))
     }
+}
+
+/// The JWKS fetch client — **bounded**, deliberately (#469). Key refresh is a once-an-hour call on
+/// a request's critical path, and since the open path started verifying credentials that path is
+/// the STOREFRONT's. An unreachable-but-not-refusing JWKS host (a black-holed TCP connection) would
+/// otherwise hang every cookie-carrying public request for as long as the socket stays open; the
+/// timeout converts that into the honest `verifier_unavailable` degrade to anonymous, in seconds.
+fn jwks_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(JWKS_FETCH_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 /// Constant-time byte equality — no early return on the first differing byte, so a matching-prefix key
@@ -582,25 +677,173 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
     /// uuid from the claim — an implementation deriving identity from `sub` cannot pass), the
     /// domain identity is `app_metadata.captain_customer_id` (#433/#437).
     fn signed_customer_jwt(sub: &str, customer_id: uuid::Uuid) -> String {
+        signed_jwt(
+            sub,
+            serde_json::json!({
+                "captain_role": "CUSTOMER",
+                "captain_customer_id": customer_id.to_string(),
+            }),
+            3600,
+        )
+    }
+
+    /// A Supabase-shaped JWT with an arbitrary `app_metadata` and lifetime, signed by the test key.
+    /// `ttl_secs` is signed: a NEGATIVE value produces an EXPIRED token (the stale-cookie case,
+    /// which is the common one on the open path, not an exotic one).
+    fn signed_jwt(sub: &str, app_metadata: serde_json::Value, ttl_secs: i64) -> String {
         let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
         header.kid = Some("captain-test-es256".into());
-        let exp = std::time::SystemTime::now()
+        let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_secs()
-            + 3600;
+            .as_secs() as i64;
         let claims = serde_json::json!({
             "sub": sub,
             "aud": SUPABASE_AUDIENCE,
-            "exp": exp,
-            "app_metadata": {
-                "captain_role": "CUSTOMER",
-                "captain_customer_id": customer_id.to_string(),
-            },
+            "exp": now + ttl_secs,
+            "app_metadata": app_metadata,
         });
         let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
             .expect("test EC key parses");
         jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
+    /// The storefront's own request shape: a cookie-delivered credential, no Authorization header.
+    fn cookie_headers(jwt: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::COOKIE, format!("captain_auth={jwt}").parse().unwrap());
+        h
+    }
+
+    /// #469 half 1, the fix itself at the auth seam: the OPEN path READS the credential the
+    /// storefront actually sends (`web::router` pins the customer surfaces to `Role::Public`), so a
+    /// signed-in customer arrives as `ReadScope::Customer` and `cart.current`'s claim leg can fire.
+    /// Before this, `/public` returned `Principal::anonymous()` without reading any credential, and
+    /// leg 1 was unreachable from a browser.
+    #[tokio::test]
+    async fn the_open_path_reads_the_customer_credential_it_used_to_ignore() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA0).to_string();
+        let customer = uuid::Uuid::from_u128(0x469);
+
+        let principal = ctx
+            .authorize(RequestRole::Public, &cookie_headers(&signed_customer_jwt(&sub, customer)))
+            .await
+            .expect("the open path never fails");
+        assert_eq!(principal.customer_id, Some(customer), "the verified claim IS the identity");
+        assert_eq!(principal.user_id.as_deref(), Some(sub.as_str()), "sub stays the auth subject");
+        assert_eq!(
+            read_scope(&principal),
+            application::queries::ReadScope::Customer(domain::generated::scalars::CustomerId(
+                customer
+            )),
+            "leg 1 of cart.current is reachable from the storefront's own request shape"
+        );
+    }
+
+    /// #469 half 1, the escalation pin (mob: testing lens 4a + API lens 3, reached independently).
+    /// Once `/public` reads credentials, an ADMIN / RESTAURANT / RESTAURANT_ACCOUNT / RIDER token
+    /// presented there must degrade to ANONYMOUS — never yield `ReadScope::Admin`/`Restaurant`/
+    /// `Rider`, and never 401. Elevating here would convert a dead claim leg into privilege
+    /// escalation on the one path anyone can reach, and would silently widen every role-omitted
+    /// read (an omitted `roles` key is open to every role path — specs/common/api.yaml).
+    #[tokio::test]
+    async fn a_staff_token_on_the_open_path_stays_anonymous() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA1).to_string();
+        let tenant = uuid::Uuid::from_u128(0xBEEF);
+
+        for role in ["ADMIN", "RESTAURANT", "RESTAURANT_ACCOUNT", "RIDER", "EXTERNAL"] {
+            // The token carries EVERY tenant claim at once: if the open path copied claims
+            // wholesale instead of constructing a customer-only principal, this is what would leak.
+            let jwt = signed_jwt(
+                &sub,
+                serde_json::json!({
+                    "captain_role": role,
+                    "captain_restaurant_id": tenant.to_string(),
+                    "captain_restaurant_account_id": tenant.to_string(),
+                    "captain_rider_id": tenant.to_string(),
+                    "captain_customer_id": tenant.to_string(),
+                }),
+                3600,
+            );
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{role}: the open path must never refuse"));
+            assert_eq!(principal.role, RequestRole::Public, "{role}: not elevated");
+            assert_eq!(principal.user_id, None, "{role}: no identity on the open path");
+            assert_eq!(principal.restaurant_id, None, "{role}: no tenant claim survives");
+            assert_eq!(principal.restaurant_account_id, None, "{role}");
+            assert_eq!(principal.rider_id, None, "{role}");
+            assert_eq!(principal.customer_id, None, "{role}");
+            assert_eq!(
+                read_scope(&principal),
+                application::queries::ReadScope::Public,
+                "{role}: a staff token on /public reads exactly what an anonymous browser reads"
+            );
+        }
+    }
+
+    /// #469 half 1, the availability pin (mob: testing lens 4b + API lens 3). A stale cookie is the
+    /// COMMON case and a JWKS outage is a platform one; neither may take anonymous browsing down.
+    /// Expired, tampered, unsigned-by-us and unverifiable-because-no-JWKS all serve the anonymous
+    /// view — 200, never 401/503.
+    #[tokio::test]
+    async fn an_unverifiable_credential_on_the_open_path_degrades_never_refuses() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0xA2).to_string();
+        let customer = uuid::Uuid::from_u128(0x469);
+
+        // 1. EXPIRED — the stale cookie of a customer who left the tab open overnight.
+        let expired = signed_jwt(
+            &sub,
+            serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": customer.to_string() }),
+            -3600,
+        );
+        // 2. TAMPERED — a flipped payload byte, i.e. a forged claim.
+        let valid = signed_customer_jwt(&sub, customer);
+        let tampered = {
+            let mut parts: Vec<String> = valid.split('.').map(str::to_string).collect();
+            let p = &mut parts[1];
+            let last = p.pop().expect("payload non-empty");
+            p.push(if last == 'A' { 'B' } else { 'A' });
+            parts.join(".")
+        };
+        for (case, jwt) in [("expired", expired), ("tampered", tampered), ("garbage", "not.a.jwt".into())] {
+            let principal = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .unwrap_or_else(|_| panic!("{case}: /public must serve 200 anonymous, never 401"));
+            assert_eq!(principal.role, RequestRole::Public, "{case}");
+            assert_eq!(principal.customer_id, None, "{case}");
+        }
+
+        // 3. The VERIFIER ITSELF is unavailable (no JWKS configured, empty cache — a cold instance
+        //    during a Supabase outage): still anonymous, still 200. `/public` worked with no JWKS
+        //    at all before this change and must keep working.
+        let no_verifier = AuthContext {
+            jwks_url: None,
+            issuer: None,
+            external_tokens: Vec::new(),
+            http: jwks_client(),
+            cache: RwLock::new(None),
+        };
+        let principal = no_verifier
+            .authorize(RequestRole::Public, &cookie_headers(&valid))
+            .await
+            .expect("a JWKS outage must not take anonymous browsing down");
+        assert_eq!(principal.role, RequestRole::Public);
+        assert_eq!(principal.customer_id, None);
+
+        // 4. NO credential at all: anonymous without touching the verifier (the cost of anonymous
+        //    browsing is unchanged — `jwks_url: None` here means any fetch attempt would fail, and
+        //    the assertion above it would too).
+        let anonymous = no_verifier
+            .authorize(RequestRole::Public, &HeaderMap::new())
+            .await
+            .expect("no credential is the ordinary anonymous request");
+        assert_eq!(anonymous.role, RequestRole::Public);
     }
 
     /// The end-to-end link every pure test stops short of (#437): a REAL signature verified
