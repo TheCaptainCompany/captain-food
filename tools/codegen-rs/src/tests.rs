@@ -5753,6 +5753,136 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
     assert!(facade.contains("pub use domain_ordering::errors::*;"), "{}", facade);
 }
 
+/// THE MANIFEST HEADER MUST MATCH THE MEASURED DEPENDENCY GRAPH (#475). A bin manifest's scope
+/// assertion is a fact about the CRATE — Rust resolves no path to an undeclared crate — and the
+/// header used to state it as a fact about the DEPLOYABLE ("linking a domain crate is the ONLY way
+/// that scope's vocabulary exists in this deployable … unspellable rather than merely unrouted").
+/// That is false wherever the image reaches the `domain` facade behind the list, through
+/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written. A comment
+/// claiming an enforcement the build does not provide is worse than no comment: it stops the next
+/// reviewer looking (CLAUDE.md), which is exactly how the sentence survived four families' wiring.
+/// So the sentence is DERIVED, not trusted: resolved closure reaches `crates/domain` ⇒ the emitted
+/// header must carry the honest sentinel and must NOT carry the strong one; closure is domain-free
+/// ⇒ it carries the strong one. Both directions are load-bearing — when `bin_runtime` is
+/// decomposed and a family becomes genuinely isolated, this fails until its header is upgraded to
+/// say so, so the prose can never lag the graph in either direction.
+///
+/// IT COVERS THE WHOLE EMITTED TEXT, NOT THE HEADER (#475 review): the first cut checked the
+/// header sentinel only, and the retired claim survived verbatim in the manifest `description`
+/// fourteen lines below it, in the `src/main.rs` module doc and on the `LANES` const — 40 files
+/// where a green test sat beside a false sentence. So EVERY phrase this emitter has ever used to
+/// assert that a DEPLOYABLE is scope-isolated is FORBIDDEN, in both artifacts, wherever the closure
+/// reaches `crates/domain`. Note the asymmetry, which is deliberate and is NOT an iff: only the
+/// SENTINEL pair is bidirectional (domain-free ⇒ the header must carry `CLAIM_ISOLATED`); the other
+/// phrases are one-directional — banned where they would be false, never REQUIRED where they happen
+/// to be true. Dropping "holds no domain vocabulary" from the gateway deps note would leave this
+/// test green, and that is correct: which true things a domain-free bin chooses to say is an
+/// editorial call, while saying a false one is the defect. That cannot prove the absence of a
+/// NEWLY invented false sentence — no test can read
+/// prose — but it does make the retired wording unable to come back by copy-paste (which is
+/// exactly how it survived four families' wiring) and makes the surviving wording unable to
+/// outlive its truth.
+///
+/// Why a test and not the emitter deriving the sentence from the graph directly: the crates being
+/// emitted ARE the workspace members, so `cargo metadata` can only resolve a closure for bins that
+/// already exist on disk. Deriving at emit time would make a NEW bin's first generation depend on
+/// its own output. Measuring after the fact is the honest order.
+#[test]
+fn bin_manifest_scope_claim_matches_the_measured_closure() {
+    use guppy::graph::DependencyDirection;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let crates = emit_bin_crates(&model);
+    // No count assertion here, deliberately, and NOT a hard-coded floor either: a floor is a
+    // second, drifting copy of the topology count (the first one tolerated losing 8 bins while
+    // claiming to check "the full bin matrix"). Its replacement -- `crates.len() ==
+    // bin_topology(&model).len()` -- was worse: `emit_bin_crates` IS `bin_topology(model).iter()
+    // .map(..)` with no filter (`emit/bins.rs`), so the equality cannot go red without editing the
+    // emitter. An assertion that has never failed and structurally cannot reads as coverage while
+    // proving nothing. The completeness of the bin matrix is owned by
+    // `deploy_tree_is_complete_both_ways`; what this test owns is that every emitted bin's PROSE
+    // matches its measured closure -- which the loop below asserts per bin, so a bin that vanished
+    // from the topology is caught there, by the spec->deploy gate, not by counting our own map.
+    assert!(!crates.is_empty(), "real specs must emit at least one bin crate to measure");
+
+    // Every phrase the bin emitter has used to say "this DEPLOYABLE cannot reach that scope".
+    // A bin whose image links the `domain` facade may carry none of them, anywhere in its
+    // manifest or its `src/main.rs`; a domain-free bin may carry them all. Matched
+    // case-insensitively so `NO`/`no` variants cannot slip through.
+    const ISOLATION_PHRASES: &[&str] = &[
+        // The sentinel the header itself carries.
+        CLAIM_ISOLATED,
+        // Retired by #475: emitted for every actor bin's purpose line and LANES doc, where the
+        // linker enforces nothing — the LANES const routes, it does not restrict what is linked.
+        "the scoping is the linker",
+        // True of the 7 gateways only; was emitted for surfaces, adapters and cron workers too.
+        "holds no domain vocabulary",
+    ];
+
+    let mut cmd = guppy::MetadataCommand::new();
+    cmd.current_dir(&root);
+    let graph = cmd.build_graph().expect("workspace graph builds");
+    // Workspace-relative dirs of a bin's transitive workspace closure — the same measurement the
+    // determinator gate hashes, so "what the image links" has ONE definition in this repo.
+    let closure_dirs = |bin: &str| -> BTreeSet<String> {
+        let member = graph.workspace().member_by_name(bin).expect("bin is a workspace member");
+        let ws_root = graph.workspace().root();
+        graph
+            .query_forward(std::iter::once(member.id()))
+            .expect("closure query")
+            .resolve()
+            .packages(DependencyDirection::Forward)
+            .filter(|p| p.in_workspace())
+            .map(|p| {
+                p.manifest_path()
+                    .parent()
+                    .expect("manifest has a parent dir")
+                    .strip_prefix(ws_root)
+                    .expect("crate dir inside the workspace")
+                    .as_str()
+                    .replace('\\', "/")
+            })
+            .collect()
+    };
+
+    let mut isolated: Vec<&str> = Vec::new();
+    for c in &crates {
+        let dirs = closure_dirs(&c.name);
+        if dirs.contains("crates/domain") {
+            assert!(
+                c.manifest.contains(CLAIM_NOT_ISOLATED),
+                "{}: the image links the `domain` facade (every scope), so the header must say so \
+                 -- missing '{CLAIM_NOT_ISOLATED}'",
+                c.name
+            );
+            // The header AND everything else the bin ships: description, module doc, const docs.
+            for (artifact, text) in [("Cargo.toml", &c.manifest), ("src/main.rs", &c.main)] {
+                let lower = text.to_lowercase();
+                for phrase in ISOLATION_PHRASES {
+                    assert!(
+                        !lower.contains(&phrase.to_lowercase()),
+                        "{}/{artifact}: claims deployable scope isolation ('{phrase}') that its own \
+                         closure contradicts -- the image links crates/domain, so every scope's \
+                         vocabulary is in it. State what this bin ROUTES, not what it cannot name.",
+                        c.name
+                    );
+                }
+            }
+        } else {
+            assert!(
+                c.manifest.contains(CLAIM_ISOLATED),
+                "{}: closure is domain-free -- the header may and should say so, missing \
+                 '{CLAIM_ISOLATED}'",
+                c.name
+            );
+            isolated.push(&c.name);
+        }
+    }
+    // The strong branch must stay exercised: text no bin carries is text that rots unnoticed
+    // (today: the seven `gateway-*` bins, whose closure really is domain-free).
+    assert!(!isolated.is_empty(), "no bin exercises the isolated header branch");
+}
+
 // ─── The generated deployment (#349, ADR-20260807-183024 step 4) ────────────────────────────────
 
 /// Every deployable maps to exactly one image, one pin file, one manifest — and back

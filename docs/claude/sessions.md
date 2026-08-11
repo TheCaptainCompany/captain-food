@@ -926,6 +926,17 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   creating `captain-food/cad2-wt` — a worktree nested in its own repo, showing up as an untracked
   directory one `git add -A` away from being committed. Verify with `git worktree list` after adding,
   and remove with `git worktree remove --force` rather than `rm -rf`.
+- **Two sessions running `make test-crates` on ONE Postgres wipe each other**: the harness resets with
+  `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` (`crates/infrastructure/tests/main/common.rs`),
+  which is database-wide, not test-scoped. So when a neighbour's server is already up, do not reuse
+  its database — `createdb cf<NN>` and point your `DATABASE_URL` at that, then `dropdb` when the run
+  is done. The isolation is per-DATABASE; the schema-level reset gives you none.
+- **`pgrep -f "<anything from your own command>"` always matches YOUR shell**, because every Bash tool
+  call runs inside a wrapper whose full script text is its command line. An
+  `until ! pgrep -f "cargo test --workspace"; do sleep 30; done` written to wait for a neighbour's
+  build therefore never terminates — it is waiting on itself. Cost here: two 10-minute background
+  waits that outlived the build they watched. Match on the process name instead (`pgrep -x cargo`,
+  `ps -eo comm`), which cannot see the wrapper's arguments.
 
 ### `make rust` does not compile the application
 
@@ -1055,6 +1066,17 @@ identical content, different SHAs — needing a `--force-with-lease` to realign.
 unpushed-commit prompt is not a signal that the work is finished.** The coordinator pushes only
 after the executor reports the phase complete and the tree is clean; the executor says explicitly
 whether it intends to amend before handing back.
+
+### The claim-time draft PR needs an empty commit first — the REST API refuses a zero-commit branch
+
+ADR-20260720-233000 mandates the draft PR **before any code**, and `POST /repos/{o}/{r}/pulls`
+rejects exactly that: a branch pointing at the same sha as `main` gets
+`422 Unprocessable Entity — No commits between main and <branch>`. There is no flag for it. Push a
+`git commit --allow-empty -m "chore(NN): claim -- <title>"` first and open the PR against that.
+
+This container has **no `gh` on PATH**, so every session drives the API with `curl` and meets the
+hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
+names the branch, so it reads like a bad ref rather than a missing commit.
 
 ### One more shell trap in commit messages
 

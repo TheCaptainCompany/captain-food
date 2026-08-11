@@ -249,6 +249,46 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> 🧾 **2026-08-11 — PER-BIN SCOPE ISOLATION: THE MANIFESTS NOW SAY WHAT THE BUILD ENFORCES**
+> ([#475 "Per-bin scope isolation is nominal: every actor/pm/projector bin transitively links all 8 domain scopes…"](https://github.com/TheCaptainCompany/captain-food/issues/475), comment half). Measured on
+> the resolved dependency graph: **50 of the 57 bins link the `domain` facade** — hence all eight
+> scope crates — behind their own scope list, through `bin_runtime` (actor/pm/projector/worker/
+> adapter), `server` (the 8 `graphql-*` subgraphs) or `web` → `app-core` (the 5 `fo-*`/`bo-*`
+> surfaces, which really do hold no server/infrastructure). Only the **7 `gateway-*` bins** are
+> domain-free end to end. The emitted manifest header claimed the opposite for all 57 ("linking a
+> domain crate is the ONLY way that scope's vocabulary exists in this deployable … *unspellable*
+> rather than merely unrouted") — **this supersedes the "step-2's facade limit is now closed FOR THE
+> BINS" line in the [#382 "Bin crates: per-actor/per-PM/per-projector/per-subgraph/per-gateway/per-surface
+> binaries from the c4-l2 topology"](https://github.com/TheCaptainCompany/captain-food/issues/382) /
+> [PR #383 "Bin crates: per-deployable binaries emitted from the c4-l2 topology (ADR-20260807-183024
+> step 3)"](https://github.com/TheCaptainCompany/captain-food/pull/383) entry below**, which was true
+> of each bin's SOURCE and never of its
+> image. The header now separates the two: the crate's own source still cannot NAME an undeclared
+> scope (real, compiler-first), while what bounds the pod today is a runtime string — but only for
+> the families that HAVE one: `spawn_actor_fleet(LANES)` / `with_only(PM)` / `with_scope(SCOPE)` on
+> the 28 mailbox/projection bins (15 `actor-*`, 5 `pm-*`, 7 `projector-*`, `bam`), **nothing at all**
+> on the other 9 of the 37 that reach the facade through `bin_runtime` — the 5 `adapter-*` and 4 cron
+> `worker-*` bins (an adapter's
+> one real link fact is its partner slice; a cron bin is bounded by the single pass it calls per
+> Job). For the subgraphs, `bin_support::subgraph_app` registers EVERY actor mailbox and slices the
+> master schema by a scope string, so one can enqueue to any aggregate.
+> A codegen test (`bin_manifest_scope_claim_matches_the_measured_closure`) now derives the sentence
+> from the guppy closure in **both** directions, over the WHOLE emitted text of both artifacts —
+> header, manifest `description`, `src/main.rs` module doc and const docs — after the first cut
+> checked the header only and left the retired claim standing verbatim in 40 files, one of them
+> contradicting itself 14 lines apart. So the prose cannot lag the graph once `bin_runtime` is
+> decomposed. **The measurement also resized the program**: PROP-20260811-090000
+> and DECISIONS §29 said 45, counting the 5 surfaces as clean because their manifest's *true* note
+> ("no database, no server, no infrastructure") reads as isolation — so the debt ledger
+> ([#490 "Scope-closure ratchet: a bin's transitive domain set must equal its declared set…"](https://github.com/TheCaptainCompany/captain-food/issues/490)) starts at **49 rows**
+> (50 bins reach the facade; under #490's *equality* rule `bam` is honest — it declares all 8 and
+> its closure is those 8 — so it is fat by design, not lying), and
+> the proposal gains a **slice 5** for the surface family, whose path no other slice touches.
+> Structural half (decompose `bin_runtime`, per-scope `infrastructure`
+> [#423 "Design record for the per-scope infrastructure split…"](https://github.com/TheCaptainCompany/captain-food/issues/423), `crates/clients/*`) stays
+> open on #475. Validate 0 errors / 37 warnings — equal to the freshly measured `482fa76` baseline,
+> same six kinds.
+
 > 🧭 **2026-08-11 — BEHAVIOUR TRACKING IS ISOLATED END TO END, AND A FAULTED WORKER PRE-DIAGNOSES
 > ITSELF — BUT "SAY IT IN /health" WOULD TAKE THE STOREFRONT DOWN AS STATED**
 > ([ADR-20260811-120828](adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md),
@@ -1404,8 +1444,10 @@
 > the deployed runtime until [#349](https://github.com/TheCaptainCompany/captain-food/issues/349)
 > (manifests emitter) / [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) (MKS
 > cutover) flip deployment. Step-2's recorded facade limit is now closed FOR THE BINS (each links
-> only its scopes); the monolith consumers stay facade-coupled until they retire. Validate 0
-> errors / 43 warnings (kinds identical to baseline).
+> only its scopes) *(corrected 2026-08-11 — true of the SOURCE, never of the IMAGE: 50 of the 57
+> bins reach the `domain` facade behind their own scope list, so nothing about the deployables was
+> closed here; see the 2026-08-11 entry above)*; the monolith consumers stay facade-coupled until
+> they retire. Validate 0 errors / 43 warnings (kinds identical to baseline).
 >
 > ✅ **2026-08-07 — ADR-183024 REALIZATION STEP (2) MERGED — per-scope domain
 > crates + kernel ([#373](https://github.com/TheCaptainCompany/captain-food/issues/373) "Domain
