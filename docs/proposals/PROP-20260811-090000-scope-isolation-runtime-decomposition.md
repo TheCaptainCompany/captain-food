@@ -15,7 +15,7 @@ Every one of the 57 bin manifests carried a header asserting that *"linking a do
 ONLY way that scope's vocabulary exists in this deployable, so the wrong coupling is **unspellable**
 rather than merely unrouted"* (`tools/codegen-rs/src/emit/bins.rs`). For **50 of them** the opposite
 is true. The sentence itself is being corrected by the honesty fix dispatched off this proposal
-([#475](https://github.com/TheCaptainCompany/captain-food/issues/475)), which restates the header per
+([#475 "The bin manifest scope header states an enforcement the build does not provide"](https://github.com/TheCaptainCompany/captain-food/issues/475)), which restates the header per
 family and gates it against the measured closure — but that changes only what the comment *says*.
 The coupling below is untouched by it, and the declared dependency is not merely insufficient — it is
 **unused**:
@@ -97,7 +97,7 @@ reachable: they link neither `bin_runtime`, nor `server`, nor `surface_runtime`,
 honest today. They are also the only family of which that holds.
 
 **Not in scope of this finding**: the 17 `crates/clients/*` crates also depend on the `domain`
-facade. That is folded into [#475](https://github.com/TheCaptainCompany/captain-food/issues/475)
+facade. That is folded into [#475 "The bin manifest scope header states an enforcement the build does not provide"](https://github.com/TheCaptainCompany/captain-food/issues/475)
 already and its fix is the same shape; it is not the enforcement mechanism, because a client crate
 is not a deployable.
 
@@ -163,7 +163,7 @@ Final vision first: A is the final clean shape and is presented first.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **(A) Per-scope runtime decomposition — `projection_runtime` + `projections-{scope}`, then the actor and subgraph equivalents** ✅ **recommended** | The only option that satisfies the stated test: a cross-scope reach becomes a **manifest edit**, which is the loudest, most reviewable act an agent can perform (PROP-20260802-130500 §5 D3's own argument). Level 5 — compiler. Shrinks images and deploy blast radius at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. Directly unblocks a properly isolated behaviour projector ([#485](https://github.com/TheCaptainCompany/captain-food/issues/485)) | Largest work; spans several slices; `infrastructure` must grow real internal seams it does not have today |
+| **(A) Per-scope runtime decomposition — `projection_runtime` + `projections-{scope}`, then the actor and subgraph equivalents** ✅ **recommended** | The only option that satisfies the stated test: a cross-scope reach becomes a **manifest edit**, which is the loudest, most reviewable act an agent can perform (PROP-20260802-130500 §5 D3's own argument). Level 5 — compiler. Shrinks images and deploy blast radius at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. Directly unblocks a properly isolated behaviour projector ([#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485)) | Largest work; spans several slices; `infrastructure` must grow real internal seams it does not have today |
 | (B) `cargo-deny` capability allowlist (PROP-20260802-130500 D3) | Config-only | **Does not address this problem.** D3 is about *capabilities* (`sqlx`, `reqwest`), not scope closure, and its intent WAS built — as `capability_dependencies_are_allowlisted` (`tools/codegen-rs/src/tests.rs`, 21 allowlisted entries), with the substitution reasoned in its doc comment. `[bans].wrappers` constrains **direct** dependents only; it cannot express "this bin's *transitive* closure is these scopes". Adopting it here would be a second mechanism that leaves defect 1 exactly as it is |
 | **(C) Codegen test over the transitive graph** — assert each bin's closure ⊆ its declared scopes ∪ a platform allowlist | Fails the build on the 51st violation; cheap; **measures** every decomposition slice (rows deleted). Landable today with the 50 current violations enumerated | Level 4 — a check an agent can edit. Alone it either fails the build immediately (unlandable) or ships with a 50-row excuse list that becomes permanent |
 | (D) Do nothing; keep the manifest comment | Zero cost | The comment claims an enforcement the build does not provide — worse than no comment (CLAUDE.md). Separately dispatched as an XS honesty fix |
@@ -178,7 +178,7 @@ whole program. B is declined with reasons, not deferred.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **(a) Projectors (7 bins)** ✅ **recommended** | Smallest infrastructure surface of any family: no mailbox, no adapters, no GraphQL, no `application` handlers — a projector needs pool + event read + fold + checkpoint. The coupling is one hand-written `const REGISTRY` (`worker.rs:338`) filtered by string, so the cut is mechanical. **It is the family [#485](https://github.com/TheCaptainCompany/captain-food/issues/485)'s behaviour worker joins**, so the first consumer arrives already isolated. Independent of the other 43 fat bins | Delivers 7 of 50; the fat families remain |
+| **(a) Projectors (7 bins)** ✅ **recommended** | Smallest infrastructure surface of any family: no mailbox, no adapters, no GraphQL, no `application` handlers — a projector needs pool + event read + fold + checkpoint. The coupling is one hand-written `const REGISTRY` (`worker.rs:338`) filtered by string, so the cut is mechanical. **It is the family [#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485)'s behaviour worker joins**, so the first consumer arrives already isolated. Independent of the other 43 fat bins | Delivers 7 of 50; the fat families remain |
 | (b) Actor bins (15 + 5 PMs) | Highest domain value — one writer per aggregate is the consistency promise | Requires per-actor handler crates = [#307](https://github.com/TheCaptainCompany/captain-food/issues/307) phase 3 (D2a, decided 2026-08-02, **costing still owed**). A program, not a slice |
 | (c) GraphQL subgraph bins (8) | Worst blast radius today — each links the whole `server` (all 17 client crates, `web`, 4 adapters, every resolver) filtered by a scope string | Therefore the **last** cuttable, not the first: `server` is the composition root. Cutting it means decomposing resolvers, adapters and the web surface at once. Highest risk per unit of value |
 | (e) Surface bins (5 `fo-*`/`bo-*`) | Only family whose path avoids `bin_runtime` AND `server`, so it is separable from both; the closure comes from one edge, `app-core → domain` | Cutting it means deciding what an SSR renderer may hold — a view-model boundary the codebase has never drawn. Not smaller than (a), just differently shaped |
@@ -204,8 +204,14 @@ of (a)–(c) — it is sequenced last only because its cut asks a question nobod
 1. **Slice 0 — the ratchet (C).** Codegen test `bin_scope_closure_matches_declaration`: for each
    `crates/bins/*`, the transitive normal-dependency closure's `domain-*` set must equal the
    manifest's declared set, unless the bin is on an explicit `PENDING_DECOMPOSITION` list carrying
-   its family and the slice that will remove it. Lands green with **50 rows**. **No bin may join the
-   list.** Also delete the `use domain_x as _;` shims' justification note once a bin is honest.
+   its family and the slice that will remove it. Lands green with **49 rows** — and the two numbers
+   in play are both right, for different rules: **50 bins reach the `domain` facade** (the
+   measurement used everywhere else in this document and in the manifest header gate), but under
+   slice 0's **equality** rule `bam` is honest — it declares all 8 domain crates and its closure is
+   those same 8, so it is fat by design, not lying, and takes no row. 49 is what
+   [#490 "Ratchet: a bin's declared scopes must equal its measured closure"](https://github.com/TheCaptainCompany/captain-food/issues/490)
+   counts. **No bin may join the list.** Also delete the `use domain_x as _;` shims' justification
+   note once a bin is honest.
 2. **Slice 1 — projectors (D2a).** `projection_runtime` (scope-agnostic; `sqlx` + `domain-common`)
    + `projections-{scope}` × 7; `bin_runtime`'s `spawn_scope_projector` moves out; 7 rows deleted.
 3. **Slice 2 — workers.** `worker-erasure`, `worker-journal-sweep`, `worker-retention`,
@@ -221,12 +227,12 @@ of (a)–(c) — it is sequenced last only because its cut asks a question nobod
    not because the family is small — five bins is 10% of the ledger.
 
 Zero `PENDING_DECOMPOSITION` rows = the program is done and the manifest header becomes true.
-**Slices 1–4 reach 45 of the 50 rows; without slice 5 the ledger stops at 5 and never closes** —
-which is the practical cost of the count having been wrong.
+**Slices 1–4 reach 44 of the 49 rows (45 of the 50 facade-reaching bins); without slice 5 the ledger
+stops at 5 and never closes** — which is the practical cost of the count having been wrong.
 
 ---
 
-## 6. What this must deliver for the behaviour worker ([#485](https://github.com/TheCaptainCompany/captain-food/issues/485))
+## 6. What this must deliver for the behaviour worker ([#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485))
 
 The behaviour-tracking projector is the first *new* consumer, and under the directive it is blocked
 until the boundary is real. Concretely it needs, from slice 1 and nothing else:
