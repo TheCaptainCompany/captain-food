@@ -18,7 +18,8 @@
 //!   senders on one lane each observe their own send order in the committed deliveries, with no
 //!   kind-based precedence (COMMAND vs EVENT rows keep pure position order).
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,6 +29,8 @@ use actor_runtime::{
     MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+
+mod common;
 
 const ACTOR_TYPE: &str = "Conversation";
 
@@ -165,17 +168,7 @@ async fn probe_rows(pool: &PgPool) -> Vec<(uuid::Uuid, i16, i64)> {
 }
 
 fn gated() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP actor_runtime discipline test: DATABASE_URL not set");
-            None
-        }
-    }
+    common::database_url("actor_runtime_discipline_test")
 }
 
 /// Serialize the suite: every test resets the same tables.

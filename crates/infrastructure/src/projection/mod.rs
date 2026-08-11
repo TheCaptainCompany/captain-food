@@ -6,7 +6,7 @@
 
 pub mod worker;
 
-pub use worker::ProjectionWorker;
+pub use worker::{DbFaultPolicy, ProjectionWorker};
 
 /// Live health snapshot of the projection worker, exposed by the server's `/projector` endpoint.
 #[derive(Clone, Debug, serde::Serialize)]

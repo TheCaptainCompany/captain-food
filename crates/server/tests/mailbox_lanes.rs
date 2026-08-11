@@ -97,14 +97,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
 
 #[tokio::test]
 async fn mailbox_lanes_join_counts_and_admin_guard() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP mailbox_lanes: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("mailbox_lanes") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_mailbox_tables(&pool).await;
     seed(&pool).await;

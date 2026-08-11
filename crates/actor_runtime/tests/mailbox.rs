@@ -13,7 +13,8 @@
 //!    committed) is taken over and the row is delivered by the successor — takeover bumps
 //!    `ownership_version`, so the corpse's late commit is fenced out too.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::Arc;
 
@@ -22,6 +23,8 @@ use actor_runtime::{
     InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+
+mod common;
 
 /// A handler that records each delivery into `delivered_probe` THROUGH THE TRANSACTION — so a
 /// fenced-out delivery must leave no probe row behind (the atomicity witness).
@@ -130,17 +133,7 @@ async fn probe_rows(pool: &PgPool) -> Vec<(uuid::Uuid, i64)> {
 }
 
 fn gated() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) => Some(url),
-        Err(_) => {
-            assert!(
-                std::env::var("DB_TESTS_REQUIRED").is_err(),
-                "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-            );
-            eprintln!("SKIP actor_runtime mailbox test: DATABASE_URL not set");
-            None
-        }
-    }
+    common::database_url("actor_runtime_mailbox_test")
 }
 
 /// Serialize the suite: every test resets the same tables.

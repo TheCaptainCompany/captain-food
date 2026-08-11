@@ -13,9 +13,31 @@ work from the top**: `Urgent` → `High` → `Medium` → `Low`, row order withi
 top open item requires a stated reason (blocked, plan-mode approval pending, product-owner
 directive) — not preference.
 
-**Re-prioritisation is a product-owner decision, made in the project** (moving items between
-Priority buckets / reordering rows). Agents never re-prioritise on their own; if the *method*
-below changes, that change is recorded as an ADR amending/superseding ADR-20260720-213024.
+**Re-prioritisation is delegated to the team** (product-owner directive, 2026-08-10,
+[ADR-20260810-215503](adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md):
+*"Don't care about the project field anymore the team decides without me"*). The **`Priority`
+bucket and the row order within a bucket are the team's to set**, in the project, alongside the
+`Type`/`Value Size`/`Impact`/`Effort` fields it already sets at triage. The product owner may
+re-bucket or reorder anything at any time, without justification, and the team adopts it
+immediately — the delegation is revocable per item and in general.
+
+**What is NOT delegated**: genuine option spaces ([proposals/DECISIONS.md](proposals/DECISIONS.md));
+external, legal and admin-gated matters; `specs/**` approval — **a `Priority` is not an approval,
+and ranking an AMBER item `Urgent` does not make it dispatchable**; and **the method below**, which
+is now **binding rather than descriptive** — it used to describe how the product owner ranked, and
+it is now the constraint under which the team ranks. If the *method* changes, that change is
+recorded as an ADR amending/superseding ADR-20260720-213024.
+
+**Ranking and dispatching must not be the same act.** The architect agent both ranks the backlog and
+names the next chunk, so: **an agent must never change a Priority bucket or a row position in order
+to make an item dispatchable, or to make its own recommendation legitimate.** If the top item is
+blocked, the answer is "blocked" — never a re-rank. A re-rank is justified by the value method or by
+a dependency that was wrong; never by what the ranker wants to work on next. Because the rationale no
+longer lives in the product owner's head, it has to be written down or it does not exist: every
+bucket change or material row move is stated in the architect's run report with the method clause
+that justifies it, and a re-ranking that reverses a previously stated order also gets a line in
+[STATUS.md](STATUS.md). Any mob lens may contest a ranking at briefing time exactly as it contests a
+design.
 
 ## How value is defined (the ordering method)
 

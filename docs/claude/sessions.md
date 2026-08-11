@@ -102,17 +102,19 @@ export DB_TESTS_REQUIRED=1                              # ALWAYS set this -- see
 cargo test -p infrastructure -- --test-threads=1        # --test-threads=1: they share ONE database
 ```
 
-**Set `DB_TESTS_REQUIRED=1` every time, and make it the habit rather than `DATABASE_URL` alone.**
-The gated tests assert on it (#230): with it set and `DATABASE_URL` missing, a suite that would have
-skipped FAILS instead of printing `ok`. Without it the skip is silent, and a full-suite total looks
-identical whether the DB tests ran or not — which is exactly how this rule gets re-learned. On
-2026-08-05 a session read this section's warning, ran `cargo test --workspace` with neither variable,
-saw **857 passed / 0 failed**, and pushed; CI then failed on a hand-written test schema still
-declaring `slug TEXT NOT NULL` for a column the change had made nullable. The same command with both
-variables set reproduced it locally in seconds. The number is not the evidence — the variables are.
+**Since #474 you no longer have to remember this** — `DB_TESTS_REQUIRED` defaults to REQUIRED, so a
+missing `DATABASE_URL` fails the suite instead of skipping it, and `DB_TESTS_REQUIRED=1` is now
+redundant (harmless, still honoured). The line above keeps it only because muscle memory is cheap.
+
+Why the polarity had to flip: a full-suite total looks **identical** whether the DB tests ran or
+not. On 2026-08-05 a session read this section's warning, ran `cargo test --workspace` with neither
+variable, saw **857 passed / 0 failed**, and pushed; CI then failed on a hand-written test schema
+still declaring `slug TEXT NOT NULL` for a column the change had made nullable. The same command
+with both variables set reproduced it locally in seconds. **The number is never the evidence.**
 
 Cost that earned it: a CI-only failure on a build-profile PR that could not possibly change
-behaviour, and an hour of diagnosis that a local DB run would have front-loaded.
+behaviour, an hour of diagnosis, and — on #451 — a bricked Cart projection that survived three green
+local gate rounds.
 
 **Proposal-hygiene wants every tracking-issue link in the FIRST 40 LINES (2026-08-08):** the
 validator scans only the header window (`tools/codegen-rs/src/validate/proposals.rs:117`), so a
@@ -211,6 +213,15 @@ mid-run. Recovery that worked:
 rm -rf target/debug/incremental target/debug/build target/debug/deps   # freed 26G
 ```
 
+**Budget for this EVERY session now (2026-08-10, #474):** `make test-crates` runs from the Stop hook
+on any `crates/`/`migrations/` diff, so the workspace test binaries get built on ordinary turns, not
+just when someone chooses to. The allowance is a routine constraint rather than an occasional one.
+In the #474 session `target/` reached 28G with 478M free and the harness itself died mid-run
+(`the temp filesystem … is full`), losing a completed 4-minute workspace run's output; `rm -rf
+target/debug/incremental` alone freed **16G** (28G → 13G) and left the build warm. Clear it BEFORE a
+planned workspace run, not after one fails. Note `target/release` does not exist in every container
+— check before reaching for the lever below.
+
 **But count the cost before doing it:** deleting the debug cache means every later `make rust` is a
 cold build. In the session where this happened it bought two full rebuilds. Delete only when writes
 are actually failing, and prefer dropping `incremental`/`deps` over the whole `target/`.
@@ -240,6 +251,15 @@ the five freshly generated `crates/bins/adapter-*` crates (a diff of 4 775 delet
 exactly like an emitter bug); the immediate rerun rebuilt and passed with zero drift. Cost: ~30
 min of debugging a phantom. If check-drift fails with an implausible mass-deletion right after a
 `target/debug` cleanup, rerun it before touching the emitter.
+
+**A NEW workspace crate fails the determinator gate until it is COMMITTED (2026-08-10):**
+`closure::tests::hashes_are_total_and_deterministic` panics with `closure dir 'crates/<new>' has no
+tracked files in HEAD` — it hashes from `HEAD`, not the working tree. It reads exactly like a broken
+determinator in code you never touched; `git add` is the whole fix. Cost: one confused re-read of an
+unrelated gate. Same shape as the `configuration.yaml` env gate, which fires on a new
+`std::env::var` read anywhere under `crates/` — including a **dev-only test-harness crate**, where
+the right answer is the `exempt` list in `tools/codegen-rs/src/tests.rs` (with the reason), NOT a
+spec key: a test knob does not belong in the boot report and every derived deployment manifest.
 
 **Don't flip `CARGO_INCREMENTAL` mid-session (2026-08-01):** toggling it changes the crate
 metadata hashes, so the next build writes a SECOND full set of workspace artifacts next to the
@@ -937,16 +957,35 @@ two rounds of local gates had called green. Derive the list instead of recalling
 git diff origin/main...HEAD --name-only -- crates/ | cut -d/ -f2 | sort -u
 ```
 
-**A green `make rust` proves nothing about anything touching `migrations/**` or a `View_*`.** Every
-DB-gated suite SKIPS without `DATABASE_URL`, counting as passed, and `rust-test` (Makefile:70) does
-not set one. **Run those suites with `DATABASE_URL` set and `DB_TESTS_REQUIRED=1`** — the loud-skip
-flag already exists (#230, documented in the headers of
-`crates/infrastructure/tests/main/mailbox_activations.rs`, `mailbox_retention.rs` and
-`standalone_workers.rs`); it turns a silent skip into a panic. Without it, `cargo test -p
-infrastructure` reports a clean pass having executed none of the migration chain. On #451 that
-silence hid a migration that bricked the Cart projection through three local gate rounds; CI's
-Postgres job found it. A local Postgres is cheap — `initdb -A trust` + `pg_ctl start` in a writable
-dir, then point `DATABASE_URL` at it.
+**A green `make rust` proves nothing about `crates/**` — it never ran a line of it.** `rust-test`
+(Makefile:70) is `cargo test --manifest-path tools/codegen-rs/Cargo.toml`: the codegen crate ALONE.
+Since #474 the workspace suite is `make test-crates`, and `.claude/hooks/stop-gate.sh` invokes it
+whenever the turn's diff touches `migrations/ | crates/ | the emitters | Cargo.{toml,lock}` — so it
+is no longer something to remember, and the two gates still cover disjoint failures.
+
+**A database is now REQUIRED, not optional.** The #230 polarity is inverted: with no `DATABASE_URL`
+a DB-gated suite PANICS with the command to run it, and the only way out is an explicit
+`DB_TESTS_REQUIRED=0`, which prints a summary naming every skipped suite. So there is nothing to
+set in the happy path — just export `DATABASE_URL` (the ~40s `initdb` recipe is §above).
+
+**Derive that count, never quote it** — it moves with every DB-gated test added, and it was already
+wrong twice in one branch (prose said 42 while the run printed 45; the run printed 45 while 50 suites
+had really skipped, because `actor_runtime`'s local copy of the gate was not writing the receipt):
+
+```sh
+cut -f1 target/db-test-skips.log | sort -u | wc -l   # how many skipped, after a DB_TESTS_REQUIRED=0 run
+cut -f1 target/db-test-skips.log | sort -u           # ...and which
+awk '/^test result:/{p+=$4; f+=$6} END{print p, f}' <log>   # the pass/fail totals, same reason
+```
+
+**Why that needed a receipt file rather than a louder `eprintln!`: libtest captures a passing test's
+stderr as well as its stdout.** The per-suite `SKIP` lines this repo relied on since #230 were not
+merely quiet, they were **unobservable** — `grep -c SKIP` over the full 990-passed baseline log
+returns **0**. Anything a passing test prints is invisible without `--nocapture`, so no improvement
+to the message could ever have worked; `make test-crates` reads `target/db-test-skips.log`, which
+the gate appends to, and prints the summary itself. Worth knowing before designing any other
+"the test warned you" mechanism in this repo. On #451 that silence hid a migration that bricked the
+Cart projection through three local gate rounds; CI's Postgres job found it.
 
 **The reverse trap: `cargo check` is equally partial.** A STALE generated file compiles perfectly —
 `57b7330` built clean with `crates/server/src/graphql/generated/query.rs` still holding an

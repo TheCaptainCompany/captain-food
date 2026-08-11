@@ -12,7 +12,8 @@
 //! requeued and redelivered it terminates REJECTED with `MailboxMessageNotFound` — a handler
 //! verdict, first attempt, no external tables needed — proving the full circle on one lane.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::Arc;
 

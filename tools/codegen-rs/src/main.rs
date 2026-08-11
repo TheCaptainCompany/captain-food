@@ -73,6 +73,15 @@ fn main() {
     // (derived from `--specs`) because proposals are markdown, not part of the YAML model.
     let proposals = load_proposal_files(&repo_root(&specs));
     issues.extend(validate_proposal_hygiene(&proposals));
+    // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
+    // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
+    // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads
+    // repo text rather than the YAML model, joins the same issue list and the same gate.
+    let root = repo_root(&specs);
+    issues.extend(validate_writer_schema_agreement(
+        &load_migration_files(&root),
+        &load_writer_files(&root),
+    ));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
