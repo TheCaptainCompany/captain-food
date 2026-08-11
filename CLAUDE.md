@@ -172,9 +172,26 @@ trust the numbers above if they look off.
 
 ### Non-negotiable rules
 
-- DSL source files (`specs/**`) are **never** modified by autonomous/execution loops — only plan mode
-  proposes DSL changes, with approval. C4 (`specs/architecture/*.yaml`) and observability contracts
-  (`specs/observability.yaml`) are **source** DSL, not generated.
+- **`specs/**` is the team's work** (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-221840](docs/adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)):
+  *"I'm surprise that I read that the spec was untouchable now that we have the team working together
+  we don't need to have this constraint anymore … I'm pretty sure the team will ensure the right
+  naming and scope. Just keep me informed."* The freeze is **lifted, not narrowed** — execution loops
+  may add and amend DSL content **and structure** under the ordinary gates. The boundary is **not**
+  content-vs-structure (a file move between scopes rewrites no refs and is free; a one-word type
+  change on an emitted event is irreversible). Three questions, in order: **(1) does it contradict or
+  create a recorded decision?** (`docs/proposals/DECISIONS.md`, `docs/adr/`) — if yes it is a decision
+  reversal, not a spec edit: stop and file a register row, whatever the diff size. **(2) Is the shape
+  already emitted, stored or promised?** (`domain_events`, a shipped client, an alert route, a partner
+  contract, a legal artifact) — if yes it is a **migration**, and the versioning story is recorded
+  before it lands: stored events are immutable, upcasting never mutation. **(3) Otherwise it is the
+  team's** — including `specs/common/`, which is a high-fan-out shared kernel, not a no-go zone;
+  freezing it would freeze the one place "one name = one dedicated scalar" is enforced. Structure gets
+  no separate gate: proportionality already routes any real option space to a proposal + register row,
+  which *is* the discussion offered. **Reporting is the obligation that replaces the freeze**: every
+  landed spec change writes one sentence in [docs/SPEC-LOG.md](docs/SPEC-LOG.md) — what the product now
+  promises differently — in the **same commit**. C4 (`specs/architecture/*.yaml`) and observability
+  contracts (`specs/observability.yaml`) are **source** DSL, not generated.
 - **Proposals are committed to the repo** (ADR-20260724-135945, product-owner directive): every
   proposal presented for approval lands in [docs/proposals/](docs/proposals/) as
   `PROP-YYYYMMDD-HHMMSS-<slug>.md` — the proposal as presented, alternatives considered, the
@@ -253,9 +270,67 @@ trust the numbers above if they look off.
   shown to the product owner — chunk, phases, checkpoints, gates, out-of-scope fences,
   anticipated decision points — as transparency, never as a permission request
   ([ADR-20260810-114242](docs/adr/ADR-20260810-114242-loop-start-action-plan.md)).
+- **No polling, only pushing — polling is a graceful fallback until pushing works again**
+  (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-231300](docs/adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)):
+  *"no polling only pushing, polling as graceful fallback until pushing works again."* Push is the
+  primary transport for every state change one component must learn from another. **The second clause
+  is the usable half**: a poll is legitimate ONLY as a fallback that is (a) a **declared** degraded
+  mode, (b) **observably** degraded — an operator can tell from telemetry that it is polling rather
+  than pushing, under a `specs/observability.yaml` contract
+  (`mailbox_push_down_total{reason}` is the reference shape) — and (c) has a **path back that
+  something actively detects**. A poll with none of those is just a poll with an excuse, and a
+  *silent* fallback is worse than the poll it replaced: it turns a loud outage into a permanent
+  invisible latency tax. **"Pushing works again" is never detected by the absence of an error** — a
+  `LISTEN` through a transaction-mode pooler is accepted and then delivers nothing, so `recv()` never
+  fails and a connection-error-driven flag stays `true` forever. Detection must be a **positive
+  liveness proof on the push path itself**: `mailbox_wake.rs`'s 30 s self-`pg_notify` canary with a
+  required echo is the reference implementation. **Scope**: this governs state-change *propagation*,
+  not *time-triggered* work — nobody can `NOTIFY` "a deadline passed", so reminder promotion, TTL
+  expiry and retention sweeps are outside it (there, the discipline is *sleep until the next due row*,
+  not *scan on a fixed interval*). The tiebreaker at the boundary: **does any component know this fact
+  before the clock does?** If yes, it is propagation and must be pushed. Applies to the team's own
+  loop too — agent completions arrive as push, so **do not reintroduce a polling status cron**.
+  **Second carve-out — MONITORING keeps a poll, permanently** (product-owner refinement, same ADR):
+  *"Monitoring could be excluded from this principle if we cannot design it pushable. In any case for
+  monitoring will have a polling as fallback."* Still try to make it pushable; it may poll where push
+  cannot be designed; and it **keeps a poll in every case, even where push works** — this clause is
+  *stronger* than the general principle and has **no exit**, inverting condition (c). The reason is not
+  frequency, it is that **for a monitor, silence is ambiguous**: a push-only monitor cannot tell
+  "healthy, nothing to report" from "dead, reporting nothing". Every other push consumer resolves that
+  with a durable backstop to reconcile against (`domain_events` + `projection_checkpoint`,
+  `inbound_messages` + status); a monitor watching a black box has none, because the thing it watches
+  is the thing that would tell it. **Narrow test**: the observer is outside what it observes and has no
+  durable record to reconcile against — it does NOT license polling in a monitor that could subscribe
+  and reconcile. `mailbox_wake.rs`'s canary is this clause already implemented (a push mechanism driven
+  on a timer); `tools/smoke/prod-smoke.sh`'s `wait_for` is correct under it. **New defect class**: a
+  monitoring path that can only fire when a signal ARRIVES — a threshold alert goes quiet when export
+  stops, which is exactly when it should scream. Liveness needs a dead-man's-switch, not a threshold.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
+- **Business metrics for every feature and every persona** (product-owner directive, 2026-08-10,
+  verbatim in [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)):
+  *"Follow Jeff Patton … we must have business metrics for all features for each persona … must be
+  developed with the test and the code."* The unit is the **persona ACTIVITY** in `specs/stories.yaml`
+  (8 personas, 25 activities), not the story step — a step is an operation call, an activity is an
+  outcome. A metric is not done until it is **declared, emitted and asserted by a test**, and it
+  declares the **question** it answers; attributes are bounded sets, never entity ids (ids belong on
+  spans). **Declaration is enforced like ADR-0032 and emission is not** — `make validate` cannot see a
+  call site, which is why 26 of the 29 `business_metrics` declared today have zero occurrences
+  anywhere in `crates/`. So: validator for coverage, **generated instruments** for names and attribute
+  types (compiler-first — never a source-text scanner), and an `InMemoryMetricExporter` behaviour test
+  for "it actually fires, once, and not on a replay"
+  (`crates/infrastructure/tests/orders_placed_metric.rs`). Mechanism and the open decisions:
+  [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md).
+  ⚠️ **The MECHANISM half of this bullet is under an open reversal** ([DECISIONS §27 row MET-R](docs/proposals/DECISIONS.md)):
+  the product owner's own design is **metrics as PROJECTIONS** — a declared `fold:` over
+  `domain_events` maintained by the `bam` projector the C4 already declares, read through a
+  tenant-scoped GraphQL query — which contradicts *"generated instruments"* and *"never entity ids"*
+  above. The PRINCIPLE (unit = persona activity, declared + emitted + asserted, states its question)
+  is unaffected. Until the reversal is decided, read the proposal's D4/D6/D8 as the current design and
+  this bullet's mechanism as the superseded one; do not implement either half without the register row
+  being closed.
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - **Completeness is part of every change (ADR-0032):** a new command/event/error also needs a behaviour

@@ -233,7 +233,9 @@ See `docs/adr/README.md` for the full index. ADRs recording decisions already re
 
 ## Non-negotiable rules summary
 
-- DSL source files (`specs/**`) are never modified by autonomous execution loops.
+- `specs/**` is the team's work (freeze lifted 2026-08-10, ADR-20260810-221840): edits land under the
+  ordinary gates, but stop for a recorded decision, and treat an already-emitted shape as a migration.
+  Every landed spec change writes its one-sentence row in `docs/SPEC-LOG.md`, same commit.
 - Business code remains independent from telemetry SDK calls.
 - Every critical workflow must have an observability contract.
 - Runtime success requires both technical and business-level observability.

@@ -2,6 +2,161 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔓 **2026-08-10 (night) — THE `specs/**` FREEZE IS LIFTED: THE DSL IS THE TEAM'S WORK**
+> ([ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md),
+> product-owner directive: *"I'm surprise that I read that the spec was untouchable now that we have
+> the team working together we don't need to have this constraint anymore… I'm pretty sure the team
+> will ensure the right naming and scope. Just keep me informed."*). The last of four delegations in
+> three days, and the one that reaches the work: prioritisation (ADR-20260810-215503), self-starting
+> sessions (ADR-20260810-011500) and product ownership (ADR-20260808-144738) each delegated
+> *judgement*; this delegates *capability*.
+>
+> **The boundary is NOT content-vs-structure** — that split is anti-correlated with risk in both
+> directions (a scope-folder move rewrites no refs and is free, because `$ref`s are kind-logical; a
+> one-word type change on an emitted event is irreversible). It is **three questions in order**:
+> (1) does it contradict or create a **recorded decision**? → stop, file a `DECISIONS.md` row;
+> (2) is the shape already **emitted, stored or promised**? → it is a **migration**, record the
+> versioning story first (upcasting, never mutation); (3) otherwise it is the team's, **including
+> structure and including `specs/common/`** (a high-fan-out shared kernel, not a no-go zone — freezing
+> it would freeze the one place "one name = one dedicated scalar" is enforced). Structure gets **no
+> separate gate**: proportionality already routes any real option space to a proposal + register row,
+> which *is* the discussion the product owner offered.
+>
+> **Reporting replaces the freeze**: [docs/SPEC-LOG.md](SPEC-LOG.md) is created and usable now — one
+> sentence per landed spec change, in product language, in the **same commit**. No cadence, no digest
+> to send; it is a pull surface kept current by a gate. The gate's shape is `DECISIONS.md` **§26
+> SPEC-1** (recommendation (d), ~30 seconds to answer); until it lands the page is prose.
+>
+> **Queue effect, measured**: 8 open issues carried an explicit AMBER flag and 4 more routed a
+> sub-task to plan mode — [#468](https://github.com/TheCaptainCompany/captain-food/issues/468),
+> [#476](https://github.com/TheCaptainCompany/captain-food/issues/476),
+> [#466](https://github.com/TheCaptainCompany/captain-food/issues/466) and the already-approved
+> 451-B `currency_mismatch` line are now **GREEN and dispatchable**. The "one plan-mode window for
+> #468 + #476" recommendation **dissolves** — the window was the only thing binding them, and #476
+> touches a key with **0 occurrences** in `specs/screens/**` and `specs/*/api.yaml`. #466 and #468
+> still sequence together (same validator area; a rule and the spec fix that keeps it green must land
+> in one change), #476 is independent.
+>
+> ⚠️ **Newly load-bearing and absent**: `event_version` has **zero occurrences** across `specs/`,
+> `crates/`, `migrations/` and `tools/`, while PROP-170000 D2 decided *"add `event_version` now
+> (cheaper before the log grows)"* on 2026-08-08. The freeze was silently standing in for it — a
+> payload nobody could change needed no versioning story. This is the structural work the delegation
+> calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
+
+> ♻️ **2026-08-11 — A BUSINESS METRIC IS A PROJECTION, NOT A COUNTER — THE TEAM CHANGED ITS OWN
+> RECOMMENDATION, AND FILED THE REVERSAL RATHER THAN EXECUTING IT**
+> ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
+> [PROP-20260810-234225](proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) D4/D6/D8/D9,
+> [DECISIONS §27bis MET-R](proposals/DECISIONS.md); docs-only).
+> The product owner held their own design back until the proposal existed, so the two would be
+> independent: *"for the metrics I have in mind the approach of the projection… we will have to create
+> a query in the graphql to allow access to these metrics."* **The team evaluated it and moved.** Not
+> out of deference — the generated-instrument design recommended one day earlier loses on four
+> measured points. **(1) It forfeits replay by construction**: `crates/infrastructure/tests/orders_placed_metric.rs:129`
+> asserts the counter does **not** fire on a rebuild, so a metric added later would carry **zero
+> history**, where a fold replays the whole log. The team's own audit standard — *"a `View_*` whose
+> restore path is not replay is a finding"* — rejects the design the team wrote. **(2) Ratios and
+> distinct-identity denominators are structurally inexpressible** as monotonic counters, so the
+> counter design needs an escape hatch for the most interesting questions; under a fold they are
+> ordinary and the plain counter becomes a one-line `value:`. **(3) It had diverged from the C4**,
+> which already declares `bam` as a **projector** with a schema in read-models
+> (`c4-l2.yaml:343,370,484`) — a schema with **zero tables** (`grep bam specs/database/` = 0).
+> **(4) Erasure**: identity-bearing metrics are personal data either way, and in our Postgres they are
+> inside the deletion engine's path instead of a vendor store with no per-subject deletion API.
+> **The mechanical question is answered** (D8): a `projections:` block declaring `key` / `measures` /
+> `fold` (`increment`/`decrement`/`add`/`subtract`/`set`/`max`/`min` per event), and a `metrics:` block
+> declaring `over` / `groupBy` / `value` / `exposedAs` — every field reference a `$ref` into the
+> **specific event**, so the validator proves the field exists there. **The rule that earns the whole
+> shape fails on `main` today**: `serviceType` is on `OrderPlaced` and on **no other Order event**
+> (`OrderExpired` carries `orderId` alone), so a projection keyed by it **cannot be decremented by a
+> cancellation** — a counter design cannot even see that, and ships two numbers that quietly disagree.
+> ⚠️ **Two clauses of [ADR-20260810-234225](adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
+> are contradicted** (*"never entity ids"* — relaxed to *bounded declared population*, which is what
+> makes `groupBy: [restaurantId]` and the restaurant-facing panel possible; and *"generated
+> instruments"*). The ADR is `Accepted`, so this is a **decision reversal**: filed as MET-R, **not
+> executed**, and the ADR will be **superseded, never rewritten**. Its principle is untouched.
+> **Q7 (a hosted analytics SDK) is now recommended for CLOSURE as "no"** — the projection design kills
+> its order-side motivation and the behaviour store kills its browse-side one.
+
+> 🔍 **2026-08-11 — BEHAVIOUR EVENT TRACKING GETS A DECLARATION SITE — AND THE ARTICLE 9 EXPOSURE
+> IS ALREADY IN THE SPEC, NOT IN THE FUTURE**
+> ([#485 "Behaviour event tracking has no declaration site…"](https://github.com/TheCaptainCompany/captain-food/issues/485),
+> [PROP-20260811-000946](proposals/PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md);
+> docs-only, no code and no spec moved).
+> Product-owner directive: *"We need to integrate the metrics in the spec. And integrate the behaviour
+> event tracking inside the screens spec."* The first clause **endorses the §27 metrics work below**
+> and changes none of it; this is the second.
+> **The finding that shapes it is not the absence of tracking — that is expected. It is that
+> special-category-adjacent data is ALREADY declared and ALREADY stored**:
+> `SetCustomerPreferences.dietaryTags` is `array<Tag>`, `Tag` is a free-form `string` with
+> `maxLength: 80` and **no enum**, persisted to `View_Customer.preferences` jsonb
+> (`specs/customer/commands.yaml:179-182`, `specs/common/scalars.yaml:145-148`,
+> `specs/database/tables/projection_tables.yaml:337`). **`halal` and `kosher` are spellable values
+> today.** No screen binds it, so nothing is running — but no review caught it, because no artifact
+> existed that would make anyone look.
+> **Why the screens spec is the right location, and it is not aesthetic**: `specs/screens/**` is the
+> **only** artifact in the repo that knows a `filter_bar` is an allergen filter — the api layer sees
+> an argument, the store sees a string, an analytics SDK sees a payload. So it is the only place the
+> rule *"this control may never be tracked"* can be written. **The window is open now and closes
+> soon**: `allergen` has **zero occurrences in `specs/catalog/*.yaml`** while the model is
+> decided-and-unbuilt ([#184](https://github.com/TheCaptainCompany/captain-food/issues/184),
+> ADR-20260808-171056), so the refusal can be built **before** the control exists.
+> **Shape**: a root `specs/behaviour_events.yaml` (legal fields — `purpose`, `lawfulBasis`,
+> `retention`, `identifierClass`, `specialCategoryRisk`, `dpia` — required, no defaults) bound by a
+> `tracking:` `$ref` on screen/action nodes; `kind:` is `VIEW | INTERACTION` and **`IMPRESSION` and
+> session replay are absent from the grammar, not discouraged in a comment**; records go to their
+> **own time-partitioned store**, never `domain_events` (a behaviour event is not a decided fact, so
+> the left-fold invariant would stop holding) and never the order path's instance
+> ([#443](https://github.com/TheCaptainCompany/captain-food/issues/443)); ten ERROR rules, of which
+> **R10 makes the emitter produce nothing while no DPIA exists** — the build gate that turns
+> "sequenced behind [#194](https://github.com/TheCaptainCompany/captain-food/issues/194)" from a
+> promise into a failure.
+> **First slice is the mechanism with ZERO live events**: instrumentation before a DPIA is processing
+> that should not have started. Register: [DECISIONS §28](proposals/DECISIONS.md) — D1–D7 team-owned;
+> **Q1 (client storage, and therefore whether a consent banner exists at all — note `X-SESSION-ID`
+> already exists, `crates/server/src/graphql/session.rs:1-15`) and Q2 (does the restaurant see its own
+> storefront's behaviour data) are product-owner-owed.** Every legal claim is **VERIFY-FIRST**; no
+> licensed-counsel review has taken place.
+> **Independent convergence on the write path** (D10): the product owner's own design for this half —
+> *"name the interaction and the properties… the principal context will be sent with the jwt. A
+> mutation should be exposed to send these events"* — matches the proposal on the name and properties,
+> and the **JWT clause is D8 option A reached from the other direction**. It is also ADR-0041's
+> envelope doctrine applied to a non-domain write without being asked. ⚠️ **One measured blocker**:
+> `op-missing-command` is an **ERROR** and all **86** mutations bind a command handled by an actor
+> (`tools/codegen-rs/src/validate/core.rs:292,295,301`), so a mutation today **cannot** be a
+> non-command — declaring `recordBehaviourEvent` the only way the validator accepts would enqueue it
+> on the actor mailbox and append it to `domain_events`, **silently, with the gate green**. The fix is
+> a small api.yaml shape: a mutation declaring **`sink:`** where a command declares `command:` — *this
+> write is recorded, not decided*. It must land before this half is buildable.
+
+> 📏 **2026-08-11 — BUSINESS METRICS BECOME A DECLARED, GATED OBLIGATION — AND 26 OF THE 29 WE
+> ALREADY DECLARE EMIT NOTHING**
+> ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
+> [ADR-20260810-234225](adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md),
+> [PROP-20260810-234225](proposals/PROP-20260810-234225-business-metrics-for-every-persona.md);
+> docs-only, no code moved).
+> Product-owner directive (Jeff Patton): *"we must have business metrics for all features for each
+> persona … must be developed with the test and the code."* Auditing the slot that already exists
+> found it almost empty: **`specs/observability.yaml` declares 29 `business_metrics` across 14
+> contracts, and 26 have ZERO occurrences in `crates/`, `tools/` or `deploy/`** — no constant, no
+> instrument, no call site. Exactly three are emitted (`orders_placed_total`,
+> `checkout_payment_failures_total`, `scope_membership_lag_positions`). The gate that should have
+> caught it (`tools/codegen-rs/src/tests.rs:1500`) covers **3 of 14 contracts** by a hardcoded
+> allowlist and asserts only that the metric NAME exists as a string constant — two of those three
+> contracts declare no business metrics at all, so its effective coverage is **2 of 29**.
+> **The recorded principle**: the unit is the persona **ACTIVITY** (8 personas, 25 activities), not
+> the story step (144 — two of which `$ref` the same query and one of which is a poll loop); a
+> metric declares the **question** it answers; attributes are bounded sets, never entity ids.
+> **Declaration is enforced like ADR-0032 and emission is not** — `make validate` cannot see a call
+> site — so the chain is validator (coverage) → **generated instruments** (names, attribute types,
+> arity; deletes the scanner's metric half) → **`InMemoryMetricExporter` behaviour test** (it fires,
+> once, not on a replay). No source-text scanner is added.
+> **Sequencing**: gate forward now with an enumerated, monotone-shrinking `unmeasured:` waiver list,
+> backfill in value-stream order — a one-sweep backfill was already run at this scale and the 26 dead
+> declarations are its receipt. Register: [DECISIONS §27](proposals/DECISIONS.md) (D1–D7 team-owned,
+> **Q7 product-owner-owed**); §22's *"Business-signal observability contracts"* row closed by
+> subsumption. The per-persona metric GRID is the `ux-designer` lens's parallel deliverable, not this.
+
 > ✅ **2026-08-10 — THE LOCAL TEST GATE IS HONEST: `make test-crates` RUNS FROM THE STOP HOOK, AND A
 > MISSING DATABASE NOW FAILS**
 > ([#474 "`make rust` runs no workspace tests at all, and DB-gated tests skip silently — \"local gates green\" is a false signal"](https://github.com/TheCaptainCompany/captain-food/issues/474),
