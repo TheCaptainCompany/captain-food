@@ -33,6 +33,16 @@
   > - the writing of the write side is done only by the actors
   > - the reading of the read side is done by actors to load the events and the projectors
 
+- **Adjacent, and each assumes the other**: [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+  (**storage boundaries and least-privilege database users**, [#494](https://github.com/TheCaptainCompany/captain-food/issues/494),
+  register §32 STO-1…STO-6) answers the second half of the same product-owner message. The division is
+  deliberate: **this proposal decides which units exist**; **that one decides what shares a recovery
+  posture and a buffer pool** — and it reaches the same conclusion **BND-3** does here, that storage
+  deliberately does **not** follow the boundary one-to-one (its §4.2 records the conclusion and the
+  stop condition that keeps the deviation honest). The permission-matrix corrections BND-4 raises are
+  worked through into actual grants in its §6.1.1, and the write-side transactional unit
+  (**STO-1**: `DomainEventLogDb` cannot hold the log alone, or the fencing token is deleted) is a
+  constraint this proposal inherits rather than re-decides.
 - **Concerns**:
   - [ ] DECISION-REVERSAL: this amends [ADR-20260807-183024](../adr/ADR-20260807-183024-one-decomposition-axis.md) D1's **named scope list** (8, "from PM coupling"), which the product owner approved on 2026-08-07 as *"Approved as recommended"*. It lands as a **superseding ADR**, never as a silent spec edit — CLAUDE.md non-negotiable rule, question 1.
   - [ ] WINDOW: ADR-20260807-183024 D7 — *"start-clean makes the storage split free — the window that does not recur"*. [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) and [#360](https://github.com/TheCaptainCompany/captain-food/issues/360) are in flight. A boundary reshape is free at the storage layer **today** and a schema migration after the cutover. The decision is time-boxed by an external event, not by preference.

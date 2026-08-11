@@ -2,6 +2,70 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗄️ **2026-08-11 — THE STORAGE SPLIT IS COSTED, AND IT FOUND TWO DEFECTS THAT ARE NOT ABOUT THE
+> SPLIT**
+> ([PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md),
+> [#494 "Storage boundaries and least-privilege database users: the write-side transactional unit, the five-database split, and the last five View_*"](https://github.com/TheCaptainCompany/captain-food/issues/494),
+> register rows STO-1..STO-6 in [DECISIONS.md §32](proposals/DECISIONS.md)). Product-owner directive:
+> five databases (`DomainEventLogDb`, `DomainCommonDb`, `CatalogDb`, `OrderDb`,
+> `BehaviorEventTrackingDb`) plus a per-app least-privilege database user derived from the spec. The
+> access model is **accepted and correct**; the dba lens completed it, priced it, and named where it
+> does not close.
+>
+> **The `View_*` blast radius is real and small — and it points the other way.** Measured: **5** SQL
+> fold views vs **11** already-materialized projection tables; **9 of 32** GraphQL queries break if
+> `domain_events` leaves the read database, **23 survive**, and **zero of the broken ones are on the
+> money path** (`Cart`, `OrderTracking`, `Catalog`, `Restaurant`, `Customer` are all tables already).
+> The five stragglers are the rider board, the restaurant delivery board, claims, the refund queue and
+> the timeliness insight. Recommended way out: **convert them to materialized projection tables** —
+> which the product owner's own rule already implies (*"the writing of the read side is done only by
+> the projectors"* is vacuous for a SQL VIEW nobody writes). `postgres_fdw` and logical replication are
+> rejected with reasons in the proposal.
+>
+> **Defect 1 — the erasure engine fails OPEN.** `crates/infrastructure/src/deletion.rs:229-233` bounds
+> its scan at `COALESCE(MIN(position), i64::MAX) FROM projection_checkpoint`, clamped to log head. A
+> database with **zero** checkpoint rows therefore erases at head with **no** fold verification —
+> exactly the database the split creates, and exactly what a start-clean production is. Fix: a
+> `projection_watermark` table in the write DB, heartbeated monotonically by each projector, with a
+> **fail-closed** default. Precondition for the split; worth landing even without it.
+>
+> **Defect 2 — 8 indexes that do not exist.** The 5 views declare 8 secondary indexes; a Postgres view
+> cannot be indexed and `views.generated.sql` emits **zero** `CREATE INDEX`. `myDeliveries` therefore
+> folds every delivery job in history to return the 3 a rider holds: at ~120 jobs/day, month 6 is
+> ~21,600 jobs × 8 correlated subqueries ≈ **173,000 index probes per call**, polled by every rider at
+> Friday peak. This is due whether or not the split happens.
+>
+> **The one thing the directive must change**: `DomainEventLogDb` cannot hold the log alone.
+> `actor_runtime/src/completion.rs:71-100` commits appends + PM state + reminders + the
+> `inbound_messages` flip + the fenced `mailbox_partitions` advance in ONE transaction — separating log
+> from mailbox does not weaken atomicity, it **deletes the fencing token** (a paused pod waking at
+> 20:40 with a stolen lease would have its appends commit). Widen it to `captain-write`. The
+> transaction the product owner *asked* about — projector fold + checkpoint — **survives the split
+> untouched**, because a co-located checkpoint plus an idempotent fold is at-least-once + idempotence,
+> not 2PC.
+>
+> **Also priced**: one CNPG cluster with five databases (five clusters do not fit the node), a
+> **session-mode** pooler as a prerequisite (the split puts the fleet at ~235 against
+> `max_connections: 220`; transaction mode silently kills `LISTEN`), five migration chains with
+> `REQUIRED_SCHEMA_VERSION` becoming a map, and behaviour tracking at **~17.5 GB/yr — ~13× the business
+> log** — which needs a declared retention policy shipping *with* its first table, not after.
+>
+> **Reconciled on landing, and both matter to whoever generates the grants.** (1) It pairs with
+> [PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+> ([DECISIONS §31](proposals/DECISIONS.md)) — **boundaries decide which units exist, storage decides
+> what shares a recovery posture and a buffer pool** — and storage deliberately does **not** follow the
+> boundary one-to-one (BND-3), with the stop condition worth becoming a validator rule: *if any app's
+> `GRANT` spans two boundaries' schemas outside the declared exceptions, the shared database has
+> silently become an integration database.* (2) ⚠️ **The permission matrix omitted the mailbox, and the
+> omission is load-bearing**: GraphQL mutation resolvers write `inbound_messages`
+> (`crates/server/src/graphql/generated/mutation.rs:42`), so *"the writing of the write side is done
+> only by the actors"*, taken literally as a `GRANT`, **makes every mutation fail at runtime**. The
+> matrix now names the mutation-resolver row explicitly — CONNECT to `captain-write` plus **INSERT and
+> SELECT** on `inbound_messages` and nothing else (SELECT because `RETURNING` needs it, and because the
+> idempotent-retry arm is a plain `SELECT`) — proposal §6.1.1, which also flags that the directive's
+> fourth bullet is a transcription slip for the **write** side and must be confirmed before it becomes
+> a role.
+
 > 🗂️ **2026-08-11 — THE 57-APP LIST, AND THE PER-APP KNOWLEDGE THAT LIVES IN RUST**
 > ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md),
 > [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491),
