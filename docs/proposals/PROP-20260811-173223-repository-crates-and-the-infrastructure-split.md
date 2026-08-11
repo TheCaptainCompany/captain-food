@@ -262,9 +262,18 @@ a shared read layer.
 | Crate | Contents | Links | Linked by |
 |---|---|---|---|
 | `ports-{B}` | the boundary's **query** ports + **row-state** ports + the generated `…Row` DTOs | `domain-{B}`, `domain-common`, `async-trait` — **no `sqlx`** | `read-{B}`, `projections-{B}`, `handlers-{B}`, `graphql-{B}` |
-| `read-{B}` | Pg adapters implementing the **query** ports (SELECT only) | `ports-{B}`, `store_core`, `sqlx` | `graphql-{B}` **only** |
+| `read-{B}` | Pg adapters implementing the **query** ports (SELECT only) | `ports-{B}`, `store_core`, `sqlx` | **the API-tier bins that serve B's operations, and nothing else** — one under the recommended subgraph-per-boundary set ([PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md) §5.1), several if the API tier ever refines *inside* a boundary. The invariant is a closure rule, not a name: `read-*` in a bin's closure ⊆ `{read-B}` for its ONE declared boundary, and no non-API bin links a `read-*` crate at all |
 | `projections-{B}` | the pure folds (moved from `application/src/projectors/`) + the row codec + `load`/`upsert` implementing the **row-state** + **projection-write** ports | `ports-{B}`, `store_core`, `sqlx`, `domain-{B}` | `projector-{B}` **only** |
 | `handlers-{B}` | the aggregates' command handlers + PMs (#307) | `ports-{B}`, `eventstore`, `domain-{B}` | `actor-*`, `pm-*` of B |
+
+**And the subgraph's closure is NOT `{ports-B, read-B}` — say so before the ratchet is built to the
+wrong set.** A subgraph is acceptance-first: every mutation resolver enqueues through B's generated
+typed actor-client door and journals the acceptance
+(`crates/server/src/graphql/generated/mutation.rs:42,57,69`), and `operationStatus` reads
+`command_journal`. Those write-side links are required, not leakage. The enforceable invariant is
+**a subgraph links no crate that can WRITE a read model and no crate that can APPEND to the log** —
+forbidden families `projections-*` and `eventstore`; required `ports-{B}`, `read-{B}`, B's actor
+clients and the mailbox client half (PROP-20260811-150242 §5.1.7).
 
 Platform:
 

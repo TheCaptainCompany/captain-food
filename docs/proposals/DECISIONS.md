@@ -1080,6 +1080,18 @@ has no capability witness whatever the boundary set is, and it should not wait f
 dispatchable today** — it measures declared-vs-honest closure per bin and its ledger is regenerated,
 not hand-written. **[#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A1 is
 unaffected**; A2 onward should follow BND-1, since an `app.yaml` names the boundary its pod serves.
+**The API tier follows and is NOT a row** — *does a bounded context own a GraphQL subgraph one-to-one?* is
+answered in the proposal's **§5.1**: not a law, but the freedom runs one way only (a subgraph may serve
+PART of a boundary and may never span two, because a spanning pod would need CONNECT to two read
+databases and STO-2's wall would be gone), and the recommended set is one subgraph per boundary plus the
+platform graph — **6 bins**. The composed schema is unchanged by any of it (one generated SDL; a subgraph
+is an execution filter, not a schema unit), the ACL is derived from `roles:` and never from the scope, and
+the seven role gateways are untouched (0 domain crates each; only the embedded table's third column
+changes). Two team-owned follow-ups, no arbitration: the folder merge **deletes** the
+`api-nested-cross-scope` ERROR for `ordering`|`payments`|`comms`, so its view-based restatement lands with
+B2/B3; and **§32 owes `graphql_platform` a SELECT on `command_journal`** in `captain-core` — without it
+every acceptance poll in the product returns null at peak while the writes succeed.
+
 **And one consequence worth carrying forward** (proposal D5): `RestaurantListingOptedOut` is the
 Art. 21 objection register and is retained **indefinitely**, so the `restaurant` boundary holds both
 an indefinite-retention accountability record and ordinary erasable data — **retention is a property

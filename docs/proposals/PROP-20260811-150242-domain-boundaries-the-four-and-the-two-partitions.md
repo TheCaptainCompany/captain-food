@@ -449,6 +449,8 @@ sequenceDiagram
     Note over PJ: One projection group already spans three scopes.<br/>The read side does not believe the boundary either.
 ```
 
+<a href="https://mermaid.live/view#pako:eNptVN9P2zAQ_ldOeSoaaTWJ7SGaKhUaITpSvMEbm5BrX4OHYxvbYasQ__vOTrqx0T5EPcf3-ftxznMhrMSigiLgY49G4FLx1vPumwH68T5a03cb9EPtuI9KKMdNhPMvl8AD0GZ3_6hL6yV6ZVqYcMldRD9T5uhtV3OampTZ2N7Iuw5D4C0GmHRc6Y39daCDNanDdaXTXOBwzqeNn81Zqq9SybwVhAS3exLf38IsWILhIlpfOr7r0MQBZfgPvG09tjwi3I6vwwGU-jqhsLZ-og3XhIVQzkFaom_uMC2GAwpWWYG3PzAfv2eZz88CyEXbu3_4DzBkcjmfN6cVoKF8eoS_qslpIdBFTqmVW-VDPAZWr5cX6_PRxuaUmllTgfTEDyYaeUB4B9sU9LhnbUmyfSI41hwvWAWjIRcm0vPMI1kiQasnTLFBcCjCTNius2Y2CJ7ueKehLLMcUtnZ1BEtxHuEz_XXdX0J1ugdbFDwngioCMLbEAjxz9SQi3vbB16sIe71dQXcOTTyMK3JA3qDGjKRo1eNyTGJibU_3DnS26evucFXniUfsmfD2oId5HJGc957Avt_Ythq3E-HSchhlbBYL_eNQ7Ec-O1WdlOS-BDhal2DuEfx4Kwy8RUWW1WwtVommzLcjefiId-2n9aTCVMfqpOTj-XJh_dvc6XmK4P7AVTWjOPGdeK3o0y5CWSHR4QgrMMwzVnekEFZQVASacgpL2MjxagVGZ79y9eY-x2gotJPi2MoOvR0HSR9VJ4LWuzy50Xilvc6Fi8vvwG7BoVU" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+
 ### 4.2 Recommended — the bridge is internal; the kernel keeps one event
 
 ```mermaid
@@ -472,6 +474,8 @@ sequenceDiagram
     PJ->>PJ: fold -> OrderTracking + OrderConversation
     Note over PJ: 3 cross-scope groups -> 1 (only ScopeMembership still crosses).<br/>`use domain_delivery::…` in this projector still does not compile.
 ```
+
+<a href="https://mermaid.live/view#pako:eNp1VF1v2zAM_CuEn1IsjtcW2IMxBOhHUKSYU2_p2zq0isQ4WmVJleR2QdH_Pkr21gzJAiQIZfJ4vKP8mnEjMCsh8_jUoeZ4KVnjWHungT6sC0Z37QpdH1vmguTSMh3g6usXYB4o2W6eVG6cQAcjJpgN6Aqpj_ZLqvNYIfXKdFrct-g9a9DDqGVSrcyvAxV1FStsm1vFOPZNPq9cMa1jfBPD2hlOSPA9Pfyxj3FWRwzGg3G5ZdsWdegh-v_AmsZhwwL-H2K2jBB1M3umgiUBIeRTEIaI63uMh_4A9-vE3ZmfmHq_k0-8STnT2feePQCpmk-n1XkJqMmQDuF9UlKXc7SBkU35WjofxlDPFpfzxdUgXXVOxXVVgnDEDEYKmUf4AOvo7JCzMDSpeSa4uhqf1SUMOsx1oN8Lh6SEgMaQMRvTIgQD3iL3RSJa9NNOtqxVkzTM7QbhEZ1GRV2N9bB2poVT6BNj-fGk71xXxG62LIFZi1ocbvyPB6kiiiFQyUiZ0AL1-2OdYpqcyMEHqRQwGBaJiNtxItc_MJT14iTtJVj6_jV8DNq8wHyxnF_OUlJaTOa2O2pGhZKa_dlZfXCGC9r6zu3Rvx6SaTYBycO8GCry4htyxVoWpNF5cWE0zef7iNbIB7hZzIBvkD9aI3XYQayvS1gbJeIOJtBbx_ij1A05neJdsD3TqfgUuDPe554bi_0e-gh2DCOj1RaW8bzCeO_9RtpB3lSD_qi3_aGjzRpuwODOtizvupOPJ58e6I6TT3Jn-wcMEddKmwDctFYqnGRjyFp0BCPoLfSakbtteh8JXLNOhezt7TdRoZYr" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 **What does NOT change, and must be said**: merging scopes does **not** merge aggregates. `Payment`
 keeps its own stream, its own mailbox lane and its own single writer. One aggregate per transaction
@@ -511,7 +515,7 @@ restaurant-boundary app.
 |---|---|---|---|
 | Role gateways | `gateway-public` · `gateway-customer` · `gateway-restaurant` · `gateway-restaurant-account` · `gateway-rider` · `gateway-admin` · `gateway-external` | 7 | A gateway is a **role path**, and every role reaches several boundaries. 0 declared domain crates each; pure routing from a generated composition table (D8, ADR-0006). Homing one in a boundary would import that role's whole fan-out into it |
 | Surfaces | `fo-marketplace` · `fo-storefront` · `bo-restaurant` · `bo-rider` · `bo-admin` | 5 | A surface is an **audience**, not a boundary — the same distinction D7 draws for `public`. `bo-rider` renders order data; `fo-storefront` renders catalog, network and order data. 0 declared domain crates each |
-| Kernel subgraph + supervisor | `graphql-common` · `actor-mailbox-supervision` | 2 | Operator facts about the mailbox itself (#315); no business vocabulary |
+| Platform graph + supervisor | `graphql-common` (→ `graphql-platform`) · `actor-mailbox-supervision` | 2 | Request-lifecycle operations that name NO boundary's vocabulary — a *message* and a *lane*, not an order or a restaurant. **Not low-traffic operator trivia**: `operationStatus` is the acceptance poll every mutation's client runs (up to 30 reads at 1 s, `crates/web/src/actions.rs:30-40`), so at Friday peak this is the highest-QPS pod in the API tier and it reads `command_journal` in `captain-core` — see §5.1.4, which also names the `GRANT` line §32 owes it |
 | Cross-cutting workers | `worker-erasure` · `worker-retention` · `worker-journal-sweep` | 3 | Each spans every boundary by nature. `worker-erasure` in particular deletes streams across all of them — it needs the **widest** grant of any app, which is a real tension with least privilege and must be named rather than discovered. See D5: it also cannot assume a boundary erases uniformly |
 | Analytics | `bam` | 1 | *"A cross-scope consumer BY DESIGN"* — declares all 7 non-kernel domain crates and its closure equals its declaration, so it is honest, not debt |
 
@@ -523,6 +527,292 @@ restaurant-boundary app.
 `projector-ordering`+`projector-payments`+`projector-comms` → `projector-order` (3→1);
 `graphql-network`/`projector-network` → `graphql-restaurant`/`projector-restaurant` (rename).
 **57 apps → 53.** Every removal is a generated bin, a generated image and a generated Deployment.
+
+**Why the API tier follows the boundary set at all — and how far that freedom actually goes — is §5.1**, which also records what the merge does to the composed schema (nothing), to the gateways (nothing), to Friday-peak query cost (fewer pods, identical hops), and to the `api-nested-cross-scope` gate (it deletes it, and names the replacement that must land in the same change).
+
+---
+
+## 5.1 The API tier under the reshape — the subgraph set REFINES the boundary set, it does not copy it
+
+§5's app table asserts the API-tier consequence (`graphql-ordering` + `graphql-payments` +
+`graphql-comms` → `graphql-order`) without arguing it, and the assertion is load-bearing for three
+other programs: §32's `graphql_{scope}` grant matrix, [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md)'s
+`read-{B}` link claim, and the generated composition table every role gateway embeds. This section
+argues it, and answers the question it raises — **does a bounded context own a GraphQL subgraph
+one-to-one?**
+
+**Answer, final vision first: no, one-to-one is not a law — but the freedom runs in exactly one
+direction, and the recommended set is nevertheless one-to-one plus the kernel graph.**
+
+> **The subgraph partition must be a REFINEMENT of the boundary partition: a subgraph may serve a
+> part of one boundary, and may never span two.** Equal is the default and the recommendation
+> (**6 subgraph bins: 5 boundaries + the platform/kernel graph**); finer is available later on
+> operational grounds with no schema change; coarser is forbidden, and the thing that forbids it is
+> not GraphQL — it is §32's `GRANT`.
+
+### 5.1.1 What a subgraph is HERE, measured — three facts that dissolve most of the question
+
+| # | Fact | Evidence |
+|---|---|---|
+| A1 | **There is exactly ONE schema.** `specs/generated/schema.generated.graphql` is emitted from the MERGED api.yaml fragments, and every `graphql-{scope}` bin builds that same master schema — the scope is passed only as an execution filter | `crates/server/src/graphql/schema.rs:118` (`build_schema_for_scope`), `crates/server/src/bin_support.rs:64-70` |
+| A2 | **A subgraph is an EXECUTION PARTITION, not a schema-composition unit.** `ScopeSlice` rejects a document whose top-level fields belong to another scope, before validation; introspection is deliberately never sliced, because *"the SLICE is about data ownership, not schema visibility"* | `crates/server/src/graphql/scope_slice.rs:1-13,56-80` |
+| A3 | **The ACL is derived from `roles:` alone and never from the scope origin.** Every guard/visible pair is emitted per operation from its literal role list; `origins` is not an input to it | `tools/codegen-rs/src/emit/server_graphql.rs:487-560`; `crates/server/src/graphql/acl.rs` |
+| A4 | **Role × boundary is a routing PRODUCT, not a deployment product** — 7 gateways + N subgraphs = 7 + N pods, never 7 × N. Each subgraph mounts all seven role paths and the gateway routes by field, not by role | `crates/server/src/graphql/routes.rs:47-52`; `crates/gateway_runtime/src/lib.rs:115-155` |
+
+A1+A2 are the whole of the "does the client see it" question: **the owning scope of a field is
+invisible in the SDL.** Moving `orderConversation` from the `comms` fragment to the `order` fragment
+changes the third column of one row in a generated routing table and nothing else a client can
+observe by introspection. Byron's rule that *the type system is the contract* is satisfied here in
+the strong form: the contract is generated from the merged fragments, so the fragment layout is
+below the contract, not part of it.
+
+A3 is the answer the brief asked to be said plainly: **authorization is genuinely orthogonal to the
+composition units.** Role visibility and role guards are computed per operation from `roles:`; no
+role gains or loses a field because the operation's fragment moved folder. This decision is
+therefore made on operational and ownership grounds, never on authorization grounds.
+
+### 5.1.2 The one real constraint, and it points one way
+
+Nothing in GraphQL requires a subgraph to equal a bounded context — the schema describes the
+product, not the backend's ownership chart, and under static, codegen-time stitching a subgraph is
+simply *a pod that is allowed to execute a set of top-level fields*. The binding constraint comes
+from **below**, from §32's per-app database role
+([PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+§6.1: `graphql_{scope}` gets **its read DB only, no CONNECT to any other**):
+
+| Granularity | What it does to the grant | Verdict |
+|---|---|---|
+| Subgraph **finer** than a boundary (2+ subgraphs inside one B) | every pod's role stays inside that boundary's schema — the grants are the same or narrower | **legal**, costs pods, buys isolation |
+| Subgraph **equal** to a boundary | one pod, one role, one read database | **the default** |
+| Subgraph **coarser** than a boundary (one pod spanning two Bs) | that pod needs CONNECT to two boundaries' read databases — STO-2's wall is gone, and the crate axis and the `GRANT` axis disagree about what a boundary is (D12 / REP-5) | **forbidden** |
+
+So the count is a free choice in one direction only. That asymmetry is what makes the API tier a
+**follower** of the boundary decision rather than an input to it: no API-tier argument prefers 5 to
+8 or 8 to 5.
+
+### 5.1.3 The recommended set: 5 + the platform graph = 6 subgraph bins
+
+Measured today from the generated composition table (`crates/server/src/graphql/generated/operation_scopes.rs`
+— 121 operations):
+
+| Boundary (recommended §3) | Subgraph | Operations | From today's scopes |
+|---|---|---|---|
+| order | `graphql-order` | **48** | ordering 31 + payments 9 + comms 8 |
+| restaurant | `graphql-restaurant` | 25 | network |
+| customer | `graphql-customer` | 15 | customer |
+| catalog | `graphql-catalog` | 15 | catalog |
+| delivery | `graphql-delivery` | 13 | delivery |
+| *(platform — not a boundary, §5.1.4)* | `graphql-platform` (today `graphql-common`) | 5 | common |
+
+| Option | Pros | Cons |
+|---|---|---|
+| **(a) One subgraph per boundary + the platform graph — 6 bins** ✅ **recommended** | One definition of a unit at the API tier, the crate axis (`read-{B}`), the `GRANT` axis (`graphql_{B}`) and the pod all name the same thing — which is the whole point of REP-5(a)'s single declaration. Two fewer pool sets against STO-4's already-tight connection ceiling. Every removal is generated: a bin, an image, a Deployment, six routing rows | The `order` subgraph is 48 operations and mixes hot checkout reads with cold admin reads in one pool (§5.1.6). One rollout moves three previously independent surfaces |
+| (b) Keep 8 subgraphs (a refinement of the 5 boundaries, today's names) | Zero API-tier churn; `payments` and `comms` keep independent deploys and blast radius | Re-creates [#493](https://github.com/TheCaptainCompany/captain-food/issues/493)'s defect one layer down: two partitions of the same operations, unreconciled, with `graphql_payments` and `graphql_order` holding roles on the SAME read database and schema — the wall stops meaning anything, and every later reviewer must ask which unit is authoritative. The isolation it buys is real but unmeasured |
+| (c) One graph per ROLE (collapse subgraphs into the 7 gateways) | Fewest pods; no routing table at all | The over-responsible graph D8 already rejected — one runtime reaching every domain is the integration database of the API layer, and it hands every role path a `GRANT` on every read database |
+
+**Recommendation: (a).** And say the boring part out loud: it is (a) *because* it is the same unit
+as everything else, not because 6 is a better number than 8. If a measured Friday-peak reason later
+demands splitting `graphql-order`, §5.1.2 already permits it — inside the boundary, with no schema
+change, no ACL change and no new database role (see the one caveat in §5.1.5).
+
+### 5.1.4 `graphql-common` survives — and §5's classification of it is wrong in a way that costs money
+
+§5 files `graphql-common` under *"Kernel subgraph + supervisor — operator facts about the mailbox
+itself ([#315](https://github.com/TheCaptainCompany/captain-food/issues/315)); no business
+vocabulary"*. Two of its five operations make that false, and the error is a capacity and on-call
+error, not a taxonomy quibble:
+
+1. **`operationStatus` is the acceptance poll of EVERY mutation in the product.** Mutations are
+   acceptance-first: the client gets `PENDING` and then polls — up to **30 reads at 1 s** per action
+   (`crates/web/src/actions.rs:30-40`). Every checkout, every restaurant acceptance, every rider
+   transition. **At Friday peak the kernel subgraph is the highest-QPS pod in the API tier, and it is
+   the pod that tells a customer whether the order they just paid for was accepted.** That is the
+   single failure mode this product cannot have.
+2. **It reads the WRITE side.** The resolver reads the mailbox row, then `command_journal`
+   (`crates/server/src/graphql/generated/query.rs:65-89`) — both live in `captain-core`. So
+   `graphql_common`'s role needs CONNECT to the write database with **SELECT on `inbound_messages`
+   and `command_journal`**. §32's matrix (§6.1.1) grants the `graphql_{scope}` mutation path
+   `INSERT + SELECT` on `inbound_messages` and says nothing about `command_journal`: **a correction
+   owed there before that line becomes a `GRANT`, because the failure mode is every acceptance poll
+   in the product returning null at 19:30 while the writes themselves succeed** — the acceptance
+   contract silently reporting "we never heard of your order".
+3. It is also the **introspection default**: a document with only `__schema`/`__type` routes to
+   `kernel_scope: "common"` (`crates/gateway_runtime/src/lib.rs:141`). Dissolving the graph means
+   choosing a new default, mechanically.
+
+**So the kernel graph survives, and it is not a boundary and must never become one.** D6's
+distinction holds exactly as written — `domain-common` is a **linkage** concept with no pod;
+the platform graph is a **deployment** concept with one — which is why the bin should be renamed
+`graphql-platform` when §10's `specs/platform/` question is answered, and why the standing rule for
+it is the API-tier form of D6's own argument:
+
+> **An operation belongs in the platform graph only if it names NO boundary's vocabulary** — it is
+> about the request lifecycle (acceptance, the mailbox, introspection), not about an order, a
+> restaurant or a rider. Otherwise the kernel is an escape hatch again, this time at the API tier.
+
+Both current inhabitants pass that test: `operationStatus`/`operationStatusChanged` are about a
+*message*, and `mailboxLanes`/`poisonedMailboxMessages`/`requeueMailboxMessage` are about a *lane*.
+
+### 5.1.5 The `comms` case: build topology only — plus one client-visible edge and one lost gate
+
+**The composed schema does not change, byte for byte.** `orderConversation` keeps its name, its
+args, its return type, its nullability and its role list; only the composition table's third column
+moves from `comms` to `order` (A1/A2). No field is removed, renamed or narrowed, so the versionless
+rule — evolve additively, deprecate rather than break, because clients in the field do not redeploy
+on our schedule — is not merely satisfied, it is not even engaged. **A type or field moving between
+subgraphs is guaranteed invisible to clients by construction here, because the SDL is generated from
+the merged catalog and the subgraph is only an execution filter over it.**
+
+Two things do change, and both must be named rather than discovered.
+
+**(i) The gateway's one-scope-per-document rule gets more permissive — and its inverse is a
+breaking-change class.** A document whose top-level fields span two scopes is answered **400**
+(`crates/gateway_runtime/src/lib.rs:140-154`). Today `{ order(...) paymentStatus(...)
+orderConversation(...) }` is rejected; after the merge it is one legal request. That direction is
+safe. The reverse is not: **any future subgraph SPLIT retracts legality from documents the schema
+still advertises**, and that constraint appears nowhere in the SDL — a client cannot discover it by
+introspection, only by a 400 in production. It is the mirror image of *a behaviour the schema does
+not express does not exist for a client*: here the schema expresses a composability the runtime
+refuses. **No client is exposed today** — the SDUI issues exactly one document per resolver
+(`crates/web/src/generated/data_layer.rs`, one `ResolverKey` → one query), which is why the merge is
+free. Record the rule: **a subgraph split is a breaking change until the gateway can split-and-merge
+a multi-field document (the recorded [#385](https://github.com/TheCaptainCompany/captain-food/issues/385)
+follow-up); a subgraph merge never is.**
+
+**(ii) A validator gate is silently deleted by the folder merge, and its replacement must land in
+the same change.** `api-nested-cross-scope` (`tools/codegen-rs/src/validate/scopes.rs:21-24,441-468`)
+is an **ERROR** that an api type may nest only its own scope's or kernel types — the executable form
+of *the join belongs in the projector, not in the query*, and the rule that keeps codegen-time
+stitching cheap (no entity resolution, no N+1). Merging `ordering` + `payments` + `comms` makes
+three scopes' worth of nesting legal overnight, **with no diff to review**: from B2 onward an `Order`
+type may nest a `Payment` type and nobody is told. Compiler-first
+([ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)) says
+the answer is not a review habit but a sharper rule:
+
+> **Restate `api-nested-cross-scope` on the BACKING VIEW instead of the folder**: a projected api
+> type may nest a projected api type only when both are fed by the same `View_*` (kernel and
+> non-projected types exempt). It is strictly stronger than the folder test, it states the actual
+> invariant — the composition already happened in the projector — and it is **boundary-set
+> independent**, so it never has to be re-tuned the next time the partition moves.
+
+That rule lands with **B2/B3**, not after. A merge that removes a gate and schedules its replacement
+for later is how a design smell becomes a resolver.
+
+### 5.1.6 Friday peak, 19:00–21:30: what actually changes
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as web client (SDUI, one document per resolver)
+    participant GW as gateway-customer (routing only, no auth, no state)
+    box TODAY -- three subgraph pods on one screen
+        participant GO as graphql-ordering
+        participant GP as graphql-payments
+        participant GC as graphql-comms
+    end
+    box AFTER the reshape -- one
+        participant GD as graphql-order
+    end
+    participant RO as read-order (adapter behind ports-order) over captain-views
+    C->>GW: POST query order
+    GW->>GO: composition row query/order to ordering
+    C->>GW: POST query paymentStatus
+    GW->>GP: composition row query/paymentStatus to payments
+    C->>GW: POST query orderConversation
+    GW->>GC: composition row query/orderConversation to comms
+    Note over GO,GC: three pods, three pools, three deploy units for ONE tracking screen.<br/>The three documents stay three -- the SDUI fetches per resolver either way.
+    C->>GW: the SAME three documents, after the reshape
+    GW->>GD: rows now read order -- same field names, same SDL, same role guards
+    GD->>RO: SELECT through the boundary query port
+    Note over GW,RO: hops unchanged, documents unchanged, schema unchanged.<br/>What changes: pods contacted 3 to 1, and one rollout now moves all three surfaces.
+```
+
+<a href="https://mermaid.live/view#pako:eNp9VF1v2zAM_CuEn1rAaTHsLRgKFHEWDOiaoskQDNgLLTGxMFt09dEsKPbfR9le6zTL_CRL5PF4OvElU6wpm0Lm6SmSVVQY3DlsfliQD2NgG5uSXP_fogtGmRZtgBmghz2VoGpD8n-xKr59yYEtgWYVm7TXkgNHnutncpenEItNwthhoD0eJir6wI1kXDiOwdidYNWHHCwnHlW38EGCB6SSf8F6Wdx-h8kEQuWIwMdSyLcVtKy9pHdsvJIj2-ecMFh2DFLOUz1hp8lJ4TOxD-PYFg-pRX8mdjaOVdw0QyBZ_cb-9vN6_ijUKYlUYUupE6F8BrM44foOcxz92HXmCHUfCheosQ2yKKkyVotELvj-7BJYLgiUnKOxk2dD-4HubHJzs9hM4WG5WoMYxB1gVHixScfLKUiDLXsTjEjueN9HXvd1A8Oxrv_AHMRcye1GP8Z-OId9lJFqHN_HOd4zttKpx4Q2rjP7bw_jrFRrdJ_3HKhXb7HME0xvxOS__HXN9euPprbmA0RrgoctO1jezyE4VD-T4XurXn0q3fXNWmwx5AzPySf7H4bNzvME6dHBloKqyB89NyAj5w7kZV0da9Kl3X6dv0fPAbfJHyM_jiUqpkkWL69w39mqFzTx8NgQbA3VGqwsBajbWRV3w8pxTbCL6PTfyy0E8VGMs5rfzWfrxITjrupKlxytRrmwwRpi0xOpN3lKrrj1oqSq0O5I5yOdRptelGnwbacXd1NhgH7HT_tpodgGVIE0fEx3_EHkkFeSBojQr2UidZ03QsAD1vXrxHFbVOSvshwyGV4NGi3j9CWTVppusGraYqxD9vv3H7c_14Y" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+
+- **Hops and query cost are unchanged.** Client → role gateway → exactly one subgraph, resolved from
+  a static table. No planner, no entity resolution, no N+1 — the D8 property holds identically at 5,
+  6 or 8 subgraphs, because composition already happened in the projector.
+- **Documents per screen are unchanged.** The SDUI fetches per resolver; coarsening does not merge
+  round trips (it only makes merging them *possible* — see §5.1.5(i)).
+- **Pods contacted per screen shrinks.** The storefront's resolver set
+  (`specs/screens/restaurant_frontoffice.yaml:65-82`) touches **7 of today's 8 subgraphs** (network,
+  catalog, ordering, payments, comms, customer, common — everything but delivery); after the reshape
+  it touches **5 of 6**. The customer tracking poll set — `order` + `paymentStatus` +
+  `orderConversation` — goes from **3 pods to 1**.
+- **The connection budget moves in the right direction, slightly.** Every subgraph family holds its
+  own pool (`crates/bin_runtime/src/lib.rs:39`), and STO-4 already measures the post-cutover budget
+  at ~235 against `max_connections: 220`. Two fewer subgraph families is two fewer pool sets against
+  the same ceiling. It does **not** remove STO-4's session-mode pooler prerequisite.
+- **What gets worse, named before it is discovered at peak**: blast radius and noisy neighbours. A
+  `graphql-order` rollout at 19:30 disturbs tracking, payment status and the order chat together.
+  And the 48-operation order graph mixes hot money-path reads (`order`, `cart`, `current`,
+  `paymentStatus`) with cold heavy admin reads (`pendingRefunds`, `pricingPolicy`,
+  `uberSplitPolicy`) in one pool. **Honest framing: the merge enlarges this defect, it does not
+  create it** — `paymentStatus` (hot) and `pendingRefunds` (cold) already share the `payments` pod
+  today, so no subgraph boundary has ever separated hot from cold. If it bites, the remedy is a
+  refinement *inside* the boundary (`graphql-order-checkout` / `graphql-order-admin`), which §5.1.2
+  permits and which needs no schema change and no new database role. **Do not pre-split: measure
+  first**, and note the §5.1.5(i) caveat — a split needs the gateway's split-and-merge to be a
+  non-breaking change.
+
+### 5.1.7 The `read-{B}`-linked-by-`graphql-{B}`-only claim, restated correctly
+
+[PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) D2
+states `read-{B}` is *"Linked by: `graphql-{B}` **only**"*. That is true under the recommended
+subgraph = boundary set and false as a *name* identity the moment the API tier refines (§5.1.2). The
+form that holds at any granularity is a closure rule, not a name:
+
+> **`read-{B}` is linked by the API-tier bins that serve B's operations, and by nothing else.** For
+> every bin, the `read-*` crates in its transitive closure must be a subset of `{read-B}` for its ONE
+> declared boundary B, and no bin outside the API tier may link a `read-*` crate at all.
+
+And the complement the same table should state, because the measured code contradicts the tidy
+reading of it: **a subgraph's closure is not `{ports-B, read-B}`.** Every mutation resolver enqueues
+through its generated typed actor-client door and journals the acceptance
+(`crates/server/src/graphql/generated/mutation.rs:42,57,69` — `client_{actor}::…Client::new(mailbox,
+actor_id)`), and `operationStatus` reads the journal (§5.1.4). Those are write-side crates and they
+are *required* — that is what acceptance-first means. The invariant worth enforcing is therefore not
+"the subgraph links only read crates" but:
+
+> **A subgraph links no crate that can WRITE a read model and no crate that can APPEND to the log.**
+> Forbidden families: `projections-*`, `eventstore`. Required: `ports-{B}`, `read-{B}`, B's actor
+> clients, and the mailbox client half.
+
+Stated that way it is directly measurable by [#490](https://github.com/TheCaptainCompany/captain-food/issues/490)'s
+ratchet (REP's slice 0). Stated as "only `read-{B}`", the ratchet is built to measure a set no
+subgraph has ever had, and it will be relaxed by the first person who hits it — which is how a gate
+becomes a comment.
+
+### 5.1.8 The seven role gateways: unchanged — confirmed, not assumed
+
+`specs/generated/crate-graph.generated.json` gives every `gateway-*` bin `"domain_crates": []`, and
+the generated main links `gateway_runtime` + `bin_probes` only — no `server`, no `infrastructure`, no
+pool, no auth (`tools/codegen-rs/src/emit/bins.rs:519-524,1191-1215`). Under the reshape the
+embedded table's third column changes value and `SCOPES` goes 8 → 6. **The bin count, the role
+paths, the auth posture (none — the subgraph is the schema boundary) and the routing algorithm are
+untouched.** There is nothing to decide about the gateways, and a domain crate ever appearing in one
+stays what the emitter's own header calls it: a boundary violation to review.
+
+One observation worth acting on while the table is regenerated anyway: `SCOPES` and `COMPOSITION`
+are **not role-filtered**, so `gateway-rider` resolves URLs for subgraphs no RIDER operation reaches.
+This is harmless for correctness (a forbidden field is denied at the subgraph, where the schema
+boundary is) but it makes the gateway→subgraph fan-out 7 × N pairs — 42 after the reshape instead of
+56 — where the true reachable set per role is much smaller. Filtering the emitted table by the role's
+ACL would make the generated NetworkPolicy exactly the role's reachable set, at zero runtime cost.
+A cheap, generated tightening for whoever next touches the deploy emitters, not a blocker.
+
+### 5.1.9 What this section does NOT change, and what is left open
+
+- **D8 stands entirely**: one domain one graph, codegen-time composition tables, top-level routing,
+  no query planner, auth at the schema boundary.
+- **The boundary decision is not made on API-tier grounds.** The API tier follows; nothing here
+  argues for 5 over 8 or 8 over 5.
+- **Nothing is added to the decision register.** The subgraph count is a derived consequence of
+  BND-1 plus §32's grant rule, and the two follow-ups it creates are team-owned and executable: the
+  view-based restatement of `api-nested-cross-scope` (§5.1.5, lands with B2/B3) and the closure-form
+  restatement of the `read-{B}` link claim (§5.1.7, lands in REP's slice 0 ratchet). The one
+  correction owed to another document is `graphql_platform`'s SELECT on `command_journal` in §32's
+  grant matrix (§5.1.4).
 
 ---
 
