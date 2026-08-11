@@ -2,6 +2,54 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📦 **2026-08-11 — REPOSITORY CRATES: TWO OPEN ROWS CLOSE, AND THE COUPLING NOBODY HAD NAMED**
+> ([PROP-20260811-173223](proposals/PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
+> [#497 "Repository crates and the dissolution of `infrastructure`: read and write are separate crates, and \"inherit\" is right on the log and wrong on the read model"](https://github.com/TheCaptainCompany/captain-food/issues/497),
+> register rows REP-1..REP-5 in [DECISIONS.md §33](proposals/DECISIONS.md)). Product-owner direction:
+> *"We also have to create crates for repositories. There is read repositories and writes
+> repositories, the write repositories generally inherit from the read repositories"* / *"The
+> infrastructure has to be split in multiple crates to be able to regulate permissions of apps based
+> on what they need nothing more."* Third message of the day and the third face of one idea — §31
+> decides which units exist, §32 what shares a recovery posture and a database role, §33 what a unit
+> may link.
+>
+> **ISO-1 and ISO-2 are CLOSED, both as (a)** (register §29 + §5). Both (b) options end with a bin
+> linking a crate that carries every other boundary's code -- ISO-1(b)'s own wording is *"the bin
+> keeps linking `infrastructure`"* -- which is what *"nothing more"* forbids.
+> **[#423 "Design record for the per-scope infrastructure split"](https://github.com/TheCaptainCompany/captain-food/issues/423)
+> slice 1 is no longer blocked on those two rows.**
+>
+> **"Inherit" is right on the log and wrong on the read model, and the code already argues it.** There
+> are TWO read contracts on every read model: the **query** port (`CartReadRepository`, 5 methods;
+> `by_id` returns `None` for a CHECKED_OUT cart, `queries.rs:277-279`) and the **row-state** port
+> (`cart_store::load`, unfiltered). The projection write repository inherits the row-state one --
+> supertraiting it onto the query port is over-privilege **and** a correctness bug, and
+> `persistence/cart.rs:67-70` says exactly why in a comment written for another reason. On the write
+> side the supertrait is right unqualified: `EventStore: EventStreamReader` creates the **log-read
+> port that does not exist today** (three components read `domain_events` three different ways --
+> `EventStore::load`, `projection/worker.rs:753`, `deletion.rs:255,320`).
+>
+> **The blocker nobody had named (REP-4)**: `DomainEvent` is ONE enum over all 8 scopes, defined in
+> the facade (`domain/src/generated/events.rs:20`) and named by `EventStore` and the projector
+> `Envelope`. A per-boundary repository crate that traffics in it links everything, so slice 1 as
+> written would deliver a smaller module tree and the **identical** closure. It is **not** an
+> event-versioning question -- storage is already `(event_type TEXT, payload jsonb)`
+> (`event_store.rs:203`), so no stored contract moves.
+>
+> **Topology**: ~28 net-new crates -- 3 per boundary (`ports-{B}` with no `sqlx` · `read-{B}` SELECT
+> adapters · `projections-{B}` folds + load/upsert) plus 13 platform crates (`store_core`,
+> `eventstore`, `mailbox_pg`, `projection_runtime`, `read-platform`, `erasure`, 7 `acl-{partner}`).
+> **`crates/infrastructure` (~13,200 lines) is dissolved**, surviving the
+> [#358 "MKS bootstrap"](https://github.com/TheCaptainCompany/captain-food/issues/358) window only as
+> a monolith-only composition crate behind a codegen guard.
+>
+> ⚠️ **BND-1 ([#493 "Two partitions, one domain"](https://github.com/TheCaptainCompany/captain-food/issues/493))
+> just became more urgent** -- 15 of the 28 crates are per-boundary, and building 3 × 8 scopes to
+> merge into 5 is the forbidden intermediate. **Dispatchable today, boundary-agnostic**: the ratchet
+> dimension on [#490 "Scope-closure ratchet"](https://github.com/TheCaptainCompany/captain-food/issues/490),
+> `store_core` + `eventstore` + the reader split + the ISO-3 witness, `projection_runtime`, the 7
+> partner ACL crates.
+
 > 🗄️ **2026-08-11 — THE STORAGE SPLIT IS COSTED, AND IT FOUND TWO DEFECTS THAT ARE NOT ABOUT THE
 > SPLIT**
 > ([PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md),

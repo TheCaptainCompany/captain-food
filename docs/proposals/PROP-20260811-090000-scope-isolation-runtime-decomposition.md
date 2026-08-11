@@ -5,6 +5,13 @@
 - **Tracking issue**: [#423 "Design record for the per-scope infrastructure split — the named exit of the facade-coupling deviation has no artifact"](https://github.com/TheCaptainCompany/captain-food/issues/423) (this proposal IS the deliverable that issue asks for)
 - **Realized by**: _(filled at completion)_
 - **Origin**: product-owner directive, 2026-08-11 — *"The enforcement is required before working on any other functional subject"*, re-prioritised under [ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md). Restates the 2026-08-02 threat model of [PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md): *"protect bad AI behavior that could use easy path instead of the right one."*
+- **Refined by**: [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md)
+  (**repository crates and the dissolution of `infrastructure`**,
+  [#497](https://github.com/TheCaptainCompany/captain-food/issues/497), register §33 REP-1…REP-5).
+  **This proposal decides which BINS link which scopes; that one decides which CRATES exist for them
+  to link** — and it **closes ISO-1 and ISO-2** (§9 below). It also names the coupling this document
+  did not: `DomainEvent` is one enum over all eight scopes, so slice 1 as written would not change
+  any bin's closure.
 - **History**: `git log -p` on this file.
 
 ---
@@ -125,7 +132,7 @@ sequenceDiagram
     Note over Pod,REG: TODAY -- the boundary is a string
     Pod->>BR: spawn_scope_projector(pool, "catalog", waiter)
     BR->>REG: scope_group_count("catalog")
-    REG-->>BR: 3 of 19 groups
+    REG-->>BR: 1 of 9 groups
     BR->>REG: ProjectionWorker::new(pool).with_scope("catalog")
     loop every tick
         BR->>PG: read events past checkpoint (filtered groups)
@@ -271,12 +278,30 @@ built" clause ([ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-fir
 
 ## 9. Unresolved questions
 
-- Does `projection_runtime` own the `EventWaiter`/LISTEN plumbing, or does that stay in
-  `infrastructure` and get passed in? (Affects whether a projector bin links `infrastructure` at all
-  — if it does, slice 1 delivers less than it promises.)
-- Do `View_*` write repositories move into `projections-{scope}`, or stay shared? A shared write
-  repo re-introduces the facade by the back door.
+- ✅ **ANSWERED 2026-08-11 — (a).** Does `projection_runtime` own the `EventWaiter`/LISTEN plumbing,
+  or does that stay in `infrastructure` and get passed in? Closed by the product-owner direction
+  *"The infrastructure has to be split in multiple crates to be able to regulate permissions of apps
+  based on what they need nothing more"* — register §29 ISO-1 and §5, design record
+  [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
+  [#497](https://github.com/TheCaptainCompany/captain-food/issues/497). Under that proposal's D3 there
+  is no `infrastructure` to stay in.
+- ✅ **ANSWERED 2026-08-11 — (a).** Do `View_*` write repositories move into `projections-{scope}`, or
+  stay shared? Same origin, same records; the generic upsert plumbing (not the typed writes) stays in
+  `projection_runtime`/`store_core`.
+- ⚠️ **The coupling this proposal did not name, and it is the one that decides slice 1.**
+  `DomainEvent` is a **single enum over all eight scopes**, defined in the facade
+  (`crates/domain/src/generated/events.rs:20`) and named by `EventStore::append`/`load`
+  (`crates/application/src/ports.rs:54-65`), by the projector `Envelope`
+  (`crates/application/src/projections.rs`) and by 95 arms of `generated/projectors.rs`. A
+  `projections-{scope}` crate that traffics in it links every scope, so **slice 1 as written delivers
+  a smaller module tree and the identical closure.** The `EventWaiter` was never the hardest coupling.
+  Tracked as **REP-4** (register §33); it is *not* an event-versioning question, because the storage
+  format is already `(event_type TEXT, payload jsonb)`
+  (`crates/infrastructure/src/persistence/event_store.rs:203`).
 - Should the `EventStore::append` witness ride slice 3, or be filed and costed on its own now?
+  (**2026-08-11**: PROP-20260811-173223 D1 splits `EventStore` into `EventStreamReader` +
+  `EventStore: EventStreamReader` in its slice 1, so the witness can ride that same signature edit —
+  ISO-3's option (b) efficiency without waiting for slice 3.)
 - **What may an SSR renderer hold?** Slice 5 cannot start without it. `app-core` renders from domain
   types today; the isolated shape is a per-surface view model fed by the GraphQL response, which is
   either a generated artifact of `specs/screens/**` or a hand-written layer per surface. Nothing in
