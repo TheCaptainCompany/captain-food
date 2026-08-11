@@ -172,6 +172,48 @@ by the DSL today.
 | Open `kind:`, with impressions and replay discouraged in the doctrine header | Flexible; no rework when merchandising analytics is wanted; the doctrine header is where this repo puts guidance anyway | Prose cannot refuse anything, and this project's own method says so — the `makefile_recipe_lines_are_ascii` precedent exists because a rule that could be ignored was. "No session replay, ever" is a hard constraint; encoding a hard constraint as a comment in a YAML header is the exact defect class this audit keeps finding elsewhere |
 | Legal fields optional, defaulted to the safest value | Lower authoring friction; nothing is ever unset | A default lawful basis is a lawful basis nobody chose, and Art. 5(2) accountability is about being able to show *who decided what and why*. A defaulted `specialCategoryRisk: NONE` in particular would make the one field whose entire purpose is to force the author to look into the one field the author never sees |
 
+#### D3a — The typing audit of this catalog (ADR-20260811-014129 Decision 2)
+
+The product owner's *"heavily strongly typed the spec, no string in it"* applies here as much as to the
+metrics grammar, and this catalog had one violation that matters more than the rest.
+
+| Field | Today's draft | Verdict |
+|---|---|---|
+| the event id (`checkout_started`) | bare name | ✅ **DECLARATION** — correct, and the only place a bare name is |
+| `kind` | `INTERACTION` | ✅ closed set (`VIEW\|INTERACTION`) — a typo is a parse error |
+| `purpose` | `UNDERSTAND_PRODUCT_USE` | ✅ closed set, and it **must** be: R7 keys off "is this purpose in the personalisation family", which is unimplementable over free text |
+| `lawfulBasis` · `identifierClass` · `specialCategoryRisk` · `regime` | tokens | ✅ closed sets. `specialCategoryRisk` especially: R6 refuses anything but `NONE`, which is only checkable against a closed set |
+| `question` · `description` | prose | ✅ **prose stays prose** — typing it would be theatre |
+| `activity` · `dpia` | `$ref` | ✅ references, already refs |
+| **`attributes: [{ name: serviceType, values: [DELIVERY, COLLECTION] }]`** | **hand-written list** | ❌ **the real defect.** `ServiceType` is a kernel scalar with exactly those members (`specs/common/scalars.yaml:260-262`), so this is a **verbatim restatement of a domain enum in a tracking spec** — the "one name = one dedicated scalar" convention violated in the file whose whole job is to keep the taxonomy honest. It goes stale the day a third service type is added, and it goes stale *silently*: the tracking spec would keep recording an attribute whose declared members no longer match the domain's |
+| **`retention: P90D`** | **free duration string** | ❌ **contradicts a recorded legal position.** [docs/legal/BRIEF-20260808-account-erasure-two-path.md:82](../legal/BRIEF-20260808-account-erasure-two-path.md): *"This table IS the written retention schedule CNIL expects — windows declared **once, in the DSL**, feeding both the sweep and the DPIA."* A free duration lets an author invent a window counsel never approved, and `P90DD` is not a parse error. No duration scalar exists today (`Duration`, `Retention`, `interval` = zero hits in `specs/common/scalars.yaml`) |
+
+**`attributes:` — the fix.** An attribute's value set is a `$ref`, never a list:
+
+```yaml
+attributes:
+  - from: { $ref: 'scalars.yaml#/ServiceType' }   # name AND members derived from the scalar
+```
+
+| Option | Pros | Cons |
+|---|---|---|
+| **`values:` must be a `$ref` — to a domain scalar where one exists, or to an enum declared once in this catalog where the set is genuinely UI-only** ✅ **recommended** | The domain enum stays the single source: add `EAT_IN` to `ServiceType` and every tracking attribute over it follows, with no sweep and no drift. A UI-only set (say a sort order with no domain counterpart) is still expressible — it is *declared once* in the catalog, which is a declaration and therefore legitimate, then referenced. Enforced by `value-set-not-scalar-backed` (R13, metrics D8) | An author who wants a *subset* of a scalar's members must say so explicitly (`only:` / `except:`), which is one more shape — and arguably a good thing, because a silent subset is how a taxonomy stops matching the domain |
+| Allow an inline list, with a rule that it must match a scalar if one exists | Lower authoring friction for one-offs | The rule has to compare a hand-written list against a scalar's members and say "these agree" — which is a check that a duplicate is currently correct, not a mechanism that prevents duplication. The next member added makes it fail somewhere far from where it was caused |
+| Keep hand-written lists | Nothing to build | Is the defect. It is also the exact thing this proposal criticises the rest of the repo for |
+
+**`retention:` — the fix.** A `$ref` into a declared retention-window catalog owned by the legal
+table, not a duration literal:
+
+```yaml
+retention: { $ref: 'retention.yaml#/BEHAVIOUR_ANALYTICS_90D' }
+```
+
+| Option | Pros | Cons |
+|---|---|---|
+| **A declared retention-window catalog, `$ref`'d** ✅ **recommended** | It is not new work — the legal brief already *has* the table and already says the windows are *"declared once, in the DSL"*; this makes that sentence true. An author cannot invent a window: the set is what counsel approved. One place to change when a window changes, feeding the sweep, the DPIA and this catalog together. It also gives the erasure sweep and the behaviour store the same vocabulary, which is the point of declaring it once | A new catalog to create, and it needs an owner. It is arguably [#194](https://github.com/TheCaptainCompany/captain-food/issues/194)'s work rather than this proposal's — so this proposal *depends* on it rather than building it, and says so |
+| A `Duration` scalar with an ISO-8601 `pattern:` | Cheap; catches `P90DD`; no new catalog | Catches typos and nothing else. The failure that matters is not a malformed duration, it is a **well-formed window nobody approved** — and a pattern cannot tell those apart |
+| Leave it a free string | Zero cost | Contradicts a recorded legal position, in the field where that position is load-bearing |
+
 ### D4 — How does this bind to the metrics catalog?
 
 | Option | Pros | Cons |
@@ -344,19 +386,25 @@ binding, and the gate's refusal. The last three are real UI.
 |       Of the customers who reach a priced cart, what fraction start checkout?     |
 |       The denominator for the payment-anxiety work (#479).                        |
 |     activity: { $ref: 'stories.yaml#/customer/activities/OrderFood' }  <-- D4     |
-|     purpose:          UNDERSTAND_PRODUCT_USE                                     |
+|     purpose:          UNDERSTAND_PRODUCT_USE           <-- closed set; R7 needs it|
 |     lawfulBasis:      LEGITIMATE_INTEREST                              <-- R7     |
-|     retention:        P90D                                                       |
+|     retention:        { $ref: 'retention.yaml#/BEHAVIOUR_ANALYTICS_90D' }         |
+|                          ^ NOT the string "P90D": the window set is what counsel  |
+|                            approved (legal brief:82 -- "declared once, in the DSL")|
 |     identifierClass:  CUSTOMER                                         <-- R8     |
 |     specialCategoryRisk: NONE                                          <-- R6     |
 |     dpia:             { $ref: 'legal/DPIA-customer-analytics.md#/S3' } <-- R10    |
 |     attributes:                                                                  |
-|       - { name: serviceType, values: [DELIVERY, COLLECTION] }          <-- bounded|
+|       - from: { $ref: 'scalars.yaml#/ServiceType' }                               |
+|            ^ NOT `values: [DELIVERY, COLLECTION]` -- that was a verbatim copy of  |
+|              a kernel scalar (scalars.yaml:260-262). Name and members derive from |
+|              the scalar, so adding EAT_IN never leaves this file stale. (D3a/R13) |
 |                                                                                  |
 | # NOT SPELLABLE, by design:                                                       |
 | #   kind: IMPRESSION                    -> unknown enum value                     |
-| #   attributes: [{ name: restaurantId }] -> entity id, refused (metrics D6)       |
+| #   attributes: [{ from: '.../RestaurantId' }] -> entity id, refused              |
 | #   purpose: SUGGEST_ACTION + LEGITIMATE_INTEREST -> R7                           |
+| #   any bare name pointing at a declaration elsewhere -> R11                      |
 +----------------------------------------------------------------------------------+
 ```
 

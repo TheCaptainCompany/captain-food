@@ -310,28 +310,41 @@ trust the numbers above if they look off.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
-- **Business metrics for every feature and every persona** (product-owner directive, 2026-08-10,
-  verbatim in [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)):
-  *"Follow Jeff Patton … we must have business metrics for all features for each persona … must be
-  developed with the test and the code."* The unit is the **persona ACTIVITY** in `specs/stories.yaml`
-  (8 personas, 25 activities), not the story step — a step is an operation call, an activity is an
-  outcome. A metric is not done until it is **declared, emitted and asserted by a test**, and it
-  declares the **question** it answers; attributes are bounded sets, never entity ids (ids belong on
-  spans). **Declaration is enforced like ADR-0032 and emission is not** — `make validate` cannot see a
-  call site, which is why 26 of the 29 `business_metrics` declared today have zero occurrences
-  anywhere in `crates/`. So: validator for coverage, **generated instruments** for names and attribute
-  types (compiler-first — never a source-text scanner), and an `InMemoryMetricExporter` behaviour test
-  for "it actually fires, once, and not on a replay"
-  (`crates/infrastructure/tests/orders_placed_metric.rs`). Mechanism and the open decisions:
-  [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md).
-  ⚠️ **The MECHANISM half of this bullet is under an open reversal** ([DECISIONS §27 row MET-R](docs/proposals/DECISIONS.md)):
-  the product owner's own design is **metrics as PROJECTIONS** — a declared `fold:` over
-  `domain_events` maintained by the `bam` projector the C4 already declares, read through a
-  tenant-scoped GraphQL query — which contradicts *"generated instruments"* and *"never entity ids"*
-  above. The PRINCIPLE (unit = persona activity, declared + emitted + asserted, states its question)
-  is unaffected. Until the reversal is decided, read the proposal's D4/D6/D8 as the current design and
-  this bullet's mechanism as the superseded one; do not implement either half without the register row
-  being closed.
+- **A business metric IS A PROJECTION** (product-owner directive, 2026-08-11: *"Confirm the reversal,
+  go with the projections"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md),
+  superseding [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
+  in part). Every feature, for every persona, carries at least one — the unit is the **persona
+  ACTIVITY** in `specs/stories.yaml` (8 personas, 25 activities), never the story step, because a step
+  is an operation call and an activity is an outcome. A metric **declares the question it answers**,
+  and it is a **declared `fold:` over `domain_events`** maintained by the `bam` projector into the
+  `bam` schema, read through a **tenant-scoped GraphQL query** — *not* a counter emitted at a call
+  site. Two reasons that decide everything downstream: **a fold replays** (a counter does not, so a
+  metric added later would carry zero history), and **ratios and distinct-identity denominators are
+  inexpressible as counters** but ordinary as queries. Grouping keys need a **declared bounded
+  population** — `restaurantId` is fine, a Postgres row is not a time series. **Operational telemetry
+  does not move**: latency, error budgets, span status and dead-man's switches stay on
+  OTLP/Honeycomb, because they must work when Postgres is down, which is exactly when a
+  Postgres-backed metric is blind. An `alertable:` subset taps a counter as it folds at head — one
+  declaration, two outputs. Grammar, rules and the open rows:
+  [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) D4/D6/D8/D9.
+- **Every reference in the DSL is a `$ref`; only a declaration may introduce a bare name**
+  (product-owner directive, 2026-08-11: *"we need to heavily strongly typed the spec no string in
+  it"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)
+  Decision 2). Four categories, in order: **(1)** a **declaration** introduces a name (`measures:
+  [{ name: orders }]`) — correct, and the only place a bare name is; **(2)** a **reference** to
+  something declared elsewhere is a `$ref` the loader resolves, **including inside the same file**
+  (`{ $ref: '#/Order/state/orderId' }`, `specs/ordering/actors.yaml:102`); **(3)** a **value from a
+  closed set** stays a bare token (`type: counter`, `bucket: DAY`) *provided the set is closed in the
+  loader schema* — **except** where a domain scalar already declares that set, where the `$ref` is
+  mandatory (`{ $ref: 'scalars.yaml#/ServiceType' }`, never a hand-copied `[DELIVERY, COLLECTION]` —
+  "one name = one dedicated scalar" applied to a value set); **(4)** **prose stays prose**
+  (`description:`, `question:`) — typing it would be theatre. Why it is structural and not stylistic:
+  [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) — a plain-string
+  `tombstone: SomeEvent` is *"silently invisible everywhere"*, because the refs walker collects only
+  `$ref` nodes and the rule written for that key *"only sees tombstones the parser recognized"*.
+  **Binding on NEW DSL surface.** It is **not** a licence to sweep: the existing bare-name sites
+  (`data_requirements:`/`actions_used:` 40, `roles:` 112) each have a bespoke rule today and their
+  conversion is separate, sequenced work ([DECISIONS §27bis MET-T2](docs/proposals/DECISIONS.md)).
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - **Completeness is part of every change (ADR-0032):** a new command/event/error also needs a behaviour

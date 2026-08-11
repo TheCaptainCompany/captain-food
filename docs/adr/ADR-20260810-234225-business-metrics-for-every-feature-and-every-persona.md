@@ -1,6 +1,6 @@
 # ADR-20260810-234225 — Business metrics for every feature and every persona, developed with the test and the code
 
-- **Status**: Accepted
+- **Status**: Superseded in part by [ADR-20260811-014129 "A business metric is a projection, and every reference in the DSL is a `$ref`"](ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md) (2026-08-11) — **clause 4 and the enforcement table are reversed**; clauses 1–3 remain in force and are carried forward there. This file is left as the record of what was decided on 2026-08-10 and why, including the reasoning that turned out to be wrong.
 - **Date**: 2026-08-10
 - **Source**: product-owner directive (verbatim below)
 - **Realized by**: [PROP-20260810-234225 "Business metrics for every feature and every persona"](../proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) · [#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484)

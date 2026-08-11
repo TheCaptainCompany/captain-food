@@ -1,6 +1,6 @@
 # PROP-20260810-234225 — Business metrics for every feature and every persona: where they are declared, and what makes the claim checkable
 
-- **Status**: Proposed
+- **Status**: Approved in part 2026-08-11 — **D4 / D6 / D8 / D9 (the projection reversal and the fold grammar) are DECIDED** by the product owner (*"Confirm the reversal, go with the projections"* · *"we need to heavily strongly typed the spec no string in it"*), recorded in [ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md). D1–D3, D5, D7 stand as team-owned and unvetoed. **Q7 (a hosted product-analytics SDK) remains OPEN** and is recommended for closure as "no" — see [DECISIONS §27bis](DECISIONS.md)
 - **Date**: 2026-08-10
 - **Tracking issue**: [#484 "26 of the 29 declared `business_metrics` emit nothing: give business metrics their own catalog, keyed persona x activity, with a bidirectional coverage gate"](https://github.com/TheCaptainCompany/captain-food/issues/484)
 - **Principle**: [ADR-20260810-234225 "Business metrics for every feature and every persona, developed with the test and the code"](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
@@ -39,6 +39,10 @@ already exists. It is almost entirely empty, and nothing says so.
 | F13 | **And that `bam` schema has zero tables.** `bam` returns **zero hits** across `specs/database/` — no table, no view, no fold. The container and its schema are declared; nothing they would hold exists | `grep -rn bam specs/database/` = 0 |
 | F14 | **The Order lifecycle events do not all carry the same fields, so a projection's grouping keys are NOT free.** `restaurantId` is on every Order event **except `OrderExpired`** (which carries `orderId` alone). **`serviceType` is on `OrderPlaced` and nowhere else.** `customerId` is on `OrderPlaced`, `OrderRated`, `OrderTipped` only | measured over `specs/ordering/events.yaml:114-533`; `OrderExpired` at `:517` has 1 property |
 | F15 | **A GraphQL mutation in this system is structurally a command.** `op-missing-command` is an **ERROR** (*"mutation declares no command."*) and `mutation-command-unhandled` requires an actor to handle it — all 86 mutations across every scope bind a `commands.yaml` `$ref`; **zero** do not | `tools/codegen-rs/src/validate/core.rs:292,295,301`; measured over `specs/*/api.yaml` |
+| F16 | **But EVERY `Order*` event carries `orderId`** — all 11 of them, including `OrderExpired`, whose payload is `orderId` and nothing else. So a fold keyed at the entity grain is total over the whole lifecycle with no event change | measured over `specs/ordering/events.yaml`; `OrderExpired` at `:517` |
+| F17 | **A bare name pointing at a declaration is invisible to the loader, and a bespoke rule is not a substitute.** [#413](https://github.com/TheCaptainCompany/captain-food/issues/413): a plain-string `tombstone: SomeEvent` is *"silently invisible everywhere"* because the refs walker collects only `$ref` nodes — and the rule written for that very key *"only sees tombstones the parser recognized"* | [#413](https://github.com/TheCaptainCompany/captain-food/issues/413); `tools/codegen-rs/src/emit/sql.rs:295-298` |
+| F18 | **Existing bare-name sites ARE checked, but each by a hand-written rule.** `data_requirements:` and `actions_used:` (40 sites across 5 screen files) and `roles:` (112 sites across 8 api fragments) are bare names covered by `screen-unknown-resolver` / `screen-unknown-role`. `fedBy:`, `emits:`, `throws:`, `command:` are already `$ref`s | `tools/codegen-rs/src/validate/core.rs:1482,1495`; counted over `specs/screens/`, `specs/*/api.yaml` |
+| F19 | **A retention window as a free duration string contradicts a recorded legal position.** *"This table IS the written retention schedule CNIL expects — windows declared **once, in the DSL**, feeding both the sweep and the DPIA."* And no duration/retention scalar exists: `Duration`, `Retention` and `interval` are **zero hits** in `specs/common/scalars.yaml` | [docs/legal/BRIEF-20260808-account-erasure-two-path.md:82](../legal/BRIEF-20260808-account-erasure-two-path.md) |
 
 ### 1.2 What F14 proves, and why it decides the shape
 
@@ -50,9 +54,17 @@ reconciling placed-minus-cancelled against reality.
 
 A counter emitted at a call site cannot see this: it emits whatever dimensions happen to be in scope.
 A **declared fold can be checked before it runs** — "every event in this fold carries every key of this
-projection" is a validator rule (§3 D8 R3), and on this repo today it would fail on a real declaration.
-That single property is the strongest argument for the shape §3 D4 recommends, and it is measured
-rather than argued.
+projection" is a validator rule (§3 D8 R7), and on this repo today it fails on the obvious
+declaration. That single property is the strongest argument for the shape §3 D4 recommends, and it is
+measured rather than argued.
+
+**And then the rule pays for itself a second time.** The obvious reading of F14 is "the events are
+missing a field, so change the events" — a versioning story. The rule says something more useful:
+**the grain is wrong.** Every one of the 11 `Order*` events carries `orderId` (F16), so a fold keyed at
+the ENTITY grain is total over the whole lifecycle with **zero event changes**, and the grouping moves
+to read time where every field is available. §3 D8a works this through. A gate that turns "we must
+migrate an event payload" into "your projection was shaped wrong" has earned its place before it has
+caught a single bug.
 
 ### 1.3 The consequence, plainly
 
@@ -212,66 +224,137 @@ the same grammar, not a separate concept.
 | One flat block: each metric declares its own fold inline | Simplest to author for a single counter; nothing to cross-reference | Every metric gets its own table, so `orders_placed_total` and `orders_cancelled_total` fold the same events into two projections that must agree and cannot be joined. A ratio across them becomes a cross-table query the DSL cannot express, which puts `derived` back as an exception — the exact defect D4 removed |
 | Free-form SQL per metric in the DSL | Maximum expressiveness, zero grammar to design | Unreviewable and uncheckable: nothing can prove a field exists on an event, nothing can prove the projection is replayable, and `bam` becomes a place where arbitrary SQL runs against the read-models database with the order path one instance away ([#443](https://github.com/TheCaptainCompany/captain-food/issues/443)). It also defeats the point — a metric nobody can read as a declaration is back to being a call site |
 
+**Three categories, and the rule that separates them** (ADR-20260811-014129 Decision 2, from the
+product owner's *"heavily strongly typed the spec, no string in it"*):
+
+1. a **DECLARATION** introduces a name — `projections: { OrderOutcomes: … }`,
+   `measures: [{ name: orders }]`. A bare name is correct here and only here.
+2. a **REFERENCE** to something declared elsewhere is a **`$ref` the loader resolves**, including
+   inside the same file — the repo already does this (`{ $ref: '#/Order/state/orderId' }`,
+   `specs/ordering/actors.yaml:102`).
+3. a **VALUE from a closed set** stays a bare token (`type: counter`, `bucket: DAY`) *provided the set
+   is closed in the loader schema*, so a typo is a parse error — **except** where a domain scalar
+   already declares the set, in which case referencing it is mandatory.
+
+Free prose (`description:`, `question:`) stays prose; typing it would be theatre.
+
 **The grammar.**
 
 ```yaml
 # specs/business_metrics.yaml
 
 projections:                       # LAYER 1 -- the fold. Maintained by the bam projector.
-  OrderOutcomes:
-    description: "Per (restaurant, service type, day): orders placed, cancelled, gross."
-    key:                           # <- the GROUPING the product owner asked about.
-      - { name: restaurantId, from: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
-      - { name: serviceType,  from: { $ref: 'events.yaml#/OrderPlaced/properties/serviceType'  } }
-      - { name: day,          from: { envelope: occurredAt, bucket: DAY } }
-    measures:                      # <- the PROPERTIES the metric carries.
-      - { name: orders,      type: counter }
-      - { name: cancelled,   type: counter }
-      - { name: gross_cents, type: sum }
-    fold:                          # <- the INCREMENT/DECREMENT per event.
-      - { on: { $ref: 'events.yaml#/OrderPlaced' }, increment: orders, by: 1 }
-      - { on: { $ref: 'events.yaml#/OrderPlaced' }, add: gross_cents,
-          from: { $ref: 'events.yaml#/OrderPlaced/properties/totalAmount/properties/amountCents' } }
-      - { on: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, increment: cancelled, by: 1 }
-      #        ^ REFUSED TODAY by R3: OrderCancelledByCustomer does not carry serviceType (F14),
-      #          so this fold cannot address a row keyed by it. Either drop serviceType from the
-      #          key, or add the field to the event -- which is a versioning story, not an edit.
-
-  CustomerOrderCounts:             # the fold that makes a distinct-identity denominator ordinary
+  OrderFacts:                      # DECLARATION -- the name comes into existence here.
+    description: "One row per order: its key fields and its lifecycle status."
+    grain: ENTITY                  # closed set: ENTITY | AGGREGATE
     key:
-      - { name: restaurantId, from: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
-      - { name: customerId,   from: { $ref: 'events.yaml#/OrderPlaced/properties/customerId'   } }
-    measures: [{ name: orders, type: counter }]
-    fold:
-      - { on: { $ref: 'events.yaml#/OrderPlaced' }, increment: orders, by: 1 }
+      # `from:` is a $ref; the COLUMN NAME is derived from the referenced property.
+      # `as:` is an OPTIONAL alias, legal only where derivation is ambiguous or the
+      # source is an envelope bucket -- and `key-alias-redundant` refuses it otherwise.
+      - from: { $ref: 'events.yaml#/OrderPlaced/properties/orderId' }
+    measures:                      # DECLARATIONS -- `name:` is legitimate here.
+      - { name: restaurantId, type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
+      - { name: serviceType,  type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/serviceType'  } }
+      - { name: day,          type: set, of: { envelope: occurredAt, bucket: DAY } }
+      - { name: status,       type: set, of: { $ref: 'scalars.yaml#/OrderStatus' } }
+      - { name: grossCents,   type: sum }
+    fold:                          # the INCREMENT/DECREMENT per event.
+      - on: { $ref: 'events.yaml#/OrderPlaced' }
+        set: { $ref: '#/projections/OrderFacts/measures/status' }        # <- REFERENCE, so a $ref
+        to:  PLACED                                                      # <- closed set (OrderStatus)
+      - on: { $ref: 'events.yaml#/OrderPlaced' }
+        add: { $ref: '#/projections/OrderFacts/measures/grossCents' }
+        from: { $ref: 'events.yaml#/OrderPlaced/properties/totalAmount/properties/amountCents' }
+      - on: { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+        set: { $ref: '#/projections/OrderFacts/measures/status' }
+        to:  CANCELLED
+        # Total: OrderCancelledByCustomer carries orderId, which is this projection's
+        # whole key. No decrement, no missing serviceType, no event change. See below.
 
 metrics:                           # LAYER 2 -- the read.
   orders_placed_total:             # the DEGENERATE case: one line of `value:`
     question: "Are orders completing end to end, and at what hourly shape?"
     activity: { $ref: 'stories.yaml#/customer/activities/OrderFood' }
-    over:     { $ref: '#/projections/OrderOutcomes' }
-    groupBy:  [day]
-    value:    { sum: orders }
-    alertable: true                # ALSO emits an OTLP counter while folding at head (D4)
+    over:     { $ref: '#/projections/OrderFacts' }
+    groupBy:
+      - { $ref: '#/projections/OrderFacts/measures/day' }                # <- REFERENCE, so a $ref
+      - { $ref: '#/projections/OrderFacts/measures/serviceType' }
+    value:
+      countRows:
+        where:
+          - measure: { $ref: '#/projections/OrderFacts/measures/status' }
+            equals:  PLACED
+    alertable: true                # ALSO taps an OTLP counter while folding at head (D4)
     exposedAs: { $ref: 'api.yaml#/queries/orderOutcomes' }
 
   repeat_order_rate:               # the case a counter backend CANNOT express at all
     question: "What fraction of a restaurant's customers come back?"
     activity: { $ref: 'stories.yaml#/customer/activities/OrderFood' }
     over:     { $ref: '#/projections/CustomerOrderCounts' }
-    groupBy:  [restaurantId]
+    groupBy:  [{ $ref: '#/projections/CustomerOrderCounts/key/customerId' }]
     value:
       ratio:
-        numerator:   { countRows: { measure: orders, atLeast: 2 } }
+        numerator:
+          countRows:
+            where:
+              - measure: { $ref: '#/projections/CustomerOrderCounts/measures/orders' }
+                atLeast: 2
         denominator: { countRows: {} }
     exposedAs: { $ref: 'api.yaml#/queries/repeatOrderRate' }
 ```
 
+**What changed under the typing rule, precisely.** `increment: orders`, `groupBy: [day]` and
+`value: { sum: orders }` were **bare names pointing at declarations elsewhere in the same file** — so a
+typo in any of them was not a broken reference the loader could catch, it was a silently wrong metric.
+That is the exact failure class this proposal exists to remove, and it was sitting in the proposal's own
+grammar. All three are now `$ref`s. **The receipt that this is not pedantry**:
+[#413](https://github.com/TheCaptainCompany/captain-food/issues/413) records that a plain-string
+`tombstone: SomeEvent` is *"silently invisible everywhere"* because the refs walker collects only
+`$ref` nodes — and that even the rule written for that key *"only sees tombstones the parser
+recognized"*.
+
+**Is `name:` on a key needed?** Mostly no, and it is now **derived**: the column name comes from the
+referenced property, so `from: { $ref: '…/properties/restaurantId' }` yields `restaurantId` and there
+is no second place for the name to disagree with the thing it names. An explicit `as:` survives for
+the one case derivation cannot serve — an **envelope bucket**, where the source is `occurredAt` but the
+column wants to be `day` — and `key-alias-redundant` (ERROR) refuses an alias that equals the derived
+name, so the redundant form cannot come back.
+
+**Closed sets stay bare tokens**, and this is categorically different from category 2: `grain:`
+(`ENTITY|AGGREGATE`), measure `type:` (`counter|sum|gauge|set`), fold ops, `bucket:`
+(`HOUR|DAY|WEEK|MONTH`), and read values (`sum|countRows|ratio`) are all closed in the loader schema, so
+`type: countr` is a parse error. They are **DSL meta-vocabulary, not domain scalars** — putting
+`MeasureType` in `specs/common/scalars.yaml` would push codegen vocabulary into the domain kernel, which
+is the opposite of what the kernel is for. Where the value **is** domain (`to: PLACED`), it is validated
+against the referenced scalar (`OrderStatus`), not against a hand-written list.
+
 **Operations.** `increment` / `decrement` (by a literal), `add` / `subtract` (by a `$ref`'d numeric
-payload field), `set` (last-write-wins, for state a metric groups on), `max` / `min`. Measure types:
-`counter`, `sum`, `gauge`. Read values: `sum`, `countRows`, `ratio`. Deliberately **no** free
-expression language — every one of these is a checkable shape, and the moment an author needs
-something outside it that is a signal the projection's key is wrong, not that the grammar is too small.
+payload field), `set` (last-write-wins), `max` / `min`. Deliberately **no** free expression language —
+every one is a checkable shape, and the moment an author needs something outside it, that is a signal
+the projection's grain is wrong, not that the grammar is too small. Which is exactly what happened
+below.
+
+#### D8a — The `serviceType` problem dissolves: it was a GRAIN error, not a missing field
+
+The product owner asked what `serviceType` was about. The honest answer is **"not an issue at all"**,
+and the reason is worth more than the fix.
+
+The stated problem: a projection keyed by `(restaurantId, serviceType, day)` cannot be decremented by
+`OrderCancelledByCustomer`, because that event carries only `orderId`, `restaurantId` and `reason`
+(F14). Two fixes were offered — drop the key field, or add it to the event (a versioning story). **A
+third was proposed in review and it is better than both**, and a fourth is better still.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Fold at the ENTITY grain — key the projection by `orderId`, `set` the status per lifecycle event, and let `groupBy` do the grouping at READ time** ✅ **recommended** | **Measured: every one of the 11 `Order*` events carries `orderId`** (`specs/ordering/events.yaml`; `OrderExpired` carries `orderId` and nothing else). So the fold is **total over the entire lifecycle with zero event changes**, and `fold-key-not-on-every-event` proves it rather than assuming it. There is no decrement at all — a cancellation is `set: status → CANCELLED` on the order's own row — so the whole class of "the decrement cannot find its row" disappears. Re-grouping later (by hour, by service type, by both) is a **query change, not a re-fold**, which is the flexibility the aggregate grain gives up. It is also the more Young-ish shape: the projection is the fold, the query is the query. **The versioning story is withdrawn** | One row per order rather than one per key-combination — at V0-in-Tours volume this is trivial, and a rollup is a later, separate projection if it is ever needed. The row carries `restaurantId` and (for `CustomerOrderCounts`) `customerId`, so it is in the erasure path — which is correct, and the precedent already exists (`projection_tables.yaml:829`) |
+| Aggregate grain plus an **order-id → key index projection**, resolving the cancellation through the lookup | Keeps the compact aggregate row. Works, and is ordinary practice: the index is itself a fold over `OrderPlaced`, and because `OrderPlaced` always precedes the cancellation **in the same `Order-{id}` stream**, the lookup is provably populated before it is read — so the fold stays total and the validator can still say so | Two projections and a join to maintain for one metric, and the validator rule gets materially harder: it must prove the *index* is total, that the lookup key is on every folded event, and that the index is written before it is read. Real cost for a compaction nobody needs at V0. Keep it as the documented answer for when volume demands a rollup |
+| Drop `serviceType` from the key | Free | Throws away the breakdown that makes the metric useful to a restaurant — delivery-vs-pickup mix is one of the few numbers an independent restaurant actually acts on |
+| Add `serviceType` to every lifecycle event | The aggregate grain then works directly | A payload shape change on emitted events: a **versioning story, not an edit** (free only while the log is empty). Paying that for a problem the grain already solves would be the wrong trade, and it is exactly the kind of "the spec must change because the design is awkward" that should be treated as a design smell first |
+
+**The rule earns its place twice over.** `fold-key-not-on-every-event` was introduced to catch a
+missing field. What it actually does here is **tell you your grain is wrong** — it fires on the
+aggregate-grained declaration and goes quiet on the entity-grained one, without anyone having to
+notice the `serviceType` asymmetry by hand.
 
 **Validator rules (all ERROR).** R1–R4 are the four already in D3; these are the fold's own.
 
@@ -279,10 +362,13 @@ something outside it that is a signal the projection's key is wrong, not that th
 |---|---|---|
 | R5 | `fold-event-unknown` | An `on:` that resolves to no declared event |
 | R6 | `fold-field-not-on-event` | A `from:`/`of:` naming a property **that event does not carry** — the direct answer to *"how do we know the property exists"* |
-| **R7** | **`fold-key-not-on-every-event`** | **An event in a projection's `fold:` that does not carry every field of that projection's `key:`.** The row could not be addressed. **This rule fails on `main` today** for any realistic Order projection (F14), which is what earns it |
-| R8 | `metric-over-unknown` · `metric-groupby-not-a-key` · `metric-value-measure-unknown` | A read over an undeclared projection, a `groupBy` on a non-key field (a scan), or a `value:` naming an undeclared measure |
+| **R7** | **`fold-key-not-on-every-event`** | **An event in a projection's `fold:` that does not carry every field of that projection's `key:`.** The row could not be addressed. It fires on the aggregate-grained declaration and goes quiet on the entity-grained one — so what it really catches is a **grain error** (D8a), which is why the `serviceType` versioning story was withdrawn rather than paid |
+| R8 | `metric-over-unknown` · `metric-groupby-not-declared` · `metric-value-measure-unknown` | A read over an undeclared projection, a `groupBy:` `$ref` that resolves to no key or measure of *that* projection, or a `value:` `$ref` naming an undeclared measure |
 | R9 | `projection-unread` | A projection no metric reads — the `view-fedby-unused` parity rule, so folds cannot accumulate unowned |
 | R10 | `metric-query-unscoped` | An `exposedAs:` query whose read scope is not tenant-bounded. A metrics query is the highest-leverage cross-tenant leak in the product: one un-scoped resolver hands every restaurant's revenue to every other. This is [#144](https://github.com/TheCaptainCompany/captain-food/issues/144)/[#432](https://github.com/TheCaptainCompany/captain-food/issues/432) territory and must not be re-derived per metric |
+| **R11** | **`bare-name-reference`** | **Any key in this catalog whose value is a bare name pointing at something declared elsewhere.** The structural half of ADR-20260811-014129 Decision 2: `increment:`, `groupBy:`, `value:`'s operand and `over:` must be `$ref`s. Without it the rule is prose, and [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) is the recorded proof that prose does not hold — a plain-string `tombstone:` was invisible to the refs walker *and* to the rule written for it |
+| R12 | `key-alias-redundant` | An explicit `as:` that equals the name derived from the referenced property. Keeps the alias for the one case that needs it (an envelope bucket) and refuses the form where a name and the thing it names can drift apart |
+| R13 | `value-set-not-scalar-backed` | An inline enumerated value list where a domain scalar already declares that set. "One name = one dedicated scalar" applied to a value set — see PROP-20260811-000946 D3a for the case that earned it |
 
 ### D9 — How is a metric read, and by whom?
 
@@ -308,30 +394,38 @@ refusal, and the coverage report the product owner works from.
 | version: 1                                                               |
 |                                                                          |
 | projections:                    # LAYER 1 -- the fold (bam projector)    |
-|   OrderOutcomes:                                                         |
-|     key:      [ restaurantId, day ]        <-- D6: bounded populations   |
-|     measures: [ orders(counter), gross_cents(sum) ]                      |
+|   OrderFacts:                              <-- DECLARATION: a bare name  |
+|     grain: ENTITY                              is CORRECT here, and only |
+|     key:                                       here (ADR-...-014129 D2)  |
+|       - from: { $ref: '.../OrderPlaced/properties/orderId' }             |
+|            ^ column name DERIVED from the ref -- no second place to      |
+|              disagree. `as:` only for an envelope bucket (R12).          |
+|     measures:                                                            |
+|       - { name: status,     type: set, of: { $ref: '.../OrderStatus' } } |
+|       - { name: grossCents, type: sum }                                  |
 |     fold:                                                                |
-|       - on OrderPlaced              -> increment orders by 1             |
-|       - on OrderPlaced              -> add gross_cents from              |
-|                                        totalAmount.amountCents           |
-|       - on OrderCancelledByCustomer -> increment cancelled by 1          |
-|                                                                          |
+|       - on:  { $ref: '.../OrderPlaced' }                                 |
+|         set: { $ref: '#/projections/OrderFacts/measures/status' }        |   <-- REFERENCE => $ref
+|         to:  PLACED                                                      |       (was `set: status`)
+|       - on:  { $ref: '.../OrderCancelledByCustomer' }                    |
+|         set: { $ref: '#/projections/OrderFacts/measures/status' }        |
+|         to:  CANCELLED                     <-- total: every Order event  |
+|                                                carries orderId (F16)     |
 | metrics:                        # LAYER 2 -- the read                    |
 |   orders_placed_total:                                                   |
 |     question: >                                                          |   <-- D3: refused if empty
-|       Are orders actually completing end to end, and at what hourly      |
+|       Are orders actually completing end to end, and at what hourly      |       PROSE stays prose
 |       shape? Feeds the Friday/Saturday 19:00-21:30 peak view and the     |
 |       dead-man's-switch alert (#483).                                    |
 |     activity:  { $ref: 'stories.yaml#/customer/activities/OrderFood' }   |   <-- D2: activity, not step
-|     over:      { $ref: '#/projections/OrderOutcomes' }                   |
-|     groupBy:   [ day ]                                                   |
-|     value:     { sum: orders }             <-- the counter is ONE LINE   |
+|     over:      { $ref: '#/projections/OrderFacts' }                      |
+|     groupBy:   [{ $ref: '#/.../measures/day' }]                          |   <-- was `groupBy: [day]`
+|     value:     { countRows: { where: [...] } }                           |
 |     alertable: true                        <-- D4: also taps an OTLP     |
 |     exposedAs: { $ref: 'api.yaml#/queries/orderOutcomes' }               |        counter, for #483
 |                                                                          |
 | unmeasured:                          # D3/D5: countable, monotone debt   |
-|   - { activity: 'stories.yaml#/admin/activities/Pricing',                |
+|   - { activity: { $ref: 'stories.yaml#/admin/activities/Pricing' },      |
 |       issue: 'https://github.com/.../issues/NNN' }                       |
 +--------------------------------------------------------------------------+
 ```
@@ -381,7 +475,7 @@ ERROR metric-story-unknown     business_metrics.yaml/prospects_cold_total
 That table is the deliverable behind *"the only way that will allow us to know the usage of the
 product"*. Today the honest version of it reads `3/29`, and nothing in the repo says so.
 
-### UC-4 — Failure state: the fold that cannot address its row (the refusal that fires on `main` today)
+### UC-4 — Failure states: the grain error, and the bare name
 
 ```
 $ make validate
@@ -391,15 +485,29 @@ ERROR fold-key-not-on-every-event   business_metrics.yaml/projections/OrderOutco
   (restaurantId, serviceType, day), but that event carries only
   (orderId, restaurantId, reason) -- it has no `serviceType`, so the decrement
   has no row to address.
-    Either drop `serviceType` from the key, or add the field to the event --
-    which is a PAYLOAD SHAPE CHANGE and needs a versioning story, not an edit
-    (free only while the log is empty; ADR-20260807-002705 D6).
-  Measured: `serviceType` appears on OrderPlaced and on NO other Order event.
+    Measured: `serviceType` appears on OrderPlaced and on NO other Order event.
+    Before changing an event payload (a VERSIONING story, not an edit): every
+    Order* event carries `orderId`. A projection at grain: ENTITY keyed by
+    orderId is TOTAL over the whole lifecycle, and the grouping moves to the
+    read, where every field is available. See D8a.
+
+ERROR bare-name-reference          business_metrics.yaml/metrics/orders_placed_total
+  `groupBy: [day]` is a bare name pointing at a declaration elsewhere in this
+  file. A typo here is not a broken reference -- it is a silently wrong metric.
+  Write { $ref: '#/projections/OrderFacts/measures/day' }.
+    Why this is a rule and not a convention: issue #413 -- a plain-string
+    `tombstone: SomeEvent` is invisible to the refs walker AND to the rule
+    written for it, because the walker only collects $ref nodes.
+
+ERROR key-alias-redundant          business_metrics.yaml/projections/OrderFacts/key/0
+  `as: restaurantId` equals the name derived from the referenced property.
+  Delete it -- an alias that restates its source is a place for the name and
+  the thing it names to drift apart.
 ```
 
-This is the failure a counter design cannot have and therefore cannot catch: a call site emits
+The first is the failure a counter design cannot have and therefore cannot catch: a call site emits
 whatever dimensions are in scope, the numbers disagree, and someone reconciles it by hand a month
-later.
+later. The second is the failure this proposal's own grammar had until the product owner read it.
 
 ### UC-5 — The read (D9): what a restaurant asks, and what it is not allowed to ask
 

@@ -43,6 +43,48 @@
 > payload nobody could change needed no versioning story. This is the structural work the delegation
 > calls for, and the window is open only while the log is empty (ADR-20260807-002705 D6, start-clean).
 
+> ✅ **2026-08-11 — THE REVERSAL IS CONFIRMED, AND THE SPEC GETS STRONGLY TYPED**
+> ([ADR-20260811-014129](adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md),
+> [DECISIONS §27bis](proposals/DECISIONS.md); docs-only).
+> Product owner, verbatim: *"Confirm the reversal, go with the projections"* and *"But we need to
+> heavily strongly typed the spec no string in it"*. MET-R closes.
+> **ADR-20260810-234225 is SUPERSEDED IN PART, never rewritten** — clauses 1–3 (persona activity as
+> the unit; declared + emitted + asserted; a metric states its question) are carried forward; clause 4
+> (*"never entity ids"*) and the enforcement table (*"generated instruments"*) are reversed. The old
+> file stays as the record of what was decided on 2026-08-10, including the reasoning that turned out
+> to be wrong.
+> **The second sentence is a separate decision and it landed on a real defect in the team's own
+> grammar.** `increment: orders`, `groupBy: [day]` and `value: { sum: orders }` were **bare names
+> pointing at declarations elsewhere in the same file** — so a typo was not a broken reference the
+> loader could catch, it was a *silently wrong metric*: the exact failure class the whole proposal
+> exists to remove, sitting inside the proposal. The product owner spotted it before the team did.
+> It is now four categories: a **declaration** may introduce a name; a **reference** is a `$ref` the
+> loader resolves (including same-file, which the repo already does at `specs/ordering/actors.yaml:102`);
+> a **value from a closed set** stays a bare token *unless a domain scalar already declares that set*,
+> where the `$ref` is mandatory; **prose stays prose**. The receipt that this is structural:
+> [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) — a plain-string `tombstone:`
+> is *"silently invisible everywhere"*, including to the rule written for it.
+> **The sharpest single fix**: `attributes: [{ values: [DELIVERY, COLLECTION] }]` in the tracking
+> catalog was a **verbatim copy of the `ServiceType` kernel scalar** (`specs/common/scalars.yaml:260-262`)
+> — now `{ $ref: 'scalars.yaml#/ServiceType' }`, so adding a third service type never leaves the
+> tracking spec silently disagreeing with the domain.
+> **And the `serviceType` problem dissolved: it was a GRAIN error, not a missing field.** Measured:
+> **every one of the 11 `Order*` events carries `orderId`** (`OrderExpired` carries it and nothing
+> else), so a projection at `grain: ENTITY` is **total over the whole lifecycle** — a cancellation is
+> `set: status → CANCELLED` on the order's own row, and the grouping moves to read time. **The
+> versioning story is withdrawn; no event needs a new field.** The rule earned its place twice:
+> `fold-key-not-on-every-event` was written to catch a missing field, and what it actually catches is
+> a wrong grain.
+> ⚠️ **One dependency surfaced (MET-W)**: `retention: P90D` as a free duration string contradicts a
+> recorded legal position — [the erasure brief:82](legal/BRIEF-20260808-account-erasure-two-path.md)
+> says the retention windows are *"declared once, in the DSL, feeding both the sweep and the DPIA"*.
+> No duration scalar exists. The fix is a declared retention-window catalog `$ref`'d by both, and it
+> belongs to [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) rather than to
+> either metrics or tracking issue.
+> **Not swept, deliberately**: the existing bare-name sites (`data_requirements:`/`actions_used:` 40,
+> `roles:` 112) are each covered by a bespoke validator rule today. Their conversion is its own
+> sequenced issue (MET-T2), not part of this.
+
 > ♻️ **2026-08-11 — A BUSINESS METRIC IS A PROJECTION, NOT A COUNTER — THE TEAM CHANGED ITS OWN
 > RECOMMENDATION, AND FILED THE REVERSAL RATHER THAN EXECUTING IT**
 > ([#484 "26 of the 29 declared `business_metrics` emit nothing…"](https://github.com/TheCaptainCompany/captain-food/issues/484),
@@ -151,6 +193,10 @@
 > site — so the chain is validator (coverage) → **generated instruments** (names, attribute types,
 > arity; deletes the scanner's metric half) → **`InMemoryMetricExporter` behaviour test** (it fires,
 > once, not on a replay). No source-text scanner is added.
+> ↑ ⚠️ **HISTORICAL — the two emphasised clauses in this paragraph were REVERSED the next day.** See
+> the 2026-08-11 "the reversal is confirmed" entry above: a business metric is a **projection**, not a
+> generated instrument, and grouping keys need a bounded *population* rather than being barred from
+> entity ids. This entry is left as written because STATUS is a chronological record.
 > **Sequencing**: gate forward now with an enumerated, monotone-shrinking `unmeasured:` waiver list,
 > backfill in value-stream order — a one-sweep backfill was already run at this scale and the 26 dead
 > declarations are its receipt. Register: [DECISIONS §27](proposals/DECISIONS.md) (D1–D7 team-owned,
