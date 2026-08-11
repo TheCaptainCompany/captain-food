@@ -79,8 +79,21 @@ Art. 17(3)(b)/(e) mechanism, (a). All retained items move to restricted-access a
 | The erasure receipt itself | Art. 5(2) | policy-defined | (a)/(b) |
 | Food-safety incident evidence | Code civil 1245-15 | 10 years from circulation, case-linked | (b) |
 
-This table IS the written retention schedule CNIL expects — windows declared **once, in the DSL**,
-feeding both the sweep and the DPIA. The open item from ADR-20260731-160000 (financial skeleton
+This table is the **proposed** written retention schedule CNIL expects. ⚠️ **CORRECTED 2026-08-11**:
+the original sentence here claimed the windows were *"declared once, in the DSL, feeding both the
+sweep and the DPIA"*. **That was false when written and is still false** — no duration scalar or
+retention-window catalog exists in `specs/**`, and `domain_stream`, the per-stream retention table
+those windows would land in, has **zero production writers** (the only `INSERT` in the tree is a
+test fixture, `crates/infrastructure/tests/main/deletion_engine.rs:99`). The correction is recorded
+at [DECISIONS MET-W](../proposals/DECISIONS.md), which approved the fix — a **named catalog of
+approved retention windows**, `$ref`'d, sequenced **with**
+[#194](https://github.com/TheCaptainCompany/captain-food/issues/194) — and the exposure is analysed
+in [BRIEF-20260811-erasure-zone-and-retention.md §4](BRIEF-20260811-erasure-zone-and-retention.md).
+Under Art. 5(2) the wording mattered in its own right: a controller-authored document asserting a
+schedule its own system does not implement is **worse evidence than silence**, because it is a
+statement the regulator can hold you to and then falsify from your own repository. Until the
+catalog lands, this table is a proposal, not a control.
+The open item from ADR-20260731-160000 (financial skeleton
 survives phase 2 OR is exported before it) **must be closed when account deletion ships** — the
 10-year records must exist somewhere after the streams die. (a) that one must be chosen; (b) which.
 

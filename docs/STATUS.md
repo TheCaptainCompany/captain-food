@@ -2,6 +2,106 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⚖️ **2026-08-11 — THE ERASURE-FREE ZONE, CORRECTLY FRAMED: THE STREAMS WERE **ALREADY** PERSONAL
+> DATA, AND TWO FORWARD TRAPS ARE NOW ON THE RECORD**
+> ([BRIEF-20260811-erasure-zone-and-retention.md](legal/BRIEF-20260811-erasure-zone-and-retention.md);
+> docs-only, no `specs/**` touched).
+> **The correction first, because it was recorded wrong.** The legal-lens pass over
+> [PR #488 "The open GraphQL path verifies credentials, and `current` is tenant-scoped by Host"](https://github.com/TheCaptainCompany/captain-food/pull/488)
+> / [#469 "`current` leg 1 is dead on the web AND is not tenant-scoped — fix both together or neither"](https://github.com/TheCaptainCompany/captain-food/issues/469)
+> said `Cart-*`, `Customer-*`
+> and `Restaurant-*` *"were an erasure-free zone and are now subject-attributable"*. **The second
+> half is wrong**, and the error is not cosmetic — "became personal data" invites the reading that
+> the obligations attach from now on, which would waive storage limitation, transparency and Art. 30
+> records for everything already designed. These streams were personal data by construction:
+> `CartStarted` **requires** `sessionId` (`specs/ordering/events.yaml:33-51`), the `SessionId` scalar
+> describes itself as *"used to bind carts and track the user across devices"*
+> (`specs/common/scalars.yaml:13-16`), `CartBoundToCustomer` writes the domain customer id onto the
+> same stream via a **designed** linking process manager, and `CustomerRegistered` **requires**
+> `phone` — `Customer-*` never needed the pseudonymity argument at all. Art. 4(1), Recital 30,
+> Art. 4(5) and CJEU C-582/14 *Breyer* all land the same way for a controller that operates the
+> linking mechanism.
+> **What #469 genuinely creates is narrower and different in kind**: seven open-path commands now
+> stamp `domain_events.user_id` with the **Supabase `sub`** (`crates/server/src/auth.rs:112-116`),
+> putting an **external identity-provider identifier** into the immutable write envelope of three
+> stream categories with **no erasure path** — and it **survives deletion of the Supabase identity**,
+> leaving an orphan in an append-only column. Whether that orphan is anonymous under Recital 26 or
+> still personal data is the question that decides whether **crypto-shredding** is optional or
+> mandatory (counsel packet **G4**).
+> **This is NOT a pre-existing breach and is not filed as an incident.** The production event log is
+> **empty by decision** (start-clean, ADR-20260807-002705 D6 — *"the window is open only while the
+> log is empty"*), so there is no data subject for an Art. 17 path to have failed. It is an **unmet
+> launch precondition, already correctly filed as
+> [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194)**. What changed is #194's
+> **size**, and it is boundable: **three stream categories, one identifier kind, no new obligation
+> class**. Trigger moment: the **first real customer order** — the same deadline as the Art. 35 DPIA
+> and the médiation-de-la-consommation registration.
+> ⚠️ **Trap 1, and it is the dangerous one — `Restaurant-*` must NEVER get an `Order`-shaped deletion
+> policy.** `RestaurantListingOptedOut` (`specs/network/events.yaml:344-356`) **is** the Art. 21
+> objection register; [the 0808 brief](legal/BRIEF-20260808-listing-opt-out-objections.md) Q1/Q4
+> states the historical event must be retained because *"it is the register, not stale data"*. The
+> one built erasure mechanism is *tombstone → delete the whole stream → receipt*
+> (`specs/ordering/actors.yaml:97-103`), and `Restaurant-*` will arrive at the #194 sweep as one of
+> the three categories with no path. Giving it that block would delete the proof of objection and
+> **permit re-listing** — the exact ProspectionPipeline failure the 0808 brief exists to prevent.
+> Nothing is broken today (`Restaurant` declares no `deletion:` block), so this is
+> **BLOCKER-on-arrival**, not a live defect.
+> **A gate was assessed and is NOT buildable today, for one reason**: the deletion DSL is well-formed
+> and already validated (`deletion-ref-unresolved` / `-match-untyped` / `-tree-cycle`), so the rule's
+> shape is easy — but the spec has **no way to say "this event is a legal register"**, and the only
+> alternative is hard-coding the event name in the validator, which is a comment written in Rust
+> rather than a spec-derived gate. **The fix is one small spec addition and it belongs to #194**: a
+> `legalRetention:` clause on the event naming its instrument and horizon, `$ref`-able from the
+> MET-W retention-window catalog; the rule then writes itself — *an actor whose `emits` reaches a
+> `legalRetention` event may not declare a stream-deleting `deletion:` block*. Until it lands the
+> hazard is **prose**, which is the weaker form on purpose-built record.
+> ⚠️ **Trap 2 — the retention control is asserted and inert.**
+> `specs/database/tables/eventstore.yaml:38-39` states that ephemeral streams such as `Cart` get a
+> retention row; **none does**. `domain_stream` has **zero production writers** — the only `INSERT`
+> in the tree is a test fixture (`crates/infrastructure/tests/main/deletion_engine.rs:99`); every
+> other reference is a `DELETE`, a comment or a validator note. So `$maxAge`/`$maxCount` bind
+> nothing and abandoned guest carts accumulate forever. Compounding it, [the erasure
+> brief:82](legal/BRIEF-20260808-account-erasure-two-path.md) claimed the written retention schedule
+> already existed *"in the DSL"* — false, as [DECISIONS MET-W](proposals/DECISIONS.md) recorded, and
+> **corrected in place in this change**. Under Art. 5(2) that ordering matters: a controller document
+> asserting a schedule its own system does not implement is **worse evidence than silence**. The fix
+> is decided and only needs sequencing — MET-W's **named catalog of approved retention windows**,
+> landing **with** #194.
+> 🔎 **One open question of FACT, team-owned, not counsel's**: does any **non-production** environment
+> hold real subject data? The empty-log argument collapses if it does. **Established from the repo**:
+> no staging/preview environment is declared anywhere it could hold data (`render.yaml` declares no
+> staging service; `staging` is a supported `APP_PROFILE` value with no service bound to it); CI's
+> database is an ephemeral per-job `postgres` container; the 2026-08-11 k3s rehearsal migrated an
+> **empty** database and never ran the auth/money smoke legs; there is no `docker-compose`, no `.env`
+> and the single `*seed*` artifact is referential policy rows. **NOT established, and it is the part
+> that matters**: the `DATABASE_URL` repo secret is opaque, `sirene-sync.yml` writes **real INSEE
+> rows** (which include *entrepreneurs individuels* — personal data per *Manni*) through it, and
+> `db-migrate.yml:29` documents the same secret as the Supabase pooler string; this repo's own
+> history records ~200k SIRENE-derived listings and ~200k `domain_events` tuples in the **pre-cutover**
+> database. Start-clean governs the **new** cluster; **the disposition of the old store is an
+> operational fact nobody has recorded**. Also unanswerable from the repo: whether any Supabase Auth
+> project holds real end-user identities. **Two answers are owed in writing before §2 of the brief
+> can be relied on in a DPIA.**
+> **Counsel packet extended to G1–G8** (appended to the consolidated packet in
+> [BRIEF-20260808-listing-opt-out-objections.md](legal/BRIEF-20260808-listing-opt-out-objections.md)):
+> empty-log reliance and the trigger moment · whole-stream deletion as the Art. 17 mechanism · **G3,
+> marked blocking** — L123-22/L102 B vs Art. 17, and which closure (10-year window + projection
+> tombstones, or export a financial skeleton first), blocking because the built path deletes the
+> whole stream on **one** window with **no per-category split**, as `specs/ordering/configuration.yaml:10-21`
+> says of itself · the orphaned `sub` and crypto-shredding · the Art. 21 register's minimum field set
+> keyed on SIREN/SIRET · a per-category schedule validated against CNIL délib. 2021-044 · **G7**,
+> `dietaryTags` as an unconstrained `array<Tag>` where `halal`/`kosher`/`allergy:peanut` are spellable
+> **today**, with the DPIA unfinalisable while it is open · **G8**, Art. 18 restriction of processing,
+> distinct from erasure and entirely unbuilt.
+> **Two items reported for routing, deliberately not acted on here**: the `SessionId` scalar
+> description (*"track the user across devices"*) **overstates the implementation** — an origin-scoped
+> `localStorage` UUIDv7 (`crates/web/src/session.rs:14-31`) that tracks nothing across devices — and
+> that wording is what decides whether the **Art. 82 LIL / ePrivacy 5(3) shopping-cart exemption**
+> covers it, so the spec text is the riskier artifact than the code (a `specs/**` change); and
+> `/public/graphql` now varies by the `captain_auth` cookie (ADR-20260811-113000) while **no `Vary` or
+> `Cache-Control` exists anywhere in the tree**, so `Cache-Control: private, no-store` is recommended
+> **on the #469 branch**, not here.
+
 > 🔓 **2026-08-10 (night) — THE `specs/**` FREEZE IS LIFTED: THE DSL IS THE TEAM'S WORK**
 > ([ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md),
 > product-owner directive: *"I'm surprise that I read that the spec was untouchable now that we have
