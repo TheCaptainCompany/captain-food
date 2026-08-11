@@ -84,6 +84,35 @@
 > **Not swept, deliberately**: the existing bare-name sites (`data_requirements:`/`actions_used:` 40,
 > `roles:` 112) are each covered by a bespoke validator rule today. Their conversion is its own
 > sequenced issue (MET-T2), not part of this.
+> **A fork closed WITHOUT taking it (MET-F), with the numbers.** Product owner raised projection
+> "state" as a JSON blob saved with the checkpoint, versus doing the fold in a generated SQL stored
+> procedure. **① The state already exists and is already transactional**: measured in
+> `crates/infrastructure/src/projection/worker.rs`, the projector holds **no fold state at all** —
+> load → project → upsert per event, `drain_group` folding up to 500 events and writing
+> `projection_checkpoint` **in the same transaction**. So *"loaded once and saved with the checkpoint
+> transactionally"* is what it already does; there is no blob to build and **no memory risk** — an
+> incomplete order is a row, and 100k of them is **12 MB**. The precedent for the JSON idea exists and
+> was deliberately *not* JSON (process-manager runs are typed columns). **② The SQL option is already
+> built and is the V0 default** — [ADR-0039](adr/0039-projection-views-generated-from-lineage.md)
+> generates a `CREATE OR REPLACE VIEW` state-fold over `domain_events`; `OrderFacts` is the same shape
+> as the shipped `View_DeliveryJob`. **③ The grammar is runtime-agnostic**; the one construct that
+> binds a runtime is `alertable:`, and it binds at the tap, not the fold. **④ Measured** (200k events /
+> 100k orders): set-based SQL **2.15 s** · plpgsql row-at-a-time **4.92 s** · Rust projector
+> **≈65–70 s** — but only **2.3×** of the 30× gap is set-versus-row, the rest is round trips that
+> [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) attacks without leaving Rust.
+> 70 s to rebuild every metric from 100k orders is **~500 days of Tours trading**; read-time grouping
+> is **27 ms**. **⑤ The argument that survives any volume assumption**: testing a generated procedure
+> means golden comparison against a Rust reference fold, so **SQL does not remove the Rust fold — it
+> adds a second one. Recorded recommendation: hybrid, deferred** — a total `(state, event) -> state`
+> vocabulary with **no host-language escape hatch** (what makes it both runtime-agnostic and
+> replay-deterministic), emit Rust today, optional per-projection `emit: sql` only if a rebuild ever
+> hurts. **⑥** The testability objection weakened the same day —
+> [#478](https://github.com/TheCaptainCompany/captain-food/pull/478) made DB tests required by default;
+> the real gap is that **no test loads `views.generated.sql` and asserts fold behaviour at all**.
+> ⚠️ **Separate finding, not part of the fork (MET-G)**: the projector's per-event **log-and-skip** is
+> correct for a read model and **wrong for a money-adjacent metric** — a skipped event leaves the count
+> permanently wrong with only an ERROR log. Wants a projection-lag/parity check, and is adjacent to the
+> `DbFaultPolicy` decision still open from [#474](https://github.com/TheCaptainCompany/captain-food/issues/474).
 > **Follow-up answered, no design change (MET-S2).** Product owner: *"this kind of counter must be
 > computed once the order is completed so a process manager can handle it."* **The first half is right
 > and is already what the entity-grain design does** — the fold `set`s status, the metric asks

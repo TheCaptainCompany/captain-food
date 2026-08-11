@@ -446,6 +446,160 @@ separately.
 | R12 | `key-alias-redundant` | An explicit `as:` that equals the name derived from the referenced property. Keeps the alias for the one case that needs it (an envelope bucket) and refuses the form where a name and the thing it names can drift apart |
 | R13 | `value-set-not-scalar-backed` | An inline enumerated value list where a domain scalar already declares that set. "One name = one dedicated scalar" applied to a value set — see PROP-20260811-000946 D3a for the case that earned it |
 
+#### D8c — Projection state, and Rust-fold vs SQL-fold: a fork that does not need settling
+
+The product owner's follow-up, verbatim: *"We need to put in place a concept of state in the
+projection… The state could be a simple json save in database and loaded once and saved with the
+checkpoint transactionally… The risk with this approach is that we going to have a big state with all
+the order incomplete in memory."* — *"What I'm considering is to do this computation directly in SQL
+with a stored procedure… The problem with that is that it's not testable… We can still declare the
+metrics projection in the spec and let the generator do the stored procedure."*
+
+**Three answers, and the first two mean the third does not need deciding now.**
+
+**① The "state" already exists, it is already transactional with the checkpoint, and nothing is held
+in memory.**
+
+The state needed to *"compute the metric at the right time"* is the entity-grain row of D8a: it carries
+`serviceType` from `OrderPlaced` and its `status` is set by the terminal event, addressed by `orderId`.
+That is not a JSON blob and it is not in memory.
+
+**Measured by the `dba` lens in `crates/infrastructure/src/projection/worker.rs`** — the projector
+holds **no fold state at all**: every event is load → project → upsert, so the state **is** the
+projection row and the process is stateless between events. `drain_group` opens **one transaction**,
+folds up to 500 events with read-your-writes, and writes `projection_checkpoint` **in that same
+transaction**.
+
+So *"loaded once and saved with the checkpoint transactionally"* is **not something to build — it is
+what the projector does today.** No JSON blob, no state table, temporary or real. The risk named —
+*"a big state with all the order incomplete in memory"* — **does not arise**: an incomplete order is a
+row, and **100k of them is 12 MB**.
+
+Two notes worth keeping. First, in this repo's V0 default the projection is not even a table — it is a
+**generated SQL fold VIEW over `domain_events`**, computed on read, holding no state whatsoever
+(②). Second, **the precedent for the JSON idea exists and was deliberately not JSON**: process-manager
+runs are typed columns in real tables, not blobs.
+
+A JSON-blob-plus-checkpoint would therefore be a step backwards twice over — it is unindexable, cannot
+be queried, grows without bound, and makes GDPR erasure a read-modify-write of the whole blob instead
+of a row delete, against a design whose erasure story is already the hard part
+([#194](https://github.com/TheCaptainCompany/captain-food/issues/194)).
+
+A JSON-blob-plus-checkpoint would in fact be a step backwards, and it is worth saying why so it is not
+revisited: a blob is unindexable, cannot be queried, grows without bound, and makes GDPR erasure a
+read-modify-write of the whole blob instead of a row delete — against a design whose erasure story is
+already the hard part ([#194](https://github.com/TheCaptainCompany/captain-food/issues/194)).
+
+**② The SQL option is not a new idea here — it is built, generated, and it is the V0 DEFAULT.**
+
+| Fact | Evidence |
+|---|---|
+| The repo already generates a SQL **state-fold over `domain_events`** from a declaration | `specs/generated/views.generated.sql`: *"Read models realized as SQL VIEWS: a `CREATE OR REPLACE VIEW` state-fold over `domain_events`, generated from each column's `from` lineage"*; emitter at `tools/codegen-rs/src/emit/sql.rs:547,561` |
+| It is a recorded decision, and it is the **default** | [ADR-0039 "Projection views generated from event lineage (fold generator)"](../adr/0039-projection-views-generated-from-lineage.md) (Accepted 2026-07-06), refining ADR-0035 #2 — *"a V0 read model is a SQL view over the append-only `domain_events` log"* (`docs/adr/0035-project-structure-clean-architecture.md:75`, **projection-on-read**) |
+| **The criterion for choosing the other runtime is ALREADY RECORDED** | *"Read models whose columns are COMPUTED are materialized tables in `tables/projection_tables.yaml` instead"* (`views.generated.sql` header). And in practice: *"the plain fold view (projection-on-read, V0 default) serves the queue; a projector remains a [fallback]"* (`docs/adr/20260720-003142-refund-opened-event.md:54`) |
+| `OrderFacts` is **exactly the shape already generated** | `View_DeliveryJob` (`views.generated.sql`) keys by stream, derives `status` with a latest-event-wins `CASE … ORDER BY e.position DESC LIMIT 1`, and takes set-once columns from the creation event. `OrderFacts` is the same: `serviceType` set-once from `OrderPlaced`, `status` latest-wins across the lifecycle |
+
+So the product owner is describing something this repo built once and shipped — and the answer is
+**better than a stored procedure**: a VIEW needs no state table, no temporary table and no procedure.
+ADR-0039 exists because the *hand-written* first fold had a subtle set-once bug (a naive
+`DISTINCT ON … ORDER BY position DESC` takes the latest event's whole payload, so fields present only
+on the creation event went null after any update). Generating it is what fixed that class — which is
+the same argument as *"let the generator do the stored procedure"*, already won.
+
+**③ Is the `projections:` grammar runtime-agnostic? Yes — with exactly one binding, named precisely.**
+
+The grammar declares **what changes on which event**, never how the change is executed. No construct
+names a Rust type, a crate, a function or an in-process concept. Every operation maps to SQL, and the
+hardest part is already generated:
+
+| Construct | SQL |
+|---|---|
+| `set` / latest-wins status | the `CASE … ORDER BY e.position DESC LIMIT 1` already emitted for `View_DeliveryJob` |
+| set-once key fields (`serviceType`) | the creation-event column lineage ADR-0039 exists to get right |
+| `add` / `increment` / `decrement` | `sum(…) FROM domain_events WHERE event_type IN (…)` |
+| `max` / `min` | `max()` / `min()` — already emitted (`picked_up_at`, `delivered_at`) |
+| `bucket: DAY` | `date_trunc` |
+| `groupBy` / `countRows` / `ratio` | `GROUP BY`, `count(*)`, a division |
+
+**The one construct that binds a runtime is `alertable:`.** A view cannot emit an OTLP counter — the
+dead-man's-switch tap needs a host process. That binding is at the **tap**, not at the fold: a host
+reads the row after the fold and emits. So even `alertable:` does not force the *fold* into Rust.
+
+Therefore **this fork does not need settling now**, and that is the finding rather than an evasion:
+the declaration compiles to either target, the repo already emits both, and the repo already has a
+**stated criterion** for which — expressible from column lineage → generated VIEW; COMPUTED → a
+materialized table with a generated projector. The metrics grammar **inherits that criterion** instead
+of re-litigating it, and the choice is made **per projection, by shape and volume**, when there is
+volume to judge.
+
+**③b The measured fork** (`dba` lens, 200k seeded events / 100k orders):
+
+| Fold runtime | Full rebuild |
+|---|---|
+| Set-based SQL | **2.15 s** |
+| Row-at-a-time inside plpgsql | 4.92 s |
+| Rust projector | **≈ 65–70 s** |
+
+SQL is ~30× faster on a full rebuild — but **only 2.3× of that is set-versus-row**; the other ~13× is
+**round trips**, which [#267](https://github.com/TheCaptainCompany/captain-food/issues/267)'s identity
+map attacks *without leaving Rust*. And the number that actually decides it: **70 seconds to rebuild
+every business metric from 100k orders**, which at Tours V0 volume is **~500 days of trading**.
+Read-time grouping over those rows is **27 ms** — which independently confirms D8a's entity grain
+needs no pre-aggregated daily table.
+
+**The argument that survives any volume assumption**, and the reason this is not merely "defer because
+V0 is small": **testing a generated procedure means golden-output comparison against a Rust reference
+fold — so SQL does not remove the Rust fold, it adds a second one.** The cost is not paid once at
+build time; it is paid on every change to a fold, forever.
+
+**Recommendation: hybrid, deferred.** Keep the fold vocabulary a **total `(state, event) -> state`**
+over `set` / `inc` / `max`, with **no host-language escape hatch** — that is simultaneously what keeps
+the declaration runtime-agnostic *and* what makes replay deterministic, which is the property the whole
+recovery story rests on. **Emit Rust today**; add an optional per-projection `emit: sql` if a rebuild
+ever actually hurts. Cost of deferring: near zero, same DSL. Cost of building SQL now: a second fold to
+maintain, a migration path under expand/contract instead of a deploy, and the loss of
+`event.consume.projection` spans inside a procedure.
+
+Note this cuts *against* the V0 default for this one catalog: projection-on-read (ADR-0035 #2) is right
+for read models a screen queries, but a metrics fold over the whole log is a full scan with correlated
+subqueries, and 27 ms read-time grouping over materialized rows is the better shape. That is the
+recorded criterion applied, not overridden — COMPUTED columns → materialized table.
+
+**④ Testability — the objection is substantially weaker than when it was raised.**
+
+*"The problem with that is that it's not testable, except if we create a test database"* — that
+infrastructure **landed the same day**:
+[#474](https://github.com/TheCaptainCompany/captain-food/issues/474) / [#478](https://github.com/TheCaptainCompany/captain-food/pull/478)
+made `make test-crates` run the workspace with **database tests required by default**, so a missing
+database fails loudly instead of skipping silently, and the Stop hook invokes it on any `crates/` or
+`migrations/` diff.
+
+There is still a real gap to name: **no test currently loads `views.generated.sql` into a database and
+asserts fold behaviour at all** — `views.generated.sql` appears only in the emitter and `main.rs`, in
+no test. So the generated folds are proved byte-identical to the spec and never proved *correct*, which
+is exactly the bug class ADR-0039 was written for.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Seed events into a test database, query the generated fold, assert the rows** ✅ **recommended now** | Cheap, uses infrastructure that exists today, and catches the set-once class ADR-0039 exists for. It is the test the generated views should already have had, so it pays for itself beyond metrics | Needs a seeding helper for `domain_events`; `initdb` costs ~40s per run |
+| **A differential/golden test: the same seeded events through the generated SQL and through a reference Rust fold, asserting identical rows** — **required if and only if `emit: sql` is ever taken** | It does not just test the fold — it **proves the runtime-agnosticism claim of ③ instead of asserting it**, and makes moving one projection between targets a change the tests can vet | **This is the real price of the SQL option, and it is why ③b defers rather than adopts**: the golden comparison needs a Rust reference fold, so choosing SQL does not replace the Rust fold — it **adds a second one**, and the cost recurs on every change to a fold rather than being paid once |
+| Leave it untested | Zero cost | Is the status quo, and ADR-0039's own origin story is a hand-written fold with a silent bug |
+
+**⑤ One finding from the same review that is NOT about the fork, and must not be lost inside it.**
+
+The projector's per-event failure handling is **log-and-skip**. For an ordinary read model that is
+correct — a skipped row is re-derivable and the screen is eventually consistent. **For a money-adjacent
+business metric it is wrong**: a skipped event leaves the count **permanently wrong**, with nothing but
+an ERROR log to say so, and a metric that is quietly wrong is worse than a metric that is missing —
+it is the `business_metrics` failure of F2 with extra steps.
+
+This does **not** want a redesign. It wants a **projection-lag or parity check** — a signal that says
+"this projection has skipped N events" or "placed-count disagrees with the log" — which is exactly the
+kind of thing `alertable:` and [#483](https://github.com/TheCaptainCompany/captain-food/issues/483)'s
+dead-man's switch exist for. It is also **adjacent to the `DbFaultPolicy` decision still open from
+[#474](https://github.com/TheCaptainCompany/captain-food/issues/474)**: cross-referenced here rather
+than duplicated, because the fault policy is the general answer and this is one consumer of it.
+
 ### D9 — How is a metric read, and by whom?
 
 | Option | Pros | Cons |
