@@ -2,6 +2,48 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗂️ **2026-08-11 — THE 57-APP LIST, AND THE PER-APP KNOWLEDGE THAT LIVES IN RUST**
+> ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md),
+> [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491),
+> [DECISIONS §30](proposals/DECISIONS.md); docs-only, no `specs/**` touched.)
+> Product-owner request: *"Give me the app list to be on the same page… create a sub folder for each
+> app/worker and indicate what it contains."* **Half of it needed no decision** — the 57 apps grouped
+> by family, with what each family contains, are §1 of the proposal (15 `actor-*` · 5 `pm-*` ·
+> 7 `projector-*` · 8 `graphql-*` · 7 `gateway-*` · 5 `fo-*`/`bo-*` · 5 `adapter-*` · 4 `worker-*` ·
+> `bam`).
+> **The other half is a "no" inside a "yes".** The app list already exists as source
+> (`specs/architecture/c4-l2.yaml` `containers:`), and a folder in `specs/**` **cannot** make a scope
+> boundary real — only the crate graph does, which is
+> [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)'s
+> job and is untouched. So the recommendation is deliberately narrower than the request: **source for
+> deploy-owned facts only, generated for everything derivable, and the `containers:` block MOVED
+> rather than copied** — a folder that restates the derivation is a drift surface, which is the one
+> outcome worse than doing nothing.
+> **What the folder is genuinely FOR**: the per-app knowledge that today lives in **Rust, inside the
+> generator** — `worker_config_consumers()` is a literal `match name { "worker-sirene-sync" => … }`
+> (`tools/codegen-rs/src/emit/bins.rs:217-224`), the grant narrowings are per-family `if`s (`:111-139`),
+> and `replicas: 1` / `strategy: Recreate` are string literals (`tools/codegen-rs/src/emit/deploy.rs:335-340`)
+> under a comment promising *"Flipping either value is a SPEC change"* while **no spec key exists to
+> flip**.
+> ⚠️ **The measured finding is a credential boundary, not a code one.** `adapter-stripe` — the pod
+> whose stated reason to exist is *"holds ONLY this partner's secrets"* (`c4-l2.yaml:125`,
+> `emit/bins.rs:415`) — carries **13** secrets in its generated pod env, including `AUTH_SESSION_KEY`,
+> `SUPABASE_SECRET_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN` and the four `OVH_*` SMS
+> credentials; `gateway-public` (*"no DB access, no business logic, no state"*) carries **10**;
+> `bam` carries **18**, including `STRIPE_SECRET_KEY`. The narrowing mechanism exists and works —
+> `worker-erasure` carries exactly **2** (`worker_key_allowed`, `emit/bins.rs:131-139`) — it is applied
+> to one family. The derivation is also too NARROW somewhere: `worker-sirene-sync`'s pod env has no
+> `INSEE_API_TOKEN`, and `SireneClient::from_env` returns `Err` without it
+> (`crates/sirene_ingest/src/client.rs:100-102`) — correct today, a live trap at the #358 cutover.
+> **Sequencing is the one product-owner row** (§30 APP-1), because this and the 2026-08-11 enforcement
+> directive compete for the same weeks; recommended answer is slice A1 (the generated app index, no
+> source moved) now and the rest after §29 slice 1, so nothing displaces the enforcement track.
+> **[#490 "Scope-closure ratchet"](https://github.com/TheCaptainCompany/captain-food/issues/490) is
+> unaffected and stays dispatchable** — with one accuracy note for its executor: recomputing the
+> closure over the workspace manifests gives **49** violating bins, not 50, and the clean set is the
+> 7 `gateway-*` **plus `bam`** (which declares all 8 domain crates, so under the issue's own equality
+> rule it passes — listing it in `PENDING_DECOMPOSITION` would land the ratchet red).
+
 > ⚖️ **2026-08-11 — THE ERASURE-FREE ZONE, CORRECTLY FRAMED: THE STREAMS WERE **ALREADY** PERSONAL
 > DATA, AND TWO FORWARD TRAPS ARE NOW ON THE RECORD**
 > ([BRIEF-20260811-erasure-zone-and-retention.md](legal/BRIEF-20260811-erasure-zone-and-retention.md);
