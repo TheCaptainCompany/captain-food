@@ -162,6 +162,18 @@ fn main() {
     // instead of being re-derived by hand against a pristine `main` worktree once per session.
     let live_profile = warning_profile(&issues);
     if write_baseline {
+        // A blessed baseline may only be minted from a GREEN model. With errors present the warning
+        // profile describes a spec the validator has already rejected — several sections stop early
+        // or never run on a broken model — so writing it would ratchet in a histogram that no valid
+        // spec ever produced, and the exit code would call it a success.
+        if !errors.is_empty() {
+            eprintln!(
+                "\n✗ refusing to write {} — the model has {} error(s) (listed above).\n  Fix them first: a baseline is only meaningful for a spec that validates.",
+                WARNING_BASELINE_PATH,
+                errors.len()
+            );
+            std::process::exit(1);
+        }
         let path = root.join(WARNING_BASELINE_PATH);
         if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
             eprintln!("✗ write {}: {}", path.display(), e);

@@ -499,8 +499,9 @@ Copied to the tracking issues' checklists on approval (README convention):
 
 ## H. Verification plan
 
-- Every realizing step lands through the standard flow: `make validate` at 0 errors, warning
-  count/kinds diffed against a re-measured `main` baseline, `make rust` green.
+- Every realizing step lands through the standard flow: `make validate` at 0 errors with
+  `tools/codegen-rs/warning-baseline.json` unchanged (or refreshed in the same commit, with the
+  reason), `make rust` green.
 - Step 1 is verified by the pinned tests it adds: the "live order never tombstones"
   (terminal-only scheduling) test, plus read-side contract tests for each of the three faces
   (null meaning, degraded row rendering the carried name, no silent drop / no join hard-error).

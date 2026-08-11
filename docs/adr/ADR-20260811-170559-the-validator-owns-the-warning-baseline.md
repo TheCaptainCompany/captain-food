@@ -47,12 +47,38 @@ The comparison is **exact in both directions**:
 `make warning-baseline` is the **only** writer (`generate --write-warning-baseline`). A change that
 legitimately moves the warning surface refreshes the artifact **in the same commit**; the diff
 (`+1 event-not-projected`) is the record, and the PR body says why an added warning is accepted. The
-artifact carries its own `doc` field saying this, and `total` is cross-checked against the histogram
-sum so a hand-edit that fudges one of the two is rejected.
+**Every field is asserted, prose included.** `total` is cross-checked against the histogram sum, and
+the artifact's `doc` field — the one place a reader is told how to change the file — must be verbatim
+the text the writer emits. That check was added after review caught the artifact shipping a `doc` that
+pointed at validator **section 16** while the section had been renumbered to **17**: hand-patched
+everywhere except in the file whose own text forbids hand-editing, and invisible to a gate that read
+only `by_rule`/`total`. An unasserted self-description is just a comment — the exact defect class this
+ADR exists to abolish, one level up. `make warning-baseline` is refused outright on a model with
+errors, so a red spec can never mint a blessed baseline.
 
 **No document pins a warning count any more.** `CLAUDE.md`, `docs/claude/codegen.md`,
 `docs/claude/autonomous-run.md` and `.claude/agents/reviewer.md` point at the artifact and at the
 gate; the "re-measure on a pristine `main` worktree" ritual is deleted, not restated.
+
+**The sweep covers open proposals too, not only the agent-facing files.** A grep for the ritual found
+it in nine proposals and in the live decision queue. Three classes, handled differently:
+
+1. **A false premise arguing a still-open decision** — [DECISIONS.md](../proposals/DECISIONS.md) D3 of
+   the business-metrics queue, and the matching pros/cons rows in `PROP-20260810-234225` and
+   `PROP-20260811-000946`, all justified ERROR severity with "a warning changes no behaviour". That is
+   now false and it was **load-bearing**, so it is corrected in place: the recommendation still stands,
+   but on the ground that survives — a warning is cleared by refreshing a *count*, while the enumerated
+   waiver list names each exemption and shrinks. The architect should know D3's argument is weaker than
+   when it was written.
+2. **Prospective acceptance criteria in unrealized proposals** — six lines instructing a future
+   executor to re-measure against a pristine `main`. Corrected: proposals are living documents
+   (ADR-20260801-020000), and leaving a live instruction to perform an abolished ritual is the same
+   defect the agent-file sweep was for.
+3. **Applied history** — the expected-validator-delta sections of `PROP-20260808-221424` and
+   `PROP-20260808-233000` (both Approved *and applied*), and
+   [ADR-20260810-234225](ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md).
+   Left as written: they record what was predicted for a change that already landed. History is not
+   corrected, only superseded.
 
 ## Alternatives considered
 
@@ -89,5 +115,8 @@ gate; the "re-measure on a pristine `main` worktree" ritual is deleted, not rest
 
 ### Follow-up actions
 
-- None. The artifact is self-refreshing by command and self-describing in its `doc` field; nothing
-  needs to be remembered.
+- None for this mechanism. The artifact is self-refreshing by command, and every one of its fields —
+  `doc` included — is asserted, so "self-describing" is a gate rather than a claim.
+- For the architect, not for this ADR: **D3 of the business-metrics decision queue lost its original
+  argument** (see above). The recommendation is unchanged and still defensible, but if that row is
+  being decided, decide it on the waiver-list reasoning, not on "warnings are invisible".

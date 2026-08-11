@@ -6861,10 +6861,46 @@ fn the_baseline_artifact_round_trips_and_rejects_an_inconsistent_edit() {
         parse_warning_baseline(&fudged).unwrap_err().contains("sums to 12"),
         "a fudged total must be rejected, not trusted"
     );
-    assert!(parse_warning_baseline("{}").is_err(), "a baseline without by_rule is not a baseline");
+    let doc = serde_json::to_string(BASELINE_DOC).expect("doc serialises");
+    assert!(parse_warning_baseline("{}").is_err(), "an empty object is not a baseline");
     assert!(
-        parse_warning_baseline("{\"total\":0,\"by_rule\":{\"x\":0}}").is_err(),
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0}}"))
+            .unwrap_err()
+            .contains("by_rule"),
+        "a baseline without by_rule is not a baseline"
+    );
+    assert!(
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0,\"by_rule\":{{\"x\":0}}}}"))
+            .unwrap_err()
+            .contains("drop the entry"),
         "a zero entry is a kind that no longer occurs — it must be dropped, not pinned at 0"
+    );
+}
+
+/// `doc` is the ONLY field of the artifact a human reads, the only one telling them how to change
+/// it — and the only one `by_rule`/`total` cannot notice going stale. It shipped pointing at
+/// validator section 16 after this section was renumbered to 17, hand-patched everywhere except in
+/// the file whose own text forbids hand-editing. So it is asserted verbatim, in both directions:
+/// a stale pointer is rejected, and the committed artifact's doc is the writer's doc.
+#[test]
+fn a_hand_edited_or_stale_doc_field_is_rejected() {
+    let profile: WarningProfile = [("command-no-mutation".to_string(), 1usize)].into_iter().collect();
+    let json = render_warning_baseline(&profile);
+    assert!(parse_warning_baseline(&json).is_ok(), "the tool's own output must parse");
+
+    // The exact defect that shipped: the renumbering §16 -> §17 missed the artifact.
+    let stale = json.replace("section 17", "section 16");
+    assert_ne!(stale, json, "the rendered doc must name the section, or this test proves nothing");
+    assert!(
+        parse_warning_baseline(&stale).unwrap_err().contains("`doc`"),
+        "a doc pointing at the wrong validator section must fail the gate, not mislead the reader"
+    );
+
+    assert!(
+        parse_warning_baseline(&json.replace(&format!("  \"doc\": {},\n", serde_json::to_string(BASELINE_DOC).unwrap()), ""))
+            .unwrap_err()
+            .contains("`doc`"),
+        "an ABSENT doc is not a way around the check"
     );
 }
 
@@ -6909,8 +6945,15 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let model = load_model(&root.join("specs")).expect("load real specs");
     let Report { mut issues, .. } = validate(&model);
-    // Same issue set the CLI gates on: the spec sections plus §13 proposals and §16 writer/schema.
+    // Same issue set the CLI gates on (main.rs), section for section: the spec sections, plus §13
+    // proposal hygiene and §16 writer/schema agreement. §16 belongs here even though it emits only
+    // errors today — the committed artifact is written from the CLI's profile, so the day §16 grows a
+    // warning kind, a narrower profile here would go red against a CORRECT artifact.
     issues.extend(validate_proposal_hygiene(&load_proposal_files(&root)));
+    issues.extend(validate_writer_schema_agreement(
+        &load_migration_files(&root),
+        &load_writer_files(&root),
+    ));
     let live = warning_profile(&issues);
     if let Err(msg) = check_warning_baseline(&root, &live) {
         panic!("{msg}");

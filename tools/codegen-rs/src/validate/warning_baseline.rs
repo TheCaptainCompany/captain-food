@@ -19,6 +19,10 @@
 //!
 //! Exact-match both ways is what makes the number un-stale-able: a stale baseline fails the gate
 //! instead of misleading a reader. Nothing anywhere needs to restate the count in prose.
+//!
+//! The check covers the WHOLE file, prose included — `doc` must be verbatim what this module writes.
+//! An artifact that forbids hand-editing in a field nothing asserts is just a comment, and it was
+//! already wrong when it first landed (it named section 16 after the renumbering to 17).
 
 use crate::*;
 
@@ -26,8 +30,9 @@ use crate::*;
 pub(crate) const WARNING_BASELINE_PATH: &str = "tools/codegen-rs/warning-baseline.json";
 
 /// The `doc` field baked into the artifact: whoever opens the file learns how to change it without
-/// leaving the file.
-const BASELINE_DOC: &str = "GENERATED warning ratchet (validator section 17) -- do not hand-edit. \
+/// leaving the file. It is ASSERTED, not just written (see `parse_warning_baseline`) — an unchecked
+/// self-description is a comment, and a comment is the thing this section exists to abolish.
+pub(crate) const BASELINE_DOC: &str = "GENERATED warning ratchet (validator section 17) -- do not hand-edit. \
 `make validate` fails when the live per-rule warning histogram differs from this one, in EITHER \
 direction. To change it, run `make warning-baseline` and commit the result in the SAME commit as \
 the spec/code change that moved the number; a deliberate INCREASE is recorded by that diff plus one \
@@ -68,11 +73,23 @@ fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
-/// Read the committed ratchet. `total` is cross-checked against the histogram so a hand-edit that
-/// fudges one of the two cannot pass — the artifact is tool-written, and this says so out loud.
+/// Read the committed ratchet. EVERY field is checked, so that no byte of the artifact is outside the
+/// ratchet: `total` is cross-checked against the histogram, and `doc` must be verbatim the text this
+/// tool writes. The `doc` check is not decoration — `doc` is the only field a human reads and the only
+/// one that tells them how to change the file, so a hand-patched or stale `doc` misdirects every future
+/// reader while `by_rule`/`total` stay perfectly green. It shipped wrong on day one (it pointed at
+/// validator section 16 after this section was renumbered to 17), which is precisely the "a number in
+/// prose goes stale" defect this section exists to abolish, one level up.
 pub(crate) fn parse_warning_baseline(text: &str) -> Result<WarningProfile, String> {
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("not valid JSON: {e}"))?;
+    let doc = v
+        .get("doc")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| "missing string field `doc`".to_string())?;
+    if doc != BASELINE_DOC {
+        return Err("`doc` is not the text this tool writes — the file is hand-edited or stale".to_string());
+    }
     let by_rule = v
         .get("by_rule")
         .and_then(|x| x.as_object())

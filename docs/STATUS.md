@@ -302,6 +302,10 @@
 > `make warning-baseline` and commit the refreshed artifact in the same commit (the `+1 <kind>` diff is
 > the record; say in the PR body why an added warning is accepted). The old prose pin went stale three
 > times (32 → 43 → 37) and cost four agents a pristine-`main` validator run each in one day.
+> **Every field is asserted, `doc` string included** — review caught the artifact shipping a `doc`
+> naming the wrong validator section, hand-patched in the one file whose own text forbids hand-editing.
+> `make warning-baseline` refuses to write from a model with errors, so a red spec cannot mint a
+> blessed baseline.
 
 > 🗄️ **2026-08-11 — THE STORAGE SPLIT IS COSTED, AND IT FOUND TWO DEFECTS THAT ARE NOT ABOUT THE
 > SPLIT**

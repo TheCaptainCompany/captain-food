@@ -397,9 +397,12 @@ failure rather than a misleading sentence.
   directly to `main`** — no branch, no PR, no claim ceremony — for changes confined to `specs/**`,
   `docs/**`, ADRs, `CLAUDE.md`, `STATUS.md`, and the generated artifacts they regenerate. **Keep `main`
   green**: run the same gate CI would (`make rust`) locally **before** pushing anything that touches
-  `specs/**` (a docs-only edit that regenerates nothing may skip it). The claim → draft-PR →
-  supervised-merge flow below applies to **code/feature work** (touching `crates/**`, `tools/**`, CI,
-  deploy), not to pure spec/doc edits.
+  `specs/**` (a docs-only edit that regenerates nothing may skip it). A spec change that moves the
+  warning surface also carries **`tools/codegen-rs/warning-baseline.json`** (refreshed by
+  `make warning-baseline`): it is part of a spec change's footprint even though it sits under
+  `tools/` and `make generate` never writes it, so it does NOT turn the change into code work. The
+  claim → draft-PR → supervised-merge flow below applies to **code/feature work** (touching
+  `crates/**`, `tools/**` *other than that artifact*, CI, deploy), not to pure spec/doc edits.
 - **Issue workflow — claim ⇒ draft PR immediately; finish ⇒ supervised auto-merge**
   (ADR-20260720-233000 + ADR-20260721-042018 + ADR-20260721-044613, method in
   [docs/BACKLOG.md](docs/BACKLOG.md)): when asked to work an issue, FIRST claim it
