@@ -194,7 +194,8 @@
 > every `NOT NULL`-without-`DEFAULT` column appears in its writer's insert list. Measured red set on
 > the real repo: **exactly the two planted columns**, no pre-existing violations anywhere on the
 > projection surface. Gates: `make rust` green, `make validate` **0 errors / 37 warnings, warning
-> profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 is stale — re-measure, as it says).
+> profile byte-identical to `origin/main`** (CLAUDE.md's pinned 43 was stale; re-measured on `main`
+> at `d7087fb` and repinned to 37 when `main` was merged into this branch — re-measure, as it says).
 
 > 🚧 **2026-08-10 — #451 PHASE 2 LANDED (code): THE CART IS PRICED LIVE ON READ — BUT THE CUSTOMER
 > STILL CANNOT SEE IT**
