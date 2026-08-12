@@ -7,6 +7,7 @@ pub(crate) mod lifecycles; // §2c aggregate lifecycles (parse + validate)
 pub(crate) mod mailbox; // §2d actor-mailbox addressing + §2e declared state/requires
 pub(crate) mod process_managers; // §2b typed-step process managers
 pub(crate) mod proposals; // §13 docs/proposals hygiene
+pub(crate) mod read_targets; // §5c-bis read-target ownership (reads/readsInfrastructure, ADR-20260812-214500)
 pub(crate) mod schema_writers; // §16 writer/schema agreement (migrations vs *_store.rs, #474)
 pub(crate) mod scopes; // §14 per-scope spec folders (placement, DAG, kernel purity, api nesting)
 pub(crate) mod reminders; // §2f reminders/schedules/deletion DSL
@@ -21,6 +22,7 @@ pub(crate) use lifecycles::*;
 pub(crate) use mailbox::*;
 pub(crate) use process_managers::*;
 pub(crate) use proposals::*;
+pub(crate) use read_targets::*;
 pub(crate) use reminders::*;
 pub(crate) use services::*;
 pub(crate) use schema_writers::*;

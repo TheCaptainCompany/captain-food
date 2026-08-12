@@ -16,6 +16,11 @@ pub(crate) struct ApiType {
     pub(crate) name: String,
     pub(crate) description: Option<String>,
     pub(crate) reads: Vec<String>,
+    /// OPTIONAL `readsInfrastructure:` — the write-path table(s) a TRANSIENT type is served from
+    /// (ADR-20260812-214500). Present ⇔ the type has no read model behind it and says so; the
+    /// validator's `transient-type-undeclared-infrastructure` makes the declaration mandatory rather
+    /// than inferring transience from a missing `reads:`.
+    pub(crate) reads_infrastructure: Vec<String>,
     pub(crate) properties: Vec<ApiField>,
     /// OPTIONAL per-type `navRoles:` — FK-derived navigation edge → LITERAL roles list (#22,
     /// ADR-20260720-230000). Omitted edge = open (inherits the parent type's reachability).
@@ -136,7 +141,7 @@ pub(crate) fn parse_api(model: &Model) -> Api {
     if let Some(m) = sect("types") {
         for (k, t) in m {
             if let Some(name) = k.as_str() {
-                types.push(ApiType { name: name.into(), description: t.get("description").and_then(|x| x.as_str()).map(|s| s.to_string()), reads: name_list(t.get("reads")), properties: field_map(t.get("properties")), nav_roles: nav_roles_map(t.get("navRoles")) });
+                types.push(ApiType { name: name.into(), description: t.get("description").and_then(|x| x.as_str()).map(|s| s.to_string()), reads: name_list(t.get("reads")), reads_infrastructure: name_list(t.get("readsInfrastructure")), properties: field_map(t.get("properties")), nav_roles: nav_roles_map(t.get("navRoles")) });
             }
         }
     }

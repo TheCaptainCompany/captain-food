@@ -311,6 +311,43 @@
 > consumer's projector folds a slim snapshot into its OWN read database -- the same
 > composition-in-the-projector answer STO-2(a) already gave for `ScopeMembership`.
 >
+> 🧱 **2026-08-12 — A READ TARGET IS DECLARED, NEVER INFERRED: the `reads:` ownership wall is a gate
+> ([ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).**
+> Retiring `command_journal` cost 110 files because the table had leaked out of its encapsulation into
+> resolver bodies -- founder verdict: *"it should never be used directly because we have to pass through
+> the actor clients that encapsulate the insert"* and *"it's unacceptable"*. Two absences allowed it, both now ERRORS, both **seen red on `786bcfa` first**:
+> (1) `reference: true` was an unguarded opt-in whose only counter-argument was a header comment, and a
+> BARE-NAME `reads: ['inbound_messages']` bypassed even the §1b ref-kind contract (a bare name is
+> invisible to the refs walker -- the #413 defect class) -- planting both **passed `make validate` with
+> zero errors**; (2) transience was inferred from a MISSING `reads:`, so deleting one line silently
+> exempted a query from every read-side rule -- also zero errors. That second one is what actually let
+> the journal through: the journal queries declared no `reads:` at all. Five new errors
+> (`reference-flag-not-a-read-target`, `reads-infrastructure-owned`,
+> `reads-infrastructure-with-read-model`, `transient-type-undeclared-infrastructure`,
+> `reads-not-a-ref`) in the new `validate::read_targets`, keyed on `refs::classify`'s `Kind` -- never on
+> a name pattern (`external_%` matches 1 of 7 categories) and never on the author's own `staging: true`.
+> The allowlist fails CLOSED in both directions, but only ONE of them is the compiler, and the precise
+> version is the reusable one: `refs::read_target_kind`'s match is exhaustive, so a new **`Kind`** does
+> not compile until it is classified -- while a new catalog **FILE** is accepted by `classify`'s
+> `_ => None` and fails closed at VALIDATE instead (`ref-kind-unknown` + `reads-unknown-view`).
+> `reservations.yaml` is the proof: no arm for months, built fine. Level 4 for the kind, level 3 for the
+> file. It gained the classifier arm it never had. Four transient types now DECLARE their table
+> (`readsInfrastructure:`): `MailboxLane` + `PoisonedMailboxMessage` + `Operation` -> the mailbox,
+> `PaymentIntent` -> the saga row -- and the key admits **`JournalTable` + `PmStateTable` ONLY**. That
+> narrowing came from the independent review, which found the first cut had wired it to the whole
+> infrastructure partition: `hubrise_connections` and `domain_events` under `readsInfrastructure:` on the
+> PUBLIC-reachable `Operation` type validated with ZERO errors, while the same `$ref` under `reads:` had
+> always been refused -- the new key had **opened a door that was shut**. Fixed, with the missing
+> mutation test added; the lesson is that a new permission needs its own red-first plant, not just the
+> rule it was added to serve. **Deliberately untouched**: `c4-l3` `components.*.reads`, the correct
+> home for infrastructure readers. **Honest limit, and the follow-up worth filing**: the compiler-first
+> half is unfinished -- `crates/actor_client`'s `MailboxAccess(pub(crate) ())` witness closes the mailbox
+> WRITE door but not `MailboxLaneRepository`/`MailboxRequeue` (`crates/application/src/queries.rs`), and
+> the existing witness cannot be reused because `actor_client` depends on `application`; and `sqlx`
+> canNOT simply be dropped from `crates/server/Cargo.toml` -- there is no `sqlx::query`, but there IS
+> `sqlx::raw_sql` (the `_sqlx_migrations` probe, `lib.rs:1497`) plus `PgPool`/`PgPoolOptions`/`Row` in
+> the composition root.
+>
 > ✅ **2026-08-12 — THE JOURNAL CONCERN IS CLOSED: `inbound_messages` is the only journal (#242
 > Runtime D, [ADR-20260812-000000](adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)).**
 > Product-owner direction, 2026-08-11: *"Remove inbound events and command journal from the dsl, the

@@ -13,6 +13,8 @@ types:
       `paymentStatusChanged`. `clientSecret` is present only while the run is in flight (NULLed when
       it resolves — a revocable Stripe credential, never event-sourced). NON-PROJECTED (transient):
       resolver-served from the saga state row, never a View_* — hence no `reads`.
+    readsInfrastructure:
+      - { $ref: 'database/tables/process_managers.yaml#/payment_process_manager' }
     properties:
       paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
       clientSecret: { type: string, nullable: true }

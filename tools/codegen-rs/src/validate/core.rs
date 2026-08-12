@@ -364,8 +364,18 @@ pub(crate) fn validate(model: &Model) -> Report {
     for t in &api.types {
         output_types.insert(t.name.clone());
     }
-    let transient_types: BTreeSet<String> =
-        api.types.iter().filter(|t| t.reads.is_empty()).map(|t| t.name.clone()).collect();
+    // A TRANSIENT type — one a query returns that has no read model behind it — must DECLARE the
+    // write-path table it is served from (`readsInfrastructure:`), not certify itself by leaving
+    // `reads:` off (ADR-20260812-214500). Transience-by-omission was the real leak: the
+    // `command_journal` resolvers declared no `reads:` at all, so no reads-side rule ever looked at
+    // them, and retiring the table cost 110 files. `readsInfrastructure` is a $ref, so the table is
+    // now a REFERENCE the validator resolves — the next retirement is a grep the loader does for you.
+    let transient_types: BTreeSet<String> = api
+        .types
+        .iter()
+        .filter(|t| t.reads.is_empty() && !t.reads_infrastructure.is_empty())
+        .map(|t| t.name.clone())
+        .collect();
     for q in &api.queries {
         let where_ = format!("api.yaml/queries.{}", q.name);
         check_roles(&mut issues, &q.roles, &where_, &user_type_set);
@@ -618,36 +628,11 @@ pub(crate) fn validate(model: &Model) -> Report {
 
     // 5c. type `reads` (api.yaml) bind output types to views.
     {
-        // Valid read targets = projection views (projection_views.yaml) PLUS reference/config tables
-        // under database/tables/*.yaml that opt in with `reference: true` (referential.yaml) — both back
-        // queries via `reads`. The event-store tables (domain_events/domain_stream) are NOT read targets.
-        let mut view_names: BTreeSet<String> = views.iter().map(|v| v.name.clone()).collect();
-        for (_k, val) in model.defs.iter().filter(|(k, _)| k.starts_with("database/tables/")) {
-            if let Value::Mapping(m) = val {
-                for (tk, tv) in m {
-                    if let Some(n) = tk.as_str() {
-                        if tv.get("reference").and_then(|b| b.as_bool()) == Some(true) {
-                            view_names.insert(n.to_string());
-                        }
-                    }
-                }
-            }
-        }
+        // The ownership wall lives in validate::read_targets (extracted so its rules can be driven on a
+        // small fixture, like validate_ref_kinds): who may be a `reads:` target at all, the
+        // `reference: true` opt-in's own guard, and the transient types' `readsInfrastructure:`.
+        let bound_views = validate_read_targets(model, &api, &views, &mut cov, &mut issues);
         let internal_views: BTreeSet<&str> = views.iter().filter(|v| v.internal).map(|v| v.name.as_str()).collect();
-        let mut bound_views: BTreeSet<String> = BTreeSet::new();
-        for t in &api.types {
-            for v in &t.reads {
-                cov.reads_links += 1;
-                bound_views.insert(v.clone());
-                if !view_names.contains(v.as_str()) {
-                    issues.push(err(
-                        "reads-unknown-view",
-                        format!("api.yaml/types.{}", t.name),
-                        format!("reads references unknown view '{}'.", v),
-                    ));
-                }
-            }
-        }
         // navRoles (#22, ADR-20260720-230000): each key must be a DERIVED navigation edge on that
         // type, each list a LITERAL roles list (ADR-20260720-191500 semantics).
         {
