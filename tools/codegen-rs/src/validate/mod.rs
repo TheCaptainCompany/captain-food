@@ -13,6 +13,7 @@ pub(crate) mod reminders; // §2f reminders/schedules/deletion DSL
 pub(crate) mod services; // §2d service catalog
 pub(crate) mod shape; // api-shape helpers (roles, inline types, data shapes)
 pub(crate) mod translations; // §10 translation hygiene
+pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warning-baseline.json)
 
 pub(crate) use bins::*;
 pub(crate) use core::*;
@@ -26,3 +27,4 @@ pub(crate) use schema_writers::*;
 pub(crate) use scopes::*;
 pub(crate) use shape::*;
 pub(crate) use translations::*;
+pub(crate) use warning_baseline::*;

@@ -233,8 +233,11 @@ retention: { $ref: 'retention.yaml#/BEHAVIOUR_ANALYTICS_90D' }
 
 ### D6 — What does the validator enforce?
 
-ERROR severity throughout, in the style the metrics half chose (a warning here is invisible — the
-repo carries a drifting warning baseline and CLAUDE.md instructs re-measuring rather than trusting it).
+ERROR severity throughout, in the style the metrics half chose. Since
+[ADR-20260811-170559](../adr/ADR-20260811-170559-the-validator-owns-the-warning-baseline.md) a warning
+is no longer invisible — the ratchet fails the gate on a new kind — but it is cleared by refreshing
+one artifact, which records a count and not *which* screen declared an untracked event. For R5 and
+R10, where the gap is the whole point, that is not enough.
 
 | Option | Pros | Cons |
 |---|---|---|
@@ -719,8 +722,9 @@ flowchart LR
   **three levels deep** under a `sensitivity: SPECIAL_CATEGORY` node still fails (R5 walks ancestors,
   not the immediate parent); a fixture where `identifierClass: PSEUDONYMOUS_DEVICE` fails while the
   D8 row is open (R8); and a fixture where events exist and no `docs/legal/DPIA-*.md` does, asserting
-  the emitter's output is **empty** (R10). `make validate` = 0 errors, no NEW warning kind against a
-  freshly re-measured `main` baseline. No `rules.yaml` entry — these are gates, not domain invariants.
+  the emitter's output is **empty** (R10). `make validate` = 0 errors and
+  `tools/codegen-rs/warning-baseline.json` unchanged (the §17 ratchet asserts the warning surface —
+  nothing to re-measure). No `rules.yaml` entry — these are gates, not domain invariants.
 - **Slice 2 (the DPIA).** Not code. A `docs/legal/DPIA-customer-analytics.md` with counsel review,
   which then makes R10 satisfiable. The **build gate is the acceptance test**: before it, generation
   is empty; after it, generation is non-empty. That transition is itself worth a test.

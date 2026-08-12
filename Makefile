@@ -26,10 +26,11 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates smoke-prod
+.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
+	@echo "         warning-baseline = refresh the warning ratchet (tools/codegen-rs/warning-baseline.json)"
 	@echo "         test-crates = the WORKSPACE test gate (#474): cargo test --workspace with the DB"
 	@echo "         suites REQUIRED. 'make rust' is the spec gate and runs NO crates/** test."
 	@echo "         c4-render (Structurizr Lite + docs/ADRs) | c4-export (validate/export DSL)"
@@ -55,6 +56,13 @@ test-observability: validate-schema  ## observability contracts are validated in
 c4-validate: validate-schema         ## C4 consistency is validated inside `validate`
 
 validate: typecheck validate-schema
+
+# The warning RATCHET (validator section 17). `validate` fails when the live per-rule warning
+# histogram differs from tools/codegen-rs/warning-baseline.json in EITHER direction; this target is
+# the only writer. Run it when a change legitimately moves the warning surface and commit the
+# refreshed artifact in the SAME commit -- the diff is the record of what the change did.
+warning-baseline:
+	$(CARGO) run --manifest-path $(CODEGEN_RS)/Cargo.toml -- --write-warning-baseline --specs specs
 
 # Generate every artifact from the specs (writes into specs/generated/** + the database.md §2 region).
 generate:

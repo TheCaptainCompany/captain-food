@@ -294,6 +294,19 @@
 > `store_core` + `eventstore` + the reader split + the ISO-3 witness, `projection_runtime`, the 7
 > partner ACL crates.
 
+> 🧮 **2026-08-11 — THE WARNING BASELINE IS A GATE, NOT A NUMBER IN A DOC**
+> ([ADR-20260811-170559](adr/ADR-20260811-170559-the-validator-owns-the-warning-baseline.md)).
+> `tools/codegen-rs/warning-baseline.json` holds the per-rule warning histogram and validator §17
+> asserts it on every `make validate` / CI run, **in both directions**. Nothing to re-measure: a green
+> validate already proves "no new warning". If a change moves the warning surface, run
+> `make warning-baseline` and commit the refreshed artifact in the same commit (the `+1 <kind>` diff is
+> the record; say in the PR body why an added warning is accepted). The old prose pin went stale three
+> times (32 → 43 → 37) and cost four agents a pristine-`main` validator run each in one day.
+> **Every field is asserted, `doc` string included** — review caught the artifact shipping a `doc`
+> naming the wrong validator section, hand-patched in the one file whose own text forbids hand-editing.
+> `make warning-baseline` refuses to write from a model with errors, so a red spec cannot mint a
+> blessed baseline.
+
 > 🗄️ **2026-08-11 — THE STORAGE SPLIT IS COSTED, AND IT FOUND TWO DEFECTS THAT ARE NOT ABOUT THE
 > SPLIT**
 > ([PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md),

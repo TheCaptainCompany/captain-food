@@ -158,18 +158,18 @@ lists entrypoints. The validator (`make validate`, the Rust `tools/codegen-rs`) 
 the **whole spec** — schema/refs, actor wiring, api↔model, views, C4, observability, and (ADR-0032)
 **tests, stories and rules completeness**: every message/event/error is exercised by a test, every
 mutation/query is reached by a story step, and every test↔rule link holds both ways. It must be
-**0 errors**. Warnings are a **baseline to compare against, not a clean slate**: as of 2026-08-11,
-measured on `main` at `d7087fb`, `main` carries 37 — `command-no-mutation` ×11,
-`action-missing-required-input` ×10, `event-not-projected` ×7, `action-unknown-input` ×7,
-`view-fedby-unused` ×1, `identity-property-not-on-command` ×1. These numbers DRIFT as specs evolve
-(an earlier pin of 32 went stale within a day, and the 43 pinned here on 2026-08-08 measured 37
-three days later): ALWAYS re-measure the baseline on a pristine `main` worktree before
-comparing. The rule for a change is therefore **0 errors and no NEW
-warning**: diff the count and kinds against `main` (`make validate` prints
-`checks: N error(s), M warning(s)`), and never read a non-zero count as a regression you caused.
-Three independent reviewer passes on [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)
-each had to stop and re-derive this because the old wording said otherwise — re-measure rather than
-trust the numbers above if they look off.
+**0 errors**. Warnings are a **ratchet the validator owns, not a number in this file**: the per-rule
+histogram lives in [`tools/codegen-rs/warning-baseline.json`](tools/codegen-rs/warning-baseline.json)
+and `make validate` fails when the live run differs from it **in either direction** — a new kind or a
+higher count is a regression, a lower count is an improvement you must bank. So **do not re-measure
+anything**: run the gate. If a change legitimately moves the warning surface, run `make
+warning-baseline` and commit the refreshed artifact **in the same commit**, and say in the PR body why
+an added warning is accepted — the diff (`+1 event-not-projected`) is the record. Never trust a
+warning count written in prose anywhere, including here: this paragraph used to pin one, and it went
+stale three times (32, then 43, then 37), costing four agents in a single day a full extra validator
+run against a pristine `main` worktree apiece before they could claim "no new warning" — three of them
+because the pinned number looked wrong and they had to re-derive it. A stale ratchet is now a gate
+failure rather than a misleading sentence.
 
 ### Non-negotiable rules
 
@@ -397,9 +397,12 @@ trust the numbers above if they look off.
   directly to `main`** — no branch, no PR, no claim ceremony — for changes confined to `specs/**`,
   `docs/**`, ADRs, `CLAUDE.md`, `STATUS.md`, and the generated artifacts they regenerate. **Keep `main`
   green**: run the same gate CI would (`make rust`) locally **before** pushing anything that touches
-  `specs/**` (a docs-only edit that regenerates nothing may skip it). The claim → draft-PR →
-  supervised-merge flow below applies to **code/feature work** (touching `crates/**`, `tools/**`, CI,
-  deploy), not to pure spec/doc edits.
+  `specs/**` (a docs-only edit that regenerates nothing may skip it). A spec change that moves the
+  warning surface also carries **`tools/codegen-rs/warning-baseline.json`** (refreshed by
+  `make warning-baseline`): it is part of a spec change's footprint even though it sits under
+  `tools/` and `make generate` never writes it, so it does NOT turn the change into code work. The
+  claim → draft-PR → supervised-merge flow below applies to **code/feature work** (touching
+  `crates/**`, `tools/**` *other than that artifact*, CI, deploy), not to pure spec/doc edits.
 - **Issue workflow — claim ⇒ draft PR immediately; finish ⇒ supervised auto-merge**
   (ADR-20260720-233000 + ADR-20260721-042018 + ADR-20260721-044613, method in
   [docs/BACKLOG.md](docs/BACKLOG.md)): when asked to work an issue, FIRST claim it

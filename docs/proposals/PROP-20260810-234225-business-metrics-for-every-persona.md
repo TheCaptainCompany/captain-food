@@ -147,7 +147,7 @@ makes the choice visible instead of discovered.
 | Option | Pros | Cons |
 |---|---|---|
 | **Four ERROR rules + an enumerated `unmeasured:` waiver list** ✅ **recommended** — `activity-unmeasured` (every persona activity is named by ≥1 metric, unless waived), `metric-story-unknown` (every metric's `story:` resolves to a real persona+activity), `metric-question-empty` (every metric states the decision it informs), `metric-name-collision` (unique across `metrics` + `business_metrics`) | Mirrors ADR-0032 exactly on the half where ADR-0032 applies; the waiver list makes the debt **countable and monotone** — `make validate` fails if you add to it, so it can only shrink; `metric-question-empty` is the anti-sprawl rule, and it is what turns telemetry into measurement | A waiver list is a mechanism that can rot if nobody prunes it — mitigated by requiring each entry to name its issue, and by the architect run reporting its length |
-| The same four rules at WARNING severity | Lands with zero backfill; no waiver mechanism to maintain | Invisible by construction: this repo carries a drifting warning baseline (43 as of 2026-08-08) and CLAUDE.md explicitly instructs re-measuring rather than trusting the count, so one more warning kind changes no behaviour |
+| The same four rules at WARNING severity | Lands with zero backfill; no waiver mechanism to maintain | **Not invisible any more** — since [ADR-20260811-170559](../adr/ADR-20260811-170559-the-validator-owns-the-warning-baseline.md) the warning surface is a committed ratchet and a new warning kind fails the gate. What it still cannot do is name the gap: clearing it means refreshing the ratchet artifact, which banks a *count*, so "17 activities are unmeasured" and "1 is" look alike in the diff. The ERROR plus the enumerated waiver list keeps each exemption visible in the spec and monotone-shrinking |
 | Only the backward rule (`metric-story-unknown`), no coverage rule | Cheapest; no waiver list | Does not encode the directive at all. "Every feature for every persona" is precisely the forward direction |
 
 ### D4 — What IS a business metric: a projection folded from the log, or a counter emitted at a boundary?
@@ -917,9 +917,9 @@ flowchart LR
 - **Slice 1 (catalog + rules).** The four D3 rules plus the six D8 rules, each with a positive and a
   **negative** unit test in `tools/codegen-rs` (a waived activity passes; an unwaived one fails; a
   dangling `activity:` fails; a duplicate name across catalogs fails; a `from:` naming a field the
-  event lacks fails; **a fold whose event lacks a key field fails**). `make validate` = 0 errors, no
-  NEW warning kind against a freshly re-measured `main` baseline. No `rules.yaml` entry — these are
-  gates, not domain invariants.
+  event lacks fails; **a fold whose event lacks a key field fails**). `make validate` = 0 errors and
+  `tools/codegen-rs/warning-baseline.json` unchanged (the §17 ratchet asserts the warning surface —
+  nothing to re-measure). No `rules.yaml` entry — these are gates, not domain invariants.
 - **Slice 2 (generated fold + read).** A codegen test asserting the generated projector and the
   generated `bam` DDL match the catalog byte-for-byte (the
   `generated_config_patterns_match_the_spec_byte_for_byte` pattern,

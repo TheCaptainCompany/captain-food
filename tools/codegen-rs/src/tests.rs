@@ -6821,3 +6821,141 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
         missing[0].1
     );
 }
+// ─── §17 — the warning ratchet (validate/warning_baseline.rs) ───────────────────────────────────
+//
+// The gate exists because the "no NEW warning" rule used to be a NUMBER IN PROSE in CLAUDE.md,
+// re-derived by hand — four separate agents paid a full extra validator run against a pristine
+// `main` worktree on one day to establish a figure the doc claimed to already know. These tests
+// pin the two properties that make the artifact un-stale-able: it is written only by the tool, and
+// ANY divergence between it and the live run fails.
+
+/// A warning's RULE is the histogram key; errors never enter the profile (the ratchet is about the
+/// warning surface — errors are already an absolute 0).
+#[test]
+fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
+    let issues = vec![
+        warn("command-no-mutation", "a".into(), String::new()),
+        warn("command-no-mutation", "b".into(), String::new()),
+        warn("view-fedby-unused", "c".into(), String::new()),
+        err("ref-unresolved", "d".into(), String::new()),
+    ];
+    let p = warning_profile(&issues);
+    assert_eq!(p.get("command-no-mutation"), Some(&2));
+    assert_eq!(p.get("view-fedby-unused"), Some(&1));
+    assert_eq!(p.get("ref-unresolved"), None, "errors are not part of the warning ratchet");
+}
+
+/// Round-trip, and the self-consistency check that makes a hand-edit visible: `total` is not an
+/// independent field you can nudge — it must equal the histogram sum.
+#[test]
+fn the_baseline_artifact_round_trips_and_rejects_an_inconsistent_edit() {
+    let mut profile = WarningProfile::new();
+    profile.insert("command-no-mutation".into(), 11);
+    profile.insert("view-fedby-unused".into(), 1);
+    let json = render_warning_baseline(&profile);
+    assert!(json.contains("\"total\": 12"), "{json}");
+    assert_eq!(parse_warning_baseline(&json).expect("round-trips"), profile);
+
+    let fudged = json.replace("\"total\": 12", "\"total\": 99");
+    assert!(
+        parse_warning_baseline(&fudged).unwrap_err().contains("sums to 12"),
+        "a fudged total must be rejected, not trusted"
+    );
+    let doc = serde_json::to_string(BASELINE_DOC).expect("doc serialises");
+    assert!(parse_warning_baseline("{}").is_err(), "an empty object is not a baseline");
+    assert!(
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0}}"))
+            .unwrap_err()
+            .contains("by_rule"),
+        "a baseline without by_rule is not a baseline"
+    );
+    assert!(
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0,\"by_rule\":{{\"x\":0}}}}"))
+            .unwrap_err()
+            .contains("drop the entry"),
+        "a zero entry is a kind that no longer occurs — it must be dropped, not pinned at 0"
+    );
+}
+
+/// `doc` is the ONLY field of the artifact a human reads, the only one telling them how to change
+/// it — and the only one `by_rule`/`total` cannot notice going stale. It shipped pointing at
+/// validator section 16 after this section was renumbered to 17, hand-patched everywhere except in
+/// the file whose own text forbids hand-editing. So it is asserted verbatim, in both directions:
+/// a stale pointer is rejected, and the committed artifact's doc is the writer's doc.
+#[test]
+fn a_hand_edited_or_stale_doc_field_is_rejected() {
+    let profile: WarningProfile = [("command-no-mutation".to_string(), 1usize)].into_iter().collect();
+    let json = render_warning_baseline(&profile);
+    assert!(parse_warning_baseline(&json).is_ok(), "the tool's own output must parse");
+
+    // The exact defect that shipped: the renumbering §16 -> §17 missed the artifact.
+    let stale = json.replace("section 17", "section 16");
+    assert_ne!(stale, json, "the rendered doc must name the section, or this test proves nothing");
+    assert!(
+        parse_warning_baseline(&stale).unwrap_err().contains("`doc`"),
+        "a doc pointing at the wrong validator section must fail the gate, not mislead the reader"
+    );
+
+    assert!(
+        parse_warning_baseline(&json.replace(&format!("  \"doc\": {},\n", serde_json::to_string(BASELINE_DOC).unwrap()), ""))
+            .unwrap_err()
+            .contains("`doc`"),
+        "an ABSENT doc is not a way around the check"
+    );
+}
+
+/// The ratchet is EXACT in both directions. An increase or a new kind is a regression; a decrease
+/// is an improvement that must still be committed, because a baseline left high is exactly the
+/// stale number this section replaced — the freed budget would be silently re-spendable.
+#[test]
+fn the_ratchet_fails_in_both_directions() {
+    let base: WarningProfile =
+        [("a".to_string(), 2usize), ("b".to_string(), 1)].into_iter().collect();
+
+    assert!(diff_warning_baseline(&base, &base).is_clean());
+
+    let grown: WarningProfile = [("a".to_string(), 3usize), ("b".to_string(), 1)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &grown);
+    assert_eq!(d.worse, vec![BaselineDelta { rule: "a".into(), committed: 2, live: 3 }]);
+    assert!(d.better.is_empty());
+
+    let new_kind: WarningProfile =
+        [("a".to_string(), 2usize), ("b".to_string(), 1), ("c".to_string(), 1)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &new_kind);
+    assert_eq!(d.worse, vec![BaselineDelta { rule: "c".into(), committed: 0, live: 1 }]);
+    assert!(
+        render_baseline_failure(&d, &new_kind).contains("NEW warning kind"),
+        "a kind absent from the baseline must be called out as new"
+    );
+
+    let fixed: WarningProfile = [("a".to_string(), 2usize)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &fixed);
+    assert!(d.worse.is_empty());
+    assert_eq!(d.better, vec![BaselineDelta { rule: "b".into(), committed: 1, live: 0 }]);
+    let msg = render_baseline_failure(&d, &fixed);
+    assert!(msg.contains("kind eliminated") && msg.contains("make warning-baseline"), "{msg}");
+}
+
+/// The one that actually holds the line: the COMMITTED artifact must equal what the real specs
+/// produce right now. Duplicated with the binary's `--check` gate on purpose — `make rust` runs
+/// `cargo test` and `validate` separately, and a ratchet only one of them enforces is a ratchet
+/// that a partial run silently skips (the #292 lesson: a guard that stops running never fails).
+#[test]
+fn the_committed_warning_baseline_matches_the_real_specs() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let Report { mut issues, .. } = validate(&model);
+    // Same issue set the CLI gates on (main.rs), section for section: the spec sections, plus §13
+    // proposal hygiene and §16 writer/schema agreement. §16 belongs here even though it emits only
+    // errors today — the committed artifact is written from the CLI's profile, so the day §16 grows a
+    // warning kind, a narrower profile here would go red against a CORRECT artifact.
+    issues.extend(validate_proposal_hygiene(&load_proposal_files(&root)));
+    issues.extend(validate_writer_schema_agreement(
+        &load_migration_files(&root),
+        &load_writer_files(&root),
+    ));
+    let live = warning_profile(&issues);
+    if let Err(msg) = check_warning_baseline(&root, &live) {
+        panic!("{msg}");
+    }
+}

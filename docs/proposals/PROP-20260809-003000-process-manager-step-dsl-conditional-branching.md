@@ -753,8 +753,9 @@ also delete themselves, because the steps behind them now exist:
 Both were coverage annotations for effects with no steps. That is the whole point of card 10:
 **declarations disappear because the thing they described became real.**
 
-*(Warning-count note: exactly one `command-no-mutation` warning clears here. Per CLAUDE.md, always
-re-measure `main`'s baseline before comparing — the pinned numbers drift within a day.)*
+*(Warning-count note: exactly one `command-no-mutation` warning clears here, so the realizing change
+refreshes `tools/codegen-rs/warning-baseline.json` in the same commit — the §17 ratchet fails on an
+improvement left unbanked just as it does on a regression.)*
 
 ---
 
