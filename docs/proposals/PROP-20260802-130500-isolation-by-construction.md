@@ -69,6 +69,31 @@ and costs review nothing once installed):
 Levels 4–5 are the only ones an agent cannot cross *silently*: the crossing itself is a loud,
 reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change).
 
+**A YAML BINDING is off the ladder entirely, and that is where the level-3 gate is the right answer**
+(2026-08-12, [ADR-20260812-214500](../adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).
+The hierarchy ranks ways to stop *Rust code* naming something it should not. It has no rung for a
+declaration in `specs/**`: no type can make `reads: [{ $ref: '…/journals.yaml#/inbound_messages' }]`
+unspellable, because the compiler never sees the YAML. So "start at level 4" resolves to *level 3 is
+the ceiling here*, not to "try harder" — and the gate is correct rather than lazy. Two refinements the
+`reads:` wall earned, both reusable:
+
+- **A gate can still fail CLOSED like a type does.** Its allowlist is derived from an EXHAUSTIVE
+  `match` over the classifier's `Kind` (`refs::read_target_kind`), so a new `database/tables/*.yaml`
+  category does not compile until someone classifies it. The compiler polices the gate's own
+  completeness even though it cannot police the binding. That is the level-4 property available to a
+  level-3 check, and it should be the default shape for any allowlist over a closed DSL set.
+- **The absence, not the assertion, is what leaks.** Both holes it closed were omissions: a table
+  *declining* to carry `reference: true` (the reason living in a header comment) and a type *leaving
+  `reads:` off* to self-certify as transient. A gate that only inspects what authors wrote sees
+  neither. Ask what the DSL means by SILENCE, and make the silent case say its name.
+
+The half of that same slice that IS reachable by the compiler is unfinished and worth naming: this
+proposal's own `MailboxAccess(pub(crate) ())` witness (D1/D4, shipped) covers the mailbox WRITE door
+but not the query ports `MailboxLaneRepository` / `MailboxRequeue`, which sit in `crates/application`
+— and `actor_client` depends on `application`, so the existing witness cannot be reused there. Closing
+it means moving those ports plus changing the resolver emitter: a slice of its own, and a genuine
+level-4 win when it lands.
+
 **START at level 4** (product-owner directive, 2026-08-03, [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)).
 This table ranked the levels but never said where to begin, so "climb one level" got read as an
 achievement instead of a floor — and [#329](https://github.com/TheCaptainCompany/captain-food/issues/329)

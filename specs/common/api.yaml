@@ -19,6 +19,17 @@ description: >
                      · reads : `reads: [{ $ref: 'database/projection_views.yaml#/View_* }]` is the view(s) that populate the
                                type (→ @reads). Omitted for boundary types returned via a mutation
                                payload. FK navigation (e.g. Restaurant.catalogs) is derived from views.yaml.
+                               Only the CQRS read side is bindable: a projection view, a projection
+                               table, or a `reference: true` table in database/tables/referential.yaml.
+                     · readsInfrastructure
+                             : the TRANSIENT alternative (ADR-20260812-214500), mutually exclusive with
+                               `reads`: a query with no read model behind it names the write-path table
+                               it is served from — the actor mailbox, a process-manager saga row.
+                               MANDATORY for a query/subscription return type that has no `reads`:
+                               transience is a DECLARATION, never an omission, so retiring an
+                               infrastructure table is a resolved `$ref` away instead of a repo-wide
+                               grep (retiring `command_journal` cost 110 files). Nested types reached
+                               through a parent's `reads` declare neither.
     - queries    : `returns` is `{ $ref: '#/types/<Type>' }`. The query's `@reads` is INHERITED from the
                    return type's binding — reads are declared on the TYPE, never on the query.
     - mutations  : `command` is `{ $ref: 'commands.yaml#/<Command>' }` (→ @command, must be handled by an
@@ -80,6 +91,9 @@ types:
       (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) —
       write-path infrastructure, no backing View_*; lanes show zero traffic until the #242
       worker flip.
+    readsInfrastructure:
+      - { $ref: 'database/tables/journals.yaml#/mailbox_partitions' }
+      - { $ref: 'database/tables/journals.yaml#/inbound_messages' }
     properties:
       actorType: { type: string }
       partition: { type: integer }
@@ -101,6 +115,8 @@ types:
       count — carries the messageId an operator needs to requeue it (requeueMailboxMessage)
       after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED
       (transient) — write-path infrastructure, no backing View_*.
+    readsInfrastructure:
+      - { $ref: 'database/tables/journals.yaml#/inbound_messages' }
     properties:
       messageId: { type: string }
       actorType: { type: string }
@@ -120,6 +136,8 @@ types:
       the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership-
       scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or
       ADMIN. NON-PROJECTED (transient) — served from the mailbox, no backing View_*.
+    readsInfrastructure:
+      - { $ref: 'database/tables/journals.yaml#/inbound_messages' }
     properties:
       messageId: { $ref: 'scalars.yaml#/MessageId' }
       correlationId: { $ref: 'scalars.yaml#/CorrelationId' }
