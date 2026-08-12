@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 29078,
+  "recordedAt": "2026-08-12T00:00:00.000Z",
+  "branch": "main",
+  "note": "Migration seed: the single mutable `secondsUsed` counter that .claude/loop-budget.json carried on origin/main, converted to the first entry of the append-only ledger. Not a run -- it is the sum of every run recorded before the ledger existed. Do not edit; the counter it replaced is gone."
+}

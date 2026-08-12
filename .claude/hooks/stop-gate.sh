@@ -75,6 +75,26 @@ else
   echo "stop-gate: no migrations/ | crates/ | emitter changes -- workspace tests not required for this turn (#474)."
 fi
 
+# --- The loop-budget invariants (ADR-0014, ADR-20260812-011057). ---
+#
+# ALWAYS: the ~10ms audit. It refuses a committed open timer (`startedAt`) or a resurrected mutable
+# counter (`secondsUsed`) in tracked budget state. Both are silent corruptions of the weekly cap
+# rather than crashes -- a committed timer billed 261 phantom minutes to an unrelated 16-minute run,
+# and a counter merge discarded 2.5h of another session's recorded time. Neither shows up in any
+# other gate, and a committed timer travels to every branch that checks it out, so this runs on
+# EVERY turn regardless of what the diff touched.
+step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
+
+# WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for
+# the same reason as the workspace suite above -- it proves the budget hook, so it runs when the
+# budget hook moves, and costs a docs turn nothing.
+# (`crates/UNKNOWN` is the sentinel the scope computation above uses when it cannot diff at all --
+# fail SAFE there too and run the suite rather than assume the hook is untouched.)
+if printf '%s\n' "$changed" | grep -Eq '^\.claude/hooks/loop-budget|^crates/UNKNOWN$'; then
+  echo "-> loop-budget selftest (diff touches .claude/hooks/loop-budget*)"
+  step bash "$ROOT/.claude/hooks/loop-budget.sh" selftest
+fi
+
 # Optional app-level gates — only if a root package.json defines them (no-op until apps/ exists).
 if [ -f "$ROOT/package.json" ]; then
   if grep -q '"test"' "$ROOT/package.json"; then ( cd "$ROOT" && npm test --silent ) || fail=1; fi
