@@ -36,9 +36,9 @@
 > against the committed manifests, so the least-privilege slice (A4) cannot start from two answers.
 > Two more things only this artifact shows: **`client-customer-credit` is reached by no deployable**
 > (a generated actor client nothing links, while `client-restaurant` is reached by 45), and
-> **`ADMIN`/`EXTERNAL` are claimed by no bounded context**, so three gateways sit under `platform`
-> because nothing else is derivable — named out loud rather than left as a default that reads like a
-> decision.
+> **`ADMIN`/`EXTERNAL` are claimed by no bounded context**, so two gateways sit under `platform` —
+> and, through its gateway, the `bo-admin` surface — because nothing else is derivable — named out
+> loud rather than left as a default that reads like a decision.
 > **BND-1 closed the same day** (entry below; [DECISIONS §31](proposals/DECISIONS.md)): the index
 > reads the boundary set from `c4-l2.yaml` `boundedContexts`, which IS that closed answer — five
 > business contexts plus `platform` — so the index needed no edit when the row closed, and needs

@@ -645,6 +645,64 @@ fn scope_list(scopes: &BTreeSet<String>, all: &[String]) -> String {
     scopes.iter().cloned().collect::<Vec<_>>().join(" + ")
 }
 
+/// The two measurements section 3's headline is ALLOWED to talk about, and nothing else. It is a
+/// struct with a pure renderer because the prose it replaces was hard-coded: it asserted "no crate
+/// is boundary-exclusive" while separately printing a non-zero exclusive count, and computed
+/// "reached from every boundary" as `total - exclusive`, which is a different predicate. Both
+/// sentences are now conditional on what came out of the graph, and both branches are exercised by
+/// `app_index_section_three_claims_only_what_it_measured`.
+pub(crate) struct SharedReach {
+    /// Workspace crates at least one app resolves.
+    pub(crate) total: usize,
+    /// ...reached from apps of exactly ONE boundary.
+    pub(crate) exclusive: usize,
+    /// ...reached from at least one app of EVERY boundary (`sig.len() == boundaries`).
+    pub(crate) saturated: usize,
+    /// The bounded-context set the signature is measured against.
+    pub(crate) boundaries: usize,
+    /// `graphql-*` apps, and how many boundaries that family spans between them.
+    pub(crate) subgraphs: usize,
+    pub(crate) subgraph_boundaries: usize,
+    /// Deployables, and the range of the `apps` column.
+    pub(crate) apps: usize,
+    pub(crate) min_apps: usize,
+    pub(crate) max_apps: usize,
+}
+
+impl SharedReach {
+    pub(crate) fn headline(&self) -> String {
+        if self.total == 0 {
+            return "**No app resolves a workspace crate in this measurement**, so this section claims nothing about what the boundaries share.\n\n".to_string();
+        }
+        let lead = if self.exclusive == 0 {
+            format!(
+                "**No crate the apps reach is boundary-EXCLUSIVE: all {} are linked from apps of two or more boundaries, and {} of them from at least one app of EVERY boundary.**",
+                self.total, self.saturated
+            )
+        } else {
+            format!(
+                "**{} of the {} crates the apps reach ARE boundary-exclusive** -- linked from apps of a single boundary and no other; {} are linked from at least one app of EVERY boundary.",
+                self.exclusive, self.total, self.saturated
+            )
+        };
+        let ceiling = if self.subgraph_boundaries == self.boundaries {
+            format!(
+                "The boundary column's ceiling is {} and one family clears it on its own -- the {} `graphql-*` subgraphs are one app per scope and between them cover all {} boundaries, so any crate a single subgraph links already scores the maximum.",
+                self.boundaries, self.subgraphs, self.boundaries
+            )
+        } else {
+            format!(
+                "The boundary column's ceiling is {} and no single family clears it -- the {} `graphql-*` subgraphs cover {} of those boundaries between them, so a maximal signature takes apps from more than one family.",
+                self.boundaries, self.subgraphs, self.subgraph_boundaries
+            )
+        };
+        format!(
+            "{lead} Read that as what it says and no more. {ceiling} **The `apps` column is the one with resolution**: it counts how many of the {} deployables actually link the crate, and it ranges from {} to {}.\n\n",
+            self.apps, self.min_apps, self.max_apps
+        )
+    }
+}
+
 /// `specs/generated/apps.generated.md`.
 pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
     let rows = app_rows(model, graph);
@@ -834,27 +892,34 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
     sigs.sort_by_key(|((sig, apps), crates)| {
         (std::cmp::Reverse(sig.len()), std::cmp::Reverse(*apps), crates.len())
     });
+    // BOTH ends of the signature are MEASURED, never inferred from the other: "belongs to exactly
+    // one" is `sig.len() == 1`, "reached from every boundary" is `sig.len() == ids.len()`, and
+    // `total - exclusive` is NEITHER -- it folds a crate reached by 3 of 6 boundaries into the
+    // saturated count. The headline below reads these two numbers and says only what they support.
     let exclusive: usize = sigs.iter().filter(|((sig, _), _)| sig.len() == 1).map(|(_, c)| c.len()).sum();
-    // The boundary signature's CEILING and what clears it alone. `graphql-*` is one app per scope
-    // and those apps' boundaries already cover the whole set, so ANY crate a single subgraph links
-    // reads "all boundaries". Stating the ceiling is what stops the column being over-read.
+    let saturated: usize = sigs
+        .iter()
+        .filter(|((sig, _), _)| sig.len() == bounds.ids.len())
+        .map(|(_, c)| c.len())
+        .sum();
+    // The boundary signature's CEILING and whether one family clears it alone. `graphql-*` is one
+    // app per scope; WHEN those apps' boundaries cover the whole set, ANY crate a single subgraph
+    // links reads "all boundaries". That is a condition, not a given -- it stops holding the day a
+    // scope's boundary leaves the family, so it is measured and the sentence follows it.
     let subgraph_boundaries: BTreeSet<&str> =
         rows.iter().filter(|r| r.family == "graphql").map(|r| r.boundary.as_str()).collect();
-    let min_apps = app_reach.values().copied().min().unwrap_or(0);
-    let max_apps = app_reach.values().copied().max().unwrap_or(0);
-    out.push_str(&format!(
-        "**No crate the apps reach is boundary-EXCLUSIVE: {} of {} are linked from at least one app of every boundary; {} belong to exactly one.** Read that as what it says and no more. The boundary column's ceiling is {} and one family clears it on its own -- the {} `graphql-*` subgraphs are one app per scope and between them cover {} of the {} boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the {} deployables actually link the crate, and it ranges from {} to {}.\n\n",
-        reach.len() - exclusive,
-        reach.len(),
+    out.push_str(&SharedReach {
+        total: reach.len(),
         exclusive,
-        bounds.ids.len(),
-        rows.iter().filter(|r| r.family == "graphql").count(),
-        subgraph_boundaries.len(),
-        bounds.ids.len(),
-        rows.len(),
-        min_apps,
-        max_apps,
-    ));
+        saturated,
+        boundaries: bounds.ids.len(),
+        subgraphs: rows.iter().filter(|r| r.family == "graphql").count(),
+        subgraph_boundaries: subgraph_boundaries.len(),
+        apps: rows.len(),
+        min_apps: app_reach.values().copied().min().unwrap_or(0),
+        max_apps: app_reach.values().copied().max().unwrap_or(0),
+    }
+    .headline());
     out.push_str(&format!("| reached by | apps (of {}) | crates | which |\n|---|---:|---:|---|\n", rows.len()));
     for ((sig, apps), crates) in sigs {
         out.push_str(&format!(

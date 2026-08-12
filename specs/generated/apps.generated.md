@@ -50,7 +50,7 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 
 Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.
 
-**No crate the apps reach is boundary-EXCLUSIVE: 44 of 44 are linked from at least one app of every boundary; 0 belong to exactly one.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover 6 of the 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 57 deployables actually link the crate, and it ranges from 8 to 57.
+**No crate the apps reach is boundary-EXCLUSIVE: all 44 are linked from apps of two or more boundaries, and 44 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 57 deployables actually link the crate, and it ranges from 8 to 57.
 
 | reached by | apps (of 57) | crates | which |
 |---|---:|---:|---|

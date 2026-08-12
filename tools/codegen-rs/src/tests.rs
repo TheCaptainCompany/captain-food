@@ -6411,6 +6411,14 @@ fn app_index_every_app_has_a_declared_boundary() {
         );
     }
     let rows = app_rows(&model, &CrateGraph::default());
+    // The bullet section 2 owes an unclaimed role. Asserting only `boundary == "platform"` leaves
+    // the SAYING-SO half — the whole point of the fallback being deliberate — untested.
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let unclaimed_bullet = index
+        .lines()
+        .find(|l| l.starts_with("- **Roles no bounded context claims**"))
+        .unwrap_or("<no such bullet in section 2>")
+        .to_string();
     let mut gateways = 0;
     for r in &rows {
         assert!(
@@ -6437,12 +6445,21 @@ fn app_index_every_app_has_a_declared_boundary() {
                 "{}: '{role}' is declared by context '{ctx}', so the app belongs to it",
                 r.name
             ),
-            None => assert_eq!(
-                r.boundary, "platform",
-                "{}: no context claims '{role}', so the only derivable answer is the platform \
-                 bucket -- and section 2 must be naming it as unclaimed",
-                r.name
-            ),
+            None => {
+                assert_eq!(
+                    r.boundary, "platform",
+                    "{}: no context claims '{role}', so the only derivable answer is the platform \
+                     bucket -- and section 2 must be naming it as unclaimed",
+                    r.name
+                );
+                assert!(
+                    unclaimed_bullet.contains(&format!("`{role}`")),
+                    "{}: '{role}' is claimed by no context, so section 2 must NAME it in the \
+                     unclaimed-roles bullet -- otherwise the platform fallback renders as if a \
+                     context had decided it. Bullet reads: {unclaimed_bullet}",
+                    r.name
+                );
+            }
         }
     }
     assert!(gateways > 0, "no app carries a role -- the gateway half of this test stopped running");
@@ -6567,6 +6584,130 @@ fn app_index_resolved_is_measured_not_declared() {
         vec!["bin_runtime".to_string()],
         "{}: `via` names the DIRECT dependency the facade enters through",
         probe.name
+    );
+}
+
+/// Section 3's PROSE, which until now was the only part of the index nothing asserted — and the
+/// only part that stated a predicate it did not measure. Two independent lies were renderable:
+/// - the headline read "**No crate the apps reach is boundary-EXCLUSIVE**" unconditionally while
+///   printing a non-zero exclusive count in the same sentence;
+/// - "linked from at least one app of every boundary" was computed as `total - exclusive`, which
+///   counts a crate reached by 3 of 6 boundaries into a claim about ALL of them.
+///
+/// Both sentences are now conditional on a measurement, so this asserts the four branches AND the
+/// inference the paragraph rests on: the `graphql-*` family is one app per scope and its boundaries
+/// cover the whole set, so a crate every subgraph links necessarily scores the maximum. That last
+/// one is what makes the real document's degenerate signature column a consequence rather than a
+/// coincidence of today's data.
+#[test]
+fn app_index_section_three_claims_only_what_it_measured() {
+    // (1) The four branches of the headline, as pure arithmetic.
+    let base = |exclusive, saturated, subgraph_boundaries| SharedReach {
+        total: 3,
+        exclusive,
+        saturated,
+        boundaries: 6,
+        subgraphs: 8,
+        subgraph_boundaries,
+        apps: 57,
+        min_apps: 2,
+        max_apps: 44,
+    };
+    let clean = base(0, 3, 6).headline();
+    assert!(
+        clean.contains("No crate the apps reach is boundary-EXCLUSIVE")
+            && clean.contains("3 of them from at least one app of EVERY boundary"),
+        "with nothing exclusive the headline may say so: {clean}"
+    );
+    let mixed = base(1, 1, 6).headline();
+    assert!(
+        !mixed.contains("No crate the apps reach is boundary-EXCLUSIVE"),
+        "1 crate IS boundary-exclusive -- the headline must not open by denying it: {mixed}"
+    );
+    assert!(
+        mixed.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && mixed.contains("1 are linked from at least one app of EVERY boundary"),
+        "the exclusive and the saturated counts are two measurements, not one minus the other \
+         (`total - exclusive` would read 2 here): {mixed}"
+    );
+    let partial = base(0, 3, 4).headline();
+    assert!(
+        !partial.contains("cover all") && partial.contains("no single family clears it"),
+        "the subgraph family spans 4 of 6 boundaries, so it does NOT clear the ceiling alone and \
+         the sentence claiming it must not render: {partial}"
+    );
+    let unmeasured = SharedReach { total: 0, ..base(0, 0, 6) }.headline();
+    assert!(
+        unmeasured.contains("claims nothing"),
+        "an unmeasured graph reaches no crate, so the paragraph has nothing to assert: {unmeasured}"
+    );
+
+    // (2) The same predicates end-to-end, over the real app set and a graph built to contain one
+    // crate of each kind. The numbers are known by construction, so the rendered prose and the
+    // rendered table must both agree with them.
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let rows = app_rows(&model, &CrateGraph::default());
+    assert!(bounds.ids.len() >= 3, "this test needs a boundary set a 2-boundary crate cannot fill");
+    let subgraphs: Vec<&AppRow> = rows.iter().filter(|r| r.family == "graphql").collect();
+    let subgraph_bounds: BTreeSet<&str> = subgraphs.iter().map(|r| r.boundary.as_str()).collect();
+    assert_eq!(
+        subgraph_bounds.len(),
+        bounds.ids.len(),
+        "the `graphql-*` family no longer covers every boundary ({subgraph_bounds:?} of {:?}), so \
+         the index's ceiling paragraph must have switched to its other branch -- update this test's \
+         expectation, not the emitter's",
+        bounds.ids
+    );
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for r in &subgraphs {
+        edges.insert(r.name.clone(), BTreeSet::from(["subgraph-shared".to_string()]));
+    }
+    // Two apps of two DIFFERENT boundaries share one crate (reached by 2 of the boundaries, so
+    // neither exclusive nor saturated), and one app links a crate nobody else does.
+    let mut picked: Vec<&AppRow> = Vec::new();
+    for r in rows.iter().filter(|r| r.family != "graphql") {
+        if !picked.iter().any(|p| p.boundary == r.boundary) {
+            picked.push(r);
+        }
+    }
+    assert!(picked.len() >= 2, "need two non-subgraph apps of different boundaries");
+    for r in picked.iter().take(2) {
+        edges.entry(r.name.clone()).or_default().insert("shared-some".to_string());
+    }
+    edges.entry(picked[0].name.clone()).or_default().insert("only-one".to_string());
+    let index = emit_app_index(&model, &CrateGraph::from_edges(edges));
+    assert!(
+        index.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && index.contains("1 are linked from at least one app of EVERY boundary"),
+        "3 crates are reached: `only-one` (1 boundary), `shared-some` (2), `subgraph-shared` (all). \
+         The headline must read 1 exclusive and 1 saturated -- `total - exclusive` would claim 2 \
+         every-boundary crates and fold `shared-some` into a claim it does not meet.\n{index}"
+    );
+    // A crate EVERY subgraph links scores the maximum -- the inference the ceiling sentence states.
+    let row = index
+        .lines()
+        .find(|l| l.contains("`subgraph-shared`"))
+        .expect("the crate every subgraph links has a row");
+    assert!(
+        row.starts_with(&format!("| {} boundaries (", bounds.ids.len())),
+        "every `graphql-*` app links `subgraph-shared` and that family covers all {} boundaries, \
+         so its signature is the full set -- got: {row}",
+        bounds.ids.len()
+    );
+    // And the prose's saturated count IS the table's, whatever the data turns out to be.
+    let table_saturated: usize = index
+        .lines()
+        .filter_map(|l| l.strip_prefix("| ")?.strip_suffix(" |"))
+        .map(|l| l.split(" | ").collect::<Vec<_>>())
+        .filter(|c| c.len() == 4 && c[0].contains("boundar"))
+        .filter(|c| c[0].split(' ').next().and_then(|n| n.parse::<usize>().ok()) == Some(bounds.ids.len()))
+        .filter_map(|c| c[2].parse::<usize>().ok())
+        .sum();
+    assert_eq!(
+        table_saturated, 1,
+        "the headline's every-boundary count must be the table's own rows summed, never a \
+         subtraction that no row supports"
     );
 }
 
