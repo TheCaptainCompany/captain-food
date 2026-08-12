@@ -838,7 +838,9 @@ and [ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-dele
 They are listed here for visibility and for the ensemble-consent + veto-window pattern of
 [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) — **they are
 not counted in the founder-owed total**, because nobody outside the team owes an answer to
-them. **Exactly one row below is genuinely founder-owed: Q7.**
+them. **Exactly one row below was ever genuinely founder-owed — Q7 — and it is ✅ CLOSED 2026-08-12
+as (A), "not now"** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)
+Decision 9; §35). **§27 now has no open founder-owed row.**
 
 The fact that earns the whole block, verified on `168fd77`: **`specs/observability.yaml` declares 29
 `business_metrics`; 26 of them have zero occurrences anywhere in `crates/`, `tools/` or `deploy/`.**
@@ -962,7 +964,12 @@ expected. It is this: **`SetCustomerPreferences.dietaryTags` is `array<Tag>`, `T
 anything wrong — but the Article 9 exposure this proposal is about is **already declared and already
 stored**, and no review caught it because no artifact existed that would make anyone look.
 
-**Two rows below are founder-owed. D1–D7 are TEAM-OWNED** under the same delegation as §27
+**The two founder-owed rows below — Q1 and Q2 — are ✅ BOTH CLOSED 2026-08-12** ((A) authenticated
+server-side only, and (A) yes-in-principle after the DPIA;
+[ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)
+Decision 9; §35), **so §28 has no open founder-owed row and the sequencing is the whole of what
+remains**: mechanism + zero live events → DPIA → the first three events, kept executable by rule R10.
+**D1–D7 are TEAM-OWNED** under the same delegation as §27
 ([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)),
 listed for visibility and the ensemble-consent + veto pattern, and **not counted in the
 founder-owed total**.
