@@ -72,6 +72,30 @@ merges add files rather than overwrite a number, merging can only raise it. That
 the old behaviour, where a merge could silently discard hours (a naive "take ours" would have thrown
 away 9128s — 2.5 h — of another session's recorded time).
 
+**The lower bound bites at the cap** (measured 2026-08-12): a `check` on an up-to-date `main` reported
+626.2m OK while three entries on the unmerged
+[#500 "#242 Runtime D: retire command_journal"](https://github.com/TheCaptainCompany/captain-food/pull/500)
+branch carried another 99.3m — the true week total was 725.5m, already past the cap, and the green
+light was false. "Run `check` from a checkout CURRENT with origin/main" is necessary but **not
+sufficient**: main is still only a lower bound while any billed branch is unmerged. So, **near the cap,
+sum the week across all remote branches before dispatching** — every ledger path is unique and its
+content immutable, so unioning is safe:
+
+```sh
+git fetch origin
+week=$(date -u +%G-W%V)
+git branch -r | while read -r b; do git ls-tree -r --name-only "$b" -- ".claude/loop-budget/$week/"; done \
+  | sort -u | while read -r f; do git branch -r --format='%(refname)' \
+  | while read -r b; do git show "$b:$f" 2>/dev/null && break; done; done | grep '"seconds"' \
+  | grep -o '[0-9]*' | awk '{s+=$1} END {printf "%.1fm across all branches\n", s/60}'
+```
+
+If that total disagrees with `check`, **propagate the missing entries onto `main`**
+(`git checkout origin/<branch> -- .claude/loop-budget/<week>/` and commit) — this is not hand-editing
+budget state: the files are verbatim hook-written records, the eventual branch merge re-adds identical
+paths with identical content (no conflict, no double count), and if the branch dies unmerged the time
+was still spent, so main holding the entry is *more* correct, not less.
+
 **If you hit a merge conflict on `.claude/loop-budget.json`**, the branch is old enough to still carry
 the retired `secondsUsed`/`startedAt` counter. Resolution: **take `main`'s config-only file**, then
 record whatever that branch's counter held above main's migrated seed with
