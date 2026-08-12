@@ -409,7 +409,7 @@ mod tests {
         let spans = [
             command_receive("C", "A", "GRAPHQL"),
             command_journal("m"),
-            command_dispatch("m", "spawned"),
+            command_dispatch("m", crate::contract::dispatch_outcome::ENQUEUED),
             command_validate(),
             event_store_append("E", "s"),
             event_publish("E"),

@@ -23,12 +23,27 @@
 -- `inbound_messages` first (id-preserving, the way 20260731143000 did it) -- do not copy this
 -- migration's shape into that situation.
 --
--- ORDERING (expand/contract): the code that reads and writes this table is deleted in the SAME
--- change, and `sweep_retention()` is redeployed below without its `command_journal` section --
--- the function is CREATE OR REPLACE'd from the generated schema, so dropping the table first
--- would leave a stale function body referencing a missing relation.
-
-BEGIN;
+-- ORDERING (SINGLE-STEP CONTRACT, licensed by the empty-log window -- NOT expand/contract): the
+-- readers and writers of this table are deleted in the SAME change as the DROP, so there is no
+-- version window in either direction and no rollout in which old and new code coexist. What makes
+-- that safe is the empty log and the down production named above, not a staged sequence. Copy the
+-- label only together with the window.
+--
+-- Inside the migration the order still matters: `sweep_retention()` is CREATE OR REPLACE'd from the
+-- generated schema BEFORE the DROP. plpgsql resolves relations at CALL time and tracks no
+-- dependencies, so dropping the table first would SUCCEED and quietly leave a function body naming
+-- a missing relation. The failure would then surface at the next invocation -- up to 6 h later, as a
+-- `worker-retention` pod that sweeps NOTHING, `inbound_messages` and all four mirrors included --
+-- rather than here, where it would be seen.
+--
+-- NO EXPLICIT `BEGIN;`/`COMMIT;`: sqlx already wraps each migration script and its
+-- `_sqlx_migrations` bookkeeping INSERT in ONE transaction (sqlx#1966). A `COMMIT;` in the script
+-- commits that ENCLOSING transaction, so the DROP would land BEFORE the bookkeeping row; a
+-- connection lost in that window replays this migration on the next run, where `LOCK TABLE
+-- command_journal` fails with `relation does not exist` and blocks every later migration until
+-- someone hand-inserts a checksum row. The `LOCK` below is transactional either way -- it is held to
+-- the end of sqlx's transaction, exactly as in 20260731143000, which also takes a lock with no
+-- `BEGIN`.
 
 -- WRITE-FENCE, mirroring 20260731143000: an old-code instance still journaling would otherwise
 -- insert between the guard and the DROP.
@@ -104,5 +119,3 @@ DROP TABLE command_journal;
 -- `RuntimePosture` itself STAYS: the mechanism (#318, ADR-20260803-104819) is right and the next
 -- process-wide posture needs it; it simply has no tenant today.
 DELETE FROM RuntimePosture WHERE posture = 'PM_MAILBOX_DELIVERY';
-
-COMMIT;

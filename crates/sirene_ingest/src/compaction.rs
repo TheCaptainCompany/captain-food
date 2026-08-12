@@ -17,20 +17,31 @@
 //! # What this means for rows that predate the status column
 //!
 //! They carry `status = 'PENDING'` (the migration default) and no `synced_at`, so the rule above will
-//! never touch them -- but for most of them the evidence the rule demands EXISTS, one table over. Every
-//! sync is a `RegisterRestaurant`/`MarkRestaurantClosed` COMMAND handed to the write-path journal
-//! (`inbound_messages`, the only journal since #242 Runtime D -- pre-#227 it was `command_journal`,
-//! whose rows the mailbox backfill carried over under the SAME id): one row per submission, with a
-//! deterministic `message_id`
+//! never touch them -- but for many of them the evidence the rule demands EXISTS, one table over.
+//! Every sync is a `RegisterRestaurant`/`MarkRestaurantClosed` COMMAND handed to the write-path
+//! journal, which since #242 Runtime D is `inbound_messages` and nothing else: one row per
+//! submission, with a deterministic `message_id`
 //! (UUIDv5 over the command type, the SIRET and the staged version's `last_seen_at` -- exactly the
 //! version this row still carries, since a later refresh would have re-pended it), and a verdict
-//! (`SUCCEEDED`/`REJECTED`/`FAILED` + `completed_at`) written when the delivery completed.
+//! (`SUCCEEDED`/`REJECTED`/`FAILED` + `completed_at`) written when the delivery completed. The seed
+//! is unchanged across the retirement -- `send_envelope` and [`journal_message_id`] derive the same
+//! UUIDv5 from the same namespace, which the infrastructure parity test pins -- so the join below
+//! simply retargets to the surviving table and cannot match a row it did not mean.
 //! That is a RECORDED outcome for the exact staged version -- the same standard `status`/`synced_at`
 //! meet -- so this pass transcribes it: `status = 'SYNCED'`, `synced_at = journal.completed_at`, payload
 //! dropped, all in one statement. Rows whose journal verdict is a rejection or a failure, and rows with
 //! no journal row at all (drained before journaling existed, or an `etat=F` signal that had nothing to
 //! close), are left untouched: the sweep re-pends them once on resume (their hash sentinel guarantees
 //! it, migration `20260728040000`) and the ordinary path confirms them.
+//!
+//! **Until #227 the journal was `command_journal`, and those verdicts DIED WITH IT.** Nothing carried
+//! them over: migration `20260731143000` says in as many words that `command_journal` is deliberately
+//! NOT touched, and `20260812000000` DROPs it with no backfill, by design -- acceptance history is
+//! not a domain fact, and the log is empty by decision at the moment it lands. A pre-#227 row's
+//! evidence is therefore not recoverable here, whatever id it once had; it falls into the
+//! "no journal row at all" class above and reclaims by re-sync. That is the safe direction -- the
+//! pass keeps the payload and INSEE re-supplies the record -- but do not read the paragraph above as
+//! promising that pre-#227 history can still be transcribed. It cannot.
 //!
 //! Two bounds on the journal evidence, worth stating plainly:
 //!

@@ -147,9 +147,11 @@ pub mod journal_status {
     pub const CONFLICT: &str = "conflict";
 }
 
-/// Values for `business.dispatch_outcome` (`spawned | duplicate_skipped`).
+/// Values for `business.dispatch_outcome` (`enqueued | duplicate_skipped`), matching
+/// `specs/observability.yaml` verbatim — this is the vocabulary a dashboard filter may rely on.
+/// `spawned` retired with the in-request spawn (#242 Runtime D): it is neither emitted nor declared,
+/// so the constant is DELETED rather than kept as a value nothing can produce.
 pub mod dispatch_outcome {
-    pub const SPAWNED: &str = "spawned";
     pub const DUPLICATE_SKIPPED: &str = "duplicate_skipped";
     /// The mailbox era (#242): the command was ENQUEUED on the actor mailbox — the partitioned
     /// worker delivers it; nothing is spawned in the request path.

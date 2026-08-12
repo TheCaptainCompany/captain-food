@@ -64,3 +64,14 @@ finished shape is one door, so build one door.
   and never reacted to. On an empty log it enqueues nothing and costs one query.
 - Rollback is a `git revert` + the down-migration you would have to write; there is no runtime lever.
   Acceptable only because of the window named above.
+- **A rolled-back binary reports itself HEALTHY while checkout is dead.** The readiness probe
+  (`crates/server/src/lib.rs`, `applied >= REQUIRED_SCHEMA_VERSION`) is ONE-DIRECTIONAL: schema
+  *behind* the binary ⇒ `SCHEMA_BEHIND` ⇒ 503, but schema *ahead* ⇒ `HEALTHY` ⇒ **200 OK**. Reverting
+  the image without also reverting the migration therefore takes traffic immediately: the old code
+  reads `Unprovable` for the deleted posture row, takes the conservative arm — the legacy one — and
+  fails on `relation "command_journal" does not exist` **inside the mutation**, not at the probe.
+  Net: a `/health` that is green over a checkout that cannot complete. Tolerable only in this window
+  (production down, log empty), and it makes the ORDER of any rollback non-negotiable: revert the
+  migration first, or not at all. It is also the sharper reason the gate had to be deleted rather
+  than defaulted ON — a lever whose OFF arm needs a dropped table is unusable precisely when someone
+  would reach for it.

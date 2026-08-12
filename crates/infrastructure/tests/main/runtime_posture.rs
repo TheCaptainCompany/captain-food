@@ -18,6 +18,13 @@ const MIGRATION: &str = include_str!("../../../../migrations/20260803104819_runt
 /// A key no posture uses — the point is the read's behaviour, not any particular gate.
 const PROBE: &str = "TEST_ONLY_PROBE_POSTURE";
 
+/// The one key `20260803104819` seeds. It is NOT a live posture any more — `20260812000000` deletes
+/// the row — but the seed statement is history and is correctly left unedited, so it is the only key
+/// through which the migration's own idempotence can be observed. Step (4) depends on that: a
+/// re-apply test aimed at [`PROBE`] would assert over a key the migration never writes, and would
+/// pass no matter what the seed's `ON CONFLICT` clause said.
+const SEEDED_BY_MIGRATION: &str = "PM_MAILBOX_DELIVERY";
+
 #[tokio::test]
 async fn posture_read_is_fail_closed_by_cause() {
     let Some(db) = crate::common::TestDb::acquire("runtime_posture").await else { return };
@@ -34,8 +41,10 @@ async fn posture_read_is_fail_closed_by_cause() {
         "a missing table must resolve Unprovable, never Err and never a value"
     );
 
-    // (2) The migration creates the table and seeds NO posture (#242 Runtime D removed the only
-    // one), so an unseeded key is still UNPROVABLE — never a fabricated `false`.
+    // (2) The migration creates the table and seeds exactly ONE key (`PM_MAILBOX_DELIVERY` —
+    // history, correctly unedited; `20260812000000` DELETEs that row afterwards, which is why no
+    // posture is live today). An unseeded key is therefore still UNPROVABLE — never a fabricated
+    // `false`.
     sqlx::raw_sql(MIGRATION).execute(&pool).await.expect("apply the runtime-posture migration");
     assert!(
         matches!(read_posture(&pool, PROBE).await.expect("read"), PostureRead::Unprovable(_)),
@@ -58,10 +67,30 @@ async fn posture_read_is_fail_closed_by_cause() {
 
     // (4) An operator flip SURVIVES a re-applied migration — the property that made this a table
     // rather than an env key: a redeploy must never silently reset a posture an operator set.
+    //
+    // This MUST be asserted over `SEEDED_BY_MIGRATION`, the key the seed statement actually names.
+    // The seed is `ON CONFLICT (posture) DO NOTHING`; the mutant this step exists to catch is
+    // `DO UPDATE SET enabled = ...`, and only a key the INSERT touches can observe the difference.
+    // Its seeded value is FALSE, so flipping to TRUE first makes the overwrite visible as a value
+    // change rather than a no-op.
+    sqlx::query("UPDATE RuntimePosture SET enabled = TRUE, updated_at = now() WHERE posture = $1")
+        .bind(SEEDED_BY_MIGRATION)
+        .execute(&pool)
+        .await
+        .expect("flip the seeded posture as an operator would");
+    assert_eq!(
+        read_posture(&pool, SEEDED_BY_MIGRATION).await.expect("read"),
+        PostureRead::Enabled(true),
+        "the operator flip did not land — the rest of this step would prove nothing"
+    );
     sqlx::raw_sql(MIGRATION).execute(&pool).await.expect("re-apply idempotently");
     assert_eq!(
-        read_posture(&pool, PROBE).await.expect("read"),
+        read_posture(&pool, SEEDED_BY_MIGRATION).await.expect("read"),
         PostureRead::Enabled(true),
         "re-applying the migration overwrote an operator-set posture"
     );
+
+    // (5) …and a re-apply does not resurrect a key it never seeded either: `PROBE` keeps the value
+    // step (3) left, so the seed writes exactly one row and no more.
+    assert_eq!(read_posture(&pool, PROBE).await.expect("read"), PostureRead::Enabled(true));
 }
