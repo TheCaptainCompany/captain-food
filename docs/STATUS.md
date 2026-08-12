@@ -2,6 +2,38 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📌 **2026-08-12 — THE FOLLOW-UP REGISTER: nine findings from tonight's mob reads are now ISSUES,
+> not paragraphs** (records-only). Each is linked from the register row it belongs to, so it is
+> reachable from the decision as well as from here:
+> - [#508](https://github.com/TheCaptainCompany/captain-food/issues/508) — `hubrise_connections.access_token`
+>   is **plaintext** and a non-expiring token, so the physical WAL archives carry it too (linked from
+>   [DECISIONS §32 ADP-1](proposals/DECISIONS.md), which called that table non-rederivable without
+>   saying it was unencrypted).
+> - [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) — the restore drill verifies
+>   **1 of the 11** databases the split creates (linked from **STO-6**).
+> - [#510](https://github.com/TheCaptainCompany/captain-food/issues/510) — mailbox query ports behind a
+>   capability witness: the level-4 half of #506 the validator rule cannot reach (linked from
+>   [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)
+>   and [PROP-20260802-130500 §1](proposals/PROP-20260802-130500-isolation-by-construction.md)).
+> - [#511](https://github.com/TheCaptainCompany/captain-food/issues/511) — JWKS single-flight test flake.
+> - [#512](https://github.com/TheCaptainCompany/captain-food/issues/512) — pool + `_sqlx_migrations`
+>   schema probe out of `crates/server`, the second level-4 half of #506 (same two links as #510).
+> - [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) — the adapter-isolation grant
+>   emitter and its **negative-path** test: nothing today proves a pod is REFUSED a database (linked
+>   from **ADP-1** and **STO-5**).
+> - [#514](https://github.com/TheCaptainCompany/captain-food/issues/514) — per-database migration chains
+>   and a `REQUIRED_SCHEMA_VERSION` **map**: eleven databases against today's one chain and one scalar
+>   constant (`crates/server/src/lib.rs:170`) — linked from **STO-1** / §35's **CUT-1** cutover row.
+> - [#515](https://github.com/TheCaptainCompany/captain-food/issues/515) — `join.captain.food`'s legal
+>   pages still lack a postal address, a phone and a named directeur de la publication, and name **no
+>   consumer mediator** (linked from **Q-L1**).
+> - [#502](https://github.com/TheCaptainCompany/captain-food/issues/502) — re-scoped in a comment: five
+>   stale `inbound_event_id` declarations survived [#500](https://github.com/TheCaptainCompany/captain-food/issues/500)
+>   in `specs/observability.yaml` (lines 506, 584, 648, 732, 966, each `source: "inbound.inbound_event_id"`
+>   against a table dropped by `20260731143000`), and the fix is to **type the reference** rather than to
+>   rename the survivors — an untyped `source:` string is the [#413](https://github.com/TheCaptainCompany/captain-food/issues/413)
+>   defect class again, invisible to the refs walker and therefore to every rename.
+
 > 🧭 **2026-08-12 — THE FOUNDER ANSWER SHEET: THE FLIP IS TAKEN, THE REGISTRY IS DESTROYED, AND
 > NOTHING IS PAID FOR UNTIL A WORKING VERSION CAN BE SEEN** (twelve founder answers + a ten-lens mob
 > read; [ADR-20260812-214021](adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md),
@@ -134,12 +166,20 @@
 > `/auth/session`+`/auth/refresh`+`/auth/logout`, which would also home the
 > [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) routes that have no bin home
 > today) — a larger slice, not taken now. Reframing finding: `AUTH_SESSION_KEY` is granted to **53 of
-> 57 pods** while exactly **two** decrypt a session, so narrowing the grant
-> ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4) buys more here than
-> the database wall. Named consequences: STO-4's pooler-first sequencing **hardens** (every adapter
+> 56 pods** while exactly **two** decrypt a session, so narrowing the grant
+> ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4, emitter + negative
+> test in [#513](https://github.com/TheCaptainCompany/captain-food/issues/513)) buys more here than
+> the database wall. **That figure was first recorded as "53 of 57, every group but the four periodic
+> workers" and the correction makes it WORSE**: [#500](https://github.com/TheCaptainCompany/captain-food/issues/500)
+> deleted `worker-journal-sweep`, which was one of the four EXCLUDED workers, so the denominator fell
+> and the numerator did not — read the smaller number as a widened blast radius, not as progress
+> (three excluded workers remain: `worker-erasure`, `worker-retention`, `worker-sirene-sync`).
+> Named consequences: STO-4's pooler-first sequencing **hardens** (every adapter
 > bin holds two pools), `hubrise_connections` is the one NON-rederivable adapter table (a
 > non-expiring token only a human re-connect replaces) so it needs a backup story while staging
-> mirrors take the refetch posture, and `sweep_retention()` forks per adapter database **including
+> mirrors take the refetch posture — and that token is **plaintext**, so the same backup copies it
+> into the WAL archives ([#508](https://github.com/TheCaptainCompany/captain-food/issues/508)) — and
+> `sweep_retention()` forks per adapter database **including
 > the avelo37 leg the first record did not know existed**.
 
 > 🗂️ **2026-08-12 — THE APP INDEX IS GENERATED, AND IT SAYS THE SPLIT IS NOT CLEAN**
@@ -311,8 +351,10 @@
 > consumer's projector folds a slim snapshot into its OWN read database -- the same
 > composition-in-the-projector answer STO-2(a) already gave for `ScopeMembership`.
 >
-> 🧱 **2026-08-12 — A READ TARGET IS DECLARED, NEVER INFERRED: the `reads:` ownership wall is a gate
-> ([ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).**
+> 🧱 **2026-08-12 — A READ TARGET IS DECLARED, NEVER INFERRED: the `reads:` ownership wall is a gate**
+> ([#507 "fix(codegen): a read target is DECLARED, never inferred"](https://github.com/TheCaptainCompany/captain-food/pull/507),
+> MERGED as `158c85a`, closing [#506](https://github.com/TheCaptainCompany/captain-food/issues/506);
+> [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).
 > Retiring `command_journal` cost 110 files because the table had leaked out of its encapsulation into
 > resolver bodies -- founder verdict: *"it should never be used directly because we have to pass through
 > the actor clients that encapsulate the insert"* and *"it's unacceptable"*. Two absences allowed it, both now ERRORS, both **seen red on `786bcfa` first**:
@@ -340,13 +382,19 @@
 > always been refused -- the new key had **opened a door that was shut**. Fixed, with the missing
 > mutation test added; the lesson is that a new permission needs its own red-first plant, not just the
 > rule it was added to serve. **Deliberately untouched**: `c4-l3` `components.*.reads`, the correct
-> home for infrastructure readers. **Honest limit, and the follow-up worth filing**: the compiler-first
-> half is unfinished -- `crates/actor_client`'s `MailboxAccess(pub(crate) ())` witness closes the mailbox
-> WRITE door but not `MailboxLaneRepository`/`MailboxRequeue` (`crates/application/src/queries.rs`), and
-> the existing witness cannot be reused because `actor_client` depends on `application`; and `sqlx`
-> canNOT simply be dropped from `crates/server/Cargo.toml` -- there is no `sqlx::query`, but there IS
-> `sqlx::raw_sql` (the `_sqlx_migrations` probe, `lib.rs:1497`) plus `PgPool`/`PgPoolOptions`/`Row` in
-> the composition root.
+> home for infrastructure readers. **Honest limits, now FILED as the compiler-first halves of this
+> change** -- a validator rule is level 3, and both of these are reachable at level 4:
+> [#510 "mailbox query ports behind a capability witness"](https://github.com/TheCaptainCompany/captain-food/issues/510)
+> -- `crates/actor_client`'s `MailboxAccess(pub(crate) ())` witness closes the mailbox WRITE door but not
+> `MailboxLaneRepository`/`MailboxRequeue` (`crates/application/src/queries.rs`), and the existing witness
+> cannot be reused because `actor_client` depends on `application`; and
+> [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)
+> -- `sqlx` canNOT simply be dropped from `crates/server/Cargo.toml`: there is no `sqlx::query`, but there
+> IS `sqlx::raw_sql` (the `_sqlx_migrations` probe, `lib.rs:1497`) plus `PgPool`/`PgPoolOptions`/`Row` in
+> the composition root. **And the rule that earned this entry a correction of its own**: the
+> `reference: true` guard, taken alone, would NOT have caught `command_journal` -- the journal's queries
+> declared no `reads:` at all, so only the second absence (transience inferred from a missing key) closed
+> the path that was actually used.
 >
 > ✅ **2026-08-12 — THE JOURNAL CONCERN IS CLOSED: `inbound_messages` is the only journal (#242
 > Runtime D, [ADR-20260812-000000](adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)).**

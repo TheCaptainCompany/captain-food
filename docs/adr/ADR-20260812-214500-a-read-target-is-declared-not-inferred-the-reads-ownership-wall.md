@@ -120,7 +120,15 @@ feeds, before the table is deleted rather than after.
   side (`MailboxLaneRepository`, `MailboxRequeue` in `crates/application/src/queries.rs`) has no
   witness, and cannot reuse that one: `actor_client` depends on `application`, so the dependency
   arrow points the wrong way. Extending it means moving those ports and changing the resolver emitter
-  — a slice of its own, tracked separately, and the stronger fix when it lands. A `reads:` binding is
+  — a slice of its own, **now filed as
+  [#510 "mailbox query ports behind a capability witness"](https://github.com/TheCaptainCompany/captain-food/issues/510)**,
+  and the stronger fix when it lands. The second half is
+  [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512):
+  `sqlx` cannot simply be dropped from `crates/server/Cargo.toml` because the `_sqlx_migrations`
+  probe uses `sqlx::raw_sql` (`lib.rs:1497`) and `PgPool`/`PgPoolOptions`/`Row` live in the
+  composition root — until they move, the manifest cannot state the boundary the compiler would
+  otherwise enforce. Both are level-4 answers to what this ADR settles at level 3
+  (PROP-20260802-130500 §1's hierarchy). A `reads:` binding is
   YAML, so no type can reach *it*: for that half, the gate is correct rather than lazy.
 
 ## Consequences

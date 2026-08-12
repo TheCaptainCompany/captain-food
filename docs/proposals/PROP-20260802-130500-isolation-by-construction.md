@@ -104,7 +104,12 @@ proposal's own `MailboxAccess(pub(crate) ())` witness (D1/D4, shipped) covers th
 but not the query ports `MailboxLaneRepository` / `MailboxRequeue`, which sit in `crates/application`
 — and `actor_client` depends on `application`, so the existing witness cannot be reused there. Closing
 it means moving those ports plus changing the resolver emitter: a slice of its own, and a genuine
-level-4 win when it lands.
+level-4 win when it lands. **Both halves are now filed rather than merely named**:
+[#510 "mailbox query ports behind a capability witness"](https://github.com/TheCaptainCompany/captain-food/issues/510)
+and [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)
+— the latter because D3's `Cargo.toml`-as-allowlist cannot state the boundary while `crates/server`
+still needs `sqlx` for the `_sqlx_migrations` probe (`sqlx::raw_sql`, `lib.rs:1497`) and holds
+`PgPool`/`PgPoolOptions`/`Row` in the composition root.
 
 **START at level 4** (product-owner directive, 2026-08-03, [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)).
 This table ranked the levels but never said where to begin, so "climb one level" got read as an

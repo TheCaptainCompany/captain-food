@@ -150,7 +150,12 @@ conflicted PR looks exactly like a slow runner. The tell is on the PR object, no
 Cost: ~40 minutes of heartbeats attributing a real conflict to runner backlog while auto-merge sat
 armed and could never fire. Habit: when an armed auto-merge does not land within one CI cycle, call
 `pull_request_read method:get minimal_output:true` and read `mergeable_state` before blaming the
-platform. Related: the conflict was SEMANTIC, not textual — one branch moved every
+platform. **And arming auto-merge is not delegating the merge**: on 2026-08-12 it failed to fire on
+**both** PRs of the day (#500 and #507) with every required check green and no conflict, and each
+had to be merged by hand. Whatever the cause, the operational rule is the one the protocol already
+states and sessions keep shortcutting — supervise until the PR reads **MERGED**. A session that
+arms auto-merge and walks away leaves a green PR sitting, and the next session finds the work
+apparently done and unmergeable-looking. Related: the conflict was SEMANTIC, not textual — one branch moved every
 `crates/infrastructure/tests/*.rs` into the `tests/main/` witness harness while the other added a
 test in the old layout, so git's auto-merge produced a file mixing both idioms. Resolve onto the
 NEW harness and re-run the moved test against a live database; a compile-only check would have
@@ -1064,6 +1069,18 @@ containing seven hex characters.
 green, quotes the claim it previously made, explains why that claim was false, and then says what
 can honestly be said instead — that the evidence is ordinary, the assertion of specific values a
 wrong implementation would not produce.
+
+**Restore a plant with `git checkout -- <path>`, NEVER from a copy you took yourself.** The rule
+above is what creates this hazard: proving red means editing a committed file, and the obvious
+mechanics — `cp <file> /tmp/x` before, `cp /tmp/x <file>` after — are **not re-entrant**. Plant
+once, prove red, restore from `/tmp`; plant a *second* mutation in the same file and the `cp`
+snapshots the **already-planted** text, so the "restore" writes the first mutation back and the
+tree is silently wrong. It survives `make validate` whenever the mutation is one the validator was
+never taught to refuse, which is exactly the case a red-first proof is about, and the diff that
+reaches review then contains a deliberate defect nobody wrote on purpose. Git already holds the
+pristine copy: `git checkout -- <path>` is idempotent, needs no bookkeeping, and cannot restore the
+wrong generation. Verify with `git status --short` before every gate run, not only at the end —
+a clean tree is the only evidence the plants are gone.
 
 ### Do not push a feature branch while its executor is still working
 

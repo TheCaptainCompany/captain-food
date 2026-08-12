@@ -109,11 +109,19 @@ for a non-existent adapter, connected to by whoever happens to need it.
 
 ### What isolation is actually worth here — the finding that reframes it
 
-`AUTH_SESSION_KEY` is granted to **53 of 57 pods**. Measured from
-`specs/generated/apps.generated.md` §5: every grant group carries it except the four periodic
-workers, which `tools/codegen-rs/src/emit/deploy.rs:187-189` narrows to the database + telemetry
-floor. Exactly **two** components decrypt a session. Isolating a table into its own database while
-broadcasting its decryption key to 53 pods buys much less than it looks like it buys — the cheap,
+`AUTH_SESSION_KEY` is granted to **53 of 56 pods**. Measured from
+`specs/generated/apps.generated.md` §5: every grant group carries it except the **three** periodic
+workers (`worker-erasure` · `worker-retention` · `worker-sirene-sync`), which the
+`worker_key_allowed` narrowing (`tools/codegen-rs/src/emit/bins.rs:136`, applied at
+`tools/codegen-rs/src/emit/deploy.rs:187-189`) cuts to the database + telemetry floor. **This was
+first recorded as "53 of 57, every group but the four periodic workers", and the correction makes
+the finding WORSE, not better**: retiring `command_journal`
+([#242](https://github.com/TheCaptainCompany/captain-food/issues/242) Runtime D) deleted
+`worker-journal-sweep`, which was one of the four EXCLUDED workers — so the denominator fell while
+the numerator did not, and the share of pods holding a key only two need rose from 53/57 to 53/56. A
+smaller denominator here is not progress. Exactly **two** components decrypt a session. Isolating a
+table into its own database while broadcasting its decryption key to 53 pods buys much less than it
+looks like it buys — the cheap,
 large win is narrowing the grant, already tracked as
 [#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4. This does not argue
 against isolation generally; it argues that for *this* table the grant surface, not the database
