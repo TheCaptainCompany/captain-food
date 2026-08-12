@@ -787,10 +787,10 @@ pub async fn router() -> Router {
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
                         sessions: auth_sessions.clone(),
                         // The SAME conditional Stripe binding the resolver side and the saga runner
-                        // use (#272 Runtime D1): the mailbox workers will execute the payment-
-                        // dependent PM legs once the PlaceOrderProcess/RefundProcess mailboxes land,
-                        // and a hard-wired fail-closed stand-in here would silently decline every
-                        // checkout the moment the generated addressing flips them.
+                        // use (#272 Runtime D1): the mailbox workers execute the payment-dependent
+                        // PM legs -- the PlaceOrderProcess/RefundProcess lanes are live and
+                        // unconditional since #242 Runtime D -- so a hard-wired fail-closed
+                        // stand-in here would silently decline every checkout.
                         payments: infrastructure::generated::service_bindings::payment_service(|| {
                             match std::env::var("STRIPE_SECRET_KEY") {
                                 Ok(key) if !key.is_empty() => {

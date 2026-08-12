@@ -3,7 +3,7 @@
 
 //! `pm-place-order` — mailbox worker realizing the `PlaceOrderProcess` process manager -- a DECLARED cross-scope bridge; its domain-crate links are its spec refs.
 //!
-//! BUSINESS RUNTIME (#385): hosts the `PlaceOrderProcess` saga runner (restricted to this PM, flip-time backfill sequenced first) AND its mailbox lane's worker fleet. Serves the `/health` + `/ping` probes its generated
+//! BUSINESS RUNTIME (#385): hosts the `PlaceOrderProcess` saga runner (restricted to this PM, startup Stripe-fact backfill sequenced before its first tick) AND its mailbox lane's worker fleet. Serves the `/health` + `/ping` probes its generated
 //! Deployment (deploy/generated/manifests/bins/pm-place-order.yaml) declares (`wired:true`, readiness
 //! 503 until the hosted runtime is up), draining on SIGTERM.
 //!
@@ -28,7 +28,7 @@ const BIN: &str = "pm-place-order";
 const FAMILY: &str = "pm";
 /// The process manager this deployable realizes (its `pm:` checkpoint slice).
 const PM: &str = "PlaceOrderProcess";
-/// The PM's own mailbox lane (Runtime D1 gate-on delivery path).
+/// The PM's own mailbox lane -- the lane fleet this bin drains, unconditionally.
 const LANES: &[&str] = &["PlaceOrderProcess"];
 
 #[tokio::main]
@@ -87,8 +87,10 @@ async fn main() {
         .await;
         tracing::info!(pm = PM, "saga runner spawned (restricted to this PM)");
         saga_status = Some(status);
-        // The PM's OWN mailbox lane (Runtime D1): the gate-on delivery path. The fleet
-        // reads the money posture itself and refuses the lane when it is unprovable.
+        // The PM's OWN mailbox lane: where its commands are delivered from. The fleet
+        // drains exactly the lane set it is handed -- no posture read since #242 Runtime D, which
+        // retired the PM_MAILBOX_DELIVERY gate with `command_journal`. There is no value a peer
+        // could hold differently, hence nothing to fail closed against.
         bin_runtime::spawn_actor_fleet(
             pool.clone(),
             BIN,

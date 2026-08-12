@@ -144,7 +144,7 @@ pub fn spawn_actor_fleet(
 }
 
 /// Everything a `pm-{name}` bin hosts besides its (optional) mailbox lane: the saga runner
-/// restricted to its OWN process manager, sequenced after the flip-time Stripe-fact backfill
+/// restricted to its OWN process manager, sequenced after the startup Stripe-fact backfill
 /// exactly like the monolith (#272 review MAJOR-2: the backfill must complete before the runner's
 /// first tick, or a fact past a frozen checkpoint is missed forever).
 pub struct PmRuntime {

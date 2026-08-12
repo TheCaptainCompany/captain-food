@@ -189,6 +189,19 @@
 > therefore the only one on which "an operator flip survives a re-apply" can fail for its stated
 > reason.
 >
+> 🧹 **The guard's PROSE outlived the guard, and three lens reviews plus the product owner missed it**
+> (found by the automated PR reviewer, corrected on the branch). The bin emitter still promised a
+> mechanism this change deletes: `pm-place-order`/`pm-refund` shipped *"the fleet reads the money
+> posture itself and refuses the lane when it is unprovable"*, and all fifteen `actor-*` bins shipped
+> *"posture-gated money lanes"* -- on lines no diff hunk touched, in the file an operator opens first
+> when a money PM pod is stuck at peak. The sibling that hid the same way: the five-line doc comment of
+> the deleted `pm_mailboxes` field, which Rust re-attached to the `only` field beside it, so
+> `ProcessManagerRunner` documented a gate flip on a field that picks a PM. All now say what is true
+> (the fleet drains exactly the lane set it is handed). **No gate is reachable** -- catching it needs a
+> source-text scanner over comment prose, the class ADR-20260803-234035/#329 rule out -- so the defence
+> is recorded as procedure in the ADR: when a mechanism is deleted, grep its VOCABULARY, not just its
+> identifiers, across the emitter and the generated output.
+>
 > ⚠️ **A leg reserved to the product owner was TAKEN, and it is recorded rather than assumed**:
 > [DECISIONS.md](proposals/DECISIONS.md) §32 JRN-1 held that flipping `PM_MAILBOX_DELIVERY` is a
 > money-path posture change needing *"a staging smoke and a one-line ADR"*. The ADR exists; **the

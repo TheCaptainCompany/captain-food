@@ -653,11 +653,11 @@ fn wired_main(b: &BinSpec) -> String {
     }
     let hosting = match b.family {
         "actor" => format!(
-            "hosts the `{}` mailbox lane's supervised worker fleet (the SAME `infrastructure::mailbox::standalone` runtime the adapter binaries use: leases, fencing, head-of-line, posture-gated money lanes, graceful drain)",
+            "hosts the `{}` mailbox lane's supervised worker fleet (the SAME `infrastructure::mailbox::standalone` runtime the adapter binaries use: leases, fencing, head-of-line, the money lanes' startup Stripe-fact backfill, graceful drain)",
             b.actor.as_deref().unwrap_or("?")
         ),
         "pm" if b.mailboxed => format!(
-            "hosts the `{}` saga runner (restricted to this PM, flip-time backfill sequenced first) AND its mailbox lane's worker fleet",
+            "hosts the `{}` saga runner (restricted to this PM, startup Stripe-fact backfill sequenced before its first tick) AND its mailbox lane's worker fleet",
             b.actor.as_deref().unwrap_or("?")
         ),
         "pm" => format!(
@@ -708,7 +708,7 @@ fn wired_main(b: &BinSpec) -> String {
                 ));
                 if b.mailboxed {
                     body.push_str(
-                        "        // The PM's OWN mailbox lane (Runtime D1): the gate-on delivery path. The fleet\n        // reads the money posture itself and refuses the lane when it is unprovable.\n        bin_runtime::spawn_actor_fleet(\n            pool.clone(),\n            BIN,\n            LANES,\n            payments,\n            config.reminder_windows(),\n            bin_runtime::MailboxSettings {\n                lease_seconds: config.mailbox_lease_seconds,\n                heartbeat_seconds: config.mailbox_heartbeat_seconds,\n                max_delivery_attempts: config.mailbox_max_delivery_attempts,\n            },\n        );\n",
+                        "        // The PM's OWN mailbox lane: where its commands are delivered from. The fleet\n        // drains exactly the lane set it is handed -- no posture read since #242 Runtime D, which\n        // retired the PM_MAILBOX_DELIVERY gate with `command_journal`. There is no value a peer\n        // could hold differently, hence nothing to fail closed against.\n        bin_runtime::spawn_actor_fleet(\n            pool.clone(),\n            BIN,\n            LANES,\n            payments,\n            config.reminder_windows(),\n            bin_runtime::MailboxSettings {\n                lease_seconds: config.mailbox_lease_seconds,\n                heartbeat_seconds: config.mailbox_heartbeat_seconds,\n                max_delivery_attempts: config.mailbox_max_delivery_attempts,\n            },\n        );\n",
                     );
                 }
                 if b.ports.contains("delivery") {
@@ -767,7 +767,7 @@ fn wired_main(b: &BinSpec) -> String {
             ));
             if b.mailboxed {
                 consts.push_str(&format!(
-                    "/// The PM's own mailbox lane (Runtime D1 gate-on delivery path).\nconst LANES: &[&str] = &[\"{}\"];\n",
+                    "/// The PM's own mailbox lane -- the lane fleet this bin drains, unconditionally.\nconst LANES: &[&str] = &[\"{}\"];\n",
                     b.actor.as_deref().unwrap_or("?")
                 ));
             }

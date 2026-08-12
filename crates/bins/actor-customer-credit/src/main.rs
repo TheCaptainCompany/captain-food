@@ -3,7 +3,7 @@
 
 //! `actor-customer-credit` — mailbox worker realizing the `CustomerCredit` aggregate -- drains ONLY its own lanes (the LANES const it hands the shared fleet, not a link fact).
 //!
-//! BUSINESS RUNTIME (#385): hosts the `CustomerCredit` mailbox lane's supervised worker fleet (the SAME `infrastructure::mailbox::standalone` runtime the adapter binaries use: leases, fencing, head-of-line, posture-gated money lanes, graceful drain). Serves the `/health` + `/ping` probes its generated
+//! BUSINESS RUNTIME (#385): hosts the `CustomerCredit` mailbox lane's supervised worker fleet (the SAME `infrastructure::mailbox::standalone` runtime the adapter binaries use: leases, fencing, head-of-line, the money lanes' startup Stripe-fact backfill, graceful drain). Serves the `/health` + `/ping` probes its generated
 //! Deployment (deploy/generated/manifests/bins/actor-customer-credit.yaml) declares (`wired:true`, readiness
 //! 503 until the hosted runtime is up), draining on SIGTERM.
 //!

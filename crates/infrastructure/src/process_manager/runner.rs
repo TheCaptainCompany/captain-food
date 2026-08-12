@@ -134,11 +134,6 @@ pub struct ProcessManagerRunner {
     /// service the GraphQL `approveRefund` mutation uses; fail-closed stand-in until the composition
     /// root injects the real Stripe adapter (the STRIPE_SECRET_KEY env-gate pattern).
     payments: Arc<dyn PaymentService>,
-    /// The Runtime D1 gate (#272, ADR-20260801-023000): when on, the STRIPE-FACT triggers retire
-    /// from this runner — the mailbox chains them to the PM lanes (B2) — and running them here
-    /// too would double-deliver (idempotent, but noisy and unfenced). The PlaceOrderProcess group
-    /// drops whole; RefundProcess keeps only its refund-OPENING legs (order facts are not in
-    /// D-B's scope). The runner retires fully at the gate's default flip.
     /// Registry slice this runner drains: `None` = every PM (the monolith's in-process runner);
     /// `Some(name)` = only that PM — the `pm-{name}` bins (#385, ADR-20260807-183024) each host
     /// their own. Per-PM checkpoints (`pm:<Name>`) make the split free: a filtered runner
