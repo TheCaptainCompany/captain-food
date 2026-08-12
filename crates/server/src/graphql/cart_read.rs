@@ -21,18 +21,28 @@ use tracing::Instrument;
 
 use super::generated::scalars::{CurrencyCode, MoneyCents};
 use super::generated::types::{Cart, Money};
+use super::tenant::TenantScope;
 
-/// The TWO-LEG `current` resolution (ADR-20260810-120531). Carts are built ANONYMOUSLY under a
-/// session id BEFORE any customer identity exists; CartBindingProcess associates them on
-/// identification. So:
+/// The TWO-LEG `current` resolution (ADR-20260810-120531), **within ONE tenant** (#469). Carts are
+/// built ANONYMOUSLY under a session id BEFORE any customer identity exists; CartBindingProcess
+/// associates them on identification. So:
 ///
 /// - **Leg 1 — claim**: a verified CUSTOMER claim resolves the claim-holder's most-recently-updated
-///   OPEN cart (`by_customer` is `updated_at DESC`).
+///   OPEN cart AT THIS RESTAURANT (`open_by_customer_at` is `updated_at DESC`).
 /// - **Leg 2 — session**: otherwise — anonymous, or the association not yet folded — a valid
-///   `X-SESSION-ID` resolves the session's most-recently-updated OPEN cart WHERE `customer_id IS
-///   NULL OR customer_id = <claim if present>`. The session id is an UNAUTHENTICATED correlator
-///   (scoping only, never identity): the NULL-or-claim filter keeps a cart already bound to
-///   someone ELSE invisible to whoever replays the session id.
+///   `X-SESSION-ID` resolves the session's most-recently-updated OPEN cart at this restaurant WHERE
+///   `customer_id IS NULL OR customer_id = <claim if present>`. The session id is an
+///   UNAUTHENTICATED correlator (scoping only, never identity): the NULL-or-claim filter keeps a
+///   cart already bound to someone ELSE invisible to whoever replays the session id.
+///
+/// **The tenant is not optional, and it comes from the `Host`** ([`TenantScope`], resolved once at
+/// the transport boundary — never a client argument, which would let the caller assert which
+/// restaurant's cart to serve). `current` is a STOREFRONT read: on `{slug}.captain.food` it answers
+/// with that restaurant's cart or with nothing. Unbounded, leg 1 returned the claim-holder's newest
+/// open cart ANYWHERE — so a customer with a cart at `b.captain.food` would have seen it, been
+/// priced for it and paid for it on `a.captain.food`. No tenant in the host (the marketplace, an
+/// unknown slug, a lookup that failed) ⇒ `None`, decided explicitly: null, never "newest anywhere",
+/// which is the same bug wearing a fallback's clothes.
 ///
 /// OPEN only (`CartStatus` is OPEN | CHECKED_OUT — the LOCKED lifecycle is #465). `None` = no
 /// open cart: the client renders the empty state, never a fabricated 0,00 EUR payable.
@@ -40,15 +50,20 @@ pub async fn current_open_cart(
     carts: &dyn CartReadRepository,
     scope: &ReadScope,
     session: Option<uuid::Uuid>,
+    tenant: TenantScope,
 ) -> Result<Option<CartRow>, DomainError> {
+    // No tenant, no cart — decided BEFORE either leg, so neither is reachable unbounded.
+    let TenantScope::Restaurant(restaurant_id) = tenant else {
+        return Ok(None);
+    };
     let claim = match scope {
         ReadScope::Customer(id) => Some(*id),
         _ => None,
     };
-    // Leg 1 — the claim-holder's newest OPEN cart.
+    // Leg 1 — the claim-holder's newest OPEN cart at THIS restaurant.
     if let Some(customer_id) = claim {
         let open = carts
-            .by_customer(customer_id)
+            .open_by_customer_at(customer_id, restaurant_id)
             .await?
             .into_iter()
             .find(|r| r.status == CartStatus::OPEN);
@@ -56,10 +71,10 @@ pub async fn current_open_cart(
             return Ok(Some(row));
         }
     }
-    // Leg 2 — the session's newest OPEN cart, NULL-or-claim owned.
+    // Leg 2 — the session's newest OPEN cart at THIS restaurant, NULL-or-claim owned.
     let Some(session) = session else { return Ok(None) };
     Ok(carts
-        .open_by_session(SessionId(session))
+        .open_by_session_at(SessionId(session), restaurant_id)
         .await?
         .into_iter()
         .find(|r| r.customer_id.is_none() || r.customer_id == claim))
@@ -226,10 +241,28 @@ mod tests {
         uuid::Uuid::from_u128(n as u128)
     }
 
+    /// The tenant the request's Host resolved to (#469) — restaurant 90 unless a test names
+    /// another, so the pre-existing lookup assertions read as "on this restaurant's storefront".
+    fn tenant(restaurant: u8) -> TenantScope {
+        TenantScope::Restaurant(RestaurantId(uid(restaurant)))
+    }
+
     fn row(cart: u8, session: u8, customer: Option<u8>, status: CartStatus, at: i64) -> CartRow {
+        row_at(cart, 90, session, customer, status, at)
+    }
+
+    /// A cart AT a named restaurant — the axis #469 turned into a scoping boundary.
+    fn row_at(
+        cart: u8,
+        restaurant: u8,
+        session: u8,
+        customer: Option<u8>,
+        status: CartStatus,
+        at: i64,
+    ) -> CartRow {
         CartRow {
             cart_id: CartId(uid(cart)),
-            restaurant_id: RestaurantId(uid(90)),
+            restaurant_id: RestaurantId(uid(restaurant)),
             session_id: SessionId(uid(session)),
             customer_id: customer.map(|c| CustomerId(uid(c))),
             status,
@@ -273,6 +306,44 @@ mod tests {
             rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
             Ok(rows)
         }
+        /// Tenant-scoped, like the Pg adapter (#469) — for the same reason the OPEN-only note above
+        /// gives: a double that answers a question the real port refuses makes the tests vacuous.
+        async fn open_by_customer_at(
+            &self,
+            customer_id: CustomerId,
+            restaurant_id: RestaurantId,
+        ) -> Result<Vec<CartRow>, DomainError> {
+            let mut rows: Vec<CartRow> = self
+                .0
+                .iter()
+                .filter(|r| {
+                    r.customer_id == Some(customer_id)
+                        && r.restaurant_id == restaurant_id
+                        && r.status == CartStatus::OPEN
+                })
+                .cloned()
+                .collect();
+            rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            Ok(rows)
+        }
+        async fn open_by_session_at(
+            &self,
+            session_id: SessionId,
+            restaurant_id: RestaurantId,
+        ) -> Result<Vec<CartRow>, DomainError> {
+            let mut rows: Vec<CartRow> = self
+                .0
+                .iter()
+                .filter(|r| {
+                    r.session_id == session_id
+                        && r.restaurant_id == restaurant_id
+                        && r.status == CartStatus::OPEN
+                })
+                .cloned()
+                .collect();
+            rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            Ok(rows)
+        }
     }
 
     /// Leg 1: the claim picks the claim-holder's most-recently-updated OPEN cart — never the
@@ -286,7 +357,9 @@ mod tests {
             row(4, 11, Some(6), CartStatus::OPEN, 400),
         ]);
         let found =
-            current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), None).await.unwrap();
+            current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), None, tenant(90))
+                .await
+                .unwrap();
         assert_eq!(found.map(|r| r.cart_id), Some(CartId(uid(2))));
     }
 
@@ -298,13 +371,13 @@ mod tests {
             row(1, 10, None, CartStatus::OPEN, 100),
             row(2, 11, None, CartStatus::OPEN, 200),
         ]);
-        let a = current_open_cart(&carts, &ReadScope::Public, Some(uid(10))).await.unwrap();
+        let a = current_open_cart(&carts, &ReadScope::Public, Some(uid(10)), tenant(90)).await.unwrap();
         assert_eq!(a.map(|r| r.cart_id), Some(CartId(uid(1))), "session A sees its own cart");
-        let b = current_open_cart(&carts, &ReadScope::Public, Some(uid(11))).await.unwrap();
+        let b = current_open_cart(&carts, &ReadScope::Public, Some(uid(11)), tenant(90)).await.unwrap();
         assert_eq!(b.map(|r| r.cart_id), Some(CartId(uid(2))), "session B sees its own cart");
-        let none = current_open_cart(&carts, &ReadScope::Public, Some(uid(12))).await.unwrap();
+        let none = current_open_cart(&carts, &ReadScope::Public, Some(uid(12)), tenant(90)).await.unwrap();
         assert!(none.is_none(), "an unknown session sees nothing");
-        let no_header = current_open_cart(&carts, &ReadScope::Public, None).await.unwrap();
+        let no_header = current_open_cart(&carts, &ReadScope::Public, None, tenant(90)).await.unwrap();
         assert!(no_header.is_none(), "no claim and no session header resolves nothing");
     }
 
@@ -315,13 +388,13 @@ mod tests {
     #[tokio::test]
     async fn a_bound_cart_is_invisible_to_the_session_leg_unless_the_claim_matches() {
         let carts = MemCarts(vec![row(1, 10, Some(5), CartStatus::OPEN, 100)]);
-        let anon = current_open_cart(&carts, &ReadScope::Public, Some(uid(10))).await.unwrap();
+        let anon = current_open_cart(&carts, &ReadScope::Public, Some(uid(10)), tenant(90)).await.unwrap();
         assert!(anon.is_none(), "anonymous replay of the session id sees a bound cart NEVER");
-        let other = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(6))), Some(uid(10)))
+        let other = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(6))), Some(uid(10)), tenant(90))
             .await
             .unwrap();
         assert!(other.is_none(), "another customer's claim on the same session sees nothing");
-        let owner = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), Some(uid(10)))
+        let owner = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), Some(uid(10)), tenant(90))
             .await
             .unwrap();
         assert_eq!(owner.map(|r| r.cart_id), Some(CartId(uid(1))), "the owner still resolves it");
@@ -332,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn a_just_identified_customer_falls_through_to_their_session_cart() {
         let carts = MemCarts(vec![row(1, 10, None, CartStatus::OPEN, 100)]);
-        let found = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), Some(uid(10)))
+        let found = current_open_cart(&carts, &ReadScope::Customer(CustomerId(uid(5))), Some(uid(10)), tenant(90))
             .await
             .unwrap();
         assert_eq!(
@@ -340,6 +413,70 @@ mod tests {
             Some(CartId(uid(1))),
             "claim leg empty → session leg resolves the unbound cart"
         );
+    }
+
+    /// #469, the tenant boundary: the SAME customer, the SAME claim, TWO restaurants — each host
+    /// serves its own cart. Leg 1 was `by_customer` newest-OPEN-anywhere, so on restaurant A this
+    /// returned the cart from restaurant B whenever B's was more recently touched.
+    #[tokio::test]
+    async fn the_claim_leg_serves_the_cart_of_the_host_restaurant() {
+        let carts = MemCarts(vec![
+            // B's cart is NEWER — an unscoped "newest OPEN cart" resolves it on every host.
+            row_at(2, 91, 10, Some(5), CartStatus::OPEN, 300),
+            row_at(1, 90, 10, Some(5), CartStatus::OPEN, 100),
+        ]);
+        let scope = ReadScope::Customer(CustomerId(uid(5)));
+        let on_a = current_open_cart(&carts, &scope, None, tenant(90)).await.unwrap();
+        assert_eq!(
+            on_a.map(|r| r.cart_id),
+            Some(CartId(uid(1))),
+            "restaurant A's storefront serves A's cart, never B's newer one"
+        );
+        let on_b = current_open_cart(&carts, &scope, None, tenant(91)).await.unwrap();
+        assert_eq!(on_b.map(|r| r.cart_id), Some(CartId(uid(2))), "and B's serves B's");
+    }
+
+    /// The DECOY-FREE case (mob, testing lens 3): "this host's cart, ELSE the newest anywhere"
+    /// passes the two-restaurant test above and is still the bug. With a cart at A **only**, a
+    /// request on B's host must resolve NOTHING — no fallback, on either leg.
+    #[tokio::test]
+    async fn a_cart_at_another_restaurant_is_invisible_with_nothing_to_fall_back_to() {
+        let carts = MemCarts(vec![row_at(1, 90, 10, Some(5), CartStatus::OPEN, 100)]);
+        let claimed = current_open_cart(
+            &carts,
+            &ReadScope::Customer(CustomerId(uid(5))),
+            Some(uid(10)),
+            tenant(91),
+        )
+        .await
+        .unwrap();
+        assert!(claimed.is_none(), "no cart at THIS restaurant is null, never another's cart");
+
+        // The same, unbound, through the session leg.
+        let anon_carts = MemCarts(vec![row_at(1, 90, 10, None, CartStatus::OPEN, 100)]);
+        let anon =
+            current_open_cart(&anon_carts, &ReadScope::Public, Some(uid(10)), tenant(91)).await.unwrap();
+        assert!(anon.is_none(), "the session leg is bounded by the host too");
+    }
+
+    /// The marketplace host, decided explicitly (#469, API lens): `live.captain.food` and every
+    /// other non-tenant host name NO restaurant, so `current` is null there — not "newest
+    /// anywhere", which is the unbounded read with a friendlier name. Holds with a claim, with a
+    /// session id, and with both.
+    #[tokio::test]
+    async fn no_tenant_in_the_host_resolves_no_cart_at_all() {
+        let carts = MemCarts(vec![
+            row_at(1, 90, 10, Some(5), CartStatus::OPEN, 100),
+            row_at(2, 91, 11, None, CartStatus::OPEN, 200),
+        ]);
+        for (case, scope, session) in [
+            ("claim", ReadScope::Customer(CustomerId(uid(5))), None),
+            ("session", ReadScope::Public, Some(uid(10))),
+            ("both", ReadScope::Customer(CustomerId(uid(5))), Some(uid(10))),
+        ] {
+            let found = current_open_cart(&carts, &scope, session, TenantScope::None).await.unwrap();
+            assert!(found.is_none(), "{case}: no tenant in the host is no cart");
+        }
     }
 
     /// The by-id narrowing (#144/#434, the DONE-WHEN): owner yes, stranger no, unbound no

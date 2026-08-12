@@ -179,6 +179,11 @@ pub mod read_authorization {
         C.get_or_init(|| meter().u64_counter(metric::READ_AUTHORIZATION_DENIED_TOTAL).build())
     }
 
+    fn public_degraded_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::PUBLIC_CREDENTIAL_DEGRADED_TOTAL).build())
+    }
+
     fn bridge_unresolved_counter() -> &'static Counter<u64> {
         static C: OnceLock<Counter<u64>> = OnceLock::new();
         C.get_or_init(|| {
@@ -219,6 +224,20 @@ pub mod read_authorization {
     /// so it must never sit inside the ordinary denial count where it would look like noise.
     pub fn bridge_unresolved(role: &str) {
         bridge_unresolved_counter().add(1, &[KeyValue::new("role", role.to_string())]);
+    }
+
+    /// The OPEN path read a credential and served the request ANONYMOUS anyway (#469): the token
+    /// did not verify, the verifier was unavailable, it was not a CUSTOMER token, or it carried no
+    /// customer claim. Never an error to the caller — `/public` degrades rather than refusing —
+    /// which is precisely why it must be counted: without it, the storefront's identified-cart path
+    /// can be down platform-wide and look like nothing at all.
+    ///
+    /// `claim_absent` is deliberately NOT [`bridge_unresolved`]: that counter means an
+    /// authenticated caller was DENIED something for want of a domain binding, and the open path
+    /// denies nobody. Routing the pre-claim-stamp window through it would sit an expected rollout
+    /// burst inside a provisioning-gap alarm — on every storefront request.
+    pub fn public_credential_degraded(reason: &str) {
+        public_degraded_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
     }
 
     /// BAM gauge: projection lag on the ACL index, in log positions. While it lags, a just-placed

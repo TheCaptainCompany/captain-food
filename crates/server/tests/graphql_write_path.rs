@@ -329,14 +329,7 @@ static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
 async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP acceptance_first_write_path: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("acceptance_first_write_path") else { return };
     let _guard = DB_LOCK.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
@@ -532,14 +525,7 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
 /// legacy arm (gate OFF).
 #[tokio::test]
 async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP pm_gate_cross_arm_duplicate: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("pm_gate_cross_arm_duplicate") else { return };
     let _guard = DB_LOCK.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;

@@ -15,7 +15,8 @@
 //!    same row) still lands.
 //! 4. **Resume is idempotent**: re-running the worker over an already-drained log changes nothing.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use infrastructure::ProjectionWorker;
 use sqlx::{PgPool, Row};

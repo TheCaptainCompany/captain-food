@@ -1044,9 +1044,21 @@ keys:
         assert!(!declared.is_empty(), "no keys parsed from configuration.yaml");
 
         // Platform-injected or tooling-only names the APP never reads through its own config.
-        let exempt: BTreeSet<&str> = ["DB_TESTS_REQUIRED", "CARGO_MANIFEST_DIR", "OUT_DIR"]
-            .into_iter()
-            .collect();
+        // `DB_TEST_SKIP_RECEIPT` and `CARGO_TARGET_DIR` join the list for the same reason
+        // `DB_TESTS_REQUIRED` is already on it (#474): they are read ONLY by `crates/db_test_gate`,
+        // a dev-dependency no production profile links, to decide where the skip receipt is written.
+        // No deployed binary reads them, so declaring them in configuration.yaml would put a
+        // test-harness knob into the boot report and every derived deployment manifest — the
+        // opposite of what this gate is protecting.
+        let exempt: BTreeSet<&str> = [
+            "DB_TESTS_REQUIRED",
+            "DB_TEST_SKIP_RECEIPT",
+            "CARGO_MANIFEST_DIR",
+            "CARGO_TARGET_DIR",
+            "OUT_DIR",
+        ]
+        .into_iter()
+        .collect();
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -1497,7 +1509,12 @@ keys:
         );
 
         let mut missing: Vec<String> = Vec::new();
-        for feature in ["command-acceptance", "place-order", "cart-price"] {
+        // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
+        // (crates/server/tests/public_credential_degraded_metric.rs proves both branches), so
+        // leaving the contract that governs them outside this guard would let a rename of
+        // `public_credential_degraded_total` or `read_authorization_bridge_unresolved_total` drift
+        // from the spec in silence.
+        for feature in ["command-acceptance", "place-order", "cart-price", "read-authorization"] {
             let node = obs.get(feature).unwrap_or_else(|| {
                 panic!("specs/observability.yaml no longer declares the '{feature}' contract")
             });
@@ -1723,6 +1740,194 @@ keys:
              assignments) may keep non-ASCII; only tab-indented command text is affected.",
             offenders.join("\n")
         );
+    }
+
+    /// The #474 HONEST-GATE guard, in three halves — all of them things the compiler cannot see.
+    ///
+    /// **Half 1: only the gate crate may spell the skip decision.** Before #474 the
+    /// `DATABASE_URL` / `DB_TESTS_REQUIRED` dance was hand-written at 17 call sites across 5
+    /// crates: 17 chances for the polarity to drift, and no way to flip it in one place. It now
+    /// lives in `crates/db_test_gate/src/lib.rs`. Exactly ONE other file may restate it —
+    /// `crates/actor_runtime/tests/common/mod.rs` — because `actor_runtime/tests/dependency_rule.rs`
+    /// forbids ANY path dependency into the workspace (ADR-20260730-234918, extraction-readiness),
+    /// and weakening an executable rule to make a refactor tidy is not on the table. A THIRD copy
+    /// is what this half prevents.
+    ///
+    /// **Half 1b: nor may a test suite read `DATABASE_URL` to decide whether to run.** Half 1 keys
+    /// on `DB_TESTS_REQUIRED`, so it is blind to the shape that actually existed 17 times before
+    /// #474 — `let Ok(_) = std::env::var("DATABASE_URL") else { return; };` — which never mentions
+    /// the opt-out variable at all. A suite written in that PRE-#474 pattern today would pass half 1
+    /// unchallenged while silently skipping with no panic and no receipt: the false signal, back in
+    /// the one place the gate was built to cover. So a `DATABASE_URL` read under `crates/**/tests/**`
+    /// is an offence too, with its own allowlist and its own reasons.
+    ///
+    /// **Half 2: the Stop hook must actually invoke the workspace suite.** `make rust` is the spec
+    /// gate and runs no `crates/**` test at all; the hook's `make test-crates` call is the only
+    /// thing that makes the workspace suite mandatory before a turn completes. Deleting that call
+    /// would restore the exact false signal #474 exists to remove, and nothing else would notice.
+    ///
+    /// All of it is text scanning, which CLAUDE.md ranks as the fallback below a type-level answer
+    /// (ADR-20260803-234035) — accepted here because the boundary is a cross-crate manifest rule and
+    /// a shell hook, neither of which the type system can reach. The reach is honest rather than
+    /// total: an aliased `use std::env::var as v` still evades it, which is why the allowlists name
+    /// files rather than pretending to prove absence.
+    #[test]
+    fn only_the_db_test_gate_spells_the_database_skip_polarity() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        // The two files allowed to read DB_TESTS_REQUIRED, each with the reason it is allowed.
+        const ALLOWED: &[(&str, &str)] = &[
+            ("crates/db_test_gate/src/lib.rs", "the gate itself"),
+            (
+                "crates/actor_runtime/tests/common/mod.rs",
+                "actor_runtime may take no path dependency into the workspace \
+                 (tests/dependency_rule.rs, ADR-20260730-234918)",
+            ),
+        ];
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        assert!(!files.is_empty(), "found no Rust sources under crates/ — the scan went blind");
+
+        // Half 1b: a TEST file that reads `DATABASE_URL` decides for itself whether it runs — the
+        // pre-#474 shape. Two files legitimately read it; neither of them DECIDES with it.
+        const URL_ALLOWED: &[(&str, &str)] = &[
+            (
+                "crates/actor_runtime/tests/common/mod.rs",
+                "the sanctioned local copy of the gate (see above)",
+            ),
+            (
+                "crates/infrastructure/tests/main/common.rs",
+                "reads the url only from a LIVE TestDb witness, i.e. after db_test_gate already \
+                 said yes -- it is not a skip decision",
+            ),
+        ];
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut url_offenders: Vec<String> = Vec::new();
+        for f in &files {
+            let Ok(text) = std::fs::read_to_string(f) else { continue };
+            let rel = f
+                .strip_prefix(&root)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // Test trees only: `crates/*/src/**` reads `DATABASE_URL` to CONNECT, which is its job.
+            // `/tests/` matches both layouts in the repo (`tests/foo.rs`, `tests/main/foo.rs`).
+            if rel.contains("/tests/")
+                && text.contains("var(\"DATABASE_URL\")")
+                && !URL_ALLOWED.iter().any(|(p, _)| *p == rel)
+            {
+                url_offenders.push(rel.clone());
+            }
+            // A READ of the variable, not a mention of it: doc comments naming the contract are
+            // exactly what we want more of. `var("DB_TESTS_REQUIRED")` catches `std::env::var`,
+            // `env::var` and any aliased import of it, which are the three shapes in this repo.
+            if !text.contains("var(\"DB_TESTS_REQUIRED\")") {
+                continue;
+            }
+            if ALLOWED.iter().any(|(p, _)| *p == rel) {
+                continue;
+            }
+            offenders.push(rel);
+        }
+        // An allowlist entry that no longer names a real file is an allowlist that quietly excuses
+        // nothing while the scan believes it is covered — the failure mode
+        // `mailbox_entry_is_constructed_only_behind_the_typed_doors` guards the same way. Assert
+        // each entry still exists AND still contains the read it excuses, so a rename fails LOUDLY
+        // here instead of widening the rule in silence.
+        for (rel, var) in ALLOWED
+            .iter()
+            .map(|(p, _)| (*p, "var(\"DB_TESTS_REQUIRED\")"))
+            .chain(URL_ALLOWED.iter().map(|(p, _)| (*p, "var(\"DATABASE_URL\")")))
+        {
+            let text = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| {
+                panic!("#474 gate allowlist names {rel}, which cannot be read ({e}) -- if the file \
+                        moved, update the allowlist; do NOT let the scan silently excuse nothing")
+            });
+            assert!(
+                text.contains(var),
+                "#474 gate allowlist excuses {rel} for reading {var}, but it no longer does -- \
+                 drop the entry rather than leaving a hole nobody is watching"
+            );
+        }
+
+        assert!(
+            url_offenders.is_empty(),
+            "these test files read DATABASE_URL themselves instead of calling the shared gate:\n  \
+             {}\n\
+             Fix: call `db_test_gate::database_url(\"<suite>\")` -- Some(url) to run, None to skip, \
+             and a PANIC when a database is required and none is configured.\n\
+             Why: the pre-#474 pattern `let Ok(_) = std::env::var(\"DATABASE_URL\") else {{ return; }};` \
+             never mentions DB_TESTS_REQUIRED, so it slips past the polarity scan above while doing \
+             the exact thing #474 removed -- skipping silently, with no panic and no receipt, over a \
+             defect that bricks a projection.\n\
+             The only permitted exceptions are:\n  {}",
+            url_offenders.join("\n  "),
+            URL_ALLOWED
+                .iter()
+                .map(|(p, why)| format!("{p} -- {why}"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+        assert!(
+            offenders.is_empty(),
+            "these files read DB_TESTS_REQUIRED themselves instead of calling the shared gate:\n  \
+             {}\n\
+             Fix: call `db_test_gate::database_url(\"<suite>\")` (add `db-test-gate` to the crate's \
+             [dev-dependencies]). It returns Some(url) to run, None to skip, and PANICS when a \
+             database is required and none is configured.\n\
+             Why: #474 — the polarity was hand-written 17 times, and a single copy left on the old \
+             polarity silently restores the failure this issue exists to remove (with no database, \
+             `cargo test --workspace` reported 990 passed over a migration defect that permanently \
+             bricks the Cart projection).\n\
+             The only permitted exceptions are:\n  {}",
+            offenders.join("\n  "),
+            ALLOWED
+                .iter()
+                .map(|(p, why)| format!("{p} -- {why}"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+
+        // Half 2 — the hook must still call the workspace suite, and still scope it to code paths.
+        let hook_path = root.join(".claude/hooks/stop-gate.sh");
+        let hook = std::fs::read_to_string(&hook_path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {} ({e}) — if the hook moved, fix this guard; do NOT let it silently \
+                 pass",
+                hook_path.display()
+            )
+        });
+        assert!(
+            hook.contains("make test-crates"),
+            ".claude/hooks/stop-gate.sh no longer invokes `make test-crates` (#474). `make rust` \
+             runs NO crates/** test, so without this call nothing exercises the workspace suite \
+             before a turn completes — which is exactly the false signal #474 removed."
+        );
+        for path in ["migrations/", "crates/"] {
+            assert!(
+                hook.contains(path),
+                ".claude/hooks/stop-gate.sh no longer scopes the #474 workspace gate to `{path}` \
+                 — a change under it would complete a turn with no test having run."
+            );
+        }
     }
 
     /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1; #290 phase 1,
@@ -5548,6 +5753,116 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
     assert!(facade.contains("pub use domain_ordering::errors::*;"), "{}", facade);
 }
 
+/// THE MANIFEST HEADER MUST MATCH THE MEASURED DEPENDENCY GRAPH (#475). A bin manifest's scope
+/// assertion is a fact about the CRATE — Rust resolves no path to an undeclared crate — and the
+/// header used to state it as a fact about the DEPLOYABLE ("linking a domain crate is the ONLY way
+/// that scope's vocabulary exists in this deployable … unspellable rather than merely unrouted").
+/// That is false wherever the image reaches the `domain` facade behind the list, through
+/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written. A comment
+/// claiming an enforcement the build does not provide is worse than no comment: it stops the next
+/// reviewer looking (CLAUDE.md), which is exactly how the sentence survived four families' wiring.
+/// So the sentence is DERIVED, not trusted: resolved closure reaches `crates/domain` ⇒ the emitted
+/// header must carry the honest sentinel and must NOT carry the strong one; closure is domain-free
+/// ⇒ it carries the strong one. Both directions are load-bearing — when `bin_runtime` is
+/// decomposed and a family becomes genuinely isolated, this fails until its header is upgraded to
+/// say so, so the prose can never lag the graph in either direction.
+///
+/// IT COVERS THE WHOLE EMITTED TEXT, NOT THE HEADER (#475 review): the first cut checked the
+/// header sentinel only, and the retired claim survived verbatim in the manifest `description`
+/// fourteen lines below it, in the `src/main.rs` module doc and on the `LANES` const — 40 files
+/// where a green test sat beside a false sentence. So EVERY phrase this emitter has ever used to
+/// assert that a DEPLOYABLE is scope-isolated is FORBIDDEN, in both artifacts, wherever the closure
+/// reaches `crates/domain`. Note the asymmetry, which is deliberate and is NOT an iff: only the
+/// SENTINEL pair is bidirectional (domain-free ⇒ the header must carry `CLAIM_ISOLATED`); the other
+/// phrases are one-directional — banned where they would be false, never REQUIRED where they happen
+/// to be true. Dropping "holds no domain vocabulary" from the gateway deps note would leave this
+/// test green, and that is correct: which true things a domain-free bin chooses to say is an
+/// editorial call, while saying a false one is the defect. That cannot prove the absence of a
+/// NEWLY invented false sentence — no test can read
+/// prose — but it does make the retired wording unable to come back by copy-paste (which is
+/// exactly how it survived four families' wiring) and makes the surviving wording unable to
+/// outlive its truth.
+///
+/// Why a test and not the emitter deriving the sentence from the graph directly: the crates being
+/// emitted ARE the workspace members, so `cargo metadata` can only resolve a closure for bins that
+/// already exist on disk. Deriving at emit time would make a NEW bin's first generation depend on
+/// its own output. Measuring after the fact is the honest order.
+#[test]
+fn bin_manifest_scope_claim_matches_the_measured_closure() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let crates = emit_bin_crates(&model);
+    // No count assertion here, deliberately, and NOT a hard-coded floor either: a floor is a
+    // second, drifting copy of the topology count (the first one tolerated losing 8 bins while
+    // claiming to check "the full bin matrix"). Its replacement -- `crates.len() ==
+    // bin_topology(&model).len()` -- was worse: `emit_bin_crates` IS `bin_topology(model).iter()
+    // .map(..)` with no filter (`emit/bins.rs`), so the equality cannot go red without editing the
+    // emitter. An assertion that has never failed and structurally cannot reads as coverage while
+    // proving nothing. The completeness of the bin matrix is owned by
+    // `deploy_tree_is_complete_both_ways`; what this test owns is that every emitted bin's PROSE
+    // matches its measured closure -- which the loop below asserts per bin, so a bin that vanished
+    // from the topology is caught there, by the spec->deploy gate, not by counting our own map.
+    assert!(!crates.is_empty(), "real specs must emit at least one bin crate to measure");
+
+    // Every phrase the bin emitter has used to say "this DEPLOYABLE cannot reach that scope".
+    // A bin whose image links the `domain` facade may carry none of them, anywhere in its
+    // manifest or its `src/main.rs`; a domain-free bin may carry them all. Matched
+    // case-insensitively so `NO`/`no` variants cannot slip through.
+    const ISOLATION_PHRASES: &[&str] = &[
+        // The sentinel the header itself carries.
+        CLAIM_ISOLATED,
+        // Retired by #475: emitted for every actor bin's purpose line and LANES doc, where the
+        // linker enforces nothing — the LANES const routes, it does not restrict what is linked.
+        "the scoping is the linker",
+        // True of the 7 gateways only; was emitted for surfaces, adapters and cron workers too.
+        "holds no domain vocabulary",
+    ];
+
+    // "What the image links" has ONE definition in this repo, and this is it: the app index's own
+    // measurement (`measure_workspace_crate_graph` -- cargo's resolver, NORMAL links only,
+    // workspace members only). #491 review: this test used to run its own unfiltered
+    // `query_forward`, which also follows DEV-dependencies -- crates that ship in no image. The
+    // two agree today (50 bins reach `domain` under either), so unifying changes no verdict; it
+    // removes the second definition before they disagree and one of the two starts lying.
+    let graph = measure_workspace_crate_graph(&root).expect("workspace graph builds");
+
+    let mut isolated: Vec<&str> = Vec::new();
+    for c in &crates {
+        if graph.closure(&c.name).contains("domain") {
+            assert!(
+                c.manifest.contains(CLAIM_NOT_ISOLATED),
+                "{}: the image links the `domain` facade (every scope), so the header must say so \
+                 -- missing '{CLAIM_NOT_ISOLATED}'",
+                c.name
+            );
+            // The header AND everything else the bin ships: description, module doc, const docs.
+            for (artifact, text) in [("Cargo.toml", &c.manifest), ("src/main.rs", &c.main)] {
+                let lower = text.to_lowercase();
+                for phrase in ISOLATION_PHRASES {
+                    assert!(
+                        !lower.contains(&phrase.to_lowercase()),
+                        "{}/{artifact}: claims deployable scope isolation ('{phrase}') that its own \
+                         closure contradicts -- the image links crates/domain, so every scope's \
+                         vocabulary is in it. State what this bin ROUTES, not what it cannot name.",
+                        c.name
+                    );
+                }
+            }
+        } else {
+            assert!(
+                c.manifest.contains(CLAIM_ISOLATED),
+                "{}: closure is domain-free -- the header may and should say so, missing \
+                 '{CLAIM_ISOLATED}'",
+                c.name
+            );
+            isolated.push(&c.name);
+        }
+    }
+    // The strong branch must stay exercised: text no bin carries is text that rots unnoticed
+    // (today: the seven `gateway-*` bins, whose closure really is domain-free).
+    assert!(!isolated.is_empty(), "no bin exercises the isolated header branch");
+}
+
 // ─── The generated deployment (#349, ADR-20260807-183024 step 4) ────────────────────────────────
 
 /// Every deployable maps to exactly one image, one pin file, one manifest — and back
@@ -6153,4 +6468,613 @@ fn platform_drill_env_matches_cluster_backup() {
         code.contains("sslmode=require") && code.contains("claude_ro"),
         "production comparison must run as the SELECT-only claude_ro role (D7)"
     );
+}
+
+// ─── The app index (#491, PROP-20260811-141654 slice A1) ────────────────────────────────────────
+// specs/generated/apps.generated.md answers ONE product-owner question -- "is the split clean?"
+// -- so what has to hold is that every app is in it, every app's boundary is DERIVED (never a
+// per-app arm), and the two columns the answer rests on cannot be faked: the grant is the same
+// derivation the pod manifest renders, and the resolved set is the measured graph, not the
+// declared one echoed back.
+
+fn app_index_model() -> Model {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    load_model(&root.join("specs")).expect("load real specs")
+}
+
+/// Every deployable in the topology appears EXACTLY once, under a family the renderer knows.
+/// A family the index cannot place would silently vanish from a document whose whole job is
+/// completeness.
+#[test]
+fn app_index_covers_every_deployable_exactly_once() {
+    let model = app_index_model();
+    let rows = app_rows(&model, &CrateGraph::default());
+    let topology: BTreeSet<String> = bin_topology(&model).into_iter().map(|b| b.name).collect();
+    let indexed: BTreeSet<String> = rows.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(indexed, topology, "the index and the bin topology must name the same apps");
+    assert_eq!(rows.len(), indexed.len(), "an app is indexed twice");
+    for r in &rows {
+        assert!(
+            FAMILY_ORDER.contains(&r.family),
+            "{}: family '{}' has no place in the index's family order -- a new family needs its \
+             row order and its one-line blurb in the same change",
+            r.name,
+            r.family
+        );
+    }
+}
+
+/// Every app's boundary is DERIVED from a declaration that is unambiguous — which is a stronger
+/// claim than "the answer is in the id set", and the earlier version of this test only made the
+/// weak one. Two derivations can go quietly wrong:
+/// - a scope folder whose AGGREGATES land in two contexts (or in none) leaves its projector and
+///   its subgraph with no derivable boundary;
+/// - a `UserType` claimed by TWO contexts makes every gateway and surface on that role path
+///   arbitrary — and it used to resolve by map-insertion order, silently.
+///
+/// The unclaimed case is NOT an error and is asserted as what it is: `ADMIN` and `EXTERNAL` are
+/// listed in no context's `roles:`, so their gateways land on `platform` deliberately, and
+/// section 2 of the index names them. The day a context claims one, the row moves and this test
+/// follows it with no edit.
+#[test]
+fn app_index_every_app_has_a_declared_boundary() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let ids: BTreeSet<&str> = bounds.ids.iter().map(|s| s.as_str()).collect();
+    for scope in &model.scopes {
+        assert!(
+            bounds.of_scope(scope).is_some(),
+            "scope folder '{scope}' owns aggregates from more than one bounded context, or owns \
+             none at all, so no boundary is derivable for its projector/subgraph. Either the \
+             aggregates or the context declaration is wrong -- do not resolve it in the emitter."
+        );
+    }
+    let rows = app_rows(&model, &CrateGraph::default());
+    // The bullet section 2 owes an unclaimed role. Asserting only `boundary == "platform"` leaves
+    // the SAYING-SO half — the whole point of the fallback being deliberate — untested.
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let unclaimed_bullet = index
+        .lines()
+        .find(|l| l.starts_with("- **Roles no bounded context claims**"))
+        .unwrap_or("<no such bullet in section 2>")
+        .to_string();
+    let mut gateways = 0;
+    for r in &rows {
+        assert!(
+            ids.contains(r.boundary.as_str()),
+            "{}: boundary '{}' is not a c4 bounded context ({:?})",
+            r.name,
+            r.boundary,
+            bounds.ids
+        );
+        let Some(role) = r.role.as_deref() else { continue };
+        gateways += 1;
+        let claimants = bounds.role_claimants(role);
+        assert!(
+            claimants.len() <= 1,
+            "{}: role '{role}' is claimed by {claimants:?}. A UserType belongs to ONE bounded \
+             context -- with two, this app's boundary (and every surface on `/{}/graphql`) is \
+             whichever context the reader happens to look at first.",
+            r.name,
+            role_path(role)
+        );
+        match claimants.iter().next() {
+            Some(ctx) => assert_eq!(
+                &r.boundary, ctx,
+                "{}: '{role}' is declared by context '{ctx}', so the app belongs to it",
+                r.name
+            ),
+            None => {
+                assert_eq!(
+                    r.boundary, "platform",
+                    "{}: no context claims '{role}', so the only derivable answer is the platform \
+                     bucket -- and section 2 must be naming it as unclaimed",
+                    r.name
+                );
+                assert!(
+                    unclaimed_bullet.contains(&format!("`{role}`")),
+                    "{}: '{role}' is claimed by no context, so section 2 must NAME it in the \
+                     unclaimed-roles bullet -- otherwise the platform fallback renders as if a \
+                     context had decided it. Bullet reads: {unclaimed_bullet}",
+                    r.name
+                );
+            }
+        }
+    }
+    assert!(gateways > 0, "no app carries a role -- the gateway half of this test stopped running");
+}
+
+/// The transitive walk the measurement rests on: a closure stops where the manifests do, and the
+/// facade drags every scope crate in behind one edge. THE ALGORITHM ONLY — it says nothing about
+/// whether the index uses it, which is why it is not named for the `honest` column. That claim is
+/// `app_index_resolved_is_measured_not_declared` below, and the difference is not academic:
+/// replacing the emitter's resolved set with `declared.clone()` leaves THIS test green.
+#[test]
+fn crate_graph_closure_is_transitive_and_stops_at_the_manifests() {
+    let edges = |pairs: &[(&str, &[&str])]| -> CrateGraph {
+        CrateGraph::from_edges(
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    (k.to_string(), v.iter().map(|s| s.to_string()).collect::<BTreeSet<String>>())
+                })
+                .collect(),
+        )
+    };
+    let graph = edges(&[
+        ("honest-bin", &["domain-ordering"]),
+        ("fat-bin", &["domain-ordering", "runtime"]),
+        ("runtime", &["domain"]),
+        ("domain", &["domain-ordering", "domain-catalog"]),
+        ("domain-ordering", &[]),
+        ("domain-catalog", &[]),
+    ]);
+    assert_eq!(
+        graph.closure("honest-bin"),
+        BTreeSet::from(["domain-ordering".to_string()]),
+        "a closure must stop where the manifests do"
+    );
+    assert_eq!(
+        graph.closure("fat-bin"),
+        BTreeSet::from([
+            "domain-ordering".to_string(),
+            "runtime".to_string(),
+            "domain".to_string(),
+            "domain-catalog".to_string(),
+        ]),
+        "the facade drags every scope crate in transitively -- that is the fat this index exists \
+         to show"
+    );
+    assert!(!graph.closure("honest-bin").contains("domain-catalog"));
+}
+
+/// `honest` is the MEASURED closure against the DECLARED manifest — not the declaration echoed
+/// back. This is the assertion the artifact's whole value proposition rests on, so it runs the
+/// REAL derivation (`app_rows` over the real model) against a synthetic graph carrying a REAL
+/// deployable's name, twice:
+/// - a graph whose closure is exactly what that bin declares must read `honest`;
+/// - the same bin behind `bin_runtime -> domain -> every scope crate` — the shape the workspace
+///   actually has — must resolve a STRICT SUPERSET of what it declares, read `fat`, and name the
+///   carrier in `via`.
+///
+/// The other real-model tests here feed `CrateGraph::default()`, under which nothing is measured
+/// and every row is unmeasured, so this is the only place `app_rows` meets a graph at all.
+/// Fabricating the column (`let resolved = declared.clone();` in `emit/app_index.rs`) leaves every
+/// other test in this file green and turns the second half of this one red — which is the point:
+/// `check-drift` would only report THAT the file changed, never that its central column became a
+/// declaration echoed back.
+#[test]
+fn app_index_resolved_is_measured_not_declared() {
+    let model = app_index_model();
+    let scopes: Vec<String> = crate_scopes(&model).into_iter().collect();
+    let domain_crate = |scope: &str| format!("domain-{}", scope.replace('_', "-"));
+    // A real deployable declaring a PROPER, non-empty subset of the scopes -- the only shape in
+    // which "resolved is a strict superset of declared" is a statement about the graph rather
+    // than about arithmetic.
+    let probe = app_rows(&model, &CrateGraph::default())
+        .into_iter()
+        .find(|r| !r.declared.is_empty() && r.declared.len() < scopes.len())
+        .expect("some deployable declares a proper subset of the domain scopes");
+    let row_for = |graph: &CrateGraph| {
+        app_rows(&model, graph)
+            .into_iter()
+            .find(|r| r.name == probe.name)
+            .expect("the probe app is indexed")
+    };
+
+    // (1) closure == declaration.
+    let tight = CrateGraph::from_edges(BTreeMap::from([(
+        probe.name.clone(),
+        probe.declared.iter().map(|s| domain_crate(s)).collect::<BTreeSet<String>>(),
+    )]));
+    let tight = row_for(&tight);
+    assert!(tight.measured, "{}: the graph names it, so it is measured", probe.name);
+    assert_eq!(
+        tight.resolved, probe.declared,
+        "{}: an image linking exactly its declared crates must resolve exactly them",
+        probe.name
+    );
+    assert!(tight.honest() && !tight.fat(), "{}: closure == declaration is honest", probe.name);
+
+    // (2) the same bin, with the facade behind one direct dependency.
+    let fat = CrateGraph::from_edges(BTreeMap::from([
+        (probe.name.clone(), BTreeSet::from(["bin_runtime".to_string()])),
+        ("bin_runtime".to_string(), BTreeSet::from(["domain".to_string()])),
+        ("domain".to_string(), scopes.iter().map(|s| domain_crate(s)).collect()),
+    ]));
+    let fat = row_for(&fat);
+    assert!(
+        fat.resolved.is_superset(&probe.declared) && fat.resolved.len() > probe.declared.len(),
+        "{}: the resolved column is READ FROM THE GRAPH -- behind `bin_runtime -> domain` the \
+         image links every scope, so resolved must strictly contain the declaration. Got \
+         declared {:?}, resolved {:?}: if those are equal, the column is the manifest echoed back \
+         and the index proves nothing.",
+        probe.name,
+        probe.declared,
+        fat.resolved
+    );
+    assert!(
+        !fat.honest() && fat.fat(),
+        "{}: an image linking more than it declares is fat, never honest",
+        probe.name
+    );
+    assert_eq!(
+        fat.facade_carriers,
+        vec!["bin_runtime".to_string()],
+        "{}: `via` names the DIRECT dependency the facade enters through",
+        probe.name
+    );
+}
+
+/// Section 3's PROSE, which until now was the only part of the index nothing asserted — and the
+/// only part that stated a predicate it did not measure. Two independent lies were renderable:
+/// - the headline read "**No crate the apps reach is boundary-EXCLUSIVE**" unconditionally while
+///   printing a non-zero exclusive count in the same sentence;
+/// - "linked from at least one app of every boundary" was computed as `total - exclusive`, which
+///   counts a crate reached by 3 of 6 boundaries into a claim about ALL of them.
+///
+/// Both sentences are now conditional on a measurement, so this asserts the four branches AND the
+/// inference the paragraph rests on: the `graphql-*` family is one app per scope and its boundaries
+/// cover the whole set, so a crate every subgraph links necessarily scores the maximum. That last
+/// one is what makes the real document's degenerate signature column a consequence rather than a
+/// coincidence of today's data.
+#[test]
+fn app_index_section_three_claims_only_what_it_measured() {
+    // (1) The four branches of the headline, as pure arithmetic.
+    let base = |exclusive, saturated, subgraph_boundaries| SharedReach {
+        total: 3,
+        exclusive,
+        saturated,
+        boundaries: 6,
+        subgraphs: 8,
+        subgraph_boundaries,
+        apps: 57,
+        min_apps: 2,
+        max_apps: 44,
+    };
+    let clean = base(0, 3, 6).headline();
+    assert!(
+        clean.contains("No crate the apps reach is boundary-EXCLUSIVE")
+            && clean.contains("3 of them from at least one app of EVERY boundary"),
+        "with nothing exclusive the headline may say so: {clean}"
+    );
+    let mixed = base(1, 1, 6).headline();
+    assert!(
+        !mixed.contains("No crate the apps reach is boundary-EXCLUSIVE"),
+        "1 crate IS boundary-exclusive -- the headline must not open by denying it: {mixed}"
+    );
+    assert!(
+        mixed.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && mixed.contains("1 are linked from at least one app of EVERY boundary"),
+        "the exclusive and the saturated counts are two measurements, not one minus the other \
+         (`total - exclusive` would read 2 here): {mixed}"
+    );
+    let partial = base(0, 3, 4).headline();
+    assert!(
+        !partial.contains("cover all") && partial.contains("no single family clears it"),
+        "the subgraph family spans 4 of 6 boundaries, so it does NOT clear the ceiling alone and \
+         the sentence claiming it must not render: {partial}"
+    );
+    let unmeasured = SharedReach { total: 0, ..base(0, 0, 6) }.headline();
+    assert!(
+        unmeasured.contains("claims nothing"),
+        "an unmeasured graph reaches no crate, so the paragraph has nothing to assert: {unmeasured}"
+    );
+
+    // (2) The same predicates end-to-end, over the real app set and a graph built to contain one
+    // crate of each kind. The numbers are known by construction, so the rendered prose and the
+    // rendered table must both agree with them.
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let rows = app_rows(&model, &CrateGraph::default());
+    assert!(bounds.ids.len() >= 3, "this test needs a boundary set a 2-boundary crate cannot fill");
+    let subgraphs: Vec<&AppRow> = rows.iter().filter(|r| r.family == "graphql").collect();
+    let subgraph_bounds: BTreeSet<&str> = subgraphs.iter().map(|r| r.boundary.as_str()).collect();
+    assert_eq!(
+        subgraph_bounds.len(),
+        bounds.ids.len(),
+        "the `graphql-*` family no longer covers every boundary ({subgraph_bounds:?} of {:?}), so \
+         the index's ceiling paragraph must have switched to its other branch -- update this test's \
+         expectation, not the emitter's",
+        bounds.ids
+    );
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for r in &subgraphs {
+        edges.insert(r.name.clone(), BTreeSet::from(["subgraph-shared".to_string()]));
+    }
+    // Two apps of two DIFFERENT boundaries share one crate (reached by 2 of the boundaries, so
+    // neither exclusive nor saturated), and one app links a crate nobody else does.
+    let mut picked: Vec<&AppRow> = Vec::new();
+    for r in rows.iter().filter(|r| r.family != "graphql") {
+        if !picked.iter().any(|p| p.boundary == r.boundary) {
+            picked.push(r);
+        }
+    }
+    assert!(picked.len() >= 2, "need two non-subgraph apps of different boundaries");
+    for r in picked.iter().take(2) {
+        edges.entry(r.name.clone()).or_default().insert("shared-some".to_string());
+    }
+    edges.entry(picked[0].name.clone()).or_default().insert("only-one".to_string());
+    let index = emit_app_index(&model, &CrateGraph::from_edges(edges));
+    assert!(
+        index.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && index.contains("1 are linked from at least one app of EVERY boundary"),
+        "3 crates are reached: `only-one` (1 boundary), `shared-some` (2), `subgraph-shared` (all). \
+         The headline must read 1 exclusive and 1 saturated -- `total - exclusive` would claim 2 \
+         every-boundary crates and fold `shared-some` into a claim it does not meet.\n{index}"
+    );
+    // A crate EVERY subgraph links scores the maximum -- the inference the ceiling sentence states.
+    let row = index
+        .lines()
+        .find(|l| l.contains("`subgraph-shared`"))
+        .expect("the crate every subgraph links has a row");
+    assert!(
+        row.starts_with(&format!("| {} boundaries (", bounds.ids.len())),
+        "every `graphql-*` app links `subgraph-shared` and that family covers all {} boundaries, \
+         so its signature is the full set -- got: {row}",
+        bounds.ids.len()
+    );
+    // And the prose's saturated count IS the table's, whatever the data turns out to be.
+    let table_saturated: usize = index
+        .lines()
+        .filter_map(|l| l.strip_prefix("| ")?.strip_suffix(" |"))
+        .map(|l| l.split(" | ").collect::<Vec<_>>())
+        .filter(|c| c.len() == 4 && c[0].contains("boundar"))
+        .filter(|c| c[0].split(' ').next().and_then(|n| n.parse::<usize>().ok()) == Some(bounds.ids.len()))
+        .filter_map(|c| c[2].parse::<usize>().ok())
+        .sum();
+    assert_eq!(
+        table_saturated, 1,
+        "the headline's every-boundary count must be the table's own rows summed, never a \
+         subtraction that no row supports"
+    );
+}
+
+/// A register row that is CLOSED and not yet in the spec is STATED by the index, and the naming
+/// that states it deletes itself. DECISIONS.md D9 homes `CartBindingProcess` in `order`;
+/// `c4-l2.yaml` still says `customer`. While they disagree the index must say so (it renders the
+/// spec, so it renders the pre-decision answer, and a reader must not take that for the decision);
+/// once they agree the bullet AND the two constants behind it are dead code, and this fails until
+/// they are removed.
+#[test]
+fn app_index_states_the_decided_home_until_the_spec_agrees() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let stated = index.contains("One row is decided and not yet spec'd");
+    match bounds.of_actor(CART_BINDING_PROCESS) {
+        Some(home) if home != CART_BINDING_DECIDED_HOME => assert!(
+            stated,
+            "c4 homes {CART_BINDING_PROCESS} in '{home}' and D9 closed it into \
+             '{CART_BINDING_DECIDED_HOME}' -- the index must name the pending move, not render \
+             the stale home silently"
+        ),
+        other => assert!(
+            !stated,
+            "c4 now homes {CART_BINDING_PROCESS} in {other:?}, which no longer contradicts D9: \
+             delete CART_BINDING_PROCESS/CART_BINDING_DECIDED_HOME and the bullet they drive"
+        ),
+    }
+}
+
+/// The index's grant column and the pod manifest are ONE derivation (`bin_secret_env_keys`).
+/// Asserted against the COMMITTED manifests: if the two ever diverge, "what may this app read?"
+/// has two answers and the least-privilege work (slice A4) starts from a lie.
+#[test]
+fn app_index_grants_match_the_generated_pod_manifests() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = app_index_model();
+    for r in app_rows(&model, &CrateGraph::default()) {
+        let path = root.join(format!("deploy/generated/manifests/bins/{}.yaml", r.name));
+        let manifest = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} -- every app has a generated manifest", path.display()));
+        let in_manifest: BTreeSet<String> = manifest
+            .lines()
+            .zip(manifest.lines().skip(1))
+            .filter(|(_, next)| next.trim() == "valueFrom:")
+            .filter_map(|(line, _)| line.trim().strip_prefix("- name: ").map(|s| s.to_string()))
+            .collect();
+        let indexed: BTreeSet<String> = r.secrets.iter().cloned().collect();
+        assert_eq!(
+            indexed, in_manifest,
+            "{}: the app index and its pod manifest disagree about the secret grant",
+            r.name
+        );
+    }
+}
+
+/// A key the app's own hosted consumer reads, that its pod does not carry, is REPORTED — with
+/// the reason. `worker-sirene-sync`/`INSEE_API_TOKEN` is the live instance (correct today: a
+/// GitHub Action still runs that job), and nothing else in the repo says the pod would need it.
+/// Pure, so the test survives the day that instance is fixed.
+#[test]
+fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
+    let bin = BinSpec {
+        name: "worker-example".into(),
+        family: "worker",
+        actor: None,
+        scope: None,
+        role: None,
+        domain_scopes: BTreeSet::new(),
+        ports: BTreeSet::new(),
+        mailboxed: false,
+        partner: None,
+        schedule: Some("0 3 * * 1".into()),
+        suspended: false,
+        consumers: BTreeSet::from(["example_ingest".to_string()]),
+    };
+    let key = |name: &str, secret: bool, consumer: &str, prod: bool| ConfigKey {
+        name: name.into(),
+        ty: "string".into(),
+        values: Vec::new(),
+        required: Vec::new(),
+        default: None,
+        secret,
+        gates: String::new(),
+        mode_of: None,
+        consumer: consumer.into(),
+        scalar: None,
+        pattern: None,
+        deploy: BTreeMap::new(),
+        from_secret: if prod {
+            BTreeMap::from([("production".to_string(), "REPO_SECRET".to_string())])
+        } else {
+            BTreeMap::new()
+        },
+    };
+    let keys = vec![
+        key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source
+        key("GRANTED_TOKEN", true, "example_ingest", true), // hosted consumer, and granted below
+        key("OTHER_TOKEN", true, "other_ingest", false),    // another consumer's key: not ours
+        key("BAKED_URL", false, "example_ingest", false),   // non-secret: baked, never a grant
+    ];
+    let missing = missing_secret_keys(&bin, &keys, &["GRANTED_TOKEN".to_string()]);
+    assert_eq!(
+        missing.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+        vec!["NEEDED_TOKEN"],
+        "only a SECRET key of a consumer this pod hosts, that the pod does not carry, is missing"
+    );
+    assert!(
+        missing[0].1.contains("from_secret"),
+        "the reason must say WHY it is absent, not just that it is: {}",
+        missing[0].1
+    );
+}
+// ─── §17 — the warning ratchet (validate/warning_baseline.rs) ───────────────────────────────────
+//
+// The gate exists because the "no NEW warning" rule used to be a NUMBER IN PROSE in CLAUDE.md,
+// re-derived by hand — four separate agents paid a full extra validator run against a pristine
+// `main` worktree on one day to establish a figure the doc claimed to already know. These tests
+// pin the two properties that make the artifact un-stale-able: it is written only by the tool, and
+// ANY divergence between it and the live run fails.
+
+/// A warning's RULE is the histogram key; errors never enter the profile (the ratchet is about the
+/// warning surface — errors are already an absolute 0).
+#[test]
+fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
+    let issues = vec![
+        warn("command-no-mutation", "a".into(), String::new()),
+        warn("command-no-mutation", "b".into(), String::new()),
+        warn("view-fedby-unused", "c".into(), String::new()),
+        err("ref-unresolved", "d".into(), String::new()),
+    ];
+    let p = warning_profile(&issues);
+    assert_eq!(p.get("command-no-mutation"), Some(&2));
+    assert_eq!(p.get("view-fedby-unused"), Some(&1));
+    assert_eq!(p.get("ref-unresolved"), None, "errors are not part of the warning ratchet");
+}
+
+/// Round-trip, and the self-consistency check that makes a hand-edit visible: `total` is not an
+/// independent field you can nudge — it must equal the histogram sum.
+#[test]
+fn the_baseline_artifact_round_trips_and_rejects_an_inconsistent_edit() {
+    let mut profile = WarningProfile::new();
+    profile.insert("command-no-mutation".into(), 11);
+    profile.insert("view-fedby-unused".into(), 1);
+    let json = render_warning_baseline(&profile);
+    assert!(json.contains("\"total\": 12"), "{json}");
+    assert_eq!(parse_warning_baseline(&json).expect("round-trips"), profile);
+
+    let fudged = json.replace("\"total\": 12", "\"total\": 99");
+    assert!(
+        parse_warning_baseline(&fudged).unwrap_err().contains("sums to 12"),
+        "a fudged total must be rejected, not trusted"
+    );
+    let doc = serde_json::to_string(BASELINE_DOC).expect("doc serialises");
+    assert!(parse_warning_baseline("{}").is_err(), "an empty object is not a baseline");
+    assert!(
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0}}"))
+            .unwrap_err()
+            .contains("by_rule"),
+        "a baseline without by_rule is not a baseline"
+    );
+    assert!(
+        parse_warning_baseline(&format!("{{\"doc\":{doc},\"total\":0,\"by_rule\":{{\"x\":0}}}}"))
+            .unwrap_err()
+            .contains("drop the entry"),
+        "a zero entry is a kind that no longer occurs — it must be dropped, not pinned at 0"
+    );
+}
+
+/// `doc` is the ONLY field of the artifact a human reads, the only one telling them how to change
+/// it — and the only one `by_rule`/`total` cannot notice going stale. It shipped pointing at
+/// validator section 16 after this section was renumbered to 17, hand-patched everywhere except in
+/// the file whose own text forbids hand-editing. So it is asserted verbatim, in both directions:
+/// a stale pointer is rejected, and the committed artifact's doc is the writer's doc.
+#[test]
+fn a_hand_edited_or_stale_doc_field_is_rejected() {
+    let profile: WarningProfile = [("command-no-mutation".to_string(), 1usize)].into_iter().collect();
+    let json = render_warning_baseline(&profile);
+    assert!(parse_warning_baseline(&json).is_ok(), "the tool's own output must parse");
+
+    // The exact defect that shipped: the renumbering §16 -> §17 missed the artifact.
+    let stale = json.replace("section 17", "section 16");
+    assert_ne!(stale, json, "the rendered doc must name the section, or this test proves nothing");
+    assert!(
+        parse_warning_baseline(&stale).unwrap_err().contains("`doc`"),
+        "a doc pointing at the wrong validator section must fail the gate, not mislead the reader"
+    );
+
+    assert!(
+        parse_warning_baseline(&json.replace(&format!("  \"doc\": {},\n", serde_json::to_string(BASELINE_DOC).unwrap()), ""))
+            .unwrap_err()
+            .contains("`doc`"),
+        "an ABSENT doc is not a way around the check"
+    );
+}
+
+/// The ratchet is EXACT in both directions. An increase or a new kind is a regression; a decrease
+/// is an improvement that must still be committed, because a baseline left high is exactly the
+/// stale number this section replaced — the freed budget would be silently re-spendable.
+#[test]
+fn the_ratchet_fails_in_both_directions() {
+    let base: WarningProfile =
+        [("a".to_string(), 2usize), ("b".to_string(), 1)].into_iter().collect();
+
+    assert!(diff_warning_baseline(&base, &base).is_clean());
+
+    let grown: WarningProfile = [("a".to_string(), 3usize), ("b".to_string(), 1)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &grown);
+    assert_eq!(d.worse, vec![BaselineDelta { rule: "a".into(), committed: 2, live: 3 }]);
+    assert!(d.better.is_empty());
+
+    let new_kind: WarningProfile =
+        [("a".to_string(), 2usize), ("b".to_string(), 1), ("c".to_string(), 1)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &new_kind);
+    assert_eq!(d.worse, vec![BaselineDelta { rule: "c".into(), committed: 0, live: 1 }]);
+    assert!(
+        render_baseline_failure(&d, &new_kind).contains("NEW warning kind"),
+        "a kind absent from the baseline must be called out as new"
+    );
+
+    let fixed: WarningProfile = [("a".to_string(), 2usize)].into_iter().collect();
+    let d = diff_warning_baseline(&base, &fixed);
+    assert!(d.worse.is_empty());
+    assert_eq!(d.better, vec![BaselineDelta { rule: "b".into(), committed: 1, live: 0 }]);
+    let msg = render_baseline_failure(&d, &fixed);
+    assert!(msg.contains("kind eliminated") && msg.contains("make warning-baseline"), "{msg}");
+}
+
+/// The one that actually holds the line: the COMMITTED artifact must equal what the real specs
+/// produce right now. Duplicated with the binary's `--check` gate on purpose — `make rust` runs
+/// `cargo test` and `validate` separately, and a ratchet only one of them enforces is a ratchet
+/// that a partial run silently skips (the #292 lesson: a guard that stops running never fails).
+#[test]
+fn the_committed_warning_baseline_matches_the_real_specs() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let Report { mut issues, .. } = validate(&model);
+    // Same issue set the CLI gates on (main.rs), section for section: the spec sections, plus §13
+    // proposal hygiene and §16 writer/schema agreement. §16 belongs here even though it emits only
+    // errors today — the committed artifact is written from the CLI's profile, so the day §16 grows a
+    // warning kind, a narrower profile here would go red against a CORRECT artifact.
+    issues.extend(validate_proposal_hygiene(&load_proposal_files(&root)));
+    issues.extend(validate_writer_schema_agreement(
+        &load_migration_files(&root),
+        &load_writer_files(&root),
+    ));
+    let live = warning_profile(&issues);
+    if let Err(msg) = check_warning_baseline(&root, &live) {
+        panic!("{msg}");
+    }
 }

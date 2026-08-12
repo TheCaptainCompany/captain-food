@@ -134,14 +134,7 @@ async fn seed_journal_verdict(
 /// only copy of the record. Recovering it costs a ~4h re-fetch from INSEE, so the test is the guard.
 #[tokio::test]
 async fn only_a_confirmed_sync_loses_its_payload() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP only_a_confirmed_sync_loses_its_payload: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = db_test_gate::database_url("only_a_confirmed_sync_loses_its_payload") else { return };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
 

@@ -14,7 +14,7 @@
 //!   not one worker starving the other) — and after A dies, B finishes the backlog.
 //!
 //! Needs `DATABASE_URL` (docker `postgres:16-alpine` locally, the CI service, any real Postgres);
-//! skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! fails otherwise since #474; only `DB_TESTS_REQUIRED=0` skips it, with a receipt.
 
 use std::sync::Arc;
 
@@ -22,6 +22,8 @@ use actor_runtime::{
     Delivery, HandlerVerdict, InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+
+mod common;
 
 const ACTOR_TYPE: &str = "Conversation";
 const PARTITIONS: i16 = 8;
@@ -129,14 +131,7 @@ fn worker(pool: &PgPool, id: &'static str) -> MailboxWorker {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_live_workers_deliver_exactly_once_in_actor_order_through_a_death() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        assert!(
-            std::env::var("DB_TESTS_REQUIRED").is_err(),
-            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-        );
-        eprintln!("SKIP actor concurrency test: DATABASE_URL not set");
-        return;
-    };
+    let Some(url) = common::database_url("actor_concurrency_test") else { return };
     let pool = PgPool::connect(&url).await.expect("connect");
     setup(&pool).await;
     actor_runtime::seed_partitions(&pool, ACTOR_TYPE, PARTITIONS).await.expect("seed");

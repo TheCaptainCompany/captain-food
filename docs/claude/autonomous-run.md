@@ -70,7 +70,9 @@ FEWER, BIGGER dispatches — never a quietly smaller mob.
 - **Claim ⇒ draft PR ⇒ gates green ⇒ ready+auto-merge as one step ⇒ supervise to MERGED.**
   Never end a turn at "pushed, CI pending" without an armed wake-up.
 - **Independent review before ready-for-review**, by eyes that did not write the diff.
-- **Validator baseline**: re-measure on pristine `main`; 0 errors, no NEW warnings.
+- **Validator baseline**: 0 errors, and the warning ratchet
+  (`tools/codegen-rs/warning-baseline.json`) is asserted by `make validate` — nothing to re-measure;
+  if a change moves it, `make warning-baseline` + commit the artifact with the change.
 - **Commit trailers**: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` + the running
   session's own `Claude-Session:` link. English everywhere. Model id never in pushed artifacts.
 - **Durable wake-ups only** (`send_later` / Routines, approved MCP): in-memory cron dies with

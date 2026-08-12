@@ -1,0 +1,20 @@
+# The DB-TEST GATE (#474): the ONE place that decides whether a database-gated test may skip.
+#
+# Hand-written, dev-dependency only — nothing in the app graph links it, and it links nothing
+# (std only), so it costs no build time in any production profile. It exists because the decision
+# it owns was previously spelled SEVENTEEN times across five crates: seventeen chances for the
+# polarity to drift, and no way to change it in one place. A test crate cannot get the polarity
+# wrong if it cannot spell the decision at all (compiler-first, ADR-20260803-234035).
+[package]
+name = "db-test-gate"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food database-test gate: DB-gated suites are REQUIRED by default and skip only under an explicit, receipted opt-out (#474)."
+
+[dependencies]
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

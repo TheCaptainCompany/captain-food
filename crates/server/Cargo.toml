@@ -94,8 +94,16 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "nat
 async-trait = { workspace = true }
 
 [dev-dependencies]
+# The #474 database-test gate: DB-gated suites are REQUIRED by default and skip only under an
+# explicit `DB_TESTS_REQUIRED=0`, which leaves a receipt. Dev-only -- the release graph never
+# links it (std-only, no build cost).
+db-test-gate = { path = "../db_test_gate" }
 # In-memory read-repository stand-ins for the subscription tests (no DB needed).
 async-trait = { workspace = true }
+# The #469 PATH-level test drives the production router with `ServiceExt::oneshot` -- a real
+# `POST /public/graphql` carrying a cookie and a `Host`, so nothing about the request is injected.
+# axum already pulls tower in; naming it here is what makes `oneshot` reachable from a test.
+tower = { version = "0.5", features = ["util"] }
 # The #440 emission proof (tests/checkout_degraded_metric.rs): a real SdkMeterProvider with the
 # SDK's own in-memory exporter observes checkout_degraded_render_total actually firing through
 # the production render path — the first declared metric in this repo proved emitted, not assumed.

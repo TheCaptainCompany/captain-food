@@ -56,6 +56,13 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
   projection rows/projectors + PM state stores (app + Pg, item 5), the service catalog (item 4, issue #26:
   `emit_services_application` traits, `emit_services_http_clients` + `emit_service_bindings`
   (infrastructure), expose-gated `emit_services_routes` (server)), and the async-graphql layer.
+  **The one emitter that MEASURES** (#491): `emit_app_index` writes `specs/generated/apps.generated.md`
+  — the 57-app index (family, boundary, declared vs resolved domain crates, pod grants) — and its
+  `resolved` column comes from `measure_workspace_crate_graph` (guppy over `cargo metadata`; normal
+  links, workspace members only), not from the model. Hence it runs LAST in `main`, after the domain
+  and bin crate manifests this same pass writes: measuring before writing would render the graph as it
+  stood before a new deployable existed, and only the NEXT run would agree with itself. It also means
+  `make generate` needs a resolvable workspace, and refuses (exit 1) rather than emit a guessed column.
 - **main** — orchestration + the coverage report printed by validate/generate.
 
 ## Output policy
@@ -65,6 +72,8 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
   `tools/codegen-rs/out/` is only ephemeral build scratch (gitignored), e.g. Structurizr `.mmd` exports.
 - Generated files carry a "GENERATED — do not edit by hand" banner. **Never hand-edit `specs/generated/**`**
   or injected regions; change the spec or the emitter and regenerate.
+- `specs/generated/apps.generated.md` is the app index — every deployable with its boundary, its
+  declared vs resolved domain crates and its pod grant (#491).
 - `specs/generated/documentation.generated.{md,html}` is the navigable product doc; `views.generated.sql` the DDL;
   `schema.generated.graphql` the SDL (the hand-written `schema.graphql` was removed);
   `c4.generated.dsl`/`c4.generated.md` the Structurizr/Mermaid views.
@@ -80,8 +89,11 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
 
 ## Validation must stay green
 
-- 0 errors is required. The only accepted warnings are the known view design-holes
-  (`view-fedby-unused`, `view-column-no-source` ×3). Any new warning is a real signal — fix or justify.
+- 0 errors is required. The accepted warnings are whatever `tools/codegen-rs/warning-baseline.json`
+  records — the validator's §17 ratchet asserts that file against every run, in both directions, so a
+  new warning is a gate failure rather than something a reader has to notice. Fix it, or bank it with
+  `make warning-baseline` in the same commit and justify it in the PR body. (Listing the kinds here
+  instead is what went stale three times; see CLAUDE.md.)
 - When you add a spec concept, add its validation rule in the same change (the model must not be able to
   drift silently). Adding a new source file = add it to `SOURCE_FILES` so its `$ref`s are checked.
 - Prefer total access on the YAML `Value` tree: `.get(...).and_then(...)` with explicit fallbacks over

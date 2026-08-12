@@ -35,6 +35,12 @@ sqlx = { workspace = true, features = ["uuid", "chrono", "json"] }
 # Linux CI image (no C toolchain needed for rustls' `ring`).
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 
+[dev-dependencies]
+# The #474 database-test gate: DB-gated suites are REQUIRED by default and skip only under an
+# explicit `DB_TESTS_REQUIRED=0`, which leaves a receipt. Dev-only -- the release graph never
+# links it (std-only, no build cost).
+db-test-gate = { path = "../db_test_gate" }
+
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
 [lints]
 workspace = true

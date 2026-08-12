@@ -766,6 +766,46 @@ impl CartReadRepository for SpecCarts {
             .cloned()
             .collect())
     }
+    /// Tenant-scoped leg 1 of `cart.current` (#469). The restaurant predicate is part of the PORT
+    /// contract, so this double honours it: a double that ignored it would let a tenant-blind
+    /// implementation pass its tests.
+    async fn open_by_customer_at(
+        &self,
+        customer_id: CustomerId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<crate::queries::CartRow>, DomainError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| {
+                r.customer_id == Some(customer_id)
+                    && r.restaurant_id == restaurant_id
+                    && r.status == CartStatus::OPEN
+            })
+            .cloned()
+            .collect())
+    }
+    /// Tenant-scoped leg 2 of `cart.current` (#469), same obligation.
+    async fn open_by_session_at(
+        &self,
+        session_id: SessionId,
+        restaurant_id: RestaurantId,
+    ) -> Result<Vec<crate::queries::CartRow>, DomainError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| {
+                r.session_id == session_id
+                    && r.restaurant_id == restaurant_id
+                    && r.status == CartStatus::OPEN
+            })
+            .cloned()
+            .collect())
+    }
 }
 
 #[derive(Default)]

@@ -107,7 +107,7 @@ impl QueryRoot {
     async fn me(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerProfile>> {
         // The verified session identity (ADR-0047), injected per-request by the HTTP layer. No
         // principal (schema executed outside a request) or an anonymous one → no profile, not an error.
-        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id().map(str::to_string)) else {
             return Ok(None);
         };
         let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
@@ -153,7 +153,7 @@ impl QueryRoot {
         // no jobs, not an error.
         let Some(rider_id) = ctx
             .data_opt::<crate::auth::Principal>()
-            .and_then(|p| p.user_id.as_deref())
+            .and_then(|p| p.user_id())
             .and_then(|s| uuid::Uuid::parse_str(s).ok())
         else {
             return Ok(Vec::new());
@@ -378,7 +378,7 @@ impl QueryRoot {
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
         Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
     }
-    /// The caller's CURRENT cart — the storefront cart/mini-cart read, TWO-LEG resolution (#451, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart (ReadScope::Customer, the `myReclamations` pattern). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart" — the client renders the empty state, never a fabricated 0,00 EUR payable.
+    /// The caller's CURRENT cart AT THIS STOREFRONT — the cart/mini-cart read, TWO-LEG resolution WITHIN ONE TENANT (#451/#469, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. The TENANT comes from the request Host ({slug}.captain.food -> RestaurantId, resolved once at the edge), NEVER from an argument — an argument would let a client assert whose cart to serve, and an OPTIONAL one would mean "unbounded when omitted". BOTH legs are bounded by it, in SQL. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart AT THIS RESTAURANT (ReadScope::Customer, the `myReclamations` pattern; PUBLIC is the anonymous PATH, not "no identity" — the open path reads the caller's credential and degrades to anonymous, so a signed-in customer on a storefront IS resolved here). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart at this restaurant WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. A host that names NO restaurant (the marketplace, an unknown slug) resolves NULL, never "the newest cart anywhere" — the customer's carts at other restaurants are a different query (`carts`). OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart here" — the client renders the empty state, never a fabricated 0,00 EUR payable.
     #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
     async fn current(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<Cart>> {
         let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
@@ -395,7 +395,11 @@ impl QueryRoot {
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         // The anonymous-session correlator (validated at transport, `session.rs`): leg 2's key.
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
-        let Some(row) = crate::graphql::cart_read::current_open_cart(&**carts, &scope, session)
+        // The request's TENANT (#469), resolved ONCE at the edge from the Host -- its own datum
+        // beside the ReadScope. Absent (the marketplace host, or a schema executed outside a
+        // request) => no tenant, and a tenant-scoped read serves NOTHING rather than everything.
+        let tenant = ctx.data_opt::<crate::graphql::tenant::TenantScope>().copied().unwrap_or(crate::graphql::tenant::TenantScope::None);
+        let Some(row) = crate::graphql::cart_read::current_open_cart(&**carts, &scope, session, tenant)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
         else {

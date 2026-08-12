@@ -37,6 +37,7 @@ mod order_projection;
 mod pending_refund_read_model;
 mod pm_prepare_delivery;
 mod projection_batching;
+mod projection_checkpoint_halt;
 mod prospection_projection;
 mod referential_policies;
 mod restaurant_locations_by_account;

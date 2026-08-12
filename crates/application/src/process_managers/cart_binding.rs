@@ -106,6 +106,25 @@ mod tests {
         ) -> Result<Vec<CartRow>, DomainError> {
             Ok(self.open.iter().filter(|c| c.session_id == session_id).cloned().collect())
         }
+        /// The tenant-scoped legs of `cart.current` (#469) are not this process manager's reads:
+        /// binding associates EVERY cart of a session at identification and is right to span
+        /// restaurants. Left unreachable rather than half-implemented — a plausible-looking
+        /// implementation here would be an invitation to route a tenant-scoped read through the
+        /// binding PM's fake and prove nothing.
+        async fn open_by_customer_at(
+            &self,
+            _customer_id: CustomerId,
+            _restaurant_id: RestaurantId,
+        ) -> Result<Vec<CartRow>, DomainError> {
+            unreachable!("CartBindingProcess reads by session, never by tenant-scoped customer")
+        }
+        async fn open_by_session_at(
+            &self,
+            _session_id: SessionId,
+            _restaurant_id: RestaurantId,
+        ) -> Result<Vec<CartRow>, DomainError> {
+            unreachable!("CartBindingProcess reads a session across restaurants, by design")
+        }
     }
 
     fn started(cart: u128) -> Vec<DomainEvent> {

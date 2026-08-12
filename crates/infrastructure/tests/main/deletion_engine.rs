@@ -11,7 +11,8 @@
 //! - a re-run after completion is a no-op (the cursor advanced atomically with the deletion);
 //! - `PgEventStore::load` skips `$`-prefixed technical rows while still counting their version.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use application::ports::EventStore;
 use infrastructure::{DeletionEngine, PgEventStore};

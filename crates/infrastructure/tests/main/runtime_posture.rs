@@ -6,7 +6,8 @@
 //! operator-flipped value — a deploy that silently flips the money gate back off would recreate
 //! the exact drift the row exists to remove.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use infrastructure::persistence::runtime_posture::{
     read_posture, PostureRead, PM_MAILBOX_DELIVERY,

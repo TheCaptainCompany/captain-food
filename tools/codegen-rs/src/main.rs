@@ -55,6 +55,9 @@ fn repo_root(specs: &std::path::Path) -> PathBuf {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
+    // §17: refresh the committed warning ratchet instead of asserting it (`make warning-baseline`).
+    // The ONLY way the artifact changes, so "the number moved" is always a deliberate, reviewable act.
+    let write_baseline = args.iter().any(|a| a == "--write-warning-baseline");
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -73,6 +76,15 @@ fn main() {
     // (derived from `--specs`) because proposals are markdown, not part of the YAML model.
     let proposals = load_proposal_files(&repo_root(&specs));
     issues.extend(validate_proposal_hygiene(&proposals));
+    // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
+    // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
+    // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads
+    // repo text rather than the YAML model, joins the same issue list and the same gate.
+    let root = repo_root(&specs);
+    issues.extend(validate_writer_schema_agreement(
+        &load_migration_files(&root),
+        &load_writer_files(&root),
+    ));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
@@ -130,6 +142,10 @@ fn main() {
         "    - proposals: {} docs/proposals/PROP-*.md — Status header, tracking-issue link, Concerns resolved before Approved, Approved names an ADR",
         proposals.len()
     );
+    eprintln!(
+        "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",
+        WARNING_BASELINE_PATH
+    );
 
     if !issues.is_empty() {
         eprintln!("• checks: {} error(s), {} warning(s)", errors.len(), warnings.len());
@@ -141,8 +157,46 @@ fn main() {
         eprintln!("• checks: all cross-references resolve, no warnings");
     }
 
+    // ─── §17 — the warning RATCHET (see validate/warning_baseline.rs) ──────────────────────────
+    // "0 errors and no NEW warning" is now asserted by the gate against a committed artifact,
+    // instead of being re-derived by hand against a pristine `main` worktree once per session.
+    let live_profile = warning_profile(&issues);
+    if write_baseline {
+        // A blessed baseline may only be minted from a GREEN model. With errors present the warning
+        // profile describes a spec the validator has already rejected — several sections stop early
+        // or never run on a broken model — so writing it would ratchet in a histogram that no valid
+        // spec ever produced, and the exit code would call it a success.
+        if !errors.is_empty() {
+            eprintln!(
+                "\n✗ refusing to write {} — the model has {} error(s) (listed above).\n  Fix them first: a baseline is only meaningful for a spec that validates.",
+                WARNING_BASELINE_PATH,
+                errors.len()
+            );
+            std::process::exit(1);
+        }
+        let path = root.join(WARNING_BASELINE_PATH);
+        if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
+            eprintln!("✗ write {}: {}", path.display(), e);
+            std::process::exit(1);
+        }
+        eprintln!(
+            "✓ wrote {} ({} warning(s), {} kind(s)) — commit it with the change that moved it.",
+            path.display(),
+            live_profile.values().sum::<usize>(),
+            live_profile.len()
+        );
+        return;
+    }
+    let baseline_failure = check_warning_baseline(&root, &live_profile).err();
+    if let Some(msg) = &baseline_failure {
+        eprint!("{}", msg);
+    }
+
     if !errors.is_empty() {
         eprintln!("\n✗ validation failed — fix the errors above before generating.");
+        std::process::exit(1);
+    }
+    if baseline_failure.is_some() {
         std::process::exit(1);
     }
 
@@ -618,4 +672,28 @@ fn main() {
         std::process::exit(1);
     }
     eprintln!("✓ wrote {}", css_path.display());
+
+    // specs/generated/apps.generated.md — THE APP INDEX (#491, PROP-20260811-141654 slice A1).
+    // LAST on purpose, and the only artifact that MEASURES rather than derives: its resolved
+    // column comes from cargo's own resolver over the workspace, so it must run AFTER the domain
+    // and bin crate manifests this same pass writes — otherwise a run that adds a deployable
+    // would render the graph as it stood before that deployable existed, and only the NEXT run
+    // would agree with itself (a two-pass instability check-drift catches one commit too late).
+    let root = repo_root(&specs);
+    match measure_workspace_crate_graph(&root) {
+        Ok(graph) => {
+            let path = out_dir.join("apps.generated.md");
+            if let Err(e) = fs::write(&path, emit_app_index(&model, &graph)) {
+                eprintln!("✗ write {}: {}", path.display(), e);
+                std::process::exit(1);
+            }
+            eprintln!("✓ wrote {}", path.display());
+        }
+        Err(e) => {
+            // Refuse rather than emit an index whose central column is a guess: a resolved set
+            // that silently fell back to the declared one would report a clean split that is not.
+            eprintln!("✗ app index: cannot measure the workspace crate graph: {e}");
+            std::process::exit(1);
+        }
+    }
 }

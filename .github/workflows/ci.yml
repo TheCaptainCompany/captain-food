@@ -191,10 +191,16 @@ jobs:
 
       # Kept WITHOUT a DATABASE_URL on purpose: this run proves the offline path (every DB-gated test
       # must skip cleanly on a contributor machine with no Postgres). The DB suites run for real in `db-test`.
+      # Since #474 the skip polarity is INVERTED — a missing database FAILS by default — so this job
+      # must now say so out loud: `DB_TESTS_REQUIRED: '0'` is the explicit opt-out, and it is exactly
+      # the declaration this step's comment used to make in prose only. It also proves the opt-out path
+      # keeps working, which is the half `db-test` cannot cover.
       # The two evidence lines before cargo test enable core dumps in THIS shell (ulimit is per-shell):
       # ubuntu runners pipe cores to apport by default, which drops them — a plain writable pattern
       # keeps the corpse for the failure-artifact upload. Guarded so they never fail a green run.
-      - name: Unit tests (whole workspace)
+      - name: Unit tests (whole workspace, no database — the offline path)
+        env:
+          DB_TESTS_REQUIRED: '0'
         run: |
           sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p" || true
           ulimit -c unlimited || true

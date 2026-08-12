@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 118,
+  "recordedAt": "2026-08-12T02:42:10.635Z",
+  "branch": "validator-owns-warning-baseline",
+  "note": "PR #496 rebase onto main + conflict resolution + re-gate"
+}

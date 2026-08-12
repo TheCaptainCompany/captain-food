@@ -1066,6 +1066,27 @@ read-authorization:
     # has no I/O since #433. It denies (safe), but it is a provisioning gap or staleness — never
     # ordinary user denial — and must not sit inside the denial count where it would look like noise.
     - { name: "read_authorization_bridge_unresolved_total", type: counter, attributes: ["role"] }
+    # The OPEN path's credential degrade (#469). `/public` now READS the caller's credential (the
+    # storefront is pinned to the anonymous path, so `cart.current`'s claim leg could never fire
+    # without it) and NEVER fails: anything unverifiable degrades to anonymous. That degrade has to
+    # be visible, or a JWKS outage looks like customers who simply stopped having carts.
+    # `reason` is the canonical bounded set:
+    #   invalid_token        — absent kid, expired, tampered, wrong issuer/audience. The ORDINARY
+    #                          case (a stale cookie): alert on the rate of change, never the count.
+    #   verifier_unavailable — JWKS unconfigured or unreachable. Any sustained non-zero rate means
+    #                          identified customers are being served the anonymous view.
+    #   role_not_customer    — a verified ADMIN/RESTAURANT/RIDER token presented to /public, which
+    #                          stays anonymous by design ("role = path", ADR-0047).
+    #   claim_absent         — a verified CUSTOMER token carrying no (or a malformed)
+    #                          captain_customer_id: the pre-claim-stamp window, EXPECTED and
+    #                          high-volume for one token lifetime after a rollout. It is counted
+    #                          HERE rather than as read_authorization_bridge_unresolved_total
+    #                          precisely so that window cannot read as a provisioning incident — on
+    #                          /public such a caller is served the anonymous view and DENIED
+    #                          nothing, which is not what that counter means. Expect a burst that
+    #                          decays toward zero; a floor that does NOT decay is a claim-stamping
+    #                          failure, and customer_claim_stamp_failed_total is where that lives.
+    - { name: "public_credential_degraded_total", type: counter, attributes: ["reason"] }
     - { name: "read_authorization_check_ms", type: histogram, attributes: ["scope_type"] }
 
   business_metrics:

@@ -6,7 +6,8 @@
 //! standalone wiring — deps construction, supervision spawn, nudge hookup — from bit-rotting
 //! unnoticed, which is exactly how the #270 review found the adapters ACKing into a void.
 //!
-//! Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
+//! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
+//! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
 use std::sync::Arc;
 

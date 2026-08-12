@@ -6748,9 +6748,9 @@ pub(crate) struct RequestEnvelope {
 fn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {
     let principal = ctx.data_opt::<crate::auth::Principal>();
     let user_id = principal
-        .and_then(|p| p.user_id.as_deref())
+        .and_then(|p| p.user_id())
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
-    let user_type = principal.map(|p| role_text(&p.role)).unwrap_or("PUBLIC").to_string();
+    let user_type = principal.map(|p| role_text(&p.role())).unwrap_or("PUBLIC").to_string();
     let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
     let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());
     // Client-suppliable ids validate structurally at scalar parse time; anything missing is
@@ -6828,7 +6828,7 @@ pub(crate) fn operation_owned(
     );
     let principal_uuid = ctx
         .data_opt::<crate::auth::Principal>()
-        .and_then(|p| p.user_id.as_deref())
+        .and_then(|p| p.user_id())
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
     let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
     admin
@@ -6883,7 +6883,7 @@ pub(crate) fn mailbox_operation_owned(
     );
     let principal_uuid = ctx
         .data_opt::<crate::auth::Principal>()
-        .and_then(|p| p.user_id.as_deref())
+        .and_then(|p| p.user_id())
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
     let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
     admin

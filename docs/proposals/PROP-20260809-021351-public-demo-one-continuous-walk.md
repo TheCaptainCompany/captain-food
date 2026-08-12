@@ -331,7 +331,8 @@ demo (step 9 is the hop the restaurant is evaluating) and of production. It need
   tracking screen changing status.
 - The demo is done when a stranger, given only the marketing link, reaches `Livrée` without help,
   and every simulated step carried its sentence before it happened.
-- `make validate` at 0 errors and no new warning kind, re-measured against a pristine `main`.
+- `make validate` at 0 errors with `tools/codegen-rs/warning-baseline.json` unchanged (the §17
+  ratchet asserts the warning surface; no pristine-`main` re-measure).
 
 ## 8. Drawbacks
 

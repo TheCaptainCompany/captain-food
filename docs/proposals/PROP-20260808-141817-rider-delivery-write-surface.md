@@ -525,8 +525,9 @@ Rider slices 3/4/7 regenerate on top of it and are never dispatched concurrently
 `ReleaseDeliveryAssignment`/`DeliveryAssignmentReleased` per decided D3) is promoted into a real
 recovery journey, and the epic decomposes into 8 V0 slices of which **two (vocabulary cleanup, validator
 PM-send credit) cost nothing** — pure spec deletion plus a validator refinement — **and clear ~9
-warnings: roughly a FIFTH of main's 43-warning baseline** (as of 2026-08-08; re-measure before
-comparing), **a third of the 24 epic-relevant warnings** — before any surface is built.
+warnings: roughly a FIFTH of main's 43-warning baseline** (the figure as of 2026-08-08; the live
+count is `tools/codegen-rs/warning-baseline.json`), **a third of the 24 epic-relevant warnings** —
+before any surface is built.
 `PlaceReplacementOrder`'s warning survives slice 2 and clears with decision D6.
 
 **The two highest-anxiety customer facts must not wait for the rider slices:**
@@ -573,8 +574,8 @@ Copied to the tracking issue's checklist on approval (README convention):
 ## 10. Verification plan
 
 - Every slice is a claimable issue landing through the standard flow: `make validate` at 0 errors,
-  warning count/kinds diffed against a re-measured `main` baseline (never the numbers pinned
-  above), `make rust` green, ADR-0032 completeness (new mutations get story steps; new
+  `tools/codegen-rs/warning-baseline.json` refreshed in the same commit for each warning the slice
+  clears (never the numbers pinned above), `make rust` green, ADR-0032 completeness (new mutations get story steps; new
   commands/events get behaviour tests with `rules:` links).
 - Slices 1–2 are measured by the warning delta itself: the retired families' and PM-step-sent
   commands' warnings disappear with **zero** new ones. `PlaceReplacementOrder`'s warning is

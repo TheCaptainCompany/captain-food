@@ -2,9 +2,16 @@
 # (ADR-20260807-183024 steps 3+4 and #385; container list per PROP-20260806-223656 s2b D5 addendum).
 #
 # PER-DEPLOYABLE BIN CRATE: `gateway-external` (gateway). The domain [dependencies] below are this bin's
-# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json -- linking
-# a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
-# coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
+# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json. What it
+# proves is REAL but NARROW, and worth stating exactly: THIS CRATE'S OWN SOURCE cannot NAME a
+# scope missing from the list -- Rust resolves no path to an undeclared crate -- and the
+# `use ... as _;` lines in src/main.rs keep every declared link a compile-checked fact rather
+# than a comment (compiler-first, ADR-20260803-234035).
+#
+# Here it is TRUE OF THE DEPLOYABLE TOO: this family's resolved graph (gateway_runtime +
+# bin_probes) contains no domain crate at all, so no domain type exists in this image to reach.
+# It is the ONLY family in the topology of which that holds today -- every other bin reaches the
+# `domain` facade transitively (#475).
 #
 # BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
 # `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
@@ -18,8 +25,9 @@ publish = false
 description = "Captain.Food `gateway-external` deployable: role gateway for /external/graphql -- thin generated top-level routing, no DB access, no business logic, no state (D8) (ADR-20260807-183024)."
 
 [dependencies]
-# (no domain crates -- this family holds NO domain vocabulary; an added domain crate
-#  here is a boundary violation to review, not a convenience)
+# (no domain crates -- and none anywhere in this family's resolved graph: a gateway image
+#  holds NO domain vocabulary at all. An added domain crate here is a boundary violation to
+#  review, not a convenience)
 # GATEWAY runtime (#385 API-tier wiring, D8): top-level-field routing to the owning
 # subgraphs from the embedded composition table. DELIBERATELY no server, no infrastructure,
 # no database -- auth lives at the subgraph (the schema boundary); a domain crate appearing

@@ -158,17 +158,18 @@ lists entrypoints. The validator (`make validate`, the Rust `tools/codegen-rs`) 
 the **whole spec** — schema/refs, actor wiring, api↔model, views, C4, observability, and (ADR-0032)
 **tests, stories and rules completeness**: every message/event/error is exercised by a test, every
 mutation/query is reached by a story step, and every test↔rule link holds both ways. It must be
-**0 errors**. Warnings are a **baseline to compare against, not a clean slate**: as of 2026-08-08
-`main` carries 43 — `command-no-mutation` ×13, `event-not-projected` ×11,
-`action-missing-required-input` ×10, `action-unknown-input` ×7, `view-fedby-unused` ×1,
-`identity-property-not-on-command` ×1. These numbers DRIFT as specs evolve (an earlier pin of 32
-went stale within a day): ALWAYS re-measure the baseline on a pristine `main` worktree before
-comparing. The rule for a change is therefore **0 errors and no NEW
-warning**: diff the count and kinds against `main` (`make validate` prints
-`checks: N error(s), M warning(s)`), and never read a non-zero count as a regression you caused.
-Three independent reviewer passes on [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)
-each had to stop and re-derive this because the old wording said otherwise — re-measure rather than
-trust the numbers above if they look off.
+**0 errors**. Warnings are a **ratchet the validator owns, not a number in this file**: the per-rule
+histogram lives in [`tools/codegen-rs/warning-baseline.json`](tools/codegen-rs/warning-baseline.json)
+and `make validate` fails when the live run differs from it **in either direction** — a new kind or a
+higher count is a regression, a lower count is an improvement you must bank. So **do not re-measure
+anything**: run the gate. If a change legitimately moves the warning surface, run `make
+warning-baseline` and commit the refreshed artifact **in the same commit**, and say in the PR body why
+an added warning is accepted — the diff (`+1 event-not-projected`) is the record. Never trust a
+warning count written in prose anywhere, including here: this paragraph used to pin one, and it went
+stale three times (32, then 43, then 37), costing four agents in a single day a full extra validator
+run against a pristine `main` worktree apiece before they could claim "no new warning" — three of them
+because the pinned number looked wrong and they had to re-derive it. A stale ratchet is now a gate
+failure rather than a misleading sentence.
 
 ### Non-negotiable rules
 
@@ -270,9 +271,80 @@ trust the numbers above if they look off.
   shown to the product owner — chunk, phases, checkpoints, gates, out-of-scope fences,
   anticipated decision points — as transparency, never as a permission request
   ([ADR-20260810-114242](docs/adr/ADR-20260810-114242-loop-start-action-plan.md)).
+- **No polling, only pushing — polling is a graceful fallback until pushing works again**
+  (product-owner directive, 2026-08-10, verbatim in
+  [ADR-20260810-231300](docs/adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)):
+  *"no polling only pushing, polling as graceful fallback until pushing works again."* Push is the
+  primary transport for every state change one component must learn from another. **The second clause
+  is the usable half**: a poll is legitimate ONLY as a fallback that is (a) a **declared** degraded
+  mode, (b) **observably** degraded — an operator can tell from telemetry that it is polling rather
+  than pushing, under a `specs/observability.yaml` contract
+  (`mailbox_push_down_total{reason}` is the reference shape) — and (c) has a **path back that
+  something actively detects**. A poll with none of those is just a poll with an excuse, and a
+  *silent* fallback is worse than the poll it replaced: it turns a loud outage into a permanent
+  invisible latency tax. **"Pushing works again" is never detected by the absence of an error** — a
+  `LISTEN` through a transaction-mode pooler is accepted and then delivers nothing, so `recv()` never
+  fails and a connection-error-driven flag stays `true` forever. Detection must be a **positive
+  liveness proof on the push path itself**: `mailbox_wake.rs`'s 30 s self-`pg_notify` canary with a
+  required echo is the reference implementation. **Scope**: this governs state-change *propagation*,
+  not *time-triggered* work — nobody can `NOTIFY` "a deadline passed", so reminder promotion, TTL
+  expiry and retention sweeps are outside it (there, the discipline is *sleep until the next due row*,
+  not *scan on a fixed interval*). The tiebreaker at the boundary: **does any component know this fact
+  before the clock does?** If yes, it is propagation and must be pushed. Applies to the team's own
+  loop too — agent completions arrive as push, so **do not reintroduce a polling status cron**.
+  **Second carve-out — MONITORING keeps a poll, permanently** (product-owner refinement, same ADR):
+  *"Monitoring could be excluded from this principle if we cannot design it pushable. In any case for
+  monitoring will have a polling as fallback."* Still try to make it pushable; it may poll where push
+  cannot be designed; and it **keeps a poll in every case, even where push works** — this clause is
+  *stronger* than the general principle and has **no exit**, inverting condition (c). The reason is not
+  frequency, it is that **for a monitor, silence is ambiguous**: a push-only monitor cannot tell
+  "healthy, nothing to report" from "dead, reporting nothing". Every other push consumer resolves that
+  with a durable backstop to reconcile against (`domain_events` + `projection_checkpoint`,
+  `inbound_messages` + status); a monitor watching a black box has none, because the thing it watches
+  is the thing that would tell it. **Narrow test**: the observer is outside what it observes and has no
+  durable record to reconcile against — it does NOT license polling in a monitor that could subscribe
+  and reconcile. `mailbox_wake.rs`'s canary is this clause already implemented (a push mechanism driven
+  on a timer); `tools/smoke/prod-smoke.sh`'s `wait_for` is correct under it. **New defect class**: a
+  monitoring path that can only fire when a signal ARRIVES — a threshold alert goes quiet when export
+  stops, which is exactly when it should scream. Liveness needs a dead-man's-switch, not a threshold.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
+- **A business metric IS A PROJECTION** (product-owner directive, 2026-08-11: *"Confirm the reversal,
+  go with the projections"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md),
+  superseding [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
+  in part). Every feature, for every persona, carries at least one — the unit is the **persona
+  ACTIVITY** in `specs/stories.yaml` (8 personas, 25 activities), never the story step, because a step
+  is an operation call and an activity is an outcome. A metric **declares the question it answers**,
+  and it is a **declared `fold:` over `domain_events`** maintained by the `bam` projector into the
+  `bam` schema, read through a **tenant-scoped GraphQL query** — *not* a counter emitted at a call
+  site. Two reasons that decide everything downstream: **a fold replays** (a counter does not, so a
+  metric added later would carry zero history), and **ratios and distinct-identity denominators are
+  inexpressible as counters** but ordinary as queries. Grouping keys need a **declared bounded
+  population** — `restaurantId` is fine, a Postgres row is not a time series. **Operational telemetry
+  does not move**: latency, error budgets, span status and dead-man's switches stay on
+  OTLP/Honeycomb, because they must work when Postgres is down, which is exactly when a
+  Postgres-backed metric is blind. An `alertable:` subset taps a counter as it folds at head — one
+  declaration, two outputs. Grammar, rules and the open rows:
+  [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) D4/D6/D8/D9.
+- **Every reference in the DSL is a `$ref`; only a declaration may introduce a bare name**
+  (product-owner directive, 2026-08-11: *"we need to heavily strongly typed the spec no string in
+  it"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)
+  Decision 2). Four categories, in order: **(1)** a **declaration** introduces a name (`measures:
+  [{ name: orders }]`) — correct, and the only place a bare name is; **(2)** a **reference** to
+  something declared elsewhere is a `$ref` the loader resolves, **including inside the same file**
+  (`{ $ref: '#/Order/state/orderId' }`, `specs/ordering/actors.yaml:102`); **(3)** a **value from a
+  closed set** stays a bare token (`type: counter`, `bucket: DAY`) *provided the set is closed in the
+  loader schema* — **except** where a domain scalar already declares that set, where the `$ref` is
+  mandatory (`{ $ref: 'scalars.yaml#/ServiceType' }`, never a hand-copied `[DELIVERY, COLLECTION]` —
+  "one name = one dedicated scalar" applied to a value set); **(4)** **prose stays prose**
+  (`description:`, `question:`) — typing it would be theatre. Why it is structural and not stylistic:
+  [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) — a plain-string
+  `tombstone: SomeEvent` is *"silently invisible everywhere"*, because the refs walker collects only
+  `$ref` nodes and the rule written for that key *"only sees tombstones the parser recognized"*.
+  **Binding on NEW DSL surface.** It is **not** a licence to sweep: the existing bare-name sites
+  (`data_requirements:`/`actions_used:` 40, `roles:` 112) each have a bespoke rule today and their
+  conversion is separate, sequenced work ([DECISIONS §27bis MET-T2](docs/proposals/DECISIONS.md)).
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - **Completeness is part of every change (ADR-0032):** a new command/event/error also needs a behaviour
@@ -304,19 +376,33 @@ trust the numbers above if they look off.
   ADRs in the same change** — so concurrent sessions never diverge on state or intent. ADR ids are
   **date-time** (`ADR-YYYYMMDD-HHMMSS`) to avoid collisions (ADR-20260718-135417); legacy `0001`–`0047`
   keep their sequential ids.
-- **Respect the prioritised backlog**: priorities are defined **in the GitHub Project
-  "Prioritized backlog"** (Priority field + row order) — pick work from the top; skipping the top item
-  needs a stated reason. Re-prioritising is a **product-owner decision made in the project**, never by
-  an agent. [docs/BACKLOG.md](docs/BACKLOG.md) records the process and how value is defined
-  (value-first, ADR-20260720-213024): foundations/cross-functional/non-functional first, then features
-  in value-stream order.
+- **Respect the prioritised backlog — and the team now sets it** (product-owner directive,
+  2026-08-10, [ADR-20260810-215503](docs/adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md):
+  *"Don't care about the project field anymore the team decides without me"*): priorities live **in the
+  GitHub Project "Prioritized backlog"** (Priority field + row order) — pick work from the top;
+  skipping the top item needs a stated reason. The **`Priority` bucket and row order are the team's
+  to set**; the product owner may override either at any time, without justification, and the team
+  adopts it immediately. What is NOT delegated: genuine option spaces
+  ([docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md)), external/legal/admin-gated matters,
+  `specs/**` approval — **a `Priority` is not an approval; ranking an AMBER item `Urgent` does not
+  make it dispatchable** — and **the method**, which is now **binding rather than descriptive**:
+  [docs/BACKLOG.md](docs/BACKLOG.md) records how value is defined (value-first, ADR-20260720-213024) —
+  foundations/cross-functional/non-functional first, then features in value-stream order — and every
+  ranking must be justifiable under it. **An agent must never change a Priority bucket or a row
+  position in order to make an item dispatchable, or to make its own recommendation legitimate**: a
+  blocked top item is reported blocked, never re-ranked. Every bucket change or material row move is
+  stated in the architect's run report with the method clause that justifies it; a re-ranking that
+  reverses a previously stated order also gets a line in `docs/STATUS.md`.
 - **Spec- and docs-only changes go straight to `main`** (product-owner directive): commit and **push
   directly to `main`** — no branch, no PR, no claim ceremony — for changes confined to `specs/**`,
   `docs/**`, ADRs, `CLAUDE.md`, `STATUS.md`, and the generated artifacts they regenerate. **Keep `main`
   green**: run the same gate CI would (`make rust`) locally **before** pushing anything that touches
-  `specs/**` (a docs-only edit that regenerates nothing may skip it). The claim → draft-PR →
-  supervised-merge flow below applies to **code/feature work** (touching `crates/**`, `tools/**`, CI,
-  deploy), not to pure spec/doc edits.
+  `specs/**` (a docs-only edit that regenerates nothing may skip it). A spec change that moves the
+  warning surface also carries **`tools/codegen-rs/warning-baseline.json`** (refreshed by
+  `make warning-baseline`): it is part of a spec change's footprint even though it sits under
+  `tools/` and `make generate` never writes it, so it does NOT turn the change into code work. The
+  claim → draft-PR → supervised-merge flow below applies to **code/feature work** (touching
+  `crates/**`, `tools/**` *other than that artifact*, CI, deploy), not to pure spec/doc edits.
 - **Issue workflow — claim ⇒ draft PR immediately; finish ⇒ supervised auto-merge**
   (ADR-20260720-233000 + ADR-20260721-042018 + ADR-20260721-044613, method in
   [docs/BACKLOG.md](docs/BACKLOG.md)): when asked to work an issue, FIRST claim it

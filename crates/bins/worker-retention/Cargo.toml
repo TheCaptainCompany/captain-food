@@ -2,9 +2,19 @@
 # (ADR-20260807-183024 steps 3+4 and #385; container list per PROP-20260806-223656 s2b D5 addendum).
 #
 # PER-DEPLOYABLE BIN CRATE: `worker-retention` (worker). The domain [dependencies] below are this bin's
-# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json -- linking
-# a domain crate is the ONLY way that scope's vocabulary exists in this deployable, so the wrong
-# coupling is unspellable rather than merely unrouted (compiler-first, ADR-20260803-234035).
+# SCOPE ASSERTION, copied from its entry in specs/generated/crate-graph.generated.json. What it
+# proves is REAL but NARROW, and worth stating exactly: THIS CRATE'S OWN SOURCE cannot NAME a
+# scope missing from the list -- Rust resolves no path to an undeclared crate -- and the
+# `use ... as _;` lines in src/main.rs keep every declared link a compile-checked fact rather
+# than a comment (compiler-first, ADR-20260803-234035).
+#
+# It is NOT A CLAIM ABOUT THE DEPLOYABLE, and no runtime filter narrows it
+# either. `bin_runtime` + `infrastructure` below pull the `domain` facade -> every domain-*
+# crate, so every scope's vocabulary is linked into this image whatever this list says. Unlike
+# the mailbox families a cron bin declares no LANES/PM/SCOPE const: what bounds it is the ONE
+# pass src/main.rs calls per Job -- its windows and its row selection live in the SQL function
+# or the implementation crate, never here. Read the list as this bin's DECLARED surface, and
+# that single call as its actual reach.
 #
 # BUSINESS RUNTIME (#385, gate-then-stabilize): runnable end-to-end, but the monolith
 # `server` bin remains the DEPLOYED runtime until ADR-20260807-183024 steps (6)-(7) (#358
@@ -18,8 +28,9 @@ publish = false
 description = "Captain.Food `worker-retention` deployable: scheduled retention sweep -- one sweep_retention() call per CronJob run; the windows live in the SQL function, never here (one bin per worker, ADR-20260808-062933) (ADR-20260807-183024)."
 
 [dependencies]
-# (no domain crates -- this family holds NO domain vocabulary; an added domain crate
-#  here is a boundary violation to review, not a convenience)
+# (no domain crate DECLARED here -- but bin_runtime/infrastructure below link the `domain`
+#  facade, so this IMAGE does carry every scope's vocabulary (#475). Declaring one here would
+#  still be a boundary violation to review, not a convenience)
 # CRON WORKER (one bin per worker, ADR-20260808-062933): telemetry/config/pool from the
 # composition kit; the pass itself lives in the implementation crate below -- this bin adds
 # scheduling shape (one pass per Job), never logic.
