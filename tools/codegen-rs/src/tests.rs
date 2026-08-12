@@ -5789,7 +5789,6 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// its own output. Measuring after the fact is the honest order.
 #[test]
 fn bin_manifest_scope_claim_matches_the_measured_closure() {
-    use guppy::graph::DependencyDirection;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let model = load_model(&root.join("specs")).expect("load real specs");
     let crates = emit_bin_crates(&model);
@@ -5819,36 +5818,17 @@ fn bin_manifest_scope_claim_matches_the_measured_closure() {
         "holds no domain vocabulary",
     ];
 
-    let mut cmd = guppy::MetadataCommand::new();
-    cmd.current_dir(&root);
-    let graph = cmd.build_graph().expect("workspace graph builds");
-    // Workspace-relative dirs of a bin's transitive workspace closure — the same measurement the
-    // determinator gate hashes, so "what the image links" has ONE definition in this repo.
-    let closure_dirs = |bin: &str| -> BTreeSet<String> {
-        let member = graph.workspace().member_by_name(bin).expect("bin is a workspace member");
-        let ws_root = graph.workspace().root();
-        graph
-            .query_forward(std::iter::once(member.id()))
-            .expect("closure query")
-            .resolve()
-            .packages(DependencyDirection::Forward)
-            .filter(|p| p.in_workspace())
-            .map(|p| {
-                p.manifest_path()
-                    .parent()
-                    .expect("manifest has a parent dir")
-                    .strip_prefix(ws_root)
-                    .expect("crate dir inside the workspace")
-                    .as_str()
-                    .replace('\\', "/")
-            })
-            .collect()
-    };
+    // "What the image links" has ONE definition in this repo, and this is it: the app index's own
+    // measurement (`measure_workspace_crate_graph` -- cargo's resolver, NORMAL links only,
+    // workspace members only). #491 review: this test used to run its own unfiltered
+    // `query_forward`, which also follows DEV-dependencies -- crates that ship in no image. The
+    // two agree today (50 bins reach `domain` under either), so unifying changes no verdict; it
+    // removes the second definition before they disagree and one of the two starts lying.
+    let graph = measure_workspace_crate_graph(&root).expect("workspace graph builds");
 
     let mut isolated: Vec<&str> = Vec::new();
     for c in &crates {
-        let dirs = closure_dirs(&c.name);
-        if dirs.contains("crates/domain") {
+        if graph.closure(&c.name).contains("domain") {
             assert!(
                 c.manifest.contains(CLAIM_NOT_ISOLATED),
                 "{}: the image links the `domain` facade (every scope), so the header must say so \
@@ -6368,5 +6348,476 @@ fn platform_drill_env_matches_cluster_backup() {
     assert!(
         code.contains("sslmode=require") && code.contains("claude_ro"),
         "production comparison must run as the SELECT-only claude_ro role (D7)"
+    );
+}
+
+// ─── The app index (#491, PROP-20260811-141654 slice A1) ────────────────────────────────────────
+// specs/generated/apps.generated.md answers ONE product-owner question -- "is the split clean?"
+// -- so what has to hold is that every app is in it, every app's boundary is DERIVED (never a
+// per-app arm), and the two columns the answer rests on cannot be faked: the grant is the same
+// derivation the pod manifest renders, and the resolved set is the measured graph, not the
+// declared one echoed back.
+
+fn app_index_model() -> Model {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    load_model(&root.join("specs")).expect("load real specs")
+}
+
+/// Every deployable in the topology appears EXACTLY once, under a family the renderer knows.
+/// A family the index cannot place would silently vanish from a document whose whole job is
+/// completeness.
+#[test]
+fn app_index_covers_every_deployable_exactly_once() {
+    let model = app_index_model();
+    let rows = app_rows(&model, &CrateGraph::default());
+    let topology: BTreeSet<String> = bin_topology(&model).into_iter().map(|b| b.name).collect();
+    let indexed: BTreeSet<String> = rows.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(indexed, topology, "the index and the bin topology must name the same apps");
+    assert_eq!(rows.len(), indexed.len(), "an app is indexed twice");
+    for r in &rows {
+        assert!(
+            FAMILY_ORDER.contains(&r.family),
+            "{}: family '{}' has no place in the index's family order -- a new family needs its \
+             row order and its one-line blurb in the same change",
+            r.name,
+            r.family
+        );
+    }
+}
+
+/// Every app's boundary is DERIVED from a declaration that is unambiguous — which is a stronger
+/// claim than "the answer is in the id set", and the earlier version of this test only made the
+/// weak one. Two derivations can go quietly wrong:
+/// - a scope folder whose AGGREGATES land in two contexts (or in none) leaves its projector and
+///   its subgraph with no derivable boundary;
+/// - a `UserType` claimed by TWO contexts makes every gateway and surface on that role path
+///   arbitrary — and it used to resolve by map-insertion order, silently.
+///
+/// The unclaimed case is NOT an error and is asserted as what it is: `ADMIN` and `EXTERNAL` are
+/// listed in no context's `roles:`, so their gateways land on `platform` deliberately, and
+/// section 2 of the index names them. The day a context claims one, the row moves and this test
+/// follows it with no edit.
+#[test]
+fn app_index_every_app_has_a_declared_boundary() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let ids: BTreeSet<&str> = bounds.ids.iter().map(|s| s.as_str()).collect();
+    for scope in &model.scopes {
+        assert!(
+            bounds.of_scope(scope).is_some(),
+            "scope folder '{scope}' owns aggregates from more than one bounded context, or owns \
+             none at all, so no boundary is derivable for its projector/subgraph. Either the \
+             aggregates or the context declaration is wrong -- do not resolve it in the emitter."
+        );
+    }
+    let rows = app_rows(&model, &CrateGraph::default());
+    // The bullet section 2 owes an unclaimed role. Asserting only `boundary == "platform"` leaves
+    // the SAYING-SO half — the whole point of the fallback being deliberate — untested.
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let unclaimed_bullet = index
+        .lines()
+        .find(|l| l.starts_with("- **Roles no bounded context claims**"))
+        .unwrap_or("<no such bullet in section 2>")
+        .to_string();
+    let mut gateways = 0;
+    for r in &rows {
+        assert!(
+            ids.contains(r.boundary.as_str()),
+            "{}: boundary '{}' is not a c4 bounded context ({:?})",
+            r.name,
+            r.boundary,
+            bounds.ids
+        );
+        let Some(role) = r.role.as_deref() else { continue };
+        gateways += 1;
+        let claimants = bounds.role_claimants(role);
+        assert!(
+            claimants.len() <= 1,
+            "{}: role '{role}' is claimed by {claimants:?}. A UserType belongs to ONE bounded \
+             context -- with two, this app's boundary (and every surface on `/{}/graphql`) is \
+             whichever context the reader happens to look at first.",
+            r.name,
+            role_path(role)
+        );
+        match claimants.iter().next() {
+            Some(ctx) => assert_eq!(
+                &r.boundary, ctx,
+                "{}: '{role}' is declared by context '{ctx}', so the app belongs to it",
+                r.name
+            ),
+            None => {
+                assert_eq!(
+                    r.boundary, "platform",
+                    "{}: no context claims '{role}', so the only derivable answer is the platform \
+                     bucket -- and section 2 must be naming it as unclaimed",
+                    r.name
+                );
+                assert!(
+                    unclaimed_bullet.contains(&format!("`{role}`")),
+                    "{}: '{role}' is claimed by no context, so section 2 must NAME it in the \
+                     unclaimed-roles bullet -- otherwise the platform fallback renders as if a \
+                     context had decided it. Bullet reads: {unclaimed_bullet}",
+                    r.name
+                );
+            }
+        }
+    }
+    assert!(gateways > 0, "no app carries a role -- the gateway half of this test stopped running");
+}
+
+/// The transitive walk the measurement rests on: a closure stops where the manifests do, and the
+/// facade drags every scope crate in behind one edge. THE ALGORITHM ONLY — it says nothing about
+/// whether the index uses it, which is why it is not named for the `honest` column. That claim is
+/// `app_index_resolved_is_measured_not_declared` below, and the difference is not academic:
+/// replacing the emitter's resolved set with `declared.clone()` leaves THIS test green.
+#[test]
+fn crate_graph_closure_is_transitive_and_stops_at_the_manifests() {
+    let edges = |pairs: &[(&str, &[&str])]| -> CrateGraph {
+        CrateGraph::from_edges(
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    (k.to_string(), v.iter().map(|s| s.to_string()).collect::<BTreeSet<String>>())
+                })
+                .collect(),
+        )
+    };
+    let graph = edges(&[
+        ("honest-bin", &["domain-ordering"]),
+        ("fat-bin", &["domain-ordering", "runtime"]),
+        ("runtime", &["domain"]),
+        ("domain", &["domain-ordering", "domain-catalog"]),
+        ("domain-ordering", &[]),
+        ("domain-catalog", &[]),
+    ]);
+    assert_eq!(
+        graph.closure("honest-bin"),
+        BTreeSet::from(["domain-ordering".to_string()]),
+        "a closure must stop where the manifests do"
+    );
+    assert_eq!(
+        graph.closure("fat-bin"),
+        BTreeSet::from([
+            "domain-ordering".to_string(),
+            "runtime".to_string(),
+            "domain".to_string(),
+            "domain-catalog".to_string(),
+        ]),
+        "the facade drags every scope crate in transitively -- that is the fat this index exists \
+         to show"
+    );
+    assert!(!graph.closure("honest-bin").contains("domain-catalog"));
+}
+
+/// `honest` is the MEASURED closure against the DECLARED manifest — not the declaration echoed
+/// back. This is the assertion the artifact's whole value proposition rests on, so it runs the
+/// REAL derivation (`app_rows` over the real model) against a synthetic graph carrying a REAL
+/// deployable's name, twice:
+/// - a graph whose closure is exactly what that bin declares must read `honest`;
+/// - the same bin behind `bin_runtime -> domain -> every scope crate` — the shape the workspace
+///   actually has — must resolve a STRICT SUPERSET of what it declares, read `fat`, and name the
+///   carrier in `via`.
+///
+/// The other real-model tests here feed `CrateGraph::default()`, under which nothing is measured
+/// and every row is unmeasured, so this is the only place `app_rows` meets a graph at all.
+/// Fabricating the column (`let resolved = declared.clone();` in `emit/app_index.rs`) leaves every
+/// other test in this file green and turns the second half of this one red — which is the point:
+/// `check-drift` would only report THAT the file changed, never that its central column became a
+/// declaration echoed back.
+#[test]
+fn app_index_resolved_is_measured_not_declared() {
+    let model = app_index_model();
+    let scopes: Vec<String> = crate_scopes(&model).into_iter().collect();
+    let domain_crate = |scope: &str| format!("domain-{}", scope.replace('_', "-"));
+    // A real deployable declaring a PROPER, non-empty subset of the scopes -- the only shape in
+    // which "resolved is a strict superset of declared" is a statement about the graph rather
+    // than about arithmetic.
+    let probe = app_rows(&model, &CrateGraph::default())
+        .into_iter()
+        .find(|r| !r.declared.is_empty() && r.declared.len() < scopes.len())
+        .expect("some deployable declares a proper subset of the domain scopes");
+    let row_for = |graph: &CrateGraph| {
+        app_rows(&model, graph)
+            .into_iter()
+            .find(|r| r.name == probe.name)
+            .expect("the probe app is indexed")
+    };
+
+    // (1) closure == declaration.
+    let tight = CrateGraph::from_edges(BTreeMap::from([(
+        probe.name.clone(),
+        probe.declared.iter().map(|s| domain_crate(s)).collect::<BTreeSet<String>>(),
+    )]));
+    let tight = row_for(&tight);
+    assert!(tight.measured, "{}: the graph names it, so it is measured", probe.name);
+    assert_eq!(
+        tight.resolved, probe.declared,
+        "{}: an image linking exactly its declared crates must resolve exactly them",
+        probe.name
+    );
+    assert!(tight.honest() && !tight.fat(), "{}: closure == declaration is honest", probe.name);
+
+    // (2) the same bin, with the facade behind one direct dependency.
+    let fat = CrateGraph::from_edges(BTreeMap::from([
+        (probe.name.clone(), BTreeSet::from(["bin_runtime".to_string()])),
+        ("bin_runtime".to_string(), BTreeSet::from(["domain".to_string()])),
+        ("domain".to_string(), scopes.iter().map(|s| domain_crate(s)).collect()),
+    ]));
+    let fat = row_for(&fat);
+    assert!(
+        fat.resolved.is_superset(&probe.declared) && fat.resolved.len() > probe.declared.len(),
+        "{}: the resolved column is READ FROM THE GRAPH -- behind `bin_runtime -> domain` the \
+         image links every scope, so resolved must strictly contain the declaration. Got \
+         declared {:?}, resolved {:?}: if those are equal, the column is the manifest echoed back \
+         and the index proves nothing.",
+        probe.name,
+        probe.declared,
+        fat.resolved
+    );
+    assert!(
+        !fat.honest() && fat.fat(),
+        "{}: an image linking more than it declares is fat, never honest",
+        probe.name
+    );
+    assert_eq!(
+        fat.facade_carriers,
+        vec!["bin_runtime".to_string()],
+        "{}: `via` names the DIRECT dependency the facade enters through",
+        probe.name
+    );
+}
+
+/// Section 3's PROSE, which until now was the only part of the index nothing asserted — and the
+/// only part that stated a predicate it did not measure. Two independent lies were renderable:
+/// - the headline read "**No crate the apps reach is boundary-EXCLUSIVE**" unconditionally while
+///   printing a non-zero exclusive count in the same sentence;
+/// - "linked from at least one app of every boundary" was computed as `total - exclusive`, which
+///   counts a crate reached by 3 of 6 boundaries into a claim about ALL of them.
+///
+/// Both sentences are now conditional on a measurement, so this asserts the four branches AND the
+/// inference the paragraph rests on: the `graphql-*` family is one app per scope and its boundaries
+/// cover the whole set, so a crate every subgraph links necessarily scores the maximum. That last
+/// one is what makes the real document's degenerate signature column a consequence rather than a
+/// coincidence of today's data.
+#[test]
+fn app_index_section_three_claims_only_what_it_measured() {
+    // (1) The four branches of the headline, as pure arithmetic.
+    let base = |exclusive, saturated, subgraph_boundaries| SharedReach {
+        total: 3,
+        exclusive,
+        saturated,
+        boundaries: 6,
+        subgraphs: 8,
+        subgraph_boundaries,
+        apps: 57,
+        min_apps: 2,
+        max_apps: 44,
+    };
+    let clean = base(0, 3, 6).headline();
+    assert!(
+        clean.contains("No crate the apps reach is boundary-EXCLUSIVE")
+            && clean.contains("3 of them from at least one app of EVERY boundary"),
+        "with nothing exclusive the headline may say so: {clean}"
+    );
+    let mixed = base(1, 1, 6).headline();
+    assert!(
+        !mixed.contains("No crate the apps reach is boundary-EXCLUSIVE"),
+        "1 crate IS boundary-exclusive -- the headline must not open by denying it: {mixed}"
+    );
+    assert!(
+        mixed.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && mixed.contains("1 are linked from at least one app of EVERY boundary"),
+        "the exclusive and the saturated counts are two measurements, not one minus the other \
+         (`total - exclusive` would read 2 here): {mixed}"
+    );
+    let partial = base(0, 3, 4).headline();
+    assert!(
+        !partial.contains("cover all") && partial.contains("no single family clears it"),
+        "the subgraph family spans 4 of 6 boundaries, so it does NOT clear the ceiling alone and \
+         the sentence claiming it must not render: {partial}"
+    );
+    let unmeasured = SharedReach { total: 0, ..base(0, 0, 6) }.headline();
+    assert!(
+        unmeasured.contains("claims nothing"),
+        "an unmeasured graph reaches no crate, so the paragraph has nothing to assert: {unmeasured}"
+    );
+
+    // (2) The same predicates end-to-end, over the real app set and a graph built to contain one
+    // crate of each kind. The numbers are known by construction, so the rendered prose and the
+    // rendered table must both agree with them.
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let rows = app_rows(&model, &CrateGraph::default());
+    assert!(bounds.ids.len() >= 3, "this test needs a boundary set a 2-boundary crate cannot fill");
+    let subgraphs: Vec<&AppRow> = rows.iter().filter(|r| r.family == "graphql").collect();
+    let subgraph_bounds: BTreeSet<&str> = subgraphs.iter().map(|r| r.boundary.as_str()).collect();
+    assert_eq!(
+        subgraph_bounds.len(),
+        bounds.ids.len(),
+        "the `graphql-*` family no longer covers every boundary ({subgraph_bounds:?} of {:?}), so \
+         the index's ceiling paragraph must have switched to its other branch -- update this test's \
+         expectation, not the emitter's",
+        bounds.ids
+    );
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for r in &subgraphs {
+        edges.insert(r.name.clone(), BTreeSet::from(["subgraph-shared".to_string()]));
+    }
+    // Two apps of two DIFFERENT boundaries share one crate (reached by 2 of the boundaries, so
+    // neither exclusive nor saturated), and one app links a crate nobody else does.
+    let mut picked: Vec<&AppRow> = Vec::new();
+    for r in rows.iter().filter(|r| r.family != "graphql") {
+        if !picked.iter().any(|p| p.boundary == r.boundary) {
+            picked.push(r);
+        }
+    }
+    assert!(picked.len() >= 2, "need two non-subgraph apps of different boundaries");
+    for r in picked.iter().take(2) {
+        edges.entry(r.name.clone()).or_default().insert("shared-some".to_string());
+    }
+    edges.entry(picked[0].name.clone()).or_default().insert("only-one".to_string());
+    let index = emit_app_index(&model, &CrateGraph::from_edges(edges));
+    assert!(
+        index.contains("1 of the 3 crates the apps reach ARE boundary-exclusive")
+            && index.contains("1 are linked from at least one app of EVERY boundary"),
+        "3 crates are reached: `only-one` (1 boundary), `shared-some` (2), `subgraph-shared` (all). \
+         The headline must read 1 exclusive and 1 saturated -- `total - exclusive` would claim 2 \
+         every-boundary crates and fold `shared-some` into a claim it does not meet.\n{index}"
+    );
+    // A crate EVERY subgraph links scores the maximum -- the inference the ceiling sentence states.
+    let row = index
+        .lines()
+        .find(|l| l.contains("`subgraph-shared`"))
+        .expect("the crate every subgraph links has a row");
+    assert!(
+        row.starts_with(&format!("| {} boundaries (", bounds.ids.len())),
+        "every `graphql-*` app links `subgraph-shared` and that family covers all {} boundaries, \
+         so its signature is the full set -- got: {row}",
+        bounds.ids.len()
+    );
+    // And the prose's saturated count IS the table's, whatever the data turns out to be.
+    let table_saturated: usize = index
+        .lines()
+        .filter_map(|l| l.strip_prefix("| ")?.strip_suffix(" |"))
+        .map(|l| l.split(" | ").collect::<Vec<_>>())
+        .filter(|c| c.len() == 4 && c[0].contains("boundar"))
+        .filter(|c| c[0].split(' ').next().and_then(|n| n.parse::<usize>().ok()) == Some(bounds.ids.len()))
+        .filter_map(|c| c[2].parse::<usize>().ok())
+        .sum();
+    assert_eq!(
+        table_saturated, 1,
+        "the headline's every-boundary count must be the table's own rows summed, never a \
+         subtraction that no row supports"
+    );
+}
+
+/// A register row that is CLOSED and not yet in the spec is STATED by the index, and the naming
+/// that states it deletes itself. DECISIONS.md D9 homes `CartBindingProcess` in `order`;
+/// `c4-l2.yaml` still says `customer`. While they disagree the index must say so (it renders the
+/// spec, so it renders the pre-decision answer, and a reader must not take that for the decision);
+/// once they agree the bullet AND the two constants behind it are dead code, and this fails until
+/// they are removed.
+#[test]
+fn app_index_states_the_decided_home_until_the_spec_agrees() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let stated = index.contains("One row is decided and not yet spec'd");
+    match bounds.of_actor(CART_BINDING_PROCESS) {
+        Some(home) if home != CART_BINDING_DECIDED_HOME => assert!(
+            stated,
+            "c4 homes {CART_BINDING_PROCESS} in '{home}' and D9 closed it into \
+             '{CART_BINDING_DECIDED_HOME}' -- the index must name the pending move, not render \
+             the stale home silently"
+        ),
+        other => assert!(
+            !stated,
+            "c4 now homes {CART_BINDING_PROCESS} in {other:?}, which no longer contradicts D9: \
+             delete CART_BINDING_PROCESS/CART_BINDING_DECIDED_HOME and the bullet they drive"
+        ),
+    }
+}
+
+/// The index's grant column and the pod manifest are ONE derivation (`bin_secret_env_keys`).
+/// Asserted against the COMMITTED manifests: if the two ever diverge, "what may this app read?"
+/// has two answers and the least-privilege work (slice A4) starts from a lie.
+#[test]
+fn app_index_grants_match_the_generated_pod_manifests() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = app_index_model();
+    for r in app_rows(&model, &CrateGraph::default()) {
+        let path = root.join(format!("deploy/generated/manifests/bins/{}.yaml", r.name));
+        let manifest = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} -- every app has a generated manifest", path.display()));
+        let in_manifest: BTreeSet<String> = manifest
+            .lines()
+            .zip(manifest.lines().skip(1))
+            .filter(|(_, next)| next.trim() == "valueFrom:")
+            .filter_map(|(line, _)| line.trim().strip_prefix("- name: ").map(|s| s.to_string()))
+            .collect();
+        let indexed: BTreeSet<String> = r.secrets.iter().cloned().collect();
+        assert_eq!(
+            indexed, in_manifest,
+            "{}: the app index and its pod manifest disagree about the secret grant",
+            r.name
+        );
+    }
+}
+
+/// A key the app's own hosted consumer reads, that its pod does not carry, is REPORTED — with
+/// the reason. `worker-sirene-sync`/`INSEE_API_TOKEN` is the live instance (correct today: a
+/// GitHub Action still runs that job), and nothing else in the repo says the pod would need it.
+/// Pure, so the test survives the day that instance is fixed.
+#[test]
+fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
+    let bin = BinSpec {
+        name: "worker-example".into(),
+        family: "worker",
+        actor: None,
+        scope: None,
+        role: None,
+        domain_scopes: BTreeSet::new(),
+        ports: BTreeSet::new(),
+        mailboxed: false,
+        partner: None,
+        schedule: Some("0 3 * * 1".into()),
+        suspended: false,
+        consumers: BTreeSet::from(["example_ingest".to_string()]),
+    };
+    let key = |name: &str, secret: bool, consumer: &str, prod: bool| ConfigKey {
+        name: name.into(),
+        ty: "string".into(),
+        values: Vec::new(),
+        required: Vec::new(),
+        default: None,
+        secret,
+        gates: String::new(),
+        mode_of: None,
+        consumer: consumer.into(),
+        scalar: None,
+        pattern: None,
+        deploy: BTreeMap::new(),
+        from_secret: if prod {
+            BTreeMap::from([("production".to_string(), "REPO_SECRET".to_string())])
+        } else {
+            BTreeMap::new()
+        },
+    };
+    let keys = vec![
+        key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source
+        key("GRANTED_TOKEN", true, "example_ingest", true), // hosted consumer, and granted below
+        key("OTHER_TOKEN", true, "other_ingest", false),    // another consumer's key: not ours
+        key("BAKED_URL", false, "example_ingest", false),   // non-secret: baked, never a grant
+    ];
+    let missing = missing_secret_keys(&bin, &keys, &["GRANTED_TOKEN".to_string()]);
+    assert_eq!(
+        missing.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+        vec!["NEEDED_TOKEN"],
+        "only a SECRET key of a consumer this pod hosts, that the pod does not carry, is missing"
+    );
+    assert!(
+        missing[0].1.contains("from_secret"),
+        "the reason must say WHY it is absent, not just that it is: {}",
+        missing[0].1
     );
 }

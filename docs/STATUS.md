@@ -2,6 +2,48 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗂️ **2026-08-12 — THE APP INDEX IS GENERATED, AND IT SAYS THE SPLIT IS NOT CLEAN**
+> ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md) slice A1,
+> [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491);
+> emitter + generated output only — **no `specs/apps/` folder, no source moved, no manifest touched**.)
+> `specs/generated/apps.generated.md` now renders all **57 deployables**: family, boundary, what each
+> hosts, its pod grant, and the two columns the product-owner question turns on — **declared** domain
+> crates vs **resolved** ones, the second MEASURED from the workspace graph with cargo's own resolver
+> rather than inferred from the spec. It is the first emitter that measures rather than derives, which
+> is why it runs last in `main` (after the manifests the same pass writes) and refuses to emit at all
+> if the workspace cannot be resolved.
+> **The verdicts it renders**: **8 of 57 apps are honest** (resolved == declared) — the 7 `gateway-*`
+> plus `bam`, which links all 8 domain crates *and declares all 8*, so it is honest-though-fat and must
+> not be counted with the other 49. **3 apps declare crates from two business boundaries**
+> (`pm-cart-binding`, `pm-delivery-dispatch` — legitimate bridges — and `bam` by design); on the graph
+> that actually links, **50 span all five**. **No crate the apps reach is boundary-exclusive** — all
+> 44 are linked from at least one app of every boundary — but that signature saturates (the 8
+> `graphql-*` subgraphs alone cover all six boundaries, so any crate one of them links scores the
+> maximum), so section 3 groups by **how many of the 57 apps link each crate** instead: 57 for
+> `telemetry`/`bin_probes`, 50 for `domain` + the `domain-*` set, 45 for the runtime spine, and **8
+> for twelve crates** — the shared-kernel reading the boundary column invites is not what the data
+> says.
+> ⚠️ **The number that names the work**: `bin_runtime` carries the `domain` facade into **45 of 57**
+> apps, `infrastructure` into 10, `server` into 8, `surface_runtime` into 5. Decomposing the first is
+> the single largest isolation move available — which is
+> [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)'s job,
+> untouched here: an index renders the debt, it does not repay it.
+> The **needed-and-not-granted** column has exactly one row and it is the recorded trap:
+> `worker-sirene-sync` needs `INSEE_API_TOKEN` and its pod does not carry it (no production
+> `from_secret` — GitHub Actions still injects it), which is correct today and breaks at the
+> [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. Grants are now ONE
+> derivation (`bin_secret_env_keys`) shared by the pod manifest and the index, asserted app-by-app
+> against the committed manifests, so the least-privilege slice (A4) cannot start from two answers.
+> Two more things only this artifact shows: **`client-customer-credit` is reached by no deployable**
+> (a generated actor client nothing links, while `client-restaurant` is reached by 45), and
+> **`ADMIN`/`EXTERNAL` are claimed by no bounded context**, so two gateways sit under `platform` —
+> and, through its gateway, the `bo-admin` surface — because nothing else is derivable — named out
+> loud rather than left as a default that reads like a decision.
+> **BND-1 closed the same day** (entry below; [DECISIONS §31](proposals/DECISIONS.md)): the index
+> reads the boundary set from `c4-l2.yaml` `boundedContexts`, which IS that closed answer — five
+> business contexts plus `platform` — so the index needed no edit when the row closed, and needs
+> none if the set ever moves again.
+
 > ✂️ **2026-08-11 — THE API TIER IS THE WIDEST APP IN THE TOPOLOGY, AND `server` IS ONE EDGE AWAY
 > FROM EIGHT PODS** (docs-only; amendments in place to
 > [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)

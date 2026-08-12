@@ -619,4 +619,28 @@ fn main() {
         std::process::exit(1);
     }
     eprintln!("✓ wrote {}", css_path.display());
+
+    // specs/generated/apps.generated.md — THE APP INDEX (#491, PROP-20260811-141654 slice A1).
+    // LAST on purpose, and the only artifact that MEASURES rather than derives: its resolved
+    // column comes from cargo's own resolver over the workspace, so it must run AFTER the domain
+    // and bin crate manifests this same pass writes — otherwise a run that adds a deployable
+    // would render the graph as it stood before that deployable existed, and only the NEXT run
+    // would agree with itself (a two-pass instability check-drift catches one commit too late).
+    let root = repo_root(&specs);
+    match measure_workspace_crate_graph(&root) {
+        Ok(graph) => {
+            let path = out_dir.join("apps.generated.md");
+            if let Err(e) = fs::write(&path, emit_app_index(&model, &graph)) {
+                eprintln!("✗ write {}: {}", path.display(), e);
+                std::process::exit(1);
+            }
+            eprintln!("✓ wrote {}", path.display());
+        }
+        Err(e) => {
+            // Refuse rather than emit an index whose central column is a guess: a resolved set
+            // that silently fell back to the declared one would report a clean split that is not.
+            eprintln!("✗ app index: cannot measure the workspace crate graph: {e}");
+            std::process::exit(1);
+        }
+    }
 }

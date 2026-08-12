@@ -1166,7 +1166,7 @@ fn subgraph_main(b: &BinSpec) -> String {
 
 /// The `(kind, field, scope)` composition rows — the same derivation as the generated
 /// `operation_scopes.rs` (one source: the per-scope api.yaml fragments' origins).
-fn operation_scope_rows(model: &Model) -> Vec<(String, String, String)> {
+pub(crate) fn operation_scope_rows(model: &Model) -> Vec<(String, String, String)> {
     let api = parse_api(model);
     let origin = |section: &str, name: &str| -> String {
         model
