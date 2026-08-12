@@ -2,6 +2,86 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧭 **2026-08-12 — THE FOUNDER ANSWER SHEET: THE FLIP IS TAKEN, THE REGISTRY IS DESTROYED, AND
+> NOTHING IS PAID FOR UNTIL A WORKING VERSION CAN BE SEEN** (twelve founder answers + a ten-lens mob
+> read; [ADR-20260812-214021](adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md),
+> new [DECISIONS §35](proposals/DECISIONS.md); **records-only — no code, no specs, no generated
+> artifacts**).
+> **The headline is not one of the twelve answers, it is what they add up to: the critical path is
+> INVERTED.** *"I'm waiting for a working version before paying OVH"* turns **provision → deploy →
+> walk** into **walk → provision → deploy** — and the one leg the team cannot supply is the exit
+> condition, because *"a working version"* carries **no acceptance criterion**, which makes it a spend
+> gate with no exit. Recorded so it can be confirmed or replaced (**§35 INV-1, the one FOUNDER-OWED
+> leg**): **smoke L1→L4 green on local k3s plus a recorded browser walk** — order placed, paid,
+> restaurant told, tracking moving without a reload, order completing. Both halves are needed:
+> `prod-smoke.sh` never opens a browser, and a browser walk cannot assert a Stripe capture.
+> **The path is a MERGE, not a build** — `origin/cutover-local-rehearsal` /
+> [PR #486](https://github.com/TheCaptainCompany/captain-food/pull/486) already carries the
+> local-rehearsal runbook, the k3s CNPG overlay, the generated monolith overlay and the smoke's
+> `SMOKE_SCHEME`/`SMOKE_PUBLIC_BASE` overrides, with **L1+L2 passing and 45/45 migrations on an empty
+> database**, while `main`'s `tools/smoke/prod-smoke.sh:41,48-49` still hardcodes an unroutable
+> `https://api.captain.food` with no scheme override. Two gaps sit outside the merge:
+> `SUPABASE_SECRET_KEY` as its own repository secret (hard-stops L3, and L4 is downstream — presence
+> is a **confirmation**, since STATUS already records a secret of that name existing on 2026-08-09)
+> and **a webhook ingress for L4's `CAPTURED` assertion**. **Local is demo, never evidence**: the
+> overlay strips `barmanObjectStore`, so the **restore drill is the first post-provisioning act** and
+> no recovery claim may cite the rehearsal.
+> **The answers, and what each cost to check.** **JRN-1 = A** — take the `PM_MAILBOX_DELIVERY` flip
+> now in [PR #500 "#242 Runtime D: retire command_journal"](https://github.com/TheCaptainCompany/captain-food/pull/500)
+> inside the empty-log window, with **L4 as the release gate before traffic is routed**; verified
+> consequence: option (a)'s interim `command_journal` grant is **not owed at all** once #500 merges
+> (it drops the table and empties `RuntimePosture`), and that PR also already removes
+> `dispatch_outcome: spawned` and deletes the `CommandChannel`/`CommandJournalStatus` scalars.
+> **CUT-1 = B** — the cutover gets a **rule**, not a list: *IN = only what the empty log or a traffic
+> pause makes cheaper*, admitting **the eleven-database storage split** and excluding the pooler, the
+> API-tier split and the runtime decomposition. **DB-HA = A** (three instances, inside the cutover) is
+> **recorded, not incurred**: with `enablePodAntiAffinity` + `podAntiAffinityType: required` on a
+> hostname topology, `instances: 3` on one node leaves **two pods `Pending` forever**, so A is the
+> **EUR 67.80** trio and its +EUR 41.20 is unpayable until the EUR 26.60 base is — and the **60 Gi of
+> PVC it implies is unpriced anywhere in the repo**, because the runbook ADR-20260807-114122 cites for
+> the sizing detail (`docs/runbooks/mks-bootstrap.md §2`) **does not exist**. **SIR-1 = all NO**
+> (*delete and record the destruction*) closes the retroactive SIRENE risk **on attestation, not
+> inspection** — so the record owes how/when the rows ceased, a project list captured while absence is
+> still inspectable, whether any backup/PITR window survives, and a named attester; and **two
+> neutralisations are owed before any re-sync**, both live today (`sirene-sync.yml` is paused only by a
+> commented-out cron and **deliberately keeps `workflow_dispatch`**, writing the staging table from
+> `secrets.DATABASE_URL`, which must be revoked and the revocation logged). **The Art. 21 blocker
+> survives forward-looking** ([#505](https://github.com/TheCaptainCompany/captain-food/issues/505)):
+> `RestaurantListingOptedOut` folds into **nothing** (`generated/projectors.rs:59` is `=> state`).
+> **Q-L1 partially resolves** — `join.captain.food` publishes the association, RNA W372020229 and the
+> rights contact, and publishes **no postal address, no phone, no named directeur de la publication and
+> no consumer mediator**; its host block is GitHub Pages, so *verify, do not copy*. **Q-L3 = no real
+> phone-verified end user** — which both supports the empty-log window and dates the trigger (first
+> real customer order = DPIA + erasure + mediator deadline). **BND-6 = B** (kitchen time labelled
+> "ready" — the label IS the decision) · **BND-7 = A** (estimate, no remedy) · **Q1 = A**
+> (authenticated server-side only — graded: plausibly no consent banner, but **Art. 13 transparency
+> and lawful basis remain**) · **Q2 = A** (yes after the DPIA; it makes the restaurant a
+> controller/joint controller) · **Q7 = A** (not now, converging with MET-Q7 a day later) ·
+> **KEY-1** delete the stray key now — ⚠️ **its referent is recorded nowhere in the repo** and this
+> record does not invent one.
+> **Two recorded corrections landed with the sheet, as corrections rather than silent edits.**
+> (1) **STO-4's sequencing is WITHDRAWN**: its ~185/~235-of-220 arithmetic is a **57-pod bin-fleet**
+> figure and the fleet is OUT of the cutover, so with the monolith deployed eleven databases × one pod
+> is **~55 backends of 220**; the pooler is re-targeted as a blocking precondition of the
+> [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) bin flip, plus a
+> recommendation to cap the monolith's per-database pool. (2) **PROP-20260809-021351's gap table was
+> STALE and is corrected in place**: **G5, G6 and G7 are FIXED** (#420/#451/#424 — including the
+> subscription that now accepts the order's `DeliveryJob-` stream and dedupes on `updated_at`),
+> **C1 is only HALF fixed** (the total prices live on read; the competitor comparison still never
+> computes and moved from the projector to `cart_read.rs:187`), and **G7b, G8 and C2 are live** — G8
+> being *nobody is told about a paid order*, with `crates/application/src/ports.rs` declaring four
+> traits and **zero notification anything**.
+> **Backlog — a previously stated order is REVERSED, and the method clause is on the record**
+> ([ADR-20260810-215503](adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md) +
+> [BACKLOG.md](BACKLOG.md)): **[#429 "Production with test data"](https://github.com/TheCaptainCompany/captain-food/issues/429)
+> is re-pointed off OVH onto local k3s WITHOUT re-scoping** (ADR-20260809-050000 fixed its target as
+> the production deployment; the inversion changes the host, and under *"local is demo, never
+> evidence"* a local walk satisfies the spend gate and does **not** close #429), and the
+> **[#494](https://github.com/TheCaptainCompany/captain-food/issues/494) storage chain drops below
+> it** on *value-first: foundations first* — a foundation that cannot be applied is not first, and
+> #494 lands at a cutover now downstream of a payment decision it cannot unblock. **Nothing was
+> re-ranked to make it dispatchable.**
+
 > 🧾 **2026-08-12 — THE FOUNDER IS THE FOUNDER, AND EVERY FOUNDER MESSAGE GOES TO THE WHOLE TEAM**
 > (two founder directives, verbatim: *"Stop calling me product owner. I'm the founder / Tech CEO."*
 > and *"When I say something ask the team for answers never answer directly without asking the whole
