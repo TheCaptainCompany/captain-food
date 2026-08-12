@@ -6370,3 +6370,191 @@ fn platform_drill_env_matches_cluster_backup() {
         "production comparison must run as the SELECT-only claude_ro role (D7)"
     );
 }
+
+// ─── The app index (#491, PROP-20260811-141654 slice A1) ────────────────────────────────────────
+// specs/generated/apps.generated.md answers ONE product-owner question -- "is the split clean?"
+// -- so what has to hold is that every app is in it, every app's boundary is DERIVED (never a
+// per-app arm), and the two columns the answer rests on cannot be faked: the grant is the same
+// derivation the pod manifest renders, and the resolved set is the measured graph, not the
+// declared one echoed back.
+
+fn app_index_model() -> Model {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    load_model(&root.join("specs")).expect("load real specs")
+}
+
+/// Every deployable in the topology appears EXACTLY once, under a family the renderer knows.
+/// A family the index cannot place would silently vanish from a document whose whole job is
+/// completeness.
+#[test]
+fn app_index_covers_every_deployable_exactly_once() {
+    let model = app_index_model();
+    let rows = app_rows(&model, &CrateGraph::default());
+    let topology: BTreeSet<String> = bin_topology(&model).into_iter().map(|b| b.name).collect();
+    let indexed: BTreeSet<String> = rows.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(indexed, topology, "the index and the bin topology must name the same apps");
+    assert_eq!(rows.len(), indexed.len(), "an app is indexed twice");
+    for r in &rows {
+        assert!(
+            FAMILY_ORDER.contains(&r.family),
+            "{}: family '{}' has no place in the index's family order -- a new family needs its \
+             row order and its one-line blurb in the same change",
+            r.name,
+            r.family
+        );
+    }
+}
+
+/// Every app's boundary is one of the c4 bounded contexts, and every scope folder maps to
+/// exactly one of them. The second half is the one that breaks quietly: a scope folder whose
+/// AGGREGATES land in two contexts leaves its projector and its subgraph with no derivable
+/// boundary, and the index would answer "platform" for apps that are anything but.
+#[test]
+fn app_index_every_app_has_a_declared_boundary() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let ids: BTreeSet<&str> = bounds.ids.iter().map(|s| s.as_str()).collect();
+    for scope in &model.scopes {
+        assert!(
+            bounds.of_scope(scope).is_some(),
+            "scope folder '{scope}' owns aggregates from more than one bounded context, so no \
+             boundary is derivable for its projector/subgraph. Either the aggregates or the \
+             context declaration is wrong -- do not resolve it in the emitter."
+        );
+    }
+    for r in app_rows(&model, &CrateGraph::default()) {
+        assert!(
+            ids.contains(r.boundary.as_str()),
+            "{}: boundary '{}' is not a c4 bounded context ({:?})",
+            r.name,
+            r.boundary,
+            bounds.ids
+        );
+    }
+}
+
+/// `honest` is the MEASURED closure against the DECLARED manifest — not the declaration echoed
+/// back. Pure: a synthetic graph where one bin's closure reaches a scope crate it never declared
+/// must read fat, and only equality reads honest.
+#[test]
+fn app_index_honest_is_measured_not_declared() {
+    let edges = |pairs: &[(&str, &[&str])]| -> CrateGraph {
+        CrateGraph::from_edges(
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    (k.to_string(), v.iter().map(|s| s.to_string()).collect::<BTreeSet<String>>())
+                })
+                .collect(),
+        )
+    };
+    let graph = edges(&[
+        ("honest-bin", &["domain-ordering"]),
+        ("fat-bin", &["domain-ordering", "runtime"]),
+        ("runtime", &["domain"]),
+        ("domain", &["domain-ordering", "domain-catalog"]),
+        ("domain-ordering", &[]),
+        ("domain-catalog", &[]),
+    ]);
+    assert_eq!(
+        graph.closure("honest-bin"),
+        BTreeSet::from(["domain-ordering".to_string()]),
+        "a closure must stop where the manifests do"
+    );
+    assert_eq!(
+        graph.closure("fat-bin"),
+        BTreeSet::from([
+            "domain-ordering".to_string(),
+            "runtime".to_string(),
+            "domain".to_string(),
+            "domain-catalog".to_string(),
+        ]),
+        "the facade drags every scope crate in transitively -- that is the fat this index exists \
+         to show"
+    );
+    assert!(!graph.closure("honest-bin").contains("domain-catalog"));
+}
+
+/// The index's grant column and the pod manifest are ONE derivation (`bin_secret_env_keys`).
+/// Asserted against the COMMITTED manifests: if the two ever diverge, "what may this app read?"
+/// has two answers and the least-privilege work (slice A4) starts from a lie.
+#[test]
+fn app_index_grants_match_the_generated_pod_manifests() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = app_index_model();
+    for r in app_rows(&model, &CrateGraph::default()) {
+        let path = root.join(format!("deploy/generated/manifests/bins/{}.yaml", r.name));
+        let manifest = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} -- every app has a generated manifest", path.display()));
+        let in_manifest: BTreeSet<String> = manifest
+            .lines()
+            .zip(manifest.lines().skip(1))
+            .filter(|(_, next)| next.trim() == "valueFrom:")
+            .filter_map(|(line, _)| line.trim().strip_prefix("- name: ").map(|s| s.to_string()))
+            .collect();
+        let indexed: BTreeSet<String> = r.secrets.iter().cloned().collect();
+        assert_eq!(
+            indexed, in_manifest,
+            "{}: the app index and its pod manifest disagree about the secret grant",
+            r.name
+        );
+    }
+}
+
+/// A key the app's own hosted consumer reads, that its pod does not carry, is REPORTED — with
+/// the reason. `worker-sirene-sync`/`INSEE_API_TOKEN` is the live instance (correct today: a
+/// GitHub Action still runs that job), and nothing else in the repo says the pod would need it.
+/// Pure, so the test survives the day that instance is fixed.
+#[test]
+fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
+    let bin = BinSpec {
+        name: "worker-example".into(),
+        family: "worker",
+        actor: None,
+        scope: None,
+        role: None,
+        domain_scopes: BTreeSet::new(),
+        ports: BTreeSet::new(),
+        mailboxed: false,
+        partner: None,
+        schedule: Some("0 3 * * 1".into()),
+        suspended: false,
+        consumers: BTreeSet::from(["example_ingest".to_string()]),
+    };
+    let key = |name: &str, secret: bool, consumer: &str, prod: bool| ConfigKey {
+        name: name.into(),
+        ty: "string".into(),
+        values: Vec::new(),
+        required: Vec::new(),
+        default: None,
+        secret,
+        gates: String::new(),
+        mode_of: None,
+        consumer: consumer.into(),
+        scalar: None,
+        pattern: None,
+        deploy: BTreeMap::new(),
+        from_secret: if prod {
+            BTreeMap::from([("production".to_string(), "REPO_SECRET".to_string())])
+        } else {
+            BTreeMap::new()
+        },
+    };
+    let keys = vec![
+        key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source
+        key("GRANTED_TOKEN", true, "example_ingest", true), // hosted consumer, and granted below
+        key("OTHER_TOKEN", true, "other_ingest", false),    // another consumer's key: not ours
+        key("BAKED_URL", false, "example_ingest", false),   // non-secret: baked, never a grant
+    ];
+    let missing = missing_secret_keys(&bin, &keys, &["GRANTED_TOKEN".to_string()]);
+    assert_eq!(
+        missing.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+        vec!["NEEDED_TOKEN"],
+        "only a SECRET key of a consumer this pod hosts, that the pod does not carry, is missing"
+    );
+    assert!(
+        missing[0].1.contains("from_secret"),
+        "the reason must say WHY it is absent, not just that it is: {}",
+        missing[0].1
+    );
+}

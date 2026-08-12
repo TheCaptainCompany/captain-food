@@ -22,6 +22,10 @@ pub(crate) struct Ctx {
     pub(crate) description: String,
     pub(crate) aggregates: Vec<String>,
     pub(crate) process_managers: Vec<String>,
+    /// The `UserType` roles this bounded context serves (`roles:`) — the tie from a role path
+    /// (and therefore a `gateway-{role}` bin and the surface that speaks to it) back to the
+    /// business boundary that owns it. Absent on a context that serves no role directly.
+    pub(crate) roles: Vec<String>,
 }
 pub(crate) struct Container {
     pub(crate) id: String,
@@ -450,6 +454,13 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                     description: bc.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     aggregates: ref_names(bc.get("aggregates")),
                     process_managers: ref_names(bc.get("processManagers")),
+                    roles: bc
+                        .get("roles")
+                        .and_then(|v| v.as_sequence())
+                        .map(|s| {
+                            s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect()
+                        })
+                        .unwrap_or_default(),
                 });
             }
         }

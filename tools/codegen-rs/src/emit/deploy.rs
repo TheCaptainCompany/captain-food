@@ -164,19 +164,16 @@ pub(crate) fn production_secret_keys(model: &Model) -> Vec<(String, String, Stri
         .collect()
 }
 
-/// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
-/// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
-fn env_yaml(
+/// THE GRANT of one bin: every secret-sourced env key its pod carries, in `secret_keys` order.
+/// The pod manifest below and the app index (`emit_app_index`, #491) both render THIS — one
+/// derivation, so "what may this app read?" cannot be answered two ways.
+pub(crate) fn bin_secret_env_keys(
     b: &BinSpec,
     model: &Model,
     secret_keys: &[(String, String, String, String)],
-    indent: &str,
-) -> String {
+) -> Vec<String> {
     let scopes = bin_config_scopes(b, model);
-    let mut out = String::new();
-    out.push_str(&format!(
-        "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
-    ));
+    let mut out = Vec::new();
     for (key, scope, consumer, _) in secret_keys {
         if consumer != "server" && !b.consumers.contains(consumer) {
             continue; // #393: a non-server consumer's key reaches only its hosting worker's pod
@@ -193,6 +190,24 @@ fn env_yaml(
         if key == "DATABASE_URL" && !needs_db(b, model) {
             continue; // D8: gateways/surfaces hold no database access — the pod never sees the URL
         }
+        out.push(key.clone());
+    }
+    out
+}
+
+/// The env block of one bin: APP_PROFILE + PORT explicit, then each secret-sourced key of the
+/// bin's config scopes as a `secretKeyRef` into the sealed `captain-secrets`.
+fn env_yaml(
+    b: &BinSpec,
+    model: &Model,
+    secret_keys: &[(String, String, String, String)],
+    indent: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
+    ));
+    for key in bin_secret_env_keys(b, model, secret_keys) {
         out.push_str(&format!(
             "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n"
         ));
