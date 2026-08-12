@@ -184,7 +184,18 @@
 > scalars. **The `PM_MAILBOX_DELIVERY` gate is deleted, not defaulted ON**: its OFF arm WAS the
 > journal, so with the table gone OFF would have meant "mailbox mutations, no B2 chaining, saga
 > triggers back" -- the silent paid-order stall. The `RuntimePosture` mechanism (#318) stays with no
-> tenant; its fail-closed read keeps its test, retargeted to an arbitrary key.
+> tenant; its fail-closed read keeps its test, which exercises the CONTRACT over an arbitrary key AND
+> the migration's idempotence over `PM_MAILBOX_DELIVERY` -- the only key the seed statement names, and
+> therefore the only one on which "an operator flip survives a re-apply" can fail for its stated
+> reason.
+>
+> ⚠️ **A leg reserved to the product owner was TAKEN, and it is recorded rather than assumed**:
+> [DECISIONS.md](proposals/DECISIONS.md) §32 JRN-1 held that flipping `PM_MAILBOX_DELIVERY` is a
+> money-path posture change needing *"a staging smoke and a one-line ADR"*. The ADR exists; **the
+> staging smoke does not, and was not performed** -- the flip was taken inside the empty-log /
+> production-down window, where a smoke of the gated form has nothing to smoke against. JRN-1 is
+> CLOSED saying exactly that, and is the place to object: while the log is still empty the reversal is
+> a `git revert` plus a down-migration, and it gets more expensive with every real order.
 >
 > ❗ **The other half of the API-lens finding STANDS and is NOT fixed here**: the permission matrix in
 > [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
