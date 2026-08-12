@@ -2,27 +2,65 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
-> 🔒 **2026-08-12 — EACH ADAPTER OWNS ITS OWN, COMPLETELY ISOLATED DATABASE** (product-owner
-> directive, verbatim: *"Each adapter must have there own database completely isolated"*;
+> 🧾 **2026-08-12 — THE FOUNDER IS THE FOUNDER, AND EVERY FOUNDER MESSAGE GOES TO THE WHOLE TEAM**
+> (two founder directives, verbatim: *"Stop calling me product owner. I'm the founder / Tech CEO."*
+> and *"When I say something ask the team for answers never answer directly without asking the whole
+> team."*;
+> [ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
+> The mob principle ([ADR-20260809-013142](adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md))
+> extends from **dispatches to founder messages**, and coordinator-never-authors
+> ([ADR-20260810-011500](adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md))
+> from **the diff to the answer**: no answer is composed and no record lands before the whole roster
+> has been asked, with *"nothing in my lens"* a complete one-line answer. Three carve-outs, each
+> attributed: an **external-clock fact** is relayed in the same turn (business lens), **executing an
+> already-recorded rollback/abort path** needs no consult while going FORWARD through an incident does
+> (release lens), and **no lens output or aggregation of lenses is legal advice or clearance** (legal
+> lens). New rule: a record created from a founder directive carries a **`Consulted:` block, one line
+> per lens** — because a lens that was never asked is indistinguishable from a lens with nothing to
+> say (testing/UX/observability lenses, convergent). "Product owner" is swept from the LIVING
+> operating docs (`CLAUDE.md`, `PLAYBOOK`, `BACKLOG`, `docs/claude/*`, `proposals/README`, and the
+> register's `PRODUCT-OWNER-OWED` → `FOUNDER-OWED`); **historical ADRs and proposals keep their
+> vocabulary** and verbatim quotes stay verbatim. Legal caveat: the title is right for repo records
+> and is **not** a French corporate mandate — external artifacts must name the statutory capacity.
+
+> 🔒 **2026-08-12 — EACH ADAPTER OWNS ITS OWN, COMPLETELY ISOLATED DATABASE — decided, then
+> CORRECTED the same day** (founder directive, verbatim: *"Each adapter must have there own database
+> completely isolated"*;
 > [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md);
 > register row **ADP-1** in [DECISIONS §32](proposals/DECISIONS.md); records-only — no code, no
-> specs, budget week 2026-W33 is exhausted at 725.5m/720m so execution rides
-> [#494 "Storage boundaries and least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
-> next week). Supersedes
+> specs; execution rides
+> [#494 "Storage boundaries and least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)).
+> Supersedes
 > [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
 > §11's placement of integration staging in `DomainCommonDb` (map amended in place): **six adapter
 > databases** — `adapter-stripe` · `adapter-hubrise` (staging + the credential tables) ·
-> `adapter-uber-direct` · `adapter-coopcycle` · `adapter-sirene` (the 655 MB mirror) ·
-> `adapter-identity` (`auth_sessions`) — each reachable by its own role and nothing else, in the
-> shared business cluster (STO-3's math already priced per-thing clusters out; the wall is role +
-> `CONNECT`, BND-3's mechanism). `avelo37` owns no table yet and gets its database with its first
-> state. Two confirm-or-redirect legs on the row: the one outward grant (the `inbound_messages`
-> front door, recommended) vs a strict outbox+relay reading, and whether `adapter-identity` is in
-> scope (recommended yes — same credentials-at-rest posture as `hubrise_connections`). Named
-> consequences: STO-4's pooler-first sequencing **hardens** (every adapter bin holds two pools),
-> and `hubrise_connections` is the one NON-rederivable adapter table (a non-expiring token only a
-> human re-connect replaces) so it needs a backup story while staging mirrors take the refetch
-> posture.
+> `adapter-uber-direct` · `adapter-coopcycle` · **`adapter-avelo37`** · `adapter-sirene` (the 655 MB
+> mirror) — each reachable by ONE app and nothing else, in the shared business cluster (STO-3's math
+> already priced per-thing clusters out; the wall is role + `CONNECT`, BND-3's mechanism). **Eleven
+> databases total** (5 business + 6 adapter).
+> **A full-roster mob found two defects in the first record of this and both are fixed**: (1) it
+> claimed *"avelo37 owns no table today"* — **false**, `external_avelo37_events` is declared
+> (`integration_staging.yaml:178`) and already retention-swept (`sweep_retention.sql:60`), so avelo37
+> would have been the ONE partner mirror left holding `CONNECT` on the write database while every
+> sibling moved out; (2) it recommended an `adapter-identity` database for `auth_sessions` on a
+> rationale that runs **backwards** — that table is AES-256-GCM encrypted under `AUTH_SESSION_KEY`
+> while `hubrise_connections.access_token` is **plaintext**, there is no such adapter crate or bin,
+> and its users are the actor path plus the BFF login route. The count did not move; the **membership**
+> did. **Both legs are now CLOSED**: leg 1 **(a)**, the `inbound_messages` front door stands — an
+> outbox+relay would hold a *bidirectional* platform grant inside each adapter database, and
+> `LISTEN`/`NOTIFY` being per-database would need an inward connection to all six or a forbidden
+> permanent poll; leg 2 **(b)**, `auth_sessions` **stays platform on `captain-write`**. The GraphQL
+> lens's dissent is recorded as the final-vision alternative (an identity bin owning the table AND
+> `/auth/session`+`/auth/refresh`+`/auth/logout`, which would also home the
+> [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) routes that have no bin home
+> today) — a larger slice, not taken now. Reframing finding: `AUTH_SESSION_KEY` is granted to **53 of
+> 57 pods** while exactly **two** decrypt a session, so narrowing the grant
+> ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4) buys more here than
+> the database wall. Named consequences: STO-4's pooler-first sequencing **hardens** (every adapter
+> bin holds two pools), `hubrise_connections` is the one NON-rederivable adapter table (a
+> non-expiring token only a human re-connect replaces) so it needs a backup story while staging
+> mirrors take the refetch posture, and `sweep_retention()` forks per adapter database **including
+> the avelo37 leg the first record did not know existed**.
 
 > 🗂️ **2026-08-12 — THE APP INDEX IS GENERATED, AND IT SAYS THE SPLIT IS NOT CLEAN**
 > ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md) slice A1,
