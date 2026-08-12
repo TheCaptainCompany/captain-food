@@ -10,21 +10,21 @@
 order is defined and maintained.** Nothing in the repository duplicates the ranking — no rank
 stamps in issue bodies, no ordered list here. Sessions (human or agent) read the board and **pick
 work from the top**: `Urgent` → `High` → `Medium` → `Low`, row order within a bucket. Skipping the
-top open item requires a stated reason (blocked, plan-mode approval pending, product-owner
+top open item requires a stated reason (blocked, plan-mode approval pending, founder
 directive) — not preference.
 
-**Re-prioritisation is delegated to the team** (product-owner directive, 2026-08-10,
+**Re-prioritisation is delegated to the team** (founder directive, 2026-08-10,
 [ADR-20260810-215503](adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md):
 *"Don't care about the project field anymore the team decides without me"*). The **`Priority`
 bucket and the row order within a bucket are the team's to set**, in the project, alongside the
-`Type`/`Value Size`/`Impact`/`Effort` fields it already sets at triage. The product owner may
+`Type`/`Value Size`/`Impact`/`Effort` fields it already sets at triage. The founder may
 re-bucket or reorder anything at any time, without justification, and the team adopts it
 immediately — the delegation is revocable per item and in general.
 
 **What is NOT delegated**: genuine option spaces ([proposals/DECISIONS.md](proposals/DECISIONS.md));
 external, legal and admin-gated matters; `specs/**` approval — **a `Priority` is not an approval,
 and ranking an AMBER item `Urgent` does not make it dispatchable**; and **the method below**, which
-is now **binding rather than descriptive** — it used to describe how the product owner ranked, and
+is now **binding rather than descriptive** — it used to describe how the founder ranked, and
 it is now the constraint under which the team ranks. If the *method* changes, that change is
 recorded as an ADR amending/superseding ADR-20260720-213024.
 
@@ -33,7 +33,7 @@ names the next chunk, so: **an agent must never change a Priority bucket or a ro
 to make an item dispatchable, or to make its own recommendation legitimate.** If the top item is
 blocked, the answer is "blocked" — never a re-rank. A re-rank is justified by the value method or by
 a dependency that was wrong; never by what the ranker wants to work on next. Because the rationale no
-longer lives in the product owner's head, it has to be written down or it does not exist: every
+longer lives in the founder's head, it has to be written down or it does not exist: every
 bucket change or material row move is stated in the architect's run report with the method clause
 that justifies it, and a re-ranking that reverses a previously stated order also gets a line in
 [STATUS.md](STATUS.md). Any mob lens may contest a ranking at briefing time exactly as it contests a
@@ -41,7 +41,7 @@ design.
 
 ## How value is defined (the ordering method)
 
-The backlog is ordered by **value, not effort** (product-owner directive, 2026-07-20):
+The backlog is ordered by **value, not effort** (founder directive, 2026-07-20):
 
 1. **First: foundations & cross-functional / non-functional** — work everything later stands on:
    API/write contracts, security (ACL), correctness invariants, observability, data
@@ -67,7 +67,7 @@ Within a tier, order stays dependency-consistent (an issue never ranks above one
   completed**, graded from its Impact section (what it unblocks / what breaks if delayed).
   Informational — it explains the Priority placement, it does not sort.
 - **Impact** = **the size of the change on the code** (blast radius). One 5-step T-shirt scale
-  (`XS`–`XL`, product-owner decision), in two places with the same value: the **org Impact field**
+  (`XS`–`XL`, founder decision), in two places with the same value: the **org Impact field**
   and the **`impact/*` repo label** (visible on issue lists/cards). It replaces the former
   `size/*` labels; the finer XXS–XXXL granularity of ADR-20260720-143000's estimation table lives
   only in the body's Estimation section (an estimate beyond XL is a "split before starting" flag,
@@ -86,7 +86,7 @@ Within a tier, order stays dependency-consistent (an issue never ranks above one
 A new issue gets, at triage time: the standard pre-task sections (ADR-20260720-143000), a **Type**
 (`Foundation`/`Feature`/`Bug`/`Task`), an **`impact/*` label** (change size, from the Estimation
 section), and the org fields **Priority + Value Size + Impact + Effort**, using the definitions
-above. The product owner adjusts its row position in the project if the default bucket placement
+above. The founder adjusts its row position in the project if the default bucket placement
 isn't enough.
 
 ## Claim protocol (multi-session safety) — claim → draft PR → supervised auto-merge
@@ -96,7 +96,7 @@ isn't enough.
 1. **Claim = label + comment + branch + draft PR, immediately** (before any implementation work):
    - add the **`status/in-progress`** label AND post a claim comment naming the **`NN-slug`**
      branch (issue number first). The label is the atomic, API-visible claim.
-   - **The claim comment MUST carry the session link** (product-owner directive, 2026-07-27):
+   - **The claim comment MUST carry the session link** (founder directive, 2026-07-27):
      `https://claude.ai/code/session_<id>`. Without it a claim is anonymous — you can see that an
      issue is taken but not by which run, so a stalled claim cannot be traced back to the session
      that made it, and a human cannot open the transcript to see what was already tried. Commits

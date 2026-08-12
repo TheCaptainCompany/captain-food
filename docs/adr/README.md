@@ -86,28 +86,169 @@ Concrete architecture/domain-model decisions taken while building the specs (Acc
 
 ## Newer decisions (date-time ids)
 
-New ADRs use a UTC date-time id (ADR-20260718-135417) and are appended here, newest last.
+New ADRs use a UTC date-time id (ADR-20260718-135417) and are listed here in id order, newest last.
+
+> **This index is hand-maintained, and it drifts.** On 2026-08-12 a records pass found **128 of the
+> then-151 date-time ADRs had no row here** — the table stopped at `20260722-101500` and picked up
+> again three weeks later, so everything decided in between was invisible to anyone browsing the
+> index. It was rebuilt from the directory in that pass (rows added from each file's H1; the richer
+> pre-existing descriptions were kept). Per this repo's prefer-executable-over-prose rule, the index
+> should be **generated or validator-checked** rather than remembered — until it is, adding the row
+> is part of adding the ADR.
 
 | ADR | Title |
 |---|---|
 | [20260718-135417](20260718-135417-adr-id-scheme-datetime.md) | ADR identifiers are **date-time based** (`ADR-YYYYMMDD-HHMMSS`) — kills the shared-counter collision when concurrent sessions each grab "the next number" (as 0046 was double-allocated 2026-07-17); legacy `0001`–`0047` keep their sequential ids, both coexist |
 | [20260718-145856](20260718-145856-inbound-webhook-integration-acl.md) | **Inbound webhook integrations** (Stripe/HubRise) via dedicated REST endpoints (`POST /adapters/{partner}/webhooks`, NOT `/external/graphql`) + **partner-specific auth** (Stripe signature, HubRise token) + **ACL → inbound events** appended in-process, idempotent. `/external/graphql` + `X-External-Api-Key` is the distinct *pull* path (ADR-0047) |
 | [20260718-213352](20260718-213352-partner-adapter-crates-and-external-m2m.md) | **Partner adapters = self-contained crates** (`crates/adapters/{stripe,hubrise}`): ACL + axum shell + standalone binary each, mountable into the monolith or **deployable as their own web service** (amends 0035, moved out of `infrastructure`). And **`/external/graphql` = the M2M standard** for external entities to query/mutate/(subscribe later), API-key auth (`X-External-Api-Key`, 0047). Two directions: partner-push webhooks vs external-drive API |
-| [20260719-120000](20260719-120000-structured-domain-rejections-graphql-error-contract.md) | **Structured domain rejections** — `DomainError::Rejected { code, context }` (errors.yaml PascalCase code + typed JSON context) replaces the interim `"Code: detail"` string; a generated error catalog owns the wire code + `{placeholder}` en/fr messages; GraphQL maps → `extensions.code` + interpolated message (P-10). Realizes the ADR-0046 follow-up |
 | [20260719-014434](20260719-014434-checkout-snapshot-on-paymentintentcreated.md) | **Checkout snapshot on `PaymentIntentCreated`** — the event carries a required `CheckoutSnapshot` frozen by `place_order`, so `OrderPlaced`/`CartCheckedOut` rebuild from the log alone (no external store); non-projected ⇒ zero view impact. Priced items/breakdown + retiring `CheckoutSnapshotSource` ride on server-side pricing |
 | [20260719-031136](20260719-031136-write-side-repository-event-sourced-actor.md) | **Write-side `Repository` over the event-store journal** — `domain::Aggregate` (identity + `fold`) + `application::Repository` (`load`/`require`/`events`/`save`/`create`); all 64 handlers + the `ProcessManagerRunner` route through it, never the raw `EventStore`. Functional event-sourced actors; loads are write-side (own stream), never read models. Refines ADR-0035/0046 |
+| [20260719-120000](20260719-120000-structured-domain-rejections-graphql-error-contract.md) | **Structured domain rejections** — `DomainError::Rejected { code, context }` (errors.yaml PascalCase code + typed JSON context) replaces the interim `"Code: detail"` string; a generated error catalog owns the wire code + `{placeholder}` en/fr messages; GraphQL maps → `extensions.code` + interpolated message (P-10). Realizes the ADR-0046 follow-up |
+| [20260719-172821](20260719-172821-typed-step-process-manager-dsl.md) | Process managers as state-table orchestrators with a typed step DSL |
+| [20260719-193500](20260719-193500-state-table-pm-runtime.md) | State-table process-manager runtime (executing the typed step DSL) |
+| [20260719-214500](20260719-214500-service-catalog-configurable-binding.md) | Service catalog with spec-declared binding (local | http) |
+| [20260720-002217](20260720-002217-server-side-pricing.md) | Server-side pricing on the order path, fail-closed |
+| [20260720-003142](20260720-003142-refund-opened-event.md) | RefundOpened: the refund queue is folded from a domain fact, not PM state |
+| [20260720-004419](20260720-004419-aggregate-lifecycle-state-machines.md) | Aggregate lifecycle state machines (declared, validated, generated) |
+| [20260720-004556](20260720-004556-partner-reoffer-policy.md) | Bounded partner re-offer policy for DeliveryDispatchProcess |
 | [20260720-015300](20260720-015300-command-journal-sourcing.md) | **Command sourcing** — every write request persists a `command_journal` row (pk `message_id`, envelope columns, business payload + hash, `RECEIVED→SUCCEEDED\|REJECTED\|FAILED`) BEFORE handling; records rejections; idempotent replay by `message_id`+hash (mismatch = Conflict); `domain_events.cause_id = message_id`; never writes/replays as the event log. Amends 0046, extends 0041, realizes P-02 `message_id` |
 | [20260720-015400](20260720-015400-inbound-event-sourcing-adapter-staging.md) | **Inbound event sourcing** — adapters own raw `external_*` staging tables (`external_stripe_events`, `external_hubrise_callbacks`; verify → UPSERT → ACK) and hand off ONLY adapted business events via `inbound_events` (`RECEIVED→DELIVERED\|FAILED`, unique (source, external_id)), drained through the normal write path (`cause_id = inbound_event_id`; aggregate fold stays the authoritative dedupe). HubRise yields commands, not inbound events. Amends 20260718-145856, generalizes 0045 |
 | [20260720-015500](20260720-015500-acceptance-first-graphql-envelope.md) | **Acceptance-first GraphQL writes** — ALL mutations async: optional `metadata: MetadataInput` (messageId/correlationId/causeId) + uniform `MutationAcceptance` (effective envelope incl. sessionId/traceId + operationStatus + duplicate); `X-SESSION-ID` header carries the anonymous session; outcomes via PUBLIC ownership-scoped `operationStatus(messageId)` + `operationStatusChanged(messageId)` (`Operation.errorCode` = the async rejection contract); checkout reads move to `paymentStatus(orderId)` (+Changed) off the payment PM row (clientSecret persisted there, nulled on resolve). Amends 0046, 20260719-120000, 20260719-193500 |
+| [20260720-130045](20260720-130045-bound-sirene-ingest-http-timeouts.md) | Bound the SIRENE ingestion's outbound HTTP calls (per-request + job timeout) |
+| [20260720-143000](20260720-143000-issue-workflow-sizing-and-pre-task-documentation.md) | Issue workflow: sized, pre-task-documented issues; PRs as the post-task record |
+| [20260720-191500](20260720-191500-literal-roles-lists-explicit-public.md) | Literal `roles:` lists: explicit PUBLIC = the anonymous path only; omitted roles = open to everyone |
+| [20260720-213000](20260720-213000-anonymous-session-continuity.md) | Anonymous checkout continuity: persistent session id, stamped through the write path |
 | [20260720-213024](20260720-213024-value-first-issue-prioritisation.md) | **Value-first issue ordering** (product-owner directive) — the backlog queue is ordered by value, not effort: tier 1 = foundations & cross-functional/non-functional (contracts, ACL, invariants, observability, retention, the codegen wave), tier 2 = features in value-stream order (customer ordering → restaurant onboarding → delivery). Priorities are defined in the GitHub Project "Prioritized backlog" (Priority = value bucket, Effort = size); the repo records the method (`docs/BACKLOG.md`). Amends 20260720-143000 §4 (sizing/pre-task docs unchanged) |
+| [20260720-220000](20260720-220000-order-subscription-orderid-ownership.md) | `orderStatusChanged` tracks by orderId with per-row ownership |
+| [20260720-230000](20260720-230000-nav-edge-field-acl.md) | Per-edge ACL on FK-derived navigation fields (`navRoles`) |
+| [20260720-233000](20260720-233000-claim-protocol-stale-reaper.md) | Issue claim protocol + stale-claim reaper (multi-session coordination) |
 | [20260721-025159](20260721-025159-journal-mirror-retention-policy.md) | **Journal/mirror retention policy** (#18) — windows live in ONE SQL function, `sweep_retention()`: `command_journal` terminal rows 90 d, `inbound_events` DELIVERED rows 30 d (FAILED kept until resolved), `external_stripe_events`/`external_hubrise_callbacks` processed rows 90 d (the PII cap on verbatim payloads). NEVER swept: `domain_events`/`domain_stream` (forever log), RECEIVED journal rows, unprocessed mirror rows, `external_sirene_restaurants`. Scheduled by the in-process `RetentionSweepWorker` (6 h, `RUN_RETENTION_SWEEP`) or `pg_cron`. Closes the retention follow-ups of 20260720-015300/-015400 |
+| [20260721-031127](20260721-031127-obs-surface-binding-command-acceptance.md) | Observability `surface` binding kind + the generic `command-acceptance` contract |
+| [20260721-031734](20260721-031734-generated-pm-state-rows-and-stores.md) | PM state-table rows and Postgres stores are generated from the table DSL |
 | [20260721-042018](20260721-042018-claim-time-draft-pr-automerge-supervision.md) | **Claim-time draft PR + supervised auto-merge** (product-owner directive) — claiming an issue = label + claim comment + `NN-slug` branch + an immediate **draft PR** (`Closes #NN`), so issue↔branch↔PR link before any code (draft = the auto-merge interlock); completion = gates green → ready → enable auto-merge → **supervise checks until MERGED**. Records the auto-merge threat model: per-PR arming needs write access (outsider/fork PRs can't arm or merge), the load-bearing config is the `main` ruleset's required `codegen` check. Amends 20260720-233000 |
+| [20260721-043033](20260721-043033-service-catalog-emitters-and-call-envelope.md) | Service-catalog emitters (trait + http client + binding wiring) and the service-call envelope |
 | [20260721-044613](20260721-044613-auto-merge-never-armed-before-completion.md) | **Auto-merge is never armed before completion** — closes a sequencing gap in 20260721-042018: a claim-time draft PR is a near-empty diff and passes CI trivially, so an auto-merge armed at claim time would stay armed for the whole task and fire the instant the PR leaves draft, even if that happens before the work is done. Auto-merge is now armed **exactly once**, in the same action as marking the PR ready for review — never earlier, never separately. Amends 20260721-042018 |
+| [20260721-053456](20260721-053456-generated-pm-orchestrator-step-pipelines.md) | Generated process-manager orchestrator step pipelines (hooks architecture) |
+| [20260721-093027](20260721-093027-lifecycle-dynamic-targets-and-generated-handlers.md) | Lifecycle completion: dynamic targets (`via`), full adoption, generated require+guard+append handlers |
 | [20260721-100601](20260721-100601-hubrise-connect-flow.md) | **HubRise connect flow** (#20) — adapter-orchestrated OAuth connect: `GET /adapters/hubrise/connect` → authorize → callback → token exchange → provision `RestaurantAccount`/`Restaurant`s/`Catalog`s via journaled WORKER sends of the EXISTING commands with the enricher's derived UUIDv5 ids (no new domain messages; creations idempotent ⇒ re-connect = token refresh + re-import). Account-scoped token in adapter-owned `hubrise_connections` (+ location snapshot for callback→token resolution) — a credential, never event-sourced, never in api.yaml. Global `HUBRISE_ACCESS_TOKEN` retired. Closes 20260718-145856 §0 |
+| [20260721-101552](20260721-101552-generated-behaviour-test-harness.md) | Generated behaviour-test harness from tests.yaml |
+| [20260721-104233](20260721-104233-avelo37-delivery-partner-adapter.md) | Avelo37 delivery-partner adapter: outbound `DeliveryService` + verified webhook two-layer inbox |
+| [20260721-122910](20260721-122910-coopcycle-delivery-partner-adapter.md) | CoopCycle delivery-partner adapter: a federated (per-instance) PARTNER path |
+| [20260721-161939](20260721-161939-delivery-dispatch-strategy-foundation.md) | Delivery dispatch strategy: restaurant/city-scoped multi-partner routing |
+| [20260721-172500](20260721-172500-uber-direct-delivery-partner-adapter.md) | Uber Direct delivery-partner adapter: an OAuth2 PARTNER path |
 | [20260721-175411](20260721-175411-ci-built-image-render-pulls.md) | **CI-built image; Render only pulls it** (amends 0042 build model) — Render meters build-pipeline minutes at a $0 cap, so compiling Rust on Render (`runtime: docker`) failed deploys under high merge frequency. The image is now built in **GitHub Actions** (free/unlimited on this PUBLIC repo — cargo-chef Dockerfile + buildx `type=gha` cache) and pushed to **GHCR** (`sha-<commit>` + `latest`), gated on green `ci`/`main` like db-migrate (0043); `render.yaml` becomes `runtime: image` + `autoDeploy: false`, deploys triggered by a Render deploy hook pinning the SHA image. Render build cost is structurally $0; deploys are immutable + rollback-friendly. Considered-and-narrower alt: a `buildFilter` keeping the Render build but skipping spec/doc merges |
+| [20260721-202504](20260721-202504-delivery-partner-self-registration.md) | Delivery partner self-registration: EXTERNAL write-path + admin approval (#61, slice 1) |
 | [20260722-091500](20260722-091500-sdui-screens-audience-taxonomy.md) | **SDUI screens organized by audience; drop the `_screens` suffix** (refines ADR-0037 §2/§4) — one `specs/screens/*.yaml` per audience, **no `_screens` suffix** (folder conveys it): two customer front offices split by host — `captain_frontoffice.yaml` = the marketplace at `live.captain.food` → bare `captain.food` (to be created), `restaurant_frontoffice.yaml` = the per-restaurant storefront at `{slug}.captain.food` (renamed from `customer_screens.yaml`, PUBLIC+CUSTOMER) — then `restaurant_backoffice.yaml`/`rider.yaml`/`system.yaml`. Audience sets **may** include a `system` set (lifts §4's blanket "no admin screen set"; impersonation stays for "view as"). Validator already generic over `screens/*.yaml`; only the doc/registry emitters were pinned to the old name. No API/behaviour change |
 | [20260722-101500](20260722-101500-per-surface-translation-sidecars.md) | **Per-surface translation sidecars** (refines ADR-0033 single catalog) — shared strings (`common.*` + future backend/server-rendered text) stay in `translations.yaml`; surface-specific strings move to a co-located `specs/screens/<surface>.translations.yaml` sidecar (first `restaurant_frontoffice.translations.yaml`). Screens `$ref` the file holding the key; keys are globally unique (new `translation-duplicate-key` check). Codegen merges all sources (`is_source_file` + `load_model` glob + `translation_entries()`); `translations.generated.json` stays a single flat catalog — byte-identical, no runtime change. `errors.yaml` untouched |
+| [20260722-152201](20260722-152201-ref-kind-contract.md) | Ref-KIND contract: every `$ref` site declares what it may point at |
+| [20260722-160000](20260722-160000-marketplace-content-split.md) | Marketplace content-split: extract `captain_frontoffice.yaml` |
+| [20260722-174500](20260722-174500-identity-federation-cross-tenant-personalization.md) | Federated customer identity & consent-gated cross-tenant personalization |
+| [20260722-181500](20260722-181500-delivery-delay-satisfaction-survey.md) | Delivery-delay satisfaction survey + post-delivery tip/reward prompt (#62) |
+| [20260722-225945](20260722-225945-captain-company-umbrella-org-rename.md) | The Captain Company umbrella: GitHub org rename + multi-product brand architecture |
+| [20260723-145959](ADR-20260723-145959-validate-pinned-resolver-args.md) | Pinned SDUI resolver args are validated against the bound query |
+| [20260723-172013](ADR-20260723-172013-sdui-screen-trees-and-web-serving.md) | Generated SDUI screen trees + BFF web serving & the wasm asset pipeline |
+| [20260724-135945](ADR-20260724-135945-proposals-are-committed-to-the-repo.md) | Proposals are committed to the repo (docs/proposals/) |
+| [20260724-143000](ADR-20260724-143000-every-proposal-has-a-tracking-issue.md) | Every proposal has a tracking issue |
+| [20260725-013315](20260725-013315-translation-hygiene-gates-and-locale-resolution-chain.md) | Translation hygiene gates + the runtime locale-resolution chain |
+| [20260725-015921](ADR-20260725-015921-order-conversations-reserve-data-model.md) | Adopt the order-conversations (messaging) design; reserve the Conversation data model now |
+| [20260726-124204](ADR-20260726-124204-reclamation-lifecycle.md) | Adopt the reclamation (customer claim/dispute) lifecycle |
+| [20260726-163737](ADR-20260726-163737-reclamation-saga-and-credit-ledger.md) | ReclamationProcess saga + the customer credit-balance ledger |
+| [20260726-171736](ADR-20260726-171736-reclamation-replacement-order.md) | Reclamation REPLACEMENT resolution: the no-charge replacement order |
+| [20260727-090000](ADR-20260727-090000-reclamation-refund-resolution-binding.md) | Reclamation refund resolution: driving the existing refund path to settlement |
+| [20260728-011344](ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) | The slug is an owner-chosen lifecycle, and SIRENE is an inbound event |
+| [20260728-143000](ADR-20260728-143000-sirene-mirror-payload-is-transient.md) | The SIRENE mirror's payload is transient; the hash is what persists |
+| [20260728-170000](ADR-20260728-170000-enums-stored-as-text-drop-ref-tables.md) | Enum columns store the TEXT value verbatim; the `ref_<enum>` lookup tables are dropped |
+| [20260728-224500](ADR-20260728-224500-every-background-loop-publishes-readiness.md) | Every in-process background loop publishes readiness, and every `RUN_*` toggle parses the same way |
+| [20260729-010500](ADR-20260729-010500-configuration-is-declared-and-fails-fast.md) | Configuration is declared in the DSL, and a missing required key stops the app |
+| [20260729-020000](ADR-20260729-020000-configuration-rides-the-artifact-secrets-ride-ci.md) | Non-secret configuration rides the artifact; secrets ride CI; the dashboard owns nothing |
+| [20260729-183000](ADR-20260729-183000-telemetry-is-honeycomb-eu-and-degrades-never-gates.md) | Telemetry is OTLP to Honeycomb, pinned to the EU region, and it degrades rather than gates |
+| [20260730-032306](ADR-20260730-032306-uber-integration-topology-two-orgs-and-asymmetric-app-auth.md) | Uber integration topology: two Direct organizations, asymmetric app auth, per-surface credentials |
+| [20260730-034635](ADR-20260730-034635-every-session-records-what-it-learned.md) | Every session records what it learned |
+| [20260730-051500](ADR-20260730-051500-isolate-build-deploy-migrate.md) | Isolate build, deploy and migrate; the schema only moves after a deploy |
+| [20260730-231500](ADR-20260730-231500-write-path-becomes-actor-mailbox.md) | The write path becomes an actor mailbox; the read side gets a batched, partitioned projection runtime |
+| [20260730-234918](ADR-20260730-234918-actor-runtime-extraction-ready.md) | The actor runtime is a product-agnostic crate, extraction-ready from day one |
+| [20260731-061609](ADR-20260731-061609-hosting-migrates-to-ovh-supabase-identity-only.md) | Hosting migrates to OVH; Supabase is retained for identity only |
+| [20260731-120825](ADR-20260731-120825-actor-messages-typed-inside-the-actor.md) | Actor messages (reminders) are typed INSIDE the actor, not a third catalog |
+| [20260731-122500](ADR-20260731-122500-the-mailbox-is-the-only-door.md) | The mailbox is the only door: worker channels flip to fire-and-forget enqueue |
+| [20260731-150500](ADR-20260731-150500-reminders-reschedule-in-place.md) | A reminder is RESCHEDULABLE in place: re-declaring postpones, never duplicates |
+| [20260731-153000](ADR-20260731-153000-gdpr-expiry-as-scheduled-actor-message.md) | GDPR data expiry is a SCHEDULED actor message; Order expiration is the first reminder use case |
+| [20260731-160000](ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md) | Order erasure = projection tombstone, then technical stream deletion, owned by a process manager |
+| [20260731-203000](ADR-20260731-203000-runtime-d-choices-a2-b2-c2.md) | Runtime D choices: two-phase payment delivery, chained PM facts, event-lineage reminder triggers |
+| [20260731-214500](ADR-20260731-214500-deletion-dsl-declarative-generic-engine.md) | The `deletion:` DSL: declarative per-actor deletion, child-declared propagation, one generic engine |
+| [20260801-010134](ADR-20260801-010134-deletion-window-rides-the-reminder-for-business-fact-expiry.md) | The deletion window rides the REMINDER when the expiry is a business fact (Order pilot shape) |
+| [20260801-020000](ADR-20260801-020000-proposals-are-living-documents.md) | Proposals are LIVING documents; git is the history |
+| [20260801-023000](ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md) | A2 realizes as a PREPARE phase + single fenced delivery (R2) |
+| [20260801-053000](ADR-20260801-053000-b2-chain-rides-the-completion-transaction.md) | B2 realizes in-transaction, with per-fact chain identity |
+| [20260801-080339](ADR-20260801-080339-auth-verifier-reads-resolved-config-not-env.md) | The auth verifier reads the JWKS URL from resolved `Config`, never `std::env` |
+| [20260802-170059](ADR-20260802-170059-client-surface-is-spec-gated.md) | No client method exposed without a usage declaration in the spec |
+| [20260802-200416](20260802-200416-push-driven-drain-loops.md) | Drain loops are woken by Postgres NOTIFY, not by a 1.5 s poll |
+| [20260802-220402](20260802-220402-mailbox-width-100-to-5.md) | Mailbox keyspace width 100 → 5 |
+| [20260802-224532](20260802-224532-push-driven-mailbox-approved.md) | Push-driven mailbox approved as proposed (D1–D5) |
+| [20260803-002712](20260803-002712-mailbox-poison-follow-ups-decided.md) | The four #313 open questions decided (requeue, backoff, alerting, adapter fleets) |
+| [20260803-104819](20260803-104819-db-persisted-pm-mailbox-delivery-posture.md) | PM_MAILBOX_DELIVERY lives in one database row |
+| [20260803-143216](20260803-143216-admin-requeue-rides-the-mailbox.md) | The admin requeue rides the mailbox it supervises |
+| [20260803-172654](ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md) | The `Mailbox` port demands a capability witness: holding the port is not holding the door |
+| [20260803-203455](ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md) | Every public mailbox door is declared: narrowing the #304 residual class by reachability |
+| [20260803-214500](ADR-20260803-214500-actor-door-contains-the-phase-2-widening.md) | The per-actor client crates enqueue through an opaque `ActorDoor`, and a guard contains what that widens |
+| [20260803-234035](ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md) | Compiler first: a check is the fallback, not the tool of choice |
+| [20260804-014546](ADR-20260804-014546-read-models-declare-their-readers.md) | Every read model declares its reader, on the component that consumes it |
+| [20260804-032640](ADR-20260804-032640-delete-unread-read-models.md) | Delete unread read models (View_RestaurantAccount, PhoneCountry) |
+| [20260804-041227](ADR-20260804-041227-populate-the-two-dead-columns-and-address-refund-facts.md) | Populate the two dead read-model columns, and address the refund facts by payment intent |
+| [20260804-154700](ADR-20260804-154700-screen-actions-are-checked-against-their-command-inputs.md) | Screen actions are checked against their command's inputs |
+| [20260805-070138](ADR-20260805-070138-render-status-reflects-service-suspension.md) | render-status reflects service suspension, not just the last deploy status |
+| [20260806-151122](ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md) | The hosting destination is Clever Cloud, not OVH |
+| [20260807-002705](ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) | Hosting: OVH Managed Kubernetes, CNPG in-cluster, GitOps-only operations |
+| [20260807-114122](ADR-20260807-114122-mks-starts-at-one-node.md) | MKS starts at one node: the ≥3-node condition becomes a ladder |
+| [20260807-183024](ADR-20260807-183024-one-decomposition-axis.md) | One decomposition axis: spec folders, per-scope crates/images/graphs, core/views storage, per-scope projectors |
+| [20260807-220528](ADR-20260807-220528-deploy-emitter-pins-are-input.md) | The deploy emitter: pins are generator INPUT, env is scope-derived, bins are probe-serving shells |
+| [20260807-223428](ADR-20260807-223428-build-matrix-determinator-gate.md) | The build matrix + determinator gate: tool shape, workflow split, cook-cache fix |
+| [20260807-231754](ADR-20260807-231754-bin-runtimes-composition-kit-scoped-config.md) | Bin runtimes: shared composition kit, scope-filtered per-bin Config, ports-derived adapter links |
+| [20260807-235930](ADR-20260807-235930-main-ruleset-required-checks.md) | `main` ruleset: required checks + required Claude review, admin bypass preserves straight-to-main |
+| [20260808-060309](ADR-20260808-060309-bare-apex-owner.md) | The marketplace owns the bare apex; adapters own the hooks host |
+| [20260808-062432](ADR-20260808-062432-one-bin-per-adapter.md) | One bin per adapter: the composed `adapters` pod splits per partner |
+| [20260808-062933](ADR-20260808-062933-one-bin-per-worker.md) | One bin per worker; periodic workers are CronJobs |
+| [20260808-063951](ADR-20260808-063951-cnpg-platform-source-tree.md) | CNPG manifests are hand-written platform SOURCE under `deploy/platform/`, not emitted |
+| [20260808-144738](ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md) | Product ownership lives in the team; no product-manager agent, ever |
+| [20260808-154005](ADR-20260808-154005-agents-channel-named-experts-published-work.md) | Advisory agents channel named experts' published bodies of work |
+| [20260808-155656](ADR-20260808-155656-first-consent-based-ensemble-decisions.md) | First consent-based ensemble decisions (rider + disappearance proposals) |
+| [20260808-171056](ADR-20260808-171056-register-sweep-consent-decisions.md) | Register sweep: the team decides 30 open decisions by consent |
+| [20260808-195315](ADR-20260808-195315-customer-brief-answers.md) | The customer answers the decision brief: money posture, entity path, radical transparency |
+| [20260808-203443](ADR-20260808-203443-tips-voluntary-contributions-funding-model.md) | Tips, voluntary contributions, and the funding model; erasure two-path and admin act-as confirmed |
+| [20260808-212741](ADR-20260808-212741-solida-studio-strategic-frame.md) | The Solida strategic frame: studio of products, delivery-channel sequencing, market-parity demo, rebrand pending |
+| [20260808-223000](ADR-20260808-223000-all-day-autonomous-operation.md) | All-day autonomous operation: weekly loop budget 30 min → 12 h |
+| [20260808-224500](ADR-20260808-224500-unflake-ci-env-race-consolidation-scope.md) | Unflake the ci gate: env-mutation purge + evidence step + flake policy; test-binary consolidation scoped infrastructure-only, sequenced after |
+| [20260808-230800](ADR-20260808-230800-rider-delivery-slices-1-2-approved-and-applied.md) | Rider/delivery slices 1–2 approved by the customer; slice 1 applied by the run; quick wins pulled forward; slice order adopted |
+| [20260808-234907](ADR-20260808-234907-answer-sheet-confirmations-dqw1-option-b.md) | Brief answer sheet: cards 1–7 confirmed, D-QW1 decided as option (b) — orderId joins the four delivery payloads |
+| [20260808-235113](ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) | Final vision first: no intermediate step where the final step can be built |
+| [20260808-235545](ADR-20260808-235545-riders-first-uber-direct-is-the-fallback.md) | Delivery-channel clarification: riders first, Uber Direct is the fallback rung |
+| [20260809-002500](ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md) | Quick-wins option-(b) diff approved as written; D6 endpoint decided as the step-DSL extension (build it now) |
+| [20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md) | Mob programming: every agent is in the dev, so issues are found DURING it |
+| [20260809-020859](ADR-20260809-020859-hourly-status-cadence-and-no-torres-lens.md) | Status cadence drops to hourly; the Teresa Torres discovery lens is declined |
+| [20260809-021500](ADR-20260809-021500-beck-is-the-testing-lens-and-the-agent-naming-rule.md) | `beck` becomes the testing lens; the agent-naming rule is written down |
+| [20260809-050000](ADR-20260809-050000-morning-brief-eight-decisions.md) | The 2026-08-09 morning brief: eight decisions |
+| [20260809-160000](ADR-20260809-160000-read-authorization-lands-ported-from-152.md) | Read-side per-instance authorization lands, ported from PR #152 |
+| [20260809-200826](ADR-20260809-200826-scope-membership-member-naming.md) | ScopeMembership columns: `principal_*` → `member_*` |
+| [20260809-212810](ADR-20260809-212810-verify-phone-claim-stamp-posture.md) | VerifyPhone claim-stamp posture: stamp → rotate → park, cookie is the transport |
+| [20260810-011500](ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md) | Team ownership: sessions start autonomously, and the coordinator never authors the diff |
+| [20260810-015941](ADR-20260810-015941-stripe-publishable-key-delivery.md) | Stripe publishable key delivery to /checkout: the decisions of the #440 chunk |
+| [20260810-112836](ADR-20260810-112836-cart-priced-live-on-read.md) | Cart priced LIVE on read; the Cart projection is a pure money-free fold |
+| [20260810-114242](ADR-20260810-114242-loop-start-action-plan.md) | Loop start: always show the product owner the action plan |
+| [20260810-120531](ADR-20260810-120531-cart-current-two-leg-resolution.md) | `cart.current` resolves in two legs (claim, then session); OPEN-only, LIVE reprice |
+| [20260810-194548](ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md) | The six-decision answer sheet: claim staleness closed, `currency_mismatch` approved, the local test gate gets an owner |
+| [20260810-215503](ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md) | Backlog prioritisation is delegated to the team; the method becomes binding |
+| [20260810-221840](ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md) | `specs/**` is the team's work: the freeze is lifted, the reporting obligation replaces it |
+| [20260810-225036](ADR-20260810-225036-projection-db-fault-policy-gated-halt.md) | A fold the database rejects is classified, and halting on it ships gated |
+| [20260810-231300](ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) | No polling, only pushing; polling as a graceful fallback until pushing works again |
+| [20260810-234225](ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md) | Business metrics for every feature and every persona, developed with the test and the code |
+| [20260811-014129](ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md) | A business metric is a projection, and every reference in the DSL is a `$ref` |
+| [20260811-105024](ADR-20260811-105024-projection-halt-default-and-health-visibility.md) | A database-rejected fold HALTS its projection group, and a halted group must be visible to Kubernetes |
+| [20260811-113000](ADR-20260811-113000-the-open-path-reads-credentials-and-current-is-tenant-scoped-by-host.md) | The open GraphQL path reads credentials (degrading to anonymous), and `current` is tenant-scoped by `Host` |
+| [20260811-120828](ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md) | Behaviour tracking is isolated end to end, and a faulted worker pre-diagnoses itself in its health payload |
+| [20260811-170559](ADR-20260811-170559-the-validator-owns-the-warning-baseline.md) | The validator owns the warning baseline; no document pins a warning count |
 | [ADR-20260812-011057](ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md) | **The loop budget is an append-only ledger, and the running timer is never committed** — the single mutable `{secondsUsed, startedAt}` file produced SEVEN silent corruptions in one day (261 phantom minutes billed for a 16-min run; a merge that would have discarded 2.5h). Cap = config nobody writes, usage = one file per run summed per ISO week (so merges are additive and nothing can lower the total), timer = untracked inside `.git/` common dir (so it cannot be committed and is shared across worktrees). Amends ADR-0014 |
+| [20260812-115930](ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md) | Each adapter owns its own, completely isolated database |
+| [ADR-20260812-142454](ADR-20260812-142454-the-loop-budget-cap-covers-two-claude-accounts.md) | **The weekly loop-budget cap covers TWO Claude accounts, so it doubles** (founder directive) — one ledger records the runs of two Claude accounts, so `weeklyBudgetSeconds` must be the SUM of both allowances: **43200 → 86400**. Only the cap is multiplied, never the usage (ledger entries are measured actual time; inflating one steals from the next week). Retires a live wrong conclusion — 2026-W33 was declared exhausted at 725.5m/720m and was in fact at 50.4 % of 1440m. The cap's value lives ONLY in `.claude/loop-budget.json`; prose states the rule. Amends ADR-20260808-223000's figure; ADR-0014's mechanism and ADR-20260812-011057's ledger design unchanged |
+| [20260812-143619](ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md) | The founder is the founder, and every founder message goes to the whole team before any answer |
 
 ## Proposed (deferred until app/runtime code exists)
 

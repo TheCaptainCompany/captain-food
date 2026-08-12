@@ -853,7 +853,8 @@ it is the final shape of those five read models, and a defect fix that stands al
    real. Justified on §2.1 alone; makes the split possible as a side effect.
 3. **Session-mode pooler + re-derived connection budget.** The split crosses the ceiling; this is a
    prerequisite.
-4. **The split itself**, at cutover, inside the window: five databases, the placement map,
+4. **The split itself**, at cutover, inside the window: eleven databases (five business +
+   ADP-1's six adapter databases -- five partner adapters + sirene), the placement map,
    `grants.generated.sql` + its two validator rules, per-database migration chains, the restore drill's
    replay leg.
 5. **RLS on `domain_events`**, separately gated and benchmarked; default flip is its own one-line ADR.
@@ -869,7 +870,7 @@ it is the final shape of those five read models, and a defect fix that stands al
 captain-db  (CNPG cluster, one WAL timeline, one PITR)
 ├── captain-write     domain_events · domain_stream · inbound_messages · mailbox_partitions
 │                     · 4x *_process_manager · slug_reservations
-│                     · projection_watermark                       [actor_* · projector_* (SELECT)
+│                     · projection_watermark · auth_sessions       [actor_* · projector_* (SELECT)
 │                                                                   · deletion_engine
 │                                                                   · graphql_* -- inbound_messages
 │                                                                     INSERT+SELECT ONLY, 6.1.1]
@@ -878,19 +879,45 @@ captain-db  (CNPG cluster, one WAL timeline, one PITR)
 │                                                    [projector_ordering · graphql_ordering (SELECT)]
 ├── CatalogDb         Catalog + ScopeMembership + ref_* + projection_checkpoint
 │                                                    [projector_catalog  · graphql_catalog (SELECT)]
-└── DomainCommonDb    Customer · Restaurant · SlugAlias · ProspectionPipeline · Rider read models
-                      · referential (PricingPolicy, City, ...) · integration staging
-                      + ScopeMembership + ref_* + projection_checkpoint
-                                          [projector_{customer,network,delivery,payments,comms}
-                                           · graphql_{...} (SELECT)]
+├── DomainCommonDb    Customer · Restaurant · SlugAlias · ProspectionPipeline · Rider read models
+│                     · referential (PricingPolicy, City, ...)
+│                     + ScopeMembership + ref_* + projection_checkpoint
+│                                         [projector_{customer,network,delivery,payments,comms}
+│                                          · graphql_{...} (SELECT)]
+├── adapter-stripe        external_stripe_events                                  [adapter_stripe ONLY]
+├── adapter-hubrise       external_hubrise_callbacks · hubrise_connections
+│                         · hubrise_connection_locations                          [adapter_hubrise ONLY]
+├── adapter-uber-direct   external_uber_direct_events                             [adapter_uber_direct ONLY]
+├── adapter-coopcycle     external_coopcycle_events                               [adapter_coopcycle ONLY]
+├── adapter-avelo37       external_avelo37_events                                 [adapter_avelo37 ONLY]
+└── adapter-sirene        external_sirene_restaurants (655 MB mirror, #231)       [worker-sirene-sync ONLY]
 
 captain-tracking  (own cluster when it ships -- 8.1/9.4)
 └── BehaviorEventTrackingDb   events + its own checkpoint    [tracking_projector -- no CONNECT above]
 ```
 
-Placement of `Cart`/`OrderConversation`/`CustomerCreditBalance`/staging above is the **recommendation**,
-not a decision — it is register row STO-2. The `graphql_*` line on `captain-write` is **not** a
-recommendation: without it every mutation fails (§6.1.1 (ii)).
+**The `adapter-*` block is a DECISION, not a recommendation** (founder directive 2026-08-12,
+[ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md),
+register row **ADP-1**): each adapter's owned state — the staging mirrors and HubRise's
+connection/credential tables — is completely isolated in a database of its own, reachable by that
+adapter's role and nothing else; the adapter's one outward grant is the `inbound_messages` front door
+(ADP-1 leg 1, **closed as (a)**: an outbox+relay would put a bidirectional platform grant INSIDE each
+adapter database, and `LISTEN`/`NOTIFY` being per-database would need an inward connection to all six).
+
+**Two corrections to this map's first version, both verified against the tree.** `adapter-avelo37` is
+**in** the set — `external_avelo37_events` is declared (`integration_staging.yaml:178`) and already
+retention-swept (`sweep_retention.sql:60`), so the earlier *"avelo37 owns no table today"* was false and
+would have left the delivery partner as the one mirror still inside `captain-write`. And there is **no
+`adapter-identity` database**: `auth_sessions` stays platform on `captain-write` (ADP-1 leg 2 closed as
+(b)) — it is AES-256-GCM encrypted under `AUTH_SESSION_KEY` where `hubrise_connections.access_token` is
+plaintext, no such adapter crate or bin exists, and its users are the actor path and the BFF login route,
+so the database would have been named for a non-existent adapter with a non-adapter `CONNECT` list on the
+sign-in path. The count is unchanged at six adapter databases; the **membership** changed.
+
+Placement of `Cart`/`OrderConversation`/`CustomerCreditBalance` above is the **recommendation**,
+not a decision — it is register row STO-2 (its staging/connections leg is answered by ADP-1). The
+`graphql_*` line on `captain-write` is **not** a recommendation: without it every mutation fails
+(§6.1.1 (ii)).
 
 ---
 
@@ -903,7 +930,9 @@ recommendation: without it every mutation fails (§6.1.1 (ii)).
   `captain-write` is correct, but it means the split's isolation applies to the *read* side only. An
   incident in `captain-write` is still a total outage. The split does not buy availability; it buys
   blast radius on reads and an enforceable access model. Say so rather than let it be misread.
-- **Five databases is five of everything**: five migration chains, five checkpoint tables, five sets of
+- **Eleven databases is eleven of everything** (five business + ADP-1's six adapter databases: five
+  partner adapters + the sirene mirror —
+  though an adapter chain is one or three tables): migration chains, checkpoint tables, sets of
   grants, a `REQUIRED_SCHEMA_VERSION` map, a drill with more legs. Every one of those is a place a
   future session can get it subtly wrong, and the generated-grants emitter is the only counterweight.
 - **Projection lag arrives on five surfaces that never had it** (§3.6). The pattern is known and
@@ -920,8 +949,9 @@ recommendation: without it every mutation fails (§6.1.1 (ii)).
 Copied to [#494](https://github.com/TheCaptainCompany/captain-food/issues/494)'s checklist on approval.
 
 1. Placement of the ~65 unnamed objects — specifically `Cart`, `OrderConversation`,
-   `CustomerCreditBalance`, `SlugAlias`/`slug_reservations`, the SIRENE mirror, and the Stripe/HubRise
-   staging tables (STO-2).
+   `CustomerCreditBalance`, `SlugAlias`/`slug_reservations` (STO-2). ~~The SIRENE mirror and the
+   Stripe/HubRise staging tables~~ — **answered 2026-08-12**: per-adapter isolated databases
+   (ADP-1, [ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)).
 2. Does the placement map live in the DSL (recommended — the grant emitter needs it) or in the deploy
    layer?
 3. `ScopeMembership` replicated per read database (recommended) — confirm, and decide whether the

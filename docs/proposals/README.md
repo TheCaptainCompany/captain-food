@@ -8,7 +8,7 @@
 > A proposal may be **partially approved** — mark the decided rows and note the remainder in its header.
 
 **Every proposal presented for approval is committed HERE before (or with) its execution**
-(product-owner directive, 2026-07-24; ADR-20260724-135945). ADRs record what was *decided*;
+(founder directive, 2026-07-24; ADR-20260724-135945). ADRs record what was *decided*;
 proposals record what was *put on the table* — the option space, the trade-offs weighed, and the
 rationale as it stood at approval time. Losing them means losing the ability to remember *why* we
 chose what we chose.
@@ -20,7 +20,7 @@ chose what we chose.
   proposal if none exists, name it in the header, and keep the two in step (a re-scoped proposal
   retitles/rescopes its issue). An issue-less proposal is invisible to the prioritised backlog and
   gets lost — the issue is what carries Value/Effort/Impact/Priority and a place on the board.
-- **Issue references are FULL CLICKABLE LINKS** (product-owner directive, 2026-07-24): GitHub does
+- **Issue references are FULL CLICKABLE LINKS** (founder directive, 2026-07-24): GitHub does
   NOT auto-link bare `#NN` inside repo markdown files (only in issues/PRs/commits), so a bare
   number in a proposal is a dead reference. Always
   `[#NN "<title>"](https://github.com/TheCaptainCompany/captain-food/issues/NN)`.
@@ -42,7 +42,7 @@ chose what we chose.
 - Body = the proposal as presented for approval: context, the recommended approach, **alternatives
   considered and why they lost**, scope decisions the approver made (e.g. AskUserQuestion answers),
   and the verification plan.
-- **Every proposal MUST include (product-owner directive, 2026-07-26):**
+- **Every proposal MUST include (founder directive, 2026-07-26):**
   - **Screen mockups — one per use case** (low-fidelity ASCII wireframes are enough): what each
     actor sees and which command/query the controls map to. Fixes the shape before the visual design.
   - **Sequence diagrams — one per load-bearing flow** (mermaid), drawn faithfully to the hexagonal
@@ -51,7 +51,7 @@ chose what we chose.
   - **Per-option pros / cons for every decision** the proposal surfaces — each option gets its
     trade-offs (a small table is ideal), and the chosen option is marked. Never present a bare
     "A vs B" without the trade-offs that justify the pick.
-  - **Final vision first (product-owner directive, 2026-08-08, ADR-20260808-235113)**: the
+  - **Final vision first (founder directive, 2026-08-08, ADR-20260808-235113)**: the
     final-clean-shape option is presented FIRST and is the default recommendation; a
     staged/intermediate option may only be recommended when something EXTERNAL forces it, and
     then it must CITE the recorded final step it stages toward (an option table that calls a

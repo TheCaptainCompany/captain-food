@@ -4,6 +4,12 @@
 - **Date**: 2026-08-12
 - **Amends**: [ADR-0014](0014-weekly-loop-budget.md) (the weekly cap itself is unchanged), and
   supersedes the worktree guidance in [docs/claude/loops.md](../claude/loops.md)
+- **Amended by**: [ADR-20260812-142454](ADR-20260812-142454-the-loop-budget-cap-covers-two-claude-accounts.md)
+  — the cap doubled to 24 h (two Claude accounts on one ledger) later the same day. The reasoning
+  below still says *"the weekly budget is 12 h"* and is **left as written**: it is the arithmetic that
+  was in front of the decision, and the 4 h staleness bound it justifies is unchanged (it is now a
+  sixth of the week rather than a third, which only makes the bound safer). The live cap's value lives
+  ONLY in `.claude/loop-budget.json` — never read a budget figure out of prose, here or anywhere.
 
 ## Context
 

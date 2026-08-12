@@ -3,6 +3,12 @@
 **Status**: Accepted · **Date**: 2026-08-08 · **Decider**: the customer (product owner), in
 session, during the first standing autonomous run (docs/claude/autonomous-run.md).
 
+> **Amended by [ADR-20260812-142454](ADR-20260812-142454-the-loop-budget-cap-covers-two-claude-accounts.md)**:
+> the cap below is **doubled to 86400 s** because one ledger records the runs of TWO Claude accounts,
+> so the cap must be the sum of both accounts' allowances. The reasoning of this ADR (all-day
+> operation needs an all-day cap) stands unchanged; only the figure moves, and it lives in
+> `.claude/loop-budget.json`, never in prose.
+
 ## Context
 
 The weekly self-imposed loop budget (ADR-0014, docs/claude/loops.md, `.claude/loop-budget.json`)
