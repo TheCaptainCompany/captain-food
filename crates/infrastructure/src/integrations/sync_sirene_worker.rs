@@ -38,10 +38,10 @@
 //! absorbed and the restaurant stays INACTIVE — reactivation is deliberately manual (logged).
 //!
 //! **Journaled sends** (ADR-20260720-015300, #15): every command this worker issues goes through the
-//! WORKER-channel journaling dispatch ([`application::dispatch::dispatch_journaled`]) — `message_id`
+//! WORKER-channel mailbox door (the generated typed actor clients) — `message_id`
 //! = UUIDv5 of (command type, SIRET, the staged row's `last_seen_at`), so re-draining the SAME staged
 //! version dedupes on the mailbox pk while an ingestion refresh (which bumps `last_seen_at`)
-//! journals as a new send; `cause_id` = UUIDv5(`row:<SIRET>`) — the staging-mirror row's identity —
+//! enqueues as a new send; `cause_id` = UUIDv5(`row:<SIRET>`) — the staging-mirror row's identity —
 //! making `external_sirene_restaurants → inbound_messages → domain_events` fully traceable.
 
 use std::sync::atomic::{AtomicBool, Ordering};
