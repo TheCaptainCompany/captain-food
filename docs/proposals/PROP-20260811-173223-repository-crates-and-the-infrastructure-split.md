@@ -28,12 +28,14 @@
   read/write repository doctrine is a standing rule every future read model is built against.
   **It closes ISO-1 and ISO-2** (§5 below).
 - **Concerns**:
-  - [ ] **BND-1-GATE**: the per-boundary half of this topology (15 of the ~27 crates) cannot start
-    before **BND-1** ([#493](https://github.com/TheCaptainCompany/captain-food/issues/493)) records
-    the boundary set. Building 3 crates × 8 scopes and merging to 5 is precisely the intermediate
+  - [x] **BND-1-GATE** — **RESOLVED 2026-08-11**: the product owner recorded the set — *"I'm ok for
+    the 5 / Customer / Order / Catalog / Restaurant / Delivery"* (register §5 + §31 BND-1) — so
+    **B = 5** and the per-boundary half (15 of the ~27 crates) is unblocked. The concern stands as
+    written for the record: that half could not start before
+    **BND-1** ([#493](https://github.com/TheCaptainCompany/captain-food/issues/493)) recorded the
+    boundary set, because building 3 crates × 8 scopes and merging to 5 is precisely the intermediate
     step [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)
-    forbids. **This direction makes BND-1 more urgent, not less.** The platform half (§6 slices 0–3)
-    is boundary-agnostic and is not gated.
+    forbids. The platform half (§6 slices 0–3) was never gated and is unchanged.
   - [ ] **EVENT-UNION**: `DomainEvent` is a single enum over all eight scopes, defined in the `domain`
     facade (`crates/domain/src/generated/events.rs:20`). Every crate that names it links all eight
     domain crates. Until **REP-4** is decided, a "per-boundary repository crate" that traffics in

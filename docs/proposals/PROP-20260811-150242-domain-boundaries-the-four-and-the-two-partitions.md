@@ -1,6 +1,7 @@
 # PROP-20260811-150242 — The four boundaries already exist: `boundedContexts` and `specs/{scope}/` are two partitions of the same twenty actors
 
-- **Status**: Proposed
+- **Status**: Proposed — **the boundary set is ANSWERED by the product owner (2026-08-11, §0)**; the
+  file moves to the approved state when the superseding ADR named in the DECISION-REVERSAL concern lands.
 - **Date**: 2026-08-11
 - **Tracking issue**: [#493 "Two partitions, one domain: boundedContexts and specs/{scope}/ home 6 of 20 actors differently, and nothing reconciles them"](https://github.com/TheCaptainCompany/captain-food/issues/493)
 - **Realized by**: _(filled at completion)_
@@ -49,6 +50,51 @@
   - [ ] AXIS-DISAGREEMENT: the link graph ([PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md)) and the per-app database role (this proposal's D11/D12, [#360](https://github.com/TheCaptainCompany/captain-food/issues/360)) are **two** enforcement axes and both are per-boundary. If crates are cut per-scope (8) while `GRANT`s are issued per-boundary (5), the two axes disagree about what a boundary IS, and every later review must ask which is authoritative. Worse than either alone. Neither may land before the set is recorded.
 - **Screen mockups**: **deliberately none, and recorded rather than silently omitted.** This proposal has no user-facing surface and no use case a persona performs — it decides which deployable units exist and who may write what. The mockups rule (docs/proposals/README.md) exists so a design's shape is fixed before its visuals; the shape here is a partition of twenty actors and a validator rule, and §2, §3 and §5 fix it exhaustively. The nearest thing to a "screen" is the boundary map in §2 and the all-57-apps table in §5.
 - **History**: `git log -p` on this file.
+
+---
+
+## 0. The product owner's answers, 2026-08-11 — verbatim, and what each closes
+
+Recorded before anything else, because five rows of the register close here and one genuinely new
+architectural concession arrives with them. Quotes are verbatim; the reading follows each.
+
+| Quote (verbatim) | Closes | Reading |
+|---|---|---|
+| *"I'm ok for the 5 / Customer / Order / Catalog / Restaurant / Delivery"* | **BND-1** | **The boundary set is CLOSED as recommended (a)**: five business boundaries — `customer` · `order` · `catalog` · `restaurant` · `delivery` — plus the `platform` bucket and the `common` kernel, exactly as §3 and §5 propose them. `catalog` stays a boundary; `comms` and `payments` dissolve into `order`. **This is the row that had been top of the register across several runs, and it unblocks slices 1–5 of [PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md) and 15 of the 28 crates in [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) REP-2(a).** |
+| *"Considering that you prefer delivery to rider because we have restaurants and admin commands in it make sense"* | **BND-2** | **`delivery`, not `rider`** — accepted with the reasoning endorsed (two of five `DeliveryJob` mutations are `[RESTAURANT, …, ADMIN]`, `specs/delivery/api.yaml:107-113`). `RIDER` stays a role. |
+| *"Estimate for now"* | **BND-7** | **The ETA is an ESTIMATE, not a promise, for V0** — option (a): the frozen number exists as an internal quality signal (promised-vs-actual), never as a commitment with a remedy. **This must be reflected wherever the freeze onto `OrderPlaced` is specified** (§D13.5 step 4), and it is the cheap moment to get the shape right: the field is named and documented as an estimate, and no remedy semantics attach to it. |
+| *"Prep time only + labelled"* | **BND-6** | **Option (b)**: when the travel leg cannot resolve, show a **prep-time-only** estimate, **explicitly labelled as what it is** ("ready in ~25 min", not "arrival"). The label is the whole condition — the defect D13.1 fact 4 measured (`eta_bar` labelled *"Estimated arrival"* bound to the kitchen ready time) is precisely the failure this answer forbids. |
+| *"I agree it was the write side of course my mistake"* | **BND-4(i)** | **Confirmed: it is the WRITE side that actors and projectors read to load events.** The permission matrix in [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md) §6.1 may now be written on that reading, and BND-4(i) is no longer a question. |
+| *"I believe creating the apps will do a cleaner split between and help the split process / Do the way you think it's better / I need to know the app list and all dependencies we need to make sure we have a clean split"* | **APP-1** | **Sequencing is delegated to the team**, with a concrete deliverable demanded: **the app list plus all dependencies**, so a clean split can be verified. Tracked under [#491](https://github.com/TheCaptainCompany/captain-food/issues/491) / [PROP-20260811-141654](PROP-20260811-141654-per-app-declaration-folders.md); §5 of this file is its boundary-side input (all 57 apps homed, 39 + 18). |
+| *"Ok for the event log, but I'm concerned about the word « journal », we have replace journal with unified mailbox inbound messages make sure we don't do both"* | **D14 confirmed; opens JRN-1** | The one-log property is accepted. The `journal` concern is **correct and sharper than it reads**: both tables exist today. Answered in [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md) §6.1.2, which owns the permission matrix the residual breaks. |
+| *"I'm ok if we create in between boundaries for process managers that are making the translation between 2 boundaries thanks to the fact that we have one crate per actor client type it's perfectly fine"* | **new — D15** | A genuine architectural concession, and it needs designing rather than filing. **§D15** below gives it a test, a classification of all five PMs, and the one measured fact that reverses its safety argument. |
+
+**One correction owed to the product owner in the same breath as the thanks: the premise of the
+concession does not hold today for process managers.** *"One crate per actor client type"* is real
+and excellent — `crates/clients/{actor}` is 17 crates, each the sealed permission to address exactly
+one actor (`crates/clients/cart/Cargo.toml:4-11`). **But no process manager uses it.** The generated
+PM pipeline reaches the target aggregate two other ways, both of which bypass the client crate, the
+target's mailbox lane and its lease:
+
+- **`deliver:` is a direct append to the target's stream.**
+  `crates/application/src/generated/process_managers.rs:118-122` —
+  `Repository::new(store).save(&format!("DeliveryJob-{…}"), stream_version, &[DomainEvent::DeliveryRequested(…)], &actor)`.
+- **`send:` runs the target aggregate's command handler IN-LINE**, in the PM's own process and
+  transaction — `crates/application/src/generated/process_managers.rs:786` —
+  `crate::commands::bind_cart_to_customer(store, sent, &actor)`.
+
+**And the DSL's own doctrine header says the opposite, verbatim** (`specs/common/processmanager.yaml:7-9`):
+
+> *"AGGREGATES OWN THE FACTS — a process manager never appends to `domain_events` itself; it
+> delivers events for the owning aggregate to record, or sends commands the aggregate may reject."*
+
+That is a spec claiming something the code does not do, on the write path, and it is exactly the
+class CLAUDE.md warns is worst: it stops the next reviewer looking. It is also the concrete instance
+that makes **ISO-3** (`EventStore::append` takes a bare `stream_name: &str`,
+`crates/application/src/ports.rs:54-60`) load-bearing rather than theoretical — the PM is the caller
+that actually appends to another boundary's stream category today. **The concession is sound; its
+stated safety mechanism is not yet in place.** §D15 designs the rule so that it becomes true rather
+than assumed.
 
 ---
 
@@ -378,6 +424,37 @@ is intra-boundary and the stop condition holds.
 **Therefore this row is closed by the team and is NOT a product-owner question.** The only artifact it
 produces is a one-line edit to `c4-l2.yaml:65` moving `CartBindingProcess` from `customer` to `order`,
 landing in B2 with the rest of the reconciliation.
+
+#### D9bis — re-examined 2026-08-11 against the THIRD option (an in-between unit): **`order` is CONFIRMED**, and the grant consequence is now measured rather than predicted
+
+The product owner's in-between concession creates an option that did not exist when D9 was decided,
+and the row was flagged as the one the losing side would make expensive. Re-examined against §D15's
+test, **`CartBindingProcess` does not qualify for an in-between unit at all**, and the reason is
+measurable rather than aesthetic:
+
+| Dimension | What `CartBindingProcess` actually touches | Boundaries |
+|---|---|---|
+| Read models it `read:`s | `projection_tables.yaml#/Cart` (`specs/ordering/processmanager.yaml:131-134`) | **order only** |
+| Aggregates it writes | `Cart` — via `crate::commands::bind_cart_to_customer(store, sent, &actor)` (`process_managers.rs:786`), i.e. an append to `Cart-{id}` | **order only** |
+| Its own PM state | `cart_binding_process_manager`, in `captain-write` | not boundary-scoped |
+| Its trigger | `CustomerIdentified`, a **customer** fact **delivered to its mailbox** | a context edge, not a data reach |
+
+**It commands one boundary and reads one boundary, and both are `order`.** The only customer-side
+thing about it is the trigger, and a trigger arrives through the mailbox as a foreign fact — which is
+Evans's context edge working exactly as intended, not a reason to create a unit. Under §D15's test it
+is a **single-boundary PM with a foreign trigger**, the most common shape there is, and an in-between
+unit for it would be a third deployable buying nothing.
+
+**The grant consequence, stated in both directions as promised.** Under **(a) `order`** — the
+confirmed answer — `pm-cart-binding`'s role is: `CONNECT` to the **order** read database with `SELECT`
+on `Cart`; `CONNECT` to `captain-write` with `INSERT` on `domain_events` for `Cart-%`, its own PM
+state row, and its own mailbox lane. **Zero cross-boundary grants; the system's first two-boundary
+`GRANT` is not created.** Under **(b) `customer`** it would need `CONNECT` to a second read database —
+the `CONNECT` wall, §D15's stop condition, breached on day one by choice. **Confirmed: `order`.**
+
+**But the "first such grant" claim in D9's original text is now known to be wrong, and correcting it
+is the more valuable half of this re-examination.** Two PMs already need a cross-boundary grant
+today, in the spec, before any in-between unit exists — see **§D16**.
 
 ### D10 — Where does the notification port live? *(recommendation: **transport in `platform`, policy in `order`**)*
 
@@ -767,6 +844,189 @@ and corrects the count:
 
 ---
 
+### D15 — In-between units for translating process managers *(recommendation: **allowed, under one test, and the test is `CONNECT`**)*
+
+The product owner has approved in-between units for PMs that translate between two boundaries, on the
+ground that one crate per actor-client type makes it safe. The concession is right in principle and
+**an unbounded licence here recreates the failure mode it is meant to avoid** — a boundary per awkward
+thing, which is how a service split becomes a distributed monolith. So it gets a test, and the test is
+chosen so a reviewer can apply it from the spec alone, without opinions.
+
+#### D15.1 The rule, in two sentences
+
+> **A translating process manager earns its own in-between unit only when it WRITES two boundaries'
+> aggregates and READS neither boundary's read models beyond its own state — because then its entire
+> data reach is `captain-write`, and the extra permission is two enumerated `actor_type` /
+> stream-category values on one shared table, not a second `CONNECT`.**
+>
+> **If it must READ another boundary's read model, it is not in-between: it lives in the boundary it
+> reads, because a read is a `CONNECT` through the strongest wall in the permission matrix and no
+> crate-per-client argument reaches it.**
+
+Call it **the `CONNECT` test**. Its whole merit is that it is decidable from `processmanager.yaml`:
+count the distinct boundaries named by the PM's `read:` steps, and count the distinct boundaries named
+by its `deliver:`/`send:` targets. Two writes and ≤ 1 read database ⇒ eligible. Two read databases ⇒
+ineligible, whatever the writes say.
+
+#### D15.2 Why the test lands there and not somewhere prettier
+
+**Because the two directions cost different things, and only one of them is what the product owner's
+argument covers.**
+
+- **The write direction is genuinely cheap, and the concession's instinct is correct.** Every write a
+  PM performs lands in **one** database: `domain_events`, `inbound_messages` and the PM state tables
+  all live in `captain-write` (**STO-1(a)**, [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+  §32 — the log cannot be separated from the mailbox without deleting the fencing token). There is **no
+  second schema to grant**. Widening a PM's write reach is widening an *enumeration* — one more
+  `actor_type` in the RLS `WITH CHECK (actor_type = ANY(…))` predicate the storage proposal already
+  derives from `actors.yaml` (§6.1.1), one more stream-category prefix in the append policy. That is
+  reviewable, generatable and diffable. **And it does not make `captain-write` an integration
+  database, on D14's own definition: an integration database is defined by shared *write* to the same
+  rows, and no two units write the same stream category.**
+- **The read direction is the expensive one, and the concession does not reach it.** Read models live
+  in per-boundary read databases whose wall is `REVOKE CONNECT` — the storage proposal's own strongest
+  mechanism (§6, *"the strongest wall, and the split buys it for free"*). A PM that reads two
+  boundaries' read models needs `CONNECT` to two read databases, and at that moment the app has the
+  standing ability to read everything in both — the exact stop condition **BND-3** names. A client
+  crate is a **write** door; it says nothing about `SELECT`.
+
+**The doctrinal reading, so the rule is not just operational convenience.** Vernon: a process manager
+is stateful coordination whose output is **commands**, and its own state is its state row. A PM that
+needs to *read* another boundary's read model is not coordinating — it is **querying another
+context's model**, which under Evans is an integration concern that belongs behind a published
+contract (D13.4's third sanctioned mechanism, a **read-time query contract**), not behind a database
+grant. So the test is not a compromise: **it says that a PM's legitimate cross-boundary reach is
+commands, and that its cross-boundary *reads* were always supposed to be contracts.**
+
+#### D15.3 What an in-between unit IS, precisely — and what it is not
+
+An in-between unit is a **deployable and a crate family, never a bounded context.** The distinction is
+D6's, applied one level down, and it is what stops the count growing:
+
+| It has | It does NOT have |
+|---|---|
+| a bin (`pm-{name}`), a Deployment, a database role | a `specs/{scope}/` folder |
+| its own PM state table in `captain-write` | a schema of its own |
+| exactly the two client crates it names, and nothing more | a stream category of its own — **a PM owns no aggregate and no events** |
+| an entry in the app list naming BOTH boundaries | a ubiquitous language, a persona, or a surface |
+| a `read:` reach of at most ONE read database | authority to define a term |
+
+**A PM has no vocabulary of its own**, which is why an in-between unit is not an Evans context: every
+term it uses is borrowed from one of the two boundaries it bridges. That is the structural reason the
+count cannot run away — **there is exactly one in-between unit per genuinely two-boundary PM, and PMs
+are declared, countable and validator-checked** (`processmanager.yaml`, 5 today). It is not a bucket
+anything can be dropped into.
+
+#### D15.4 The five PMs today, classified
+
+Measured from `specs/{ordering,payments,delivery}/processmanager.yaml`, under the boundary set closed
+in §0. `Restaurant` and `OrderTracking`/`Cart` are read models; the write column is `deliver:`/`send:`
+targets.
+
+| PM | `read:` boundaries | write boundaries | Verdict |
+|---|---|---|---|
+| **`CartBindingProcess`** | **order** (`Cart`, `:131-134`) | **order** (`Cart`, `:137-139`) | **Single-boundary → `order`.** Foreign trigger only (`CustomerIdentified`). **No in-between unit** (D9bis) |
+| **`ReclamationProcess`** | — (none) | **order** (`CustomerCredit`, `specs/ordering/processmanager.yaml:204-206`) | **Single-boundary → `order`.** The cleanest case in the set: no reads at all. **No in-between unit** |
+| **`RefundProcess`** | **order** (`OrderTracking`, ×4) | **order** (`Payment`, ×6) | **Single-boundary → `order`** once `payments` dissolves. **No in-between unit** |
+| **`PlaceOrderProcess`** | **order** (`Cart`, `:28-31`) + **restaurant** (`Restaurant`, `:38-41`) | **order** (`Payment`, `Order`, `Cart`) | **Writes ONE boundary, reads TWO. INELIGIBLE — it is not in-between, it is an `order` PM with a cross-boundary READ** → §D16 |
+| **`DeliveryDispatchProcess`** | **order** (`OrderTracking`, `:34-37`) + **restaurant** (`Restaurant`, `:42-46`) | **delivery** (`DeliveryJob`, ×4) + **order** (`Order`, `:230-232`, `:249-251`) | **The ONLY genuine two-boundary WRITER — and still ineligible today**, because it reads two read databases. Eligible the moment its `Restaurant` read becomes a contract (§D16) |
+
+**So the concession creates ZERO in-between units today, and exactly one candidate.** That is the
+honest answer and it is the reassuring one: the rule is not a licence being spent, it is a licence
+being reserved for the one place the architecture actually bends — dispatch, which genuinely
+coordinates a delivery job and an order and is the second-hottest write path of a Friday service.
+
+#### D15.5 The precondition the concession itself needs — and it is not optional
+
+**The product owner's safety argument is *"we have one crate per actor client type"*, and process
+managers do not use those crates.** §0 measures it: `deliver:` is a direct `Repository::save` to the
+target's stream (`process_managers.rs:118-122`) and `send:` runs the target's command handler in-line
+(`:786`). Neither goes through `crates/clients/{actor}`; neither goes through the target's mailbox
+lane; neither takes the target's lease. So today, an in-between unit's "permission to address two
+boundaries" would be **a formatted string**, not a link edge — and the argument that makes the
+concession safe would be a comment.
+
+**Therefore the in-between unit is gated on the PM write path going through the client crates**, which
+is the same change ISO-3 already demands and which the concession makes urgent:
+
+1. `deliver:` emits `Client{Target}::record(fact, envelope)` instead of `Repository::save(&format!(…))`.
+2. `send:` emits `Client{Target}::send(cmd, envelope)` instead of an in-line handler call.
+3. The PM bin's `Cargo.toml` then names exactly the client crates its `processmanager.yaml` targets —
+   **its declared reach becomes a link edge**, which is what the product owner believed it already was.
+4. `EventStore::append` loses its bare `&str` in favour of a stream-category witness (**ISO-3**), so
+   the escape hatch closes rather than moving.
+
+**And this is a correctness fix independently of boundaries**, which is why it should not be argued as
+a boundary cost. Today a PM appending to `Cart-{id}` in its own transaction is a **second writer** on
+an aggregate whose whole runtime discipline — mailbox serialization, lease, `ownership_version`
+fencing — exists to guarantee there is one. Vernon's rule (*the mailbox is the serialization point*)
+is enforced for every GraphQL and adapter path and **not** for the PM path. A `Cart` being bound by
+`pm-cart-binding` while `actor-cart` drains an `AddCartLine` for the same cart is two writers racing
+on optimistic concurrency alone, which is exactly the anomaly the mailbox was built to remove.
+
+#### D15.6 What stops the list growing — the three mechanical brakes
+
+Named explicitly, because *"an unbounded licence recreates the failure"* is the right worry:
+
+1. **The `CONNECT` test is a validator rule, not a review habit.** It is computable from
+   `processmanager.yaml` alone: `distinct_read_boundaries(pm) <= 1` for any PM declared in-between,
+   and `distinct_write_boundaries(pm) == 2`. A PM that fails it cannot be declared in-between; a PM
+   whose `read:` steps later grow a second boundary **breaks the build**, which is the point.
+2. **In-between is a property of a PM, and PMs are a closed, declared catalog.** There is no way to
+   create an in-between unit for anything else — not a subgraph, not a projector, not an adapter, not
+   a worker. §5's app table stays exhaustive.
+3. **Two boundaries, never three.** A PM writing three boundaries is not translating; it is
+   orchestrating, and it is the signal that the boundary set is wrong — which is a **BND** question,
+   not a licence to widen. Encode it as the same rule's upper bound.
+
+**Recommendation: adopt the rule as stated, adopt the three brakes, and treat D15.5 as the
+precondition rather than the follow-up** — final-vision-first
+([ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)): the
+concession's premise is the design, so build the premise.
+
+### D16 — The stop condition already fires, today, on two process managers *(recommendation: **project a slim published snapshot; do not grant the second `CONNECT`**)*
+
+**Measured, and it corrects this proposal's own D9 text.** D9 said a `customer`-homed
+`CartBindingProcess` *"would be the first such grant in the system."* It would not be the first.
+**Two PMs already need a `GRANT` spanning two boundaries, in the spec, on the two hottest paths of a
+Friday service:**
+
+| PM | Cross-boundary read | Where | Why it reads it |
+|---|---|---|---|
+| `PlaceOrderProcess` (**order**) | `projection_tables.yaml#/Restaurant` | `specs/ordering/processmanager.yaml:38-41` | The four checkout guards immediately after it: `RestaurantPaused`, `CannotOrderTestRestaurant`, `DeliveryAddressRequired`, `OutsideDeliveryArea` (`:42-45`) |
+| `DeliveryDispatchProcess` (**delivery**) | `projection_tables.yaml#/Restaurant` | `specs/delivery/processmanager.yaml:42-46` | *"The pickup address"* — fed straight into `DeliveryRequested.pickup` (`:53`) |
+
+Both read the **restaurant** boundary's read model. `pm-place-order` does it **on the checkout path**,
+i.e. on every order at 19:30 Friday. So BND-3's stop condition — *"if any app's `GRANT` spans two
+boundaries' schemas outside the declared exceptions, the shared database has silently become an
+integration database"* — is not a future risk to watch for: **it is the current design, and it was
+never noticed because nothing measures it.**
+
+| Option | Pros | Cons |
+|---|---|---|
+| **(a) The restaurant boundary PUBLISHES the two facts, and each consuming boundary's projector folds a slim snapshot into its OWN read database** ✅ **recommended** | Final vision, and it is the answer STO-2(a) already gave for `ScopeMembership` — *"composition happens in the projector, not the query"*, applied to authorization; this applies it to dispatch inputs. Each PM keeps **one** `CONNECT`, the stop condition holds unbroken, and `DeliveryDispatchProcess` becomes **eligible** for an in-between unit under D15. The data is tiny and slow-moving: `order_acceptance`, `is_test`, `address`, `delivery_area`, `preparation_time_minutes`. Read-shared log (D14) makes the fold free — the restaurant events are already in the one log every projector may read | A second copy of five restaurant fields, eventually consistent. **Say the staleness cost out loud**: a restaurant pausing orders at 19:45 is honoured one projection lag later, so the pause guard is *near*-immediate, not immediate. That is the honest trade and it is small — the alternative's failure mode (a wrong `GRANT`) is not small |
+| (b) A read-time query contract — the PM calls `restaurant`'s published query (D13.4's third mechanism) | No copy, no staleness; uses a mechanism this proposal already sanctioned | Puts a **synchronous cross-boundary hop inside the checkout saga**, at peak, on the money path — a restaurant-side latency spike becomes a checkout failure. D13 chose read-time composition for a value that *must* be fresh (the ETA); a pause flag and a pickup address are not that value |
+| (c) Declare a permanent exception and grant the second `CONNECT` | Zero work; matches what the code does today | The exception list is where boundary erosion lives. Two exceptions on the two hottest paths is not an exception list, it is the design — and it would make `DeliveryDispatchProcess` permanently ineligible for the in-between unit the product owner just authorised |
+
+**Recommendation: (a).** And note the sequencing gift: it is the **same** projector-side composition
+STO-2 already recommends, so it is one mechanism serving two programs rather than a new one.
+
+**On exceptions, since BND-3's stop condition names a list.** Keep the list, keep it **short**, and
+make granting one a recorded act rather than a review outcome:
+
+> **An exception to the one-`CONNECT`-per-app rule is granted only by a register row with a named
+> owner and a stated removal condition, and the list is emitted into the generated grant script from
+> a single declared place** (the app's own declaration folder,
+> [#491](https://github.com/TheCaptainCompany/captain-food/issues/491) / REP-5(a)) **so that adding
+> one is a visible diff in the file whose entire purpose is permissions.** The standing list is the
+> three already named — `admin_ro`/`claude_ro` incident tooling, `bam`, `worker-erasure` — each of
+> which is cross-cutting *by definition* rather than by convenience. **A business app is never on it.**
+
+That is what stops the list growing: not a promise, but the fact that the only way onto it is a diff
+in a permissions file with a removal condition written next to it.
+
+---
+
 ## 4. Flows
 
 ### 4.1 Today — checkout crosses three boundaries, and two of its events live in the kernel
@@ -820,6 +1080,39 @@ sequenceDiagram
 ```
 
 <a href="https://mermaid.live/view#pako:eNp1VF1v2zAM_CuEn1IsjtcW2IMxBOhHUKSYU2_p2zq0isQ4WmVJleR2QdH_Pkr21gzJAiQIZfJ4vKP8mnEjMCsh8_jUoeZ4KVnjWHungT6sC0Z37QpdH1vmguTSMh3g6usXYB4o2W6eVG6cQAcjJpgN6Aqpj_ZLqvNYIfXKdFrct-g9a9DDqGVSrcyvAxV1FStsm1vFOPZNPq9cMa1jfBPD2hlOSPA9Pfyxj3FWRwzGg3G5ZdsWdegh-v_AmsZhwwL-H2K2jBB1M3umgiUBIeRTEIaI63uMh_4A9-vE3ZmfmHq_k0-8STnT2feePQCpmk-n1XkJqMmQDuF9UlKXc7SBkU35WjofxlDPFpfzxdUgXXVOxXVVgnDEDEYKmUf4AOvo7JCzMDSpeSa4uhqf1SUMOsx1oN8Lh6SEgMaQMRvTIgQD3iL3RSJa9NNOtqxVkzTM7QbhEZ1GRV2N9bB2poVT6BNj-fGk71xXxG62LIFZi1ocbvyPB6kiiiFQyUiZ0AL1-2OdYpqcyMEHqRQwGBaJiNtxItc_MJT14iTtJVj6_jV8DNq8wHyxnF_OUlJaTOa2O2pGhZKa_dlZfXCGC9r6zu3Rvx6SaTYBycO8GCry4htyxVoWpNF5cWE0zef7iNbIB7hZzIBvkD9aI3XYQayvS1gbJeIOJtBbx_ij1A05neJdsD3TqfgUuDPe554bi_0e-gh2DCOj1RaW8bzCeO_9RtpB3lSD_qi3_aGjzRpuwODOtizvupOPJ58e6I6TT3Jn-wcMEddKmwDctFYqnGRjyFp0BCPoLfSakbtteh8JXLNOhezt7TdRoZYr" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+
+### 4.3 D15 — an in-between unit, drawn as it must be built (dispatch, the one candidate)
+
+Today's path is drawn first because the difference is the whole design: the PM currently **appends to
+`DeliveryJob-{id}` itself**, in its own transaction, past the `DeliveryJob` lane's lease. The
+in-between unit is only safe once that arrow is a client-crate send.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant PM as pm-delivery-dispatch<br/>DeliveryDispatchProcess
+    participant RDB as restaurant read DB<br/>Restaurant snapshot
+    participant CL as client-delivery-job<br/>the sealed write door
+    participant MB as inbound_messages<br/>captain-write
+    participant AJ as actor-delivery-job<br/>DeliveryJob lane
+    participant ES as domain_events
+
+    Note over PM,RDB: TODAY -- read step 2 reaches the RESTAURANT read model directly<br/>specs/delivery/processmanager.yaml:42-46. Second CONNECT = D16 stop condition
+    PM->>RDB: SELECT address FROM Restaurant
+    Note over PM,ES: TODAY -- deliver is a DIRECT append past the DeliveryJob lease<br/>process_managers.rs:118-122, a SECOND WRITER on the aggregate
+    PM-->>ES: Repository::save "DeliveryJob-{id}" DeliveryRequested
+
+    Note over PM,AJ: D15.5 + D16 -- the shape the concession assumes
+    PM->>PM: read the SLIM restaurant snapshot folded into<br/>the delivery read DB -- one CONNECT, D16 option a
+    PM->>CL: record DeliveryRequested, envelope
+    CL->>MB: INSERT kind EVENT, actor_type DeliveryJob
+    MB->>AJ: drain under lease + fence
+    AJ->>ES: append DeliveryRequested -- the OWNING aggregate records it
+    PM->>CL: send MarkOrderDelivered via client-order
+    Note over PM,CL: Two client crates named in Cargo.toml = the in-between unit's<br/>declared reach, as a LINK EDGE rather than a formatted string
+```
+
+<a href="https://mermaid.live/view#pako:eNptVG1v4jgQ_iujfLkPS6ha7a5O6K4SJbkVPRKqwO3qpErVEE_Bt4ntsw0Vqvrfb-wkW_aAT2A8zzwvnnlNai0omUDi6N89qZoyiVuL7aMC_uDea7VvN2S73watl7U0qDw8FIAOTJsKauSB7DEV0hn09e63jb26zfrTrD98sLom585xquwuAFlyHvc2nFhCAdldhKnej51C43ban0PMFgGhbiQp_07nH72JEH5H4AgbEvBipScQWl_QU0QaUm30XomnlrnillxEqNF4lCqN5eeV0_tQibXX9rz74MO93kCD6kJ5vgrlQrfc4okOrIFd6q6VmulqLme3R2zUBNbLbPo3pGlnkvNk4CZ8r3fkICit8tV6-lc1LdfdlZbzbUBIS7VvjpGSM1S7q4HplemSaVGxYDs-YttMPt6kHz-PYUW1VgJmy7LMZ2v4HbLrz9xUGwjn0kvdE30o0tvbSHCVL8JVFIITdfBHtSzgPcQLsvLViaqeFEj2E7J5FaGMISZh0Pmo8CdHCR1FUb2Kp16GG1s3ub7-Nb2-uRkx1ipnERl8q-brvAKtIhJut5a2OGTKIlhF4FOR0U5ynsfJxOGB4DE56Zq-SvH2mPwgUoXR4SjExdim9xO27dP4E3yI9rHK-CJ3aCh-YysDc_aS34Hb88s78fShmHQ5hpurxbw4HZRhIuBZN4Kft1Re_3jyQ77DOIXGWtEQ5iiS0cbHvicdZ4vQsdZWnAscAakDNdr0js0WXFBw6vNylVdr-C45qPxrXjJ8nIcnfzQ_JdbVFXdcF4wRlh898MCxVzFLNuk5rKHu3vS-D6R_A2eEBjeX38p5-eU90F4Bz7P_nzQXcAq035eWm_aADHSQOGwQHf65kGQoX7_o_hrUlhs5UNhG62GGdqvHXrcND0ogxRtjQ_6FKCiU_pdumQiqGwwd49SO4uqAxbz8E_LsSw4MuuN2foccCwdrW_RBqPNWqm0ygqQlPpOCl_ZrwnfbuL4FPeO-8cnb239Q0PWT" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 **What does NOT change, and must be said**: merging scopes does **not** merge aggregates. `Payment`
 keeps its own stream, its own mailbox lane and its own single writer. One aggregate per transaction

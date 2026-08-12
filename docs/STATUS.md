@@ -2,6 +2,88 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-11 — BND-1 IS CLOSED: THE BOUNDARY SET IS FIVE, AND THE REGISTER'S LONGEST-STANDING
+> ROW IS ANSWERED**
+> (product-owner answer sheet, 2026-08-11; [DECISIONS.md](proposals/DECISIONS.md) §5 + §31;
+> [PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+> §0; [#493 "Two partitions, one domain: boundedContexts and specs/{scope}/ home 6 of 20 actors differently, and nothing reconciles them"](https://github.com/TheCaptainCompany/captain-food/issues/493)).
+> Verbatim: *"I'm ok for the 5 / Customer / Order / Catalog / Restaurant / Delivery"*.
+>
+> **The boundary set is CLOSED as recommended: five business boundaries -- `customer` - `order` -
+> `catalog` - `restaurant` - `delivery` -- plus the `platform` bucket and the `common` kernel** (a
+> linkage concept with no pod, never a boundary). `catalog` stays a boundary; **`comms` and
+> `payments` dissolve into `order`**; `public` stays a role of `customer`. **This unblocks slices
+> 1-5 of [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)
+> and 15 of the 28 crates in
+> [PROP-20260811-173223](proposals/PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md)
+> REP-2(a)** -- the BND-1-GATE concern on that file is now checked. It also beats the clock:
+> ADR-20260807-183024 D7's *"start-clean makes the storage split free -- the window that does not
+> recur"* closes at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover.
+> **Still owed before that proposal can be marked approved**: the superseding ADR on
+> ADR-20260807-183024 D1's named scope list.
+>
+> **Four more rows close in the same message.** **BND-2** -- the boundary is **`delivery`, not
+> `rider`**, reasoning endorsed. **BND-7** -- *"Estimate for now"*: the ETA frozen onto `OrderPlaced`
+> is an **estimate, not a promise with a remedy**, and that must be reflected wherever the freeze is
+> specified. **BND-6** -- *"Prep time only + labelled"*: when the travel leg cannot resolve, show the
+> prep-time estimate **explicitly labelled as what it is** (which is precisely the defect already
+> shipped at `specs/screens/restaurant_frontoffice.yaml:490`). **BND-4(i)** -- *"I agree it was the
+> write side"*: actors and projectors read the **WRITE** side to load events, so the permission
+> matrix may now be emitted on that reading. **APP-1** is **delegated to the team** with one
+> deliverable demanded and not delegated: the app list plus all dependencies
+> ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A1).
+>
+> **NEW: in-between units for translating process managers are GRANTED, and BOUNDED (BND-8/BND-9).**
+> Verbatim: *"I'm ok if we create in between boundaries for process managers that are making the
+> translation between 2 boundaries thanks to the fact that we have one crate per actor client type."*
+> The team has bounded it with **the `CONNECT` test**: a PM earns its own in-between unit only when
+> it **writes two boundaries and reads at most one** -- because every PM write lands in ONE database
+> (`domain_events` + `inbound_messages` + PM state are all inside `captain-write`, STO-1), so
+> widening write reach widens an *enumeration*, while a second READ is a second `CONNECT` through the
+> strongest wall in the matrix, i.e. BND-3's stop condition. **Classified: the concession creates
+> ZERO units today and reserves exactly ONE candidate** (`DeliveryDispatchProcess`);
+> `CartBindingProcess` is **CONFIRMED in `order`** under the new third option, because it commands
+> one boundary and reads one boundary -- both `order` -- and its customer-side trigger is a mailbox
+> fact, not a data reach.
+>
+> ⚠️ **Two measured findings arrived with it, and both correct things already written down.**
+> **(1) The concession's premise is not true of process managers today**: `deliver:` is a DIRECT
+> append to the target aggregate's stream (`crates/application/src/generated/process_managers.rs:118-122`)
+> and `send:` runs the target's command handler **in-line** (`:786`) -- neither goes through
+> `crates/clients/{actor}`, the target's mailbox lane, or its lease. **The DSL's own doctrine header
+> says the opposite verbatim** (`specs/common/processmanager.yaml:7-9`: *"a process manager never
+> appends to `domain_events` itself"*). That is a spec claiming something the code does not do, on
+> the write path, and it is the concrete caller that makes **ISO-3** load-bearing. **(2) BND-3's stop
+> condition already fires, twice**: `PlaceOrderProcess` reads the **restaurant** boundary's
+> `Restaurant` read model on the CHECKOUT path (`specs/ordering/processmanager.yaml:38-41`, feeding
+> four guards) and `DeliveryDispatchProcess` reads it for the pickup address
+> (`specs/delivery/processmanager.yaml:42-46`). D9's claim that a `customer`-homed
+> `CartBindingProcess` *"would be the first such grant in the system"* is **wrong** -- two exist
+> today. Recommended remedy: the `restaurant` boundary publishes the five slow-moving fields and each
+> consumer's projector folds a slim snapshot into its OWN read database -- the same
+> composition-in-the-projector answer STO-2(a) already gave for `ScopeMembership`.
+>
+> 📓 **The `journal` concern is CORRECT, and both tables still exist (JRN-1, §32).** Verbatim:
+> *"make sure we don't do both."* `inbound_events` is backfilled and DROPPED; **`command_journal` is
+> not**. Live on it today: the legacy arm of `placeOrder`/`approveRefund`/`denyRefund` writes it
+> whenever `PM_MAILBOX_DELIVERY` is false -- **and false is the seeded default**
+> (`specs/database/tables/referential.yaml:111`), so **`PlaceOrder`'s acceptance lives in
+> `command_journal` in the posture we actually run**; `operationStatus` and `operationStatusChanged`
+> read it **unconditionally on both arms**; the mailbox arm reads it for cross-arm duplicate
+> identity; `worker-journal-sweep` and `sweep_retention.sql` write it. **The API lens's finding is
+> VERIFIED and is worse than reported**: the permission matrix's *query*-path row grants the write
+> database **no `CONNECT` at all**, so as written it breaks the acceptance poll on **both** arms, not
+> just the journal fallback -- up to 30 polls at 1 s per action, i.e. every checkout, every
+> restaurant acceptance, every rider transition. **Recommendation: grant both reads now to the
+> platform graph, with the grant's REMOVAL as a named line in the `PM_MAILBOX_DELIVERY` default-flip
+> ADR's checklist** -- retiring first is the final-vision answer but the retirement rides a money-path
+> flip gated on a staging smoke that is downstream of #358, which is exactly the externally-forced
+> clause ADR-20260808-235113 carves out. **Nothing in flight makes the retirement harder**; the one
+> thing to watch is that `CommandJournal` must stay a PLATFORM write-path port and must never acquire
+> a `ports-{B}`/`read-{B}` home under REP-2. Full analysis:
+> [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+> §6.1.2.
+
 > ⏱️ **2026-08-11 — THE ETA IS THE PRODUCT, AND NOTHING COMPUTES IT; PLUS: ONE EVENT LOG**
 > ([PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
 > D9/D10/D13/D14,
@@ -53,7 +135,8 @@
 > the travel leg cannot resolve) and **BND-7** (is the frozen ETA a promise with a remedy, or an
 > estimate?) -- BND-7 **before** the freeze lands, since adding a field to an already-stored event is a
 > migration and it is nearly free before the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
-> cutover. **BND-1 (the boundary set) is still unrecorded and remains the top of the register.**
+> cutover. **BND-1 (the boundary set) was answered on 2026-08-11 -- see the entry at the head of
+> this file; BND-6 and BND-7 are answered too.**
 
 > 📦 **2026-08-11 — REPOSITORY CRATES: TWO OPEN ROWS CLOSE, AND THE COUPLING NOBODY HAD NAMED**
 > ([PROP-20260811-173223](proposals/PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
@@ -96,9 +179,9 @@
 > [#358 "MKS bootstrap"](https://github.com/TheCaptainCompany/captain-food/issues/358) window only as
 > a monolith-only composition crate behind a codegen guard.
 >
-> ⚠️ **BND-1 ([#493 "Two partitions, one domain"](https://github.com/TheCaptainCompany/captain-food/issues/493))
-> just became more urgent** -- 15 of the 28 crates are per-boundary, and building 3 × 8 scopes to
-> merge into 5 is the forbidden intermediate. **Dispatchable today, boundary-agnostic**: the ratchet
+> ✅ **BND-1 ([#493 "Two partitions, one domain"](https://github.com/TheCaptainCompany/captain-food/issues/493))
+> is CLOSED (2026-08-11): B = 5**, so the 15 per-boundary crates are unblocked and the BND-1-GATE
+> concern on that proposal is checked. **Dispatchable today, boundary-agnostic**: the ratchet
 > dimension on [#490 "Scope-closure ratchet"](https://github.com/TheCaptainCompany/captain-food/issues/490),
 > `store_core` + `eventstore` + the reader split + the ISO-3 witness, `projection_runtime`, the 7
 > partner ACL crates.
