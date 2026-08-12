@@ -1438,18 +1438,76 @@ boundary is) but it makes the gateway→subgraph fan-out 7 × N pairs — 42 aft
 ACL would make the generated NetworkPolicy exactly the role's reachable set, at zero runtime cost.
 A cheap, generated tightening for whoever next touches the deploy emitters, not a blocker.
 
-### 5.1.9 What this section does NOT change, and what is left open
+### 5.1.9 Three corrections from the 2026-08-11 API-tier measurement
+
+This section was argued from the composition table and the routing code. Measuring the *resolvers*
+and the *generated SDL* afterwards contradicted three of its statements. Each correction is recorded
+here rather than by rewriting the reasoning above, because the reasoning is still right and the
+facts under it were incomplete.
+
+**C1 — §5.1.2's table is already violated by a subgraph that is EQUAL to its boundary.** The table
+says a subgraph coarser than a boundary is *"forbidden"* because it *"needs CONNECT to two
+boundaries' read databases"*. Measured from `crates/server/src/graphql/generated/query.rs`, that
+condition is met **today by five of the eight subgraphs at boundary granularity**:
+
+| Subgraph (today's scopes) | Foreign read models its resolvers hold | Evidence |
+|---|---|---|
+| `catalog` | `RestaurantReadRepository` | `query.rs:21` — `Catalog.restaurant` FK-nav hydration |
+| `network` | `CustomerReadRepository` | `query.rs:233` |
+| `delivery` | `OrderReadRepository`, `RestaurantReadRepository` | `query.rs:124-125,162-163,188-189` |
+| `ordering` | `CatalogReadRepository`, `RestaurantReadRepository`, `CustomerReadRepository` | `query.rs:311-312,418-419` |
+| `payments` | `CustomerReadRepository` | `generated/mutation.rs` (refund decision legs) |
+
+Under BND-1(a) this becomes: `graphql-catalog` → `read-restaurant`; `graphql-delivery` →
+`read-order` + `read-restaurant`; `graphql-restaurant` → `read-customer`; `graphql-order` →
+`read-catalog` + `read-restaurant` + `read-customer`. **Only `graphql-customer` and
+`graphql-platform` are clean.** So the CONNECT wall §5.1.2 leans on is not a property the recommended
+set has; it is a property the recommended set must be *made to have*. **The reshape does not create
+this and does not fix it** — §5.1.3(a) stands unchanged on its own grounds.
+
+**C2 — the invariant in §5.1.7 is not satisfiable as written, and the reason is a gate hole.** The
+closure rule — *"the `read-*` crates in its transitive closure must be a subset of `{read-B}` for its
+ONE declared boundary"* — is contradicted by C1. The cause is that the FK-derived navigation fields
+are **generated, not declared**: `specs/catalog/api.yaml:9-20` declares no `restaurant` property on
+`Catalog`, and the emitter adds `restaurant: Restaurant!` from the `restaurantId` FK
+(`tools/codegen-rs/src/emit/server_graphql.rs:229`). The validator rule that exists precisely to
+forbid this — `api-nested-cross-scope`, whose own text prescribes *"pre-joined in a projector-owned
+view"* (`tools/codegen-rs/src/validate/scopes.rs:21-24`) — walks `$ref`s in the spec and therefore
+sees **none** of the ten cross-scope nested type edges in
+`specs/generated/schema.generated.graphql`, while `make validate` reports 0 errors. §5.1.5 already
+foresaw *"the view-based restatement of `api-nested-cross-scope`"* as a B2/B3 follow-up; the
+measurement promotes it from a tidy-up to the **precondition of per-scope API crates**, because
+four of the ten edges are cycles (`restaurant ↔ order`, `restaurant ↔ delivery`,
+`restaurant ↔ catalog`, `delivery ↔ order` after the reshape) and Rust has no cyclic crate graph.
+Full enumeration, the five permanently-empty edges whose deletion breaks every cycle, and the
+migration story for removing them:
+[PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md) §4.3.
+
+**C3 — introspection stops working the moment composition is per-scope.**
+`crates/gateway_runtime/src/lib.rs:121-122` skips `__`-prefixed fields on the comment *"introspection
+— any subgraph answers the role-filtered shape"*, and routes an introspection-only document to
+`table.kernel_scope`. That is true only because every subgraph today holds the **master** schema
+(§5.1.1 A1). Under per-scope composition `graphql-platform` would answer with its own 5 operations
+instead of 121, silently narrowing every client's view of the API. The fix belongs in the gateway,
+which already embeds a generated table: embed the generated SDL and answer introspection there,
+which also retires the `kernel_scope` default. Register row **API-3**.
+
+**What this section still does NOT change**
 
 - **D8 stands entirely**: one domain one graph, codegen-time composition tables, top-level routing,
-  no query planner, auth at the schema boundary.
+  no query planner, auth at the schema boundary. C3 moves *introspection* to the gateway; it does not
+  move execution or add a planner.
 - **The boundary decision is not made on API-tier grounds.** The API tier follows; nothing here
-  argues for 5 over 8 or 8 over 5.
-- **Nothing is added to the decision register.** The subgraph count is a derived consequence of
-  BND-1 plus §32's grant rule, and the two follow-ups it creates are team-owned and executable: the
-  view-based restatement of `api-nested-cross-scope` (§5.1.5, lands with B2/B3) and the closure-form
-  restatement of the `read-{B}` link claim (§5.1.7, lands in REP's slice 0 ratchet). The one
-  correction owed to another document is `graphql_platform`'s SELECT on `command_journal` in §32's
-  grant matrix (§5.1.4).
+  argues for 5 over 8 or 8 over 5. The 2026-08-11 measurement adds one sequencing fact and no
+  boundary argument: **the compositions are generated, so cutting 8 costs the same as cutting 6** —
+  the `server` cut therefore lands BEFORE the reshape, and B3 regenerates it
+  (PROP-20260811-090000 §5.1).
+- **Three rows ARE now added to the decision register** (§34), reversing this section's earlier
+  *"nothing is added"*: **API-1** (what resolves a cross-boundary FK nav field — C1/C2),
+  **API-2** (deleting the five permanently-empty nav fields is a schema removal and needs its
+  migration story recorded — C2), **API-3** (introspection's home — C3). All three are team-owned.
+  The one correction owed to another document is unchanged: `graphql_platform`'s SELECT on
+  `command_journal` in §32's grant matrix (§5.1.4).
 
 ---
 
@@ -1517,6 +1575,14 @@ the other three. It is one sitting, not a program.
 | **B4** | Per-boundary `captain-views` schemas + the per-app database roles (D11), **report-only first** — a check reports declared-vs-effective grants before any `GRANT` narrows. The flip is a separate recorded decision | That the grants are right before they are load-bearing (gate-then-stabilize). A wrong narrowing takes a pod down at boot, not in review | Report-only is inert; the flip is one config decision |
 
 **Then**, and only then, PROP-20260811-090000 slice 1 builds `projections-{boundary}` × 5.
+
+**What runs BEFORE B1, in parallel, and is gated on none of this** (added 2026-08-11): the API-tier
+`server` cut — PROP-20260811-090000 slice 4 sub-slices **A1** (extract `api_runtime` + `api_graph`,
+drop `server` from the 8 subgraph manifests) and **A2** (delete the five permanently-empty
+cross-scope nav fields; make the API type graph acyclic). Both are scope-count-agnostic: the
+compositions are generated, so B3 regenerates them at 6 exactly as it would at 8, and A2's cycle set
+is identical before and after the merge (§5.1.9 C2). Sequencing them after B1–B3 would idle a
+nothing-gated slice behind the superseding ADR this proposal still owes.
 
 ---
 

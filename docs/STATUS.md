@@ -2,6 +2,72 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✂️ **2026-08-11 — THE API TIER IS THE WIDEST APP IN THE TOPOLOGY, AND `server` IS ONE EDGE AWAY
+> FROM EIGHT PODS** (docs-only; amendments in place to
+> [PROP-20260811-090000](proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md)
+> §1/§4.1-§4.4/§5.1/§5.2 and
+> [PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)
+> §5.1.9/§8; new register section [DECISIONS §34](proposals/DECISIONS.md) — API-1, API-2, API-3, all
+> **team-owned**). Product-owner directive, 2026-08-11: *"Remove the damn server crate it's currently
+> the purpose of what we are doing"*.
+>
+> **Measured**: each of the 8 `graphql-*` subgraph bins **declares 3 workspace crates and links 44**
+> -- 14x, against 1.5x for the 7 `gateway-*` bins. **25 of the 44 are reachable only through
+> `server`**: `web`, `app-core`, `surface_runtime`, all five partner adapters
+> (`stripe-adapter`, `uber-direct-adapter`, `hubrise-adapter`, `coopcycle-adapter`,
+> `avelo37-adapter`), `shared_types`, and **14 of the 15 `crates/clients/*`**. A pod whose whole job
+> is `catalog` and `categories` links the Stripe integration and the entire SSR renderer, and can
+> spell `client_order::OrderClient`. The cause is a recorded design choice, not drift:
+> `crates/server/src/bin_support.rs:1-8` says a subgraph IS the monolith's surface filtered by a
+> scope **string** — defect 3 of that proposal's §1, reproduced in the API tier.
+>
+> **Three findings reorder work elsewhere.**
+> **(1) REP-4 does NOT gate the API tier.** `EventStore` — the only port whose signature names the
+> all-scopes `DomainEvent` — appears in **three** resolvers
+> (`crates/server/src/graphql/generated/mutation.rs:4942,6384,6584`, i.e.
+> `placeOrder`/`approveRefund`/`denyRefund`), and in all three inside the **`else` branch of the
+> `pm_mailbox_delivery` gate**. Queries name it **zero** times; the subscription path carries
+> `AppendedEvent = {String, String, Uuid, i64}`
+> (`crates/infrastructure/src/persistence/event_bus.rs:20-31`), not the union. **Six of eight
+> subgraphs never name it** — so the API tier is cuttable **before** the event split, which reverses
+> that proposal's own "subgraphs are last cuttable" ranking.
+> **(2) The real blocker is a GATE HOLE, and it outranks everything it let through.**
+> `api-nested-cross-scope` forbids an api type in scope S from nesting another scope's type
+> (`tools/codegen-rs/src/validate/scopes.rs:21-24`) and `make validate` reports 0 errors — while
+> `specs/generated/schema.generated.graphql` contains **ten** such edges. The rule walks `$ref`s in
+> the spec; the emitter **derives** these fields from FKs (`tools/codegen-rs/src/emit/server_graphql.rs:229`)
+> and from `navRoles:`. **Four of the ten are cycles** (`network <-> ordering`, `network <-> delivery`,
+> `network <-> catalog`, `delivery <-> ordering`), so per-scope API crates cannot exist at all — Rust
+> has no cyclic crate graph. **Five of the ten resolve `Vec::new()` unconditionally**
+> (`crates/server/src/graphql/generated/types.rs:1101-1105,1230`:
+> `Restaurant.deliveryJobs/catalogs/carts/orders`, `Order.deliveryJobs`) and deleting them makes the
+> graph **acyclic**. That deletion is a schema removal — register row **API-2**, with the migration
+> story recorded (provably empty; zero first-party selections in `specs/screens/**` or
+> `crates/web/src/**`; no third-party client; production down with an empty log — the free window
+> closes at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover).
+> **(3) The 8->6 subgraph reshape lands AFTER the cut, not before.** The compositions are
+> **generated**, so cutting 8 costs the same as cutting 6, and the cycle set is identical either side
+> of the merge. The cut is gated on nothing; the reshape still owes the superseding ADR on
+> ADR-20260807-183024 D1's scope list.
+>
+> **What the directive can be satisfied by NOW**: removing `server` from the eight subgraph
+> manifests (slice **A1** — extract `api_runtime` + `api_graph`; `server` keeps compiling by
+> re-export and stays the monolith's composition root). **Deleting the crate** additionally needs the
+> #358 cutover plus homes for three route sets — the SSR host fallback (slice 5's undrawn view-model
+> boundary), `POST /auth/session` (already a recorded
+> [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) cutover precondition, **no bin
+> home exists**) and `/internal/sirene/drain`. Both readings are written out in
+> PROP-20260811-090000 §5.2 so the smaller one is never delivered silently.
+>
+> **Also corrected**: PROP-20260811-150242 §5.1.2's *"coarser is forbidden"* CONNECT argument is
+> already violated **at boundary granularity** — five of eight subgraphs hold another boundary's read
+> model inside a resolver (`crates/server/src/graphql/generated/query.rs:21,124-125,311-312,418-419`),
+> and only `graphql-customer` and `graphql-platform` are clean. Register row **API-1**; the
+> doctrine's own answer (*"pre-joined in a projector-owned view"*) is the recommendation. And
+> **API-3**: `crates/gateway_runtime/src/lib.rs:121-122`'s *"any subgraph answers the role-filtered
+> shape"* becomes false the day composition is per-scope — introspection must move to the gateway, or
+> `graphql-platform` answers with 5 operations instead of 121.
+
 > ✅ **2026-08-11 — BND-1 IS CLOSED: THE BOUNDARY SET IS FIVE, AND THE REGISTER'S LONGEST-STANDING
 > ROW IS ANSWERED**
 > (product-owner answer sheet, 2026-08-11; [DECISIONS.md](proposals/DECISIONS.md) §5 + §31;
