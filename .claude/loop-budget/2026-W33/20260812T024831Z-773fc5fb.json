@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 500,
+  "recordedAt": "2026-08-12T02:48:31.356Z",
+  "branch": "HEAD",
+  "note": "PR #496 rebase run, unbilled remainder: the timer was opened only after the rebase (the branch worktree carried the pre-ledger hook until it was rebased onto main), so the 2.0m segment covers neither the pre-start rebase nor the post-stop CI supervision. Measured from stat -c %w on the worktree .git (02:38:25Z) to 02:50Z, minus the 120s already recorded."
+}
