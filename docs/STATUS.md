@@ -2,6 +2,28 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔒 **2026-08-12 — EACH ADAPTER OWNS ITS OWN, COMPLETELY ISOLATED DATABASE** (product-owner
+> directive, verbatim: *"Each adapter must have there own database completely isolated"*;
+> [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md);
+> register row **ADP-1** in [DECISIONS §32](proposals/DECISIONS.md); records-only — no code, no
+> specs, budget week 2026-W33 is exhausted at 725.5m/720m so execution rides
+> [#494 "Storage boundaries and least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
+> next week). Supersedes
+> [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+> §11's placement of integration staging in `DomainCommonDb` (map amended in place): **six adapter
+> databases** — `adapter-stripe` · `adapter-hubrise` (staging + the credential tables) ·
+> `adapter-uber-direct` · `adapter-coopcycle` · `adapter-sirene` (the 655 MB mirror) ·
+> `adapter-identity` (`auth_sessions`) — each reachable by its own role and nothing else, in the
+> shared business cluster (STO-3's math already priced per-thing clusters out; the wall is role +
+> `CONNECT`, BND-3's mechanism). `avelo37` owns no table yet and gets its database with its first
+> state. Two confirm-or-redirect legs on the row: the one outward grant (the `inbound_messages`
+> front door, recommended) vs a strict outbox+relay reading, and whether `adapter-identity` is in
+> scope (recommended yes — same credentials-at-rest posture as `hubrise_connections`). Named
+> consequences: STO-4's pooler-first sequencing **hardens** (every adapter bin holds two pools),
+> and `hubrise_connections` is the one NON-rederivable adapter table (a non-expiring token only a
+> human re-connect replaces) so it needs a backup story while staging mirrors take the refetch
+> posture.
+
 > 🗂️ **2026-08-12 — THE APP INDEX IS GENERATED, AND IT SAYS THE SPLIT IS NOT CLEAN**
 > ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md) slice A1,
 > [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491);
