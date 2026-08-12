@@ -67,8 +67,8 @@ MessageId:
   type: string
   format: uuid
   description: >
-    Unique id of one command submission — the idempotency key of the write path (command_journal pk,
-    ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent.
+    Unique id of one command submission — the idempotency key of the write path (inbound_messages
+    pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent.
     A replayed messageId with an identical payload acknowledges against the original; the same id
     with a different payload is rejected (Conflict). Events emitted by the command carry it as
     domain_events.cause_id.
@@ -307,27 +307,11 @@ OperationStatus:
     PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."
 
 
-# --- Write-path journal lifecycles (database/tables/journals.yaml, ADR-20260720-015300/-015400) ---
+# --- Write-path journal lifecycles (database/tables/journals.yaml, ADR-20260731-122500) ---
 # Enum $ref columns store the enum's TEXT value verbatim (ADR-20260728, superseding the ADR-0037
 # ordinal + ref_<enum> scheme), so rows are self-describing; renaming a value is the migration event.
-
-CommandJournalStatus:
-  type: string
-  enum: [RECEIVED, SUCCEEDED, REJECTED, FAILED]
-  description: >
-    Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED,
-    REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus
-    (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status —
-    the journal row keeps the original's real state.
-
-
-CommandChannel:
-  type: string
-  enum: [GRAPHQL, WORKER, INTERNAL]
-  description: >
-    Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment
-    worker (e.g. the HubRise enricher), or an internal trigger endpoint.
-
+# Since #242 Runtime D there is ONE journal, so there is ONE lifecycle enum and ONE channel enum:
+# the mailbox's. `CommandJournalStatus`/`CommandChannel` retired with `command_journal`.
 
 InboundMessageKind:
   type: string
@@ -359,8 +343,8 @@ InboundMessageChannel:
   description: >
     Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an
     on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE,
-    HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and
-    which gains EXTERNAL for adapted facts).
+    HubRise…). Succeeds the retired CommandChannel (whose INTERNAL became WORKER here, and which
+    gained EXTERNAL for adapted facts).
 
 
 MailboxActorType:

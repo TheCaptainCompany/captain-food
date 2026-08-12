@@ -160,7 +160,7 @@ external_stripe_events:
   description: >
     Raw VERIFIED Stripe webhook mirror (ADR-20260720-015400). The webhook endpoint UPSERTs one row
     per Stripe event id AFTER raw-body signature verification (ADR-20260718-145856), then the ACL
-    translates it into an adapted business event staged in journals.yaml#/inbound_events.
+    translates it into an adapted business event staged in journals.yaml#/inbound_messages.
     Redelivery dedupes on the pk and ACKs immediately; processed_at is the translation high-water
     mark, enabling replay/backfill without asking Stripe to resend.
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
@@ -173,7 +173,7 @@ external_stripe_events:
     event_type:      { type: text, index: true }              # Stripe type, e.g. 'payment_intent.succeeded'
     payload:         { type: jsonb }                          # raw verified Stripe event, verbatim
     received_at:     { type: timestamptz, index: true }
-    processed_at:    { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+    processed_at:    { type: timestamptz, nullable: true, index: true }   # NULL => not yet translated into inbound_messages
 
 external_avelo37_events:
   staging: true
@@ -182,7 +182,7 @@ external_avelo37_events:
     The webhook endpoint UPSERTs one row per partner event id AFTER raw-body signature verification
     (Stripe-style timestamped HMAC, fail-closed), then the avelo37-acl translates it into an adapted
     business event (DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated)
-    staged in journals.yaml#/inbound_events. Redelivery dedupes on the pk and ACKs immediately;
+    staged in journals.yaml#/inbound_messages. Redelivery dedupes on the pk and ACKs immediately;
     processed_at is the translation high-water mark, enabling replay/backfill without asking the
     partner to resend.
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
@@ -196,7 +196,7 @@ external_avelo37_events:
     event_type:       { type: text, index: true }             # partner type, e.g. 'delivery.accepted'
     payload:          { type: jsonb }                         # raw verified partner event, verbatim
     received_at:      { type: timestamptz, index: true }
-    processed_at:     { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+    processed_at:     { type: timestamptz, nullable: true, index: true }   # NULL => not yet translated into inbound_messages
 
 external_coopcycle_events:
   staging: true
@@ -209,7 +209,7 @@ external_coopcycle_events:
     instance's per-instance secret. The endpoint UPSERTs one row per event AFTER raw-body signature
     verification (Stripe-style timestamped HMAC, fail-closed), then the coopcycle-acl translates it
     into an adapted business event (DeliveryAcceptedByPartner / DeliveryRejectedByPartner /
-    DeliveryStatusUpdated) staged in journals.yaml#/inbound_events. Redelivery dedupes on the pk and
+    DeliveryStatusUpdated) staged in journals.yaml#/inbound_messages. Redelivery dedupes on the pk and
     ACKs immediately; processed_at is the translation high-water mark, enabling replay/backfill
     without asking the instance to resend.
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
@@ -224,7 +224,7 @@ external_coopcycle_events:
     event_type:         { type: text, index: true }            # partner type, e.g. 'task.accepted' / 'delivery.status_updated'
     payload:            { type: jsonb }                         # raw verified partner event, verbatim
     received_at:        { type: timestamptz, index: true }
-    processed_at:       { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+    processed_at:       { type: timestamptz, nullable: true, index: true }   # NULL => not yet translated into inbound_messages
 
 external_uber_direct_events:
   staging: true
@@ -237,7 +237,7 @@ external_uber_direct_events:
     hex(HMAC-SHA256(webhook_secret, raw_body)), no timestamp. The endpoint UPSERTs one row per event
     AFTER raw-body signature verification (fail-closed), then the uber_direct-acl translates it into an
     adapted business event (DeliveryAcceptedByPartner / DeliveryRejectedByPartner /
-    DeliveryStatusUpdated) staged in journals.yaml#/inbound_events. Redelivery dedupes on the pk and
+    DeliveryStatusUpdated) staged in journals.yaml#/inbound_messages. Redelivery dedupes on the pk and
     ACKs immediately; processed_at is the translation high-water mark, enabling replay/backfill without
     asking Uber to resend.
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
@@ -251,7 +251,7 @@ external_uber_direct_events:
     event_type:    { type: text, index: true }            # Uber webhook kind, e.g. 'event.delivery_status' / 'event.courier_update'
     payload:       { type: jsonb }                         # raw verified partner event, verbatim
     received_at:   { type: timestamptz, index: true }
-    processed_at:  { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+    processed_at:  { type: timestamptz, nullable: true, index: true }   # NULL => not yet translated into inbound_messages
 
 external_hubrise_callbacks:
   staging: true
@@ -259,7 +259,7 @@ external_hubrise_callbacks:
     Raw VERIFIED HubRise callback mirror (ADR-20260720-015400). pk is the provider event id when
     present, else a UUIDv5 of the raw body. HubRise callbacks carry no state, so the enrichment leg
     (OAuth pull → ACL → ImportCatalog / stock COMMANDS, journaled with channel WORKER) marks
-    processed_at — HubRise yields commands, not inbound_events rows (request/report split).
+    processed_at — HubRise yields commands, not kind-EVENT mailbox rows (request/report split).
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
     max_age: '90 days'
     applies_to: >

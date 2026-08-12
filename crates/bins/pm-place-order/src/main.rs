@@ -75,7 +75,7 @@ async fn main() {
             std::sync::Arc::new(stripe_adapter::StripePaymentGateway::new(key))
         });
         let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);
-        let (status, posture) = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {
+        let status = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {
             pool: pool.clone(),
             bin: BIN,
             pm: PM,
@@ -85,7 +85,7 @@ async fn main() {
             waiter,
         })
         .await;
-        tracing::info!(pm = PM, posture = ?posture, "saga runner spawned (restricted to this PM)");
+        tracing::info!(pm = PM, "saga runner spawned (restricted to this PM)");
         saga_status = Some(status);
         // The PM's OWN mailbox lane (Runtime D1): the gate-on delivery path. The fleet
         // reads the money posture itself and refuses the lane when it is unprovable.

@@ -526,7 +526,7 @@ pub struct Option_ {
     pub stock_status: Option<StockStatus>,
 }
 
-/// The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-20260720-015500): the EFFECTIVE technical envelope echoed back (server-computed where the client supplied nothing) plus the journaled operation status. Business outcomes are never here — read them via queries/subscriptions (`operationStatus`, `paymentStatus`, the read models). NON-PROJECTED (transient) — built from the command_journal acceptance, no `reads`.
+/// The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-20260720-015500): the EFFECTIVE technical envelope echoed back (server-computed where the client supplied nothing) plus the journaled operation status. Business outcomes are never here — read them via queries/subscriptions (`operationStatus`, `paymentStatus`, the read models). NON-PROJECTED (transient) — built from the mailbox acceptance, no `reads`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct MutationAcceptance {
@@ -598,7 +598,7 @@ pub struct PoisonedMailboxMessage {
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership- scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
+/// Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership- scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or ADMIN. NON-PROJECTED (transient) — served from the mailbox, no backing View_*.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {

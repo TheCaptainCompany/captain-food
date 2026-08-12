@@ -9,7 +9,6 @@
 use std::sync::Arc;
 
 use async_graphql::Schema;
-use application::journal::CommandJournal;
 use actor_client::mailbox::Mailbox;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
@@ -75,12 +74,9 @@ pub struct WriteDeps {
     /// The `refund_process_manager` state rows the refund DECISION legs (`approveRefund` /
     /// `denyRefund`) resolve the pending run on (rules.yaml#/RefundRequiresApproval).
     pub refund_state: Arc<dyn RefundProcessStateStore>,
-    /// The durable command journal every mutation writes BEFORE handling (acceptance-first,
-    /// ADR-20260720-015300/-015500) — also the `operationStatus` read.
-    pub journal: Arc<dyn CommandJournal>,
-    /// The actor mailbox (#242 flip): the aggregate-routed mutations' acceptance door — an
-    /// `inbound_messages` insert the partitioned worker delivers; also the mailbox-first
-    /// `operationStatus` read.
+    /// THE acceptance door (acceptance-first, ADR-20260720-015300/-015500; the only journal
+    /// since #242 Runtime D): every mutation's command is an `inbound_messages` insert the
+    /// partitioned worker delivers, and `operationStatus` reads the same row back.
     pub mailbox: Arc<dyn Mailbox>,
     /// The in-process operation-response broadcast (behind the actor_client boundary, #303)
     /// feeding `operationStatusChanged` through `ActorClient::watch`.
@@ -93,9 +89,6 @@ pub struct WriteDeps {
     /// decision backed by a real `UNIQUE` constraint, never a lookup against the eventually-consistent
     /// `Restaurant` projection.
     pub slug_reservations: Arc<dyn application::queries::SlugReservationRepository>,
-    /// The Runtime D1 flip (`PM_MAILBOX_DELIVERY`, #272): the gated PM resolvers pick their arm
-    /// from this at request time — see [`super::PmMailboxDelivery`].
-    pub pm_mailbox_delivery: bool,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -152,12 +145,10 @@ pub fn build_schema_for_scope(
         builder = builder.data(w.payments);
         builder = builder.data(w.pm_state);
         builder = builder.data(w.refund_state);
-        builder = builder.data(w.journal);
         builder = builder.data(w.mailbox);
         builder = builder.data(w.status_bus);
         builder = builder.data(w.auth_sessions);
         builder = builder.data(w.slug_reservations);
-        builder = builder.data(super::PmMailboxDelivery(w.pm_mailbox_delivery));
     }
     if let Some(bus) = events {
         builder = builder.data(bus);

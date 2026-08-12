@@ -4,14 +4,14 @@
 //! THE FUNCTION UNDER TEST IS THE REAL SPEC SOURCE — `include_str!` of
 //! `specs/database/functions/sweep_retention.sql` — never a hand-written mirror. A mirror is how
 //! the PR #270 review's C5 escaped: the deployed function still swept the dropped
-//! `inbound_events` table while the test's private copy quietly didn't, so the abort was
+//! `inbound_events` table while the test's private copy quietly did not, so the abort was
 //! invisible here. Whatever the spec function references, this test must create; a spec change
 //! that breaks the function now breaks this test.
 //!
 //! The point of this test is as much what is DELETED as what is UNTOUCHABLE:
 //!   - `domain_events` — the forever log — survives a sweep at ANY age;
-//!   - `command_journal` RECEIVED rows survive at any age (only terminal rows age out);
-//!   - `inbound_messages` RECEIVED (pending) and SCHEDULED (future) rows survive at any age;
+//!   - `inbound_messages` RECEIVED (pending) and SCHEDULED (future) rows survive at any age
+//!     (only terminal rows age out);
 //!   - unprocessed mirror rows (`processed_at IS NULL`) survive at any age;
 //!   - `external_sirene_restaurants` (full mirror, detect-by-absence) is never referenced.
 //!
@@ -37,26 +37,6 @@ async fn apply_spec_function(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the spec sweep_retention function");
-}
-
-/// Insert a `command_journal` row with the given status name, ages expressed in days.
-async fn journal_row(pool: &PgPool, status: &str, received_days: i32, completed_days: Option<i32>) {
-    sqlx::query(
-        "INSERT INTO command_journal
-           (message_id, correlation_id, user_type, channel, command_type, payload, payload_hash,
-            status, received_at, completed_at)
-         VALUES ($1, $1, 'PUBLIC', 'GRAPHQL', 'PlaceOrder', '{}', 'h',
-                 $2,
-                 now() - make_interval(days => $3),
-                 CASE WHEN $4::int IS NULL THEN NULL ELSE now() - make_interval(days => $4) END)",
-    )
-    .bind(uuid::Uuid::new_v4())
-    .bind(status)
-    .bind(received_days)
-    .bind(completed_days)
-    .execute(pool)
-    .await
-    .expect("insert command_journal row");
 }
 
 /// Insert an `inbound_messages` row with the given status name, ages expressed in days.
@@ -140,18 +120,11 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     .await
     .expect("insert domain event");
 
-    // command_journal: the three terminal statuses past 90d age out; a terminal row inside the
-    // window and a RECEIVED row of ANY age are kept.
-    journal_row(&pool, "SUCCEEDED", 92, Some(91)).await;
-    journal_row(&pool, "REJECTED", 92, Some(91)).await;
-    journal_row(&pool, "FAILED", 92, Some(91)).await;
-    journal_row(&pool, "SUCCEEDED", 90, Some(89)).await;
-    journal_row(&pool, "RECEIVED", 400, None).await;
-
-    // inbound_messages: terminal rows past 90d age out (FAILED included — the mailbox keeps
-    // errors on the row, not the workflow); terminal inside the window and RECEIVED (pending
-    // work) of any age are kept.
+    // inbound_messages — the ONE journal since #242 Runtime D: terminal rows past 90d age out
+    // (FAILED and REJECTED included — the mailbox keeps errors on the row, not the workflow);
+    // terminal inside the window and RECEIVED (pending work) of any age are kept.
     mailbox_row(&pool, "SUCCEEDED", 92, Some(91)).await;
+    mailbox_row(&pool, "REJECTED", 92, Some(91)).await;
     mailbox_row(&pool, "FAILED", 92, Some(91)).await;
     mailbox_row(&pool, "SUCCEEDED", 90, Some(89)).await;
     mailbox_row(&pool, "RECEIVED", 400, None).await;
@@ -197,8 +170,7 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     // One sweep pass through the worker.
     let worker = RetentionSweepWorker::new(pool.clone());
     let summary = worker.run_once().await.expect("sweep pass");
-    assert_eq!(summary.command_journal, 3, "the three aged terminal journal rows");
-    assert_eq!(summary.inbound_messages, 2, "the aged terminal mailbox rows");
+    assert_eq!(summary.inbound_messages, 3, "the three aged terminal mailbox rows");
     assert_eq!(summary.external_stripe_events, 1, "only the aged processed mirror row");
     assert_eq!(summary.external_hubrise_callbacks, 1, "only the aged processed callback row");
     assert_eq!(summary.external_avelo37_events, 1, "only the aged processed avelo37 row");
@@ -206,7 +178,6 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     assert_eq!(summary.auth_sessions, 1, "only the expired pickup row");
 
     // What remains is exactly the keep-set…
-    assert_eq!(count(&pool, "command_journal").await, 2, "in-window terminal + ancient RECEIVED");
     assert_eq!(count(&pool, "inbound_messages").await, 2, "in-window terminal + pending RECEIVED");
     assert_eq!(count(&pool, "external_stripe_events").await, 2, "in-window processed + unprocessed");
     assert_eq!(count(&pool, "external_hubrise_callbacks").await, 2, "in-window processed + unprocessed");
@@ -216,14 +187,6 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     // …and the untouchables are untouched, at any age.
     assert_eq!(count(&pool, "domain_events").await, 1, "the forever log is NEVER swept");
     assert_eq!(count(&pool, "external_sirene_restaurants").await, 1, "the SIRENE mirror is exempt");
-    let received: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM command_journal
-          WHERE status = 'RECEIVED'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("count RECEIVED");
-    assert_eq!(received, 1, "RECEIVED journal rows are never age-swept");
     let pending: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM inbound_messages
           WHERE status = 'RECEIVED'",

@@ -17,12 +17,14 @@
 //! # What this means for rows that predate the status column
 //!
 //! They carry `status = 'PENDING'` (the migration default) and no `synced_at`, so the rule above will
-//! never touch them -- but for most of them the evidence the rule demands EXISTS, one table over. Until
-//! #227 every sync was a `RegisterRestaurant`/`MarkRestaurantClosed` COMMAND sent through the journaling
-//! dispatch (#15): `command_journal` holds one row per submission, with a deterministic `message_id`
+//! never touch them -- but for most of them the evidence the rule demands EXISTS, one table over. Every
+//! sync is a `RegisterRestaurant`/`MarkRestaurantClosed` COMMAND handed to the write-path journal
+//! (`inbound_messages`, the only journal since #242 Runtime D -- pre-#227 it was `command_journal`,
+//! whose rows the mailbox backfill carried over under the SAME id): one row per submission, with a
+//! deterministic `message_id`
 //! (UUIDv5 over the command type, the SIRET and the staged version's `last_seen_at` -- exactly the
 //! version this row still carries, since a later refresh would have re-pended it), and a verdict
-//! (`SUCCEEDED`/`REJECTED`/`FAILED` + `completed_at`) written by the dispatch when the handler returned.
+//! (`SUCCEEDED`/`REJECTED`/`FAILED` + `completed_at`) written when the delivery completed.
 //! That is a RECORDED outcome for the exact staged version -- the same standard `status`/`synced_at`
 //! meet -- so this pass transcribes it: `status = 'SYNCED'`, `synced_at = journal.completed_at`, payload
 //! dropped, all in one statement. Rows whose journal verdict is a rejection or a failure, and rows with
@@ -32,8 +34,8 @@
 //!
 //! Two bounds on the journal evidence, worth stating plainly:
 //!
-//! - **It expires.** The retention sweep (ADR-20260721-025159) deletes terminal `command_journal` rows
-//!   90 days after `completed_at`. Run this pass before the pre-#227 verdicts age out, or their rows
+//! - **It expires.** The retention sweep (ADR-20260721-025159) deletes terminal `inbound_messages`
+//!   rows 90 days after `completed_at`. Run this pass before the verdicts age out, or their rows
 //!   fall back to reclamation-by-re-sync.
 //! - **`SUCCEEDED` means the submission succeeded, not that the record's every field reached the
 //!   domain**: the pre-#227 register path absorbed changed records as idempotent no-op replays. The
@@ -63,9 +65,9 @@ fn sirene_uuid(seed: &str) -> uuid::Uuid {
     uuid::Uuid::new_v5(&ns, seed.as_bytes())
 }
 
-/// The deterministic `command_journal.message_id` the retired command path (#15, pre-#227) wrote for
-/// one staged version: UUIDv5 over (command type, SIRET, the row's `last_seen_at` as READ). Public so
-/// the infrastructure parity test can compare it against the worker's own derivation.
+/// The deterministic journal `message_id` a SIRENE sync send carries for one staged version: UUIDv5
+/// over (command type, SIRET, the row's `last_seen_at` as READ). Public so the infrastructure parity
+/// test can compare it against the worker's own derivation.
 pub fn journal_message_id(command_type: &str, siret: &str, last_seen_at: DateTime<Utc>) -> uuid::Uuid {
     sirene_uuid(&format!("command:{command_type}:{siret}:{}", last_seen_at.to_rfc3339()))
 }
@@ -160,7 +162,7 @@ pub async fn compact_payloads(
             "UPDATE external_sirene_restaurants s \
                 SET status = 'SYNCED', synced_at = j.completed_at, payload = NULL \
                FROM unnest($1::text[], $2::uuid[]) AS v(siret, message_id) \
-               JOIN command_journal j ON j.message_id = v.message_id \
+               JOIN inbound_messages j ON j.message_id = v.message_id \
               WHERE s.siret = v.siret \
                 AND s.payload IS NOT NULL \
                 AND s.status = 'PENDING' \

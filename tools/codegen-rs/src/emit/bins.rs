@@ -431,7 +431,6 @@ fn family_purpose(b: &BinSpec) -> String {
             "bam" => "business-activity projector -- a cross-scope consumer BY DESIGN (it folds every scope's events)".to_string(),
             "worker-sirene-sync" => "scheduled SIRENE listing sync -- one CronJob pass: raw INSEE ingestion (sirene_ingest::sweep) then the staged-row drain through the SIRENE ACL (one bin per worker, ADR-20260808-062933; sirene-sync.yml stays authoritative until the #358 cutover)".to_string(),
             "worker-retention" => "scheduled retention sweep -- one sweep_retention() call per CronJob run; the windows live in the SQL function, never here (one bin per worker, ADR-20260808-062933)".to_string(),
-            "worker-journal-sweep" => "scheduled command_journal stale-RECEIVED sweep -- flips dead spawned runs to FAILED so operationStatus never lies (one bin per worker, ADR-20260808-062933)".to_string(),
             "worker-erasure" => "the GDPR erasure worker -- the generic deletion engine as ONE NAMED minimal-grant pod, one bounded pass per CronJob run (one bin per worker, ADR-20260808-062933)".to_string(),
             other => unreachable!(
                 "worker container '{other}' has no purpose line — the family derivation \
@@ -705,7 +704,7 @@ fn wired_main(b: &BinSpec) -> String {
                     "None"
                 };
                 body.push_str(&format!(
-                    "        {payments_opt}let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        let (status, posture) = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {{\n            pool: pool.clone(),\n            bin: BIN,\n            pm: PM,\n            mailbox_lane: {lane},\n            partner: {partner},\n            payments: {payments_field},\n            waiter,\n        }})\n        .await;\n        tracing::info!(pm = PM, posture = ?posture, \"saga runner spawned (restricted to this PM)\");\n        saga_status = Some(status);\n",
+                    "        {payments_opt}let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        let status = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {{\n            pool: pool.clone(),\n            bin: BIN,\n            pm: PM,\n            mailbox_lane: {lane},\n            partner: {partner},\n            payments: {payments_field},\n            waiter,\n        }})\n        .await;\n        tracing::info!(pm = PM, \"saga runner spawned (restricted to this PM)\");\n        saga_status = Some(status);\n",
                 ));
                 if b.mailboxed {
                     body.push_str(
@@ -1424,7 +1423,7 @@ fn worker_main(b: &BinSpec) -> String {
 /// the family: the family (crate, manifest, CronJob, image, pin) derives from the c4-l2
 /// `worker-*` container list, and a new container without its arm here fails generation LOUDLY
 /// instead of shipping an empty pod. Every arm is ASSEMBLY of existing implementation code —
-/// the same passes the monolith's in-process loops run (journal_sweep, RetentionSweepWorker,
+/// the same passes the monolith's in-process loops run (RetentionSweepWorker,
 /// DeletionEngine, sirene_ingest::sweep + SireneSyncWorker), never a fork.
 fn cron_worker_pass(b: &BinSpec) -> &'static str {
     match b.name.as_str() {
@@ -1441,7 +1440,6 @@ fn cron_worker_pass(b: &BinSpec) -> &'static str {
             tracing::info!(
                 worker = "retention_sweep",
                 total = s.total(),
-                command_journal = s.command_journal,
                 inbound_messages = s.inbound_messages,
                 external_stripe_events = s.external_stripe_events,
                 external_hubrise_callbacks = s.external_hubrise_callbacks,
@@ -1454,23 +1452,6 @@ fn cron_worker_pass(b: &BinSpec) -> &'static str {
         }
         Err(e) => {
             tracing::error!(worker = "retention_sweep", error = %e, "sweep pass failed -- storage keeps growing until a pass succeeds");
-            false
-        }
-    }
-"#,
-        "worker-journal-sweep" => r#"    // ONE shared pass (infrastructure::integrations::journal_sweep) -- the monolith loops the
-    // SAME function; the stale window and the cadence live there, never here.
-    match infrastructure::integrations::journal_sweep::sweep_stale_received_once(&pool).await {
-        Ok(0) => {
-            tracing::info!(worker = "journal_sweep", swept = 0u64, "no stale RECEIVED commands");
-            true
-        }
-        Ok(n) => {
-            tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED");
-            true
-        }
-        Err(e) => {
-            tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed");
             false
         }
     }

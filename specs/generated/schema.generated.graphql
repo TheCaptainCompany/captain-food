@@ -161,19 +161,6 @@ enum OperationStatus {
   FAILED
 }
 
-enum CommandJournalStatus {
-  RECEIVED
-  SUCCEEDED
-  REJECTED
-  FAILED
-}
-
-enum CommandChannel {
-  GRAPHQL
-  WORKER
-  INTERNAL
-}
-
 enum InboundMessageKind {
   COMMAND
   EVENT

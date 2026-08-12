@@ -236,7 +236,7 @@ two places, both defensible from resource coupling and neither defensible from d
 
 The five-database list is stated in domain nouns. The actual objects are **~65**: 11 projection tables,
 8 referential tables, 3 integration-connection tables, 6 integration-staging tables, ~30 `ref_*` enum
-tables, 4 process-manager tables, `command_journal`, `slug_reservations`, `projection_checkpoint`,
+tables, 4 process-manager tables, `slug_reservations`, `projection_checkpoint`,
 `inbound_messages`, `mailbox_partitions`, `domain_events`, `domain_stream`. **The list assigns one of
 them by name.**
 
@@ -323,7 +323,7 @@ bloat.
 one database**:
 
 ```
-domain_events · domain_stream · inbound_messages · mailbox_partitions · command_journal
+domain_events · domain_stream · inbound_messages · mailbox_partitions
 · payment_process_manager · refund_process_manager · cart_binding_process_manager
 · delivery_dispatch_process_manager · slug_reservations
 ```
@@ -522,80 +522,65 @@ rewriting a queued message's payload.
 word « journal », we have replace journal with unified mailbox inbound messages make sure we don't do
 both."*
 
-**The concern is correct, and it is sharper than it reads: both tables exist on `main` today.**
-`specs/database/tables/journals.yaml:6-8` says so in its own words — `inbound_messages` is THE MAILBOX
-*"unifying `command_journal` (requests) and the retired `inbound_events` (adapted facts)"*, **plus the
-residual `command_journal` (the PM legs' door until [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)
-Runtime D)**. `inbound_events` is backfilled and dropped (migration `20260731143000`).
-`command_journal` is not. The unification stopped one table short, and this section resolves what that
-costs the permission matrix.
+**The concern was correct, and it is now RESOLVED in the code.** When this section was written both
+tables existed on `main`: `inbound_events` was backfilled and dropped (migration `20260731143000`),
+but `command_journal` survived as the PM legs' door. **It no longer does.** Product-owner direction,
+2026-08-11 — *"Remove inbound events and command journal from the dsl, the only tables that must
+remain is inbound messages"* — landed as
+[#242](https://github.com/TheCaptainCompany/captain-food/issues/242) **Runtime D**
+([ADR-20260812-000000](../adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)):
+`command_journal` is dropped by `20260812000000`, the `PM_MAILBOX_DELIVERY` gate is deleted with it,
+and `inbound_messages` is the only write-path journal. **This section is kept, rewritten, because its
+second finding is NOT resolved and would otherwise disappear with the first.**
 
-#### (A) What is actually left on `command_journal`, measured
+#### (A) What was on `command_journal`, and where each role went
 
-| Role | Who | Evidence | Alive today? |
-|---|---|---|---|
-| **Writer — the PM legs' legacy arm** | `placeOrder`, `approveRefund`, `denyRefund` insert + complete the journal row when the `PM_MAILBOX_DELIVERY` posture is **false** | `crates/server/src/graphql/generated/mutation.rs:4973-5010` (and `:6414`, `:6613`); the gate at `:4867` | ✅ **and it is the DEFAULT** — the posture is seeded **false** (`specs/database/tables/referential.yaml:111`), so **`PlaceOrder`, the most important write in the product, is journaled to `command_journal` and not to the mailbox in the current posture** |
-| **Reader — the acceptance poll** | `operationStatus` reads the mailbox first, then falls back to the journal | `crates/server/src/graphql/generated/query.rs:66-89` — `status_door.get_operation_status(...)` then `journal.by_message(...)` | ✅ **unconditionally, on BOTH arms** |
-| **Reader — the acceptance push** | `operationStatusChanged` takes the same snapshot | `crates/server/src/graphql/generated/subscription.rs:31` | ✅ unconditionally |
-| **Reader — cross-arm duplicate identity** | the **mailbox** arm of the three PM resolvers consults the journal by `messageId` before enqueueing, so a client retry straddling a gate flip cannot re-execute | `mutation.rs:4881-4889` | ✅ **even when the gate is ON** |
-| **Writer — stale-RECEIVED sweep** | `worker-journal-sweep` marks crashed runs FAILED | `crates/infrastructure/src/integrations/journal_sweep.rs:27-28` | ✅ |
-| **Writer — retention sweep** | terminal rows aged 90 days | `specs/database/functions/sweep_retention.sql` | ✅ |
-| ~~Worker channel~~ | ~~`dispatch_journaled` for SIRENE / HubRise~~ | **retired** — both now enqueue on the mailbox through typed clients (`sync_sirene_worker.rs:454`, `enrich.rs:641,695`). `application::dispatch::dispatch_journaled` has **zero non-test callers** | ❌ **and their module doc comments still describe the journal path** (`sync_sirene_worker.rs:41-45`, `enrich.rs:6-17`) — stale prose on a retired mechanism, worth deleting in whichever change touches them next |
+| Role | Who | Where it went |
+|---|---|---|
+| **Writer — the PM legs' legacy arm** | `placeOrder`, `approveRefund`, `denyRefund` when `PM_MAILBOX_DELIVERY` was **false** — the seeded default, so `PlaceOrder`'s acceptance really did live here | **Deleted.** The three PM commands are addressed to their mailbox lanes like every other command; the emitter now FAILS GENERATION on a wired mutation with no addressing rather than falling back |
+| **Reader — the acceptance poll** | `operationStatus` read the mailbox, then fell back to the journal | **Mailbox only.** An unknown messageId resolves null, as it always did for non-owned ids |
+| **Reader — the acceptance push** | `operationStatusChanged`'s snapshot | **Mailbox only** |
+| **Reader — cross-arm duplicate identity** | the mailbox arm consulted the journal before enqueueing | **Gone with the second arm.** The mailbox pk is the whole dedupe; the PM-specific duplicate/Conflict property is still asserted (`graphql_write_path.rs`) |
+| **Writer — stale-RECEIVED sweep** | `worker-journal-sweep` | **Retired** — the app count goes 57 → 56. The mailbox's own attempt cap + backoff is its liveness backstop |
+| **Writer — retention sweep** | terminal rows aged 90 days | **Leg removed** from `sweep_retention()`; `inbound_messages` keeps its identical window |
+| ~~Worker channel~~ | ~~`dispatch_journaled` for SIRENE / HubRise~~ | Already retired before this change; **the stale module docs it left behind are now corrected too**, and `application::dispatch` is deleted |
 
-**[#242](https://github.com/TheCaptainCompany/captain-food/issues/242) Runtime D's remaining scope,
-precisely.** D1 + D2 + D3 all merged ([#273](https://github.com/TheCaptainCompany/captain-food/pull/273),
-squash `735adbf`). What remains is **one gated decision and its deploy**: flip `PM_MAILBOX_DELIVERY`
-to true after a staging smoke, and — riding that same deploy — **DROP `command_journal`**, retire the
-journal sweep and retire the legacy saga-runner groups.
-[PROP-20260731-195500](PROP-20260731-195500-runtime-d-pm-mailboxes-and-reminders.md)
-§"Realization state (D1)" states the sequencing verbatim: *"`command_journal` retirement is sequenced
-reads-first as planned … the DROP (with the journal sweep's retirement) rides the default-flip
-deploy."*
-
-#### (B) The API-lens claim, verified against the code — and it is worse than reported
+#### (B) The API-lens claim — the half that STANDS
 
 The claim was that `operationStatus` reads the mailbox and then `command_journal`, and that §6.1 grants
 subgraphs `inbound_messages` but not `command_journal`, so *"every acceptance poll in the product
 returns null at 19:30 while the writes themselves succeed."*
 
-**Verified true — `query.rs:78` takes `Arc<dyn application::journal::CommandJournal>` and calls
-`by_message`, and §6.1's mutation row grants `inbound_messages` and nothing else.** Two corrections
-make it sharper rather than softer:
+The `command_journal` half is moot: there is no journal to grant. **The other half is not, and it is
+the more serious one:**
 
 1. **`operationStatus` is a QUERY, and §6.1's query row grants the write database *no `CONNECT` at
-   all*.** So the missing grant is not only `command_journal` — **the mailbox read is missing too.**
-   Read literally, the matrix breaks the poll on **both** arms, not just the fallback. The pod serving
-   it is `graphql-common` (`operation_scopes.rs:13` — `("query", "operationStatus", "common")`), which
-   owns no read models, so under §6.1 as written that role connects to nothing and every acceptance
-   poll in the product fails.
+   all*.** The mailbox read is missing too. Read literally, the matrix breaks the acceptance poll
+   outright. The pod serving it is `graphql-common` (`operation_scopes.rs:13` —
+   `("query", "operationStatus", "common")`), which owns no read models, so under §6.1 as written that
+   role connects to nothing and every acceptance poll in the product fails.
 2. **The blast radius is the whole product, not one screen.** Mutations are acceptance-first: the
    client receives PENDING and polls up to **30 times at 1 s** (`crates/web/src/actions.rs:30-40`).
    Every checkout, every restaurant acceptance, every rider transition. **The failure mode is the
    acceptance contract silently reporting "we never heard of your order" while the order is in fact
    being processed** — this domain's named worst failure mode, seen from the customer's side.
 
-#### (C) The decision: grant it, or retire it first?
+#### (C) The decision
 
-| Option | Pros | Cons |
-|---|---|---|
-| **(a) The matrix gains BOTH reads now — `CONNECT captain-write` + `SELECT` on `inbound_messages` and `command_journal` for the platform graph — and the grant's REMOVAL is a named line in the default-flip ADR's checklist** ✅ **recommended** | It is the only option that is **true of the deployed posture**. The gate is `false`, so the journal is where `PlaceOrder`'s acceptance actually lives right now, and a matrix that omits it documents a system we do not run. It is also the only option that survives a **gate rollback**, which is the whole point of gate-then-stabilize — rolling `PM_MAILBOX_DELIVERY` back with the table dropped is unrecoverable. Cost: one `SELECT` on one table for one pod, removed by a one-line diff at the flip | It records a residual in a document about least privilege, and residuals outlive their windows unless something forces the issue. The forcing function is the ADR checklist line — it must be written, not intended |
-| (b) Retire `command_journal` first, so the grant is never needed | The final-vision answer, and the product owner's instruction taken literally — one journal, not two | **The retirement is not near, for a reason outside this proposal.** It rides the `PM_MAILBOX_DELIVERY` default flip, a **money-path posture change** gated on a staging smoke that has not happened; staging traffic is itself downstream of the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. Choosing (b) means the permission matrix cannot be emitted until an unrelated deploy lands — it makes the *correct* document wait on the *money* decision |
-| (c) Grant it permanently and stop tracking the retirement | Simplest | Answers *"make sure we don't do both"* with "we do both, forever". Not on the table; recorded so the recommendation is not read as drift toward it |
+The option space that used to sit here — *grant `command_journal` with an expiry, or retire it first?*
+— **is closed by the retirement.** Option (b) ("retire `command_journal` first, so the grant is never
+needed") is what happened, earlier than this proposal expected, because the window made it cheap: the
+flip it was blocked on rode the retirement rather than preceding it
+([ADR-20260812-000000](../adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)).
+**No permission is owed for a table that no longer exists**, and nothing here should be read as
+licensing one.
 
-**Recommendation: (a), and say plainly why it is not a betrayal of final-vision-first.**
-[ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) forbids
-choosing a cheap intermediate **where the final step can be built**. Here the final step — dropping the
-table — is blocked by an externally-forced sequence (a money-path flip awaiting a staging smoke), which
-is exactly the clause that ADR carves out: *where staging is externally forced, the intermediate ships
-only with the final step already designed and recorded.* The final step **is** designed and recorded,
-in PROP-20260731-195500. So the honest form is: **grant it, and make the grant carry its own expiry.**
-
-**The three lines this decision owes, and they belong in the default-flip ADR's checklist:**
-
-1. `DROP TABLE command_journal`, after the flip is smoked and the read fallbacks are deleted.
-2. Delete the `command_journal` `SELECT` from the platform graph's role, and delete the journal read
-   from `operationStatus`, `operationStatusChanged` and the cross-arm duplicate check.
-3. Retire `worker-journal-sweep` and the `command_journal` branch of `sweep_retention.sql`.
+**What the matrix still owes, and it is not optional:** the platform graph needs
+`CONNECT captain-write` + `SELECT` on `inbound_messages` and `mailbox_partitions` (plus the
+ADMIN-guarded `UPDATE on inbound_messages` for `requeueMailboxMessage`). Without it the acceptance
+poll fails on the one remaining door. This is a **grant with no expiry** — the mailbox is the
+acceptance surface permanently — so the "residual that outlives its window" worry that shaped the old
+recommendation does not apply.
 
 **Corrected §6.1 rows.** Replace the single `graphql_{scope}` pair with these three, because the
 platform graph is genuinely different from a boundary subgraph and the difference is a `CONNECT`:
@@ -604,7 +589,7 @@ platform graph is genuinely different from a boundary subgraph and the differenc
 |---|---|---|---|---|---|
 | `graphql_{B}` (×5) — **query** path | **its read DB only** | **no CONNECT** | — | **SELECT only** | **no CONNECT** |
 | `graphql_{B}` (×5) — **mutation** path | its read DB **+ `captain-write`** | **no access** | `inbound_messages`: **INSERT + SELECT**, nothing else | (as above) | **no CONNECT** |
-| **`graphql_platform` — the acceptance surface** (`operationStatus`, `operationStatusChanged`, the mailbox lane monitor) | **`captain-write` only** — it owns no read models | **no access** | **SELECT** on `inbound_messages`, `mailbox_partitions` **and `command_journal`** (the last **expires at the default flip**); **UPDATE on `inbound_messages`** only for the ADMIN-guarded `requeueMailboxMessage` | — | **no CONNECT** |
+| **`graphql_platform` — the acceptance surface** (`operationStatus`, `operationStatusChanged`, the mailbox lane monitor) | **`captain-write` only** — it owns no read models | **no access** | **SELECT** on `inbound_messages` and `mailbox_partitions`; **UPDATE on `inbound_messages`** only for the ADMIN-guarded `requeueMailboxMessage`. No expiry — the mailbox is the acceptance surface permanently (#242 Runtime D) | — | **no CONNECT** |
 
 **And the standing rule that keeps this from recurring**, because the same omission has now been made
 twice in one matrix — the mailbox in (ii), the journal here: **every table a resolver touches is read
@@ -615,21 +600,20 @@ and a resolver reaching a store nobody granted is a **build** failure rather tha
 `permission denied`. That is compiler-first applied to the permission matrix, and it is cheaper than
 the two review passes that found these by eye.
 
-#### (D) Does today's work create NEW dependencies on `command_journal`?
+#### (D) The retirement landed — what the programs in flight must not undo
 
-Asked while it is still on paper, because a dependency added now makes the retirement harder later.
-**Checked across the three programs in flight — the answer is no, with one caveat:**
+This section used to ask whether the three programs in flight were adding NEW dependencies on
+`command_journal` (they were not). The table is gone; what survives is the one constraint that was
+called *"the one thing to watch"*, restated for the mailbox:
 
-| Program | New dependency on `command_journal`? | Note |
-|---|---|---|
-| **The boundary set** ([PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md), §31) | **No.** It is write-path infrastructure with no business vocabulary; it belongs to `platform` on both partitions and no boundary reshape touches it | The three PM resolvers that write it all land in **`order`** after the reshape, which if anything **concentrates** the residual in one subgraph instead of spreading it |
-| **The storage split** (this proposal, STO-1) | **No.** `command_journal` is already inside `captain-write`, named in STO-1(a)'s widened list | The split does not move it, so the DROP is unaffected by whether the split lands first |
-| **The repository crates** ([PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md), REP-2) | **No — and this must stay true.** `CommandJournal` is a **write-path acceptance port**, not a read-model repository: it must **not** acquire a `ports-{B}` / `read-{B}` / `projections-{B}` home, or its retirement becomes a crate deletion inside a per-boundary family | ⚠️ **The one thing to watch.** REP-2(a)'s 13 platform crates should keep `CommandJournal` where `Mailbox` lives — in the platform write-path crate — precisely so both retire together and neither becomes a boundary's problem |
-| **[#491](https://github.com/TheCaptainCompany/captain-food/issues/491) per-app declaration folders** | **No, and it helps** | If the grant is declared per app (REP-5(a)), the expiring `command_journal` `SELECT` is **one line in one file** with the flip named next to it — materially better than the same grant scattered through a generated script |
-
-**Net: nothing in flight makes the retirement harder, and one thing makes it easier.** The only real
-risk is the passive one already named — a residual with no forcing function outlives its window — and
-the mitigation is the ADR checklist line, not a promise.
+**`Mailbox` is a PLATFORM write-path acceptance port and must stay one.** It must not acquire a
+`ports-{B}` / `read-{B}` / `projections-{B}` home under
+[PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) REP-2,
+and `inbound_messages` must not be split out of `captain-write` under STO-1: the mailbox row's terminal
+flip and the `domain_events` append **commit in one transaction**, so a boundary that owns one and not
+the other has no way to be correct. The boundary reshape
+([PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md), §31)
+leaves it in `platform` on both partitions, which is right.
 
 ### 6.2 Compiler-first: what can be GENERATED so a wrong grant cannot be hand-written
 
@@ -884,7 +868,7 @@ it is the final shape of those five read models, and a defect fix that stands al
 ```
 captain-db  (CNPG cluster, one WAL timeline, one PITR)
 ├── captain-write     domain_events · domain_stream · inbound_messages · mailbox_partitions
-│                     · command_journal · 4x *_process_manager · slug_reservations
+│                     · 4x *_process_manager · slug_reservations
 │                     · projection_watermark                       [actor_* · projector_* (SELECT)
 │                                                                   · deletion_engine
 │                                                                   · graphql_* -- inbound_messages

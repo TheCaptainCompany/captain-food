@@ -60,7 +60,7 @@ impl QueryRoot {
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(PoisonedMailboxMessage::from).collect())
     }
-    /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
+    /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the mailbox, no View_*.
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
@@ -75,18 +75,7 @@ impl QueryRoot {
             }
             return Ok(Some(super::mutation::operation_from_mailbox(&row)));
         }
-        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?;
-        let Some(row) = journal
-            .by_message(input.message_id.0)
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        if !super::mutation::operation_owned(ctx, &row) {
-            return Ok(None);
-        }
-        Ok(Some(super::mutation::operation_from_journal(&row)))
+        Ok(None)
     }
     /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
     #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]

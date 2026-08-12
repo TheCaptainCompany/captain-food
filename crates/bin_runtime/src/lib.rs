@@ -114,8 +114,8 @@ pub fn fail_closed_payments() -> Arc<dyn PaymentService> {
 }
 
 /// Spawn the supervised mailbox-worker fleet for this bin's lanes — the SAME
-/// `infrastructure::mailbox::standalone` runtime the adapter binaries use (posture-gated money
-/// lanes, PM backfill, push listener, fenced completion, graceful drain), with the bin's declared
+/// `infrastructure::mailbox::standalone` runtime the adapter binaries use (PM backfill, push
+/// listener, fenced completion, graceful drain), with the bin's declared
 /// `MAILBOX_*` configuration. Returns after spawning; the fleet supervises itself.
 pub fn spawn_actor_fleet(
     pool: PgPool,
@@ -162,22 +162,14 @@ pub struct PmRuntime {
     pub waiter: Option<infrastructure::EventWaiter>,
 }
 
-/// Read the money posture and spawn the restricted saga runner. Returns the `/saga`-shaped status
-/// handle (the bin's health endpoint reports it) and the posture read (the caller logs it).
-///
-/// Posture mapping mirrors the monolith: `Unprovable` runs the legacy arm (gate off) —
-/// deterministic across every process reading the same missing row — and a TRANSIENT read error
-/// never reaches here (`pm_mailbox_delivery_posture` retries until the database answers, because
-/// a guessed money posture is the stall the row exists to remove).
+/// Spawn the restricted saga runner. Returns the `/saga`-shaped status handle (the bin's health
+/// endpoint reports it). No posture read since #242 Runtime D: the runner never reacts to Stripe
+/// facts -- the mailbox chains them to the PM lanes -- so there is nothing left to gate.
 pub async fn spawn_pm_runtime(
     rt: PmRuntime,
-) -> (Arc<std::sync::Mutex<infrastructure::ProcessManagerStatus>>, Option<bool>) {
-    let posture =
-        infrastructure::mailbox::pm_mailbox_delivery_posture(&rt.pool, rt.bin).await;
-    let gate_on = posture == Some(true);
+) -> Arc<std::sync::Mutex<infrastructure::ProcessManagerStatus>> {
     let mut runner = infrastructure::ProcessManagerRunner::new(rt.pool.clone())
-        .with_only(rt.pm)
-        .with_pm_mailboxes(gate_on);
+        .with_only(rt.pm);
     if let Some(partner) = rt.partner {
         runner = runner.with_partner(partner);
     }
@@ -185,10 +177,10 @@ pub async fn spawn_pm_runtime(
         runner = runner.with_payments(payments);
     }
     let status = runner.status();
-    // The flip-time backfill (monolith parity): only the money PMs (the mailbox-laned ones) need
-    // it, and only with the gate ON. Idempotent — the standalone fleet runs its own pass too; the
-    // point of THIS one is strictly-before the runner's first tick.
-    let backfill_pool = rt.mailbox_lane.filter(|_| gate_on).map(|_| rt.pool.clone());
+    // The startup backfill (monolith parity): only the money PMs (the mailbox-laned ones) need
+    // it. Idempotent — the standalone fleet runs its own pass too; the point of THIS one is
+    // strictly-before the runner's first tick.
+    let backfill_pool = rt.mailbox_lane.map(|_| rt.pool.clone());
     let waiter = rt.waiter;
     tokio::spawn(async move {
         if let Some(pool) = backfill_pool {
@@ -196,10 +188,10 @@ pub async fn spawn_pm_runtime(
         }
         runner.run_loop_with(waiter).await;
     });
-    (status, posture)
+    status
 }
 
-/// The flip-time Stripe-fact backfill, sequenced by the caller before the runner's first tick —
+/// The Stripe-fact backfill, sequenced by the caller before the runner's first tick —
 /// the monolith composition root's `pm_backfill` closure, shared. Seeds the PM lanes first so the
 /// width lookup can never race the workers' own seeding; retries transient errors; a final
 /// failure is LOUD and a restart retries (facts stay in the log — nothing is lost).
@@ -207,7 +199,7 @@ async fn run_pm_backfill(pool: &PgPool) {
     for (actor_type, width) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
         if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
             if let Err(e) = actor_runtime::seed_partitions(pool, actor_type, *width as i16).await {
-                tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry BEFORE relying on the flip");
+                tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry");
                 return;
             }
         }
@@ -230,7 +222,7 @@ async fn run_pm_backfill(pool: &PgPool) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
             Err(e) => {
-                tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry BEFORE relying on the flip");
+                tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry");
                 return;
             }
         }

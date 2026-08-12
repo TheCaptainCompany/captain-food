@@ -4,8 +4,8 @@
 //!
 //! ```text
 //! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ journal ──▶ domain write
-//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → command_journal → ImportCatalog handler
-//!   inventory callback → get_inventory(locationId)→ map_inventory→ command_journal → update_offer_stock handler (per sku)
+//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → mailbox → ImportCatalog handler
+//!   inventory callback → get_inventory(locationId)→ map_inventory→ mailbox → update_offer_stock handler (per sku)
 //! ```
 //!
 //! # Journaled sends (ADR-20260720-015300, #15)
@@ -13,8 +13,8 @@
 //! Every command this enricher issues goes through the WORKER-channel journaling dispatch
 //! ([`application::dispatch::dispatch_journaled`]), never straight to a handler: `message_id` =
 //! UUIDv5 of (callback id, command type[, offer id]) so a HubRise redelivery replays the SAME id and
-//! dedupes on `command_journal` instead of double-applying; `cause_id` = UUIDv5(callback id) — the
-//! mirrored callback's identity — so the chain `external_hubrise_callbacks → command_journal →
+//! dedupes on the mailbox pk instead of double-applying; `cause_id` = UUIDv5(callback id) — the
+//! mirrored callback's identity — so the chain `external_hubrise_callbacks → inbound_messages →
 //! domain_events` is fully traceable end to end.
 //!
 //! # Why the two directions differ (CLAUDE.md "Commands vs inbound events")
@@ -541,7 +541,7 @@ pub fn hubrise_system_user_id() -> uuid::Uuid {
 /// Records HubRise-driven catalog/inventory writes through the WORKER-channel journaling dispatch and
 /// the ordinary command handlers. Generic over the [`HubRisePuller`] so the dispatch (import, per-SKU
 /// stock, `OfferNotFound` skip, journal dedup) is unit-testable in memory; `dyn EventStore` /
-/// `dyn CommandJournal` keep it off the concrete Postgres adapters. The pull token is resolved PER
+/// `dyn Mailbox` keep it off the concrete Postgres adapters. The pull token is resolved PER
 /// CALLBACK from the connected account (`hubrise_connections`, issue #20) — the former global
 /// `HUBRISE_ACCESS_TOKEN` fallback is retired.
 pub struct HubRiseEnricher<P: HubRisePuller> {

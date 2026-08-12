@@ -15,7 +15,7 @@
 pub mod span {
     /// SERVER — the synchronous acceptance entry point (one per mutation resolver).
     pub const COMMAND_RECEIVE: &str = "command.receive";
-    /// INTERNAL — the `command_journal` insert: durable RECEIVED, or duplicate/conflict.
+    /// INTERNAL — the `inbound_messages` insert: durable RECEIVED, or duplicate/conflict.
     pub const COMMAND_JOURNAL: &str = "command.journal";
     /// INTERNAL — handing the command to the async handler (or declining to, on a duplicate).
     pub const COMMAND_DISPATCH: &str = "command.dispatch";

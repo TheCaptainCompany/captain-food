@@ -6300,17 +6300,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "worker-journal-sweep"
-version = "0.1.0"
-dependencies = [
- "bin_runtime",
- "infrastructure",
- "regex",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "worker-retention"
 version = "0.1.0"
 dependencies = [

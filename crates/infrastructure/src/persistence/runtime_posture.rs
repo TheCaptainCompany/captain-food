@@ -1,23 +1,22 @@
 //! Process-wide runtime postures (#318, ADR-20260803-104819): ONE `RuntimePosture` database row
-//! per posture, read at STARTUP by every process the posture governs — the monolith composition
-//! root and every standalone adapter fleet. Replaces the per-process env read of
-//! `PM_MAILBOX_DELIVERY`: per-process env is per-deploy state, and a drifted gate value on one
-//! adapter fleet delivering Payment facts without the PM chain hop is the silent paid-order
-//! stall ADR-20260803-002712 Q4 exists to remove.
+//! per posture, read at STARTUP by every process the posture governs. A posture is deliberately
+//! NOT per-process env: env is per-deploy state, and a drifted value across a fleet is how one
+//! process behaves differently from its peers on a money path.
+//!
+//! NO POSTURE IS DECLARED TODAY. The mechanism's first and only tenant, `PM_MAILBOX_DELIVERY`,
+//! retired with `command_journal` in #242 Runtime D (ADR-20260812-000000): its OFF arm was the
+//! legacy journal+spawn path, so once that table went there was nothing left to pick. The read
+//! stays — the next process-wide posture needs exactly this shape, and a posture read is the kind
+//! of thing that must be right the first time.
 //!
 //! The read is deliberately three-valued, because the SAFE reaction differs by cause:
 //! - a read VALUE is the posture, process-wide, until the next restart;
-//! - a MISSING row/table ([`PostureRead::Unprovable`]) resolves deterministically to the legacy
-//!   arm — no process can read `true` from a database state the row does not exist in, so
-//!   everyone converging on gate-off/refuse-money-lanes is consistent by construction;
-//! - a TRANSIENT error (`Err`) means a peer may have read `true` — the caller must not guess:
-//!   the monolith refuses to start, an adapter fleet waits for the row to answer.
+//! - a MISSING row/table ([`PostureRead::Unprovable`]) resolves deterministically to the
+//!   conservative arm — no process can read `true` from a database state the row does not exist
+//!   in, so every process converging on the same answer is consistent by construction;
+//! - a TRANSIENT error (`Err`) means a peer may have read `true` — the caller must not guess.
 
 use sqlx::PgPool;
-
-/// The posture key of the Runtime D1 money gate (ADR-20260801-023000) — uppercase snake,
-/// mirroring the retired env-key spelling so the gate keeps its name across the move.
-pub const PM_MAILBOX_DELIVERY: &str = "PM_MAILBOX_DELIVERY";
 
 /// Outcome of a posture-row read that REACHED the database (transport failures stay `Err`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +25,7 @@ pub enum PostureRead {
     Enabled(bool),
     /// The database answered but cannot PROVE a posture: the row is missing, or the table
     /// itself is (schema behind this binary / an unseeded database). Deterministic across every
-    /// process reading the same state — the caller falls to the legacy arm, never a guess.
+    /// process reading the same state — the caller takes its conservative arm, never a guess.
     Unprovable(&'static str),
 }
 

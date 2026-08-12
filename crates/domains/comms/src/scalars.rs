@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
+/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
 

@@ -43,7 +43,7 @@ pub struct CorrelationId(pub uuid::Uuid);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CauseId(pub uuid::Uuid);
 
-/// Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.
+/// Unique id of one command submission — the idempotency key of the write path (inbound_messages pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MessageId(pub uuid::Uuid);
 
@@ -194,25 +194,6 @@ pub enum OperationStatus {
     FAILED,
 }
 
-/// Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED, REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status — the journal row keeps the original's real state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum CommandJournalStatus {
-    RECEIVED,
-    SUCCEEDED,
-    REJECTED,
-    FAILED,
-}
-
-/// Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment worker (e.g. the HubRise enricher), or an internal trigger endpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum CommandChannel {
-    GRAPHQL,
-    WORKER,
-    INTERNAL,
-}
-
 /// What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
@@ -236,7 +217,7 @@ pub enum InboundMessageStatus {
     DUPLICATE,
 }
 
-/// Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).
+/// Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Succeeds the retired CommandChannel (whose INTERNAL became WORKER here, and which gained EXTERNAL for adapted facts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum InboundMessageChannel {

@@ -12,7 +12,7 @@ use std::time::Duration;
 use hubrise_adapter::api::HubRiseApi;
 use hubrise_adapter::connect::HttpHubRiseConnectGateway;
 use hubrise_adapter::{routes, HubRiseConnectFlow, HubRiseEnricher, PgHubRiseConnections};
-use infrastructure::{PgCommandJournal, PgEventStore, PgRestaurantRepository};
+use infrastructure::PgRestaurantRepository;
 
 #[tokio::main]
 async fn main() {
@@ -29,9 +29,9 @@ async fn main() {
                 .connect_lazy(&url)
                 .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
             state.raw = Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
-            let store = Arc::new(PgEventStore::new(pool.clone()));
-            // WORKER-channel command journal (ADR-20260720-015300): every enricher/connect send is
-            // journaled before handling, so redeliveries dedupe instead of double-applying.
+            // WORKER-channel mailbox (ADR-20260731-122500): every enricher/connect send is
+            // enqueued before handling, so redeliveries dedupe on the row's pk instead of
+            // double-applying.
             let nudges =
                 Arc::new(infrastructure::persistence::mailbox_store::MailboxNudges::default());
             let mailbox = Arc::new(

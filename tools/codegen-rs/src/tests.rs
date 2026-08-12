@@ -5758,7 +5758,8 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// header used to state it as a fact about the DEPLOYABLE ("linking a domain crate is the ONLY way
 /// that scope's vocabulary exists in this deployable … unspellable rather than merely unrouted").
 /// That is false wherever the image reaches the `domain` facade behind the list, through
-/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written. A comment
+/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written (56 since #242
+/// Runtime D retired `worker-journal-sweep`). A comment
 /// claiming an enforcement the build does not provide is worse than no comment: it stops the next
 /// reviewer looking (CLAUDE.md), which is exactly how the sentence survived four families' wiring.
 /// So the sentence is DERIVED, not trusted: resolved closure reaches `crates/domain` ⇒ the emitted
@@ -6064,7 +6065,7 @@ fn deploy_tree_is_complete_both_ways() {
         workers.iter().any(|b| b.name == "bam" && b.schedule.is_none()),
         "bam stays the always-on worker Deployment (do not respawn it as a CronJob)"
     );
-    for expected in ["worker-sirene-sync", "worker-retention", "worker-journal-sweep", "worker-erasure"] {
+    for expected in ["worker-sirene-sync", "worker-retention", "worker-erasure"] {
         let w = workers
             .iter()
             .find(|b| b.name == expected)

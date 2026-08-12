@@ -23,7 +23,6 @@
 pub mod delivery_gateway;
 pub mod delivery_offer_timeout_worker;
 pub mod google;
-pub mod journal_sweep;
 pub mod payments;
 pub mod retention_sweep_worker;
 pub mod sirene;

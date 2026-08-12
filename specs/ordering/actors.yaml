@@ -258,10 +258,10 @@ Reclamation:
 
 # --- Process managers (sagas) — #272 Runtime D1 (PM mailboxes, ADR-20260801-023000) ---
 #
-# These entries land STRICTLY WITH the D-A wiring (the prepare-phase delivery + the gated
-# resolvers): the generated addressing flips the three mutations the moment they exist, and the
-# flip ships GATED behind PM_MAILBOX_DELIVERY (gate-then-stabilize — the default flip is its own
-# one-line ADR after the gated form is smoked).
+# These entries carry the D-A wiring (the prepare-phase delivery): the generated addressing sends
+# the three PM mutations to their mailbox lanes. The flip shipped gated behind PM_MAILBOX_DELIVERY
+# and the gate RETIRED in #242 Runtime D (ADR-20260812-000000) — PM mailbox delivery is now the
+# only path, so a PM command has no second arm to fall back to.
 
 PlaceOrderProcess:
   type: process-manager

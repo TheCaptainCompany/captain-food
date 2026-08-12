@@ -35,18 +35,6 @@ pub struct SubgraphSettings {
 /// monolith serves them — per-role auth at the path boundary, per-field ACL + role-filtered
 /// introspection in the schema — restricted to `settings.scope` by the scope-slice extension.
 pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
-    // THE MONEY POSTURE (#318): the same RuntimePosture row every process reads — retried until
-    // the database answers (a guessed money posture is the stall the row exists to remove);
-    // `Unprovable` deterministically runs the legacy arm, like every other reader.
-    let posture =
-        infrastructure::mailbox::pm_mailbox_delivery_posture(&pool, settings.bin).await;
-    let pm_mailbox_delivery = posture == Some(true);
-    tracing::info!(
-        bin = settings.bin,
-        scope = settings.scope,
-        posture = ?posture,
-        "subgraph composition: money posture resolved"
-    );
     // Process-local buses (the recorded cross-process push gap): constructed so the schema always
     // carries them — poll paths are authoritative in the bin topology.
     let event_bus = EventBus::default();
@@ -60,7 +48,7 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
         }
         Arc::new(n)
     };
-    let di = crate::build_graphql_di(&pool, &event_bus, &status_bus, &nudges, pm_mailbox_delivery);
+    let di = crate::build_graphql_di(&pool, &event_bus, &status_bus, &nudges);
     let schema = crate::graphql_schema::build_schema_for_scope(
         Some(di.read),
         Some(di.write),

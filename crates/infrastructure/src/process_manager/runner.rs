@@ -139,7 +139,6 @@ pub struct ProcessManagerRunner {
     /// too would double-deliver (idempotent, but noisy and unfenced). The PlaceOrderProcess group
     /// drops whole; RefundProcess keeps only its refund-OPENING legs (order facts are not in
     /// D-B's scope). The runner retires fully at the gate's default flip.
-    pm_mailboxes: bool,
     /// Registry slice this runner drains: `None` = every PM (the monolith's in-process runner);
     /// `Some(name)` = only that PM — the `pm-{name}` bins (#385, ADR-20260807-183024) each host
     /// their own. Per-PM checkpoints (`pm:<Name>`) make the split free: a filtered runner
@@ -164,19 +163,11 @@ impl ProcessManagerRunner {
             dispatch_config: PgDispatchStrategy::new(pool.clone()),
             partner: Arc::new(NoopDeliveryService),
             payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
-            pm_mailboxes: false,
             only: None,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
             last_head: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
         }
-    }
-
-    /// Retire the Stripe-fact triggers from this runner (the `PM_MAILBOX_DELIVERY` gate is on —
-    /// the mailbox chains them to the PM lanes instead, #272 Runtime D1).
-    pub fn with_pm_mailboxes(mut self, on: bool) -> Self {
-        self.pm_mailboxes = on;
-        self
     }
 
     /// Restrict this runner to ONE named process manager (its spec name, e.g.
@@ -314,15 +305,13 @@ impl ProcessManagerRunner {
                 .map_err(db_err)?
                 .unwrap_or(0);
 
-        // Gate-aware trigger set (#272 Runtime D1): with PM mailboxes on, the Stripe facts are
-        // chained to the PM lanes by the mailbox delivery — this runner must not race them.
+        // The Stripe facts are chained to the PM lanes by the mailbox delivery (#242 Runtime D),
+        // so this runner never reacts to them -- unconditionally, since the gate that used to make
+        // this a choice retired with `command_journal`. Racing them would double-drive the saga.
         let triggers: Vec<String> = group
             .triggers
             .iter()
-            .filter(|t| {
-                !(self.pm_mailboxes
-                    && matches!(**t, "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded"))
-            })
+            .filter(|t| !matches!(**t, "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded"))
             .map(|t| t.to_string())
             .collect();
         if triggers.is_empty() {
