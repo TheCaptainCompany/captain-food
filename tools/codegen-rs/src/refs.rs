@@ -129,10 +129,12 @@ pub(crate) const READ_TARGET_KINDS: &[Kind] =
 
 /// Every OTHER store kind: write-path state owned by infrastructure or by an adapter — the actor
 /// mailbox and its registry, process-manager saga rows, adapter staging mirrors and credential
-/// stores, the event log itself, the uniqueness reservations. A query may be *served* from one of
-/// these (`readsInfrastructure:`, the four declared transient types), but a business read model may
-/// never BE one, because retiring one must stay an implementation detail: `command_journal` had
-/// leaked into resolver bodies, and deleting it cost 110 files.
+/// stores, the event log itself, the uniqueness reservations. A business read model may never BE one,
+/// because retiring one must stay an implementation detail: `command_journal` had leaked into resolver
+/// bodies, and deleting it cost 110 files.
+///
+/// This is the PARTITION, not an allowlist — nothing grants access from it. The kinds a transient type
+/// may actually name are the strictly narrower [`TRANSIENT_READ_KINDS`].
 pub(crate) const INFRASTRUCTURE_TABLE_KINDS: &[Kind] = &[
     Kind::JournalTable,
     Kind::PmStateTable,
@@ -142,13 +144,32 @@ pub(crate) const INFRASTRUCTURE_TABLE_KINDS: &[Kind] = &[
     Kind::ReservationTable,
 ];
 
+/// What a TRANSIENT output type may name under `readsInfrastructure:` — the two categories a resolver
+/// is served from TODAY, and nothing else: the actor mailbox (`operationStatus` and the two ADMIN
+/// supervision screens) and a process-manager saga row (`paymentStatus`, ADR-20260720-015500's
+/// declared exception).
+///
+/// Deliberately NOT [`INFRASTRUCTURE_TABLE_KINDS`]. Handing the whole partition to the new key would
+/// have made it strictly WEAKER than the `reads:` contract it sits beside: `reads:` already refused a
+/// `$ref` into `hubrise_connections` or `domain_events`, so a permissive `readsInfrastructure:` would
+/// have OPENED a door that was previously shut — on `Operation`, which is PUBLIC-reachable — to exactly
+/// the leaked-OAuth-token exposure this wall exists to prevent, and to the raw event log the doctrine
+/// comment on the `reads:` row calls "never". Found by independent review of this very change, which is
+/// the argument for the shape rather than against it: serving a query from a credential store, a
+/// staging mirror or `domain_events` must cost a reviewed edit to THIS line.
+pub(crate) const TRANSIENT_READ_KINDS: &[Kind] = &[Kind::JournalTable, Kind::PmStateTable];
+
 /// Is this kind a STORE (a table or view), and if so may a `reads:` binding name it?
 /// `Some(true)` = read model / reference table, `Some(false)` = infrastructure- or adapter-owned,
 /// `None` = not a store at all.
 ///
 /// The `match` is EXHAUSTIVE on purpose (compiler first, ADR-20260803-234035): a new `Kind` variant
-/// — including a new `database/tables/*.yaml` category added next month — does not compile until it
-/// is classified here, so the wall cannot be widened by omission the way `reference: true` could.
+/// does not compile until it is classified here, so the wall cannot be widened by omission the way
+/// `reference: true` could. Precisely: that is a compile-time guarantee about a new **`Kind`**, not
+/// about a new catalog FILE — [`classify`]'s `_ => None` arm accepts an unknown
+/// `database/tables/*.yaml` with no code change at all, and such a file then fails closed at VALIDATE
+/// (`ref-kind-unknown` on any `$ref` into it, plus `reads-unknown-view`) rather than at compile.
+/// Level 4 for the kind, level 3 for the file.
 pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
     match k {
         Kind::ProjectionView | Kind::ProjectionTable | Kind::ReferentialTable => Some(true),
@@ -425,9 +446,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("api.yaml", "types.*.reads[*]",        READ_TARGET_KINDS),
     // The declared exception (#242 Runtime D fallout): a TRANSIENT type — one a query returns that
     // has no read model behind it — names the infrastructure it is served from, explicitly, instead
-    // of certifying itself by leaving `reads:` off. Complement of `reads:` by construction: a
-    // projection belongs under `reads:`, never here.
-    ("api.yaml", "types.*.readsInfrastructure[*]", INFRASTRUCTURE_TABLE_KINDS),
+    // of certifying itself by leaving `reads:` off. A projection belongs under `reads:`, never here;
+    // and this set is NARROWER than "not a projection" on purpose (see TRANSIENT_READ_KINDS) — a
+    // credential store, a staging mirror and the event log are refused here exactly as under `reads:`,
+    // so the new key can never be the weaker door.
+    ("api.yaml", "types.*.readsInfrastructure[*]", TRANSIENT_READ_KINDS),
     ("api.yaml", "inputs.*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiInput]),
     ("api.yaml", "queries.*.args.*",        &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
     ("api.yaml", "queries.*.returns",       &[Kind::ApiType]),

@@ -31,10 +31,15 @@
 //! never a name pattern: `external_%` matches one of the seven infrastructure categories and misses
 //! `auth_sessions`, `hubrise_connections`, `inbound_messages`, `mailbox_partitions`,
 //! `payment_process_manager`, `slug_reservations` and `domain_events`. It is also never the author's own
-//! `staging: true`, which is forgeable by omission, the very defect above. Because
-//! [`refs::read_target_kind`]'s match is exhaustive over `Kind`, a NEW `database/tables/*.yaml`
-//! category does not compile until it has been classified — the allowlist fails CLOSED, where a
-//! denylist would fail open.
+//! `staging: true`, which is forgeable by omission, the very defect above.
+//!
+//! **How far the fail-closed property reaches, exactly.** [`refs::read_target_kind`]'s match is
+//! exhaustive over `Kind`, so a new **`Kind`** does not compile until it has been classified — that
+//! part is a compile-time guarantee. A new **catalog FILE** is weaker: [`refs::classify`]'s `_ => None`
+//! arm accepts an unknown `database/tables/*.yaml` with no code change, and it then fails closed at
+//! VALIDATE (`ref-kind-unknown` on any `$ref` into it, plus `reads-unknown-view`) rather than at
+//! compile. Both directions are closed; only one of them is the compiler. Do not let this get restated
+//! as "a new category does not compile" — `reservations.yaml` had no arm for months and built fine.
 //!
 //! Out of scope on purpose: `architecture/c4-l3.yaml`'s `components.*.reads`, which is the CORRECT home
 //! for infrastructure readers (the mailbox worker, the ACLs, the process managers) — banning it there
@@ -161,6 +166,16 @@ pub(crate) fn validate_read_targets(
     // ── 3. transience is a DECLARATION, never an omission ────────────────────────────────────────
     // Nested output types reached through a parent's `reads:` legitimately declare neither; the
     // obligation lands on the type a QUERY or SUBSCRIPTION returns, which is where a store is touched.
+    //
+    // MUTATION return types are therefore EXEMPT, and that is deliberate rather than an oversight.
+    // Under acceptance-first (ADR-20260720-015500) every mutation returns the one shared
+    // `MutationAcceptance`, which is built in memory from the enqueue result — it is the echo of a
+    // WRITE, not a view of a store, and the only table behind it (`inbound_messages`) is reached
+    // through `actor_client`'s `Mailbox` door, whose `MailboxAccess(pub(crate) ())` witness the
+    // compiler already enforces. Demanding a `readsInfrastructure:` there would be false: it would
+    // declare a read that does not happen, and it would name a table the resolver cannot touch
+    // directly anyway. If a mutation ever returns a store-backed type, that is a new decision (it
+    // breaks "results ARE reads") and it gets this rule extended in the same change.
     {
         let returned: BTreeSet<&str> = api
             .queries

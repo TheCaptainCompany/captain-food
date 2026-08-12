@@ -7200,10 +7200,12 @@ mod read_target_ownership {
         }
     }
 
-    /// The discriminator itself. `read_target_kind`'s match is EXHAUSTIVE over `Kind`, so a new
-    /// `database/tables/*.yaml` category cannot compile until it has been classified — the allowlist
-    /// fails closed where a denylist would fail open. This test pins the two published sets against it
-    /// so the REF_CONTRACT rows and the runtime check can never disagree.
+    /// The discriminator itself. `read_target_kind`'s match is EXHAUSTIVE over `Kind`, so a new **`Kind`**
+    /// cannot compile until it has been classified. (A new catalog FILE is the weaker case — `classify`'s
+    /// `_ => None` accepts it and it fails closed at VALIDATE instead; see
+    /// `the_reservation_catalog_is_classified`, which exists precisely because a catalog went unclassified
+    /// for months and built fine.) This test pins the published sets against the function so the
+    /// REF_CONTRACT rows and the runtime check can never disagree.
     #[test]
     fn read_target_kind_classifies_every_store_kind_consistently() {
         for k in refs::READ_TARGET_KINDS {
@@ -7215,6 +7217,72 @@ mod read_target_ownership {
         // A non-store kind is not a read target and not an infrastructure table — it is not a store.
         assert_eq!(refs::read_target_kind(refs::Kind::Aggregate), None);
         assert_eq!(refs::read_target_kind(refs::Kind::TableColumn), None);
+    }
+
+    /// `readsInfrastructure:` must never be the WEAKER door. The set it admits is strictly narrower
+    /// than "not a projection": the credential store, the adapter staging mirrors and the raw event log
+    /// are refused here exactly as they are under `reads:`.
+    ///
+    /// This is the mutation the first cut of this suite was missing, and its absence is why the defect
+    /// shipped: `readsInfrastructure` was wired to the whole infrastructure partition, so planting
+    /// `hubrise_connections` and `domain_events` on the PUBLIC-reachable `Operation` type validated with
+    /// ZERO errors — while the SAME `$ref` under `reads:` had always been refused. The new key had
+    /// opened a door that was previously shut, to the leaked-OAuth-token exposure this whole wall exists
+    /// to prevent. Serving a query from one of these must cost a reviewed edit to `TRANSIENT_READ_KINDS`.
+    #[test]
+    fn reads_infrastructure_admits_only_the_mailbox_and_saga_rows() {
+        for target in [
+            "database/tables/integration_connections.yaml#/hubrise_connections",
+            "database/tables/integration_connections.yaml#/auth_sessions",
+            "database/tables/integration_staging.yaml#/external_stripe_events",
+            "database/tables/eventstore.yaml#/domain_events",
+            "database/tables/reservations.yaml#/slug_reservations",
+        ] {
+            let mut m = real_model();
+            set_type_key(&mut m, "Operation", "readsInfrastructure", &format!("[{{ $ref: '{}' }}]", target));
+            let report = validate(&m);
+            let hit = report
+                .issues
+                .iter()
+                .find(|i| i.rule == "ref-kind" && i.location.contains("readsInfrastructure"))
+                .unwrap_or_else(|| {
+                    panic!("{} must not be reachable through readsInfrastructure -- it is not a mailbox or a saga row", target)
+                });
+            assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+            assert!(
+                hit.message.contains("journal table") && hit.message.contains("process-manager state table"),
+                "the message must name the two admissible categories: {}",
+                hit.message
+            );
+        }
+    }
+
+    /// The other half of the same wall: the two categories that ARE served today keep working, so the
+    /// narrowing above is a wall and not a wrecking ball. `readsInfrastructure` is also proven to be
+    /// what makes them legal -- the committed catalog validates only because the four sites declare it.
+    #[test]
+    fn the_mailbox_and_the_saga_row_remain_declarable() {
+        for (ty, target) in [
+            ("Operation", "database/tables/journals.yaml#/inbound_messages"),
+            ("MailboxLane", "database/tables/journals.yaml#/mailbox_partitions"),
+            ("PaymentIntent", "database/tables/process_managers.yaml#/payment_process_manager"),
+        ] {
+            let mut m = real_model();
+            set_type_key(&mut m, ty, "readsInfrastructure", &format!("[{{ $ref: '{}' }}]", target));
+            let report = validate(&m);
+            assert!(
+                !report.issues.iter().any(|i| i.location.contains("readsInfrastructure")),
+                "{} -> {} is exactly what the key is for: {:?}",
+                ty,
+                target,
+                report
+                    .issues
+                    .iter()
+                    .filter(|i| i.location.contains("readsInfrastructure"))
+                    .map(|i| (i.rule, &i.message))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     /// `reservations.yaml` had NO classifier arm, so `slug_reservations` resolved to no `Kind` at all —

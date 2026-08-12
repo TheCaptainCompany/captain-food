@@ -62,8 +62,13 @@ declared no `reads:` at all: **a reads-side rule, however strict, would never ha
    `Kind`. `refs::read_target_kind` partitions those kinds into read-legal (`ProjectionView`,
    `ProjectionTable`, `ReferentialTable`) and infrastructure/adapter-owned (`JournalTable`,
    `PmStateTable`, `StagingTable`, `ConnectionTable`, `EventStoreTable`, `ReservationTable`). Its
-   `match` is **exhaustive over `Kind`**, so a new table category does not compile until it is
-   classified: the allowlist fails **closed** where a denylist would fail open. A name pattern was
+   `match` is **exhaustive over `Kind`**, so a new **`Kind`** does not compile until it is classified.
+   Stated precisely, because the honest version is what makes it reusable: that is a compile-time
+   guarantee about a new *kind*, **not** about a new catalog **file** — `classify`'s `_ => None` arm
+   accepts an unknown `database/tables/*.yaml` with no code change, and such a file then fails closed at
+   **validate** (`ref-kind-unknown` on any `$ref` into it, plus `reads-unknown-view`) rather than at
+   compile. `reservations.yaml` is the proof: it had no arm for months and built fine. Level 4 for the
+   kind, level 3 for the file; both directions closed, only one of them the compiler. A name pattern was
    rejected — `external_%` matches one of seven categories and misses `auth_sessions`,
    `hubrise_connections`, `inbound_messages`, `mailbox_partitions`, `payment_process_manager`,
    `slug_reservations`, `domain_events` — and so was the author-supplied `staging: true`, forgeable by
@@ -79,8 +84,16 @@ declared no `reads:` at all: **a reads-side rule, however strict, would never ha
 
 4. **Transience is a DECLARATION.** A type a query or subscription returns declares either `reads:` (a
    read model) or **`readsInfrastructure:`** — the write-path table it is served from, as a `$ref` the
-   loader resolves, constrained by a REF_CONTRACT row to the infrastructure kinds and mutually
-   exclusive with `reads:`. Omitting both is `transient-type-undeclared-infrastructure`. Four types
+   loader resolves, mutually exclusive with `reads:` and constrained by a REF_CONTRACT row to
+   **`JournalTable` and `PmStateTable` only** (`refs::TRANSIENT_READ_KINDS`) — the two categories a
+   resolver is actually served from today. **Not** "any infrastructure kind": the first cut of this
+   change admitted the whole partition, which made the new key strictly WEAKER than the `reads:`
+   contract beside it — `reads:` already refused a `$ref` into `hubrise_connections` or
+   `domain_events`, so the permissive form *opened a door that had been shut*, on the PUBLIC-reachable
+   `Operation` type, to precisely the leaked-credential exposure rule 1 exists to prevent. Caught by the
+   independent review of this ADR's own PR, which is an argument for the shape and not against it:
+   serving a query from a credential store, a staging mirror or the event log must cost a reviewed edit
+   to that one line. Omitting both is `transient-type-undeclared-infrastructure`. Four types
    declare it today: `MailboxLane`, `PoisonedMailboxMessage`, `Operation` (the mailbox) and
    `PaymentIntent` (the saga row — ADR-20260720-015500's declared exception). Nested output types
    reached through a parent's `reads:` owe nothing, because no store is touched there.
@@ -115,7 +128,10 @@ feeds, before the table is deleted rather than after.
 - Five new validator ERRORS, all seen red first, all pinned by fixture tests that mutate the **real**
   committed catalog (`tools/codegen-rs/src/tests.rs`, `mod read_target_ownership`) — including one that
   proves legality follows the declaring catalog rather than the table's name, so the wall survives a
-  table moving between files.
+  table moving between files, and one that plants a credential store and the event log under
+  `readsInfrastructure:` and requires both to be refused. That last one was **missing from the first
+  cut, which is exactly why the widened-door defect shipped past a green gate** — the lesson being that
+  a new permission needs a mutation test of its own, not just the rule it was added to serve.
 - One new DSL key, `api.yaml types.*.readsInfrastructure`, on four existing types. It changes **no
   generated artifact** — not the SDL, not a resolver — so nothing promised to a client moves.
 - `database/tables/reservations.yaml` gains a classifier arm (`Kind::ReservationTable`). It had none,

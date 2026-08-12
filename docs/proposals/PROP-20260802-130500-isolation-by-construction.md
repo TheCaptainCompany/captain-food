@@ -74,18 +74,30 @@ reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change)
 The hierarchy ranks ways to stop *Rust code* naming something it should not. It has no rung for a
 declaration in `specs/**`: no type can make `reads: [{ $ref: '…/journals.yaml#/inbound_messages' }]`
 unspellable, because the compiler never sees the YAML. So "start at level 4" resolves to *level 3 is
-the ceiling here*, not to "try harder" — and the gate is correct rather than lazy. Two refinements the
-`reads:` wall earned, both reusable:
+the ceiling here*, not to "try harder" — and the gate is correct rather than lazy. Three refinements the
+`reads:` wall earned, all reusable:
 
-- **A gate can still fail CLOSED like a type does.** Its allowlist is derived from an EXHAUSTIVE
-  `match` over the classifier's `Kind` (`refs::read_target_kind`), so a new `database/tables/*.yaml`
-  category does not compile until someone classifies it. The compiler polices the gate's own
-  completeness even though it cannot police the binding. That is the level-4 property available to a
-  level-3 check, and it should be the default shape for any allowlist over a closed DSL set.
+- **A gate can fail CLOSED like a type does — but be exact about how far that reaches.** The allowlist
+  is derived from an EXHAUSTIVE `match` over the classifier's `Kind` (`refs::read_target_kind`), so a new
+  **`Kind`** does not compile until someone classifies it: the compiler polices the gate's own
+  completeness even though it cannot police the binding, and that is the level-4 property available to a
+  level-3 check. It does **not** extend to a new catalog FILE: `classify`'s `_ => None` accepts one with
+  no code change, and it fails closed at *validate* instead (`reservations.yaml` had no arm for months
+  and built fine). Level 4 for the kind, level 3 for the file — a mixed guarantee is still worth having,
+  and overstating it is how a reviewer's trust gets spent. Prefer this shape for any allowlist over a
+  closed DSL set, and write down which half is which.
 - **The absence, not the assertion, is what leaks.** Both holes it closed were omissions: a table
   *declining* to carry `reference: true` (the reason living in a header comment) and a type *leaving
   `reads:` off* to self-certify as transient. A gate that only inspects what authors wrote sees
   neither. Ask what the DSL means by SILENCE, and make the silent case say its name.
+- **A new PERMISSION needs its own red-first mutation, not just the rule it serves.** The same change
+  that closed those two holes introduced a third: the escape hatch it added for the four legitimately
+  transient types (`readsInfrastructure:`) was wired to *every* infrastructure kind, which made it
+  strictly weaker than the `reads:` contract beside it — the OAuth credential store and `domain_events`
+  became nameable on a PUBLIC-reachable type, having been refused before. Ten mutation tests passed; the
+  defect shipped, and the independent review caught it. The missing test was the one nobody thinks to
+  write, because it plants a mutant against the *exemption* rather than against the wall. Rule of thumb:
+  **whenever a change adds a way to say yes, plant the mutants that abuse the yes.**
 
 The half of that same slice that IS reachable by the compiler is unfinished and worth naming: this
 proposal's own `MailboxAccess(pub(crate) ())` witness (D1/D4, shipped) covers the mailbox WRITE door
