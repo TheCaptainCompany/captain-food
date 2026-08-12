@@ -8,49 +8,63 @@ Read it for one question -- **is the split clean?** It is clean when no app span
 
 ## 1. The families
 
-| family | apps | honest | fat | what one app of this family IS |
-|---|---:|---:|---:|---|
-| `actor` | 15 | 0 | 15 | a mailbox worker draining ONE aggregate's lanes -- the one-writer-per-aggregate promise, deployed |
-| `pm` | 5 | 0 | 5 | a mailbox worker running ONE saga; a declared cross-scope bridge |
-| `projector` | 7 | 0 | 7 | a projection worker folding the single log, filtered to its scope, on its own checkpoint (D4) |
-| `worker` | 4 | 0 | 4 | a periodic pass; the declared cadence renders a CronJob, no cadence an always-on Deployment |
-| `adapter` | 5 | 0 | 5 | one partner ACL: verify, mirror into that partner's journal, translate, enqueue |
-| `graphql` | 8 | 0 | 8 | one scope's GraphQL subgraph -- queries over its views, mutations onto its lanes (D8) |
-| `gateway` | 7 | 7 | 0 | one role path `/{role}/graphql`: routing only -- no DB, no state, no domain vocabulary |
-| `fo` | 2 | 0 | 2 | a front-office surface: assets + SSR for one public audience, speaking only to its gateway |
-| `bo` | 3 | 0 | 3 | a back-office surface: assets + SSR for one operator audience |
-| `bam` | 1 | 1 | 0 | the business-activity projector -- a cross-scope consumer BY DESIGN |
-| **total** | **57** | **8** | **49** | |
+Three states, exhaustive and exclusive. **`honest`** = measured, and the image links exactly the domain crates its manifest declares. **`fat`** = measured, and it links MORE than it declares -- the crates are in the image, the manifest never names them. **`unmeasured`** = cargo does not know this deployable at all, so nothing is claimed about it: absence of evidence is not evidence, and it is never counted as fat.
+
+| family | apps | honest | fat | unmeasured | what one app of this family IS |
+|---|---:|---:|---:|---:|---|
+| `actor` | 15 | 0 | 15 | 0 | a mailbox worker draining ONE aggregate's lanes -- the one-writer-per-aggregate promise, deployed |
+| `pm` | 5 | 0 | 5 | 0 | a mailbox worker running ONE saga; a declared cross-scope bridge |
+| `projector` | 7 | 0 | 7 | 0 | a projection worker folding the single log, filtered to its scope, on its own checkpoint (D4) |
+| `worker` | 4 | 0 | 4 | 0 | a periodic pass; the declared cadence renders a CronJob, no cadence an always-on Deployment |
+| `adapter` | 5 | 0 | 5 | 0 | one partner ACL: verify, mirror into that partner's journal, translate, enqueue |
+| `graphql` | 8 | 0 | 8 | 0 | one scope's GraphQL subgraph -- queries over its views, mutations onto its lanes (D8) |
+| `gateway` | 7 | 7 | 0 | 0 | one role path `/{role}/graphql`: routing only -- no DB, no state, no domain vocabulary |
+| `fo` | 2 | 0 | 2 | 0 | a front-office surface: assets + SSR for one public audience, speaking only to its gateway |
+| `bo` | 3 | 0 | 3 | 0 | a back-office surface: assets + SSR for one operator audience |
+| `bam` | 1 | 1 | 0 | 0 | the business-activity projector -- a cross-scope consumer BY DESIGN |
+| **total** | **57** | **8** | **49** | **0** | |
 
 ## 2. Per boundary -- is the split clean?
 
-`honest` = the image links exactly the domain crates the manifest declares. `cross-boundary (declared)` = apps whose DECLARED crates reach more than one business boundary -- a bridge, legitimate for a process manager, a smell anywhere else. `cross-boundary (resolved)` = the same question asked of what actually links.
+`honest`/`fat`/`unmeasured` as defined in section 1. `cross-boundary (declared)` = apps whose DECLARED crates reach more than one business boundary -- a bridge, legitimate for a process manager, a smell anywhere else. `cross-boundary (resolved)` = the same question asked of what actually links.
 
-| boundary | apps | honest | fat | cross-boundary (declared) | cross-boundary (resolved) |
-|---|---:|---:|---:|---:|---:|
-| **catalog** | 4 | 0 | 4 | 0 | 4 |
-| **customer** | 8 | 2 | 6 | 1 | 6 |
-| **delivery** | 11 | 1 | 10 | 1 | 10 |
-| **order** | 16 | 0 | 16 | 0 | 16 |
-| **platform** | 9 | 3 | 6 | 1 | 7 |
-| **restaurant** | 9 | 2 | 7 | 0 | 7 |
-| **total** | **57** | **8** | **49** | **3** | **50** |
+| boundary | apps | honest | fat | unmeasured | cross-boundary (declared) | cross-boundary (resolved) |
+|---|---:|---:|---:|---:|---:|---:|
+| **catalog** | 4 | 0 | 4 | 0 | 0 | 4 |
+| **customer** | 8 | 2 | 6 | 0 | 1 | 6 |
+| **delivery** | 11 | 1 | 10 | 0 | 1 | 10 |
+| **order** | 16 | 0 | 16 | 0 | 0 | 16 |
+| **platform** | 9 | 3 | 6 | 0 | 1 | 7 |
+| **restaurant** | 9 | 2 | 7 | 0 | 0 | 7 |
+| **total** | **57** | **8** | **49** | **0** | **3** | **50** |
 
 **The verdicts:**
 
 - **No app spans two boundaries** -- not yet. 3 of 57 apps DECLARE crates from more than one business boundary (`pm-cart-binding` = customer+order; `pm-delivery-dispatch` = delivery+order; `bam` = catalog+customer+delivery+order+restaurant). On the graph the build actually resolves, 50 do.
-- **resolved == declared** -- 8 of 57 apps. The other 49 link domain crates their manifest never names.
+- **resolved == declared** -- 8 of 57 apps. 49 link domain crates their manifest never names.
 - **Which dependency carries the facade in** -- `bin_runtime` into 45, `infrastructure` into 10, `server` into 8, `surface_runtime` into 5, `stripe-adapter` into 4, `avelo37-adapter` into 2, `coopcycle-adapter` into 2, `uber-direct-adapter` into 2, `actor_client` into 1, `application` into 1, `hubrise-adapter` into 1. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.
+- **Roles no bounded context claims** -- `ADMIN`, `EXTERNAL`. Their gateways are indexed under `platform` because nothing else is derivable, NOT because a context decided so; a `roles:` entry in `c4-l2.yaml` moves them with no edit here.
+- **One row is decided and not yet spec'd** -- DECISIONS.md D9 closes `CartBindingProcess` into `order`, and `specs/architecture/c4-l2.yaml` still homes it in `customer`. This index renders the SPEC, so `pm-cart-binding` reads `customer` above; when that one-liner lands the table reads customer 8 -> 7, order 16 -> 17, and this bullet disappears.
 
 ## 3. What the boundaries share
 
-Every workspace crate any app resolves, grouped by the set of boundaries whose apps reach it. A crate reached by one boundary is that boundary's own; a crate reached by all of them is a shared kernel whether or not it was designed as one.
+Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.
 
-**44 of the 44 crates the apps reach are shared across boundaries; 0 belong to exactly one.** If the table below has a single row, that is not a rendering accident -- it is the shape of the graph.
+**No crate the apps reach is boundary-EXCLUSIVE: 44 of 44 are linked from at least one app of every boundary; 0 belong to exactly one.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover 6 of the 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 57 deployables actually link the crate, and it ranges from 8 to 57.
 
-| reached by | crates | which |
-|---|---:|---|
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 44 | `actor_client`, `actor_runtime`, `app-core`, `application`, `avelo37-adapter`, `bin_probes`, `bin_runtime`, `client-cart`, `client-catalog`, `client-conversation`, `client-customer`, `client-delivery-job`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-payment`, `client-place-order-process`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-restaurant`, `client-restaurant-account`, `client-rider`, `coopcycle-adapter`, `domain`, `domain-catalog`, `domain-common`, `domain-comms`, `domain-customer`, `domain-delivery`, `domain-network`, `domain-ordering`, `domain-payments`, `gateway_runtime`, `hubrise-adapter`, `infrastructure`, `server`, `shared_types`, `sirene_ingest`, `stripe-adapter`, `surface_runtime`, `telemetry`, `uber-direct-adapter`, `web` |
+| reached by | apps (of 57) | crates | which |
+|---|---:|---:|---|
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 57 | 2 | `bin_probes`, `telemetry` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 50 | 9 | `domain`, `domain-catalog`, `domain-common`, `domain-comms`, `domain-customer`, `domain-delivery`, `domain-network`, `domain-ordering`, `domain-payments` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 45 | 7 | `actor_client`, `actor_runtime`, `application`, `bin_runtime`, `client-restaurant`, `infrastructure`, `sirene_ingest` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 15 | 1 | `gateway_runtime` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 13 | 4 | `app-core`, `shared_types`, `surface_runtime`, `web` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 12 | 3 | `client-delivery-job`, `client-payment`, `stripe-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 10 | 3 | `avelo37-adapter`, `coopcycle-adapter`, `uber-direct-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 9 | 3 | `client-catalog`, `client-restaurant-account`, `hubrise-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 8 | 12 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-rider`, `server` |
+
+**Reached by no deployable** -- 5 workspace crate(s): `captain-food-codegen`, `captain-food-secret-gate`, `client-customer-credit`, `db-test-gate`, `desktop`. Codegen, gates and the desktop shell are expected here. `client-customer-credit` is not: a generated actor client no app links is either an actor with no caller or a wiring gap, and this is the only artifact that would show it.
 
 ## 4. The apps
 

@@ -16,8 +16,13 @@
 > plus `bam`, which links all 8 domain crates *and declares all 8*, so it is honest-though-fat and must
 > not be counted with the other 49. **3 apps declare crates from two business boundaries**
 > (`pm-cart-binding`, `pm-delivery-dispatch` — legitimate bridges — and `bam` by design); on the graph
-> that actually links, **50 span all five**. **All 44 workspace crates the apps reach are shared across
-> every boundary; not one belongs to a single boundary.**
+> that actually links, **50 span all five**. **No crate the apps reach is boundary-exclusive** — all
+> 44 are linked from at least one app of every boundary — but that signature saturates (the 8
+> `graphql-*` subgraphs alone cover all six boundaries, so any crate one of them links scores the
+> maximum), so section 3 groups by **how many of the 57 apps link each crate** instead: 57 for
+> `telemetry`/`bin_probes`, 50 for `domain` + the `domain-*` set, 45 for the runtime spine, and **8
+> for twelve crates** — the shared-kernel reading the boundary column invites is not what the data
+> says.
 > ⚠️ **The number that names the work**: `bin_runtime` carries the `domain` facade into **45 of 57**
 > apps, `infrastructure` into 10, `server` into 8, `surface_runtime` into 5. Decomposing the first is
 > the single largest isolation move available — which is
@@ -29,6 +34,11 @@
 > [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. Grants are now ONE
 > derivation (`bin_secret_env_keys`) shared by the pod manifest and the index, asserted app-by-app
 > against the committed manifests, so the least-privilege slice (A4) cannot start from two answers.
+> Two more things only this artifact shows: **`client-customer-credit` is reached by no deployable**
+> (a generated actor client nothing links, while `client-restaurant` is reached by 45), and
+> **`ADMIN`/`EXTERNAL` are claimed by no bounded context**, so three gateways sit under `platform`
+> because nothing else is derivable — named out loud rather than left as a default that reads like a
+> decision.
 > **BND-1 closed the same day** (entry below; [DECISIONS §31](proposals/DECISIONS.md)): the index
 > reads the boundary set from `c4-l2.yaml` `boundedContexts`, which IS that closed answer — five
 > business contexts plus `platform` — so the index needed no edit when the row closed, and needs

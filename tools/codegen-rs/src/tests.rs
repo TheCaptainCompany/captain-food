@@ -5789,7 +5789,6 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// its own output. Measuring after the fact is the honest order.
 #[test]
 fn bin_manifest_scope_claim_matches_the_measured_closure() {
-    use guppy::graph::DependencyDirection;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let model = load_model(&root.join("specs")).expect("load real specs");
     let crates = emit_bin_crates(&model);
@@ -5819,36 +5818,17 @@ fn bin_manifest_scope_claim_matches_the_measured_closure() {
         "holds no domain vocabulary",
     ];
 
-    let mut cmd = guppy::MetadataCommand::new();
-    cmd.current_dir(&root);
-    let graph = cmd.build_graph().expect("workspace graph builds");
-    // Workspace-relative dirs of a bin's transitive workspace closure — the same measurement the
-    // determinator gate hashes, so "what the image links" has ONE definition in this repo.
-    let closure_dirs = |bin: &str| -> BTreeSet<String> {
-        let member = graph.workspace().member_by_name(bin).expect("bin is a workspace member");
-        let ws_root = graph.workspace().root();
-        graph
-            .query_forward(std::iter::once(member.id()))
-            .expect("closure query")
-            .resolve()
-            .packages(DependencyDirection::Forward)
-            .filter(|p| p.in_workspace())
-            .map(|p| {
-                p.manifest_path()
-                    .parent()
-                    .expect("manifest has a parent dir")
-                    .strip_prefix(ws_root)
-                    .expect("crate dir inside the workspace")
-                    .as_str()
-                    .replace('\\', "/")
-            })
-            .collect()
-    };
+    // "What the image links" has ONE definition in this repo, and this is it: the app index's own
+    // measurement (`measure_workspace_crate_graph` -- cargo's resolver, NORMAL links only,
+    // workspace members only). #491 review: this test used to run its own unfiltered
+    // `query_forward`, which also follows DEV-dependencies -- crates that ship in no image. The
+    // two agree today (50 bins reach `domain` under either), so unifying changes no verdict; it
+    // removes the second definition before they disagree and one of the two starts lying.
+    let graph = measure_workspace_crate_graph(&root).expect("workspace graph builds");
 
     let mut isolated: Vec<&str> = Vec::new();
     for c in &crates {
-        let dirs = closure_dirs(&c.name);
-        if dirs.contains("crates/domain") {
+        if graph.closure(&c.name).contains("domain") {
             assert!(
                 c.manifest.contains(CLAIM_NOT_ISOLATED),
                 "{}: the image links the `domain` facade (every scope), so the header must say so \
@@ -6405,10 +6385,18 @@ fn app_index_covers_every_deployable_exactly_once() {
     }
 }
 
-/// Every app's boundary is one of the c4 bounded contexts, and every scope folder maps to
-/// exactly one of them. The second half is the one that breaks quietly: a scope folder whose
-/// AGGREGATES land in two contexts leaves its projector and its subgraph with no derivable
-/// boundary, and the index would answer "platform" for apps that are anything but.
+/// Every app's boundary is DERIVED from a declaration that is unambiguous — which is a stronger
+/// claim than "the answer is in the id set", and the earlier version of this test only made the
+/// weak one. Two derivations can go quietly wrong:
+/// - a scope folder whose AGGREGATES land in two contexts (or in none) leaves its projector and
+///   its subgraph with no derivable boundary;
+/// - a `UserType` claimed by TWO contexts makes every gateway and surface on that role path
+///   arbitrary — and it used to resolve by map-insertion order, silently.
+///
+/// The unclaimed case is NOT an error and is asserted as what it is: `ADMIN` and `EXTERNAL` are
+/// listed in no context's `roles:`, so their gateways land on `platform` deliberately, and
+/// section 2 of the index names them. The day a context claims one, the row moves and this test
+/// follows it with no edit.
 #[test]
 fn app_index_every_app_has_a_declared_boundary() {
     let model = app_index_model();
@@ -6417,12 +6405,14 @@ fn app_index_every_app_has_a_declared_boundary() {
     for scope in &model.scopes {
         assert!(
             bounds.of_scope(scope).is_some(),
-            "scope folder '{scope}' owns aggregates from more than one bounded context, so no \
-             boundary is derivable for its projector/subgraph. Either the aggregates or the \
-             context declaration is wrong -- do not resolve it in the emitter."
+            "scope folder '{scope}' owns aggregates from more than one bounded context, or owns \
+             none at all, so no boundary is derivable for its projector/subgraph. Either the \
+             aggregates or the context declaration is wrong -- do not resolve it in the emitter."
         );
     }
-    for r in app_rows(&model, &CrateGraph::default()) {
+    let rows = app_rows(&model, &CrateGraph::default());
+    let mut gateways = 0;
+    for r in &rows {
         assert!(
             ids.contains(r.boundary.as_str()),
             "{}: boundary '{}' is not a c4 bounded context ({:?})",
@@ -6430,14 +6420,41 @@ fn app_index_every_app_has_a_declared_boundary() {
             r.boundary,
             bounds.ids
         );
+        let Some(role) = r.role.as_deref() else { continue };
+        gateways += 1;
+        let claimants = bounds.role_claimants(role);
+        assert!(
+            claimants.len() <= 1,
+            "{}: role '{role}' is claimed by {claimants:?}. A UserType belongs to ONE bounded \
+             context -- with two, this app's boundary (and every surface on `/{}/graphql`) is \
+             whichever context the reader happens to look at first.",
+            r.name,
+            role_path(role)
+        );
+        match claimants.iter().next() {
+            Some(ctx) => assert_eq!(
+                &r.boundary, ctx,
+                "{}: '{role}' is declared by context '{ctx}', so the app belongs to it",
+                r.name
+            ),
+            None => assert_eq!(
+                r.boundary, "platform",
+                "{}: no context claims '{role}', so the only derivable answer is the platform \
+                 bucket -- and section 2 must be naming it as unclaimed",
+                r.name
+            ),
+        }
     }
+    assert!(gateways > 0, "no app carries a role -- the gateway half of this test stopped running");
 }
 
-/// `honest` is the MEASURED closure against the DECLARED manifest — not the declaration echoed
-/// back. Pure: a synthetic graph where one bin's closure reaches a scope crate it never declared
-/// must read fat, and only equality reads honest.
+/// The transitive walk the measurement rests on: a closure stops where the manifests do, and the
+/// facade drags every scope crate in behind one edge. THE ALGORITHM ONLY — it says nothing about
+/// whether the index uses it, which is why it is not named for the `honest` column. That claim is
+/// `app_index_resolved_is_measured_not_declared` below, and the difference is not academic:
+/// replacing the emitter's resolved set with `declared.clone()` leaves THIS test green.
 #[test]
-fn app_index_honest_is_measured_not_declared() {
+fn crate_graph_closure_is_transitive_and_stops_at_the_manifests() {
     let edges = |pairs: &[(&str, &[&str])]| -> CrateGraph {
         CrateGraph::from_edges(
             pairs
@@ -6473,6 +6490,111 @@ fn app_index_honest_is_measured_not_declared() {
          to show"
     );
     assert!(!graph.closure("honest-bin").contains("domain-catalog"));
+}
+
+/// `honest` is the MEASURED closure against the DECLARED manifest — not the declaration echoed
+/// back. This is the assertion the artifact's whole value proposition rests on, so it runs the
+/// REAL derivation (`app_rows` over the real model) against a synthetic graph carrying a REAL
+/// deployable's name, twice:
+/// - a graph whose closure is exactly what that bin declares must read `honest`;
+/// - the same bin behind `bin_runtime -> domain -> every scope crate` — the shape the workspace
+///   actually has — must resolve a STRICT SUPERSET of what it declares, read `fat`, and name the
+///   carrier in `via`.
+///
+/// The other real-model tests here feed `CrateGraph::default()`, under which nothing is measured
+/// and every row is unmeasured, so this is the only place `app_rows` meets a graph at all.
+/// Fabricating the column (`let resolved = declared.clone();` in `emit/app_index.rs`) leaves every
+/// other test in this file green and turns the second half of this one red — which is the point:
+/// `check-drift` would only report THAT the file changed, never that its central column became a
+/// declaration echoed back.
+#[test]
+fn app_index_resolved_is_measured_not_declared() {
+    let model = app_index_model();
+    let scopes: Vec<String> = crate_scopes(&model).into_iter().collect();
+    let domain_crate = |scope: &str| format!("domain-{}", scope.replace('_', "-"));
+    // A real deployable declaring a PROPER, non-empty subset of the scopes -- the only shape in
+    // which "resolved is a strict superset of declared" is a statement about the graph rather
+    // than about arithmetic.
+    let probe = app_rows(&model, &CrateGraph::default())
+        .into_iter()
+        .find(|r| !r.declared.is_empty() && r.declared.len() < scopes.len())
+        .expect("some deployable declares a proper subset of the domain scopes");
+    let row_for = |graph: &CrateGraph| {
+        app_rows(&model, graph)
+            .into_iter()
+            .find(|r| r.name == probe.name)
+            .expect("the probe app is indexed")
+    };
+
+    // (1) closure == declaration.
+    let tight = CrateGraph::from_edges(BTreeMap::from([(
+        probe.name.clone(),
+        probe.declared.iter().map(|s| domain_crate(s)).collect::<BTreeSet<String>>(),
+    )]));
+    let tight = row_for(&tight);
+    assert!(tight.measured, "{}: the graph names it, so it is measured", probe.name);
+    assert_eq!(
+        tight.resolved, probe.declared,
+        "{}: an image linking exactly its declared crates must resolve exactly them",
+        probe.name
+    );
+    assert!(tight.honest() && !tight.fat(), "{}: closure == declaration is honest", probe.name);
+
+    // (2) the same bin, with the facade behind one direct dependency.
+    let fat = CrateGraph::from_edges(BTreeMap::from([
+        (probe.name.clone(), BTreeSet::from(["bin_runtime".to_string()])),
+        ("bin_runtime".to_string(), BTreeSet::from(["domain".to_string()])),
+        ("domain".to_string(), scopes.iter().map(|s| domain_crate(s)).collect()),
+    ]));
+    let fat = row_for(&fat);
+    assert!(
+        fat.resolved.is_superset(&probe.declared) && fat.resolved.len() > probe.declared.len(),
+        "{}: the resolved column is READ FROM THE GRAPH -- behind `bin_runtime -> domain` the \
+         image links every scope, so resolved must strictly contain the declaration. Got \
+         declared {:?}, resolved {:?}: if those are equal, the column is the manifest echoed back \
+         and the index proves nothing.",
+        probe.name,
+        probe.declared,
+        fat.resolved
+    );
+    assert!(
+        !fat.honest() && fat.fat(),
+        "{}: an image linking more than it declares is fat, never honest",
+        probe.name
+    );
+    assert_eq!(
+        fat.facade_carriers,
+        vec!["bin_runtime".to_string()],
+        "{}: `via` names the DIRECT dependency the facade enters through",
+        probe.name
+    );
+}
+
+/// A register row that is CLOSED and not yet in the spec is STATED by the index, and the naming
+/// that states it deletes itself. DECISIONS.md D9 homes `CartBindingProcess` in `order`;
+/// `c4-l2.yaml` still says `customer`. While they disagree the index must say so (it renders the
+/// spec, so it renders the pre-decision answer, and a reader must not take that for the decision);
+/// once they agree the bullet AND the two constants behind it are dead code, and this fails until
+/// they are removed.
+#[test]
+fn app_index_states_the_decided_home_until_the_spec_agrees() {
+    let model = app_index_model();
+    let bounds = boundary_map(&model);
+    let index = emit_app_index(&model, &CrateGraph::default());
+    let stated = index.contains("One row is decided and not yet spec'd");
+    match bounds.of_actor(CART_BINDING_PROCESS) {
+        Some(home) if home != CART_BINDING_DECIDED_HOME => assert!(
+            stated,
+            "c4 homes {CART_BINDING_PROCESS} in '{home}' and D9 closed it into \
+             '{CART_BINDING_DECIDED_HOME}' -- the index must name the pending move, not render \
+             the stale home silently"
+        ),
+        other => assert!(
+            !stated,
+            "c4 now homes {CART_BINDING_PROCESS} in {other:?}, which no longer contradicts D9: \
+             delete CART_BINDING_PROCESS/CART_BINDING_DECIDED_HOME and the bullet they drive"
+        ),
+    }
 }
 
 /// The index's grant column and the pod manifest are ONE derivation (`bin_secret_env_keys`).

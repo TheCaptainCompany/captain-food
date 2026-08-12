@@ -46,6 +46,17 @@ use guppy::MetadataCommand;
 /// gateways). It is a real bounded context in `c4-l2.yaml`, not a sentinel invented here.
 const PLATFORM_BOUNDARY: &str = "platform";
 
+/// The one register row that is CLOSED and not yet reflected in the spec this index reads
+/// (DECISIONS.md §31 D9, 2026-08-11: `CartBindingProcess` is homed in `order`, while
+/// `specs/architecture/c4-l2.yaml` still lists it under `customer`). These two names are NOT an
+/// app rule and are not a boundary table — they name a decision in flight so the index can state
+/// the move it will make instead of silently rendering the pre-decision answer. The bullet they
+/// drive is CONDITIONAL on the spec still disagreeing, so both constants become dead the moment
+/// the one-line c4 edit lands, and `app_index_states_the_decided_home_until_the_spec_agrees`
+/// fails if they are kept past that point.
+pub(crate) const CART_BINDING_PROCESS: &str = "CartBindingProcess";
+pub(crate) const CART_BINDING_DECIDED_HOME: &str = "order";
+
 // ─── The measured half: the workspace crate graph ───────────────────────────────────────────────
 
 /// The workspace dependency graph, MEASURED — crate → its direct workspace dependencies over
@@ -92,6 +103,13 @@ impl CrateGraph {
     fn known(&self, krate: &str) -> bool {
         self.direct.contains_key(krate)
     }
+
+    /// Every measured workspace member — the denominator the "reached by no deployable" line
+    /// subtracts from. A crate no image links is either tooling or a crate nothing calls, and
+    /// only the full member list can tell the index which crates it never had to mention.
+    fn members(&self) -> BTreeSet<&str> {
+        self.direct.keys().map(|k| k.as_str()).collect()
+    }
 }
 
 /// Measure the workspace graph with guppy (`cargo metadata`) — the resolver the build itself
@@ -131,8 +149,10 @@ pub(crate) struct BoundaryMap {
     /// Aggregate/PM name → the context that DECLARES it. Process managers included: c4 lists
     /// them under `processManagers:`, which is the one place a bridge's home is stated.
     of_actor: BTreeMap<String, String>,
-    /// `UserType` role → owning context.
-    of_role: BTreeMap<String, String>,
+    /// `UserType` role → the contexts that CLAIM it. A SET, not one id: two contexts claiming one
+    /// role is an ambiguity to show, and a plain `insert` here resolved it by iteration order,
+    /// silently. A role no context claims is equally a `None` — see `of_role`.
+    of_role: BTreeMap<String, BTreeSet<String>>,
     /// Scope folder → owning context, derived from the contexts of the actors that folder owns.
     /// `None` = the folder's actors span more than one context (an ambiguity the index must
     /// SHOW, never average away) or it owns none.
@@ -140,15 +160,47 @@ pub(crate) struct BoundaryMap {
 }
 
 impl BoundaryMap {
-    /// The context of a scope folder, `platform` when the folder owns no aggregate at all
-    /// (today: nothing — the kernel owns `MailboxSupervision`, which the `platform` context
-    /// declares), `None` when its actors span contexts.
+    /// The context of a scope FOLDER. `None` when the folder's aggregates span more than one
+    /// context OR it owns none — both are "not derivable", and the index must show that rather
+    /// than average it away. `platform` is returned only for a name that is not a scope folder at
+    /// all (an `integration_scopes` entry naming something outside `specs/{scope}/`), because
+    /// every real folder is present in the map by construction.
     pub(crate) fn of_scope(&self, scope: &str) -> Option<&str> {
         match self.of_scope.get(scope) {
             Some(Some(bc)) => Some(bc.as_str()),
             Some(None) => None,
             None => Some(PLATFORM_BOUNDARY),
         }
+    }
+
+    /// The context of a `UserType` role — `Some` only when EXACTLY ONE context claims it. Zero
+    /// claimants and two claimants are both `None`: the first is a role no `boundedContexts`
+    /// entry lists (`ADMIN`, `EXTERNAL` today), the second a contradiction. Either way the
+    /// gateway falls to `platform` and section 2 names the role out loud, so a default never
+    /// passes for a declaration.
+    pub(crate) fn of_role(&self, role: &str) -> Option<&str> {
+        match self.of_role.get(role) {
+            Some(set) if set.len() == 1 => set.iter().next().map(|s| s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The context c4 DECLARES an aggregate or process manager in.
+    pub(crate) fn of_actor(&self, actor: &str) -> Option<&str> {
+        self.of_actor.get(actor).map(|s| s.as_str())
+    }
+
+    /// Every context claiming `role` — the raw evidence behind `of_role`, so a test can assert the
+    /// derivation is unambiguous instead of asserting the answer it produced.
+    pub(crate) fn role_claimants(&self, role: &str) -> BTreeSet<&str> {
+        self.of_role.get(role).map(|s| s.iter().map(|c| c.as_str()).collect()).unwrap_or_default()
+    }
+
+    /// The context owning the role served at `/{path}/graphql` (how a surface inherits its
+    /// boundary: the c4 relationship names its gateway, the gateway's path names the role).
+    fn of_role_path(&self, path: &str) -> Option<&str> {
+        let role = self.of_role.keys().find(|r| role_path(r) == path)?.clone();
+        self.of_role(&role)
     }
 }
 
@@ -181,17 +233,22 @@ pub(crate) fn boundary_map(model: &Model) -> BoundaryMap {
             of_actor.insert(a.clone(), ctx.id.clone());
         }
         for r in &ctx.roles {
-            of_role.insert(r.clone(), ctx.id.clone());
+            of_role.entry(r.clone()).or_insert_with(BTreeSet::new).insert(ctx.id.clone());
         }
     }
     // scope → context, via the AGGREGATES each scope folder owns (the folder is the
     // scope-membership declaration everything else derives from, ADR-20260807-183024).
     //
-    // AGGREGATES ONLY, and this is load-bearing: `specs/ordering/` owns `CartBindingProcess`,
-    // which c4 puts in the `customer` context — a process manager is a DECLARED bridge, so
-    // letting one vote would make its folder's boundary ambiguous and silently un-derivable for
-    // the two apps (`projector-ordering`, `graphql-ordering`) that read it. A bridge takes its
-    // home from `of_actor` instead, where c4 states it directly.
+    // AGGREGATES ONLY, ON PRINCIPLE: a boundary owns the state it can SERIALIZE, and an aggregate
+    // is the only thing that owns state — so an aggregate's folder is evidence of where a
+    // boundary lives, while a process manager is a DECLARED BRIDGE whose whole job is to span
+    // two. A bridge's c4 home may legitimately differ from the folder its definition sits in, and
+    // letting it vote would make that folder's boundary ambiguous and silently un-derivable for
+    // every app that reads the folder. So a PM takes its home from `of_actor`, where c4 states it
+    // directly, and never contributes to `of_scope`. This is the rule, not a workaround: it holds
+    // when no folder disagrees. The live example that shows the difference is `specs/ordering/`,
+    // which owns `CartBindingProcess` while c4 homes it in `customer` — without the rule,
+    // `projector-ordering` and `graphql-ordering` would lose their boundary.
     let mut per_scope: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (actor, _, _) in actor_scope_links(model) {
         let Some(bc) = of_aggregate.get(&actor) else { continue };
@@ -219,6 +276,11 @@ pub(crate) struct AppRow {
     pub(crate) family: &'static str,
     /// The bounded context this app belongs to — one of `BoundaryMap::ids`.
     pub(crate) boundary: String,
+    /// The `UserType` a gateway serves, `None` for every other family — kept on the row so the
+    /// index can say which roles no context claims without re-deriving the topology.
+    pub(crate) role: Option<String>,
+    /// The aggregate (`actor`) or process manager (`pm`) this app realizes, `None` elsewhere.
+    pub(crate) actor: Option<String>,
     /// What the manifest says (scope names of the `domain-*` crates it links).
     pub(crate) declared: BTreeSet<String>,
     /// What the workspace graph resolves (scope names of every `domain-*` crate in the closure).
@@ -241,10 +303,21 @@ pub(crate) struct AppRow {
 }
 
 impl AppRow {
-    /// The column that makes a clean split verifiable: does the image link exactly what the
-    /// manifest claims? An unmeasured app is never honest — absence of evidence is not evidence.
+    /// THE THREE STATES, exhaustive and mutually exclusive: `honest` (measured, and the image
+    /// links exactly what the manifest declares), `fat` (measured, and it links more), and
+    /// unmeasured (`!measured` — cargo does not know this deployable). `honest + fat + unmeasured
+    /// == 1` for every row, which is why the tables render all three: folding the third into
+    /// `fat` would report an app we cannot see as an app we caught lying.
+    ///
+    /// An unmeasured app is never honest — absence of evidence is not evidence.
     pub(crate) fn honest(&self) -> bool {
         self.measured && self.declared == self.resolved
+    }
+
+    /// Measured, and the image links domain crates the manifest never names. NOT the complement
+    /// of `honest`: an unmeasured app is neither.
+    pub(crate) fn fat(&self) -> bool {
+        self.measured && self.declared != self.resolved
     }
 
     /// The BUSINESS boundaries this app's DECLARED crates reach (`platform` excluded — the
@@ -338,6 +411,8 @@ pub(crate) fn app_rows(model: &Model, graph: &CrateGraph) -> Vec<AppRow> {
             name: b.name.clone(),
             family: index_family(&b),
             boundary,
+            role: b.role.clone(),
+            actor: b.actor.clone(),
             declared,
             resolved,
             facade_carriers,
@@ -391,19 +466,14 @@ fn app_boundary(
         "gateway" => b
             .role
             .as_deref()
-            .and_then(|r| bounds.of_role.get(r))
-            .cloned()
+            .and_then(|r| bounds.of_role(r))
+            .map(|s| s.to_string())
             .unwrap_or_else(unresolved),
         "surface" => surface_gateway
             .get(b.name.as_str())
             .and_then(|gw| gw.strip_prefix("gateway-"))
-            .and_then(|path| {
-                bounds
-                    .of_role
-                    .iter()
-                    .find(|(role, _)| role_path(role) == path)
-                    .map(|(_, bc)| bc.clone())
-            })
+            .and_then(|path| bounds.of_role_path(path))
+            .map(|s| s.to_string())
             .unwrap_or_else(unresolved),
         // An adapter/worker declares the scope whose keys and journals it works on; `bam` and the
         // generic sweeps declare none, and belong to no business boundary by construction.
@@ -592,33 +662,37 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
 
     // ── 1. Families ────────────────────────────────────────────────────────────────────────────
     out.push_str("## 1. The families\n\n");
-    out.push_str("| family | apps | honest | fat | what one app of this family IS |\n|---|---:|---:|---:|---|\n");
+    out.push_str("Three states, exhaustive and exclusive. **`honest`** = measured, and the image links exactly the domain crates its manifest declares. **`fat`** = measured, and it links MORE than it declares -- the crates are in the image, the manifest never names them. **`unmeasured`** = cargo does not know this deployable at all, so nothing is claimed about it: absence of evidence is not evidence, and it is never counted as fat.\n\n");
+    out.push_str("| family | apps | honest | fat | unmeasured | what one app of this family IS |\n|---|---:|---:|---:|---:|---|\n");
     for fam in FAMILY_ORDER {
         let mine: Vec<&AppRow> = rows.iter().filter(|r| r.family == *fam).collect();
         if mine.is_empty() {
             continue;
         }
-        let honest = mine.iter().filter(|r| r.honest()).count();
         out.push_str(&format!(
-            "| `{fam}` | {} | {} | {} | {} |\n",
+            "| `{fam}` | {} | {} | {} | {} | {} |\n",
             mine.len(),
-            honest,
-            mine.len() - honest,
+            mine.iter().filter(|r| r.honest()).count(),
+            mine.iter().filter(|r| r.fat()).count(),
+            mine.iter().filter(|r| !r.measured).count(),
             family_blurb(fam)
         ));
     }
     let honest_total = rows.iter().filter(|r| r.honest()).count();
+    let fat_total = rows.iter().filter(|r| r.fat()).count();
+    let unmeasured_total = rows.iter().filter(|r| !r.measured).count();
     out.push_str(&format!(
-        "| **total** | **{}** | **{}** | **{}** | |\n\n",
+        "| **total** | **{}** | **{}** | **{}** | **{}** | |\n\n",
         rows.len(),
         honest_total,
-        rows.len() - honest_total
+        fat_total,
+        unmeasured_total
     ));
 
     // ── 2. Boundaries ──────────────────────────────────────────────────────────────────────────
     out.push_str("## 2. Per boundary -- is the split clean?\n\n");
-    out.push_str("`honest` = the image links exactly the domain crates the manifest declares. `cross-boundary (declared)` = apps whose DECLARED crates reach more than one business boundary -- a bridge, legitimate for a process manager, a smell anywhere else. `cross-boundary (resolved)` = the same question asked of what actually links.\n\n");
-    out.push_str("| boundary | apps | honest | fat | cross-boundary (declared) | cross-boundary (resolved) |\n|---|---:|---:|---:|---:|---:|\n");
+    out.push_str("`honest`/`fat`/`unmeasured` as defined in section 1. `cross-boundary (declared)` = apps whose DECLARED crates reach more than one business boundary -- a bridge, legitimate for a process manager, a smell anywhere else. `cross-boundary (resolved)` = the same question asked of what actually links.\n\n");
+    out.push_str("| boundary | apps | honest | fat | unmeasured | cross-boundary (declared) | cross-boundary (resolved) |\n|---|---:|---:|---:|---:|---:|---:|\n");
     let mut ids = bounds.ids.clone();
     ids.sort();
     for bc in &ids {
@@ -626,14 +700,14 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
         if mine.is_empty() {
             continue;
         }
-        let honest = mine.iter().filter(|r| r.honest()).count();
         let dspan = mine.iter().filter(|r| r.declared_span(&bounds).len() > 1).count();
         let rspan = mine.iter().filter(|r| r.resolved_span(&bounds).len() > 1).count();
         out.push_str(&format!(
-            "| **{bc}** | {} | {} | {} | {} | {} |\n",
+            "| **{bc}** | {} | {} | {} | {} | {} | {} |\n",
             mine.len(),
-            honest,
-            mine.len() - honest,
+            mine.iter().filter(|r| r.honest()).count(),
+            mine.iter().filter(|r| r.fat()).count(),
+            mine.iter().filter(|r| !r.measured).count(),
             dspan,
             rspan
         ));
@@ -642,10 +716,11 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
         rows.iter().filter(|r| r.declared_span(&bounds).len() > 1).collect();
     let rspan_all = rows.iter().filter(|r| r.resolved_span(&bounds).len() > 1).count();
     out.push_str(&format!(
-        "| **total** | **{}** | **{}** | **{}** | **{}** | **{}** |\n\n",
+        "| **total** | **{}** | **{}** | **{}** | **{}** | **{}** | **{}** |\n\n",
         rows.len(),
         honest_total,
-        rows.len() - honest_total,
+        fat_total,
+        unmeasured_total,
         dspan_all.len(),
         rspan_all
     ));
@@ -674,10 +749,17 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
         rspan_all
     ));
     out.push_str(&format!(
-        "- **resolved == declared** -- {} of {} apps. The other {} link domain crates their manifest never names.\n",
+        "- **resolved == declared** -- {} of {} apps. {} link domain crates their manifest never names{}.\n",
         honest_total,
         rows.len(),
-        rows.len() - honest_total
+        fat_total,
+        if unmeasured_total == 0 {
+            String::new()
+        } else {
+            format!(
+                "; {unmeasured_total} are UNMEASURED (not workspace members cargo knows), so this index claims nothing about them"
+            )
+        }
     ));
     // WHERE the repair goes: how many apps each DIRECT dependency carries the facade into. One
     // crate carrying most of them is not a detail, it is the shape of the work.
@@ -690,44 +772,126 @@ pub(crate) fn emit_app_index(model: &Model, graph: &CrateGraph) -> String {
     let mut carriers: Vec<(&str, usize)> = carriers.into_iter().collect();
     carriers.sort_by_key(|(c, n)| (std::cmp::Reverse(*n), *c));
     out.push_str(&format!(
-        "- **Which dependency carries the facade in** -- {}. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.\n\n",
+        "- **Which dependency carries the facade in** -- {}. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.\n",
         carriers.iter().map(|(c, n)| format!("`{c}` into {n}")).collect::<Vec<_>>().join(", ")
     ));
+    // A gateway's boundary is its ROLE's context. A role no context claims is not an error -- it
+    // is an undeclared one, and the row lands on `platform` by default. Say which, so nobody reads
+    // the default as a decision.
+    let unclaimed: BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.family == "gateway")
+        .filter_map(|r| r.role.as_deref())
+        .filter(|role| bounds.role_claimants(role).is_empty())
+        .collect();
+    if !unclaimed.is_empty() {
+        out.push_str(&format!(
+            "- **Roles no bounded context claims** -- {}. Their gateways are indexed under `{PLATFORM_BOUNDARY}` because nothing else is derivable, NOT because a context decided so; a `roles:` entry in `c4-l2.yaml` moves them with no edit here.\n",
+            unclaimed.iter().map(|r| format!("`{r}`")).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    // A decision that is CLOSED in the register and not yet in the spec the index reads. The index
+    // renders the spec, so it renders the pre-decision answer -- and says so, with the move it
+    // will make. Derived from the spec: the line disappears when c4 catches up.
+    if let (Some(home), Some(row)) = (
+        bounds.of_actor.get(CART_BINDING_PROCESS),
+        rows.iter().find(|r| r.family == "pm" && r.actor.as_deref() == Some(CART_BINDING_PROCESS)),
+    ) {
+        if home != CART_BINDING_DECIDED_HOME {
+            let count = |bc: &str| rows.iter().filter(|r| r.boundary == bc).count();
+            out.push_str(&format!(
+                "- **One row is decided and not yet spec'd** -- DECISIONS.md D9 closes `{CART_BINDING_PROCESS}` into `{CART_BINDING_DECIDED_HOME}`, and `specs/architecture/c4-l2.yaml` still homes it in `{home}`. This index renders the SPEC, so `{}` reads `{home}` above; when that one-liner lands the table reads {home} {} -> {}, {CART_BINDING_DECIDED_HOME} {} -> {}, and this bullet disappears.\n",
+                row.name,
+                count(home),
+                count(home) - 1,
+                count(CART_BINDING_DECIDED_HOME),
+                count(CART_BINDING_DECIDED_HOME) + 1,
+            ));
+        }
+    }
+    out.push('\n');
 
     // ── 3. Shared crates ───────────────────────────────────────────────────────────────────────
     out.push_str("## 3. What the boundaries share\n\n");
-    out.push_str("Every workspace crate any app resolves, grouped by the set of boundaries whose apps reach it. A crate reached by one boundary is that boundary's own; a crate reached by all of them is a shared kernel whether or not it was designed as one.\n\n");
+    out.push_str("Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.\n\n");
+    // Two measurements per crate: WHICH boundaries reach it, and HOW MANY apps do. The first
+    // saturates and the second does not -- see the paragraph below, which is why both are grouped
+    // on and why the count is a column and not a footnote.
     let mut reach: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut app_reach: BTreeMap<String, usize> = BTreeMap::new();
     for r in &rows {
         for c in graph.closure(&r.name) {
-            reach.entry(c).or_default().insert(r.boundary.clone());
+            reach.entry(c.clone()).or_default().insert(r.boundary.clone());
+            *app_reach.entry(c).or_default() += 1;
         }
     }
-    let mut by_sig: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
+    let mut by_sig: BTreeMap<(Vec<String>, usize), Vec<String>> = BTreeMap::new();
     for (krate, bcs) in &reach {
-        by_sig.entry(bcs.iter().cloned().collect()).or_default().push(krate.clone());
+        let key = (bcs.iter().cloned().collect::<Vec<_>>(), app_reach[krate]);
+        by_sig.entry(key).or_default().push(krate.clone());
     }
-    let mut sigs: Vec<(&Vec<String>, &Vec<String>)> = by_sig.iter().collect();
-    sigs.sort_by_key(|(sig, crates)| (std::cmp::Reverse(sig.len()), crates.len()));
-    let owned: usize = sigs.iter().filter(|(sig, _)| sig.len() == 1).map(|(_, c)| c.len()).sum();
+    let mut sigs: Vec<(&(Vec<String>, usize), &Vec<String>)> = by_sig.iter().collect();
+    sigs.sort_by_key(|((sig, apps), crates)| {
+        (std::cmp::Reverse(sig.len()), std::cmp::Reverse(*apps), crates.len())
+    });
+    let exclusive: usize = sigs.iter().filter(|((sig, _), _)| sig.len() == 1).map(|(_, c)| c.len()).sum();
+    // The boundary signature's CEILING and what clears it alone. `graphql-*` is one app per scope
+    // and those apps' boundaries already cover the whole set, so ANY crate a single subgraph links
+    // reads "all boundaries". Stating the ceiling is what stops the column being over-read.
+    let subgraph_boundaries: BTreeSet<&str> =
+        rows.iter().filter(|r| r.family == "graphql").map(|r| r.boundary.as_str()).collect();
+    let min_apps = app_reach.values().copied().min().unwrap_or(0);
+    let max_apps = app_reach.values().copied().max().unwrap_or(0);
     out.push_str(&format!(
-        "**{} of the {} crates the apps reach are shared across boundaries; {} belong to exactly one.** If the table below has a single row, that is not a rendering accident -- it is the shape of the graph.\n\n",
-        reach.len() - owned,
+        "**No crate the apps reach is boundary-EXCLUSIVE: {} of {} are linked from at least one app of every boundary; {} belong to exactly one.** Read that as what it says and no more. The boundary column's ceiling is {} and one family clears it on its own -- the {} `graphql-*` subgraphs are one app per scope and between them cover {} of the {} boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the {} deployables actually link the crate, and it ranges from {} to {}.\n\n",
+        reach.len() - exclusive,
         reach.len(),
-        owned
+        exclusive,
+        bounds.ids.len(),
+        rows.iter().filter(|r| r.family == "graphql").count(),
+        subgraph_boundaries.len(),
+        bounds.ids.len(),
+        rows.len(),
+        min_apps,
+        max_apps,
     ));
-    out.push_str("| reached by | crates | which |\n|---|---:|---|\n");
-    for (sig, crates) in sigs {
+    out.push_str(&format!("| reached by | apps (of {}) | crates | which |\n|---|---:|---:|---|\n", rows.len()));
+    for ((sig, apps), crates) in sigs {
         out.push_str(&format!(
-            "| {} boundar{} ({}) | {} | {} |\n",
+            "| {} boundar{} ({}) | {} | {} | {} |\n",
             sig.len(),
             if sig.len() == 1 { "y" } else { "ies" },
             sig.join(", "),
+            apps,
             crates.len(),
             crates.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
         ));
     }
     out.push('\n');
+    // The complement, which no other artifact states: workspace members NO deployable links. An
+    // index asked for "all dependencies we need for a clean split" has to name what is not one.
+    let app_names: BTreeSet<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    let orphans: Vec<&str> = graph
+        .members()
+        .into_iter()
+        .filter(|m| !app_names.contains(m) && !reach.contains_key(*m))
+        .collect();
+    if !orphans.is_empty() {
+        let clients: Vec<&&str> = orphans.iter().filter(|c| c.starts_with("client-")).collect();
+        out.push_str(&format!(
+            "**Reached by no deployable** -- {} workspace crate(s): {}. {}\n\n",
+            orphans.len(),
+            orphans.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", "),
+            if clients.is_empty() {
+                "Codegen, gates and the desktop shell are expected here; anything else is a crate the images do not ship.".to_string()
+            } else {
+                format!(
+                    "Codegen, gates and the desktop shell are expected here. {} is not: a generated actor client no app links is either an actor with no caller or a wiring gap, and this is the only artifact that would show it.",
+                    clients.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+                )
+            }
+        ));
+    }
 
     // ── 4. The apps ────────────────────────────────────────────────────────────────────────────
     out.push_str("## 4. The apps\n\n");
