@@ -375,7 +375,7 @@ mod tests {
         // recorded blast-radius cost whose exit is the per-scope infrastructure split; the
         // sharp assertion here is the manifest-level one (only worker-sirene-sync can SPELL
         // sirene_ingest APIs), not a build-closure wall.
-        for bin in ["worker-retention", "worker-journal-sweep", "worker-erasure", "worker-sirene-sync"] {
+        for bin in ["worker-retention", "worker-erasure", "worker-sirene-sync"] {
             let closure = closure_dirs(graph(), bin).expect("closure resolves");
             assert!(
                 closure.contains("crates/infrastructure"),
@@ -389,7 +389,7 @@ mod tests {
             sirene_manifest.contains("sirene_ingest = { path"),
             "worker-sirene-sync must link the shared sweep orchestration directly"
         );
-        for bin in ["worker-retention", "worker-journal-sweep", "worker-erasure"] {
+        for bin in ["worker-retention", "worker-erasure"] {
             let manifest =
                 std::fs::read_to_string(repo_root().join(format!("crates/bins/{bin}/Cargo.toml")))
                     .expect("worker bin manifest");

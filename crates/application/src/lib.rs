@@ -11,7 +11,6 @@ pub mod auth_sessions;
 pub mod behaviour_support;
 pub mod commands;
 pub mod deliveries;
-pub mod dispatch;
 pub mod dispatch_strategy;
 pub mod generated;
 pub mod journal;

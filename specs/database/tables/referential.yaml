@@ -108,16 +108,17 @@ RuntimePosture:
   reference: true
   description: >
     Process-wide runtime postures — ONE row per posture, read at startup by EVERY process the
-    posture governs (#318, ADR-20260803-104819). Seeded: PM_MAILBOX_DELIVERY false (the Runtime
-    D1 money gate, ADR-20260801-023000 — ON, the PM mutations deliver through the PM mailboxes,
-    the Payment lane B2-chains inbound Stripe facts and the saga runner's Stripe-fact triggers
-    retire; OFF, the legacy journal+spawn path handles everything). A posture is DELIBERATELY
-    not an env key: per-process env is per-deploy state, and a drifted value on one adapter
-    fleet delivering Payment facts without the PM chain hop is the silent paid-order stall.
-    Flip = UPDATE the row + an ORDERED full restart of every mailbox-delivering process (ON:
-    adapter fleets first, monolith last; OFF: monolith first — ADR-20260803-104819 Decision 3);
-    while the row is unreadable a money-lane fleet fails closed (see the ADR).
+    posture governs (#318, ADR-20260803-104819). A posture is DELIBERATELY not an env key:
+    per-process env is per-deploy state, and a drifted value across a fleet is how one process
+    behaves differently from its peers on a money path. Flip = UPDATE the row + an ORDERED full
+    restart of every process that reads it (ADR-20260803-104819 Decision 3); while the row is
+    unreadable a governed money lane fails closed (see the ADR).
+    CURRENTLY EMPTY: the mechanism's first and only tenant, PM_MAILBOX_DELIVERY, retired with
+    `command_journal` in #242 Runtime D (ADR-20260812-000000) — PM mailbox delivery is now
+    unconditional, so there is no arm left to pick. The table and its fail-closed read stay for
+    the next posture; a posture with no reader would be a control that does nothing, so the row
+    was deleted rather than pinned true.
   columns:
-    posture:    { type: text, pk: true, note: "The posture key, e.g. 'PM_MAILBOX_DELIVERY'. Uppercase snake, mirroring the retired env-key spelling so the gate keeps its name across the move." }
+    posture:    { type: text, pk: true, note: "The posture key, uppercase snake (e.g. 'PM_MAILBOX_DELIVERY', retired)." }
     enabled:    { type: boolean, note: "The posture value every process adopts at its next startup." }
     updated_at: { type: timestamptz, note: "When the posture last changed — the operator's evidence trail for 'which processes have restarted into it'." }

@@ -15,7 +15,7 @@
 pub mod span {
     /// SERVER — the synchronous acceptance entry point (one per mutation resolver).
     pub const COMMAND_RECEIVE: &str = "command.receive";
-    /// INTERNAL — the `command_journal` insert: durable RECEIVED, or duplicate/conflict.
+    /// INTERNAL — the `inbound_messages` insert: durable RECEIVED, or duplicate/conflict.
     pub const COMMAND_JOURNAL: &str = "command.journal";
     /// INTERNAL — handing the command to the async handler (or declining to, on a duplicate).
     pub const COMMAND_DISPATCH: &str = "command.dispatch";
@@ -147,9 +147,11 @@ pub mod journal_status {
     pub const CONFLICT: &str = "conflict";
 }
 
-/// Values for `business.dispatch_outcome` (`spawned | duplicate_skipped`).
+/// Values for `business.dispatch_outcome` (`enqueued | duplicate_skipped`), matching
+/// `specs/observability.yaml` verbatim — this is the vocabulary a dashboard filter may rely on.
+/// `spawned` retired with the in-request spawn (#242 Runtime D): it is neither emitted nor declared,
+/// so the constant is DELETED rather than kept as a value nothing can produce.
 pub mod dispatch_outcome {
-    pub const SPAWNED: &str = "spawned";
     pub const DUPLICATE_SKIPPED: &str = "duplicate_skipped";
     /// The mailbox era (#242): the command was ENQUEUED on the actor mailbox — the partitioned
     /// worker delivers it; nothing is spawned in the request path.

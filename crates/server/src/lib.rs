@@ -120,7 +120,7 @@ pub fn wire() -> HealthDto {
 /// only checks the DB has reached at least this version. Bump when adding a migration this build depends on.
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
-/// writes `command_journal` at acceptance, so the app cannot serve writes without it.
+/// writes `inbound_messages` at acceptance, so the app cannot serve writes without it.
 /// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
 /// `20260725000000` = the `orderconversation` projection table (#131, epic #129): the projection worker
@@ -167,7 +167,7 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260810113000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260812000000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -326,14 +326,12 @@ pub struct GraphqlDi {
     pub restaurants: Arc<dyn RestaurantReadRepository>,
 }
 
-/// Build [`GraphqlDi`] (ADR-0035 composition root). `pm_mailbox_delivery` is the money posture
-/// the caller resolved from its RuntimePosture row (#318) — never env, never a guess.
+/// Build [`GraphqlDi`] (ADR-0035 composition root).
 pub fn build_graphql_di(
     pool: &PgPool,
     event_bus: &EventBus,
     operation_status_bus: &actor_client::OperationStatusBus,
     mailbox_nudges: &Arc<infrastructure::persistence::mailbox_store::MailboxNudges>,
-    pm_mailbox_delivery: bool,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -443,11 +441,10 @@ pub fn build_graphql_di(
         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
             pool.clone(),
         )),
-        // Acceptance-first dispatch (ADR-20260720-015300/-015500): the durable command
-        // journal + the journal-transition broadcast behind operationStatus(+Changed).
-        journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
-        // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
-        // the partitioned workers spawned below deliver.
+        // Acceptance-first dispatch (ADR-20260720-015300/-015500): the actor mailbox is THE
+        // acceptance door since #242 Runtime D -- every mutation enqueues here and the
+        // partitioned workers spawned below deliver; the transition broadcast behind
+        // operationStatus(+Changed) rides the status bus below.
         mailbox: Arc::new(
             infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
                 .with_nudges(mailbox_nudges.clone()),
@@ -456,10 +453,6 @@ pub fn build_graphql_di(
         slug_reservations: Arc::new(
             infrastructure::PgSlugReservationRepository::new(pool.clone()),
         ),
-        // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
-        // gated PM resolvers pick mailbox-vs-legacy from this at request time —
-        // sourced from the RuntimePosture row read above (#318), never env.
-        pm_mailbox_delivery,
         auth_sessions: {
             // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
             // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
@@ -560,58 +553,6 @@ pub async fn router() -> Router {
                 snap.lock().expect("health snapshot mutex").state = db_state::DOWN;
                 spawn_heartbeat(pool.clone(), snap.clone());
 
-                // THE MONEY POSTURE (#318, ADR-20260803-104819): PM_MAILBOX_DELIVERY is ONE
-                // RuntimePosture database row every process reads at startup — never env (a
-                // per-deploy override is a drift path), never a guess. Resolution is fail-closed
-                // by cause: a missing row/table is DETERMINISTIC (no process can read `true`
-                // from that state, so everyone falls to the legacy arm together — runner active,
-                // no chaining; /health independently reports schema_behind, ADR-0043); a
-                // transient error is NOT (a peer may have read TRUE), so after brief retries the
-                // process refuses to start — on Render a failed deploy keeps the previous
-                // version serving, which is strictly safer than booting into the silent
-                // paid-order stall this row exists to remove.
-                let pm_mailbox_delivery = {
-                    use infrastructure::persistence::runtime_posture::{self, PostureRead};
-                    let mut attempt = 0u32;
-                    loop {
-                        attempt += 1;
-                        match runtime_posture::read_posture(
-                            &pool,
-                            runtime_posture::PM_MAILBOX_DELIVERY,
-                        )
-                        .await
-                        {
-                            Ok(PostureRead::Enabled(v)) => {
-                                tracing::info!(
-                                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
-                                    enabled = v,
-                                    "money posture read from its RuntimePosture row"
-                                );
-                                break v;
-                            }
-                            Ok(PostureRead::Unprovable(reason)) => {
-                                tracing::warn!(
-                                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
-                                    reason,
-                                    "money posture UNPROVABLE -- legacy arm (gate off) until a migrated restart"
-                                );
-                                break false;
-                            }
-                            Err(e) if attempt < 5 => {
-                                tracing::warn!(error = %e, attempt, "money posture read failed -- retrying");
-                                tokio::time::sleep(Duration::from_secs(2)).await;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    error = %e,
-                                    "money posture UNREADABLE after retries -- refusing to start (an unproven money posture must not boot)"
-                                );
-                                panic!("PM_MAILBOX_DELIVERY posture unreadable after retries: {e}");
-                            }
-                        }
-                    }
-                };
-
                 // The read/write dependency graph of the GraphQL surface — ONE composition,
                 // shared with the graphql-{scope} subgraph bins (#385 API-tier wiring, D8):
                 // extracting it is what lets a subgraph bin serve the same resolvers without a
@@ -622,7 +563,6 @@ pub async fn router() -> Router {
                     &event_bus,
                     &operation_status_bus,
                     &mailbox_nudges,
-                    pm_mailbox_delivery,
                 );
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
@@ -669,9 +609,9 @@ pub async fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
-                // THE FLIP-TIME BACKFILL (#272 review MAJOR-2 + re-verify residual): with the
-                // gate ON, any Stripe fact the saga runner accepted but had not reacted to
-                // before the flip has no deliverer — a PaymentCaptured with no OrderPlaced is a
+                // THE STARTUP BACKFILL (#272 review MAJOR-2 + re-verify residual): any Stripe
+                // fact a previously-running saga runner accepted but had not reacted to has no
+                // deliverer — a PaymentCaptured with no OrderPlaced is a
                 // paid order nobody is told about. Runs STRICTLY BEFORE the saga runner's first
                 // tick (sequenced inside the runner's own task below): that first tick can
                 // advance pm:RefundProcess past an un-reacted PaymentRefunded (via the group's
@@ -680,13 +620,9 @@ pub async fn router() -> Router {
                 // absorb already-delivered hops); PM lanes are seeded first so the width lookup
                 // can never race the workers' own seeding.
                 let pm_backfill = {
-                    let gate_on = pm_mailbox_delivery;
                     let pool = pool.clone();
                     let nudges = mailbox_nudges.clone();
                     async move {
-                        if !gate_on {
-                            return;
-                        }
                         for (actor_type, width) in
                             infrastructure::generated::command_router::ACTOR_MAILBOXES
                         {
@@ -695,7 +631,7 @@ pub async fn router() -> Router {
                                     actor_runtime::seed_partitions(&pool, actor_type, *width as i16)
                                         .await
                                 {
-                                    tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry BEFORE relying on the flip");
+                                    tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry");
                                     return;
                                 }
                             }
@@ -727,7 +663,7 @@ pub async fn router() -> Router {
                                 Err(e) => {
                                     // Facts stay in the log — nothing is lost — but the runner
                                     // may now advance past them: LOUD, and a restart retries.
-                                    tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry BEFORE relying on the flip");
+                                    tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry");
                                     return;
                                 }
                             }
@@ -790,10 +726,7 @@ pub async fn router() -> Router {
                     .expect("payment service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone())
                         .with_partner(partner)
-                        .with_payments(saga_payments)
-                        // Runtime D1 (#272): with PM mailboxes on, the Stripe-fact triggers are
-                        // chained to the PM lanes by the mailbox — this runner must not race them.
-                        .with_pm_mailboxes(pm_mailbox_delivery);
+                        .with_payments(saga_payments);
                     saga_status = Some(runner.status());
                     // The backfill runs INSIDE the runner's task, before its first tick — the
                     // ordering the re-verification demanded (see the pm_backfill comment above).
@@ -833,32 +766,6 @@ pub async fn router() -> Router {
                 // table through the ACL into the ordinary write path. Always constructed (the
                 // /internal/sirene/drain ping needs it); the slow safety-net poll loop is gated by
                 // RUN_SIRENE_WORKER — default OFF since 2026-07-28 (paused, issue #220).
-                // The command_journal stale-RECEIVED sweep (ADR-20260720-015300) SURVIVES the
-                // drain worker's retirement (ADR-20260731-122500): the journal is still the PM
-                // legs' door until Runtime D, and a crashed spawned run must still flip to FAILED
-                // so operationStatus never reports a dead run as pending forever. Always-on with a
-                // DB, slow tick; retires WITH command_journal itself.
-                {
-                    // ONE shared pass, two schedulers (ADR-20260808-062933): this loop and the
-                    // generated `worker-journal-sweep` CronJob bin both call
-                    // `integrations::journal_sweep` — window and cadence live there, never here.
-                    let sweep_pool = pool.clone();
-                    tokio::spawn(async move {
-                        use infrastructure::integrations::journal_sweep;
-                        loop {
-                            match journal_sweep::sweep_stale_received_once(&sweep_pool).await {
-                                Ok(0) => {}
-                                Ok(n) => tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED"),
-                                Err(e) => tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed"),
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(
-                                journal_sweep::SWEEP_INTERVAL_SECONDS,
-                            ))
-                            .await;
-                        }
-                    });
-                }
-
                 // THE MAILBOX WORKERS (#242 Runtime C3, PROP-20260728-152752): one per actor type
                 // with a declared mailbox — claim partition lanes, drain head-of-line, deliver
                 // through the generated command router, commit fenced. ALWAYS running when a DB is
@@ -880,10 +787,10 @@ pub async fn router() -> Router {
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
                         sessions: auth_sessions.clone(),
                         // The SAME conditional Stripe binding the resolver side and the saga runner
-                        // use (#272 Runtime D1): the mailbox workers will execute the payment-
-                        // dependent PM legs once the PlaceOrderProcess/RefundProcess mailboxes land,
-                        // and a hard-wired fail-closed stand-in here would silently decline every
-                        // checkout the moment the generated addressing flips them.
+                        // use (#272 Runtime D1): the mailbox workers execute the payment-dependent
+                        // PM legs -- the PlaceOrderProcess/RefundProcess lanes are live and
+                        // unconditional since #242 Runtime D -- so a hard-wired fail-closed
+                        // stand-in here would silently decline every checkout.
                         payments: infrastructure::generated::service_bindings::payment_service(|| {
                             match std::env::var("STRIPE_SECRET_KEY") {
                                 Ok(key) if !key.is_empty() => {
@@ -967,7 +874,6 @@ pub async fn router() -> Router {
                             // Runtime D1 (#272, B2): a recorded Stripe fact chains its
                             // PM-addressed copy in the SAME completion transaction, and the PM
                             // lane's worker is nudged post-commit.
-                            .with_pm_fact_chaining(pm_mailbox_delivery)
                             .with_nudges(mailbox_nudges.clone());
                         if let Some(settings) = &activations {
                             h = h.with_activations(settings.clone());
@@ -1113,8 +1019,8 @@ pub async fn router() -> Router {
                         "mailbox: per-actor-type workers running in-process"
                     );
 
-                    // (The flip-time backfill runs INLINE before the saga runner spawns — see
-                    // the PM_MAILBOX_DELIVERY block above the RUN_PROCESS_MANAGERS gate.)
+                    // (The startup Stripe-fact backfill runs INLINE before the saga runner
+                    // spawns — see the pm_backfill block above the RUN_PROCESS_MANAGERS gate.)
                 }
 
                 // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):

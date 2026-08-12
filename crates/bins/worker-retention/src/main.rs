@@ -90,7 +90,6 @@ async fn run_pass(config: &config::Config) -> bool {
             tracing::info!(
                 worker = "retention_sweep",
                 total = s.total(),
-                command_journal = s.command_journal,
                 inbound_messages = s.inbound_messages,
                 external_stripe_events = s.external_stripe_events,
                 external_hubrise_callbacks = s.external_hubrise_callbacks,

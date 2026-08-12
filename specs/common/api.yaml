@@ -59,7 +59,7 @@ types:
       the EFFECTIVE technical envelope echoed back (server-computed where the client supplied
       nothing) plus the journaled operation status. Business outcomes are never here — read them via
       queries/subscriptions (`operationStatus`, `paymentStatus`, the read models). NON-PROJECTED
-      (transient) — built from the command_journal acceptance, no `reads`.
+      (transient) — built from the mailbox acceptance, no `reads`.
     properties:
       messageId: { $ref: 'scalars.yaml#/MessageId' }
       correlationId: { $ref: 'scalars.yaml#/CorrelationId' }
@@ -119,7 +119,7 @@ types:
       stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of
       the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership-
       scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or
-      ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
+      ADMIN. NON-PROJECTED (transient) — served from the mailbox, no backing View_*.
     properties:
       messageId: { $ref: 'scalars.yaml#/MessageId' }
       correlationId: { $ref: 'scalars.yaml#/CorrelationId' }
@@ -189,7 +189,7 @@ queries:
       the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in
       the resolver: the row is returned only to the journaling actor (JWT subject match), the
       journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves
-      null (no existence oracle). Transient — served from the command_journal, no View_*.
+      null (no existence oracle). Transient — served from the mailbox, no View_*.
     args:
       messageId: { $ref: 'scalars.yaml#/MessageId', required: true }
     returns: { $ref: '#/types/Operation', nullable: true }

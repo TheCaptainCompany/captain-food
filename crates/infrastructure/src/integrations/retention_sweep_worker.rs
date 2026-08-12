@@ -3,11 +3,11 @@
 //! `sweep_retention()` SQL function (`specs/database/functions/sweep_retention.sql`), so this worker
 //! is a dumb periodic caller and the windows can never drift between code sites.
 //!
-//! Scope (see the ADR + ADR-20260731-122500): `command_journal` terminal rows (90 d),
-//! `inbound_messages` terminal rows (90 d — the mailbox replaced `inbound_events`), the four
-//! webhook mirrors' processed rows (90 d), abandoned `auth_sessions`. NEVER swept:
-//! `domain_events`/`domain_stream` (the forever log — the function does not reference them),
-//! RECEIVED journal/mailbox rows (pending work), SCHEDULED mailbox rows (future work),
+//! Scope (see the ADR + ADR-20260731-122500): `inbound_messages` terminal rows (90 d — the mailbox
+//! is the only journal since #242 Runtime D, having replaced both `inbound_events` and
+//! `command_journal`), the four webhook mirrors' processed rows (90 d), abandoned `auth_sessions`.
+//! NEVER swept: `domain_events`/`domain_stream` (the forever log — the function does not reference
+//! them), RECEIVED mailbox rows (pending work), SCHEDULED mailbox rows (future work),
 //! unprocessed mirror rows, and `external_sirene_restaurants` (full mirror, detect-by-absence
 //! needs every row).
 //!
@@ -30,7 +30,6 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 /// One sweep pass's per-table delete counters, as reported by `sweep_retention()`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RetentionSweepSummary {
-    pub command_journal: u64,
     pub inbound_messages: u64,
     pub external_stripe_events: u64,
     pub external_hubrise_callbacks: u64,
@@ -41,8 +40,7 @@ pub struct RetentionSweepSummary {
 
 impl RetentionSweepSummary {
     pub fn total(&self) -> u64 {
-        self.command_journal
-            + self.inbound_messages
+        self.inbound_messages
             + self.external_stripe_events
             + self.external_hubrise_callbacks
             + self.external_avelo37_events
@@ -73,7 +71,6 @@ impl RetentionSweepWorker {
             let deleted: i64 = row.try_get("deleted").map_err(db_err)?;
             let deleted = deleted.max(0) as u64;
             match table.as_str() {
-                "command_journal" => summary.command_journal = deleted,
                 "inbound_messages" => summary.inbound_messages = deleted,
                 "external_stripe_events" => summary.external_stripe_events = deleted,
                 "external_hubrise_callbacks" => summary.external_hubrise_callbacks = deleted,
@@ -93,7 +90,6 @@ impl RetentionSweepWorker {
             match self.run_once().await {
                 Ok(s) if s.total() > 0 => tracing::info!(
                     worker = "retention_sweep",
-                    command_journal = s.command_journal,
                     inbound_messages = s.inbound_messages,
                     external_stripe_events = s.external_stripe_events,
                     external_hubrise_callbacks = s.external_hubrise_callbacks,

@@ -360,12 +360,8 @@ containers:
     integration_scopes: [network]
   worker-retention:
     technology: "Rust — scheduled worker bin (CronJob)"
-    description: "Retention sweep (ADR-20260721-025159): one sweep_retention() call per run — the windows and predicates live entirely in the SQL function (specs/database/functions/sweep_retention.sql), so this pod is a dumb periodic caller and the policy can never drift between code sites. Sweeps terminal journal/mailbox rows, processed webhook-mirror rows and abandoned auth sessions; NEVER touches domain_events (the forever log)."
+    description: "Retention sweep (ADR-20260721-025159): one sweep_retention() call per run — the windows and predicates live entirely in the SQL function (specs/database/functions/sweep_retention.sql), so this pod is a dumb periodic caller and the policy can never drift between code sites. Sweeps terminal mailbox rows, processed webhook-mirror rows and abandoned auth sessions; NEVER touches domain_events (the forever log)."
     schedule: "0 */6 * * *"
-  worker-journal-sweep:
-    technology: "Rust — scheduled worker bin (CronJob)"
-    description: "command_journal stale-RECEIVED sweep (ADR-20260720-015300): flips commands whose spawned run died before a terminal row to FAILED, so operationStatus never reports a dead run as pending forever. Cadence = half the 10-minute stale window (infrastructure::integrations::journal_sweep owns both). Retires WITH command_journal itself (Runtime D)."
-    schedule: "*/5 * * * *"
   worker-erasure:
     technology: "Rust — scheduled worker bin (CronJob)"
     description: "The GDPR erasure worker (ADR-20260731-214500 §4): the generic deletion engine as ONE NAMED, minimal-grant pod — an auditable legal-precondition posture ('the process that erases personal data' is this pod and nothing else). Each run executes the declared deletion journeys over the bounded scan window (tombstone → delete stream + receipt on the deletion ledger, restart-safe two-tx design); honours the RUN_DELETION_ENGINE gate (default off until smoked). Its env carries DATABASE_URL + telemetry ONLY — no partner or identity secrets."
@@ -473,8 +469,7 @@ relationships:
   - { from: worker-sirene-sync, to: resend, description: "Send prospection outreach emails (ADR-0020)" }
   - { from: worker-sirene-sync, to: slack, description: "Prospection / ops alerts (ADR-0020)" }
   # periodic sweeps + the GDPR erasure worker (one bin per worker, ADR-20260808-062933)
-  - { from: worker-retention, to: event-store, description: "sweep_retention(): expire terminal journal/mailbox rows + processed webhook mirrors (windows live in the SQL function)" }
-  - { from: worker-journal-sweep, to: event-store, description: "Flip stale RECEIVED command_journal rows to FAILED (liveness backstop for operationStatus)" }
+  - { from: worker-retention, to: event-store, description: "sweep_retention(): expire terminal mailbox rows + processed webhook mirrors (windows live in the SQL function)" }
   - { from: worker-erasure, to: event-store, description: "Tombstone + delete erased streams; record receipts on the per-actor deletion ledger (two-tx journeys)" }
   - { from: worker-erasure, to: read-models, description: "Scan bound = the slowest projection checkpoint (a fact is acted on only after every read model folded it)" }
   - { from: worker-erasure, to: otel-collector, description: "OTLP export (every worker bin)" }

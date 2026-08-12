@@ -33,12 +33,11 @@ description: >
 # mutation (metadata?) -> sync validate + DURABLE ACCEPTANCE INSERT -> MutationAcceptance echoed
 #   -> async handling -> terminal status (SUCCEEDED | REJECTED | FAILED)
 #   -> operationStatus/operationStatusChanged.
-# TWO acceptance doors carry the same contract since the mailbox flip (#242 Runtime C /
-# #272 Runtime D1): an aggregate- or PM-addressed command's acceptance is the `inbound_messages`
-# row (the worker delivers and completes it — dispatch_outcome `enqueued`); the gated-off legacy
-# arm's acceptance is the `command_journal` row (spawned handler — dispatch_outcome `spawned`).
-# The three PM commands (placeOrder/approveRefund/denyRefund) pick per request on
-# PM_MAILBOX_DELIVERY; the span names and metrics below are emitted identically on both arms.
+# ONE acceptance door carries the contract since #242 Runtime D: EVERY command — aggregate- or
+# PM-addressed, GraphQL or worker — is accepted as an `inbound_messages` row and the partitioned
+# worker delivers and completes it (dispatch_outcome `enqueued`). The `command_journal` door and
+# its in-request spawn (dispatch_outcome `spawned`) are retired with the table; the three PM
+# commands (placeOrder/approveRefund/denyRefund) no longer pick an arm per request.
 # Binds the WHOLE dispatch surface (`surface: graphql`), not one command — every mutation flows
 # through it. Per-workflow contracts (place-order, ...) remain the deep-dive complement.
 # =====================================================================
@@ -51,9 +50,9 @@ command-acceptance:
   run_identity:
     - { name: correlation_id, source: "command.correlation_id", required: true }
     - { name: trace_id, source: "otel.trace_id", required: true }
-    - { name: message_id, source: "command.message_id", required: true }   # command_journal pk (ADR-20260720-015300)
+    - { name: message_id, source: "command.message_id", required: true }   # inbound_messages pk (ADR-20260720-015300)
     - { name: command_type, source: "command.type", required: true }
-    - { name: channel, source: "journal.channel", required: true }   # scalars CommandChannel: GRAPHQL | WORKER | INTERNAL (#15)
+    - { name: channel, source: "journal.channel", required: true }   # scalars InboundMessageChannel: GRAPHQL | WORKER | EXTERNAL
 
   spans:
     - name: "command.receive"
@@ -74,16 +73,15 @@ command-acceptance:
       required: true
       attributes:
         - { key: "business.message_id", type: string, required: true }
-        - { key: "business.dispatch_outcome", type: string, required: true }   # spawned | enqueued | duplicate_skipped
+        - { key: "business.dispatch_outcome", type: string, required: true }   # enqueued | duplicate_skipped
 
   metrics:
     - { name: "commands_accepted_total", type: counter, attributes: ["channel"] }
     - { name: "command_duplicates_total", type: counter, attributes: ["channel"] }   # duplicate: true acceptances — client retry correctness (#17)
     - { name: "command_sync_conflicts_total", type: counter, attributes: ["command_type"] }   # sync Conflict rate: messageId reuse with a different payload (ADR-20260720-015500 §2)
     # Acceptance insert → COMMITTED terminal status; status = SUCCEEDED | REJECTED | FAILED
-    # (REJECTED/FAILED split). Emitted by the legacy spawn completion (journal insert as t0) AND
-    # by the mailbox delivery's post-commit observer (the row's received_at as t0) — the metric
-    # never goes dark when a command flips arms (#272 D1).
+    # (REJECTED/FAILED split). Emitted by the mailbox delivery's post-commit observer, with the
+    # row's received_at as t0 — the single door since #242 Runtime D.
     - { name: "command_completion_ms", type: histogram, attributes: ["status"] }
     # PROP-20260802-223522 D4: a delivery terminally FAILED by the attempts cap is an OPERATOR
     # EVENT — the paid-order failure mode ("who gets told?") made countable. Emitted by the
@@ -114,12 +112,12 @@ command-acceptance:
 # Cart (OPEN) -> PlaceOrder -> PaymentIntentCreated -> [Stripe] -> PaymentCaptured
 #   -> OrderPlaced + CartCheckedOut   (or PaymentFailed -> abort, cart stays OPEN)
 #
-# Under PM_MAILBOX_DELIVERY (#272 D1, ADR-20260801-023000) the SAME spans ride a different
-# topology: the command leg is a PlaceOrderProcess mailbox delivery whose PREPARE phase carries
+# Since #242 Runtime D the spans ride ONE topology: the command leg is a PlaceOrderProcess
+# mailbox delivery whose PREPARE phase carries
 # command.validate/cart.read/pricing.compute/payment.intent.create (no transaction open), the
 # fenced commit carries event.store.append, and the capture leg is a chained PM-lane delivery
-# (B2) instead of a saga-runner tick. Correlate by correlation_id across the hops — the
-# acceptance-first note below applies doubly: THREE mailbox rows now share one correlation.
+# (B2), never a saga-runner tick. Correlate by correlation_id across the hops — the
+# acceptance-first note below applies doubly: THREE mailbox rows share one correlation.
 # =====================================================================
 place-order:
   feature: place-order
@@ -138,7 +136,7 @@ place-order:
   run_identity:
     - { name: correlation_id, source: "command.correlation_id", required: true }
     - { name: trace_id, source: "otel.trace_id", required: true }
-    - { name: message_id, source: "command.message_id", required: true }   # command_journal pk (ADR-20260720-015300)
+    - { name: message_id, source: "command.message_id", required: true }   # inbound_messages pk (ADR-20260720-015300)
     - { name: order_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/OrderId' }, required: true }
     - { name: command_type, source: "command.type", required: true }
 

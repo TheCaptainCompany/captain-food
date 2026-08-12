@@ -61,21 +61,22 @@ SELECT cron.schedule('domain_events_retention', '0 * * * *', $$
 $$);
 ```
 
-### Write-path journals & adapter staging (ADR-20260720-015300 / -015400)
+### The write-path journal & adapter staging (ADR-20260731-122500)
 
 Two table categories sit BESIDE the event store, never inside it:
 
-- **`command_journal`** ([`tables/journals.yaml`](database/tables/journals.yaml)) — one row per
-  command submission (any channel), persisted **before** handling. pk `message_id` is the write-path
-  idempotency key (same payload hash = replayed acceptance; different = Conflict); the row records
-  **rejections too** and backs the `operationStatus` query/subscription. Events appended by the
-  command carry `message_id` as `domain_events.cause_id`, chaining request → journal → facts.
-- **`inbound_messages`** (same file) — THE ACTOR MAILBOX (ADR-20260731-122500 "the mailbox is the
-  only door"): adapted inbound **business** events (events.yaml vocabulary only) are enqueued by
-  the adapter ACLs as kind-`EVENT` rows on their aggregate's lane and delivered by the mailbox
-  workers through the fenced completion transaction (`cause_id = message_id`; the aggregate's fold
-  stays the authoritative dedupe). The drained `inbound_events` table it replaces was backfilled
-  and dropped by the `20260731143000` migration.
+- **`inbound_messages`** ([`tables/journals.yaml`](database/tables/journals.yaml)) — THE ACTOR
+  MAILBOX (ADR-20260731-122500 "the mailbox is the only door"), and since #242 Runtime D the
+  **only** write-path journal. One row per message to one actor, whatever the channel: a GraphQL
+  or worker command (kind `COMMAND`, persisted **before** handling — pk `message_id` is the
+  write-path idempotency key, same payload hash = replayed acceptance, different = Conflict, and
+  the row records **rejections too**, backing the `operationStatus` query/subscription), an
+  adapted inbound business event enqueued by an adapter ACL (kind `EVENT`, events.yaml vocabulary
+  only), or a reminder (kind `MESSAGE`). The partitioned workers deliver every one of them
+  through the fenced completion transaction, so events appended by a delivery carry
+  `message_id` as `domain_events.cause_id`, chaining request → mailbox → facts. Both
+  predecessors are gone: `inbound_events` backfilled and dropped by the `20260731143000`
+  migration, `command_journal` dropped by `20260812000000`.
 - **`external_*` staging** ([`tables/integration_staging.yaml`](database/tables/integration_staging.yaml),
   ADR-0045 generalized) — adapter-OWNED verbatim mirrors (`external_sirene_restaurants`,
   `external_stripe_events`, `external_hubrise_callbacks`): verify → UPSERT → ACK, with
@@ -88,13 +89,12 @@ the single source of truth. None of these are projected or a GraphQL `reads` tar
 
 Unlike the forever event log, journals and webhook mirrors have a **usefulness window**. The
 windows live in **one place** — the [`sweep_retention()`](database/functions/sweep_retention.sql)
-function (part of the generated schema): `command_journal` terminal rows 90 days from
-`completed_at`; `inbound_messages` terminal rows 90 days from `completed_at`; the webhook
-mirrors' processed rows 90 days from `processed_at`
+function (part of the generated schema): `inbound_messages` terminal rows 90 days from
+`completed_at`; the webhook mirrors' processed rows 90 days from `processed_at`
 (also the PII cap on verbatim third-party payloads). **Never swept**: `domain_events` /
 `domain_stream` (this function does not reference them — the log's only trimming stays the
-opt-in `$maxAge`/`$maxCount` above), `RECEIVED` journal/mailbox rows (pending work — the
-stale-`RECEIVED` sweep marks crashed journal runs `FAILED` first), `SCHEDULED` mailbox rows
+opt-in `$maxAge`/`$maxCount` above), `RECEIVED` mailbox rows (pending work — the mailbox's own
+attempt cap flips a wedged delivery to `FAILED` first), `SCHEDULED` mailbox rows
 (future work), unprocessed mirror
 rows, and `external_sirene_restaurants` (full mirror — detect-by-absence needs every row).
 Scheduling is environment-side, like the `$maxAge` sweep: the in-process `RetentionSweepWorker`

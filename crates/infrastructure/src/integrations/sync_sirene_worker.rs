@@ -38,17 +38,16 @@
 //! absorbed and the restaurant stays INACTIVE — reactivation is deliberately manual (logged).
 //!
 //! **Journaled sends** (ADR-20260720-015300, #15): every command this worker issues goes through the
-//! WORKER-channel journaling dispatch ([`application::dispatch::dispatch_journaled`]) — `message_id`
+//! WORKER-channel mailbox door (the generated typed actor clients) — `message_id`
 //! = UUIDv5 of (command type, SIRET, the staged row's `last_seen_at`), so re-draining the SAME staged
-//! version dedupes on `command_journal` while an ingestion refresh (which bumps `last_seen_at`)
-//! journals as a new send; `cause_id` = UUIDv5(`row:<SIRET>`) — the staging-mirror row's identity —
-//! making `external_sirene_restaurants → command_journal → domain_events` fully traceable.
+//! version dedupes on the mailbox pk while an ingestion refresh (which bumps `last_seen_at`)
+//! enqueues as a new send; `cause_id` = UUIDv5(`row:<SIRET>`) — the staging-mirror row's identity —
+//! making `external_sirene_restaurants → inbound_messages → domain_events` fully traceable.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::journal::{payload_hash, CommandJournalEntry};
 use actor_client::mailbox::{Envelope, Mailbox};
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
@@ -56,7 +55,7 @@ use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
 use domain::generated::events::{DomainEvent, RestaurantRegistered};
 use domain::generated::scalars::{
-    CommandChannel, RestaurantListingStatus, RestaurantStatus,
+    RestaurantListingStatus, RestaurantStatus,
 };
 
 use client_restaurant::RestaurantClient;
@@ -99,24 +98,27 @@ const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 /// small enough that a genuinely broken one stops costing anything within a sweep or two.
 const MAX_SYNC_ATTEMPTS: i32 = 10;
 
-/// The `inbound_messages.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
-/// and unlike `command_journal`'s `last_seen_at`-seeded message_id it is STABLE across sweeps
+/// The `inbound_messages.source` this adapter owns. `(source, external_id)` is the delivery-level
+/// dedupe, and unlike the `last_seen_at`-seeded command message_id below it is STABLE across sweeps
 /// (ADR-20260728-011344).
 const SIRENE_SOURCE: &str = "sirene";
 
-/// The WORKER-channel journal entry for one command a staged row caused (#15). `message_id` is
-/// deterministic over (command type, SIRET, the row's `last_seen_at` as READ) — a re-drain of the
-/// same staged version replays the same id and dedupes; a refreshed row (bumped `last_seen_at`) is a
-/// new send. `cause_id` names the mirror row, closing the staging → journal → events chain.
-fn journal_entry(
+/// The WORKER-channel [`Envelope`] for one command a staged row caused (#15, ADR-0041).
+/// `message_id` is deterministic over (command type, SIRET, the row's `last_seen_at` as READ) — a
+/// re-drain of the same staged version replays the same id and the mailbox pk dedupes it; a
+/// refreshed row (bumped `last_seen_at`) is a new send. `cause_id` is the PARENT — the
+/// staging-mirror row's identity — closing the staging → mailbox → events chain; the delivery side
+/// rebuilds the event-append actor with `cause_id = message_id` itself, exactly like the GraphQL
+/// door. Field-for-field what the retired `enqueue_worker_command` door stamped for this worker
+/// (deterministic message_id, per-source system principal, WORKER channel).
+fn send_envelope(
     command_type: &str,
     siret: &str,
     last_seen_at: DateTime<Utc>,
     correlation_id: uuid::Uuid,
-    payload: serde_json::Value,
-) -> CommandJournalEntry {
+) -> Envelope {
     let seed = format!("command:{command_type}:{siret}:{}", last_seen_at.to_rfc3339());
-    CommandJournalEntry {
+    Envelope {
         message_id: sirene_uuid(&seed),
         correlation_id,
         cause_id: Some(sirene_uuid(&format!("row:{siret}"))),
@@ -124,34 +126,8 @@ fn journal_entry(
         trace_id: None,
         user_id: Some(sirene_system_user_id()),
         user_type: EXTERNAL_USER_TYPE.to_string(),
-        channel: CommandChannel::WORKER,
-        command_type: command_type.to_string(),
-        payload_hash: payload_hash(&payload),
-        payload,
-    }
-}
-
-/// Journal-entry values → the typed client's [`Envelope`] (ADR-0041): the mailbox row's
-/// `cause_id` is the PARENT (the staging-mirror row's identity) — the delivery side rebuilds the
-/// event-append actor with `cause_id = message_id` itself, exactly like the GraphQL dispatch.
-/// Field-for-field what the retired `enqueue_worker_command` door stamped for this worker
-/// (deterministic message_id, per-source system principal, WORKER channel).
-fn send_envelope(entry: &CommandJournalEntry) -> Envelope {
-    Envelope {
-        message_id: entry.message_id,
-        correlation_id: entry.correlation_id,
-        cause_id: entry.cause_id,
-        session_id: None,
-        trace_id: None,
-        user_id: entry.user_id,
-        user_type: entry.user_type.clone(),
         channel: "WORKER".into(),
     }
-}
-
-fn serialize_command<T: serde::Serialize>(command_type: &str, cmd: &T) -> Result<serde_json::Value, DomainError> {
-    serde_json::to_value(cmd)
-        .map_err(|e| DomainError::Repository(format!("serialize {command_type}: {e}")))
 }
 
 /// What one drain pass did — logged by the loop and by the ping-triggered run.
@@ -453,7 +429,7 @@ impl SireneSyncWorker {
         // bulk door (`enqueue_inbound_facts`, D8 deferred).
         let mailbox: Arc<dyn Mailbox> = Arc::new(PgMailbox::new(self.pool.clone()));
         // Fresh correlation id per pass so all mailbox rows + events of one drain are traceable
-        // together; each send derives its own message_id/cause_id ([`journal_entry`]).
+        // together; each send derives its own message_id/cause_id ([`send_envelope`]).
         let correlation_id = uuid::Uuid::new_v4();
 
         // 1) Pending rows, keyset-paginated by SIRET: a row left pending after a write failure is
@@ -899,20 +875,13 @@ impl SireneSyncWorker {
         match state.listing_status {
             RestaurantListingStatus::NON_PARTNER => {
                 let cmd = MarkRestaurantClosed { restaurant_id, reason: Some(reason.to_string()) };
-                let payload = serialize_command("MarkRestaurantClosed", &cmd)?;
                 // The deterministic identity is unchanged (the compaction parity below pins it);
                 // only the DOOR moved: fire-and-forget through the typed `RestaurantClient`
                 // (#284 slice 3), the mailbox worker delivers (ADR-20260731-122500). `closed`
                 // still counts HAND-OFFS; the delivered outcome lives on the mailbox row and the
                 // supervision lanes.
-                let entry = journal_entry(
-                    "MarkRestaurantClosed",
-                    siret,
-                    last_seen_at,
-                    correlation_id,
-                    payload,
-                );
-                let env = send_envelope(&entry);
+                let env =
+                    send_envelope("MarkRestaurantClosed", siret, last_seen_at, correlation_id);
                 match RestaurantClient::new(mailbox.clone(), restaurant_id.0).send(cmd, env).await? {
                     EnqueueOutcome::Enqueued => {
                         summary.closed += 1;
@@ -960,7 +929,7 @@ mod tests {
     use super::*;
 
     /// The compaction's journal arm (#238) re-derives, in the `sirene_ingest` crate, the deterministic
-    /// `command_journal.message_id` this worker seeds — same namespace, same seed shape. The two crates
+    /// journal `message_id` this worker seeds — same namespace, same seed shape. The two crates
     /// cannot share the code (ADR-0045: the CI ingestion sees no domain layers), so this pins them
     /// together: if either derivation moves, the journal evidence silently stops matching and the
     /// historical payloads stop being reclaimable — a drift this test turns into a loud failure.
@@ -970,15 +939,10 @@ mod tests {
             .expect("fixed timestamp")
             .with_timezone(&Utc);
         for command_type in ["RegisterRestaurant", "MarkRestaurantClosed"] {
-            let entry = journal_entry(
-                command_type,
-                "85242109900021",
-                last_seen_at,
-                uuid::Uuid::nil(),
-                serde_json::json!({}),
-            );
+            let env =
+                send_envelope(command_type, "85242109900021", last_seen_at, uuid::Uuid::nil());
             assert_eq!(
-                entry.message_id,
+                env.message_id,
                 sirene_ingest::journal_message_id(command_type, "85242109900021", last_seen_at),
                 "the {command_type} message_id derivations drifted apart"
             );

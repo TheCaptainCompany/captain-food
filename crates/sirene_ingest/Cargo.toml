@@ -19,8 +19,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 # v4 for the per-run `sync_run_id` correlating all rows one ingestion touched; v5 for the
-# compaction's journal-evidence join (#238): re-deriving the deterministic `command_journal`
-# message_id the retired command path wrote per staged version.
+# compaction's journal-evidence join (#238): re-deriving the deterministic `inbound_messages`
+# message_id a SIRENE sync send carries per staged version.
 uuid = { workspace = true, features = ["v5"] }
 # `payload_hash` (ADR-20260728-011344): the "did this record actually change?" key that stops a sweep
 # re-pending ~200k unchanged rows. sqlx already pulls sha2/hex transitively for SCRAM auth, so this

@@ -406,7 +406,7 @@ pub trait Mailbox: Send + Sync {
     ) -> Result<bool, DomainError>;
 }
 
-/// In-memory double for tests (mirrors `journal::mem::MemCommandJournal`). Compiled only for this
+/// In-memory double for tests. Compiled only for this
 /// crate's own tests or under the D5 `test-fixtures` feature — a mem double in a release
 /// artifact would be a mailbox that silently swallows commands.
 #[cfg(any(test, feature = "test-fixtures"))]

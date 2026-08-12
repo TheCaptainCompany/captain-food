@@ -28,7 +28,6 @@ impl SubscriptionRoot {
     /// Live status of one journaled command, keyed by its messageId acceptance handle (the push counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state first (no subscribe/complete race), then every transition. Open to every role path (roles omitted) but ownership-scoped like the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
     #[graphql(name = "operationStatusChanged")]
     async fn operation_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Operation>>> {
-        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         // The D4 read door (PROP-20260802-130500, #303): the snapshot reads AND the response
         // stream resolve through the ONE generic ActorClient — same door as `operationStatus`;
         // the bus lives behind it now, so nobody subscribes raw.
@@ -55,32 +54,19 @@ impl SubscriptionRoot {
             .watch(wanted)
             .ok_or_else(|| async_graphql::Error::new("operationStatusChanged: the status door carries no response stream"))?;
         Ok(async_stream::stream! {
-            use domain::generated::scalars::CommandJournalStatus as J;
             use domain::generated::scalars::InboundMessageStatus as M;
-            // Snapshot-first, MAILBOX-FIRST (#242 flip): the acceptance already inserted the row —
-            // in inbound_messages post-flip, in command_journal for the legacy PM-leg mutations.
-            if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
-                let owned = admin
-                    || (principal_uuid.is_some() && principal_uuid == row.user_id)
-                    || (session.is_some() && session == row.session_id);
-                if !owned {
-                    return;
-                }
+            // Snapshot-first (#242 Runtime D): the acceptance already inserted the row on
+            // inbound_messages -- the only journal, so an unknown messageId ends the stream.
+            let Ok(Some(row)) = status_door.get_operation_status(wanted).await else { return };
+            let owned = admin
+                || (principal_uuid.is_some() && principal_uuid == row.user_id)
+                || (session.is_some() && session == row.session_id);
+            if !owned {
+                return;
+            }
+            {
                 let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
                 yield Ok(super::mutation::operation_from_mailbox(&row));
-                if terminal {
-                    return;
-                }
-            } else {
-                let Ok(Some(row)) = journal.by_message(wanted).await else { return };
-                let owned = admin
-                    || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)
-                    || (session.is_some() && session == row.entry.session_id);
-                if !owned {
-                    return;
-                }
-                let terminal = row.status != J::RECEIVED;
-                yield Ok(super::mutation::operation_from_journal(&row));
                 if terminal {
                     return;
                 }
@@ -101,18 +87,11 @@ impl SubscriptionRoot {
                             break;
                         }
                     }
-                    // Lagged: the durable row is the pull truth — re-read (mailbox first) and
-                    // finish if terminal.
+                    // Lagged: the durable row is the pull truth — re-read and finish if terminal.
                     Some(actor_client::OperationWatchEvent::Lagged) => {
                         if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                             let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
                             yield Ok(super::mutation::operation_from_mailbox(&row));
-                            if terminal {
-                                break;
-                            }
-                        } else if let Ok(Some(row)) = journal.by_message(wanted).await {
-                            let terminal = row.status != J::RECEIVED;
-                            yield Ok(super::mutation::operation_from_journal(&row));
                             if terminal {
                                 break;
                             }

@@ -69,7 +69,7 @@ async fn main() {
         let pool = bin_runtime::pg_pool(&config.database_url, config.database_pool_max_connections)
             .unwrap_or_else(|e| panic!("{BIN}: pg pool init: {e}"));
         let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);
-        let (status, posture) = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {
+        let status = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {
             pool: pool.clone(),
             bin: BIN,
             pm: PM,
@@ -79,7 +79,7 @@ async fn main() {
             waiter,
         })
         .await;
-        tracing::info!(pm = PM, posture = ?posture, "saga runner spawned (restricted to this PM)");
+        tracing::info!(pm = PM, "saga runner spawned (restricted to this PM)");
         saga_status = Some(status);
     } else {
         tracing::warn!(bin = BIN, "DATABASE_URL unset -- no workers hosted, readiness stays 503");

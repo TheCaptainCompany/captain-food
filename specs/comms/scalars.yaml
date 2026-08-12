@@ -14,7 +14,7 @@ ConversationMessageId:
   description: >
     Client-generated id of one posted conversation message — the idempotency key for PostMessage
     (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId`
-    (the command_journal submission id); this identifies the business message itself (#129).
+    (the mailbox submission id); this identifies the business message itself (#129).
 
 
 MessageVisibility:

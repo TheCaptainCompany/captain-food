@@ -311,26 +311,52 @@
 > consumer's projector folds a slim snapshot into its OWN read database -- the same
 > composition-in-the-projector answer STO-2(a) already gave for `ScopeMembership`.
 >
-> 📓 **The `journal` concern is CORRECT, and both tables still exist (JRN-1, §32).** Verbatim:
-> *"make sure we don't do both."* `inbound_events` is backfilled and DROPPED; **`command_journal` is
-> not**. Live on it today: the legacy arm of `placeOrder`/`approveRefund`/`denyRefund` writes it
-> whenever `PM_MAILBOX_DELIVERY` is false -- **and false is the seeded default**
-> (`specs/database/tables/referential.yaml:111`), so **`PlaceOrder`'s acceptance lives in
-> `command_journal` in the posture we actually run**; `operationStatus` and `operationStatusChanged`
-> read it **unconditionally on both arms**; the mailbox arm reads it for cross-arm duplicate
-> identity; `worker-journal-sweep` and `sweep_retention.sql` write it. **The API lens's finding is
-> VERIFIED and is worse than reported**: the permission matrix's *query*-path row grants the write
-> database **no `CONNECT` at all**, so as written it breaks the acceptance poll on **both** arms, not
-> just the journal fallback -- up to 30 polls at 1 s per action, i.e. every checkout, every
-> restaurant acceptance, every rider transition. **Recommendation: grant both reads now to the
-> platform graph, with the grant's REMOVAL as a named line in the `PM_MAILBOX_DELIVERY` default-flip
-> ADR's checklist** -- retiring first is the final-vision answer but the retirement rides a money-path
-> flip gated on a staging smoke that is downstream of #358, which is exactly the externally-forced
-> clause ADR-20260808-235113 carves out. **Nothing in flight makes the retirement harder**; the one
-> thing to watch is that `CommandJournal` must stay a PLATFORM write-path port and must never acquire
-> a `ports-{B}`/`read-{B}` home under REP-2. Full analysis:
+> ✅ **2026-08-12 — THE JOURNAL CONCERN IS CLOSED: `inbound_messages` is the only journal (#242
+> Runtime D, [ADR-20260812-000000](adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)).**
+> Product-owner direction, 2026-08-11: *"Remove inbound events and command journal from the dsl, the
+> only tables that must remain is inbound messages"* -- answering the earlier *"make sure we don't do
+> both."* `inbound_events` was backfilled and DROPPED by `20260731143000`; `command_journal` is
+> dropped by `20260812000000`. With it go: the legacy journal+spawn arm of
+> `placeOrder`/`approveRefund`/`denyRefund` (the emitter now FAILS GENERATION on an unaddressed
+> mutation rather than falling back), the `operationStatus`/`operationStatusChanged` fallback and the
+> cross-arm duplicate read, the `worker-journal-sweep` CronJob (**57 apps -> 56**), the
+> `command_journal` leg of `sweep_retention()`, and the `CommandJournalStatus`/`CommandChannel`
+> scalars. **The `PM_MAILBOX_DELIVERY` gate is deleted, not defaulted ON**: its OFF arm WAS the
+> journal, so with the table gone OFF would have meant "mailbox mutations, no B2 chaining, saga
+> triggers back" -- the silent paid-order stall. The `RuntimePosture` mechanism (#318) stays with no
+> tenant; its fail-closed read keeps its test, which exercises the CONTRACT over an arbitrary key AND
+> the migration's idempotence over `PM_MAILBOX_DELIVERY` -- the only key the seed statement names, and
+> therefore the only one on which "an operator flip survives a re-apply" can fail for its stated
+> reason.
+>
+> 🧹 **The guard's PROSE outlived the guard, and three lens reviews plus the product owner missed it**
+> (found by the automated PR reviewer, corrected on the branch). The bin emitter still promised a
+> mechanism this change deletes: `pm-place-order`/`pm-refund` shipped *"the fleet reads the money
+> posture itself and refuses the lane when it is unprovable"*, and all fifteen `actor-*` bins shipped
+> *"posture-gated money lanes"* -- on lines no diff hunk touched, in the file an operator opens first
+> when a money PM pod is stuck at peak. The sibling that hid the same way: the five-line doc comment of
+> the deleted `pm_mailboxes` field, which Rust re-attached to the `only` field beside it, so
+> `ProcessManagerRunner` documented a gate flip on a field that picks a PM. All now say what is true
+> (the fleet drains exactly the lane set it is handed). **No gate is reachable** -- catching it needs a
+> source-text scanner over comment prose, the class ADR-20260803-234035/#329 rule out -- so the defence
+> is recorded as procedure in the ADR: when a mechanism is deleted, grep its VOCABULARY, not just its
+> identifiers, across the emitter and the generated output.
+>
+> ⚠️ **A leg reserved to the product owner was TAKEN, and it is recorded rather than assumed**:
+> [DECISIONS.md](proposals/DECISIONS.md) §32 JRN-1 held that flipping `PM_MAILBOX_DELIVERY` is a
+> money-path posture change needing *"a staging smoke and a one-line ADR"*. The ADR exists; **the
+> staging smoke does not, and was not performed** -- the flip was taken inside the empty-log /
+> production-down window, where a smoke of the gated form has nothing to smoke against. JRN-1 is
+> CLOSED saying exactly that, and is the place to object: while the log is still empty the reversal is
+> a `git revert` plus a down-migration, and it gets more expensive with every real order.
+>
+> ❗ **The other half of the API-lens finding STANDS and is NOT fixed here**: the permission matrix in
 > [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
-> §6.1.2.
+> §6.1.2 grants the *query* path **no `CONNECT` to the write database at all**, so the acceptance poll
+> breaks on the mailbox read too -- up to 30 polls at 1 s per action, i.e. every checkout, every
+> restaurant acceptance, every rider transition. The recommended `command_journal` grant-with-expiry is
+> now moot (the table is gone) and the proposal is updated in place; the `inbound_messages` read grant
+> is still owed.
 
 > ⏱️ **2026-08-11 — THE ETA IS THE PRODUCT, AND NOTHING COMPUTES IT; PLUS: ONE EVENT LOG**
 > ([PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)

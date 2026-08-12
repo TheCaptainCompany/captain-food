@@ -188,30 +188,6 @@ CREATE TABLE mailbox_partitions (
   checkpoint BIGINT NOT NULL
 );
 
-CREATE TABLE command_journal (
-  message_id UUID PRIMARY KEY,
-  correlation_id UUID NOT NULL,
-  cause_id UUID NULL,
-  session_id UUID NULL,
-  trace_id TEXT NULL,
-  user_id UUID NULL,
-  user_type TEXT NOT NULL,
-  channel TEXT NOT NULL,
-  command_type TEXT NOT NULL,
-  payload JSONB NOT NULL,
-  payload_hash TEXT NOT NULL,
-  status TEXT NOT NULL,
-  error JSONB NULL,
-  received_at TIMESTAMPTZ NOT NULL,
-  completed_at TIMESTAMPTZ NULL
-);
-CREATE INDEX ON command_journal (correlation_id);
-CREATE INDEX ON command_journal (session_id);
-CREATE INDEX ON command_journal (user_id);
-CREATE INDEX ON command_journal (command_type);
-CREATE INDEX ON command_journal (status);
-CREATE INDEX ON command_journal (received_at);
-
 CREATE TABLE payment_process_manager (
   cart_id UUID PRIMARY KEY,
   order_id UUID NOT NULL,
@@ -552,12 +528,11 @@ LANGUAGE sql STABLE AS $$
   ORDER BY position;
 $$;
 
--- Retention sweep for the write-path journals and adapter webhook mirrors
+-- Retention sweep for the write-path journal and the adapter webhook mirrors
 -- (ADR-20260721-025159; issue #18). The ONE place the retention windows live — schedule it from
 -- the in-process RetentionSweepWorker (default) or a pg_cron job; either way the policy is here.
 --
 -- Scope, per table (aged rows only — the guard columns are the tables' own high-water marks):
---   command_journal            terminal rows (SUCCEEDED/REJECTED/FAILED)  90 days from completed_at
 --   inbound_messages           terminal rows (SUCCEEDED/REJECTED/FAILED/IGNORED/DUPLICATE/
 --                              CANCELLED)                                 90 days from completed_at
 --   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
@@ -565,12 +540,12 @@ $$;
 --   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
 --   external_uber_direct_events processed rows (processed_at set)         90 days from processed_at
 --
--- (`inbound_events` was swept here until ADR-20260731-122500 retired it — the mailbox backfill
--- migration drops the table and redeploys this function without its section.)
+-- (Both mailbox predecessors were swept here and are gone: `inbound_events`, retired by
+-- ADR-20260731-122500, and `command_journal`, retired by #242 Runtime D — each drop migration
+-- redeploys this function without its section.)
 --
 -- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
 -- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
--- command_journal RECEIVED rows (the stale-RECEIVED sweep marks crashed runs FAILED first),
 -- inbound_messages RECEIVED rows (pending work) and SCHEDULED rows (future work),
 -- unprocessed mirror rows (processed_at IS NULL), and external_sirene_restaurants (a full
 -- mirror — detect-by-absence needs the complete row set, ADR-0045).
@@ -583,13 +558,7 @@ DECLARE
 BEGIN
   -- Status predicates compare the enum's TEXT value directly (ADR-20260728: enum columns store
   -- the scalars.yaml value verbatim; the ref_* ordinal lookups are gone).
-  DELETE FROM command_journal
-   WHERE status IN ('SUCCEEDED', 'REJECTED', 'FAILED')
-     AND completed_at IS NOT NULL
-     AND completed_at < now() - INTERVAL '90 days';
-  GET DIAGNOSTICS n = ROW_COUNT;
-  swept_table := 'command_journal'; deleted := n; RETURN NEXT;
-
+  --
   -- The mailbox (journals.yaml `inbound_messages.retention`): terminal rows only — RECEIVED is
   -- pending work, SCHEDULED is future work; neither is ever age-swept.
   DELETE FROM inbound_messages
