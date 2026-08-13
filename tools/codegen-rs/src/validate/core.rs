@@ -217,6 +217,9 @@ pub(crate) fn validate(model: &Model) -> Report {
     // --- 2d. Service catalog (services.yaml, ADR-20260719-214500) --------------------------------
     validate_services(model, &mut issues);
 
+    // --- §18. Database catalog + per-kind placement (#494 slice 1, STO-1(a)/STO-2(a)/ADP-1) ------
+    validate_databases(model, &mut issues);
+
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();
     for (f, v) in &model.defs {

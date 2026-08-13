@@ -1,4 +1,4 @@
-version: 4
+version: 5
 description: >
   Raw-integration STAGING tables (ADR-0045, generalized by ADR-20260720-015400) — a third table
   category alongside the event store (eventstore.yaml), the event-fed projections
@@ -12,8 +12,14 @@ description: >
   `journals.yaml#/inbound_messages` (Stripe). The codegen emits its CREATE TABLE + indexes generically like any other
   `database/tables/*.yaml` table; `staging: true` documents the category.
 
+  PLACEMENT (#494 slice 1, ADP-1 / ADR-20260812-115930): every staging table declares `database:`
+  as a `$ref` into database/databases.yaml — each adapter's isolated database, reachable by that
+  adapter's role and nothing else. The validator refuses an absent placement and a table placed
+  outside its own adapter's database.
+
 external_sirene_restaurants:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_sirene' }
   description: >
     Raw INSEE Sirene établissement mirror (ADR-0045). The scheduled CI ingestion job UPSERTs one row per
     SIRET with the verbatim INSEE payload; the on-app `sync_sirene_worker` drains rows past its checkpoint,
@@ -157,6 +163,7 @@ external_sirene_restaurants:
 
 external_stripe_events:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_stripe' }
   description: >
     Raw VERIFIED Stripe webhook mirror (ADR-20260720-015400). The webhook endpoint UPSERTs one row
     per Stripe event id AFTER raw-body signature verification (ADR-20260718-145856), then the ACL
@@ -177,6 +184,7 @@ external_stripe_events:
 
 external_avelo37_events:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_avelo37' }
   description: >
     Raw VERIFIED Avelo37 delivery-partner webhook mirror (ADR-20260720-015400 follow-up, issue #28).
     The webhook endpoint UPSERTs one row per partner event id AFTER raw-body signature verification
@@ -200,6 +208,7 @@ external_avelo37_events:
 
 external_coopcycle_events:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_coopcycle' }
   description: >
     Raw VERIFIED CoopCycle delivery-partner webhook mirror (ADR-20260721-122910, issue #58) — the
     third DeliveryProvider=PARTNER seam after Avelo37, adopting the same two-layer inbox pattern
@@ -228,6 +237,7 @@ external_coopcycle_events:
 
 external_uber_direct_events:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_uber_direct' }
   description: >
     Raw VERIFIED Uber Direct delivery-partner webhook mirror (ADR-20260721-172500, issue #57) — a
     DeliveryProvider=PARTNER seam via the Uber DIRECT delivery API (not the Uber Eats marketplace),
@@ -255,6 +265,7 @@ external_uber_direct_events:
 
 external_hubrise_callbacks:
   staging: true
+  database: { $ref: 'database/databases.yaml#/adapter_hubrise' }
   description: >
     Raw VERIFIED HubRise callback mirror (ADR-20260720-015400). pk is the provider event id when
     present, else a UUIDv5 of the raw body. HubRise callbacks carry no state, so the enrichment leg

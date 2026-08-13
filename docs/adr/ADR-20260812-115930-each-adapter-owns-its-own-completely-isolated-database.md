@@ -20,6 +20,11 @@ shape than the one recommended there.
 What moves, measured against `specs/database/tables/` today — **six adapter databases**: the five
 partner adapters that exist as `crates/adapters/*` crates, plus the SIRENE mirror.
 
+> **Live source since [#494](https://github.com/TheCaptainCompany/captain-food/issues/494) slice 1:**
+> this membership table is the decision record; the LIVE, validator-enforced resolution is
+> [`specs/generated/databases.generated.md`](../../specs/generated/databases.generated.md)
+> (declared in `specs/database/databases.yaml`, per-table placements as `$ref`s).
+
 | Adapter database | Tables it takes | Today's owner (spec) | The one app that connects |
 |---|---|---|---|
 | `adapter-stripe` | `external_stripe_events` | `integration_staging.yaml` | `adapter-stripe` |

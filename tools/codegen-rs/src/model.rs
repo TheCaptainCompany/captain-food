@@ -11,6 +11,10 @@ pub(crate) const SOURCE_FILES: &[&str] = &[
     "processmanager.yaml",
     "services.yaml",
     "database/projection_views.yaml",
+    // The database catalog (#494 slice 1): the eleven databases as declarations — name, owning
+    // role, K8s object-name binding, recovery posture. What a table's `database:` placement `$ref`
+    // resolves into; the placement rules live in validate/databases.rs.
+    "database/databases.yaml",
     "api.yaml",
     "stories.yaml",
     "rules.yaml",
@@ -134,6 +138,13 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
                 continue;
             }
             root_scoped_files.push(f);
+        }
+        // The database catalog starts empty when absent (fixture/degenerate models) — §18 then
+        // requires it the moment any covered-kind table exists, so the REAL tree cannot lose it
+        // silently while a minimal test model needs no boilerplate.
+        if f == "database/databases.yaml" && !p.exists() {
+            defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
+            continue;
         }
         load(&mut defs, f.to_string(), &p)?;
     }

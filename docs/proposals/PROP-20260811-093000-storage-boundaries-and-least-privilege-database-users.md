@@ -866,6 +866,12 @@ it is the final shape of those five read models, and a defect fix that stands al
 
 **No end-user screens.** The operator surface is the placement map and the grants:
 
+> **Live source since [#494](https://github.com/TheCaptainCompany/captain-food/issues/494) slice 1:**
+> the map below is the decision record; the LIVE, validator-enforced resolution is
+> [`specs/generated/databases.generated.md`](../../specs/generated/databases.generated.md)
+> (declared in `specs/database/databases.yaml` — underscored Postgres names, `k8sName` bindings,
+> recovery postures, per-table placement `$ref`s).
+
 ```
 captain-db  (CNPG cluster, one WAL timeline, one PITR)
 ├── captain-write     domain_events · domain_stream · inbound_messages · mailbox_partitions

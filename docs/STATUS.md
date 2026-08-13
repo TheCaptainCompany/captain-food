@@ -2,6 +2,25 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
+> least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
+> slice 1, [PR #543](https://github.com/TheCaptainCompany/captain-food/pull/543)):
+> `specs/database/databases.yaml` declares the **eleven databases** (5 business + ADP-1's 6 adapter
+> databases) as name + owning role + `k8sName` binding + `recovery` posture and nothing else, and
+> the validator (§18, `database-placement-*` rules) enforces per-kind placement with **no default**:
+> the four write-side kinds derive `captain_write` mechanically (STO-1(a) — the fencing token),
+> staging/connection tables declare `database:` as a `$ref`, `ScopeMembership` is
+> `replicated: read-databases` (STO-2(a)), and the ADP-1 membership wall is red in both directions
+> (the avelo37 flip [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)
+> documents nearly shipping now names its own mismatch). Business-table placement stays **open**
+> (register row STO-2) and declaring one is refused so a spec edit cannot silently close the row.
+> The resolved inventory is GENERATED — `specs/generated/databases.generated.{md,json}` — and is
+> the interface [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) (drill legs),
+> [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) (grant emitter) and
+> [#514](https://github.com/TheCaptainCompany/captain-food/issues/514) (migration chains) build
+> against. **No CNPG manifests, no grants, no migrations moved** — this slice is the declaration
+> site only; slices 2+ make it executable.
+
 > ⏱️ **2026-08-13 — THE WEEKLY CAP IS NOT A STOP SIGN; billing continues** (founder, 2026-08-12,
 > verbatim: *"Don't care about the budget right now understood?"*, operationalized by the
 > 2026-08-13 resume prompt — provenance labeled in

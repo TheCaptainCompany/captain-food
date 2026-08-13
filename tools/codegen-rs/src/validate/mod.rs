@@ -3,6 +3,7 @@
 
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod core; // §1 validate() orchestrator + resolver-args checks
+pub(crate) mod databases; // §18 database catalog + per-kind placement (#494 slice 1)
 pub(crate) mod lifecycles; // §2c aggregate lifecycles (parse + validate)
 pub(crate) mod mailbox; // §2d actor-mailbox addressing + §2e declared state/requires
 pub(crate) mod process_managers; // §2b typed-step process managers
@@ -18,6 +19,7 @@ pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warni
 
 pub(crate) use bins::*;
 pub(crate) use core::*;
+pub(crate) use databases::*;
 pub(crate) use lifecycles::*;
 pub(crate) use mailbox::*;
 pub(crate) use process_managers::*;

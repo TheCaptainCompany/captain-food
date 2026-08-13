@@ -1,0 +1,167 @@
+version: 1
+description: >
+  THE DATABASE CATALOG (#494 slice 1) — the eleven databases the storage split creates, as
+  DECLARATIONS: name, owning role, the K8s object-name binding, and the recovery posture. Nothing
+  else lives here on purpose: grants are #513's emitter (derived from this catalog plus the role
+  model, never hand-written), migration chains and the REQUIRED_SCHEMA_VERSION map are #514's,
+  restore-drill legs are #509's, and retention/backup schedules/PII class are inventory for their
+  own named slices. Decided by PROP-20260811-093000 (register rows STO-1(a)/STO-2(a), DECISIONS §32)
+  and ADR-20260812-115930 "Each adapter owns its own, completely isolated database" (ADP-1, both
+  legs closed). The resolved placement inventory — which tables land where — is GENERATED into
+  specs/generated/databases.generated.{md,json}; that artifact, not the prose maps in the ADR or
+  the proposal, is the live source.
+
+  NAMES ARE UNDERSCORED, ALWAYS (`adapter_stripe`, never `adapter-stripe`): a hyphen in a Postgres
+  database name is a quoted identifier in every DSN, psql invocation and GRANT forever. The
+  Kubernetes object name (the CNPG `Database` CR, which cannot carry an underscore — RFC 1123) is
+  the `k8sName` binding declared per entry, so the two spellings can never drift apart silently.
+
+  PLACEMENT GRAMMAR (consumed by the validator in this slice, by #513's emitter next):
+    - The four write-side kinds — event store, journals, PM state, reservations — are DERIVED into
+      `captain_write` mechanically from the table-kind classifier. STO-1(a) is a correctness fact,
+      not a choice: the fenced completion transaction commits the handler's appends, the mailbox
+      terminal flip and the fenced checkpoint advance atomically, and separating the log from the
+      mailbox deletes the FENCING TOKEN, not merely atomicity. A `database:` key on these kinds is
+      an ERROR, so the transactional unit cannot be edited apart one table at a time.
+    - Staging and connection tables DECLARE `database:` as a `$ref` into this catalog
+      (ADR-20260811-014129 Decision 2: a reference is a `$ref`; a bare string is invisible to the
+      refs walker — the #413 defect class). Absence is an ERROR, never `captain_write`-by-omission.
+    - `replicated: read-databases` is the REPLICATED placement class (STO-2(a)): the table is
+      projected into EVERY read database — the resolved set is every database declared
+      `recovery: replay`, which is the definition of a read database (its whole content is a
+      re-derivable fold of the log), not a naming pun. `ScopeMembership` and the `ref_*` enum
+      family are DECIDED replicated; `projection_checkpoint` (runtime machinery, not spec-declared)
+      is per-read-database by the same rule.
+    - Business read models and referential tables beyond the replicated class carry NO placement
+      yet: that is register row STO-2's open remainder (DECISIONS §32 — "a working recommendation,
+      not a decision, and needs a yes"). Declaring one here before the row closes is refused by the
+      validator; the completeness rule widens to all kinds when STO-2 closes.
+
+  RECOVERY is the one attribute carried beyond identity, because the drill slice (#509) consumes it
+  and non-rederivability must be declared where the database is:
+    pitr            — irreplaceable; WAL archiving + point-in-time recovery, rehearsed restores.
+    replay          — re-derivable from the log; recovery is projector replay from checkpoint 0.
+    refetch         — re-derivable from the external partner; recovery is re-ingestion.
+    backup-required — NOT re-derivable and not on the PITR path; needs its own backup story.
+
+# ── The write-side transactional unit ────────────────────────────────────────────────────────────
+
+captain_write:
+  description: >
+    The write side, ONE database (STO-1(a), widened from the directive's `DomainEventLogDb` and
+    renamed so the contents are not surprising): `domain_events` + `domain_stream`, the actor
+    mailbox (`inbound_messages` + `mailbox_partitions`), the four `*_process_manager` state
+    tables and `slug_reservations` — everything the fenced completion transaction touches. Plus
+    the two PLATFORM connection tables that are deliberately NOT adapter state:
+    `auth_sessions` (ADP-1 leg 2 (b) — encrypted, used by the actor path and the BFF login route,
+    not by any adapter) and `sms_send_quota` (a cross-replica money ceiling on the OTP send path).
+  owner: migrator          # PROP-20260811-093000 §6.1 — the CI-only DDL credential owns the business schemas
+  k8sName: captain-write
+  recovery: pitr
+
+# ── The read databases (recovery: replay IS the class the replicated placement resolves to) ──────
+
+read_order:
+  description: >
+    `OrderDb` in PROP-20260811-093000 §11 — the ORDER boundary's read models (the map recommends
+    Cart, OrderTracking, OrderConversation, CustomerCreditBalance; that placement is STO-2's open
+    remainder, not yet declared), plus the replicated authorization index and its own
+    `projection_checkpoint`. Written by its projector role, read by its subgraph role; no other
+    subgraph holds CONNECT — the wall the split is bought for.
+  owner: migrator
+  k8sName: read-order
+  recovery: replay
+
+read_catalog:
+  description: >
+    `CatalogDb` in PROP-20260811-093000 §11 — the catalog boundary's read models (the Catalog
+    projection; placement itself is STO-2's open remainder), plus the replicated authorization
+    index and its own `projection_checkpoint`.
+  owner: migrator
+  k8sName: read-catalog
+  recovery: replay
+
+read_common:
+  description: >
+    `DomainCommonDb` in PROP-20260811-093000 §11 — the shared read database for the remaining
+    scopes' read models (the map recommends Customer, Restaurant, SlugAlias, ProspectionPipeline,
+    the rider read models and the seeded referential tables; all STO-2 open remainder), plus the
+    replicated authorization index and its own `projection_checkpoint`. Distinct from the
+    `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
+  owner: migrator
+  k8sName: read-common
+  recovery: replay
+
+# ── Behaviour tracking (own cluster when it ships — STO-3 (c)) ───────────────────────────────────
+
+tracking:
+  description: >
+    `BehaviorEventTrackingDb` (PROP-20260811-093000 §9) — declared now so the catalog is the
+    complete set of eleven, holding ZERO tables until the first tracking table lands in the spec.
+    Deliberately NO waiver mechanism exists for it: the day its first table is declared, that table
+    owes a placement AND the §9.4 retention policy in the same change (unbounded growth arithmetic:
+    ~17.5 GB/yr, ~13x the business log). Its projector never reads the business log (§9.2) and it
+    moves to its own cluster when it ships (STO-3 (c)) — CNPG base backups are physical, so
+    excluding it from the business PITR is only real once it is out.
+  owner: migrator
+  k8sName: tracking
+  recovery: backup-required   # neither irreplaceable nor replayable (§9.1): daily logical dump, honest "a restore loses up to a day"
+
+# ── The six adapter databases (ADP-1, ADR-20260812-115930 — completely isolated, one owning app) ──
+
+adapter_stripe:
+  description: >
+    Stripe's isolated database: the verified webhook mirror. Owning app: the stripe adapter; its
+    one outward grant is INSERT into `inbound_messages` on captain_write (ADP-1 leg 1 (a) — the
+    ACL/mailbox front door).
+  owner: adapter_stripe
+  k8sName: adapter-stripe
+  recovery: refetch
+
+adapter_hubrise:
+  description: >
+    HubRise's isolated database: the callback mirror AND the connection/credential tables. The one
+    adapter database that must be inside a backup story: `hubrise_connections.access_token` is a
+    NON-expiring OAuth token only a human re-connect can replace (#508 tracks that it is also
+    plaintext, so the backup story is simultaneously a leak story) — hence `backup-required` where
+    every sibling mirror is `refetch`.
+  owner: adapter_hubrise
+  k8sName: adapter-hubrise
+  recovery: backup-required
+
+adapter_uber_direct:
+  description: >
+    Uber Direct's isolated database: the verified webhook mirror (one central API, no federation
+    dimension).
+  owner: adapter_uber_direct
+  k8sName: adapter-uber-direct
+  recovery: refetch
+
+adapter_coopcycle:
+  description: >
+    CoopCycle's isolated database: the verified webhook mirror (federated — rows carry their
+    originating co-op `instance_id`).
+  owner: adapter_coopcycle
+  k8sName: adapter-coopcycle
+  recovery: refetch
+
+adapter_avelo37:
+  description: >
+    Avelo37's isolated database: the verified webhook mirror. In the set from day one —
+    ADR-20260812-115930 records that its first version claimed avelo37 "owns no table today",
+    which was false, and left uncorrected would have kept the one partner mirror (courier names
+    and phones in verbatim payloads) inside the write database while every sibling moved out.
+  owner: adapter_avelo37
+  k8sName: adapter-avelo37
+  recovery: refetch
+
+adapter_sirene:
+  description: >
+    The SIRENE mirror's isolated database (655 MB once, #231). The stated naming asymmetry: no
+    `crates/adapters/sirene` crate exists — the mirror's sole reader/writer is the
+    `worker-sirene-sync` CronJob (plus the offline `sirene_ingest` loader), and the database is
+    named for the partner data, not for a crate invented to justify it. The test it passes is the
+    one that matters: exactly one app connects, and it owns the mirror.
+  owner: worker_sirene_sync
+  k8sName: adapter-sirene
+  recovery: refetch

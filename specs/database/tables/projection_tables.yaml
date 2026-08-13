@@ -803,6 +803,7 @@ ScopeMembership:
   aggregate: Order
   slice: V0
   internal: true   # a technical authorization index, never a GraphQL `reads` target (no output type binds it)
+  replicated: read-databases   # STO-2(a), DECIDED: projected into EVERY read database by each scope's projector — "composition happens in the projector, not the query", applied to authorization; one database, one grant, and each subgraph stays self-sufficient. The resolved set is every `recovery: replay` database in database/databases.yaml.
   note: >
     WHO may see WHICH protected instance (#144). One row per (scope, member): the single index every
     read-side authorization question resolves against, for every role and every surface —
