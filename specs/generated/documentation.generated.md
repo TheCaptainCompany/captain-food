@@ -11438,10 +11438,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-auth-otp_body"></a>`auth.otp_body` | `phone` | We sent a code to {phone}. Enter it below. | Nous avons envoyé un code au {phone}. Saisissez-le ci-dessous. |
 | <a id="translation-auth-resend"></a>`auth.resend` | — | Resend code | Renvoyer le code |
 | <a id="translation-auth-resend_in"></a>`auth.resend_in` | `seconds` | Resend in {seconds}s | Renvoyer dans {seconds}s |
-| <a id="translation-auth-error-too_soon"></a>`auth.error.too_soon` | `seconds` | Please wait {seconds}s before asking for a new code. | Veuillez patienter {seconds}s avant de demander un nouveau code. |
-| <a id="translation-auth-error-daily_cap"></a>`auth.error.daily_cap` | — | You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. |
-| <a id="translation-auth-error-country_not_served"></a>`auth.error.country_not_served` | `dialingCode` | We can't send a code to {dialingCode} numbers yet -- we deliver in Tours. Please use a French mobile number, or contact us. | Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} -- nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. |
-| <a id="translation-auth-error-unavailable"></a>`auth.error.unavailable` | — | We can't send verification codes right now. Please contact us -- we'll get you signed in. | Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. |
 | <a id="translation-item-choose_one"></a>`item.choose_one` | — | Choose 1 | Choisissez 1 |
 | <a id="translation-item-instructions_placeholder"></a>`item.instructions_placeholder` | — | Special instructions (optional) | Instructions spéciales (facultatif) |
 | <a id="translation-item-add_to_cart"></a>`item.add_to_cart` | `total` | Add to cart — {total} | Ajouter au panier — {total} |

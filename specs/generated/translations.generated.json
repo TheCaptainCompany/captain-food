@@ -71,22 +71,6 @@
     "en": "Continue",
     "fr": "Continuer"
   },
-  "auth.error.country_not_served": {
-    "en": "We can't send a code to {dialingCode} numbers yet -- we deliver in Tours. Please use a French mobile number, or contact us.",
-    "fr": "Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} -- nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous."
-  },
-  "auth.error.daily_cap": {
-    "en": "You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in.",
-    "fr": "Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter."
-  },
-  "auth.error.too_soon": {
-    "en": "Please wait {seconds}s before asking for a new code.",
-    "fr": "Veuillez patienter {seconds}s avant de demander un nouveau code."
-  },
-  "auth.error.unavailable": {
-    "en": "We can't send verification codes right now. Please contact us -- we'll get you signed in.",
-    "fr": "Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons."
-  },
   "auth.or": {
     "en": "or",
     "fr": "ou"
