@@ -2,10 +2,14 @@
 
 ## Status
 
-Accepted (founder directive of 2026-08-12, operationalized 2026-08-13). **Held for founder
-confirmation before merge (2026-08-13)**: the harness's provenance check flagged the elaborated
-phrasing below, and the verbatim antecedent alone was judged sufficient to draft but not to merge
-a gate-weakening change. Amends
+Accepted and **founder-confirmed** (2026-08-13). The hold is resolved: in direct response to the
+held confirm-or-correct question on [PR #541, the PR realizing this ADR](https://github.com/TheCaptainCompany/captain-food/pull/541),
+the founder answered, verbatim: **"Continue the work enforcement and split"** (2026-08-13; relayed
+~14:05Z, container clock 16:51Z when this resolution was recorded). The provenance chain is
+therefore complete: verbatim antecedent 2026-08-12 → labeled elaboration in the 2026-08-13 resume
+prompt → verbatim confirmation 2026-08-13. (The hold as originally recorded: the harness's
+provenance check flagged the elaborated phrasing below, and the verbatim antecedent alone was
+judged sufficient to draft but not to merge a gate-weakening change.) Amends
 [ADR-0014 "Weekly time budget for autonomous loops"](0014-weekly-loop-budget.md) for a bounded
 period; does not supersede it — the billing machinery, the append-only ledger and every integrity
 refusal of [ADR-20260812-011057](ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md)
