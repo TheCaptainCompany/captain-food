@@ -69,15 +69,19 @@
 > catalog/orders to a *Captain Food Marketplace* app; ADR line 18 registers the Eats suite under
 > Captain Food Restaurant), so no DECISIONS register row. **Second follow-up (same day)**: *"test and
 > prod keys to test directly on production"* — restates the recorded 2026-07-29 keys directive
-> (`specs/delivery/configuration.yaml:94-107`) and confirms **#257** (per-order credential selection,
-> both sets loaded) as its realization; folded into PROP §6.2. Two guardrails raised, **both
-> team-owned, neither a founder-owed DECISIONS row**: mode coherence as an **order-level rule** (a
-> test order must not trigger a real Stripe capture — #544's capture leg and #257's selector share one
-> order-mode SoT, recommended a fact on the order per D3), and a **missing observability contract** (a
-> test-mode order in prod must be countable/alertable, since Uber keys carry no mode marker). Mechanism
-> buildable now on test creds; the real PROD key set is externally gated on D7 + Uber certification.
-> **Clarification/advance, not a reversal.** #257's exact title is UNVERIFIED — GitHub access was
-> disabled this session (HTTP 403).
+> (`specs/delivery/configuration.yaml:94-107`) and confirms **[#257 "Stripe mode becomes a DOMAIN
+> property, not a deployment one: hold both key pairs and select per order"](https://github.com/TheCaptainCompany/captain-food/issues/257)**
+> (Stripe-first; the Uber Direct config comment extends the same pattern — one order-mode drives both
+> integrations; #257 **supersedes #254**) as its realization; folded into PROP §6.2. **CORRECTION
+> (coordinator supplied #257's content; my session couldn't reach GitHub, HTTP 403)**: my first pass
+> classified mode-coherence a rule with no founder decision — that pre-decided ≈ #257 option 1 and was
+> **over-reach**. Split fixed: the **SoT/coherence half** (one order-mode fact, #544's capture leg and
+> #257's selector share it) stays a **rule**; the **mixed-mode resolution** (test customer × live
+> restaurant) is a **FOUNDER decision — new OPEN row D11**, carrying #257's four-option table + a
+> recommendation (option 1 with the test ticket unmistakably marked / off the live kitchen flow), and
+> **it BLOCKS #257 implementation** per #257's own words. The **observability contract** (mode visible
+> per order) stands unchanged. Config-key *structure* verdict is still clarification/advance; the
+> mixed-mode *policy* is the genuine open decision.
 
 > 🎯 **2026-08-13 — THE ACCEPTANCE CRITERION EXISTS: SIX CLAUSES WALKED ON THE LOCAL STACK, WITH THE
 > FRONT DOOR DELIBERATELY UNLOCKED FROM THE INSIDE** (founder directive + ten-lens mob;

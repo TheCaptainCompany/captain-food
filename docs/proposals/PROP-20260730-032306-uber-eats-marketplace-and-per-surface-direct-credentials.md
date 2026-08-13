@@ -712,38 +712,52 @@ which is exactly the class the sweep surfaces.
 1. **Test keys on production** (built today): both deploy profiles resolve to the `_TEST` secret, so
    production runs the test credential. This is done.
 2. **Choosing the credential per ORDER** — a test order on a live restaurant — which *"needs both
-   sets loaded at once"*. This is **[#257](https://github.com/TheCaptainCompany/captain-food/issues/257)**
-   (title **unverified this session — GitHub access was disabled, HTTP 403**; the config describes it
-   as *the per-order credential-selection mechanism*, coordinator to confirm the exact title). The
-   founder's *"test directly on production"* = mechanism 2 = the realization of #257. This section
-   **records that the founder confirmed #257**; it does **not** re-spec it.
+   sets loaded at once"*. This is
+   **[#257 "Stripe mode becomes a DOMAIN property, not a deployment one: hold both key pairs and
+   select per order"](https://github.com/TheCaptainCompany/captain-food/issues/257)**. #257 is
+   **Stripe-first** — its own quoted directive: *"Test keys and prod keys for stripe will live inside
+   the config to allow us to test on production. The fact that we use prod or test keys is based on the
+   customer or restaurant test mode, not on the environment"* — and the Uber Direct config comment
+   (`:106-107`) references it as **the same pattern extended to Uber Direct**. So the per-order-mode
+   design is **one order-mode driving BOTH integrations identically** (Stripe *and* Uber Direct), not
+   two independent selectors. The founder's *"test directly on production"* = mechanism 2 = the
+   realization of #257. **#257 supersedes [#254](https://github.com/TheCaptainCompany/captain-food/issues/254)**
+   (the go-live switch) per #257's body. This section **records the founder confirmation**; it does
+   **not** re-spec #257 (its mockups/sequence diagrams live in #257's own proposal).
 
 **External gate, stated so no one blocks the wrong thing:** the #257 **mechanism** (both sets loaded,
 mode chosen per order) is **buildable now with the existing test credentials** — it needs no live
 keys. The real **PROD credential set** is externally gated: a live Uber-approved app is downstream of
 **D7** (SASU / licence / Provider entity) and Uber certification. So build the selector now against
-test creds; wire the `_PROD` secret when the live app lands. Neither blocks the other.
+test creds; wire the `_PROD` secret when the live app lands. **But** — see D11 — #257 states
+*"implementation should not start before the mixed-mode rule is decided"*, so the founder-owed policy
+below gates the build even though the credentials do not.
 
-#### Guardrail 1 — mode coherence is an ORDER-level invariant (a rule, not a founder decision)
+#### Guardrail 1 — one order-mode source of truth (a rule) driving a mixed-mode POLICY that is a FOUNDER DECISION (D11, OPEN)
 
-The mode is a property of the **order**, chosen **once**, and must be **coherent across every
-integration that order touches**: a test order runs **test Stripe AND test Uber together** — never a
-test delivery against a real charge, never a real courier on a test payment. Stripe's mode is readable
-from the key (`sk_test_`/`sk_live_`, `mode_of: stripe`), but **Uber Direct keys carry no such marker**
-(`configuration.yaml:103-105`), so coherence cannot be reconstructed after the fact from the
-credentials — it has to be **decided at the order and carried**.
+Two things were conflated in my first pass, and #257 forces them apart:
 
-- **This interacts with the in-flight capture-on-delivered slice
-  [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)**: a **test order must not
-  trigger a real Stripe capture**. #544's capture leg and #257's per-order credential selector must
-  read **one order-mode source of truth**, not decide mode independently.
-- **Recommended design (single SoT, under existing doctrine):** mode is a **fact on the order**,
-  frozen at placement and folded — the *same* pattern D3 already set for `acquisitionSurface` (not
-  derivable at dispatch: the write path is acceptance-first, the `Host`/request context is gone by the
-  time the saga runs). The capture leg and the delivery selector both read that one field.
-- **Classification:** this is a **correctness invariant with one right answer, so it is a RULE**
-  (`rules.yaml`, pinned by a test under ADR-20260813-233418 AR-2), **not** a founder-owed DECISIONS
-  row — there is no option space to arbitrate. Where the SoT lives resolves under D3's precedent.
+- **(a) WHERE the mode lives — a rule, one right answer.** The mode is a property of the **order**,
+  chosen **once**, and **coherent across every integration that order touches** — a test order runs
+  **test Stripe AND test Uber Direct together**, never a test courier on a real charge. Stripe's mode
+  is readable from the key (`sk_test_`/`sk_live_`, `mode_of: stripe`); **Uber Direct keys carry no such
+  marker** (`configuration.yaml:103-105`), so coherence cannot be reconstructed after the fact — it is
+  **decided at the order and carried**. Recommended, under existing doctrine: mode is a **fact on the
+  order**, frozen at placement and folded, the *same* pattern D3 set for `acquisitionSurface` (not
+  derivable at dispatch — acceptance-first, the request context is gone when the saga runs). #544's
+  capture leg and #257's selector read that **one** field. This half is a **RULE** (`rules.yaml`,
+  pinned by a test under ADR-20260813-233418 AR-2) — no arbitration.
+
+- **(b) WHICH mode wins when the two sides DISAGREE — a founder decision, not a rule.** A **test
+  customer ordering from a LIVE restaurant** (or the reverse) has no single "right" resolution: the
+  four candidate policies trade money-safety against test realism against a customer-visible rejection.
+  **My first pass silently pre-decided this as "either-side-test ⇒ order-test" (≈ #257 option 1) and
+  wrongly classified it a rule.** That was made blind to #257, which presents it explicitly as a
+  founder decision with a four-option table and states *"implementation should not start before the
+  mixed-mode rule is decided — it is the one that can cost a restaurant real food."* **It is therefore
+  reopened as an OPEN founder-owed decision — D11 (§11 of `DECISIONS.md`) — and it BLOCKS #257
+  implementation.** The rule in (a) still holds regardless of which option D11 picks; only the
+  mixed-mode resolution is open.
 
 #### Guardrail 2 — a test-mode order in production must be observable (a contract, not a founder decision)
 
@@ -758,10 +772,12 @@ orders on a live restaurant, or a `mode=live` order that dispatched on a test co
   test-order volume in prod), **do not build it here**. It is the gap the config comment already names
   (nothing can report Uber's mode); named as a **missing contract**, team-owned, no founder input due.
 
-**Verdict: clarification / advance, not a reversal.** The directive moves the recorded *"both profiles
-→ `_TEST` on purpose"* state toward its **already-anticipated** next step (*"when the live app
-arrives, production flips to `_PROD`"*) and confirms #257 as the per-order mechanism. No recorded row
-fixes a *different* mode-selection design, so nothing is contradicted — no DECISIONS reversal row.
+**Verdict on the config-key structure: clarification / advance, not a reversal.** The directive moves
+the recorded *"both profiles → `_TEST` on purpose"* state toward its **already-anticipated** next step
+(*"when the live app arrives, production flips to `_PROD`"*) and confirms #257 as the per-order
+mechanism. **Separately**, the mixed-mode resolution is a **genuine open founder decision (D11)** that
+#257 itself flags and that gates #257's build — surfaced to the founder in parallel; when answered, D11
+closes and Guardrail 1(a)'s coherence rule is confirmed or adjusted to match the chosen option.
 
 ---
 
@@ -861,10 +877,12 @@ Every lens invited; "nothing in my lens" is a complete one-line answer.
   credential-selection mechanism — **clarification/advance, not a reversal**: it moves the recorded
   *"both → `_TEST` on purpose"* state to its already-anticipated `_PROD` flip. Mechanism buildable now
   on test creds; the PROD credential set is externally gated on D7 + Uber certification.
-- **payments / capture-boundary lens**: mode coherence is an **order-level invariant** — a test order
-  must never trigger a real Stripe capture. #544's capture leg and #257's selector must share **one
-  order-mode SoT** (recommended: a fact on the order, D3 precedent). Raised as a **rule** (AR-2), not a
-  founder decision.
+- **payments / capture-boundary lens**: mode coherence splits in two. The **SoT half** — a test order
+  must never trigger a real Stripe capture; #544's capture leg and #257's selector share **one
+  order-mode SoT** (a fact on the order, D3 precedent) — is a **rule** (AR-2). The **mixed-mode half**
+  (test customer × live restaurant) is a **FOUNDER decision (D11)**, not a rule — **corrected after
+  #257 was read**: my first pass pre-decided it ≈ option 1 and mis-classified it. #257 says
+  implementation must not start before it is decided, so D11 **blocks #257**.
 - **observability lens**: per-order mode is unreadable from the profile and Uber keys carry no marker,
   so a **test-mode order in prod is invisible** unless the order exposes its mode — a **missing
   observability contract** (`orders_by_mode{mode}` + incoherence alert), recommended not built.
