@@ -1,7 +1,7 @@
 //! #469 review round 2: the S3 re-route PROVED, not argued.
 //!
 //! The whole S3 decision is *which counter fires* when a verified CUSTOMER token carries no
-//! `captain_customer_id` — the pre-claim-stamp window, i.e. every signed-in customer for one token
+//! `captain_food.customer_id` — the pre-claim-stamp window, i.e. every signed-in customer for one token
 //! lifetime after rollout. It must be `public_credential_degraded_total{reason=claim_absent}` (a
 //! visible degrade) and NOT `read_authorization_bridge_unresolved_total` (whose contract says
 //! *"a provisioning gap or staleness — never ordinary user denial"*, and which an operator reads as
@@ -51,8 +51,14 @@ async fn jwks_endpoint() -> String {
     format!("http://{addr}/jwks")
 }
 
-/// A Supabase-shaped CUSTOMER token with **no** `captain_customer_id`: exactly the credential every
-/// already-signed-in customer's browser holds for one token lifetime after the claim stamp ships.
+/// OUR identity project. `iss` is MANDATORY since #519 -- this fixture used to mint tokens with no
+/// `iss` at all, against a verifier built with an empty `SUPABASE_URL`, which is precisely the
+/// configuration in which a staging or sibling-product token verified in production.
+const TEST_SUPABASE_URL: &str = "https://captain-under-test.supabase.co";
+
+/// A Supabase-shaped CUSTOMER token with **no** `captain_food.customer_id`: exactly the credential
+/// every already-signed-in customer's browser holds for one token lifetime after the claim stamp
+/// ships.
 fn claimless_customer_jwt(sub: uuid::Uuid) -> String {
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some("captain-test-es256".into());
@@ -64,8 +70,9 @@ fn claimless_customer_jwt(sub: uuid::Uuid) -> String {
     let claims = json!({
         "sub": sub.to_string(),
         "aud": "authenticated",
+        "iss": format!("{TEST_SUPABASE_URL}/auth/v1"),
         "exp": exp,
-        "app_metadata": { "captain_role": "CUSTOMER" },
+        "app_metadata": { "captain_food": { "role": "CUSTOMER" } },
     });
     let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
         .expect("test EC key parses");
@@ -78,7 +85,10 @@ async fn router() -> axum::Router {
         server::graphql_schema::build_schema(None, None, None),
         server::TenantLookup(None),
     )
-    .layer(axum::Extension(server::AuthContext::from_config(jwks_endpoint().await, String::new())))
+    .layer(axum::Extension(server::AuthContext::from_config(
+        jwks_endpoint().await,
+        TEST_SUPABASE_URL.into(),
+    )))
 }
 
 /// One real request through the edge: `POST /{role}/graphql`, the credential delivered the way a

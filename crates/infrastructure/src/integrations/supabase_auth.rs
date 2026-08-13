@@ -311,7 +311,7 @@ fn str_field(v: &Value, k: &str) -> Option<String> {
 enum StampFailure {
     /// `SUPABASE_SECRET_KEY` absent: fail CLOSED, never pretend to have stamped (#437).
     NotConfigured,
-    /// The auth user already carries a DIFFERENT `captain_customer_id` — a data defect to
+    /// The auth user already carries a DIFFERENT `captain_food.customer_id` — a data defect to
     /// INVESTIGATE, never an overwrite and never retried (architect verdict on #437: retrying
     /// cannot fix a wrong binding, it can only hammer it).
     ClaimConflict { auth_ref: String, existing: String, target: String },
@@ -335,7 +335,7 @@ impl StampFailure {
             StampFailure::ClaimConflict { auth_ref, existing, target } => DomainError::Repository(
                 format!(
                     "supabase claim stamp CONFLICT: auth user {auth_ref} already stamped with \
-                     captain_customer_id {existing}, refusing to overwrite with {target} \
+                     captain_food.customer_id {existing}, refusing to overwrite with {target} \
                      (investigate, never retry -- #437)"
                 ),
             ),
@@ -361,31 +361,56 @@ enum StampDecision {
     Conflict { existing: String },
 }
 
+/// **The one `app_metadata` key Captain Food owns** (#519), written here and read by
+/// `server::auth`'s token verifier — which pins the agreement in a test rather than trusting two
+/// spellings to stay equal.
+///
+/// The claims are NESTED under it rather than spelled as flat `captain_*` keys because GoTrue
+/// merges `app_metadata` **SHALLOWLY**: with one owned object, a sibling product of a shared
+/// identity project can write its own key without touching ours, and — the reason this exists —
+/// the object's ABSENCE is a positive signal that a token was not minted for this product. Under a
+/// group-wide identity project `iss` and `aud` are identical across siblings, so this is the only
+/// separator left.
+pub const PRODUCT_CLAIM_KEY: &str = "captain_food";
+
 /// The idempotence/conflict decision on the CURRENT provider metadata, before any write.
+///
+/// Reads ONLY inside [`PRODUCT_CLAIM_KEY`]: a pre-#519 flat `captain_customer_id` sitting beside it
+/// (the shallow merge leaves it there) is another era's metadata, not a stamp, so an auth user
+/// carrying only the flat keys is re-stamped into the nested shape rather than reported as a
+/// conflict.
 fn stamp_decision(metadata: &Value, target: &str) -> StampDecision {
-    match metadata.get("captain_customer_id").and_then(Value::as_str) {
+    let ours = metadata.get(PRODUCT_CLAIM_KEY);
+    let claim = |k: &str| ours.and_then(|o| o.get(k)).and_then(Value::as_str);
+    match claim("customer_id") {
         Some(existing) if existing != target => StampDecision::Conflict { existing: existing.to_string() },
         // No-op ONLY when the role is exactly CUSTOMER — a present-but-wrong role (checkpoint-b
         // hole) must fall through to the repairing PUT, or the wrong-role token gets rotated
         // and parked.
-        Some(_same) if metadata.get("captain_role").and_then(Value::as_str) == Some("CUSTOMER") => {
-            StampDecision::Noop
-        }
+        Some(_same) if claim("role") == Some("CUSTOMER") => StampDecision::Noop,
         _ => StampDecision::Put,
     }
 }
 
 /// The admin PUT body — PURE so a unit test pins the shallow-merge rule: GoTrue merges
-/// `app_metadata` SHALLOWLY (top-level keys replace, siblings survive), so BOTH claims travel in
-/// EVERY write — a single-key write would leave a token whose two claims came from different
-/// writes, and on a fresh user would mint a customer id with no role. `captain_role` is HARDCODED
-/// CUSTOMER: this operation exists for the paying customer's session, and a wrong-role stamp is
-/// made unspellable rather than validated (architect verdict on #437).
-fn stamp_put_body(customer_id: &CustomerId) -> Value {
+/// `app_metadata` SHALLOWLY (top-level keys replace, siblings survive). Post-#519 that rule bites
+/// ONE level down instead: [`PRODUCT_CLAIM_KEY`] is a top-level key, so this write REPLACES our
+/// whole object and every claim must travel in EVERY write — a single-key write would leave a token
+/// whose claims came from different writes, and on a fresh user would mint a customer id with no
+/// role. `role` is HARDCODED CUSTOMER: this operation exists for the paying customer's session, and
+/// a wrong-role stamp is made unspellable rather than validated (architect verdict on #437).
+///
+/// `pub` deliberately: it is the WIRE SHAPE, and `server::auth`'s verifier reads this exact value in
+/// `the_verifier_reads_what_the_claim_stamp_writes` — the writer and the reader live in different
+/// crates with no shared type, so a transposition between them is otherwise caught by nothing before
+/// production smoke.
+pub fn stamp_put_body(customer_id: &CustomerId) -> Value {
     json!({
         "app_metadata": {
-            "captain_role": "CUSTOMER",
-            "captain_customer_id": customer_id.0.to_string(),
+            PRODUCT_CLAIM_KEY: {
+                "role": "CUSTOMER",
+                "customer_id": customer_id.0.to_string(),
+            }
         }
     })
 }
@@ -562,18 +587,27 @@ mod tests {
 
     /// The shallow-merge rule of services.yaml `identity.stamp_customer_claim`, pinned on the
     /// PURE body builder: BOTH claims in every write, exactly two keys, role hardcoded CUSTOMER
-    /// (a wrong-role stamp is unspellable — architect verdict, #437).
+    /// (a wrong-role stamp is unspellable — architect verdict, #437). Post-#519 they live INSIDE
+    /// `captain_food`, which is itself the single top-level key the shallow merge sees — so the
+    /// rule is unchanged and now applies one level down.
     #[test]
     fn stamp_put_body_carries_both_claims_in_one_write() {
         let body = stamp_put_body(&CustomerId(uuid::Uuid::from_u128(0x437)));
         let md = body["app_metadata"].as_object().expect("app_metadata object");
-        assert_eq!(md["captain_role"], json!("CUSTOMER"));
-        assert_eq!(md["captain_customer_id"], json!("00000000-0000-0000-0000-000000000437"));
         assert_eq!(
             md.len(),
+            1,
+            "exactly ONE top-level key -- everything of ours is inside it, so a sibling product's \
+             write cannot reach our claims and ours cannot reach theirs (#519)"
+        );
+        let ours = md[PRODUCT_CLAIM_KEY].as_object().expect("the captain_food object");
+        assert_eq!(ours["role"], json!("CUSTOMER"));
+        assert_eq!(ours["customer_id"], json!("00000000-0000-0000-0000-000000000437"));
+        assert_eq!(
+            ours.len(),
             2,
-            "exactly the two claims -- GoTrue merges shallowly, so a missing sibling here means \
-             a claim silently dropped on some provider states"
+            "exactly the two claims -- this object is REPLACED wholesale by the merge, so a \
+             missing sibling here means a claim silently dropped on some provider states"
         );
     }
 
@@ -584,26 +618,48 @@ mod tests {
     #[test]
     fn stamp_decision_noop_only_on_exact_customer_role() {
         let target = "00000000-0000-0000-0000-000000000437";
+        let meta = |claims: Value| json!({ PRODUCT_CLAIM_KEY: claims });
         // Fully and correctly stamped -> idempotent no-op.
-        let stamped = json!({ "captain_customer_id": target, "captain_role": "CUSTOMER" });
+        let stamped = meta(json!({ "customer_id": target, "role": "CUSTOMER" }));
         assert_eq!(stamp_decision(&stamped, target), StampDecision::Noop);
         // Same id but WRONG role -> the PUT is issued (repair), not a no-op.
-        let wrong_role = json!({ "captain_customer_id": target, "captain_role": "RESTAURANT" });
+        let wrong_role = meta(json!({ "customer_id": target, "role": "RESTAURANT" }));
         assert_eq!(
             stamp_decision(&wrong_role, target),
             StampDecision::Put,
-            "a present-but-wrong captain_role must fall through to the repairing PUT"
+            "a present-but-wrong role must fall through to the repairing PUT"
         );
         // Half-stamped (id, no role) -> PUT both keys.
-        let half = json!({ "captain_customer_id": target });
-        assert_eq!(stamp_decision(&half, target), StampDecision::Put);
+        assert_eq!(stamp_decision(&meta(json!({ "customer_id": target })), target), StampDecision::Put);
         // Fresh user -> PUT.
         assert_eq!(stamp_decision(&json!({}), target), StampDecision::Put);
         // Different id -> conflict, never an overwrite (role irrelevant).
-        let other = json!({ "captain_customer_id": "11111111-1111-1111-1111-111111111111", "captain_role": "CUSTOMER" });
+        let other = meta(json!({ "customer_id": "11111111-1111-1111-1111-111111111111", "role": "CUSTOMER" }));
         assert_eq!(
             stamp_decision(&other, target),
             StampDecision::Conflict { existing: "11111111-1111-1111-1111-111111111111".into() }
+        );
+    }
+
+    /// #519: the PRE-NESTING flat claims are ANOTHER ERA'S metadata, not a stamp. GoTrue's shallow
+    /// merge leaves them sitting beside `captain_food` forever, so reading them would be reading a
+    /// key nothing writes and nothing verifies — and a flat id belonging to a different customer
+    /// would block the real stamp as a phantom "conflict" rather than being re-stamped.
+    #[test]
+    fn the_pre_nesting_flat_claims_are_not_a_stamp() {
+        let target = "00000000-0000-0000-0000-000000000437";
+        let flat_same = json!({ "captain_role": "CUSTOMER", "captain_customer_id": target });
+        assert_eq!(
+            stamp_decision(&flat_same, target),
+            StampDecision::Put,
+            "flat claims do not count as stamped -- the nested object is written"
+        );
+        let flat_other =
+            json!({ "captain_role": "CUSTOMER", "captain_customer_id": "11111111-1111-1111-1111-111111111111" });
+        assert_eq!(
+            stamp_decision(&flat_other, target),
+            StampDecision::Put,
+            "and a flat id for someone else is not a conflict -- nothing reads it"
         );
     }
 

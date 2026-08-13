@@ -68,7 +68,7 @@ FIX_OFFER_ID="e2e50000-0000-4000-8000-000000000004"
 SMOKE_ADMIN_EMAIL="smoke-admin@${SMOKE_BASE_DOMAIN}"
 SMOKE_CUSTOMER_EMAIL="smoke-customer@${SMOKE_BASE_DOMAIN}"
 # The BRIDGED stranger for the #433 read-guard negative: its own user, its own per-run
-# captain_customer_id claim — reusing the customer user with a different claim would clobber the
+# captain_food.customer_id claim — reusing the customer user with a different claim would clobber the
 # first token's claim between steps.
 SMOKE_STRANGER_EMAIL="smoke-stranger@${SMOKE_BASE_DOMAIN}"
 
@@ -172,24 +172,30 @@ load_supabase_creds() {
   [ -n "$SB_KEY" ] || fail "L3: SUPABASE_SECRET_KEY is not set — role JWTs cannot be minted. It is its own repo secret since #358 (it was previously read off the Render service, which the OVH cutover retires)."
 }
 
-# mint_token <email> <captain_role> [customer_id] — ensure the smoke user exists with the role
-# (and, when given, a per-run captain_customer_id claim — #433: the JWT carries the domain ids),
-# then magic-link verify to a session. Prints the access token. Nothing is emailed.
+# mint_token <email> <role> [customer_id] — ensure the smoke user exists with the role (and, when
+# given, a per-run customer_id claim — #433: the JWT carries the domain ids), then magic-link verify
+# to a session. Prints the access token. Nothing is emailed.
+#
+# #519: every claim lives INSIDE app_metadata.captain_food. The verifier refuses a token without
+# that object, so a mint that still wrote the flat captain_* keys would produce a token this smoke
+# cannot use — and the flat keys a previously-stamped smoke user still carries are inert siblings
+# the shallow merge leaves behind, read by nothing.
 #
 # ORDER IS LOAD-BEARING (mob findings, beck+farley): the app_metadata stamp is UNCONDITIONAL and
 # happens BEFORE the link used for verification is generated — a conditional repair keyed on the
 # role would skip re-stamping a reused smoke user, whose token would then carry LAST run's
 # customer id: the positive poll times out and the negative probe silently proves the wrong
 # posture. Claims materialize at token ISSUANCE (/verify), and each generate_link rotates the OTP
-# hash, so the sequence is: create -> stamp -> link -> verify. The PUT sends BOTH keys — GoTrue's
-# app_metadata merge is shallow and version-dependent; never rely on it preserving captain_role.
+# hash, so the sequence is: create -> stamp -> link -> verify. The PUT sends the WHOLE captain_food
+# object every time — GoTrue's app_metadata merge is shallow and version-dependent, so our object is
+# replaced wholesale and never merged key-by-key; never rely on it preserving a sibling claim.
 mint_token() {
   local email="$1" role="$2" customer_id="${3:-}" link th sess tok uid meta payload claim
   load_supabase_creds
   # Idempotent create (an already-registered email errors; ignored).
   curl -sS -m 20 -o /dev/null -X POST "$SB_URL/auth/v1/admin/users" \
     -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
-    -d "$(jq -cn --arg e "$email" --arg r "$role" '{email:$e, email_confirm:true, app_metadata:{captain_role:$r}}')" || true
+    -d "$(jq -cn --arg e "$email" --arg r "$role" '{email:$e, email_confirm:true, app_metadata:{captain_food:{role:$r}}}')" || true
   # Resolve the user id (a first link also proves the user exists), then stamp UNCONDITIONALLY.
   link=$(curl -sS -m 20 -X POST "$SB_URL/auth/v1/admin/generate_link" \
     -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
@@ -197,9 +203,9 @@ mint_token() {
   uid=$(printf '%s' "$link" | jq -r '.id // .user.id // empty')
   [ -n "$uid" ] || fail "L3: could not resolve the Supabase user id for $email: $(printf '%s' "$link" | jq -c 'del(.action_link, .email_otp, .hashed_token)' | head -c 400)"
   if [ -n "$customer_id" ]; then
-    meta=$(jq -cn --arg r "$role" --arg c "$customer_id" '{app_metadata:{captain_role:$r, captain_customer_id:$c}}')
+    meta=$(jq -cn --arg r "$role" --arg c "$customer_id" '{app_metadata:{captain_food:{role:$r, customer_id:$c}}}')
   else
-    meta=$(jq -cn --arg r "$role" '{app_metadata:{captain_role:$r}}')
+    meta=$(jq -cn --arg r "$role" '{app_metadata:{captain_food:{role:$r}}}')
   fi
   curl -sS -m 20 -o /dev/null -X PUT "$SB_URL/auth/v1/admin/users/$uid" \
     -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" \
@@ -221,8 +227,8 @@ mint_token() {
   if [ -n "$customer_id" ]; then
     payload=$(printf '%s' "$tok" | cut -d. -f2 | tr '_-' '/+')
     case $(( ${#payload} % 4 )) in 2) payload="${payload}==";; 3) payload="${payload}=";; esac
-    claim=$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r '.app_metadata.captain_customer_id // empty')
-    [ "$claim" = "$customer_id" ] || fail "L3: token for $email carries captain_customer_id '$claim', expected '$customer_id' — the stamp did not reach the issued token"
+    claim=$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r '.app_metadata.captain_food.customer_id // empty')
+    [ "$claim" = "$customer_id" ] || fail "L3: token for $email carries captain_food.customer_id '$claim', expected '$customer_id' — the stamp did not reach the issued token"
   fi
   printf '%s' "$tok"
 }
@@ -372,7 +378,7 @@ l3b() {
 # --- L4b: the read guard, executed in production (#144/#433) --------------------------------------
 # The only executable proof the closed vulnerability stays closed where it matters: a caller who is
 # NOT the order's member reads NOTHING — no by-id row, no list dump. Since #433 this runs as a
-# BRIDGED stranger: a second smoke user carrying its OWN per-run captain_customer_id claim, so the
+# BRIDGED stranger: a second smoke user carrying its OWN per-run captain_food.customer_id claim, so the
 # probe exercises the membership EXISTS path itself (the sharper posture — #430's version proved
 # only the unbridged fail-closed-Public arm, which the DB suite already pinned).
 # (rules.yaml cannot carry read-guard coverage — #212 — so this assertion is the production gate.)
@@ -449,7 +455,7 @@ l4() {
   #    paymentStatus read below works exactly like a real guest checkout.
   #    customerId is REQUIRED as of #144 (structural, not domain-checked at placement): the smoke
   #    generates one per run and — since #433 — stamps the SAME value into the token's
-  #    captain_customer_id claim, exactly what the product's verifyPhone mint will do (the
+  #    captain_food.customer_id claim, exactly what the product's verifyPhone mint will do (the
   #    stamp-before-issue precondition recorded on #429). The claim IS the identity: the order
   #    poll below runs as this customer, and the negative probe as a bridged stranger.
   customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER" "$customer_id")
@@ -511,7 +517,7 @@ l4() {
   say "      L4: payment intent confirmed (succeeded) — waiting for the webhook + saga"
 
   # 4. The inbound webhook (PaymentCaptured) drives the saga: OrderPlaced + projection. Poll —
-  #    AS THE CUSTOMER (#433): the token now carries this run's captain_customer_id (asserted on
+  #    AS THE CUSTOMER (#433): the token now carries this run's captain_food.customer_id (asserted on
   #    the token itself at mint), so this is the customer-POSITIVE production proof #430 could not
   #    give: the paying customer reads their own order through the membership guard.
   t=0; last="(never observed)"
