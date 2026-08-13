@@ -682,4 +682,162 @@ mod tests {
         let issues = db_issues(&m);
         assert!(has(&issues, "database-placement-conflict"), "{}", render(&issues));
     }
+
+    // ── §18 red-test coverage completion (#546): the arms two review passes named as having no
+    // fixture forcing them red. Each mutant trips exactly its check; the `database-decl-invalid`
+    // family shares one slug, so those assert additionally on the distinguishing message substring so
+    // each of the five sub-checks is individually provable (a single fixture tripping all five would
+    // not prove each fires). The anchor `a_well_formed_catalog_raises_nothing` already exercises every
+    // new arm's happy path (staging with a valid `$ref` = the not-a-ref happy path; valid decls = all
+    // §18a happy paths; declared `captain_write` = the write-unit happy path; the valid `read-databases`
+    // token = the placement-invalid happy path), so no false positive slips through.
+
+    /// A single well-formed database declaration, field by field, so a §18a hygiene test mutates
+    /// exactly ONE line and proves exactly ONE check fires. A catalog-only model exercises 18a in
+    /// isolation: with no tables, `any_covered` is false and the 18b placement loop never runs.
+    fn one_database(name: &str, owner: &str, k8s: &str, recovery: &str, description: &str) -> String {
+        [
+            format!("{}:", name),
+            format!("  owner: {}", owner),
+            format!("  k8sName: {}", k8s),
+            format!("  recovery: {}", recovery),
+            format!("  description: {}", description),
+        ]
+        .join("\n")
+    }
+
+    /// THE priority arm: a bare-string `database:` value instead of a `$ref`. This is the literal
+    /// enforcement of the #413 "invisible to the refs walker" class (ADR-20260811-014129 D2) the
+    /// whole §18 placement design exists to protect — a plain-string placement resolves nowhere and
+    /// is silently unseen by every ref-driven rule.
+    #[test]
+    fn a_bare_string_placement_is_not_a_ref() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/integration_staging.yaml",
+                "external_stripe_events:\n  staging: true\n  database: adapter_stripe\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-not-a-ref"), "{}", render(&issues));
+    }
+
+    /// §18a `database-name-not-underscored`: a hyphenated database name — a hyphen in a Postgres
+    /// database name is a quoted identifier in every DSN and GRANT forever.
+    #[test]
+    fn a_hyphenated_database_name_is_not_underscored() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &one_database("adapter-stripe", "adapter_stripe", "adapter-stripe", "refetch", "stripe db"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-name-not-underscored"), "{}", render(&issues));
+    }
+
+    /// §18a `database-decl-invalid`, sub-check `owner`: a non-snake_case owning role.
+    #[test]
+    fn a_bad_owner_is_decl_invalid() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &one_database("adapter_stripe", "Bad-Owner", "adapter-stripe", "refetch", "stripe db"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-decl-invalid"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("owner")), "{}", render(&issues));
+    }
+
+    /// §18a `database-decl-invalid`, sub-check `k8sName`: an underscore is not RFC 1123 (the CNPG
+    /// Database CR object name).
+    #[test]
+    fn a_non_rfc1123_k8s_name_is_decl_invalid() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &one_database("adapter_stripe", "adapter_stripe", "adapter_stripe", "refetch", "stripe db"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-decl-invalid"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("k8sName")), "{}", render(&issues));
+    }
+
+    /// §18a `database-decl-invalid`, sub-check `k8sName` COLLISION: two databases binding the same
+    /// (individually valid) K8s object name — one object name, one database.
+    #[test]
+    fn a_k8s_name_collision_is_decl_invalid() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &[
+                "adapter_stripe:",
+                "  owner: adapter_stripe",
+                "  k8sName: shared-name",
+                "  recovery: refetch",
+                "  description: stripe db",
+                "adapter_avelo37:",
+                "  owner: adapter_avelo37",
+                "  k8sName: shared-name",
+                "  recovery: refetch",
+                "  description: avelo db",
+            ]
+            .join("\n"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-decl-invalid"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("already bound")), "{}", render(&issues));
+    }
+
+    /// §18a `database-decl-invalid`, sub-check `recovery`: a posture outside the closed set (the
+    /// drill slice #509 consumes it).
+    #[test]
+    fn an_out_of_set_recovery_is_decl_invalid() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &one_database("adapter_stripe", "adapter_stripe", "adapter-stripe", "bogus", "stripe db"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-decl-invalid"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("recovery")), "{}", render(&issues));
+    }
+
+    /// §18a `database-decl-invalid`, sub-check `description`: a declaration with no rationale is a
+    /// name squat.
+    #[test]
+    fn an_empty_description_is_decl_invalid() {
+        let m = model(&[(
+            "database/databases.yaml",
+            &one_database("adapter_stripe", "adapter_stripe", "adapter-stripe", "refetch", "''"),
+        )]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-decl-invalid"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("description")), "{}", render(&issues));
+    }
+
+    /// §18a `database-write-unit-undeclared`: a covered-kind table exists (so `any_covered` is true)
+    /// but the catalog does not declare `captain_write`, the unit every derived placement resolves
+    /// into (STO-1(a)).
+    #[test]
+    fn a_catalog_missing_the_write_unit_is_flagged() {
+        let no_write = one_database("read_order", "migrator", "read-order", "replay", "the order read database");
+        let m = model(&[
+            ("database/databases.yaml", &no_write),
+            ("database/tables/eventstore.yaml", "domain_events:\n  columns:\n    id: { type: uuid }\n"),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-write-unit-undeclared"), "{}", render(&issues));
+    }
+
+    /// The bad-`replicated`-value branch of `database-placement-invalid`: a replicable kind whose
+    /// `replicated:` value is outside the accepted set — the only replicated class is the bare token
+    /// `read-databases`.
+    #[test]
+    fn a_bad_replicated_value_is_placement_invalid() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/projection_tables.yaml",
+                "ScopeMembership:\n  replicated: sometimes\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-invalid"), "{}", render(&issues));
+    }
 }
