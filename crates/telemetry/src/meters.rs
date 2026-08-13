@@ -7,9 +7,10 @@
 //! Instruments are built once behind `OnceLock`. Creating an instrument per call would allocate on every
 //! command and — worse — is how duplicate time series with inconsistent attribute sets appear.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::OnceLock;
 
-use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, ObservableGauge};
 use opentelemetry::KeyValue;
 
 use crate::contract::metric;
@@ -342,9 +343,38 @@ pub mod otp_send {
         C.get_or_init(|| meter().u64_counter(metric::SMS_SEND_TOTAL).build())
     }
 
-    fn enforcing_gauge() -> &'static Gauge<i64> {
-        static G: OnceLock<Gauge<i64>> = OnceLock::new();
-        G.get_or_init(|| meter().i64_gauge(metric::OTP_SEND_GUARD_ENFORCING).build())
+    /// The guard's last DECLARED state, re-read by the gauge callback on every export cycle.
+    /// `-1` = never declared, so nothing is observed at all — an absent series and a `0` series mean
+    /// different things and must stay distinguishable.
+    static ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    /// An **observable** gauge, not a synchronous one — and that is the whole fix.
+    ///
+    /// A synchronous `Gauge::record` writes one data point when it is called. Called once at
+    /// composition, it says "the guard was wired when this process booted" and then says nothing ever
+    /// again, so the series goes flat-`1` and STAYS flat-`1` however broken the guard becomes. That
+    /// defeats the gauge in precisely the case it exists for: zero refusals is indistinguishable from
+    /// a disabled limiter, and a stale `1` is indistinguishable from a live `1`
+    /// (ADR-20260810-231300 — a liveness signal must be RE-ASSERTED, or it only proves the process
+    /// once booted).
+    ///
+    /// The callback is invoked by the SDK on every collection cycle, so the value is re-asserted by
+    /// construction with no timer of our own, and it stops being emitted the moment the process dies
+    /// — a dead-man's switch rather than a threshold. This is the metrics export path, not a poll of
+    /// another component's state, so it is outside that ADR's push rule.
+    fn enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::OTP_SEND_GUARD_ENFORCING)
+                .with_callback(|observer| {
+                    let state = ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
     }
 
     /// An OTP send was asked for (`otp_send_requested_total{dialing_code, allowed}`).
@@ -374,11 +404,17 @@ pub mod otp_send {
         sms_counter().add(1, &[KeyValue::new("result", result.to_string())]);
     }
 
-    /// The guard's liveness (`otp_send_guard_enforcing`): 1 while enforcing against the SHARED
-    /// counter, 0 when degraded. Recorded at composition, because "no refusals" and "no limiter" are
-    /// otherwise the same observation — the inverted dead-man's switch (ADR-20260810-231300).
+    /// Declare the guard's liveness (`otp_send_guard_enforcing`): 1 while enforcing against the SHARED
+    /// counter, 0 when the counter is unreachable and the guard therefore is not enforcing.
+    ///
+    /// Call it at composition AND wherever enforcement is actually decided — the value is then
+    /// re-asserted on every export cycle by [`enforcing_gauge`]'s callback. "No refusals" and "no
+    /// limiter" are otherwise the same observation, which is the inverted dead-man's switch
+    /// (ADR-20260810-231300).
     pub fn guard_enforcing(enforcing: bool) {
-        enforcing_gauge().record(i64::from(enforcing), &[]);
+        ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        // Registers the callback on first declaration; idempotent afterwards.
+        let _ = enforcing_gauge();
     }
 }
 

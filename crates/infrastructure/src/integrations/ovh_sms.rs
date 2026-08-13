@@ -105,9 +105,14 @@ impl OvhSmsClient {
     /// "Someone added a second call site and forgot the guard" becomes a type error rather than a
     /// review finding — which matters because this is a money path that already has more than one
     /// door. Emits `sms_send_total{result}` at the seam where a message becomes a euro.
+    ///
+    /// **The witness is taken BY VALUE, so one claim buys exactly one send.** It was `&`-borrowed
+    /// first, which quietly allowed `for _ in 0..1000 { sms.send(&w, m) }` — a thousand messages
+    /// against a single claim, i.e. the budget bypassed by a loop. Consuming it makes "one claim, one
+    /// send" a property of the type rather than a sentence in a doc comment. Do not add a `&` here.
     pub async fn send(
         &self,
-        recipient: &crate::sms_authorization::AuthorizedSmsRecipient,
+        recipient: crate::sms_authorization::AuthorizedSmsRecipient,
         message: &str,
     ) -> Result<(), DomainError> {
         let result = self.send_authorized(recipient.as_str(), message).await;

@@ -33,31 +33,6 @@ auth.resend_in:
   params: { seconds: "seconds until resend is available" }
   messages: { en: "Resend in {seconds}s", fr: "Renvoyer dans {seconds}s" }
 
-# The four REFUSED-SEND states (#516). A refused OTP request lands on a real person at the
-# highest-friction tap in the funnel, so each refusal has to say a different, true thing: a rate limit
-# rendered as "code incorrect" is a lie, and "invalid number" to a Belgian tourist is an accusation.
-# Wording mirrors the typed rejections in specs/customer/errors.yaml -- these are the SCREEN's copy;
-# the server's own `messages` are the fallback for anything that reads the error directly.
-auth.error.too_soon:
-  params: { seconds: "seconds remaining in the server's backoff window -- from the rejection, never a client guess" }
-  messages: { en: "Please wait {seconds}s before asking for a new code.", fr: "Veuillez patienter {seconds}s avant de demander un nouveau code." }
-# No countdown here ON PURPOSE: counting down to tomorrow is not information, so the exit is help.
-auth.error.daily_cap:
-  messages:
-    en: "You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in."
-    fr: "Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter."
-# NAMES the country and offers an exit. Never "invalid number" -- the number is fine, we are the limit.
-auth.error.country_not_served:
-  params: { dialingCode: "the dialing code we cannot deliver to, e.g. '+32'" }
-  messages:
-    en: "We can't send a code to {dialingCode} numbers yet -- we deliver in Tours. Please use a French mobile number, or contact us."
-    fr: "Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} -- nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous."
-# The global ceiling. Says nothing about the customer, because they did nothing wrong.
-auth.error.unavailable:
-  messages:
-    en: "We can't send verification codes right now. Please contact us -- we'll get you signed in."
-    fr: "Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons."
-
 # ── item detail sheet ────────────────────────────────────────────────────────
 item.choose_one:            { messages: { en: "Choose 1", fr: "Choisissez 1" } }
 item.instructions_placeholder: { messages: { en: "Special instructions (optional)", fr: "Instructions spéciales (facultatif)" } }

@@ -37,12 +37,19 @@ use domain::generated::scalars::{DialingCode, NationalPhoneNumber, PhoneNumber};
 /// forged outside it — that is the whole point. Holding one is proof that the allowlist passed and
 /// that one send was claimed against the per-number and global counters.
 ///
-/// It is deliberately NOT `Clone`: a clone would be a second send on one claim.
+/// **One claim, one send — and that is enforced by MOVE, not by the absence of `Clone`.**
+/// `OvhSmsClient::send` takes the witness **by value**, so sending consumes it and a second send
+/// needs a second claim. Not being `Clone` is necessary but nowhere near sufficient: this type was
+/// briefly passed by shared reference, and `&self`-style borrowing already permits
+/// `for _ in 0..1000 { sms.send(&w, m) }` — one claim, a thousand messages, budget spent once.
+/// A missing `Clone` impl cannot stop that; only consuming the value can. If you ever find yourself
+/// adding `&` to a signature that takes this type, you are re-opening exactly that hole.
 #[derive(Debug)]
 pub struct AuthorizedSmsRecipient(PhoneNumber);
 
 impl AuthorizedSmsRecipient {
-    /// The E.164 recipient to hand to the provider.
+    /// The E.164 recipient to hand to the provider. Borrowing the STRING is fine — it is the witness
+    /// itself that must be consumed, and only the sender (which takes it by value) can do so.
     pub fn as_str(&self) -> &str {
         &self.0 .0
     }
@@ -86,8 +93,21 @@ impl SmsSendAuthorizer {
             .await;
         telemetry::meters::otp_send::requested(&dialing_code.0, result.is_ok());
         match result {
-            Ok(phone) => Ok(AuthorizedSmsRecipient(phone)),
+            Ok(phone) => {
+                // Enforcement just happened against the shared counter, so re-assert liveness HERE —
+                // where it is actually decided — not only at composition. A boot-time `true` that is
+                // never refreshed proves the process once started, which is not the property the
+                // gauge exists for (ADR-20260810-231300).
+                telemetry::meters::otp_send::guard_enforcing(true);
+                Ok(AuthorizedSmsRecipient(phone))
+            }
             Err(refusal) => {
+                // A refusal we COMPUTED is enforcement working; an unreachable counter is the guard
+                // not enforcing at all, and the gauge must say so rather than sit on a stale `1`.
+                telemetry::meters::otp_send::guard_enforcing(!matches!(
+                    refusal,
+                    SmsRefusal::StoreUnavailable { .. }
+                ));
                 Self::record_refusal(&refusal);
                 Err(refusal)
             }

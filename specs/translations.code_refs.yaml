@@ -18,11 +18,3 @@ code_refs:
     used_by: crates/web/src/tracking.rs
   - key: order.rate
     used_by: crates/web/src/tracking.rs
-  # The refused-OTP-send states (#516). Resolved in Rust rather than $ref'd from the OTP sheet on
-  # purpose: the sheet carries ONE `inline_error` bound to a runtime string, so WHICH of the four
-  # refusals happened is decided from the rejection's typed error code.
-  # `auth::refusal_translation_key` is that mapping, and it is the only place an error code becomes a
-  # renderable key -- so a new refusal that forgets its key is a compile-time hole in one match, not a
-  # blank message in production.
-  - key: auth.error.*
-    used_by: crates/web/src/auth.rs

@@ -347,6 +347,10 @@ pub(crate) fn sms_send_guard(
     );
     // The liveness gauge (#516; ADR-20260810-231300's inverted dead-man's switch): without it, "no
     // refusals tonight" and "the limiter has been off since the last deploy" are one observation.
+    // This is the FIRST assertion, not the only one: the gauge is observable, so its callback
+    // re-asserts on every export cycle, and `SmsSendAuthorizer::authorize` re-declares the state at
+    // the point enforcement is actually decided (0 when the shared counter is unreachable). A single
+    // boot-time `record` proved only that the process once started.
     telemetry::meters::otp_send::guard_enforcing(true);
     Arc::new(infrastructure::SmsSendAuthorizer::new(
         policy,
