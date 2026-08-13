@@ -2,10 +2,15 @@
 
 ## Status
 
-Accepted and **founder-confirmed** (2026-08-13). The hold is resolved: in direct response to the
-held confirm-or-correct question on [PR #541, the PR realizing this ADR](https://github.com/TheCaptainCompany/captain-food/pull/541),
-the founder answered, verbatim: **"Continue the work enforcement and split"** (2026-08-13; relayed
-~14:05Z, container clock 16:51Z when this resolution was recorded). The provenance chain is
+Accepted and **founder-confirmed** (2026-08-13). The hold is resolved **in this session's
+conversation** (`session_01XTrJE7m5TGkKRRPKj5ZFqZ`), not on a GitHub surface: the coordinator put
+the held confirm-or-correct question about
+[PR #541, the PR realizing this ADR](https://github.com/TheCaptainCompany/captain-food/pull/541)
+to the founder there, and his reply is a user turn in that transcript, verbatim: **"Continue the
+work enforcement and split"** (2026-08-13; relayed ~14:05Z, container clock 16:51Z when this
+resolution was recorded). The founder posts no GitHub comments — the PR carries none — and per the
+operating model's own rule GitHub is never the record: the session transcript is where every
+founder directive in this repo's records is checkable, this one included. The provenance chain is
 therefore complete: verbatim antecedent 2026-08-12 → labeled elaboration in the 2026-08-13 resume
 prompt → verbatim confirmation 2026-08-13. On the page the quote needs its referents: *"the
 enforcement"* and *"the split"* are the founder's own vocabulary from his message earlier the same
