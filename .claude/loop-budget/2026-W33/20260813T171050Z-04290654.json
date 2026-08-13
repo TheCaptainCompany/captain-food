@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 420,
+  "recordedAt": "2026-08-13T17:10:50.471Z",
+  "branch": "budget-override-cap-not-a-stop-sign",
+  "note": "final round on budget-override-cap-not-a-stop-sign: status exit gated by capIsAStopSign (selftest 9j/9k/9m, red first), executor.md precondition 4 rewritten to read exit codes (0/3/2) instead of reporting every non-zero as budget exhaustion."
+}
