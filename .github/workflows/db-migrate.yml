@@ -79,7 +79,11 @@ jobs:
         env:
           # The commit this run is migrating for: the deploy's own head_sha, or the dispatched ref.
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          HEALTH_URL: https://api.captain.food/health
+          # The MARKETPLACE host, not `api.` (#358): the generated Ingress routes no `api.` host at
+          # all — role = path per audience host there (ADR-0006) — so a check hard-wired to `api.`
+          # would start failing the moment the cutover lands, on a job that gates every schema
+          # change. `live.` is served identically by the monolith today and by fo-marketplace after.
+          HEALTH_URL: https://live.captain.food/health
           # Render rollouts take minutes (image pull + boot + health gate); 15 min is generous but
           # finite -- an unbounded wait would hold the schema hostage to a stuck rollout.
           DEADLINE_SECONDS: "900"

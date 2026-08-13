@@ -124,8 +124,53 @@ pub(crate) fn validate_bin_topology(model: &Model, issues: &mut Vec<Issue>) {
         }
     }
 
+    // 5. `deploy_tree:` (#358) — the field that decides WHICH generated tree a container is
+    //    emitted into, so a mistake in it is a container that deploys nowhere or twice:
+    //    - an unrecognised value is refused rather than defaulted (`DeployTree::Unknown` lands in
+    //      neither tree by construction — this is the message that explains why);
+    //    - at most ONE `monolith` container, because the overlay names its Deployment/Service
+    //      `server` unconditionally; a second one would silently overwrite the first;
+    //    - a `monolith` container is never ALSO a derived bin — the two trees must not both claim
+    //      the same deployable.
+    let mut monoliths: Vec<&str> = Vec::new();
+    for c in &c4.containers {
+        match &c.deploy_tree {
+            DeployTree::Unknown(v) => issues.push(err(
+                "c4-deploy-tree-unknown",
+                format!("architecture/c4-l2.yaml/containers.{}", c.id),
+                format!(
+                    "container '{}' declares deploy_tree '{}' — the only generated trees are `bins` (default) and `monolith`; an unknown value is emitted into NEITHER tree, so the container would deploy nowhere.",
+                    c.id, v
+                ),
+            )),
+            DeployTree::Monolith => monoliths.push(c.id.as_str()),
+            DeployTree::Bins => {}
+        }
+    }
+    if monoliths.len() > 1 {
+        issues.push(err(
+            "c4-deploy-tree-many-monoliths",
+            "architecture/c4-l2.yaml".into(),
+            format!(
+                "containers {:?} all declare `deploy_tree: monolith` — the overlay emits ONE Deployment/Service named `server`, so the later declaration would silently overwrite the earlier.",
+                monoliths
+            ),
+        ));
+    }
+
     // 3. every projector-*/graphql-*/gateway-* container matches a derived bin.
     let derived: BTreeSet<&str> = topology.iter().map(|b| b.name.as_str()).collect();
+    for id in &monoliths {
+        if derived.contains(id) {
+            issues.push(err(
+                "c4-deploy-tree-monolith-is-a-bin",
+                format!("architecture/c4-l2.yaml/containers.{id}"),
+                format!(
+                    "container '{id}' declares `deploy_tree: monolith` but is ALSO a derived bin — both trees would emit a workload for it and GitOps would apply two Deployments with the same purpose."
+                ),
+            ));
+        }
+    }
     for c in &c4.containers {
         let generated_family = ["projector-", "graphql-", "gateway-", "adapter-"]
             .iter()

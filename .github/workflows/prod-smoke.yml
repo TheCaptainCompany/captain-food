@@ -1,6 +1,10 @@
 # Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/prod-smoke.sh.
 # Manual (workflow_dispatch) + daily. Requires repo secrets STRIPE_SECRET_KEY_TEST (sk_test) and
-# RENDER_API_KEY (used to read the deployed Supabase URL/secret so role JWTs can be minted).
+# SUPABASE_SECRET_KEY.
+#
+# SUPABASE_SECRET_KEY replaced RENDER_API_KEY here (#358): the smoke used to read the Supabase service
+# key off the Render service to mint role JWTs, which made it structurally unable to verify anything
+# that is not Render — including the cluster the cutover moves to. It is now supplied directly.
 name: prod-smoke
 
 on:
@@ -23,10 +27,10 @@ jobs:
           # refuses anything that is not `sk_test_`. Reading a mode-suffixed secret makes that refusal
           # structural rather than a runtime check on an ambiguously-named value.
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          if [ -z "$STRIPE_SECRET_KEY" ] || [ -z "$RENDER_API_KEY" ]; then
-            echo "::error::repo secrets STRIPE_SECRET_KEY_TEST / RENDER_API_KEY are not configured"
+          if [ -z "$STRIPE_SECRET_KEY" ] || [ -z "$SUPABASE_SECRET_KEY" ]; then
+            echo "::error::repo secrets STRIPE_SECRET_KEY_TEST / SUPABASE_SECRET_KEY are not configured"
             exit 1
           fi
           bash tools/smoke/prod-smoke.sh

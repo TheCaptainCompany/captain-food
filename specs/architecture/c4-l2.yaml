@@ -82,6 +82,23 @@ boundedContexts:
 # ADR-20260808-062933). Every actor/PM is REALIZED by exactly one bin — the
 # `realizes:` binding is what the #349 emitter turns into bin crates ↔ images ↔ Deployments.
 containers:
+  # -- THE CURRENTLY DEPLOYED RUNTIME (transitional, #358) --
+  # Every other container below is where we are GOING. This one is what is RUNNING, and until #358
+  # it had no home in any spec and therefore no manifest anywhere in deploy/ — the repo could
+  # describe a future cluster in 80-odd objects and could not describe the one workload a cutover
+  # has to move. `deploy_tree: monolith` routes it to its own generated overlay
+  # (deploy/generated/monolith/) instead of the per-bin manifests tree; deleting this container is
+  # what retires the monolith, and it prunes the overlay with it.
+  # `ingress_host: api.captain.food` is the monolith-era API host (ADR-0036) — the bins tree
+  # deliberately serves no `api.` host, because there role = path on each audience host (ADR-0006).
+  # It stays alive until every registered partner webhook (Stripe's is on
+  # https://api.captain.food/adapters/stripe/webhooks) has moved to hooks.captain.food.
+  server:
+    technology: "Rust — Axum monolith (server bin): GraphQL role paths, SDUI SSR + assets, partner webhook ingest, in-process projector and mailbox drain"
+    description: "The single deployed process (ADR-0042/0043): serves every audience host and every /{role}/graphql path from one binary, ingests partner webhooks, and runs the projector in-process. Split into the bin topology by ADR-20260807-183024 steps (6)-(7); retired when they flip."
+    deploy_tree: monolith
+    ingress_host: "api.captain.food"
+
   # -- client apps (run on the user's device) --
   web-client:
     technology: "Leptos (Rust → WASM), Crux core, SSR+hydration"

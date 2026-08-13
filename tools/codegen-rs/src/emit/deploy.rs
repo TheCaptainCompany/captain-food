@@ -29,9 +29,19 @@
 //! nulls and NEVER overwrites an existing one (pins are CI-owned state, not spec-derived). A
 //! null pin renders as the `:unpinned` tag — visibly undeployable, never a silent default.
 //!
-//! GATE-THEN-STABILIZE: nothing consumes this tree yet. No Argo CD is installed (#366), no CI
+//! GATE-THEN-STABILIZE: nothing consumes the BINS tree yet. No Argo CD is installed (#366), no CI
 //! step applies manifests; the monolith `server` deployment remains the runtime until steps
 //! (6)–(7) of the ADR flip it with the product owner live at the console.
+//!
+//! WHICH IS WHY THE MONOLITH IS ALSO EMITTED (#358 cutover rehearsal): `deploy/generated/monolith/`
+//! is the manifest for the thing we ACTUALLY deploy — Namespace + Deployment + Service + Ingress
+//! for the one `server` process, derived from the same specs (the `server` c4-l2 container carrying
+//! `deploy_tree: monolith`, the same secret-key contract, the same screens-derived host set). Until
+//! this existed, the repo could describe a future cluster in 80-odd objects and could not describe the
+//! ONE workload a cutover has to move — a hole that would have been discovered at the console.
+//! The monolith serves EVERY host at `/` because its routes are explicit and host-independent
+//! (`crates/server/src/hosts.rs` does host routing in the router FALLBACK), so one Service behind
+//! every host rule is the faithful description, not a simplification.
 
 use crate::*;
 use std::path::Path;
@@ -537,6 +547,13 @@ fn host_rules(model: &Model, topology: &[BinSpec]) -> Vec<HostRule> {
     let by_bin: BTreeMap<&str, &BinSpec> = topology.iter().map(|b| (b.name.as_str(), b)).collect();
     let mut integration_hosts: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for c in read_c4(model).containers {
+        // A container of the OTHER deploy tree (the transitional monolith) declares its own host
+        // — `api.captain.food` — which belongs to the monolith overlay, never here: this tree has
+        // no `server` Service to route it to, so emitting the rule would produce an Ingress that
+        // dangles the moment it is applied.
+        if c.deploy_tree != DeployTree::Bins {
+            continue;
+        }
         if let Some(host) = c.ingress_host {
             let Some(b) = by_bin.get(c.id.as_str()) else { continue };
             match (b.family, &b.partner) {
@@ -612,6 +629,220 @@ spec:
         ns = DEPLOY_NAMESPACE,
         hosts = hosts_tls,
         rules = rules_yaml,
+    )
+}
+
+// ─── The TRANSITIONAL monolith overlay (`deploy/generated/monolith/`) ────────────────────────────
+//
+// The bins tree above describes where we are going. This one describes what is running: ONE
+// `server` process, one image, every host, every role path. It is emitted from the same specs so
+// the two cannot fork, and it is a COMPLETE, applyable overlay (its own Namespace + kustomization)
+// so a cutover rehearsal — or the cutover itself — is `kubectl apply -k deploy/generated/monolith`
+// and nothing else.
+
+/// The monolith image repo: `IMAGE_PREFIX` ITSELF, not `{IMAGE_PREFIX}/{bin}` — the monolith
+/// predates the per-bin split and CI has been publishing it there since ADR-20260721-175411
+/// (`.github/workflows/build-image.yml`). Changing it would orphan every published digest.
+fn monolith_image_ref(pin: Option<&ImagePin>) -> String {
+    match pin.and_then(|p| p.digest.as_deref()) {
+        Some(d) => format!("{IMAGE_PREFIX}@{d}"),
+        None => format!("{IMAGE_PREFIX}:unpinned"),
+    }
+}
+
+/// The `server` container of c4-l2 — the monolith's spec home (`deploy_tree: monolith`). `None`
+/// on a model that does not declare one: the overlay is then simply not emitted, never guessed.
+pub(crate) fn monolith_container(model: &Model) -> Option<Container> {
+    read_c4(model).containers.into_iter().find(|c| c.deploy_tree == DeployTree::Monolith)
+}
+
+/// The monolith pod's env: APP_PROFILE + PORT, then EVERY production secret key whose declared
+/// `consumer` is `server`. No scope narrowing and no `needs_db` narrowing, unlike a bin — this ONE
+/// process is every scope, holds the write path, the read models and every integration ACL at
+/// once. That breadth is exactly what the bin split exists to end; describing it accurately here
+/// is what makes the difference visible.
+fn monolith_env_yaml(secret_keys: &[(String, String, String, String)], indent: &str) -> String {
+    let mut out = format!(
+        "{indent}- name: APP_PROFILE\n{indent}  value: production\n{indent}- name: PORT\n{indent}  value: \"{HTTP_PORT}\"\n"
+    );
+    for (key, _scope, consumer, _) in secret_keys {
+        if consumer != "server" {
+            continue;
+        }
+        out.push_str(&format!(
+            "{indent}- name: {key}\n{indent}  valueFrom:\n{indent}    secretKeyRef:\n{indent}      name: {SECRETS_NAME}\n{indent}      key: {key}\n"
+        ));
+    }
+    out
+}
+
+fn monolith_labels_yaml(indent: &str) -> String {
+    format!(
+        "{indent}app.kubernetes.io/name: server\n{indent}app.kubernetes.io/part-of: captain-food\n{indent}captain.food/family: monolith\n"
+    )
+}
+
+fn monolith_workload_yaml(model: &Model, pin: Option<&ImagePin>, secret_keys: &[(String, String, String, String)]) -> String {
+    let unpinned_note = if pin.and_then(|p| p.digest.as_ref()).is_none() {
+        "\n# UNPINNED: deploy/pins/server.json has no digest yet -- CI's pin-bump writes it and\n# regenerates this file; the :unpinned tag is deliberately undeployable, never a default."
+    } else {
+        ""
+    };
+    let desc = monolith_container(model).map(|c| c.description).unwrap_or_default();
+    format!(
+        r#"# GENERATED by the Captain.Food codegen -- do not edit by hand (#358 cutover, ADR-20260807-183024).
+# THE WORKLOAD WE ACTUALLY DEPLOY: the monolith `server` (c4-l2 `server`, deploy_tree: monolith).
+# {desc}
+# Image resolved from the deploy ledger deploy/pins/server.json ({{digest, source_hash}}; rollback =
+# git revert of the pin change).{unpinned}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: {ns}
+  labels:
+{labels}spec:
+  # ONE replica, strategy Recreate -- and here it is not a placeholder for #242's leases: this pod
+  # ALSO hosts the in-process projector and the mailbox drain (ADR-0040/0043), so a second replica
+  # would double-drain the same lanes and a RollingUpdate would overlap two of them mid-deploy.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: server
+  template:
+    metadata:
+      labels:
+{tpl_labels}    spec:
+      containers:
+        - name: server
+          image: {image}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {port}
+          env:
+{env}          # READINESS is /health ON PURPOSE (ADR-0043): it returns 503 while the applied schema
+          # is behind the binary's REQUIRED_SCHEMA_VERSION, so a deploy that races ahead of the
+          # out-of-band migration is held OUT of rotation instead of serving a half-migrated read
+          # model. `failureThreshold` is generous for exactly that case -- the pod is not sick, it
+          # is waiting for CI's `sqlx migrate run`.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 30
+          # LIVENESS is /ping, which never touches the database -- a database outage must not get
+          # the process killed and restarted into the same outage.
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            # Sized from what this binary has actually been living inside: the Render free instance
+            # it runs on today is 512Mi/0.1 CPU. Requests match that floor; the limit keeps the
+            # headroom the SSR + projector path uses at peak without letting a leak take the node.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: {ns}
+  labels:
+{labels}spec:
+  selector:
+    app.kubernetes.io/name: server
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+"#,
+        ns = DEPLOY_NAMESPACE,
+        labels = monolith_labels_yaml("    "),
+        tpl_labels = monolith_labels_yaml("        "),
+        image = monolith_image_ref(pin),
+        port = HTTP_PORT,
+        env = monolith_env_yaml(secret_keys, "            "),
+        unpinned = unpinned_note,
+        desc = desc,
+    )
+}
+
+/// Every host the monolith answers: the SAME screens-derived host set as the bins Ingress (one
+/// derivation, `host_rules`), plus the monolith's own declared `ingress_host`. Each host routes
+/// `/` to the single Service, because the monolith's role paths, webhook paths and SSR surfaces
+/// are all one router — the host only selects which surface the FALLBACK renders.
+fn monolith_ingress_yaml(model: &Model, topology: &[BinSpec], container: &Container) -> String {
+    let mut hosts: Vec<String> = host_rules(model, topology).into_iter().map(|r| r.host).collect();
+    if let Some(h) = &container.ingress_host {
+        if !hosts.contains(h) {
+            hosts.push(h.clone());
+        }
+    }
+    let mut tls = String::new();
+    let mut rules = String::new();
+    for h in &hosts {
+        tls.push_str(&format!("        - \"{h}\"\n"));
+        rules.push_str(&format!(
+            "    - host: \"{h}\"\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: server\n                port:\n                  name: http\n"
+        ));
+    }
+    format!(
+        r#"# GENERATED by the Captain.Food codegen -- do not edit by hand (#358 cutover).
+# The monolith's Ingress: EVERY host at `/` to the one `server` Service. The host set is the same
+# screens-derived set as the bins Ingress (one derivation) plus the monolith's own declared
+# `ingress_host`, `api.captain.food` -- which the bins tree deliberately does NOT serve, because
+# role = path per audience host there (ADR-0006). `api.` therefore has a LIFETIME: it must keep
+# answering until every registered partner webhook endpoint (Stripe's is
+# `https://api.captain.food/adapters/stripe/webhooks`) has been re-registered on
+# `hooks.captain.food`. Retiring it first silently drops payment-capture callbacks -- paid orders
+# nobody is told about.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: captain-food-monolith
+  namespace: {ns}
+  labels:
+    app.kubernetes.io/part-of: captain-food
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+{tls}      secretName: wildcard-captain-food-tls
+  rules:
+{rules}"#,
+        ns = DEPLOY_NAMESPACE,
+        tls = tls,
+        rules = rules,
+    )
+}
+
+fn monolith_kustomization_yaml() -> String {
+    format!(
+        r#"# GENERATED by the Captain.Food codegen -- do not edit by hand (#358 cutover).
+# `kubectl apply -k deploy/generated/monolith` is the WHOLE of deploying Captain.Food as it runs
+# today, minus the two things that are deliberately not in it: the `{SECRETS_NAME}` Secret (sealed
+# at provisioning, never in the repo -- deploy/generated/secret-keys.json is its checklist) and the
+# schema, applied out-of-band by sqlx-cli (ADR-0043; the /health readiness gate above holds the pod
+# out of rotation until it lands). Rehearsal procedure: docs/runbooks/cutover-local-rehearsal.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - server.yaml
+  - ingress.yaml
+"#
     )
 }
 
@@ -796,17 +1027,31 @@ exception: the deploy LEDGER, written by CI (one `{{digest, source_hash}}` pin-b
 deploy, #363/#371), read by the emitter to bake image digests into the Deployments. Rollback of
 one image = `git revert` of its pin change; `git log -- deploy/pins` is the deployment history.
 
-GATE-THEN-STABILIZE: nothing applies this tree today. Argo CD (#366) will reconcile
-`deploy/generated/manifests/` only when steps (6)-(7) of the ADR flip deployment, with the
-product owner live at the console; until then the monolith `server` deployment remains the
-runtime. The bins behind these manifests are probe-serving shells (/health + /ping) -- their
-business runtime wiring (mailbox hosting, per-scope projection, subgraph slices, gateway
-composition tables) is tracked on #349 and blocks the flip.
+TWO TREES, ON PURPOSE, while the cutover is in flight:
+
+- `manifests/` -- the per-bin topology we are moving TO. GATE-THEN-STABILIZE: nothing applies it
+  today. Argo CD (#366) reconciles it only when steps (6)-(7) of the ADR flip deployment, with the
+  product owner live at the console. The bins behind these manifests are probe-serving shells
+  (/health + /ping) -- their business runtime wiring (mailbox hosting, per-scope projection,
+  subgraph slices, gateway composition tables) is tracked on #349 and blocks the flip.
+- `monolith/` -- the workload we ACTUALLY deploy (#358): the single `server` process, serving every
+  host and every role path. `kubectl apply -k deploy/generated/monolith` is the whole of deploying
+  Captain.Food as it runs today, minus the sealed `captain-secrets` (checklist: secret-keys.json)
+  and the schema, applied out-of-band by sqlx-cli (ADR-0043). It exists because the repo used to
+  describe a future cluster in per-bin manifests and could not describe the one workload a cutover
+  has to move. It is emitted from the c4-l2 `server` container's `deploy_tree: monolith`, so
+  deleting that container is what retires the monolith -- and prunes this overlay with it.
+  `api.captain.food` is served HERE and deliberately not in `manifests/`: it is the registered
+  partner webhook address, and it outlives the cutover until those are re-registered on
+  `hooks.captain.food` (ADR-20260811-004500).
+
+Rehearse the whole sequence locally before spending anything:
+docs/runbooks/cutover-local-rehearsal.md.
 
 Bins: {n}. Build one image: `docker build -f deploy/generated/Dockerfile.bin --build-arg
 BIN=<bin> .` Render the manifests: `kustomize build deploy/generated/manifests`.
 "#,
-        n = topology.len()
+        n = topology.len(),
     )
 }
 
@@ -831,6 +1076,18 @@ pub(crate) fn emit_deploy_tree(model: &Model, pins: &BTreeMap<String, ImagePin>)
             format!("manifests/bins/{}.yaml", b.name),
             bin_manifest_yaml(b, model, pins.get(&b.name), &secret_keys),
         ));
+    }
+    // The transitional monolith overlay — emitted only when c4-l2 declares a `deploy_tree:
+    // monolith` container, so retiring the monolith is a SPEC deletion that prunes the whole
+    // overlay, not a code change plus a hand `rm`.
+    if let Some(c) = monolith_container(model) {
+        out.push(("monolith/namespace.yaml".into(), namespace_yaml()));
+        out.push((
+            "monolith/server.yaml".into(),
+            monolith_workload_yaml(model, pins.get("server"), &secret_keys),
+        ));
+        out.push(("monolith/ingress.yaml".into(), monolith_ingress_yaml(model, &topology, &c)));
+        out.push(("monolith/kustomization.yaml".into(), monolith_kustomization_yaml()));
     }
     out
 }

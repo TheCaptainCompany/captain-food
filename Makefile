@@ -39,7 +39,7 @@ help:
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
 
 # Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/README.md.
-# Needs: STRIPE_SECRET_KEY (sk_test), RENDER_API_KEY (or SUPABASE_URL+SUPABASE_SECRET_KEY).
+# Needs: STRIPE_SECRET_KEY (sk_test) and SUPABASE_SECRET_KEY.
 smoke-prod:
 	bash tools/smoke/prod-smoke.sh
 

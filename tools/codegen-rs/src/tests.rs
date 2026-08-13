@@ -5956,14 +5956,21 @@ fn deploy_tree_is_complete_both_ways() {
         assert!(pin.exists(), "missing deploy/pins/{}.json -- run `make generate` and commit it", b.name);
     }
 
-    // No stale pins: a pin for a bin the topology dropped is deploy history for a workload that
-    // no longer exists -- delete it in the same change that dropped the bin.
+    // No stale pins: a pin for a deployable the specs dropped is deploy history for a workload
+    // that no longer exists -- delete it in the same change that dropped the deployable. The
+    // MONOLITH is a deployable too (#358): its pin is legitimate exactly while its
+    // `deploy_tree: monolith` container is declared, and becomes stale the moment it is retired.
+    let mut pinnable: BTreeSet<String> = bins.iter().map(|b| b.to_string()).collect();
+    pinnable.extend(monolith_container(&model).map(|c| c.id));
     for entry in fs::read_dir(root.join("deploy/pins")).expect("deploy/pins exists").flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(bin) = name.strip_suffix(".json") else {
-            panic!("deploy/pins/{name}: only {{bin}}.json pin files belong here");
+            panic!("deploy/pins/{name}: only {{deployable}}.json pin files belong here");
         };
-        assert!(bins.contains(bin), "stale pin deploy/pins/{name}: no bin '{bin}' in the topology");
+        assert!(
+            pinnable.contains(bin),
+            "stale pin deploy/pins/{name}: no bin or monolith container '{bin}' in the specs"
+        );
     }
 
     // Ingress derivation: every screens->surface binding names a real bin, and EVERY surface in
@@ -6110,6 +6117,118 @@ fn deploy_tree_is_complete_both_ways() {
     assert!(
         !sirene.contains("name: INSEE_API_TOKEN"),
         "INSEE_API_TOKEN has no production from_secret — it reaches the pod only when the #358 cutover gives it a deploy source"
+    );
+}
+
+/// THE WORKLOAD WE ACTUALLY DEPLOY has a manifest (#358). Until this test existed, the repo
+/// emitted a workload per derived bin for a topology that runs nowhere and ZERO for the one that serves
+/// every paying customer — a hole nobody could see, because every other completeness rule here
+/// checks the bins tree against itself. This one checks the monolith against the SPEC that
+/// declares it, so retiring the monolith is a spec deletion (and this test then asserts the
+/// overlay is gone) rather than a code change plus a hand `rm`.
+#[test]
+fn the_deployed_monolith_has_a_generated_manifest() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let pins = read_image_pins(&root).expect("pins parse");
+    let tree = emit_deploy_tree(&model, &pins);
+    let files: BTreeMap<&str, &str> = tree.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+
+    let Some(container) = monolith_container(&model) else {
+        // The monolith is retired: the overlay must be gone WITH it, or GitOps would keep
+        // applying a Deployment nothing declares any more.
+        assert!(
+            !files.keys().any(|p| p.starts_with("monolith/")),
+            "no `deploy_tree: monolith` container is declared, yet the monolith overlay is still emitted"
+        );
+        return;
+    };
+    assert_eq!(container.id, "server", "the monolith container is the `server` bin");
+
+    let workload = files["monolith/server.yaml"];
+    assert!(workload.contains("kind: Deployment"), "the monolith needs a Deployment:\n{workload}");
+    assert!(workload.contains("kind: Service"), "the monolith needs a Service (the Ingress routes to it)");
+    // The same write-path safety the bins carry, for the same reason squared: this pod ALSO
+    // hosts the in-process projector and mailbox drain, so two of them double-drain.
+    assert!(workload.contains("replicas: 1") && workload.contains("type: Recreate"));
+    // Readiness on /health is ADR-0043's deploy interlock (503 while the schema is behind);
+    // liveness on /ping so a database outage cannot get the process killed into the same outage.
+    assert!(workload.contains("path: /health"), "readiness must gate on /health");
+    assert!(workload.contains("path: /ping"), "liveness must use /ping");
+    // The monolith image is IMAGE_PREFIX itself -- not `{prefix}/server`. CI has published it
+    // there since ADR-20260721-175411; a renamed repo orphans every published digest.
+    assert!(
+        workload.contains("image: ghcr.io/thecaptaincompany/captain-food:")
+            || workload.contains("image: ghcr.io/thecaptaincompany/captain-food@"),
+        "the monolith image repo must stay the one CI publishes to:\n{workload}"
+    );
+    // Its pod env is the FULL `server`-consumer secret set: this one process is every scope.
+    // Checked against the catalog, so a new server-consumed secret cannot be forgotten here.
+    for (key, _, consumer, _) in production_secret_keys(&model) {
+        if consumer == "server" {
+            assert!(
+                workload.contains(&format!("name: {key}")),
+                "the monolith pod env misses server-consumed secret '{key}' -- it would boot without it"
+            );
+        }
+    }
+    assert!(files.contains_key("monolith/namespace.yaml"), "the overlay must be self-contained");
+    let kustomization = files["monolith/kustomization.yaml"];
+    for r in ["namespace.yaml", "server.yaml", "ingress.yaml"] {
+        assert!(kustomization.contains(r), "monolith kustomization misses {r}");
+    }
+
+    // THE HOST RECONCILIATION (#358). The monolith answers every host the bins tree serves —
+    // one derivation, so a new audience host cannot reach the future and miss the present —
+    // PLUS its own declared `ingress_host`, which the bins tree deliberately does not carry.
+    let mono_ingress = files["monolith/ingress.yaml"];
+    let bins_ingress = files["manifests/ingress.yaml"];
+    for host in ["captain.food", "live.captain.food", "*.captain.food", "system.captain.food"] {
+        assert!(mono_ingress.contains(&format!("- host: \"{host}\"")), "monolith ingress misses {host}");
+    }
+    let api_host = container.ingress_host.as_deref().expect("the monolith declares its API host");
+    assert!(
+        mono_ingress.contains(&format!("- host: \"{api_host}\"")),
+        "the monolith must serve its declared ingress_host {api_host} -- the registered Stripe webhook endpoint lives on it"
+    );
+    assert!(
+        !bins_ingress.contains(&format!("- host: \"{api_host}\"")),
+        "the BINS ingress must not carry {api_host}: it has no `server` Service to route it to, so the rule would dangle on apply"
+    );
+    // And every host rule points at the ONE Service -- the monolith has no per-role backends.
+    assert!(
+        !mono_ingress.contains("name: gateway-"),
+        "the monolith overlay must route to `server`, never to a gateway bin that is not deployed"
+    );
+
+    // The smoke must target hosts this Ingress actually serves. `api.` was hard-wired into it
+    // until #358 while the generated routing carried no `api.` host at all -- a mismatch that
+    // would have surfaced as a 404 during the cutover window, on the one script that tells us
+    // whether money still moves.
+    let smoke = fs::read_to_string(root.join("tools/smoke/prod-smoke.sh")).expect("smoke script");
+    assert!(
+        !smoke.contains("https://api.${SMOKE_BASE_DOMAIN}"),
+        "prod-smoke.sh must not hard-wire the `api.` host: the generated Ingress routes role paths per AUDIENCE host (ADR-0006)"
+    );
+    // Each audience base defaults to a host the generated Ingress actually serves. The host is
+    // taken FROM the rendered Ingress, not from a literal here, so moving an audience's host in
+    // the screens specs fails this test instead of silently unpointing the smoke.
+    for (var, label) in [("PUBLIC_BASE", "live"), ("ADMIN_BASE", "system")] {
+        assert!(
+            bins_ingress.contains(&format!("- host: \"{label}.")),
+            "the generated Ingress no longer serves a '{label}.' host: prod-smoke.sh's {var} default is stale"
+        );
+        assert!(
+            smoke.contains(&format!("{var}=\"${{SMOKE_"))
+                && smoke.contains(&format!("://{label}.${{SMOKE_BASE_DOMAIN}}")),
+            "prod-smoke.sh {var} must default to {label}.<domain> -- the audience host the Ingress serves"
+        );
+    }
+    // The Render branch is retired with the platform it reads (#358): a smoke whose auth comes
+    // from the service being decommissioned cannot verify the service replacing it.
+    assert!(
+        !smoke.contains("api.render.com"),
+        "prod-smoke.sh must not read credentials off Render -- that service does not survive the cutover"
     );
 }
 

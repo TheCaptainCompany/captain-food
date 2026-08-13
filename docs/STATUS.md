@@ -799,6 +799,71 @@
 > `Cache-Control` exists anywhere in the tree**, so `Cache-Control: private, no-store` is recommended
 > **on the #469 branch**, not here.
 
+> 🧪 **2026-08-11 — THE CUTOVER WAS REHEARSED, LOCALLY AND END TO END; THE MONOLITH NOW HAS A
+> MANIFEST**
+> ([#358](https://github.com/TheCaptainCompany/captain-food/issues/358), branch
+> `cutover-local-rehearsal`,
+> [runbook](runbooks/cutover-local-rehearsal.md), [ADR-20260811-004500](adr/ADR-20260811-004500-role-paths-live-on-audience-hosts-api-host-is-a-webhook-address.md)).
+>
+> **The hole that was found first.** `deploy/generated/manifests/` held a per-bin Deployment/CronJob
+> for every derived bin (57 when the hole was found; **56** since
+> [#500](https://github.com/TheCaptainCompany/captain-food/pull/500) retired `worker-journal-sweep`)
+> for a topology that runs nowhere — and **zero manifests for the monolith `server`, the process that
+> actually serves every customer**. The repo could describe a future cluster in 83 objects and could
+> not describe the one workload a cutover has to move. `server` is now a declared c4-l2 container
+> (`deploy_tree: monolith`) and `deploy/generated/monolith/` is emitted from it: Namespace +
+> Deployment + Service + Ingress, `kubectl apply -k` and nothing else. Retiring the monolith is now a
+> spec deletion that prunes the overlay, and a codegen test asserts both directions.
+>
+> **What actually ran on a single-node k3s**, in this order, watched, **on 2026-08-11 against the
+> 45-migration chain of that day**: CNPG 1.27.4 operator → `captain-db` Cluster **`Cluster in healthy
+> state`** with `initdb` complete → `sqlx migrate run` applied the full chain to the empty database →
+> the generated monolith overlay applied verbatim → the pod reached `1/1 Running` → **`/health` =
+> 200** with a matching `requiredSchemaVersion` and **`/ping` = `pong`** → `prod-smoke.sh`
+> **L1 and L2 PASS** against it.
+>
+> **Re-verified on 2026-08-13, after merging `main`** — because #500 landed a migration in between and
+> a stale empirical claim is worse than none. `sqlx-cli 0.8.3 migrate run` against a freshly created,
+> empty Postgres 16 database applies the **full 46-migration chain**, `max(version) =
+> **20260812000000**` = `REQUIRED_SCHEMA_VERSION`, with #500's `ACCESS EXCLUSIVE` write fence and
+> `RECEIVED`-straggler guard passing on an empty table. The **k3s leg was NOT re-run**: it is a
+> multi-hour stand-up whose own runbook forbids a concurrent workspace `cargo build`, and the gates
+> this merge needed are exactly that build. Everything above the schema line therefore remains
+> 2026-08-11 evidence, unchanged by the merge; the schema line is fresh.
+>
+> **What it does NOT prove**, stated plainly because a spending decision rests on it: nothing about
+> OVH, Cinder volumes or `Retain`; **nothing about backup or restore** (the rehearsal overlay removes
+> `barmanObjectStore`, and at `instances: 1` that is the only recovery path — the largest gap);
+> nothing about DNS, TLS issuance, cert-manager, ingress-nginx or the LoadBalancer (the Ingress is
+> applied and parsed, nothing serves it; the app was reached by pod IP); nothing about HA; not the
+> production image (a debug binary in an ad-hoc image — the real cargo-chef release build is CI's);
+> and **not the money path** — L3/L4 need `SUPABASE_SECRET_KEY`, which this box does not have.
+>
+> **Three repo defects the rehearsal exposed, now fixed.** (1) `prod-smoke.sh` and `db-migrate.yml`
+> targeted `https://api.captain.food`, a host the generated Ingress routes **nowhere** — they now use
+> the audience hosts (`live.`, `system.`) that both topologies serve, with `api.` kept alive on the
+> monolith overlay as the **webhook address** until the registered Stripe endpoint moves to `hooks.`
+> (ADR-20260811-004500). (2) The smoke read its Supabase URL from `specs/configuration.yaml`, deleted
+> by the per-scope split — a missing file returned empty instead of failing, so the **daily smoke has
+> been dying at L3 blaming a missing environment variable**; it now scans the scope catalogs and says
+> so loudly when they are absent. (3) The smoke's Render branch (`RENDER_API_KEY` → the deployed
+> `SUPABASE_SECRET_KEY`) is retired: auth that depends on the platform being decommissioned cannot
+> verify the platform replacing it.
+>
+> **The two gaps between this branch and a money-path walk, stated not solved.** (1)
+> `SUPABASE_SECRET_KEY` as a repository secret the `prod-smoke` workflow can read — and this is a
+> **confirmation, not a creation**: STATUS already records (2026-08-09, verified) that an Actions
+> secret of that name exists and that `render-config-sync` reaches it through `toJSON(secrets)`;
+> nothing in the repo can tell whether it is scoped to this workflow or still holds the value the
+> smoke needs, so the founder confirms or re-points it. (2) **A webhook ingress**, so Stripe can reach
+> L4's `CAPTURED` assertion: `stripe listen --forward-to` is outbound-only and **nothing in the repo
+> uses it** (grepped, zero hits) — the rehearsal cluster has no inbound address at all, so L4 cannot
+> be walked locally however green L1–L3 get. Both are FOUNDER actions and neither is built here.
+> Still open for the console session: everything in
+> [#362](https://github.com/TheCaptainCompany/captain-food/issues/362) — ingress-nginx and
+> cert-manager are vendorable and pinnable offline exactly like `cnpg-operator/PIN.json`, and are the
+> next slice.
+
 > 🔓 **2026-08-10 (night) — THE `specs/**` FREEZE IS LIFTED: THE DSL IS THE TEAM'S WORK**
 > ([ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md),
 > product-owner directive: *"I'm surprise that I read that the spec was untouchable now that we have

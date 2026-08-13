@@ -1,0 +1,18 @@
+# PLATFORM SOURCE, hand-written (#358). REHEARSAL ONLY -- see kustomization.yaml in this
+# directory for what each removal means the rehearsal does not prove.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: captain-db
+  namespace: captain-prod
+spec:
+  storage:
+    # k3s's built-in provisioner. Delete-reclaim, node-local, no expansion -- everything
+    # captain-db-retain exists to avoid, which is exactly why this file may never be applied to
+    # anything holding real orders.
+    storageClass: local-path
+    size: 5Gi
+  # Both blocks are REMOVED rather than stubbed: a stubbed backup destination that silently
+  # archives nowhere is how you discover at restore time that you have no backups.
+  backup: null
+  managed: null

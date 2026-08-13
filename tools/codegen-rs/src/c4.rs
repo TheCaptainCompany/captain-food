@@ -27,10 +27,27 @@ pub(crate) struct Ctx {
     /// business boundary that owns it. Absent on a context that serves no role directly.
     pub(crate) roles: Vec<String>,
 }
+/// Which GENERATED deployment tree a container belongs to (`deploy_tree:` in c4-l2, default
+/// `bins`). Two trees exist ON PURPOSE while the cutover is in flight (ADR-20260807-183024 steps
+/// (6)-(7)): the per-bin topology we are moving TO, and the monolith we are actually running.
+/// `Unknown` is a distinct variant rather than a silent fall-back to `Bins`, so a typo'd value
+/// lands in NEITHER tree and is caught by §15 instead of quietly deploying the wrong shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeployTree {
+    /// `deploy/generated/manifests/` — one Deployment/CronJob per derived bin (#349/#385).
+    Bins,
+    /// `deploy/generated/monolith/` — the TRANSITIONAL single `server` process that serves every
+    /// host and every role path today; retired when the bin topology takes over.
+    Monolith,
+    Unknown(String),
+}
+
 pub(crate) struct Container {
     pub(crate) id: String,
     pub(crate) technology: String,
     pub(crate) description: String,
+    /// The generated deployment tree this container is emitted into (`deploy_tree:`).
+    pub(crate) deploy_tree: DeployTree,
     /// Actor/PM names this container realizes (`realizes:` $refs) — the bin ↔ deployable binding
     /// (ADR-20260807-183024; consumed by the #349 emitter chain).
     pub(crate) realizes: Vec<String>,
@@ -473,6 +490,11 @@ pub(crate) fn read_c4(model: &Model) -> C4 {
                     id: id.to_string(),
                     technology: c.get("technology").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    deploy_tree: match c.get("deploy_tree").and_then(|x| x.as_str()) {
+                        None | Some("bins") => DeployTree::Bins,
+                        Some("monolith") => DeployTree::Monolith,
+                        Some(other) => DeployTree::Unknown(other.to_string()),
+                    },
                     realizes: ref_names(c.get("realizes")),
                     ingress_host: c
                         .get("ingress_host")
