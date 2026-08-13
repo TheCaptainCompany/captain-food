@@ -299,7 +299,9 @@ if (cmd === 'status') {
   console.error(`  ${segs.length} segment(s) this week; timer file: ${TIMER}`);
   const t = openTimer();
   console.error(t ? `  OPEN TIMER: ${describe(t)}${t.age > STALE_TIMER_SECONDS ? '  <-- STALE, will not be billed' : ''}` : `  no open timer`);
-  process.exit(over ? EXIT_OVER : EXIT_OK);
+  // status is the REPORT command (the ADR names it as the constraint's replacement), so under the
+  // override it must be the last place still emitting a refusal signal (ADR-20260813-132540).
+  process.exit(over && capIsAStopSign ? EXIT_OVER : EXIT_OK);
 }
 
 if (cmd === 'reset') {

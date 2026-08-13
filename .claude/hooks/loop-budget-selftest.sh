@@ -196,9 +196,14 @@ expect_code "9h INTEGRITY is untouched: stop with no open timer still refuses (e
 stamp_timer $((5 * 3600))
 run bash "$HOOK" stop
 expect_code "9i INTEGRITY is untouched: a stale timer still refuses (exit 3), never billed" 3
+run bash "$HOOK" status
+expect_code "9j status over the cap under the override exits 0 -- the REPORT command must not emit a refusal signal" 0
+expect_out  "9k ...while still printing the over-cap state loudly" "loop budget"
 printf '{\n  "weeklyBudgetSeconds": %s\n}\n' "$BUDGET" > "$REPO/.claude/loop-budget.json"
 run bash "$HOOK" check
-expect_code "9j the flag ABSENT restores the stop sign (exit 2) -- the recorded path back works" 2
+expect_code "9l the flag ABSENT restores the stop sign (exit 2) -- the recorded path back works" 2
+run bash "$HOOK" status
+expect_code "9m ...and status over the cap exits 2 again with the flag absent" 2
 
 printf 'loop-budget selftest: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || { echo "loop-budget selftest: FAILED -- a budget guard is not firing (see above)." >&2; exit 2; }

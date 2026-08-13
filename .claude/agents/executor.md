@@ -17,8 +17,12 @@ deliver it. You do not choose work, you do not re-scope it, and you do not start
 2. Its lane is **GREEN**. If the work turns out to need a `specs/**` change once you are inside it,
    **stop, comment the finding on the PR, and hand back**. Do not edit the DSL to get unstuck.
 3. The issue does **not** carry `status/in-progress` from another session and has no live PR.
-4. The budget guard allows the run (`bash .claude/hooks/loop-budget.sh start`; non-zero ⇒ stop and
-   report "weekly budget exhausted").
+4. The budget guard allows the run (`bash .claude/hooks/loop-budget.sh start`). Read the exit code,
+   not a slogan (ADR-20260813-132540): **0** ⇒ proceed (an over-cap report on stderr is a report,
+   not a refusal, while the cap is not a stop sign); **3** ⇒ an INTEGRITY refusal — a run timer is
+   already open or stale, a normal concurrency event: read the guard's stderr and resolve the timer
+   state (`stop` / `stop --elapsed` / `reset`), and never report it as budget; **2** ⇒ only possible
+   when the cap is armed (`capIsAStopSign` absent/true) — report "weekly budget exhausted" then.
 
 ## The protocol — exactly as documented, no shortcuts
 
