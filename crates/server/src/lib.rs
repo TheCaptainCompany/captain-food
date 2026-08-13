@@ -43,10 +43,11 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
+use actor_client::supervision::MailboxLaneRepository;
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, MailboxLaneRepository, OrderReadRepository,
+    DeliveryReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
     UberSplitPolicyReadRepository,

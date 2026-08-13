@@ -43,19 +43,18 @@ impl QueryRoot {
     /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
     #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::MailboxLaneRepository>>()?;
-        let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let repo = ctx.data::<std::sync::Arc<dyn actor_client::supervision::MailboxLaneRepository>>()?;
+        let rows = actor_client::supervision::mailbox_lanes(repo.as_ref()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(MailboxLane::from).collect())
     }
     /// Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED with error code DeliveryInfrastructureError — newest first, with the messageId the requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from inbound_messages directly, no View_* (write-path infrastructure, not a business read model). Server clamps the page to 200.
     #[graphql(name = "poisonedMailboxMessages", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn poisoned_mailbox_messages(&self, ctx: &async_graphql::Context<'_>, input: Option<PoisonedMailboxMessagesQueryInput>) -> async_graphql::Result<Vec<PoisonedMailboxMessage>> {
-        let repo = ctx.data::<std::sync::Arc<dyn application::queries::MailboxLaneRepository>>()?;
+        let repo = ctx.data::<std::sync::Arc<dyn actor_client::supervision::MailboxLaneRepository>>()?;
         let (actor_type, limit) = input
             .map(|i| (i.actor_type.map(|v| v.0), i.limit.map(|v| v.0)))
             .unwrap_or((None, None));
-        let rows = repo
-            .poisoned(actor_type, limit.unwrap_or(200).clamp(1, 200))
+        let rows = actor_client::supervision::poisoned_messages(repo.as_ref(), actor_type, limit.unwrap_or(200).clamp(1, 200))
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(PoisonedMailboxMessage::from).collect())

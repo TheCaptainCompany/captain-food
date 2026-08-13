@@ -698,69 +698,10 @@ pub trait UberSplitPolicyReadRepository: Send + Sync {
     async fn list(&self) -> Result<Vec<UberSplitPolicyRow>, DomainError>;
 }
 
-/// One actor-supervision lane (#242 Runtime B, PROP-20260728-152752): a `(actor_type, partition)`
-/// row from the `mailbox_partitions` registry joined with the live pending/scheduled backlog counted
-/// out of `inbound_messages`. Write-path infrastructure, not a business read model — served by the
-/// ADMIN-only `mailboxLanes` query, no backing `View_*`.
-#[derive(Debug, Clone)]
-pub struct MailboxLaneRow {
-    pub actor_type: String,
-    /// 0 .. the actor's declared mailbox.partitions - 1 (SMALLINT in the registry).
-    pub partition: i16,
-    /// The fencing counter (§3.1) — increments on every ownership change, NOT a date.
-    pub ownership_version: i64,
-    /// Worker instance id; `None` = unowned (claimable).
-    pub claimed_by: Option<String>,
-    /// Past or `None` = claimable; heartbeat-renewed while owned.
-    pub lease_until: Option<chrono::DateTime<chrono::Utc>>,
-    /// Largest mailbox position with everything at or below it terminal.
-    pub checkpoint: i64,
-    /// RECEIVED rows on the lane — the live backlog a worker pass would drain.
-    pub pending: i64,
-    /// SCHEDULED rows on the lane — future work (reminders) awaiting promotion.
-    pub scheduled: i64,
-    /// `received_at` of the oldest RECEIVED row — the lane's staleness signal.
-    pub oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Largest `attempts` among the lane's RECEIVED rows — > 0 means a head row is failing its
-    /// completion transaction and being re-paced toward the cap (PROP-20260802-223522 D4).
-    pub retrying_attempts: i64,
-    /// Rows terminally FAILED by the delivery-attempts cap — each one is an operator event.
-    pub poisoned: i64,
-}
-
-/// One cap-poisoned mailbox row (#315): an `inbound_messages` row the delivery-attempts cap
-/// flipped to terminal FAILED with error code `DeliveryInfrastructureError` — the per-row detail
-/// behind [`MailboxLaneRow::poisoned`]'s count, carrying the id the requeue recovery needs.
-#[derive(Debug, Clone)]
-pub struct PoisonedMessageRow {
-    pub message_id: uuid::Uuid,
-    pub actor_type: String,
-    pub partition: i16,
-    pub message_type: String,
-    /// Delivery attempts consumed before the cap flipped the row (SMALLINT on the table).
-    pub attempts: i16,
-    /// `error->>'code'` — always `DeliveryInfrastructureError` for a poisoned row today, carried
-    /// anyway so the screen never has to hard-code the predicate it filters by.
-    pub error_code: Option<String>,
-    pub correlation_id: Option<uuid::Uuid>,
-    pub received_at: chrono::DateTime<chrono::Utc>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Read port over the mailbox registry + backlog. Backs the ADMIN `mailboxLanes` supervision query;
-/// the adapter joins `mailbox_partitions` with per-lane counts from `inbound_messages`.
-#[async_trait]
-pub trait MailboxLaneRepository: Send + Sync {
-    /// Every registered lane, `(actor_type, partition)` order — empty until a worker seeds the registry.
-    async fn list(&self) -> Result<Vec<MailboxLaneRow>, DomainError>;
-    /// Every cap-poisoned row (#315), newest first, optionally filtered to one actor type;
-    /// `limit` is the resolver-clamped page size. Backs the ADMIN `poisonedMailboxMessages` query.
-    async fn poisoned(
-        &self,
-        actor_type: Option<String>,
-        limit: i64,
-    ) -> Result<Vec<PoisonedMessageRow>, DomainError>;
-}
+// The supervision READ port (`MailboxLaneRepository` + its two row types) moved to
+// `actor_client::supervision` under #510: its methods demand the `MailboxAccess` witness only
+// that crate can mint, so it has to live where the mint lives. The WRITE half below stays —
+// its one legitimate caller is `crate::commands::requeue_mailbox_message`, in THIS crate.
 
 /// Outcome of a [`MailboxRequeue::requeue_if_poisoned`] arbitration (#315) — what the database
 /// said about the target row, decided and applied in ONE statement so no check-then-act window
@@ -780,6 +721,40 @@ pub enum RequeueOutcome {
     NotRequeueable { status: String },
 }
 
+/// The capability WITNESS [`MailboxRequeue::requeue_if_poisoned`] demands (#510, the write half
+/// of the #304 posture): a value only THIS crate can mint, because its single field is
+/// `pub(crate)`. Holding the port — every `CommandDeps` bundle and GraphQL context does — is no
+/// longer holding the door: the one production mint sits inside
+/// `crate::commands::requeue_mailbox_message`, the handler the `RequeueMailboxMessage` command
+/// reaches through the mailbox, so a resolver or worker holding the `Arc<dyn MailboxRequeue>`
+/// cannot spell the flip. Implementors outside the crate (`infrastructure::PgMailboxRequeue`)
+/// name the type in their signatures and ignore the value — naming a type is not constructing one.
+///
+/// Honest limit, same as the read witness's (`actor_client::mailbox::MailboxAccess`): any code
+/// INSIDE `application` can mint. The crate is the permission boundary, not the function.
+#[derive(Debug, Clone, Copy)]
+pub struct MailboxRequeueAccess(pub(crate) ());
+
+impl MailboxRequeueAccess {
+    /// Mint the witness. `pub(crate)` IS the enforcement — every caller of the requeue port
+    /// stands inside this crate, behind the command handler.
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
+}
+
+/// The TEST-ONLY mint (#510, mirroring `actor_client::mailbox::fixtures::MailboxAccess::for_tests`):
+/// an integration test asserting the port's arbitration matrix IS the thing behind the door, so it
+/// needs one. Compiled only under `test-fixtures`, which only `[dev-dependencies]` may enable
+/// (CI-guarded by `test_fixtures_feature_never_reaches_a_release_artifact`) — a door for tests,
+/// never a door in a release artifact.
+#[cfg(any(test, feature = "test-fixtures"))]
+impl MailboxRequeueAccess {
+    pub fn for_tests() -> Self {
+        Self(())
+    }
+}
+
 /// WRITE port over the poisoned-row recovery (#315, ADR-20260803-002712 Q1): the arbiter of
 /// "only cap-poisoned rows are requeueable" (rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
 /// Deliberately NOT part of the read repository: the flip must be a single atomic arbitration.
@@ -790,8 +765,11 @@ pub trait MailboxRequeue: Send + Sync {
     /// Flip the row `FAILED → RECEIVED` iff it is cap-poisoned (error code
     /// `DeliveryInfrastructureError`); report what the database found otherwise. Never guesses:
     /// the predicate and the flip are one statement.
-    async fn requeue_if_poisoned(&self, message_id: uuid::Uuid)
-        -> Result<RequeueOutcome, DomainError>;
+    async fn requeue_if_poisoned(
+        &self,
+        message_id: uuid::Uuid,
+        access: MailboxRequeueAccess,
+    ) -> Result<RequeueOutcome, DomainError>;
 }
 
 // =====================================================================

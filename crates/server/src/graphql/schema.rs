@@ -13,10 +13,11 @@ use actor_client::mailbox::Mailbox;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
+use actor_client::supervision::MailboxLaneRepository;
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, MailboxLaneRepository, OrderConversationReadRepository, OrderReadRepository,
+    DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
     UberSplitPolicyReadRepository,
@@ -50,8 +51,10 @@ pub struct ReadDeps {
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
     pub reclamations: Arc<dyn ReclamationReadRepository>,
     pub customer_credit: Arc<dyn CustomerCreditReadRepository>,
-    /// The ADMIN `mailboxLanes` supervision read (#242 Runtime B): the mailbox partition registry
-    /// joined with its live backlog — write-path infrastructure, not a business read model.
+    /// The ADMIN `mailboxLanes`/`poisonedMailboxMessages` supervision read (#242 Runtime B): the
+    /// mailbox partition registry joined with its live backlog — write-path infrastructure, not a
+    /// business read model. The port lives in `actor_client::supervision` (#510): its methods
+    /// demand the mailbox witness, so the resolvers read through that crate's door functions.
     pub mailbox_lanes: Arc<dyn MailboxLaneRepository>,
 }
 
@@ -119,23 +122,47 @@ pub fn build_schema_for_scope(
         builder = builder.extension(super::scope_slice::ScopeSlice::new(scope));
     }
     if let Some(d) = deps {
-        builder = builder.data(d.restaurants);
-        builder = builder.data(d.prospection);
-        builder = builder.data(d.pricing_policy);
-        builder = builder.data(d.uber_estimation_policy);
-        builder = builder.data(d.uber_split_policy);
-        builder = builder.data(d.catalogs);
-        builder = builder.data(d.carts);
-        builder = builder.data(d.orders);
-        builder = builder.data(d.order_conversations);
-        builder = builder.data(d.customers);
-        builder = builder.data(d.deliveries);
-        builder = builder.data(d.refunds);
-        builder = builder.data(d.delivery_satisfaction);
-        builder = builder.data(d.delivery_partner_availabilities);
-        builder = builder.data(d.reclamations);
-        builder = builder.data(d.customer_credit);
-        builder = builder.data(d.mailbox_lanes);
+        // EXHAUSTIVE on purpose — no `..` (#510, the #529 class): `ctx.data` is TypeId-keyed, so
+        // a ReadDeps field added without a matching `.data()` registration compiles clean and
+        // 500s at resolve time, on the supervision screen mid-incident in the worst case. This
+        // destructure forces every new field to be named here, and the unused-variable lint then
+        // points straight at the missing registration.
+        let ReadDeps {
+            restaurants,
+            prospection,
+            pricing_policy,
+            uber_estimation_policy,
+            uber_split_policy,
+            catalogs,
+            carts,
+            orders,
+            order_conversations,
+            customers,
+            deliveries,
+            refunds,
+            delivery_satisfaction,
+            delivery_partner_availabilities,
+            reclamations,
+            customer_credit,
+            mailbox_lanes,
+        } = d;
+        builder = builder.data(restaurants);
+        builder = builder.data(prospection);
+        builder = builder.data(pricing_policy);
+        builder = builder.data(uber_estimation_policy);
+        builder = builder.data(uber_split_policy);
+        builder = builder.data(catalogs);
+        builder = builder.data(carts);
+        builder = builder.data(orders);
+        builder = builder.data(order_conversations);
+        builder = builder.data(customers);
+        builder = builder.data(deliveries);
+        builder = builder.data(refunds);
+        builder = builder.data(delivery_satisfaction);
+        builder = builder.data(delivery_partner_availabilities);
+        builder = builder.data(reclamations);
+        builder = builder.data(customer_credit);
+        builder = builder.data(mailbox_lanes);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

@@ -5,8 +5,9 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
+use actor_client::supervision::{MailboxLaneRow, PoisonedMessageRow};
 use application::projections::{CartRow, CatalogRow, CustomerCreditBalanceRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, MailboxLaneRow, PoisonedMessageRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;

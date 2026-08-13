@@ -6,6 +6,13 @@ license-file.workspace = true
 publish = false
 description = "Captain.Food application layer: use cases — ports (traits infrastructure must implement), CQRS command/query handlers, and process managers (sagas). Depends on `domain` ONLY (ADR-0035); must never depend on infrastructure/server/web."
 
+[features]
+# Cross-crate TEST access to the requeue-port witness (#510, the PROP-20260802-130500 D5 mechanism
+# applied at this crate): `MailboxRequeueAccess::for_tests()`. Enabled ONLY from [dev-dependencies]
+# — the codegen guard `test_fixtures_feature_never_reaches_a_release_artifact` fails the build if
+# any [dependencies] entry (i.e. a release artifact) turns it on.
+test-fixtures = []
+
 [dependencies]
 domain = { path = "../domain" }
 async-trait = { workspace = true }
