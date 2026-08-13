@@ -2,6 +2,41 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔐 **2026-08-13 — IDENTITY: SUPABASE AUTH IS RETAINED FOR V0, AND THE WINDOW TO OWN IDENTITY CLOSES
+> AT THE FIRST REAL ORDER** (founder directive + ten-lens mob;
+> [ADR-20260813-004634](adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md),
+> new [DECISIONS §36 IDP-1](proposals/DECISIONS.md); **records-only — no code, no specs, no generated
+> artifacts**, so no SPEC-LOG row is owed).
+> - **The correction underneath it**: *"Don't care about the Supabase keys because we going to use our
+>   own Postgres hosted on Kubernetes"* — the premise was already true and the inference was not. The
+>   database has been self-hosted CNPG since
+>   [ADR-20260807-002705](adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md); Supabase is the
+>   **identity provider only** and holds no business data; **`SUPABASE_SECRET_KEY` gates authentication,
+>   not storage**, so it remains the hard stop [§35 INV-1](proposals/DECISIONS.md) recorded against
+>   smoke L3/L4.
+> - **The decision**: retain, verbatim *"For the auth/identify we will use Supabase because it's free
+>   and easier"* — EUR 0 at V0 volumes, and the **SMS bill is identical either way** because OTP already
+>   goes out on our **own OVHcloud account** through the Supabase Send-SMS hook (ADR-20260722-174500).
+>   All ten lenses recommended not self-hosting now; the strongest reason is that
+>   `crates/server/src/auth.rs`'s `asymmetric_alg` accepts **asymmetric JWKS only, deliberately** (kills
+>   `alg`-confusion forgery), while self-hosted GoTrue defaults to symmetric — a swap edits the token
+>   verification path days before a demo.
+> - **⚠️ THE DEADLINE, which is the durable output**: `domain_events.user_id` holds the **provider's
+>   subject**, so a later switch is an **upcasting migration on an immutable log**; and with
+>   **Q-L3 = no real phone-verified user (2026-08-12)** a switch today triggers no processor-exit
+>   obligations. **Both windows close at the first real order** — *if we ever intend to own identity, it
+>   lands before the first real order or it becomes materially more expensive.*
+> - **Unchanged by the decision, still owed** (proposed as issues, not filed here): no **OTP rate limit
+>   / `+33` allowlist** anywhere (SMS-pumping is a real money risk on our own SMS account); the
+>   **auth-session park/pickup has no observability contract** and `auth_routes.rs` discards the cause;
+>   the **OTP rejection message has no translation key**. Also NAMED, not fixed:
+>   `specs/architecture/c4-l3.yaml` still says the OTP goes via *"Twilio"* (a `specs/**` edit owing a
+>   SPEC-LOG row).
+> - **For the demo leg**: identity needs the key **AND pod egress to `SUPABASE_JWKS_URL`** (two gaps,
+>   not one — egress is checkable in minutes); the **payment leg needs no ingress**, since
+>   `stripe listen --forward-to` reaches the local stack outbound and the CLI's own signing secret
+>   satisfies the fail-closed `STRIPE_WEBHOOK_SECRET` boot gate.
+
 > 📌 **2026-08-12 — THE FOLLOW-UP REGISTER: nine findings from tonight's mob reads are now ISSUES,
 > not paragraphs** (records-only). Each is linked from the register row it belongs to, so it is
 > reachable from the decision as well as from here:

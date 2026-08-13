@@ -1373,6 +1373,57 @@ it dispatchable**, and no `Priority` bucket was moved to legitimise a recommenda
 
 ---
 
+## 36. Supabase Auth for V0 — ✅ CLOSED 2026-08-13 ON A FOUNDER ANSWER
+
+One answer, a full ten-lens mob read before it was recorded, and a **correction** underneath it. The
+record is [ADR-20260813-004634](../adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md)
+(`Consulted:` block per [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md));
+this row is the queue trace, so the answer is not the only evidence the question was asked.
+
+**The correction is the reason the row exists.** The question was opened by *"Don't care about the
+Supabase keys because we going to use our own Postgres hosted on Kubernetes"* — **the premise was
+already true and the inference was not**. The database has been self-hosted CloudNativePG in-cluster
+since [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md); Supabase is
+the **identity provider only** and holds no business data (`specs/services.yaml`, the `identity`
+capability wrapped by `supabase-acl` per ADR-0015); and `SUPABASE_SECRET_KEY` gates **authentication,
+not storage** — unset, it fails closed and login degrades to a fresh-OTP retry
+(`specs/common/configuration.yaml`). Hosting our own Postgres therefore does not retire that key, and
+it stays the hard stop §35 INV-1 already recorded against smoke L3/L4.
+
+| # | Decision | Options & the trade-off | Answer / status |
+|---|---|---|---|
+| **IDP-1** ✅ **CLOSED 2026-08-13 — retain, with a DATED reversal window** | **Do we own identity, or keep the provider for V0?** Raised by the key question above; the answer decides whether the token verification path is touched before the demo | **(A) Retain Supabase Auth.** EUR 0 delta at V0 volumes; **the SMS bill is identical either way** because OTP already goes out on **our own OVHcloud account** through the Supabase Send-SMS hook (`crates/infrastructure/src/integrations/ovh_sms.rs`, [ADR-20260722-174500](../adr/20260722-174500-identity-federation-cross-tenant-personalization.md)) — so nothing per-message moves. Cost: a vendor on the auth path, and a reversal price that grows with every appended event. **(B) Self-host GoTrue now** — the cheapest moment there will ever be, but it requires editing `crates/server/src/auth.rs`'s `asymmetric_alg`, which accepts **asymmetric JWKS only, deliberately**, to kill `alg`-confusion forgery; GoTrue's default is symmetric. **(C) Build our own issuer** — rejected outright at V0 | ✅ **(A)**, verbatim: *"For the auth/identify we will use Supabase because it's free and easier"*. **All ten lenses recommended not self-hosting now** — unanimous. **⚠️ THE DEADLINE IS THE DURABLE OUTPUT, not the choice.** Two windows, both closing at the **first real order**: (i) **technical** — `domain_events.user_id` holds the **provider's subject** (`Principal::user_id()` = the Supabase `sub`, parsed into the envelope by `request_envelope()`), so a different issuer on an **immutable** log is an **upcasting migration**, free only while the log is empty; (ii) **legal** — with **Q-L3 = no real phone-verified end user** (dated **2026-08-12**, §35) a switch today is not a personal-data migration and triggers **no processor-exit obligations**. Recorded plainly: **if we ever intend to own identity, it lands before the first real order or it becomes materially more expensive.** That instant now carries a **fourth** trigger alongside the Art. 35 DPIA, Art. 17 erasure and médiation deadlines |
+
+**Four things stay true regardless of the answer, and are NOT closed by it** — listed here because
+they were surfaced by this review and would otherwise be lost with the question. (1) The **claim
+contract** `captain_customer_id` + `captain_role` is an invariant of **any** issuer: a replacement
+must emit exactly those or the authorization boundary moves while the schema does not. (2) The **SMS
+provider is our own Art. 28 processor** either way. (3) **SMS-pumping fraud** on an unguarded OTP
+endpoint is a real money risk (hundreds in a night) and **no rate limit or `+33` allowlist exists
+anywhere** in `crates/server` or `crates/application`. (4) The **auth-session handoff has no
+observability contract at all** — `specs/observability.yaml`'s `customer-identification` covers the
+command path and stops there, while `crates/server/src/auth_routes.rs` collapses `absent | expired |
+wrong_owner | decrypt_failed | not_configured` into status codes and **discards the cause**, so an
+operator cannot distinguish a misconfigured `AUTH_SESSION_KEY` from a user who waited too long. Plus
+one UX defect: the **OTP rejection message has no translation key**
+(`specs/screens/captain_frontoffice.yaml:166` and `restaurant_frontoffice.yaml:213` bind
+`{{ otp_error_message }}` rather than `$ref`-ing the catalog), so the worst moment of the login flow
+is the one un-localized string on the sheet.
+
+**What this un-blocks for the demo leg, concretely**: identity needs **two** things, not one — the
+existing key **and pod egress to `SUPABASE_JWKS_URL`** (blocked egress fails exactly like an absent
+key: every token unverifiable, every request anonymous), and egress is checkable in minutes. The
+**payment leg needs no ingress**: `stripe listen --forward-to` reaches the local stack outbound
+through the hosts entry the rehearsal runbook already writes, and the CLI's own signing secret
+satisfies the fail-closed `STRIPE_WEBHOOK_SECRET` boot gate — real Stripe, real signature, not a shim.
+
+**One stale-spec correction is NAMED, not made** (records-only change): `specs/architecture/c4-l3.yaml`
+still describes the `supabase-acl` as sending OTP via *"Twilio; mock in dev"*, and the generated C4 +
+documentation carry it forward. `specs/services.yaml` is already correct (OVHcloud). It is a
+`specs/**` edit owing a SPEC-LOG row and is deliberately out of scope here.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
