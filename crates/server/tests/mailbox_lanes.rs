@@ -27,6 +27,36 @@ use sqlx::PgPool;
 /// separate threads, so without this lock one test's reset races the other's assertions.
 static DB_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Every `RequestRole` except ADMIN — exhaustive BY CONSTRUCTION: the match in the tripwire
+/// stops compiling when a variant is added to the enum, so this list cannot silently fall
+/// behind it. Earned on this very PR (#536 review): both refusal loops iterated 4 of the 6
+/// non-admin roles while their docstrings claimed "every non-ADMIN role is refused" —
+/// `RestaurantAccount` and `External` were covered by nobody.
+fn every_non_admin_role() -> [RequestRole; 6] {
+    // Compile-time exhaustiveness tripwire: when this match stops compiling because a new
+    // variant appeared, extend the array below (and decide whether the new role may see the
+    // supervision surface — refused is the default).
+    fn _exhaustive(r: RequestRole) {
+        match r {
+            RequestRole::Public
+            | RequestRole::Customer
+            | RequestRole::RestaurantAccount
+            | RequestRole::Restaurant
+            | RequestRole::Rider
+            | RequestRole::Admin
+            | RequestRole::External => {}
+        }
+    }
+    [
+        RequestRole::Public,
+        RequestRole::Customer,
+        RequestRole::RestaurantAccount,
+        RequestRole::Restaurant,
+        RequestRole::Rider,
+        RequestRole::External,
+    ]
+}
+
 /// Fresh mailbox tables from the ACTUAL migration file — dropped first so the test is re-runnable
 /// against a dirty database (the migration itself is forward-only and runs once in production).
 async fn reset_mailbox_tables(pool: &PgPool) {
@@ -154,7 +184,7 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     assert_eq!(lanes[1]["claimedBy"], serde_json::Value::Null);
 
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
-    for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::Rider] {
+    for role in every_non_admin_role() {
         let resp = schema
             .execute(async_graphql::Request::new(query).data(role))
             .await;
@@ -196,7 +226,7 @@ async fn poisoned_mailbox_messages_detail_and_admin_guard() {
     assert_eq!(rows[0]["messageId"], "00000000-0000-0000-0000-00000000b001");
     assert_eq!(rows[0]["errorCode"], "DeliveryInfrastructureError");
 
-    for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::Rider] {
+    for role in every_non_admin_role() {
         let resp = schema
             .execute(async_graphql::Request::new(query).data(role))
             .await;
