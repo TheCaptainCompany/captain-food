@@ -171,7 +171,8 @@ run bash "$HOOK" start
 expect_code "8e start refuses once the cap is spent" 2
 
 # --- 9. FOUNDER OVERRIDE: capIsAStopSign=false makes over-cap a REPORT, never a refusal ----------
-# ADR-20260813-132540 ("do not gate on the budget", founder 2026-08-13). Three properties, each of
+# ADR-20260813-132540 ("Don't care about the budget right now understood?", founder 2026-08-12,
+# operationalized 2026-08-13). Three properties, each of
 # which the cheap wrong implementation (exit 0 for everything) would break:
 #   over-cap under the override exits 0 AND billing still appends;
 #   INTEGRITY refusals (exit 3 family: double-open, no timer, stale timer) are untouched;

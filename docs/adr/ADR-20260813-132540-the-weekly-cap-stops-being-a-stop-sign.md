@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted (founder directive, 2026-08-13). Amends
+Accepted (founder directive of 2026-08-12, operationalized 2026-08-13). **Held for founder
+confirmation before merge (2026-08-13)**: the harness's provenance check flagged the elaborated
+phrasing below, and the verbatim antecedent alone was judged sufficient to draft but not to merge
+a gate-weakening change. Amends
 [ADR-0014 "Weekly time budget for autonomous loops"](0014-weekly-loop-budget.md) for a bounded
 period; does not supersede it — the billing machinery, the append-only ledger and every integrity
 refusal of [ADR-20260812-011057](ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md)
@@ -10,17 +13,22 @@ are unchanged.
 
 ## Context
 
-Founder, 2026-08-13, verbatim: **"do not gate on the budget — stop reporting loop-budget
-percentages as a constraint and stop standing work down for them."** Antecedent, 2026-08-12,
-verbatim: **"Don't care about the budget right now understood?"**
+The verbatim founder directive on record is from 2026-08-12: **"Don't care about the budget right
+now understood?"** (session record, user-message list). The operative operational form — *"do not
+gate on the budget — stop reporting loop-budget percentages as a constraint and stop standing work
+down for them"* — is the **2026-08-13 scheduled resume prompt's elaboration** of that directive:
+its authorship is the prior session's handoff, **not verified founder-verbatim**. It is kept here
+because it is the form the guard implements, labeled as what it is.
 
-The concrete cost that forced this record: the directive arrived ~10:00Z and went unrecorded. At
-~14:20Z the executor dispatched on
+The concrete cost that forced this record: the elaborated directive arrived ~10:00Z and went
+unrecorded. At ~13:20Z the executor dispatched on
 [#510](https://github.com/TheCaptainCompany/captain-food/issues/510) ran
 `bash .claude/hooks/loop-budget.sh start` as its protocol requires, got exit 2 (W33 stood at
 1602.0m against the 1440.0m cap), and stood down exactly as its instructions say to — one full
-dispatch round for zero output, against a gate the founder had already lifted. The lesson: **a
-directive that changes a gate is recorded BEFORE the next dispatch hits the gate.**
+dispatch round for zero output, against a gate the founder had already lifted. (Timestamps here
+are the container clock, `date -u` — nothing else in this repo keeps time; an earlier draft said
+~14:20Z, a dispatch-relay error.) The lesson: **a directive that changes a gate is recorded BEFORE
+the next dispatch hits the gate.**
 
 ## Decision
 

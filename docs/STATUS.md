@@ -2,12 +2,14 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
-> ⏱️ **2026-08-13 — THE WEEKLY CAP IS NOT A STOP SIGN; billing continues** (founder directive
-> *"do not gate on the budget"*;
-> [ADR-20260813-132540](adr/ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md)).
+> ⏱️ **2026-08-13 — THE WEEKLY CAP IS NOT A STOP SIGN; billing continues** (founder, 2026-08-12,
+> verbatim: *"Don't care about the budget right now understood?"*, operationalized by the
+> 2026-08-13 resume prompt — provenance labeled in
+> [ADR-20260813-132540](adr/ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md),
+> which is held for founder confirmation before merge).
 > `.claude/loop-budget.json` now carries `"capIsAStopSign": false`: `loop-budget.sh check`/`start`
 > still print the over-cap state loudly but exit 0, so no session stands down for it (the #510
-> executor did, on 2026-08-13 ~14:20Z, against an already-lifted gate — the cost that forced the
+> executor did, on 2026-08-13 ~13:20Z container clock, against an already-lifted gate — the cost that forced the
 > record). Integrity refusals (stale timer, double-open, audit) and the append-only ledger are
 > unchanged. **The report that replaces the constraint**: W33 has recorded **1602 minutes (~26.7h)
 > so far** — a number, not a gate. **Exit condition** (event-bounded, pre-recorded path back):

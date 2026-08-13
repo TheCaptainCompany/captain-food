@@ -554,9 +554,10 @@ session.** When a session has produced decisions, write them down and let the ne
 small; do not carry a 30-turn context forward for its own sake.
 
 **A directive that changes a gate is recorded BEFORE the next dispatch hits the gate** (2026-08-13):
-the founder lifted the budget cap ~10:00Z, nothing was recorded, and at ~14:20Z the #510 executor was
-dispatched into `loop-budget.sh start`'s guaranteed exit 2 — one full dispatch round for zero output,
-standing down against an already-lifted gate (ADR-20260813-132540).
+the budget-cap lift (founder antecedent 2026-08-12) was relayed ~10:00Z, nothing was recorded, and at
+~13:20Z (container clock — `date -u` is the repo's only clock) the #510 executor was dispatched into
+`loop-budget.sh start`'s guaranteed exit 2 — one full dispatch round for zero output, standing down
+against an already-lifted gate (ADR-20260813-132540).
 
 **Context discipline — the rules that keep a session under ~80k** (2026-08-01, after a week at
 87% of requests >150k context): (1) `specs/generated/**` and `crates/**/generated/**` are

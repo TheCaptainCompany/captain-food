@@ -24,7 +24,7 @@ allowances**, because one shared ledger records the runs of two accounts working
 (founder directive 2026-08-12 — ADR-20260812-142454). A cap sized for a single account therefore
 halves the team's week silently, and that is a wrong "exhausted" verdict, not a safety margin.
 
-**The cap is currently NOT a stop sign** (founder directive 2026-08-13 —
+**The cap is currently NOT a stop sign** (founder directive 2026-08-12, operationalized 2026-08-13 —
 [ADR-20260813-132540](../adr/ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md)):
 `.claude/loop-budget.json` sets `"capIsAStopSign": false`, so an over-cap `check`/`start` still
 prints the exhaustion message but exits 0 — do not stand a run down for it, and do not report the
