@@ -480,3 +480,206 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A well-formed catalog fixture — the write unit, one read database (so `replicated:` resolves
+    /// to a non-empty set) and the two adapter databases the table fixtures place into. Tests mutate
+    /// a clone of this or drop a database from it.
+    fn catalog() -> String {
+        [
+            "captain_write:",
+            "  owner: migrator",
+            "  k8sName: captain-write",
+            "  recovery: pitr",
+            "  description: the write side",
+            "read_order:",
+            "  owner: migrator",
+            "  k8sName: read-order",
+            "  recovery: replay",
+            "  description: the order read database",
+            "adapter_stripe:",
+            "  owner: adapter_stripe",
+            "  k8sName: adapter-stripe",
+            "  recovery: refetch",
+            "  description: stripe isolated database",
+            "adapter_avelo37:",
+            "  owner: adapter_avelo37",
+            "  k8sName: adapter-avelo37",
+            "  recovery: refetch",
+            "  description: avelo37 isolated database",
+        ]
+        .join("\n")
+    }
+
+    /// Build a model from a `(logical-file, yaml)` list — the tests.rs fixture pattern.
+    fn model(files: &[(&str, &str)]) -> Model {
+        let mut defs = BTreeMap::new();
+        for (f, y) in files {
+            defs.insert((*f).to_string(), serde_yaml::from_str::<Value>(y).expect("valid yaml"));
+        }
+        Model { defs, ..Default::default() }
+    }
+
+    /// `Issue` is not `Debug`; render the database-* subset for assertion messages, and return only
+    /// those so an unrelated rule never masks or fakes a pass.
+    fn db_issues(model: &Model) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_databases(model, &mut issues);
+        issues.into_iter().filter(|i| i.rule.starts_with("database-")).collect()
+    }
+    fn render(issues: &[Issue]) -> String {
+        issues.iter().map(|i| format!("  {} {}: {}", i.rule, i.location, i.message)).collect::<Vec<_>>().join("\n")
+    }
+    fn has(issues: &[Issue], rule: &str) -> bool {
+        issues.iter().any(|i| i.rule == rule)
+    }
+
+    /// The baseline is CLEAN — every arm below is proven to fire only against its mutant, not
+    /// against a well-formed catalog. Two adapter mirrors, each in its own database; one derived
+    /// write table; one replicated read model.
+    #[test]
+    fn a_well_formed_catalog_raises_nothing() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            ("database/tables/eventstore.yaml", "domain_events:\n  columns:\n    id: { type: uuid }\n"),
+            (
+                "database/tables/integration_staging.yaml",
+                "external_stripe_events:\n  staging: true\n  database: { $ref: 'database/databases.yaml#/adapter_stripe' }\n\
+                 external_avelo37_events:\n  staging: true\n  database: { $ref: 'database/databases.yaml#/adapter_avelo37' }\n",
+            ),
+            (
+                "database/tables/projection_tables.yaml",
+                "ScopeMembership:\n  replicated: read-databases\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(issues.is_empty(), "expected a clean baseline, got:\n{}", render(&issues));
+    }
+
+    /// A covered-kind table with no placement key — the credential-store-next-to-the-log hole.
+    #[test]
+    fn a_staging_table_with_no_placement_is_missing() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            ("database/tables/integration_staging.yaml", "external_stripe_events:\n  staging: true\n"),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-missing"), "{}", render(&issues));
+    }
+
+    /// A placement `$ref` into a database the catalog does not declare.
+    #[test]
+    fn a_placement_into_an_undeclared_database_is_flagged() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/integration_staging.yaml",
+                "external_stripe_events:\n  staging: true\n  database: { $ref: 'database/databases.yaml#/adapter_identity' }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-unknown-database"), "{}", render(&issues));
+    }
+
+    /// ADP-1 wall, direction 1: an adapter's table placed OUTSIDE its own database. This is the
+    /// error ADR-20260812-115930 documents nearly shipping (avelo37 left inside the write DB).
+    #[test]
+    fn an_adapter_table_outside_its_own_database_is_a_mismatch() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/integration_staging.yaml",
+                "external_avelo37_events:\n  staging: true\n  database: { $ref: 'database/databases.yaml#/captain_write' }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-adapter-mismatch"), "{}", render(&issues));
+        assert!(issues.iter().any(|i| i.message.contains("adapter_avelo37")), "{}", render(&issues));
+    }
+
+    /// ADP-1 wall, direction 2: a table naming no adapter placed INSIDE an adapter database — the
+    /// inward clause (an adapter database holds nothing foreign).
+    #[test]
+    fn a_foreign_table_inside_an_adapter_database_is_a_mismatch() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/integration_connections.yaml",
+                "auth_sessions:\n  database: { $ref: 'database/databases.yaml#/adapter_stripe' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-adapter-mismatch"), "{}", render(&issues));
+    }
+
+    /// A `database:` key on a DERIVED write-side kind: the transactional unit is not overridable
+    /// one table at a time (STO-1(a) — the fencing token).
+    #[test]
+    fn a_placement_on_a_derived_write_kind_is_not_declarable() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/eventstore.yaml",
+                "domain_events:\n  database: { $ref: 'database/databases.yaml#/captain_write' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-not-declarable"), "{}", render(&issues));
+    }
+
+    /// A `database:` key on an OPEN business kind (a referential table): declaring it here would
+    /// silently close register row STO-2, so it is refused until that row closes.
+    #[test]
+    fn a_placement_on_an_open_business_kind_is_refused() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/referential.yaml",
+                "PricingPolicy:\n  reference: true\n  database: { $ref: 'database/databases.yaml#/read_order' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-not-declarable"), "{}", render(&issues));
+    }
+
+    /// `replicated:` with no `recovery: replay` database in the catalog — a placement to nowhere.
+    #[test]
+    fn a_replicated_table_with_no_read_database_is_empty() {
+        // Catalog with the read database dropped: only captain_write + the two adapters remain.
+        let no_read: String = catalog()
+            .lines()
+            .collect::<Vec<_>>()
+            .chunks(5)
+            .filter(|c| !c.first().map(|l| l.starts_with("read_order")).unwrap_or(false))
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let m = model(&[
+            ("database/databases.yaml", &no_read),
+            (
+                "database/tables/projection_tables.yaml",
+                "ScopeMembership:\n  replicated: read-databases\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-replicated-empty"), "{}", render(&issues));
+    }
+
+    /// Declaring BOTH `database:` and `replicated:` — single-home or replicated, never both.
+    #[test]
+    fn declaring_both_placement_keys_conflicts() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/projection_tables.yaml",
+                "ScopeMembership:\n  replicated: read-databases\n  database: { $ref: 'database/databases.yaml#/read_order' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-conflict"), "{}", render(&issues));
+    }
+}
