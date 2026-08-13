@@ -1,25 +1,37 @@
--- Retention sweep for the write-path journal and the adapter webhook mirrors
--- (ADR-20260721-025159; issue #18). The ONE place the retention windows live — schedule it from
--- the in-process RetentionSweepWorker (default) or a pg_cron job; either way the policy is here.
+-- SMS-OTP send quota (#516): the SHARED, cross-replica counter behind the OTP send guards.
 --
--- Scope, per table (aged rows only — the guard columns are the tables' own high-water marks):
---   inbound_messages           terminal rows (SUCCEEDED/REJECTED/FAILED/IGNORED/DUPLICATE/
---                              CANCELLED)                                 90 days from completed_at
---   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
---   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
---   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
---   external_uber_direct_events processed rows (processed_at set)         90 days from processed_at
+-- WHY A TABLE AT ALL. `requestPhoneVerification` is anonymous by design and every accepted send
+-- spends real money on our own OVHcloud account. A per-pod in-memory limiter multiplies the
+-- allowance by the replica count and resets on every deploy, so for the GLOBAL DAILY CEILING --
+-- the only guard that bounds the total bill, because an attacker rotates numbers -- it would be
+-- the difference between a ceiling and a suggestion. Every pod must count into the same row.
 --
--- (Both mailbox predecessors were swept here and are gone: `inbound_events`, retired by
--- ADR-20260731-122500, and `command_journal`, retired by #242 Runtime D — each drop migration
--- redeploys this function without its section.)
+-- WHY THE PRIMARY KEY IS THE WHOLE INVARIANT. `RequestPhoneVerification` has NO per-phone actor
+-- lane (the GraphQL door mints a fresh actor id per request), so nothing serialises two concurrent
+-- requests for the same number except a single-statement atomic claim against this key. The claim
+-- is `INSERT ... ON CONFLICT DO UPDATE ... WHERE`, where the WHERE clause IS the limit: a losing
+-- claim updates no row and returns none, so a refusal never burns budget.
 --
--- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
--- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
--- inbound_messages RECEIVED rows (pending work) and SCHEDULED rows (future work),
--- unprocessed mirror rows (processed_at IS NULL), and external_sirene_restaurants (a full
--- mirror — detect-by-absence needs the complete row set, ADR-0045).
-CREATE FUNCTION sweep_retention()
+-- Keys: 'phone:<E.164>:hour' | 'phone:<E.164>:day' | 'global:day' -- always the CANONICAL number,
+-- so '0612345678', '00612345678' and '612345678' under '+33' share one bucket, and a phone-CHANGE
+-- send draws on the same budget as a verification send.
+--
+-- Copied from specs/generated/schema.generated.sql
+-- (specs/database/tables/integration_connections.yaml).
+--
+-- Also replaces sweep_retention() (specs/database/functions/sweep_retention.sql) so quota rows join
+-- the sweep: the key embeds a phone number, which is personal data, and a bucket nobody is still
+-- asking about has no reason to exist. Body copied VERBATIM from the generated source
+-- (CREATE -> CREATE OR REPLACE).
+
+CREATE TABLE sms_send_quota (
+  quota_key TEXT PRIMARY KEY,
+  window_start TIMESTAMPTZ NOT NULL,
+  sent_count INTEGER NOT NULL,
+  last_granted_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE OR REPLACE FUNCTION sweep_retention()
 RETURNS TABLE (swept_table TEXT, deleted BIGINT)
 LANGUAGE plpgsql
 AS $$

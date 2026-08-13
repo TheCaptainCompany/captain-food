@@ -627,6 +627,21 @@ impl From<MoneyCents> for ds::MoneyCents {
     }
 }
 
+/// How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never "retry immediately".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct RetryAfterSeconds(pub i64);
+async_graphql::scalar!(RetryAfterSeconds, "RetryAfterSeconds", "How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never \"retry immediately\".");
+impl From<ds::RetryAfterSeconds> for RetryAfterSeconds {
+    fn from(v: ds::RetryAfterSeconds) -> Self {
+        Self(v.0)
+    }
+}
+impl From<RetryAfterSeconds> for ds::RetryAfterSeconds {
+    fn from(v: RetryAfterSeconds) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct PageLimit(pub i64);

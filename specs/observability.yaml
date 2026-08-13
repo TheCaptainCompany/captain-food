@@ -403,6 +403,39 @@ customer-identification:
     # a credential/provisioning/provider defect — never ordinary user error — and each one is a
     # customer whose login silently stayed anonymous. Alert on ANY sustained non-zero rate.
     - { name: "customer_claim_stamp_failed_total", type: counter, attributes: ["reason"] }
+    # ---- The OTP SEND leg (#516): the money half of identity, and it had no instrumentation at all.
+    #
+    # OTLP-ONLY, deliberately, and not a BAM fold: an OTP send emits NO domain event (actors.yaml
+    # `emits: []`), so there is nothing for a projection to fold — a business metric cannot see this
+    # path, and the one thing we must never do is start writing a `domain_events` row per refused
+    # send, since that is a log an anonymous attacker gets to drive.
+    #
+    # `dialing_code` is bounded (SMS_ALLOWED_DIALING_CODES plus 'other' for everything refused), so it
+    # is a legal label. THE PHONE NUMBER IS NEVER A LABEL — high cardinality belongs on the span, and
+    # only hashed; a metric series per phone number is both a cost incident and personal data in a
+    # place with no retention story.
+    #
+    # ALARM SHAPE, and the trap: never alert on a static send rate. Friday 19:00-21:30 looks exactly
+    # like an attack by volume. Alert on the RATIO of sends to verifications (an attack moves only the
+    # numerator, because nobody verifies the codes) plus burn of the daily ceiling
+    # (SMS_MAX_SENDS_PER_DAY_GLOBAL). Joining a send to its later verification cannot use
+    # correlation_id -- it BREAKS across the provider's SMS-hook hop, because Supabase calls us back on
+    # a fresh request -- so the join is the hashed phone plus a time window.
+    - { name: "otp_send_requested_total", type: counter, attributes: ["dialing_code", "allowed"] }
+    # DEFECT-ADJACENT counter, and the one with the INVERTED dead-man's-switch problem: zero refusals
+    # reads identically to "the limiter is switched off". `reason` is bounded: country_not_served |
+    # unparseable | cooldown | hourly_cap | daily_cap | global_ceiling | store_unavailable.
+    # `reason=global_ceiling` is the loud one — it means real sign-ups are being turned away.
+    - { name: "otp_send_refused_total", type: counter, attributes: ["reason"] }
+    # THE MONEY SEAM: emitted at the OVH sender itself, on the hook path, where a send becomes a euro.
+    # `result` is bounded: sent | failed | refused. The gap between otp_send_requested_total{allowed=true}
+    # and sms_send_total is the provider hop, and a persistent gap means we are being asked to send
+    # messages nobody requested through our own front door.
+    - { name: "sms_send_total", type: counter, attributes: ["result"] }
+    # GUARD LIVENESS (the inverted dead-man's switch, ADR-20260810-231300): 1 while the guard is
+    # enforcing with a shared counter, 0 when it is degraded. Without this, "no refusals tonight" and
+    # "the limiter has been disabled since the last deploy" are the same observation.
+    - { name: "otp_send_guard_enforcing", type: gauge, attributes: [] }
   business_metrics:
     - { name: "customer_signins_total", type: counter, attributes: ["outcome"] }
     - { name: "otp_verifications_failed_total", type: counter, attributes: ["reason"] }

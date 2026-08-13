@@ -7604,11 +7604,11 @@ _🧩 aggregate_ — A customer identity, keyed by phone number and linked to th
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `RequestPhoneVerification`](#command-requestphoneverification) | _Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev). No event._ | — |
+| [📩 `RequestPhoneVerification`](#command-requestphoneverification) | _Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev), REFUSING when the guards say so. No event._ | [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
 | [📩 `VerifyPhone`](#command-verifyphone) | [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerIdentified`](#event-customeridentified) | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired) |
 | [📩 `RequestEmailVerification`](#command-requestemailverification) | _Delegate to Supabase Auth: send an email magic link (localized via the stored locale). No event._ | [⛔ `EmailAlreadyInUse`](#error-emailalreadyinuse) |
 | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) | [⚡ `CustomerEmailVerified`](#event-customeremailverified) | [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired) |
-| [📩 `RequestPhoneChange`](#command-requestphonechange) | _Delegate to Supabase Auth: send an SMS OTP to the new phone. No event._ | [⛔ `PhoneAlreadyInUse`](#error-phonealreadyinuse) |
+| [📩 `RequestPhoneChange`](#command-requestphonechange) | _Delegate to Supabase Auth: send an SMS OTP to the new phone, REFUSING when the send guards say so. No event._ | [⛔ `PhoneAlreadyInUse`](#error-phonealreadyinuse), [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
 | [📩 `ConfirmPhoneChange`](#command-confirmphonechange) | [⚡ `CustomerPhoneChanged`](#event-customerphonechanged) | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `PhoneAlreadyInUse`](#error-phonealreadyinuse) |
 | [📩 `ChangeLanguage`](#command-changelanguage) | [⚡ `CustomerLanguageChanged`](#event-customerlanguagechanged) | — |
 | [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite) | [⚡ `RestaurantFavorited`](#event-restaurantfavorited) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
@@ -7684,7 +7684,7 @@ Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase s
 
 - **Dispatched by**: [✏️ `requestPhoneVerification`](#mutation-requestphoneverification) · **handled by** [🎭 `Customer`](#actor-customer)
 - **Emits**: —
-- **Throws**: —
+- **Throws**: [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7747,7 +7747,7 @@ Ask Supabase to send an SMS OTP to a NEW phone for a signed-in customer (stored 
 
 - **Dispatched by**: [✏️ `requestPhoneChange`](#mutation-requestphonechange) · **handled by** [🎭 `Customer`](#actor-customer)
 - **Emits**: —
-- **Throws**: [⛔ `PhoneAlreadyInUse`](#error-phonealreadyinuse)
+- **Throws**: [⛔ `PhoneAlreadyInUse`](#error-phonealreadyinuse), [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8068,10 +8068,11 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="event-customerpaymentmethodset--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customerpaymentmethodset--paymentmethodid"></a>`paymentMethodId` | [🔤 `PaymentMethodId`](#scalar-paymentmethodid) | ✅ |  |
 
-### 🔤 Scalars _(6)_
+### 🔤 Scalars _(7)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
+| <a id="scalar-retryafterseconds"></a>🔤 `RetryAfterSeconds` | integer | How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never "retry immediately".  |
 | <a id="scalar-addressid"></a>🔤 `AddressId` | string _uuid_ | Identifies a saved address in a customer's address book. |
 | <a id="scalar-paymentmethodid"></a>🔤 `PaymentMethodId` | string | Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'. |
 | <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
@@ -8079,17 +8080,21 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 
-### ⛔ Errors _(5)_
+### ⛔ Errors _(9)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
+| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
+| <a id="error-phonecountrynotserved"></a>⛔ `PhoneCountryNotServed` | The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the economic control against SMS pumping (premium-payout ranges are what makes the attack pay), which is why the refusal is fail-closed — an unparseable number lands here too, never on a send.  | 🇬🇧 We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us. | 🇫🇷 Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
+| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
+| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
 | <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
 | <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
 | <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) |
 | <a id="error-emailalreadyinuse"></a>⛔ `EmailAlreadyInUse` | The email is already linked to another customer. | 🇬🇧 The email '{email}' is already in use by another account. | 🇫🇷 L'e-mail '{email}' est déjà utilisé par un autre compte. | [📩 `RequestEmailVerification`](#command-requestemailverification) |
 | <a id="error-phonealreadyinuse"></a>⛔ `PhoneAlreadyInUse` | The phone number is already linked to another customer (on change). | 🇬🇧 The phone number '{phone}' is already in use by another account. | 🇫🇷 Le numéro '{phone}' est déjà utilisé par un autre compte. | [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
 
-### 📐 Business rules _(9)_
+### 📐 Business rules _(10)_
 
 <a id="rule-guestcartsboundonidentification"></a>
 #### 📐 Rule: `GuestCartsBoundOnIdentification`
@@ -8104,6 +8109,13 @@ _A returning visitor's open guest carts are bound to their Customer on identific
 _Phone-OTP verification registers a new customer or identifies a returning one; an invalid code is rejected._
 
 - **Verified by**: [🧪 `TestCustomerRequestPhoneVerification`](#test-testcustomerrequestphoneverification), [🧪 `TestCustomerVerifyPhoneRegisters`](#test-testcustomerverifyphoneregisters), [🧪 `TestCustomerVerifyPhoneReturningIdentifies`](#test-testcustomerverifyphonereturningidentifies), [🧪 `TestCustomerVerifyPhoneIsRejected`](#test-testcustomerverifyphoneisrejected)
+
+<a id="rule-otpsendisguardedbycountryandbudget"></a>
+#### 📐 Rule: `OtpSendIsGuardedByCountryAndBudget`
+
+_An SMS OTP is sent ONLY to a dialing code on the served allowlist, ONLY within this number's per-hour and per-day allowance, and ONLY while the platform's global daily SMS ceiling has room; otherwise the request is refused with a typed reason and NOTHING is handed to the sender. The allowlist is the economic control (premium-payout ranges are what makes SMS pumping profitable), the global ceiling is the only control that bounds the TOTAL bill (an attacker rotates numbers), and the guard is fail-closed — a number that cannot be parsed is refused, never sent. One phone number has ONE budget, whichever door asks and however the number is written: '0612345678', '00612345678' and '612345678' under '+33' share a single counter, and requesting a phone CHANGE draws on the same budget as requesting verification — a budget keyed on the request rather than on the number is doubled by asking twice, differently._
+
+- **Verified by**: [🧪 `TestCustomerRequestPhoneVerification`](#test-testcustomerrequestphoneverification), [🧪 `TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards`](#test-testcustomerrequestphoneverificationisrefusedbythesendguards)
 
 <a id="rule-emailverificationuniquetokenvalid"></a>
 #### 📐 Rule: `EmailVerificationUniqueTokenValid`
@@ -8166,7 +8178,17 @@ _Sends an SMS OTP to a phone (localized via the dialing code); emits nothing_
 - **Given**: _(none)_
 - **When**: [📩 `RequestPhoneVerification`](#command-requestphoneverification)
 - **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `PhoneVerificationRegistersOrIdentifies`](#rule-phoneverificationregistersoridentifies)
+- **Verifies**: [📐 `PhoneVerificationRegistersOrIdentifies`](#rule-phoneverificationregistersoridentifies), [📐 `OtpSendIsGuardedByCountryAndBudget`](#rule-otpsendisguardedbycountryandbudget)
+
+<a id="test-testcustomerrequestphoneverificationisrefusedbythesendguards"></a>
+#### 🧪 Test: `TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards`
+
+_Refuses an OTP send to an unserved dialing code -- and hands nothing to the sender_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestPhoneVerification`](#command-requestphoneverification)
+- **Thrown**: [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted)
+- **Verifies**: [📐 `OtpSendIsGuardedByCountryAndBudget`](#rule-otpsendisguardedbycountryandbudget)
 
 <a id="test-testcustomerverifyphoneregisters"></a>
 #### 🧪 Test: `TestCustomerVerifyPhoneRegisters`
@@ -8418,7 +8440,7 @@ _criticality: **high**_
 | `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`* |
 | `event.publish` | `PRODUCER` | ✅ | — | `business.event_type`* |
 
-- **Metrics**: `customer_identification_duration_ms` _(histogram)_, `customer_claim_stamp_failed_total` _(counter)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
+- **Metrics**: `customer_identification_duration_ms` _(histogram)_, `customer_claim_stamp_failed_total` _(counter)_, `otp_send_requested_total` _(counter)_, `otp_send_refused_total` _(counter)_, `sms_send_total` _(counter)_, `otp_send_guard_enforcing` _(gauge)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
 - **Status rules**: success ⇐ spans [`command.receive`, `otp.verify`, `claims.stamp`, `event.store.append`, `event.publish`]
 - **SLOs**: p95 ≤ 600ms · p99 ≤ 1200ms · error rate ≤ 2%
 
@@ -10369,7 +10391,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-tracesampleratio"></a>🔤 `TraceSampleRatio` | string `^(0(\.[0-9]+)?|1(\.0+)?)$` | The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.  |
 | <a id="scalar-loglevel"></a>🔤 `LogLevel` | string `^(?i)(trace|debug|info|warn|error)$` | The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.  |
 
-### ⛔ Errors _(11)_
+### ⛔ Errors _(10)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10377,7 +10399,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-forbidden"></a>⛔ `Forbidden` | Authenticated, but not allowed to act on this resource (e.g. not the owner). | 🇬🇧 You are not allowed to perform this action. | 🇫🇷 Vous n'êtes pas autorisé à effectuer cette action. | — |
 | <a id="error-validationerror"></a>⛔ `ValidationError` | Input failed schema validation (type, format, required, bounds). | 🇬🇧 The field '{field}' is invalid. | 🇫🇷 Le champ '{field}' est invalide. | — |
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
-| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path. | 🇬🇧 Too many requests. Please slow down. | 🇫🇷 Trop de requêtes. Veuillez patienter. | — |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
 | <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant) |

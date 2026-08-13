@@ -167,7 +167,7 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260812000000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260813021500;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -295,17 +295,67 @@ pub struct AppState {
 /// (`SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`), else the fail-closed stand-in — the same
 /// env-gate + fallback pattern as the Stripe payment binding. Used for BOTH the GraphQL write-side
 /// `auth_provider` and the `/auth/refresh` route.
-fn identity_service_impl() -> Arc<dyn application::generated::services::IdentityService> {
+fn identity_service_impl(
+    send_guard: Option<Arc<infrastructure::SmsSendAuthorizer>>,
+) -> Arc<dyn application::generated::services::IdentityService> {
     match infrastructure::SupabaseIdentityService::from_env() {
         Some(adapter) => {
             tracing::info!(binding = "identity", impl_ = "SupabaseIdentityService", "identity service wired (SUPABASE_URL set)");
-            Arc::new(adapter)
+            // The send guards (#516) attach here as CHEAP SHEDDING only — a peek, never a claim. The
+            // authoritative wall is the `/auth/sms-hook` route, because that is where the euro is
+            // actually spent; a guard missing HERE costs a provider round-trip and a vaguer refusal
+            // message, never an unbounded bill.
+            match send_guard {
+                Some(guard) => Arc::new(adapter.with_send_guard(guard)),
+                None => Arc::new(adapter),
+            }
         }
         None => {
             tracing::warn!(binding = "identity", impl_ = "FailClosedIdentityService", "SUPABASE_URL/PUBLISHABLE_KEY unset -- identity fails closed, auth stays anonymous-only");
             Arc::new(FailClosedIdentityService)
         }
     }
+}
+
+/// Build the OTP send guards (#516) over the SHARED Postgres counter.
+///
+/// Shared is the whole point: a per-pod in-memory limiter multiplies the allowance by the replica count
+/// and resets on every deploy, and for the global daily ceiling — the only guard that bounds the bill —
+/// that is the difference between a ceiling and a suggestion.
+///
+/// Thresholds come from the resolved `Config` (declared in `specs/customer/configuration.yaml`), never
+/// from a local `env::var` + inline fallback: a default declared in the spec and then re-typed at the
+/// call site is two sources of truth, and it is the spec's copy that turns out to be inert.
+pub(crate) fn sms_send_guard(
+    pool: &PgPool,
+    config: &generated::config::Config,
+) -> Arc<infrastructure::SmsSendAuthorizer> {
+    let policy = application::sms_guard::SmsSendPolicy::from_config(
+        Some(config.sms_allowed_dialing_codes.as_str()),
+        Some(config.sms_max_sends_per_number_per_hour as i32),
+        Some(config.sms_max_sends_per_number_per_day as i32),
+        Some(config.sms_send_backoff_seconds.as_str()),
+        Some(config.sms_max_sends_per_day_global as i32),
+    );
+    tracing::info!(
+        binding = "sms_send_guard",
+        allowed_dialing_codes = %policy.allowed_dialing_codes.join(","),
+        per_number_hour = policy.max_per_number_per_hour,
+        per_number_day = policy.max_per_number_per_day,
+        global_day = policy.max_per_day_global,
+        "otp send guards wired against the SHARED sms_send_quota counter (#516)"
+    );
+    // The liveness gauge (#516; ADR-20260810-231300's inverted dead-man's switch): without it, "no
+    // refusals tonight" and "the limiter has been off since the last deploy" are one observation.
+    // This is the FIRST assertion, not the only one: the gauge is observable, so its callback
+    // re-asserts on every export cycle, and `SmsSendAuthorizer::authorize` re-declares the state at
+    // the point enforcement is actually decided (0 when the shared counter is unreachable). A single
+    // boot-time `record` proved only that the process once started.
+    telemetry::meters::otp_send::guard_enforcing(true);
+    Arc::new(infrastructure::SmsSendAuthorizer::new(
+        policy,
+        Box::new(infrastructure::persistence::PgSmsQuotaStore::new(pool.clone())),
+    ))
 }
 
 /// The read/write dependency graph of the GraphQL surface, built over one pool — the ONE
@@ -332,6 +382,8 @@ pub fn build_graphql_di(
     event_bus: &EventBus,
     operation_status_bus: &actor_client::OperationStatusBus,
     mailbox_nudges: &Arc<infrastructure::persistence::mailbox_store::MailboxNudges>,
+    // #516: the OTP send guards, so the identity ACL can shed a doomed request with a typed reason.
+    sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>>,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -407,7 +459,7 @@ pub fn build_graphql_di(
         // ACL adapter (#117) when SUPABASE_URL + PUBLISHABLE_KEY are set, else the
         // fail-closed stand-in (auth stays anonymous-only — the Stripe env-gate pattern).
         auth_provider: infrastructure::generated::service_bindings::identity_service(
-            || identity_service_impl(),
+            || identity_service_impl(sms_guard.clone()),
         )
         .expect("identity service binding (services.yaml)"),
         // The `payment` service resolved through the GENERATED topology binding
@@ -509,6 +561,10 @@ pub async fn router() -> Router {
     let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
         Arc::new(application::auth_sessions::NoopAuthSessionStore);
     let mut write_deps: Option<WriteDeps> = None;
+    // The OTP send guards (#516) — Some only once a pool exists, because the counter that makes them
+    // meaningful is SHARED state in Postgres. With no database, `/auth/sms-hook` 503s rather than
+    // sending unguarded: fail-closed, since an unguarded send path is the failure being prevented.
+    let mut sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
     let mut deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>> = None;
@@ -558,11 +614,13 @@ pub async fn router() -> Router {
                 // extracting it is what lets a subgraph bin serve the same resolvers without a
                 // logic fork. Everything below this call is monolith-only hosting (workers,
                 // ingestors, SSR) that the bins re-home family by family.
+                sms_guard = Some(sms_send_guard(&pool, &config));
                 let di = build_graphql_di(
                     &pool,
                     &event_bus,
                     &operation_status_bus,
                     &mailbox_nudges,
+                    sms_guard.clone(),
                 );
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
@@ -781,7 +839,7 @@ pub async fn router() -> Router {
                         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
                         catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
                         auth: infrastructure::generated::service_bindings::identity_service(
-                            || identity_service_impl(),
+                            || identity_service_impl(sms_guard.clone()),
                         )
                         .expect("identity service binding (services.yaml)"),
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
@@ -1182,7 +1240,7 @@ pub async fn router() -> Router {
     let auth_routes_state = auth_routes::AuthRoutesState {
         sessions: Some(auth_sessions.clone()),
         identity: infrastructure::generated::service_bindings::identity_service(|| {
-            identity_service_impl()
+            identity_service_impl(sms_guard.clone())
         })
         .expect("identity service binding (services.yaml)"),
         // The Supabase Send-SMS hook → OVH delivery (#118): both the OVH client and the hook secret
@@ -1196,6 +1254,8 @@ pub async fn router() -> Router {
             .filter(|s| !s.is_empty())
             .and_then(|s| infrastructure::supabase_sms_hook::decode_hook_secret(&s))
             .map(Arc::new),
+        // THE WALL (#516): without the shared counter the hook refuses to send at all.
+        sms_guard: sms_guard.clone(),
     };
 
     let schema = graphql::schema::build_schema(read_deps, write_deps, Some(event_bus));

@@ -59,6 +59,22 @@ impl OvhSmsClient {
         })
     }
 
+    /// A client for TESTS ONLY, pointed at `base_url` with dummy credentials — so a test can prove
+    /// that a guarded path never REACHES the sender without either mutating process env or making a
+    /// real OVH call. Point it at an unroutable address and any send that slips through is a loud
+    /// transport failure rather than a silent pass.
+    #[doc(hidden)]
+    pub fn for_test(base_url: &str) -> Option<Self> {
+        Self::from_parts(OvhSmsEnv {
+            endpoint: Some(base_url.to_string()),
+            application_key: Some("ak".into()),
+            application_secret: Some("as".into()),
+            consumer_key: Some("ck".into()),
+            service_name: Some("sms-test-1".into()),
+            sender: None,
+        })
+    }
+
     /// The pure gating core of [`Self::from_env`]: same fail-closed rule (any required part
     /// absent or empty ⇒ `None`), no environment access.
     fn from_parts(parts: OvhSmsEnv) -> Option<Self> {
@@ -77,8 +93,37 @@ impl OvhSmsClient {
         })
     }
 
-    /// Send one transactional SMS (the OTP) to an E.164 recipient.
-    pub async fn send(&self, phone: &str, message: &str) -> Result<(), DomainError> {
+    /// Send one transactional SMS (the OTP) to an **authorised** recipient.
+    ///
+    /// The recipient is an [`AuthorizedSmsRecipient`](crate::sms_authorization::AuthorizedSmsRecipient)
+    /// rather than a `&str` ON PURPOSE (#516, compiler-first per ADR-20260803-234035): that type's
+    /// field is private to `crate::sms_authorization` and it has no public constructor, so the ONLY
+    /// way to obtain one is `SmsSendAuthorizer::authorize`, which checks the country allowlist and
+    /// claims the send against the shared per-number and global-daily counters first.
+    ///
+    /// A caller holding a phone number and a message therefore has **no path to this method**.
+    /// "Someone added a second call site and forgot the guard" becomes a type error rather than a
+    /// review finding — which matters because this is a money path that already has more than one
+    /// door. Emits `sms_send_total{result}` at the seam where a message becomes a euro.
+    ///
+    /// **The witness is taken BY VALUE, so one claim buys exactly one send.** It was `&`-borrowed
+    /// first, which quietly allowed `for _ in 0..1000 { sms.send(&w, m) }` — a thousand messages
+    /// against a single claim, i.e. the budget bypassed by a loop. Consuming it makes "one claim, one
+    /// send" a property of the type rather than a sentence in a doc comment. Do not add a `&` here.
+    pub async fn send(
+        &self,
+        recipient: crate::sms_authorization::AuthorizedSmsRecipient,
+        message: &str,
+    ) -> Result<(), DomainError> {
+        let result = self.send_authorized(recipient.as_str(), message).await;
+        telemetry::meters::otp_send::sms_send(if result.is_ok() { "sent" } else { "failed" });
+        result
+    }
+
+    /// The transport itself, split out so [`Self::send`] is only the witness + telemetry wrapper.
+    /// **Private on purpose**: it takes a bare `&str`, so it must stay unreachable from outside this
+    /// type or the witness would be decorative.
+    async fn send_authorized(&self, phone: &str, message: &str) -> Result<(), DomainError> {
         let url = format!("{}/sms/{}/jobs", self.base_url, self.service_name);
         let body = json!({
             "message": message,

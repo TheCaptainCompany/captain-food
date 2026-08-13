@@ -1467,13 +1467,40 @@ tests:
   # ----------------------------- Customer (Supabase Auth wrapped — ADR-0015) ----------------------------
   TestCustomerRequestPhoneVerification:
     name: "Sends an SMS OTP to a phone (localized via the dialing code); emits nothing"
-    rules: [{ $ref: 'rules.yaml#/PhoneVerificationRegistersOrIdentifies' }]
+    rules:
+      - { $ref: 'rules.yaml#/PhoneVerificationRegistersOrIdentifies' }
+      - { $ref: 'rules.yaml#/OtpSendIsGuardedByCountryAndBudget' }
     actor: { $ref: 'actors.yaml#/Customer' }
     given: []
     when:
       type: { $ref: 'commands.yaml#/RequestPhoneVerification' }
       data: { dialingCode: "+33", nationalNumber: "612345678", locale: "fr-FR" }
     then: []
+
+  # The send guards (#516). This test is a REAL end-to-end assertion of the country allowlist: '+212'
+  # is off the served set, so the handler refuses and the fake sender records nothing.
+  #
+  # The other three refusals listed in `thrown` are inherently MULTI-CALL (a cooldown window, a daily
+  # count, a global ceiling) and cannot be driven by a single `when`. They are declared here for
+  # contract completeness and PROVEN by the hand-written tests in
+  # `crates/application/src/sms_guard.rs` (per-number window/daily/backoff, canonical-number budget
+  # sharing, the global ceiling and the backwards-clock case, all with an injected clock) and
+  # `crates/infrastructure/tests/main/sms_send_quota.rs` (the same semantics against the atomic
+  # Postgres statement, which is the one that runs in production). Same shape as
+  # TestCatalogImportIsRejected, which likewise lists three errors that one call cannot all throw.
+  TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards:
+    name: "Refuses an OTP send to an unserved dialing code -- and hands nothing to the sender"
+    rules: [{ $ref: 'rules.yaml#/OtpSendIsGuardedByCountryAndBudget' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequestPhoneVerification' }
+      data: { dialingCode: "+212", nationalNumber: "612345678", locale: "fr-FR" }
+    thrown:
+      - { $ref: 'errors.yaml#/PhoneCountryNotServed' }
+      - { $ref: 'errors.yaml#/RateLimited' }
+      - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+      - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
 
   TestCustomerVerifyPhoneRegisters:
     name: "Verifying the OTP on a new phone registers the customer"

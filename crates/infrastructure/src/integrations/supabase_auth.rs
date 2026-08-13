@@ -123,6 +123,10 @@ pub struct SupabaseIdentityService {
     /// anon OTP flows keep working and stamping fails CLOSED with `not_configured`.
     admin_key: Option<String>,
     http: reqwest::Client,
+    /// The OTP send guards (#516) — used here for CHEAP SHEDDING only (a `peek`, never a claim).
+    /// `None` leaves this adapter unguarded, which is safe ONLY because the authoritative guard is on
+    /// the hook path where the euro is actually spent; see [`Self::with_send_guard`].
+    send_guard: Option<std::sync::Arc<crate::sms_authorization::SmsSendAuthorizer>>,
 }
 
 /// The raw environment inputs of [`SupabaseIdentityService::from_env`], read verbatim
@@ -169,7 +173,20 @@ impl SupabaseIdentityService {
             apikey,
             admin_key: parts.secret_key.filter(|s| !s.is_empty()),
             http: reqwest::Client::new(),
+            send_guard: None,
         })
+    }
+
+    /// Attach the OTP send guards (#516) for edge shedding. Builder-shaped rather than a constructor
+    /// parameter so `from_env`'s gating stays the pure function `from_parts` tests drive, and so a
+    /// deployment without a database connection still constructs an identity service (it simply sheds
+    /// nothing, and the hook-path wall still holds).
+    pub fn with_send_guard(
+        mut self,
+        guard: std::sync::Arc<crate::sms_authorization::SmsSendAuthorizer>,
+    ) -> Self {
+        self.send_guard = Some(guard);
+        self
     }
 
     /// The claim-stamp core (#437): GET the auth user's current `app_metadata` (the
@@ -422,6 +439,21 @@ impl IdentityService for SupabaseIdentityService {
         input: IdentitySendPhoneOtpInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
+        // CHEAP SHEDDING (#516), NOT the wall. The euro is spent later and INBOUND: the provider
+        // calls our `/auth/sms-hook` back, and that route makes the authoritative claim. What this
+        // buys is still worth having, for two independent reasons — an obviously doomed request (an
+        // unserved country, a number already at its cap) is refused with a TYPED, renderable reason
+        // instead of a generic provider failure, and we skip a provider round-trip per attempt.
+        //
+        // It PEEKS rather than claims, so it never double-charges the budget the hook then claims
+        // against. That makes it advisory by construction, which is the correct posture for a check
+        // that is not the wall.
+        if let Some(guard) = self.send_guard.as_ref() {
+            guard
+                .peek(&input.dialing_code, &input.national_number)
+                .await
+                .map_err(|refusal| refusal.into_domain_error())?;
+        }
         let phone = canonical_phone(&input.dialing_code, &input.national_number);
         self.post("otp", json!({ "phone": phone }), None, None).await.map(|_| ())
     }

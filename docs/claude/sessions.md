@@ -140,7 +140,11 @@ tweak, a doc fix — trips it with `generated artifacts drifted -- run 'make gen
 regenerated files`. Running `make generate` then changes nothing and the failure repeats. Read the
 `--stat` line it prints directly above: if the listed files are yours rather than generated ones,
 the fix is to **commit your own change**, not to regenerate. Real drift names files under
-`specs/generated/**` or `crates/**/generated/**`.
+`specs/generated/**` or `crates/**/generated/**`. The check is a plain whole-tree `git diff --quiet`
+(`Makefile:75`), which is why a docs-only edit trips a gate whose message only talks about generated
+files — it hit again on 2026-08-13 (#516) and cost a full `make rust` cycle spent diagnosing a
+phantom drift. The pre-emption is the rule in §"Run `make rust` only on a COMMITTED tree": commit
+first, then gate. Treat `make rust` as the gate, never as a mid-edit progress check.
 
 **A PR "waiting on checks" may not be waiting on checks at all — read `mergeable_state` FIRST
 (2026-08-09).** `pull_request_read` with `method: get_status` returns `{state: pending,
@@ -249,6 +253,18 @@ there; the remaining large link products are other crates' suites and the `serve
 consolidated suite pays instead a ~0.4 s/test schema reset (the witness replays the full
 42-migration chain per test): the 54-test infrastructure pass went 15 s → 37 s of pure execution,
 bought back several times over by 26 fewer link steps per iteration.
+
+**ENOSPC also kills a local Postgres, and it does not come back on its own (2026-08-13, #516):** a
+`cargo build` that exhausts the allowance takes the local cluster down with it, and the cluster then
+fails to RESTART, because crash recovery itself needs to write — `FATAL: could not extend file
+"base/.../..._fsm": No space left on device` raised **during WAL redo**, then `shutting down due to
+startup process failure`. The DB shares the allowance with `target/`, so a workspace build and a live
+cluster compete for it. Two consequences, each earned: (a) when the database "disappears" mid-session,
+read `<datadir>/server.log` before suspecting your code, the harness or your connection string — the
+cause is two screens up and unmistakable, and it reads like the DB was never there; (b) it recovers
+with a single `pg_ctl start` **once space is free** — no `initdb`, no data loss — so free space FIRST
+and do not re-init in a panic. Free disk before a workspace build whenever a cluster is up. Cost here:
+one lost compile plus a recovery round, on top of the build that caused it.
 
 **After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
 `make rust` check-drift ran a STALE `generate` binary right after the deps sweep and mass-pruned
@@ -934,6 +950,20 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   `git status --porcelain` and `git log -1` against the pushed head; clean at the remote sha means
   nothing to lose. Here that was 8.8G — more than the whole review needed, and cheaper than
   deleting `target/debug`, which costs a rebuild.
+- **Sweep the scratchpad for stale build dirs before touching `target/` at all (2026-08-13, #516):**
+  earlier runs in the same session directory left **4.7G** of abandoned build trees there; clearing
+  them took the allowance from 2.3G to 6.9G. Same class as the dead worktree above and same price —
+  free — but easier to miss, because nothing in `git status` mentions the scratchpad. Check it before
+  every `target/debug` lever in §2, all of which cost a rebuild.
+- **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
+  allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
+  checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses
+  the ~200 compiled registry deps and made both `make rust` and `make test-crates` feasible where a
+  cold build in-tree could not start. Workspace crates still recompile (the path is part of the package
+  id), so a second artifact set coexists; that is the price, and it is far below a cold build. Do NOT
+  reach for the `deps/ +50M` lever without **excluding `.rlib`** when sharing a cache this way — the
+  sweep in §2 is worded for link products, and a bare `-size +50M -delete` there took a `server` lib
+  recompile with it.
 - **`git worktree add <abs-path>` from a reset cwd can land the tree INSIDE the repo.** It did here,
   creating `captain-food/cad2-wt` — a worktree nested in its own repo, showing up as an untracked
   directory one `git add -A` away from being committed. Verify with `git worktree list` after adding,

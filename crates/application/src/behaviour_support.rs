@@ -1075,15 +1075,50 @@ impl crate::dispatch_strategy::DispatchStrategyRepository for SpecDispatchConfig
 /// (`hdr.<base64url(payload)>.sig`) whose payload reflects ONLY what was stamped — no stamp
 /// recorded means no claim in the token. Tests therefore pin the stamp→rotate→park ORDERING by
 /// decoding the parked token (behaviour), never by asserting a call log.
+///
+/// **`sent` is the one call log this file allows, and #516 is why.** The convention here is that a
+/// call log tests structure rather than behaviour — but for an SMS OTP the outbound call IS the
+/// behaviour, because it is the money. `assert_appended(&before, &[])` passes whether or not an SMS
+/// went out (the command emits no event), so before this field existed "no SMS was attempted" was
+/// literally unassertable and every send guard would have been unproven. Assert
+/// `bed.identity.sent().is_empty()`, never just the response.
+///
+/// It also enforces the REAL [`SmsSendPolicy`] over an in-memory counter, so a behaviour test drives
+/// the same allowlist decision the served adapters make instead of a lookalike.
 #[derive(Default)]
 pub struct FakeIdentity {
     /// The `app_metadata` the provider holds after a stamp (`None` = never stamped).
     stamped: Mutex<Option<serde_json::Value>>,
+    /// Every phone-OTP send this double was asked to make AND authorised. A refused send records
+    /// nothing — that absence is the assertion.
+    sent: Mutex<Vec<IdentitySendPhoneOtpInput>>,
+    /// Per-process counters for the send guards. In-memory ON PURPOSE here (see
+    /// [`InMemorySmsQuotaStore`]); the served path uses the shared Postgres store.
+    quota: crate::sms_guard::InMemorySmsQuotaStore,
+}
+
+impl FakeIdentity {
+    /// The phone-OTP sends this double actually made. **The money assertion**: a guarded refusal must
+    /// leave this empty, and a rejection alone does not prove that nothing was sent.
+    pub fn sent(&self) -> Vec<IdentitySendPhoneOtpInput> {
+        self.sent.lock().expect("FakeIdentity poisoned").clone()
+    }
 }
 
 #[async_trait]
 impl IdentityService for FakeIdentity {
-    async fn send_phone_otp(&self, _input: IdentitySendPhoneOtpInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+    async fn send_phone_otp(&self, input: IdentitySendPhoneOtpInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        // The guards run HERE because the served adapters run them here too (the ACL boundary and
+        // the send seam): a behaviour test then exercises the real policy, not a double of it.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        crate::sms_guard::SmsSendPolicy::default()
+            .authorize(&self.quota, &input.dialing_code, &input.national_number, now)
+            .await
+            .map_err(|refusal| refusal.into_domain_error())?;
+        self.sent.lock().expect("FakeIdentity poisoned").push(input);
         Ok(())
     }
     async fn verify_phone_otp(

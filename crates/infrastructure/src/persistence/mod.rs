@@ -34,9 +34,11 @@ pub mod restaurant_store;
 pub mod scope_membership_store;
 pub mod runtime_posture;
 pub mod slug_alias_store;
+pub mod sms_send_quota;
 pub mod slug_reservation;
 
 pub use auth_sessions::PgAuthSessionStore;
+pub use sms_send_quota::PgSmsQuotaStore;
 pub use cart::PgCartRepository;
 pub use catalog::PgCatalogRepository;
 pub use customer::PgCustomerRepository;

@@ -7,9 +7,10 @@
 //! Instruments are built once behind `OnceLock`. Creating an instrument per call would allocate on every
 //! command and — worse — is how duplicate time series with inconsistent attribute sets appear.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::OnceLock;
 
-use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, ObservableGauge};
 use opentelemetry::KeyValue;
 
 use crate::contract::metric;
@@ -300,6 +301,120 @@ pub mod customer_identification {
     /// bound to a different customer), never retried (mob verdict, #437).
     pub fn claim_stamp_failed(reason: &str) {
         stamp_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
+/// The OTP **send** leg of `customer-identification` (#516) — the money half of identity.
+///
+/// OTLP-only, deliberately: an OTP send emits NO domain event (`actors.yaml` `emits: []`), so there is
+/// nothing for a BAM fold to see — and writing a `domain_events` row per refused send would create a
+/// log an anonymous attacker gets to drive.
+pub mod otp_send {
+    use super::*;
+
+    /// Dialing codes we are willing to put in a LABEL. Bounded on purpose and independently of
+    /// configuration: the attacker chooses the dialing code, so labelling it verbatim would let them
+    /// mint unbounded time series — a metrics-cost incident driven from an anonymous endpoint.
+    /// Everything else collapses to `other`, which is all an operator needs; the specific range
+    /// belongs on the span.
+    const LABELLED_DIALING_CODES: &[&str] =
+        &["+33", "+32", "+41", "+44", "+49", "+34", "+39", "+1"];
+
+    fn dialing_code_label(dialing_code: &str) -> &'static str {
+        LABELLED_DIALING_CODES
+            .iter()
+            .find(|known| **known == dialing_code)
+            .copied()
+            .unwrap_or("other")
+    }
+
+    fn requested_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::OTP_SEND_REQUESTED_TOTAL).build())
+    }
+
+    fn refused_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::OTP_SEND_REFUSED_TOTAL).build())
+    }
+
+    fn sms_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::SMS_SEND_TOTAL).build())
+    }
+
+    /// The guard's last DECLARED state, re-read by the gauge callback on every export cycle.
+    /// `-1` = never declared, so nothing is observed at all — an absent series and a `0` series mean
+    /// different things and must stay distinguishable.
+    static ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    /// An **observable** gauge, not a synchronous one — and that is the whole fix.
+    ///
+    /// A synchronous `Gauge::record` writes one data point when it is called. Called once at
+    /// composition, it says "the guard was wired when this process booted" and then says nothing ever
+    /// again, so the series goes flat-`1` and STAYS flat-`1` however broken the guard becomes. That
+    /// defeats the gauge in precisely the case it exists for: zero refusals is indistinguishable from
+    /// a disabled limiter, and a stale `1` is indistinguishable from a live `1`
+    /// (ADR-20260810-231300 — a liveness signal must be RE-ASSERTED, or it only proves the process
+    /// once booted).
+    ///
+    /// The callback is invoked by the SDK on every collection cycle, so the value is re-asserted by
+    /// construction with no timer of our own, and it stops being emitted the moment the process dies
+    /// — a dead-man's switch rather than a threshold. This is the metrics export path, not a poll of
+    /// another component's state, so it is outside that ADR's push rule.
+    fn enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::OTP_SEND_GUARD_ENFORCING)
+                .with_callback(|observer| {
+                    let state = ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// An OTP send was asked for (`otp_send_requested_total{dialing_code, allowed}`).
+    ///
+    /// ALARM SHAPE: never alert on this rate alone — Friday 19:00-21:30 looks exactly like an attack
+    /// by volume. Alert on the RATIO of sends to verifications (an attack moves only the numerator,
+    /// because nobody verifies the codes) plus burn of the daily ceiling.
+    pub fn requested(dialing_code: &str, allowed: bool) {
+        requested_counter().add(
+            1,
+            &[
+                KeyValue::new("dialing_code", dialing_code_label(dialing_code)),
+                KeyValue::new("allowed", allowed),
+            ],
+        );
+    }
+
+    /// A send was refused by the guards (`otp_send_refused_total{reason}`). `reason` comes from
+    /// `SmsRefusal::reason()`, bounded by construction.
+    pub fn refused(reason: &str) {
+        refused_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// THE MONEY SEAM (`sms_send_total{result}`): one per message handed to the OVH sender.
+    /// `result`: sent | failed | refused.
+    pub fn sms_send(result: &str) {
+        sms_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// Declare the guard's liveness (`otp_send_guard_enforcing`): 1 while enforcing against the SHARED
+    /// counter, 0 when the counter is unreachable and the guard therefore is not enforcing.
+    ///
+    /// Call it at composition AND wherever enforcement is actually decided — the value is then
+    /// re-asserted on every export cycle by [`enforcing_gauge`]'s callback. "No refusals" and "no
+    /// limiter" are otherwise the same observation, which is the inverted dead-man's switch
+    /// (ADR-20260810-231300).
+    pub fn guard_enforcing(enforcing: bool) {
+        ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        // Registers the callback on first declaration; idempotent afterwards.
+        let _ = enforcing_gauge();
     }
 }
 

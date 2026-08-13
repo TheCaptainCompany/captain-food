@@ -128,6 +128,25 @@ pub mod metric {
     /// claim_conflict | provider_error). Each one is a customer whose login silently stayed
     /// anonymous; alert on any sustained non-zero rate.
     pub const CUSTOMER_CLAIM_STAMP_FAILED_TOTAL: &str = "customer_claim_stamp_failed_total";
+    /// `customer-identification` contract (#516): OTP sends ASKED FOR, attributes `dialing_code`
+    /// (bounded — the allowlist plus `other`) and `allowed`. The phone number is NEVER a label; high
+    /// cardinality belongs on the span, and only hashed.
+    pub const OTP_SEND_REQUESTED_TOTAL: &str = "otp_send_requested_total";
+    /// `customer-identification` contract (#516): OTP sends REFUSED by the send guards, attribute
+    /// `reason` (country_not_served | unparseable | cooldown | hourly_cap | daily_cap |
+    /// global_ceiling | store_unavailable). `global_ceiling` means real sign-ups are being turned
+    /// away. Note the INVERTED dead-man's switch: zero refusals reads identically to "the limiter is
+    /// switched off", which is why [`OTP_SEND_GUARD_ENFORCING`] exists beside it.
+    pub const OTP_SEND_REFUSED_TOTAL: &str = "otp_send_refused_total";
+    /// `customer-identification` contract (#516): THE MONEY SEAM — one per message handed to the OVH
+    /// sender, attribute `result` (sent | failed | refused). A persistent gap between this and
+    /// `otp_send_requested_total{allowed=true}` means we are being asked to send messages nobody
+    /// requested through our own front door.
+    pub const SMS_SEND_TOTAL: &str = "sms_send_total";
+    /// `customer-identification` contract (#516): 1 while the send guard is enforcing against the
+    /// SHARED counter, 0 when degraded — the liveness proof that separates "a quiet night" from "the
+    /// guard has been off since the last deploy".
+    pub const OTP_SEND_GUARD_ENFORCING: &str = "otp_send_guard_enforcing";
     /// `cart-price` contract (#451): read-side pricing latency at the resolver seam — if it
     /// drifts toward the budget, the per-request memoized catalog read is the lever.
     pub const CART_PRICE_MS: &str = "cart_price_ms";

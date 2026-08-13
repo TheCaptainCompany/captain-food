@@ -58,11 +58,17 @@ Conflict:
 
 
 RateLimited:
-  description: "Too many requests on this path."
-  context: {}
+  description: >
+    Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries
+    the server's own remaining backoff so the screen renders a real countdown rather than guessing
+    (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a
+    resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a
+    null field.
+  context:
+    retryAfterSeconds: { $ref: 'scalars.yaml#/RetryAfterSeconds' }
   messages:
-    en: "Too many requests. Please slow down."
-    fr: "Trop de requêtes. Veuillez patienter."
+    en: "Too many requests. Please wait {retryAfterSeconds}s and try again."
+    fr: "Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer."
 
 
 Internal:

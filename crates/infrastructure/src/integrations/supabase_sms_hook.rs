@@ -28,6 +28,22 @@ pub fn decode_hook_secret(secret: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(b64).ok().filter(|b| !b.is_empty())
 }
 
+/// The counterpart of [`verify`]: the `webhook-signature` value Supabase would send for `body`.
+///
+/// It lives beside `verify` rather than in a test module because the SERVER's hook tests need it too
+/// (#516: proving the send guards refuse a correctly SIGNED request is the only way to show the
+/// refusal is the guard's and not the signature check's), and a second hand-rolled copy of this
+/// construction in another crate is precisely how the two drift apart. It grants nothing without the
+/// secret — the same input `verify` already demands.
+pub fn sign(secret_key: &[u8], webhook_id: &str, webhook_timestamp: &str, body: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret_key).expect("hmac accepts any key length");
+    mac.update(format!("{webhook_id}.{webhook_timestamp}.{body}").as_bytes());
+    format!(
+        "v1,{}",
+        base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+    )
+}
+
 /// Verify a standard-webhooks signature. `now_unix` is injected for deterministic tests.
 pub fn verify(
     secret_key: &[u8],

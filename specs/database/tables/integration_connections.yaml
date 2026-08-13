@@ -34,6 +34,41 @@ auth_sessions:
   retention:
     policy: "expired rows swept by sweep_retention() (any row past expires_at); claimed rows are deleted at pickup."
 
+# SMS-OTP SEND QUOTA (#516): the counters behind the OTP send guards. Transport-owned like
+# auth_sessions above — never event-sourced (a refused send is not a business fact and must not enter
+# the log an attacker can drive at will), never in api.yaml, never projected.
+#
+# IT IS IN POSTGRES FOR ONE REASON: it must be SHARED ACROSS REPLICAS. A per-pod in-memory limiter
+# multiplies the allowance by the replica count and resets on every deploy, which turns a money
+# ceiling into a suggestion — and the global daily ceiling in particular is meaningless unless every
+# pod counts into the same row.
+sms_send_quota:
+  description: >
+    One row per quota bucket, each an atomic window counter: 'phone:<E.164>:hour',
+    'phone:<E.164>:day' and the platform-wide 'global:day'. Claimed by a SINGLE
+    INSERT ... ON CONFLICT DO UPDATE ... WHERE statement whose WHERE clause IS the limit — a losing
+    claim updates no row and returns none, so there is no read-then-write to race. That matters here
+    because `RequestPhoneVerification` has NO per-phone actor lane (the mailbox mints a fresh actor id
+    per request), so nothing serialises two concurrent requests for the same number but this statement.
+
+    The key is the CANONICAL phone number, never the request: '0612345678', '00612345678' and
+    '612345678' under '+33' collapse to one bucket, and a phone-CHANGE send draws on the same one as a
+    verification send. `window_start` is the start of the live window (a claim past its end resets both
+    the window and the count); `last_granted_at` drives the escalating cooldown; `sent_count` is
+    incremented ONLY when a send is actually authorised, so a refusal never burns budget.
+  columns:
+    quota_key:       { type: text, pk: true }             # 'phone:+33612345678:hour' | 'phone:…:day' | 'global:day'
+    window_start:    { type: timestamptz }                # start of the live window; a claim past its end resets it
+    sent_count:      { type: integer }                    # sends AUTHORISED in this window (refusals do not count)
+    last_granted_at: { type: timestamptz }                # drives the 30s -> 2min -> 10min cooldown
+  retention:
+    policy: >
+      Rows are self-expiring by window and rewritten in place, so the table's size is bounded by the
+      number of DISTINCT numbers seen, not by traffic. Swept by sweep_retention() once a bucket's
+      window has been dead for 2 days -- a phone number is personal data (GDPR), so a quota row for a
+      number nobody is still asking about has no reason to exist. The 'global:day' row is swept by the
+      same rule and simply recreated by the next send.
+
 hubrise_connections:
   description: >
     One row per connected HubRise Account: the account-scoped, non-expiring OAuth access token,

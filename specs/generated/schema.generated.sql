@@ -37,6 +37,13 @@ CREATE TABLE auth_sessions (
 CREATE INDEX ON auth_sessions (session_id);
 CREATE INDEX ON auth_sessions (expires_at);
 
+CREATE TABLE sms_send_quota (
+  quota_key TEXT PRIMARY KEY,
+  window_start TIMESTAMPTZ NOT NULL,
+  sent_count INTEGER NOT NULL,
+  last_granted_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE hubrise_connections (
   restaurant_account_id UUID PRIMARY KEY,
   hubrise_account_id TEXT NOT NULL UNIQUE,
@@ -598,6 +605,15 @@ BEGIN
    WHERE expires_at < now();
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'auth_sessions'; deleted := n; RETURN NEXT;
+
+  -- sms_send_quota (#516): OTP send-guard counters whose last activity is 2 days old. The key embeds
+  -- a phone number, which is personal data -- a quota row for a number nobody is still asking about
+  -- has no reason to exist. Live windows (hour, day) are never touched; the 'global:day' row is swept
+  -- by the same rule and simply recreated by the next send.
+  DELETE FROM sms_send_quota
+   WHERE last_granted_at < now() - INTERVAL '2 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'sms_send_quota'; deleted := n; RETURN NEXT;
 END;
 $$;
 
