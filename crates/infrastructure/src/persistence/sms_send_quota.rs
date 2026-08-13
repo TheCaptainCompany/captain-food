@@ -45,7 +45,9 @@ fn unavailable(e: sqlx::Error) -> QuotaDenial {
 /// * **the ceiling** — `sent_count < limit` in the `DO UPDATE … WHERE`. A losing claim touches
 ///   nothing, so a refusal never burns budget.
 /// * **the cooldown ladder** — indexed out of the `$4::bigint[]` schedule by the count so far, with
-///   the last entry repeating (`least(count+1, len)`).
+///   the last entry repeating. Postgres arrays are **1-BASED**, so the cooldown owed after
+///   `sent_count` grants is element `[sent_count]` — `[sent_count + 1]` skips a whole rung, which is
+///   the defect `the_cooldown_ladder_holds_in_sql` caught (30s became 120s on the first resend).
 ///
 /// `$5` is `now` as a unix epoch, injected rather than taken from the database clock, so the window
 /// edges are testable and every replica uses one clock source per call.
@@ -62,7 +64,7 @@ const CLAIM_SQL: &str = "\
             q.window_start + make_interval(secs => $2::double precision) <= to_timestamp($5) \
             OR ( q.sent_count < $3::int \
                  AND to_timestamp($5) >= q.last_granted_at + make_interval(secs => \
-                       COALESCE(($4::bigint[])[least(q.sent_count + 1, array_length($4::bigint[], 1))], 0)::double precision) ) \
+                       COALESCE(($4::bigint[])[least(q.sent_count, array_length($4::bigint[], 1))], 0)::double precision) ) \
           ) \
     RETURNING q.sent_count";
 
@@ -74,7 +76,7 @@ const PEEK_SQL: &str = "\
            q.window_start + make_interval(secs => $2::double precision) <= to_timestamp($5) AS expired, \
            GREATEST(0, EXTRACT(EPOCH FROM (q.window_start + make_interval(secs => $2::double precision) - to_timestamp($5))))::bigint AS window_left, \
            GREATEST(0, EXTRACT(EPOCH FROM (q.last_granted_at + make_interval(secs => \
-               COALESCE(($4::bigint[])[least(q.sent_count + 1, array_length($4::bigint[], 1))], 0)::double precision) - to_timestamp($5))))::bigint AS cooldown_left \
+               COALESCE(($4::bigint[])[least(q.sent_count, array_length($4::bigint[], 1))], 0)::double precision) - to_timestamp($5))))::bigint AS cooldown_left \
       FROM sms_send_quota q WHERE q.quota_key = $1";
 
 /// The remaining window on a DENIED claim, for the `retryAfterSeconds` the screen renders. A second
@@ -84,7 +86,7 @@ const PEEK_SQL: &str = "\
 const RETRY_AFTER_SQL: &str = "\
     SELECT GREATEST(0, EXTRACT(EPOCH FROM (q.window_start + make_interval(secs => $2::double precision) - to_timestamp($3))))::bigint AS window_left, \
            GREATEST(0, EXTRACT(EPOCH FROM (q.last_granted_at + make_interval(secs => \
-               COALESCE(($4::bigint[])[least(q.sent_count + 1, array_length($4::bigint[], 1))], 0)::double precision) - to_timestamp($3))))::bigint AS cooldown_left, \
+               COALESCE(($4::bigint[])[least(q.sent_count, array_length($4::bigint[], 1))], 0)::double precision) - to_timestamp($3))))::bigint AS cooldown_left, \
            q.sent_count \
       FROM sms_send_quota q WHERE q.quota_key = $1";
 
@@ -122,6 +124,14 @@ impl PgSmsQuotaStore {
 #[async_trait]
 impl SmsQuotaStore for PgSmsQuotaStore {
     async fn try_claim(&self, claim: &QuotaClaim, now_unix: i64) -> Result<QuotaGrant, QuotaDenial> {
+        // THE KILL SWITCH, and it must fire on a COLD key too. The `$3 >= 1` guard inside CLAIM_SQL
+        // only reaches the `DO UPDATE` branch, so with no row yet the plain `INSERT` would win and a
+        // ceiling of zero would grant the first send of the day. Found by
+        // `the_kill_switch_refuses_the_very_first_send` against a real Postgres; the in-memory
+        // reference store had the same hole and the same fix.
+        if claim.limit < 1 {
+            return Err(QuotaDenial::LimitReached { retry_after_seconds: claim.window_seconds });
+        }
         let backoff: Vec<i64> = claim.backoff_seconds.clone();
         let row = sqlx::query(CLAIM_SQL)
             .bind(&claim.key)
