@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 840,
+  "recordedAt": "2026-08-13T00:53:23.036Z",
+  "branch": "?",
+  "note": "records-only: the Supabase-Auth-for-V0 decision (ADR + DECISIONS §36 + STATUS); timed out-of-tree because another session held the shared timer"
+}
