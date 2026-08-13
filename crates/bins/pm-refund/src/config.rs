@@ -186,11 +186,11 @@ pub struct Config {
     pub database_url: String,
     /// sqlx pool ceiling per PROCESS (ADR-20260807-183024 realization, issue #385): the monolith and every wired bin size their PgPool from this DECLARED value instead of a per-main constant. Matters at bin granularity: 49 pods x this ceiling is the CNPG cluster's connection budget, so the number must be reviewable in one place. Per-bin tuning is an env override on the pod (env > baked > default), not a code change.
     pub database_pool_max_connections: i64,
-    /// Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused.
+    /// Supabase Auth base URL: the passwordless OTP/magic-link flows, AND (#519) half the token verification contract -- the expected `iss` is derived from it as `{SUPABASE_URL}/auth/v1`. Unset, the identity service is the fail-closed stand-in and every login is refused, AND there is no verifier at all: `/public` degrades to anonymous and every ROLE path answers 503. An unset issuer never means "skip the issuer check".
     pub supabase_url: String,
     /// Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed (auth stays anonymous-only).
     pub supabase_publishable_key: String,
-    /// JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous.
+    /// JWKS endpoint used to verify Supabase-issued JWTs -- the other half of the #519 verification contract, useless without SUPABASE_URL and vice-versa. Unset, tokens cannot be verified: the open path `/public` falls back to anonymous, and every ROLE path fails closed with 503.
     pub supabase_jwks_url: String,
     /// AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login.
     pub auth_session_key: String,
@@ -322,7 +322,7 @@ impl Config {
         let database_pool_max_connections = raw("DATABASE_POOL_MAX_CONNECTIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
         let supabase_url = raw("SUPABASE_URL").or_else(|| baked("SUPABASE_URL", profile).map(str::to_string));
         if supabase_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            problems.missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
+            problems.missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL: the passwordless OTP/magic-link flows, AND (#519) half the token verification contract -- the expected `iss` is derived from it as `{SUPABASE_URL}/auth/v1`. Unset, the identity service is the fail-closed stand-in and every login is refused, AND there is no verifier at all: `/public` degrades to anonymous and every ROLE path answers 503. An unset issuer never means \"skip the issuer check\"." });
         }
         let supabase_url = supabase_url.unwrap_or_default();
         let supabase_publishable_key = raw("SUPABASE_PUBLISHABLE_KEY").or_else(|| baked("SUPABASE_PUBLISHABLE_KEY", profile).map(str::to_string));
@@ -332,7 +332,7 @@ impl Config {
         let supabase_publishable_key = supabase_publishable_key.unwrap_or_default();
         let supabase_jwks_url = raw("SUPABASE_JWKS_URL").or_else(|| baked("SUPABASE_JWKS_URL", profile).map(str::to_string));
         if supabase_jwks_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            problems.missing.push(MissingKey { name: "SUPABASE_JWKS_URL", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
+            problems.missing.push(MissingKey { name: "SUPABASE_JWKS_URL", gates: "JWKS endpoint used to verify Supabase-issued JWTs -- the other half of the #519 verification contract, useless without SUPABASE_URL and vice-versa. Unset, tokens cannot be verified: the open path `/public` falls back to anonymous, and every ROLE path fails closed with 503." });
         }
         let supabase_jwks_url = supabase_jwks_url.unwrap_or_default();
         let auth_session_key = raw("AUTH_SESSION_KEY");
@@ -422,12 +422,12 @@ impl Config {
         }
         if let Some(v) = Some(supabase_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
+                problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Supabase Auth base URL: the passwordless OTP/magic-link flows, AND (#519) half the token verification contract -- the expected `iss` is derived from it as `{SUPABASE_URL}/auth/v1`. Unset, the identity service is the fail-closed stand-in and every login is refused, AND there is no verifier at all: `/public` degrades to anonymous and every ROLE path answers 503. An unset issuer never means \"skip the issuer check\"." });
             }
         }
         if let Some(v) = Some(supabase_jwks_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "SUPABASE_JWKS_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
+                problems.invalid.push(InvalidKey { name: "SUPABASE_JWKS_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "JWKS endpoint used to verify Supabase-issued JWTs -- the other half of the #519 verification contract, useless without SUPABASE_URL and vice-versa. Unset, tokens cannot be verified: the open path `/public` falls back to anonymous, and every ROLE path fails closed with 503." });
             }
         }
         if let Some(v) = Some(auth_session_key.as_str()) {

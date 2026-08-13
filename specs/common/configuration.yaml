@@ -151,8 +151,11 @@ keys:
       $ref: 'scalars.yaml#/HttpsUrl'
     required: [staging, production]
     gates: >
-      Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
-      the fail-closed stand-in and every login is refused.
+      Supabase Auth base URL: the passwordless OTP/magic-link flows, AND (#519) half the token
+      verification contract -- the expected `iss` is derived from it as `{SUPABASE_URL}/auth/v1`.
+      Unset, the identity service is the fail-closed stand-in and every login is refused, AND there
+      is no verifier at all: `/public` degrades to anonymous and every ROLE path answers 503. An
+      unset issuer never means "skip the issuer check".
     deploy:
       production: "https://zcshlzhiinwmpzujuiep.supabase.co"
       staging: "https://zcshlzhiinwmpzujuiep.supabase.co"
@@ -175,8 +178,9 @@ keys:
       $ref: 'scalars.yaml#/HttpsUrl'
     required: [staging, production]
     gates: >
-      JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
-      authenticated request falls back to anonymous.
+      JWKS endpoint used to verify Supabase-issued JWTs -- the other half of the #519 verification
+      contract, useless without SUPABASE_URL and vice-versa. Unset, tokens cannot be verified: the
+      open path `/public` falls back to anonymous, and every ROLE path fails closed with 503.
     deploy:
       production: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
       staging: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"

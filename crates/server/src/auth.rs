@@ -291,14 +291,14 @@ struct Claims {
 /// The provider's `app_metadata` bag, of which we read exactly ONE key (#519).
 ///
 /// Everything else in there belongs to the provider or to a sibling product of the group, and this
-/// type deliberately cannot see it: a claim that is not inside [`PRODUCT_CLAIM`] is not a claim
+/// type deliberately cannot see it: a claim that is not inside [`PRODUCT_CLAIM_KEY`](infrastructure::integrations::supabase_auth::PRODUCT_CLAIM_KEY) is not a claim
 /// about us. That is also why the pre-#519 flat `captain_*` keys need no read-side tolerance —
 /// there is nowhere for them to land.
 #[derive(Debug, Default, Deserialize)]
 struct AppMetadata {
     /// **The positive product proof.** Absent ⇒ the token belongs to some other product (or predates
     /// the nesting), and no amount of valid signature, issuer or audience turns it into a principal
-    /// here. The field name IS the wire key [`PRODUCT_CLAIM_KEY`].
+    /// here. The field name IS the wire key [`PRODUCT_CLAIM_KEY`](infrastructure::integrations::supabase_auth::PRODUCT_CLAIM_KEY).
     #[serde(default)]
     captain_food: Option<ProductClaims>,
 }
@@ -344,7 +344,7 @@ struct Grant<'a> {
 impl AppMetadata {
     /// The ONE place a verified token becomes a grant, and the only gate between `/{role}/graphql`
     /// and an authenticated principal. `None` means the token proves nothing about Captain Food:
-    /// either it carries no [`PRODUCT_CLAIM`] object (a sibling product's user under a shared
+    /// either it carries no [`PRODUCT_CLAIM_KEY`](infrastructure::integrations::supabase_auth::PRODUCT_CLAIM_KEY) object (a sibling product's user under a shared
     /// identity project, or a pre-#519 flat-claims token), or the object carries no role we
     /// recognise. Both are refusals, never defaults.
     fn grant(&self) -> Option<Grant<'_>> {
@@ -390,12 +390,40 @@ impl Verifier {
     }
 
     /// The only [`Validation`] built in this module, so "forgot to set the issuer" is not an edit a
-    /// call site can make. `exp` is validated by default; `set_issuer` also makes `iss` a REQUIRED
-    /// claim, so a token that simply omits it is refused rather than passing vacuously.
+    /// call site can make.
+    ///
+    /// **In `jsonwebtoken`, MATCHING a reserved claim does not REQUIRE it** — and getting that
+    /// backwards is how an issuer check becomes a no-op (review round 1 on #519; the previous
+    /// version of this comment asserted the opposite and was wrong). In the pinned `10.3.0`:
+    /// `Validation::new` seeds `required_spec_claims` with `{"exp"}` alone (`validation.rs:112-115`);
+    /// `set_issuer`/`set_audience` only assign the matcher (`:143-145`); and `validate()`'s `iss`
+    /// and `aud` arms both end in `_ => {}` (`:308-320`, `:325-349`), so an ABSENT claim — or a
+    /// non-string one, which deserializes to `TryParse::FailedToParse` — falls through and passes
+    /// **vacuously**. The crate documents it: *"Validation only happens if `iss` claim is present in
+    /// the token."*
+    ///
+    /// So the requirement is **derived from the matchers we actually set**, not written out beside
+    /// them: adding a matcher without requiring it is not a pair anyone can spell here, and removing
+    /// one keeps the two in step. `required_spec_claims` demands `TryParse::Parsed`, so the same
+    /// line covers the retyped-claim road as well as the absent-claim one
+    /// (`validation.rs:258-272`). Pinned by
+    /// `tests::every_reserved_claim_the_verifier_matches_is_also_required` on the produced value and
+    /// end-to-end by `a_token_that_omits_or_retypes_iss_or_aud_is_refused_not_passed_vacuously`.
     fn validation(&self, alg: Algorithm) -> Validation {
         let mut validation = Validation::new(alg);
         validation.set_audience(&[SUPABASE_AUDIENCE]);
         validation.set_issuer(&[self.issuer.as_str()]);
+
+        // `exp` is the library's own default and is validated by time rather than matched; every
+        // OTHER reserved claim is required exactly when we matched it.
+        let mut required = vec!["exp"];
+        if validation.iss.is_some() {
+            required.push("iss");
+        }
+        if validation.aud.is_some() {
+            required.push("aud");
+        }
+        validation.set_required_spec_claims(&required);
         validation
     }
 }
@@ -1124,19 +1152,46 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         app_metadata: serde_json::Value,
         ttl_secs: i64,
     ) -> String {
+        signed_jwt_shaped(sub, app_metadata, ttl_secs, |claims| {
+            claims.insert("iss".into(), serde_json::json!(issuer));
+        })
+    }
+
+    /// The token with reserved claims REMOVED or RETYPED. `jsonwebtoken`'s `iss`/`aud` matchers are
+    /// **present-only** — an absent or non-string claim takes their `_ => {}` arm and passes
+    /// vacuously — so this is the only way to observe the difference between *matched* and
+    /// *required*. It is the shape a custom access-token hook in a SHARED identity project can
+    /// produce, which is exactly the project #519 is about.
+    fn signed_jwt_reshaped(
+        sub: &str,
+        app_metadata: serde_json::Value,
+        edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+    ) -> String {
+        signed_jwt_shaped(sub, app_metadata, 3600, |claims| {
+            claims.insert("iss".into(), serde_json::json!(TEST_ISSUER));
+            edit(claims);
+        })
+    }
+
+    fn signed_jwt_shaped(
+        sub: &str,
+        app_metadata: serde_json::Value,
+        ttl_secs: i64,
+        edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+    ) -> String {
         let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
         header.kid = Some("captain-test-es256".into());
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
             .as_secs() as i64;
-        let claims = serde_json::json!({
-            "sub": sub,
-            "aud": SUPABASE_AUDIENCE,
-            "iss": issuer,
-            "exp": now + ttl_secs,
-            "app_metadata": app_metadata,
-        });
+        let mut claims = serde_json::Map::new();
+        claims.insert("sub".into(), serde_json::json!(sub));
+        claims.insert("aud".into(), serde_json::json!(SUPABASE_AUDIENCE));
+        claims.insert("exp".into(), serde_json::json!(now + ttl_secs));
+        claims.insert("app_metadata".into(), app_metadata);
+        edit(&mut claims);
+        let claims = serde_json::Value::Object(claims);
         let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
             .expect("test EC key parses");
         jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
@@ -1516,6 +1571,89 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 "{case}: and the open path degrades rather than trusting an unverifiable claim"
             );
         }
+    }
+
+    /// **MATCHED is not REQUIRED, and only this test can tell them apart** (review round 1 on #519).
+    ///
+    /// `jsonwebtoken`'s `set_issuer`/`set_audience` assign a matcher and nothing else: they do NOT
+    /// add the claim to `required_spec_claims` (which `Validation::new` leaves as `{"exp"}`), and
+    /// `validate()`'s `iss` and `aud` arms both end in `_ => {}`. An **absent** claim — and a
+    /// **non-string** one, which deserializes to `TryParse::FailedToParse` — therefore takes the
+    /// fall-through and passes VACUOUSLY. Verified against the pinned `jsonwebtoken 10.3.0`
+    /// (`validation.rs:112-115`, `:143-145`, `:258-272`, `:308-320`, `:325-349`); the crate says so
+    /// itself: *"Validation only happens if `iss` claim is present in the token."*
+    ///
+    /// Not reachable by an outsider — the token must still be signed by a key in our JWKS. But the
+    /// premise of #519 is a project whose claim shaping is **not ours alone**: an access-token hook
+    /// or custom-claim arrangement in the shared group project is precisely the actor that can drop
+    /// or retype `iss`. A guarantee that has never been seen red is not a guarantee.
+    #[tokio::test]
+    async fn a_token_that_omits_or_retypes_iss_or_aud_is_refused_not_passed_vacuously() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0x51E).to_string();
+        let meta = || {
+            captain_food_claims(
+                "CUSTOMER",
+                serde_json::json!({ "customer_id": uuid::Uuid::from_u128(0x51EC).to_string() }),
+            )
+        };
+
+        type Edit = Box<dyn FnOnce(&mut serde_json::Map<String, serde_json::Value>)>;
+        let cases: Vec<(&str, Edit)> = vec![
+            ("no iss", Box::new(|c: &mut serde_json::Map<_, _>| {
+                c.remove("iss");
+            })),
+            ("no aud", Box::new(|c: &mut serde_json::Map<_, _>| {
+                c.remove("aud");
+            })),
+            ("neither", Box::new(|c: &mut serde_json::Map<_, _>| {
+                c.remove("iss");
+                c.remove("aud");
+            })),
+            // A non-string claim reaches the SAME silent arm by a different road: serde fails to
+            // parse it, and a failed parse is not a mismatch.
+            ("numeric iss", Box::new(|c: &mut serde_json::Map<_, _>| {
+                c.insert("iss".into(), serde_json::json!(42));
+            })),
+            ("object aud", Box::new(|c: &mut serde_json::Map<_, _>| {
+                c.insert("aud".into(), serde_json::json!({ "any": "thing" }));
+            })),
+        ];
+
+        for (case, edit) in cases {
+            let jwt = signed_jwt_reshaped(&sub, meta(), edit);
+            assert!(
+                ctx.authorize(RequestRole::Customer, &cookie_headers(&jwt)).await.is_err(),
+                "{case}: a reserved claim we MATCH must also be REQUIRED -- otherwise omitting it \
+                 skips the check entirely"
+            );
+            assert_eq!(
+                ctx.authorize(RequestRole::Public, &cookie_headers(&jwt))
+                    .await
+                    .expect("the open path never refuses")
+                    .identity,
+                Identity::Anonymous,
+                "{case}: and it buys no identity on the open path"
+            );
+        }
+    }
+
+    /// The requirement is DERIVED from the matchers, so the two cannot drift (see
+    /// [`Verifier::validation`]). Pinned on the produced value, not on the source text.
+    #[test]
+    fn every_reserved_claim_the_verifier_matches_is_also_required() {
+        let validation = unfetchable_verifier().validation(Algorithm::ES256);
+        assert_eq!(validation.iss.as_ref().map(|s| s.len()), Some(1), "the issuer is matched");
+        assert_eq!(validation.aud.as_ref().map(|s| s.len()), Some(1), "the audience is matched");
+        let mut required: Vec<&str> =
+            validation.required_spec_claims.iter().map(String::as_str).collect();
+        required.sort_unstable();
+        assert_eq!(
+            required,
+            ["aud", "exp", "iss"],
+            "`exp` (the library default) plus every claim we match -- a matcher without its \
+             requirement is a check an absent claim simply skips"
+        );
     }
 
     /// **The positive product check.** A token that verifies completely — our key, our issuer, the

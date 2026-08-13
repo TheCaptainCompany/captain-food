@@ -43,12 +43,42 @@ while all four defects stood, which is what a gate never seen red is worth.
 necessary and none skippable — recorded in the `crates/server/src/auth.rs` module header:
 
 1. **Signature**, from a JWKS key, asymmetric families only (unchanged, ADR-0047).
-2. **`iss`**, equal to `{SUPABASE_URL}/auth/v1` — **mandatory**. Unset **refuses**; it never skips.
-3. **`aud`**, `authenticated` — kept as a shape check, documented as evidence of nothing about who
-   minted the token.
+2. **`iss`**, equal to `{SUPABASE_URL}/auth/v1` — **mandatory in both senses**: unset configuration
+   **refuses** rather than skipping, and the claim must be **present and a string** on the token, not
+   merely non-contradictory (see below — the library's matcher is present-only).
+3. **`aud`**, `authenticated` — kept as a shape check on the same present-and-a-string footing, and
+   documented as evidence of nothing about who minted the token.
 4. **`app_metadata.captain_food`**, present and carrying a role we recognise. Its **absence is a
    refusal**, not a default.
 5. The granted role must **equal the path role** (unchanged).
+
+### Matching a reserved claim is not requiring it — and the library made that the default
+
+The first version of this change set the issuer matcher and stopped there, on a comment asserting that
+`set_issuer` also makes `iss` required. **It does not.** In the pinned `jsonwebtoken 10.3.0`,
+`Validation::new` seeds `required_spec_claims` with `{"exp"}` alone (`validation.rs:112-115`),
+`set_issuer`/`set_audience` only assign the matcher (`:143-145`), and `validate()`'s `iss` and `aud`
+arms both end in `_ => {}` (`:308-320`, `:325-349`) — so a token that simply **omits** the claim, or
+carries a **non-string** one (`TryParse::FailedToParse`), falls through and passes **vacuously**. The
+crate documents it: *"Validation only happens if `iss` claim is present in the token."* Found by
+independent review, reproduced by a standalone probe on the same crate version, and seen red here as
+`left: ["exp"]`.
+
+That is not an outsider's attack — the token must still be signed by a key in our JWKS. It matters
+because the premise of this ADR is a project whose **claim shaping is not ours alone**: an
+access-token hook or custom-claim arrangement in the shared group project is exactly the actor that
+can drop or retype `iss`, and the mandatory-issuer guarantee would then have been worth nothing while
+reading as if it held.
+
+The fix is **derived, not written out beside the matchers**: `Verifier::validation` computes
+`required_spec_claims` from the matchers it actually set, so "matched but not required" is not a pair
+that can be spelled there, and removing a matcher keeps the two in step. Because
+`required_spec_claims` demands `TryParse::Parsed`, the one line covers the retyped-claim road as well
+as the absent-claim one.
+
+**The general lesson, which is not derivable from our code**: with any JWT library, *matched* and
+*required* are two switches, and a claim-matching API that reads like an assertion usually is not one.
+Assert the produced `Validation`, and mint a token with the claim removed.
 
 ### The issuer case is taken by the compiler, not by a guard
 
@@ -110,7 +140,8 @@ belonging to another customer cannot block the real stamp as a phantom conflict.
 - A sibling product's token, a staging token and a token with no product claims are all **refused**,
   by the same rule, for the same reason.
 - The unvalidated-issuer state is gone from the type, not from a branch.
-- Four behaviours that were previously unobserved are pinned, each seen red first.
+- Six behaviours that were previously unobserved are pinned, each seen red first — including the two
+  the first round of this work asserted in prose and did not enforce.
 
 ### Negative
 

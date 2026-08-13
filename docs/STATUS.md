@@ -13,6 +13,13 @@
 >   ⇒ skip the issuer check"* — previously reachable whenever `SUPABASE_URL` resolved empty, which is
 >   exactly the configuration in which a **staging token verified in production** — is not a state the
 >   type can hold. Unset now REFUSES: `503` on every role path, anonymous on `/public`.
+> - **…and MATCHING a reserved claim is not REQUIRING it** (found by independent review, seen red as
+>   `left: ["exp"]`). `jsonwebtoken 10.3.0`'s `set_issuer`/`set_audience` only assign a matcher;
+>   `required_spec_claims` stays `{"exp"}` and `validate()`'s `iss`/`aud` arms end in `_ => {}`, so a
+>   token that OMITS the claim — or carries a non-string one — passed **vacuously**. `Verifier::validation`
+>   now DERIVES the required set from the matchers it set, so the two cannot drift. The exposure was
+>   never an outsider's (the token must still be signed by a key in our JWKS); it is that a shared
+>   group project's access-token hook is exactly what can drop or retype `iss`.
 > - **Roles fail closed.** `parse_role` returns `Option`; absent or unrecognised grants NOTHING. The
 >   old `_ => Customer` catch-all is what would have landed a sibling product's user on
 >   `/customer/graphql` as an authenticated customer.
