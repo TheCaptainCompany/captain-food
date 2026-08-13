@@ -19,6 +19,12 @@
 //! composition, and nothing ever set it `false`. So a guard whose shared counter had gone away kept
 //! reporting `1` forever — "enforcing", while enforcing nothing. Phase 4 drives a real
 //! `SmsSendAuthorizer` whose store is unreachable and asserts the gauge follows it down.
+//!
+//! **Phase 5 covers the leg that actually carries an outage.** Phase 4 goes through `authorize`, the
+//! hook path; but when the shared counter is down the identity ACL sheds the request at `peek`, so the
+//! provider is never asked, the hook never fires and `authorize` is never reached. A gauge maintained
+//! on `authorize` alone would sit on `1` for the whole outage with phase 4 still green — the same
+//! blindness, one door over. Both legs must re-declare, so both legs are asserted.
 
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
@@ -100,9 +106,8 @@ fn the_gauge_is_a_heartbeat_and_absent_until_declared() {
         application::sms_guard::SmsSendPolicy::default(),
         Box::new(UnreachableStore),
     );
-    let refusal = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("runtime")
+    let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+    let refusal = runtime
         .block_on(authorizer.authorize_e164("+33612345678"))
         .expect_err("an unreachable counter must refuse, fail-closed");
     assert!(
@@ -117,6 +122,36 @@ fn the_gauge_is_a_heartbeat_and_absent_until_declared() {
         "a send refused because the SHARED counter is unreachable must drop the gauge to 0 — the \
          guard is not enforcing, and a stale `1` here is the exact blindness the gauge exists to \
          remove"
+    );
+
+    // PHASE 5 — THE SAME PROPERTY ON THE LEG THAT ACTUALLY CARRIES THE OUTAGE. `peek` is the identity
+    // ACL's cheap shedding path, and during a counter outage it is the ONLY one that runs: the request
+    // is shed at the edge, the provider is never asked to send, `/auth/sms-hook` never fires, and
+    // `authorize` is never reached. A gauge maintained only on the `authorize` path would therefore
+    // hold `1` for the entire outage — the failure phase 4 describes, reached through the busier door.
+    // NOT vacuous: before `peek`'s `Err` arm re-declared the state, this assertion read
+    // `[.., 1, 1]` against the expected `[.., 1, 0]`.
+    telemetry::meters::otp_send::guard_enforcing(true); // a healthy claim again
+    provider.force_flush().expect("eighth collection");
+
+    let shed = runtime
+        .block_on(authorizer.peek(
+            &domain::generated::scalars::DialingCode("+33".into()),
+            &domain::generated::scalars::NationalPhoneNumber("612345678".into()),
+        ))
+        .expect_err("an unreachable counter must shed at the edge too, fail-closed");
+    assert!(
+        matches!(shed, application::sms_guard::SmsRefusal::StoreUnavailable { .. }),
+        "the store outage must surface as StoreUnavailable from peek as well, got {shed:?}"
+    );
+
+    provider.force_flush().expect("ninth collection");
+    assert_eq!(
+        enforcing_points(&exporter),
+        vec![1, 1, 1, 0, 0, 1, 0, 1, 0],
+        "shedding at the ACL because the SHARED counter is unreachable must drop the gauge to 0 too \
+         — this is the leg that runs during the outage, so a stale `1` here keeps the whole outage \
+         invisible even with phase 4 passing"
     );
 }
 

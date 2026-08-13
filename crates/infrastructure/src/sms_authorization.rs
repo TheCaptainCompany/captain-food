@@ -164,6 +164,15 @@ impl SmsSendAuthorizer {
         {
             Ok(_) => Ok(()),
             Err(refusal) => {
+                // The same liveness assertion as `authorize`, and this is the leg that usually carries
+                // it: when the shared counter is down the ACL sheds HERE, at the edge, so the provider
+                // is never asked and `authorize` is never reached. Without this line the gauge would
+                // sit on a stale `1` for the whole outage -- reporting "enforcing" from the one path
+                // that proves it is not.
+                telemetry::meters::otp_send::guard_enforcing(!matches!(
+                    refusal,
+                    SmsRefusal::StoreUnavailable { .. }
+                ));
                 Self::record_refusal(&refusal);
                 Err(refusal)
             }

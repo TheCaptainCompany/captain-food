@@ -149,10 +149,15 @@ to a Belgian visitor is an accusation aimed at someone who did nothing wrong.
   process dies. A synchronous `record` at composition would have been the defect wearing the fix's
   name — it says "the guard was wired when this process booted" and then says nothing again, so the
   series goes flat-`1` and stays flat-`1` however broken the guard becomes, which is a stale `1`
-  indistinguishable from a live `1` in exactly the case the gauge exists for. `authorize` additionally
-  re-declares the state where enforcement is actually DECIDED, dropping to `0` when the shared counter
-  is unreachable (ADR-20260810-231300; this is the metrics export path re-reading our own state, not a
-  poll of another component, so it is outside that ADR's push rule).
+  indistinguishable from a live `1` in exactly the case the gauge exists for. **Both** enforcement
+  points additionally re-declare the state where enforcement is actually DECIDED, dropping to `0` when
+  the shared counter is unreachable (ADR-20260810-231300; this is the metrics export path re-reading our
+  own state, not a poll of another component, so it is outside that ADR's push rule). Both, not just
+  `authorize`, because during a counter outage the ACL sheds at `peek` and the hook path is never
+  reached — a gauge maintained on `authorize` alone would hold `1` for the entire outage, the same
+  blindness one door over. Each leg has its own assertion in
+  `crates/server/tests/otp_guard_liveness_metric.rs` (phases 4 and 5), and phase 5 was confirmed
+  non-vacuous by reverting only `peek`'s arm: `left: [..,1,1]` vs `right: [..,1,0]`.
 - **Never alert on send rate**: Friday 19:00–21:30 looks exactly like an attack by volume. Alert on
   the RATIO of sends to verifications (an attack moves only the numerator — nobody verifies the codes)
   plus ceiling burn. The join cannot use `correlation_id`, which **breaks across the provider's
