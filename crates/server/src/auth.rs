@@ -947,10 +947,30 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         )
     }
 
-    /// A Supabase-shaped JWT with an arbitrary `app_metadata` and lifetime, signed by the test key.
-    /// `ttl_secs` is signed: a NEGATIVE value produces an EXPIRED token (the stale-cookie case,
-    /// which is the common one on the open path, not an exotic one).
+    /// OUR identity project, as the tests' `iss`. Before #519 the fixtures minted tokens with **no
+    /// `iss` claim at all** and every context carried `issuer: None`, so the whole suite was
+    /// issuer-blind BY CONSTRUCTION: not one assertion could have noticed that issuer validation
+    /// was optional.
+    const TEST_ISSUER: &str = "https://captain-under-test.supabase.co/auth/v1";
+    /// A DIFFERENT project on the same provider — the sibling product sharing the group's identity
+    /// project, or staging pointed at production's. Same signing key on purpose: the signature is
+    /// not what separates products, so a test that changed the key would prove nothing.
+    const OTHER_PROJECT_ISSUER: &str = "https://sibling-product.supabase.co/auth/v1";
+
+    /// A Supabase-shaped JWT with an arbitrary `app_metadata` and lifetime, signed by the test key
+    /// and issued by [`TEST_ISSUER`]. `ttl_secs` is signed: a NEGATIVE value produces an EXPIRED
+    /// token (the stale-cookie case, which is the common one on the open path, not an exotic one).
     fn signed_jwt(sub: &str, app_metadata: serde_json::Value, ttl_secs: i64) -> String {
+        signed_jwt_from(TEST_ISSUER, sub, app_metadata, ttl_secs)
+    }
+
+    /// The same token, minted by an arbitrary issuer — the only knob the cross-project tests need.
+    fn signed_jwt_from(
+        issuer: &str,
+        sub: &str,
+        app_metadata: serde_json::Value,
+        ttl_secs: i64,
+    ) -> String {
         let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
         header.kid = Some("captain-test-es256".into());
         let now = std::time::SystemTime::now()
@@ -960,12 +980,23 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         let claims = serde_json::json!({
             "sub": sub,
             "aud": SUPABASE_AUDIENCE,
+            "iss": issuer,
             "exp": now + ttl_secs,
             "app_metadata": app_metadata,
         });
         let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
             .expect("test EC key parses");
         jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
+    /// The `app_metadata` a Captain Food token carries after #519: ONE product-owned object, whose
+    /// PRESENCE is what proves the token was minted for this product. Under a group-wide identity
+    /// project `iss` and `aud` are identical across every sibling product, so this object is the
+    /// only separator left.
+    fn captain_food_claims(role: &str, claims: serde_json::Value) -> serde_json::Value {
+        let mut obj = claims;
+        obj["role"] = serde_json::json!(role);
+        serde_json::json!({ "captain_food": obj })
     }
 
     /// The storefront's own request shape: a cookie-delivered credential, no Authorization header.
@@ -1248,6 +1279,158 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
             ctx.authorize(RequestRole::Customer, &tampered).await.is_err(),
             "a tampered payload must be rejected by signature verification"
         );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // #519 — WHAT A TOKEN MUST PROVE, once one identity project serves EVERY product of the group.
+    //
+    // The three separators a verifier normally leans on all stop separating:
+    //   `aud`  is the Supabase constant "authenticated", which every user of every project carries;
+    //   `iss`  becomes IDENTICAL across sibling products the moment they share a project;
+    //   the signing KEY is the project's, so a sibling's token verifies against our JWKS.
+    // What is left is the product's own claim object, and it only separates if its ABSENCE refuses.
+    // ---------------------------------------------------------------------------------------
+
+    /// **Issuer, positively.** Same signing key, a DIFFERENT project's `iss`: refused on a role
+    /// path, anonymous on the open one. Seen RED first — the fixtures below used to build
+    /// `issuer: None`, so this token was accepted as a fully bound CUSTOMER.
+    #[tokio::test]
+    async fn a_token_from_another_project_is_refused_even_though_our_key_signed_it() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0x519).to_string();
+        let customer = uuid::Uuid::from_u128(0x519C);
+        let foreign = signed_jwt_from(
+            OTHER_PROJECT_ISSUER,
+            &sub,
+            captain_food_claims(
+                "CUSTOMER",
+                serde_json::json!({ "customer_id": customer.to_string() }),
+            ),
+            3600,
+        );
+
+        assert!(
+            ctx.authorize(RequestRole::Customer, &cookie_headers(&foreign)).await.is_err(),
+            "a token minted by another project must not authorize a role path -- audience proves \
+             nothing (every Supabase user is `authenticated`) and the key is the project's"
+        );
+        assert_eq!(
+            ctx.authorize(RequestRole::Public, &cookie_headers(&foreign))
+                .await
+                .expect("the open path never refuses")
+                .identity,
+            Identity::Anonymous,
+            "and it buys no identity on the open path either"
+        );
+    }
+
+    /// **Unset issuer REFUSES; it does not skip.** `SUPABASE_URL` empty used to mean "no issuer to
+    /// compare against", i.e. no issuer check at all — the one configuration in which a staging or
+    /// sibling token verifies in production. Now the verifier does not exist, and every role path
+    /// fails closed with `503` while `/public` degrades to anonymous.
+    #[tokio::test]
+    async fn an_unset_issuer_refuses_every_role_path_instead_of_skipping_the_check() {
+        let (url, _hits) = counting_jwks(false).await;
+        let ctx = AuthContext::from_config(url, String::new()); // SUPABASE_URL unset
+        let sub = uuid::Uuid::from_u128(0x51A).to_string();
+        let meta = captain_food_claims(
+            "CUSTOMER",
+            serde_json::json!({ "customer_id": uuid::Uuid::from_u128(0x51AC).to_string() }),
+        );
+
+        for (case, issuer) in
+            [("our own project", TEST_ISSUER), ("a sibling project", OTHER_PROJECT_ISSUER)]
+        {
+            let jwt = signed_jwt_from(issuer, &sub, meta.clone(), 3600);
+            assert!(
+                matches!(
+                    ctx.authorize(RequestRole::Customer, &cookie_headers(&jwt)).await,
+                    Err(AuthError::Unavailable)
+                ),
+                "{case}: an unconfigured issuer must FAIL CLOSED (503), never verify a token \
+                 without checking who issued it"
+            );
+            assert_eq!(
+                ctx.authorize(RequestRole::Public, &cookie_headers(&jwt))
+                    .await
+                    .expect("the open path never refuses")
+                    .identity,
+                Identity::Anonymous,
+                "{case}: and the open path degrades rather than trusting an unverifiable claim"
+            );
+        }
+    }
+
+    /// **The positive product check.** A token that verifies completely — our key, our issuer, the
+    /// Supabase audience — but carries NO `captain_food` claim object is not a principal of this
+    /// product. Under a group-wide project this is the ordinary shape of a sibling product's user,
+    /// and before #519 it landed on `/customer/graphql` as an authenticated CUSTOMER.
+    #[tokio::test]
+    async fn a_token_with_no_captain_food_claim_object_is_never_an_authenticated_principal() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0x51B).to_string();
+        let id = uuid::Uuid::from_u128(0x51BC).to_string();
+
+        for (case, app_metadata) in [
+            ("no app_metadata at all", serde_json::json!({})),
+            ("a sibling product's claims", serde_json::json!({ "other_product": { "role": "ADMIN" } })),
+            ("provider bookkeeping only", serde_json::json!({ "provider": "phone", "providers": ["phone"] })),
+            // The PRE-#519 shape: flat `captain_*` keys. Supabase merges `app_metadata` SHALLOWLY,
+            // which is why nesting rather than renaming is the fix -- and why the flat keys survive
+            // as inert siblings on an already-stamped auth user. They must grant nothing.
+            (
+                "the pre-#519 flat claims",
+                serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": id }),
+            ),
+        ] {
+            let jwt = signed_jwt(&sub, app_metadata, 3600);
+            assert!(
+                ctx.authorize(RequestRole::Customer, &cookie_headers(&jwt)).await.is_err(),
+                "{case}: a token proving no Captain Food role must be refused, not defaulted"
+            );
+            assert_eq!(
+                ctx.authorize(RequestRole::Public, &cookie_headers(&jwt))
+                    .await
+                    .expect("the open path never refuses")
+                    .identity,
+                Identity::Anonymous,
+                "{case}: and it is anonymous on the open path"
+            );
+        }
+    }
+
+    /// **Role parsing fails CLOSED.** An absent or unrecognised role grants nothing — it does not
+    /// fall back to CUSTOMER. The token below carries a perfectly good `customer_id`, so the only
+    /// thing standing between it and a customer session is the role check.
+    #[tokio::test]
+    async fn an_absent_or_unrecognised_role_grants_nothing_rather_than_customer() {
+        let ctx = ctx_with_cache(signing_set(), Instant::now());
+        let sub = uuid::Uuid::from_u128(0x51D).to_string();
+        let customer = uuid::Uuid::from_u128(0x51DC);
+        let claims = serde_json::json!({ "customer_id": customer.to_string() });
+
+        for (case, role) in [("absent", None), ("empty", Some("")), ("unknown", Some("SUPERADMIN"))]
+        {
+            let mut obj = claims.clone();
+            if let Some(role) = role {
+                obj["role"] = serde_json::json!(role);
+            }
+            let jwt = signed_jwt(&sub, serde_json::json!({ "captain_food": obj }), 3600);
+            assert!(
+                ctx.authorize(RequestRole::Customer, &cookie_headers(&jwt)).await.is_err(),
+                "{case} role: no role is NO role -- never the CUSTOMER baseline"
+            );
+            let public = ctx
+                .authorize(RequestRole::Public, &cookie_headers(&jwt))
+                .await
+                .expect("the open path never refuses");
+            assert_eq!(public.identity, Identity::Anonymous, "{case} role: no identity on /public");
+            assert_eq!(
+                read_scope(&public),
+                application::queries::ReadScope::Public,
+                "{case} role: and no customer scope, despite a usable customer_id beside it"
+            );
+        }
     }
 }
 
