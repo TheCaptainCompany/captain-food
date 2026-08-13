@@ -170,6 +170,35 @@ expect_out  "8c ...with the documented message" "weekly loop budget exhausted"
 run bash "$HOOK" start
 expect_code "8e start refuses once the cap is spent" 2
 
+# --- 9. FOUNDER OVERRIDE: capIsAStopSign=false makes over-cap a REPORT, never a refusal ----------
+# ADR-20260813-132540 ("do not gate on the budget", founder 2026-08-13). Three properties, each of
+# which the cheap wrong implementation (exit 0 for everything) would break:
+#   over-cap under the override exits 0 AND billing still appends;
+#   INTEGRITY refusals (exit 3 family: double-open, no timer, stale timer) are untouched;
+#   the flag ABSENT restores exit 2 -- flipping back is a one-line config edit, proven reversible.
+# The cap is exhausted at this point (case 8 spent it), which is exactly the state to test under.
+printf '{\n  "weeklyBudgetSeconds": %s,\n  "capIsAStopSign": false\n}\n' "$BUDGET" > "$REPO/.claude/loop-budget.json"
+run bash "$HOOK" check
+expect_code "9a check over the cap under the override exits 0 (reported, not refused)" 0
+expect_out  "9b ...and the exhaustion message stays LOUD on stderr (never silent)" "weekly loop budget exhausted"
+run bash "$HOOK" start
+expect_code "9c start over the cap under the override opens a timer" 0
+expect_out  "9d ...still shouting the over-cap state" "weekly loop budget exhausted"
+run bash "$HOOK" start
+expect_code "9e INTEGRITY is untouched: a second start over a live timer still refuses (exit 3)" 3
+before="$(entries)"; t0="$(total)"
+run bash "$HOOK" stop --note "override run"
+expect_code "9f stop under the override exits 0 even though the week is over cap" 0
+[ "$(entries)" = "$((before+1))" ] && ok "9g ...and billing still APPENDS its ledger file (the override never stops the meter)" || bad "9g billing unchanged" "entries $before -> $(entries)"
+run bash "$HOOK" stop
+expect_code "9h INTEGRITY is untouched: stop with no open timer still refuses (exit 3)" 3
+stamp_timer $((5 * 3600))
+run bash "$HOOK" stop
+expect_code "9i INTEGRITY is untouched: a stale timer still refuses (exit 3), never billed" 3
+printf '{\n  "weeklyBudgetSeconds": %s\n}\n' "$BUDGET" > "$REPO/.claude/loop-budget.json"
+run bash "$HOOK" check
+expect_code "9j the flag ABSENT restores the stop sign (exit 2) -- the recorded path back works" 2
+
 printf 'loop-budget selftest: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || { echo "loop-budget selftest: FAILED -- a budget guard is not firing (see above)." >&2; exit 2; }
 exit 0

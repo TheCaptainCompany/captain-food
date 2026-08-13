@@ -553,6 +553,11 @@ operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are
 session.** When a session has produced decisions, write them down and let the next session start
 small; do not carry a 30-turn context forward for its own sake.
 
+**A directive that changes a gate is recorded BEFORE the next dispatch hits the gate** (2026-08-13):
+the founder lifted the budget cap ~10:00Z, nothing was recorded, and at ~14:20Z the #510 executor was
+dispatched into `loop-budget.sh start`'s guaranteed exit 2 — one full dispatch round for zero output,
+standing down against an already-lifted gate (ADR-20260813-132540).
+
 **Context discipline — the rules that keep a session under ~80k** (2026-08-01, after a week at
 87% of requests >150k context): (1) `specs/generated/**` and `crates/**/generated/**` are
 GREP-ONLY — never `Read` a generated artifact wholesale (`documentation.generated.md` alone can
@@ -596,6 +601,10 @@ with a tiny error body that only surfaces when `tar` rejects it (cost: one debug
 fetching a prebuilt cargo-machete, 2026-08-03). `cargo install <tool> --locked` from crates.io
 works fine (~2–3 min compile) — go straight there for Rust tooling; do not burn turns on
 prebuilt-binary URLs.
+
+**GitHub 403 from executor sessions is API-only** (2026-08-13): plain `git fetch`/`git push` over
+the git transport works even when every `api.github.com` call returns 403 — push the branch
+yourself; do not hand branch pushes back to the coordinator.
 
 **A DB-gated suite that is green in CI can still be order-dependent** — CI runs the whole
 workspace against ONE shared database, so a suite can silently depend on a table a SIBLING suite
