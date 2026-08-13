@@ -16,6 +16,9 @@
 //!   (`get_operation_status(message_id)` + `watch(message_id)`, PROP-20260802-130500 D4, #303):
 //!   status is an envelope-level outcome keyed by the globally-unique `message_id`, so the read
 //!   side is actor-agnostic while the write side stays per-actor.
+//! - [`supervision`] — the ADMIN supervision READ port (`mailboxLanes` / `poisonedMailboxMessages`,
+//!   #510): moved up from `application::queries` so its methods demand the same [`mailbox::MailboxAccess`]
+//!   witness as every other mailbox read; the two door functions there are the sanctioned path.
 //! - [`status_bus`] — the in-process operation-response bus (§2.1 generalized, relocated from
 //!   `infrastructure` under #303): publishers push post-commit verdicts, and the ONLY consumer
 //!   surface is `ActorClient::watch` (`subscribe` is crate-internal).
@@ -36,6 +39,7 @@ pub mod mailbox;
 mod partition;
 pub mod reminders;
 pub mod status_bus;
+pub mod supervision;
 
 /// GENERATED surface (do not edit by hand): the frozen command-addressing tables, emitted by
 /// tools/codegen-rs from specs/actors.yaml. The typed clients used to live here too; phase 2

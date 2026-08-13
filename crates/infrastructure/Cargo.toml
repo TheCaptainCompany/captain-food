@@ -76,6 +76,10 @@ db-test-gate = { path = "../db_test_gate" }
 # integration tests seed mailbox rows through the EntryFixture conversion — test-only doors a
 # release build of this crate never sees.
 actor_client = { path = "../actor_client", features = ["test-fixtures"] }
+# The same D5 gate on the APPLICATION crate (#510): `MailboxRequeueAccess::for_tests()`, so the
+# mailbox_requeue suite can assert the write port's arbitration matrix directly — a test-only
+# mint the release graph never sees.
+application = { path = "../application", features = ["test-fixtures"] }
 # Test-only actor reach (#306): `mailbox_wake` drives a Cart lane. A dev-dependency is the right
 # grant — the release graph must not gain an actor because a test needed one.
 client-cart = { path = "../clients/cart" }

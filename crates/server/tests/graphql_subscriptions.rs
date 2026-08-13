@@ -265,15 +265,19 @@ impl application::queries::DeliverySatisfactionReadRepository for Empty {
 }
 
 #[async_trait]
-impl application::queries::MailboxLaneRepository for Empty {
-    async fn list(&self) -> Result<Vec<application::queries::MailboxLaneRow>, DomainError> {
+impl actor_client::supervision::MailboxLaneRepository for Empty {
+    async fn list(
+        &self,
+        _access: actor_client::mailbox::MailboxAccess,
+    ) -> Result<Vec<actor_client::supervision::MailboxLaneRow>, DomainError> {
         Ok(vec![])
     }
     async fn poisoned(
         &self,
         _actor_type: Option<String>,
         _limit: i64,
-    ) -> Result<Vec<application::queries::PoisonedMessageRow>, DomainError> {
+        _access: actor_client::mailbox::MailboxAccess,
+    ) -> Result<Vec<actor_client::supervision::PoisonedMessageRow>, DomainError> {
         Ok(vec![])
     }
 }

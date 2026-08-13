@@ -10,7 +10,8 @@
 
 use std::sync::Arc;
 
-use application::queries::{MailboxLaneRepository, MailboxLaneRow};
+use actor_client::mailbox::MailboxAccess;
+use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow};
 use infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository;
 use infrastructure::{
     PgCartRepository, PgCatalogRepository, PgCustomerCreditRepository, PgCustomerRepository,
@@ -109,7 +110,7 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
 
     // 1) The repository join: live rows only, per lane, (actor_type, partition) order.
     let repo = PgMailboxLaneRepository::new(pool.clone());
-    let lanes: Vec<MailboxLaneRow> = repo.list().await.expect("list lanes");
+    let lanes: Vec<MailboxLaneRow> = repo.list(MailboxAccess::for_tests()).await.expect("list lanes");
     assert_eq!(lanes.len(), 2, "two registered lanes: {lanes:?}");
 
     let lane0 = &lanes[0];

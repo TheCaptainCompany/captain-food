@@ -1,6 +1,6 @@
 //! E2E of the poisoned-row recovery (#315, ADR-20260803-002712 Q1) on real Postgres: a
 //! cap-poisoned `inbound_messages` row is listed by the supervision read
-//! ([`application::queries::MailboxLaneRepository::poisoned`]), a `RequeueMailboxMessage`
+//! (`actor_client::supervision::MailboxLaneRepository::poisoned`, #510), a `RequeueMailboxMessage`
 //! command delivered through a REAL worker fleet (the same standalone spawn the adapters use)
 //! flips it back to RECEIVED and records the `MailboxMessageRequeued` audit fact — and the
 //! flipped row is then REDELIVERED by the fleet to a terminal verdict (the review's blind-spot
@@ -17,7 +17,9 @@
 
 use std::sync::Arc;
 
-use application::queries::{MailboxLaneRepository, MailboxRequeue, RequeueOutcome};
+use actor_client::mailbox::MailboxAccess;
+use actor_client::supervision::MailboxLaneRepository;
+use application::queries::{MailboxRequeue, MailboxRequeueAccess, RequeueOutcome};
 use infrastructure::persistence::mailbox_lanes::{PgMailboxLaneRepository, PgMailboxRequeue};
 use infrastructure::persistence::mailbox_store::MailboxNudges;
 use infrastructure::FailClosedPaymentGateway;
@@ -109,14 +111,14 @@ async fn requeue_recovers_a_poisoned_row_end_to_end() {
     // (1) The supervision read surfaces both — id, lane, attempts, the poison error code — and
     // the lane filter matches and misses correctly.
     let repo = PgMailboxLaneRepository::new(pool.clone());
-    let listed = repo.poisoned(None, 200).await.expect("poisoned listing");
+    let listed = repo.poisoned(None, 200, MailboxAccess::for_tests()).await.expect("poisoned listing");
     assert_eq!(listed.len(), 2);
     let cart_row = listed.iter().find(|r| r.message_id == cart_poisoned).expect("cart row listed");
     assert_eq!(cart_row.actor_type, "Cart");
     assert_eq!(cart_row.attempts, 5);
     assert_eq!(cart_row.error_code.as_deref(), Some("DeliveryInfrastructureError"));
-    assert_eq!(repo.poisoned(Some("Cart".into()), 200).await.expect("filtered").len(), 1);
-    assert_eq!(repo.poisoned(Some("Payment".into()), 200).await.expect("filtered").len(), 0);
+    assert_eq!(repo.poisoned(Some("Cart".into()), 200, MailboxAccess::for_tests()).await.expect("filtered").len(), 1);
+    assert_eq!(repo.poisoned(Some("Payment".into()), 200, MailboxAccess::for_tests()).await.expect("filtered").len(), 0);
 
     // (2) Deliver RequeueMailboxMessage (targeting the supervision-lane poisoned row) through a
     // REAL fleet — the adapters' spawn, the generated router, the fenced completion.
@@ -191,24 +193,24 @@ async fn requeue_recovers_a_poisoned_row_end_to_end() {
     // unknown refuses.
     let port = PgMailboxRequeue::new(pool.clone());
     assert_eq!(
-        port.requeue_if_poisoned(cart_poisoned).await.expect("flip"),
+        port.requeue_if_poisoned(cart_poisoned, MailboxRequeueAccess::for_tests()).await.expect("flip"),
         RequeueOutcome::Requeued { actor_type: "Cart".into() }
     );
     assert_eq!(
-        port.requeue_if_poisoned(cart_poisoned).await.expect("re-requeue"),
+        port.requeue_if_poisoned(cart_poisoned, MailboxRequeueAccess::for_tests()).await.expect("re-requeue"),
         RequeueOutcome::AlreadyDeliverable { actor_type: "Cart".into() },
         "a duplicate/retried requeue converges instead of erroring"
     );
     assert_eq!(
-        port.requeue_if_poisoned(requeue_cmd).await.expect("succeeded row"),
+        port.requeue_if_poisoned(requeue_cmd, MailboxRequeueAccess::for_tests()).await.expect("succeeded row"),
         RequeueOutcome::NotRequeueable { status: "SUCCEEDED".into() },
         "a row that already ran is never requeued"
     );
     assert_eq!(
-        port.requeue_if_poisoned(uuid::Uuid::from_u128(0xF00D)).await.expect("unknown row"),
+        port.requeue_if_poisoned(uuid::Uuid::from_u128(0xF00D), MailboxRequeueAccess::for_tests()).await.expect("unknown row"),
         RequeueOutcome::NotFound
     );
     // And the listing is empty again — the screen's count and detail agree (the cart row is
     // RECEIVED, the supervision row REJECTED: neither is poisoned any more).
-    assert_eq!(repo.poisoned(None, 200).await.expect("relist").len(), 0);
+    assert_eq!(repo.poisoned(None, 200, MailboxAccess::for_tests()).await.expect("relist").len(), 0);
 }

@@ -99,15 +99,18 @@ the ceiling here*, not to "try harder" — and the gate is correct rather than l
   write, because it plants a mutant against the *exemption* rather than against the wall. Rule of thumb:
   **whenever a change adds a way to say yes, plant the mutants that abuse the yes.**
 
-The half of that same slice that IS reachable by the compiler is unfinished and worth naming: this
-proposal's own `MailboxAccess(pub(crate) ())` witness (D1/D4, shipped) covers the mailbox WRITE door
-but not the query ports `MailboxLaneRepository` / `MailboxRequeue`, which sit in `crates/application`
-— and `actor_client` depends on `application`, so the existing witness cannot be reused there. Closing
-it means moving those ports plus changing the resolver emitter: a slice of its own, and a genuine
-level-4 win when it lands. **Both halves are now filed rather than merely named**:
+The half of that same slice that IS reachable by the compiler is now CLOSED:
 [#510 "mailbox query ports behind a capability witness"](https://github.com/TheCaptainCompany/captain-food/issues/510)
-and [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)
-— the latter because D3's `Cargo.toml`-as-allowlist cannot state the boundary while `crates/server`
+finished what D1/D4's `MailboxAccess(pub(crate) ())` witness started, asymmetrically because the two
+query ports' legitimate callers sit on opposite sides of the `actor_client → application` arrow. The
+READ port `MailboxLaneRepository` moved into `actor_client::supervision`, where both methods demand
+the existing witness and the generated resolvers read through two declared minting doors
+(`mailbox_lanes` / `poisoned_messages` — the `operationStatus` shape); the WRITE port
+`MailboxRequeue` sealed in place in `crates/application` behind its own `MailboxRequeueAccess`
+witness, minted only inside the `requeue_mailbox_message` handler. The
+`every_mailbox_port_method_demands_the_access_witness` guard covers both. What remains filed is the
+other half: [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)
+— D3's `Cargo.toml`-as-allowlist cannot state the boundary while `crates/server`
 still needs `sqlx` for the `_sqlx_migrations` probe (`sqlx::raw_sql`, `lib.rs:1497`) and holds
 `PgPool`/`PgPoolOptions`/`Row` in the composition root.
 

@@ -568,6 +568,7 @@ impl crate::queries::MailboxRequeue for SpecMailboxRequeue {
     async fn requeue_if_poisoned(
         &self,
         message_id: uuid::Uuid,
+        _access: crate::queries::MailboxRequeueAccess,
     ) -> Result<crate::queries::RequeueOutcome, DomainError> {
         use crate::queries::RequeueOutcome;
         let mut rows = self.rows.lock().unwrap();

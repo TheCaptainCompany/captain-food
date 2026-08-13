@@ -2153,7 +2153,10 @@ pub async fn requeue_mailbox_message(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     use crate::queries::RequeueOutcome;
-    let actor_type = match requeue.requeue_if_poisoned(cmd.target_message_id.0).await? {
+    // THE production mint of the requeue witness (#510): this handler is the one door to the
+    // flip, and the mailbox is the one door to this handler.
+    let access = crate::queries::MailboxRequeueAccess::granted();
+    let actor_type = match requeue.requeue_if_poisoned(cmd.target_message_id.0, access).await? {
         RequeueOutcome::Requeued { actor_type }
         | RequeueOutcome::AlreadyDeliverable { actor_type } => actor_type,
         RequeueOutcome::NotFound => {

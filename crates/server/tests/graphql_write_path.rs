@@ -189,7 +189,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
         Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
     let customer_credit: Arc<dyn application::queries::CustomerCreditReadRepository> =
         Arc::new(infrastructure::PgCustomerCreditRepository::new(pool.clone()));
-    let mailbox_lanes: Arc<dyn application::queries::MailboxLaneRepository> = Arc::new(
+    let mailbox_lanes: Arc<dyn actor_client::supervision::MailboxLaneRepository> = Arc::new(
         infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(pool.clone()),
     );
     let event_store: Arc<dyn EventStore> = Arc::new(PgEventStore::new(pool.clone()));

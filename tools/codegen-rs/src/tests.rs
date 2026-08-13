@@ -2191,6 +2191,9 @@ keys:
         /// Methods of the `Mailbox` port trait: (name, takes the witness EXACTLY).
         port_methods: Vec<(String, bool)>,
         saw_port_trait: bool,
+        /// Methods of the `MailboxLaneRepository` supervision read port (#510) — same demand.
+        lane_methods: Vec<(String, bool)>,
+        saw_lane_trait: bool,
     }
 
     const WITNESS: &str = "MailboxAccess";
@@ -2251,38 +2254,55 @@ keys:
                     }
                 }
 
-                // THE PORT TRAIT — every method must take the witness, EXACTLY (not wrapped).
-                Item::Trait(t) if t.ident == "Mailbox" => {
-                    out.saw_port_trait = true;
+                // THE PORT TRAITS — every method must take the witness, EXACTLY (not wrapped).
+                // `MailboxLaneRepository` is the supervision READ port, moved into this crate by
+                // #510 precisely so its methods could make this demand.
+                Item::Trait(t) if t.ident == "Mailbox" || t.ident == "MailboxLaneRepository" => {
+                    if t.ident == "Mailbox" {
+                        out.saw_port_trait = true;
+                    } else {
+                        out.saw_lane_trait = true;
+                    }
                     for ti in &t.items {
                         match ti {
-                            syn::TraitItem::Fn(f) => out.port_methods.push((
-                                f.sig.ident.to_string(),
-                                f.sig.inputs.iter().any(|i| match i {
-                                    syn::FnArg::Typed(pt) => is_exact_witness(&pt.ty),
-                                    syn::FnArg::Receiver(_) => false,
-                                }),
-                            )),
+                            syn::TraitItem::Fn(f) => {
+                                let entry = (
+                                    f.sig.ident.to_string(),
+                                    f.sig.inputs.iter().any(|i| match i {
+                                        syn::FnArg::Typed(pt) => is_exact_witness(&pt.ty),
+                                        syn::FnArg::Receiver(_) => false,
+                                    }),
+                                );
+                                if t.ident == "Mailbox" {
+                                    out.port_methods.push(entry);
+                                } else {
+                                    out.lane_methods.push(entry);
+                                }
+                            }
                             // Associated items on the port trait. Not exploitable today only
                             // because `Mailbox` is used as `dyn` and such a const makes it
                             // dyn-incompatible (E0038) — safety borrowed from a usage pattern
                             // elsewhere, so it is owned here instead.
-                            syn::TraitItem::Const(c) => {
-                                out.check_sig(rel, &format!("`Mailbox::{}`", c.ident), true, &c.ty)
-                            }
+                            syn::TraitItem::Const(c) => out.check_sig(
+                                rel,
+                                &format!("`{}::{}`", t.ident, c.ident),
+                                true,
+                                &c.ty,
+                            ),
                             syn::TraitItem::Type(ty) => {
                                 let b = &ty.bounds;
                                 out.check_sig(
                                     rel,
-                                    &format!("`Mailbox::{}` bounds", ty.ident),
+                                    &format!("`{}::{}` bounds", t.ident, ty.ident),
                                     true,
                                     &quote::quote!(#b),
                                 )
                             }
                             // A macro INVOCATION expands to items this walk can never see.
                             syn::TraitItem::Macro(m) => out.leaks.push(format!(
-                                "  {rel}: `Mailbox` contains a macro invocation (`{}!`) — trait \
+                                "  {rel}: `{}` contains a macro invocation (`{}!`) — trait \
                                  items must be written out, or this guard cannot see them",
+                                t.ident,
                                 m.mac.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
                             )),
                             _ => {}
@@ -2343,13 +2363,13 @@ keys:
                 Item::Impl(i) => {
                     let on_witness = mentions(&i.self_ty, WITNESS);
                     let trait_impl = i.trait_.is_some();
-                    // EXEMPTION: an `impl Mailbox for _` legitimately names the witness in every
-                    // method — that IS the port contract.
+                    // EXEMPTION: an `impl Mailbox for _` (or of the #510 supervision read port)
+                    // legitimately names the witness in every method — that IS the port contract.
                     let is_port_impl = i
                         .trait_
                         .as_ref()
                         .and_then(|(_, p, _)| p.segments.last())
-                        .is_some_and(|s| s.ident == "Mailbox");
+                        .is_some_and(|s| s.ident == "Mailbox" || s.ident == "MailboxLaneRepository");
                     if on_witness && trait_impl {
                         out.leaks.push(format!(
                             "  {rel}: a trait impl on the witness (`{}`) — `Default`, `From`, \
@@ -2647,6 +2667,12 @@ keys:
         }
 
         assert!(scan.saw_port_trait, "no `trait Mailbox` found — renamed? move this guard with it");
+        assert!(
+            scan.saw_lane_trait,
+            "no `trait MailboxLaneRepository` found in actor_client — the #510 supervision read \
+             port moved or was renamed; move this guard with it (it must live where the witness \
+             mint lives, or its methods cannot demand one)"
+        );
 
         // PHASE 2 (#306): the generated per-actor client crates are outside this crate, so the
         // compiler already makes the witness unmintable there. The scan still refuses to see it
@@ -2719,6 +2745,32 @@ keys:
              primitives (`by_message`, `cancel_scheduled`) is the dangerous shape: the entry's \
              private fields do NOT incidentally close it."
         );
+
+        // The #510 supervision READ port, same demand: both methods take the witness, so holding
+        // the `Arc<dyn MailboxLaneRepository>` (every GraphQL context does) is not holding the
+        // door — the only callable path is the two minting doors in `supervision.rs`.
+        assert_eq!(
+            scan.lane_methods.len(),
+            2,
+            "the MailboxLaneRepository port has {} methods, this guard expects 2 ({:?}). If you \
+             ADDED one, confirm it takes the witness and bump this number — the bump is the act \
+             of having looked. If it DROPPED, fix the scan rather than deleting it.",
+            scan.lane_methods.len(),
+            scan.lane_methods.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()
+        );
+        let lane_naked: Vec<&str> = scan
+            .lane_methods
+            .iter()
+            .filter(|(_, ok)| !ok)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(
+            lane_naked.is_empty(),
+            "these `MailboxLaneRepository` port methods take no `MailboxAccess` witness: \
+             {lane_naked:?}\n\nFix: add a `MailboxAccess` parameter — the port moved into \
+             actor_client (#510) precisely so it could make this demand; a witness-less method \
+             reopens the direct `inbound_messages` read for every port holder."
+        );
         assert!(
             scan.leaks.is_empty(),
             "the MailboxAccess witness leaks:\n{}\n\n\
@@ -2727,6 +2779,69 @@ keys:
              through the shared delegates in `crate::enqueue`. Why: ONE public route to a witness \
              reopens every method of the port for every crate in the workspace.",
             scan.leaks.join("\n")
+        );
+
+        // ── The WRITE half of the supervision pair (#510): `MailboxRequeue`, sealed IN PLACE. ──
+        // It stays in `application` (its one legitimate caller, the `requeue_mailbox_message`
+        // command handler, lives there — below actor_client on the dependency arrow), so its
+        // witness is a second, application-minted type. The same three properties are held, at
+        // the port's own home: every method takes the exact witness, the in-crate mint stays
+        // `pub(crate)`, and the only public mint is the fixtures-gated `for_tests`.
+        let app_rel = "crates/application/src/queries.rs";
+        let app_src = std::fs::read_to_string(root.join(app_rel)).expect("application queries.rs");
+        let app_file = syn::parse_file(&app_src)
+            .unwrap_or_else(|e| panic!("{app_rel} does not parse ({e}) — this guard reads the AST"));
+        fn is_exact_requeue_witness(ty: &syn::Type) -> bool {
+            let syn::Type::Path(p) = ty else { return false };
+            p.qself.is_none()
+                && p.path.segments.last().is_some_and(|s| {
+                    s.ident == "MailboxRequeueAccess"
+                        && matches!(s.arguments, syn::PathArguments::None)
+                })
+        }
+        let mut requeue_methods: Vec<(String, bool)> = Vec::new();
+        for item in &app_file.items {
+            let syn::Item::Trait(t) = item else { continue };
+            if t.ident != "MailboxRequeue" {
+                continue;
+            }
+            for ti in &t.items {
+                if let syn::TraitItem::Fn(f) = ti {
+                    requeue_methods.push((
+                        f.sig.ident.to_string(),
+                        f.sig.inputs.iter().any(|i| match i {
+                            syn::FnArg::Typed(pt) => is_exact_requeue_witness(&pt.ty),
+                            syn::FnArg::Receiver(_) => false,
+                        }),
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            requeue_methods.len(),
+            1,
+            "the MailboxRequeue port has {} methods, this guard expects 1 ({:?}) — same bump \
+             discipline as the Mailbox count above.",
+            requeue_methods.len(),
+            requeue_methods.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()
+        );
+        let requeue_naked: Vec<&str> = requeue_methods
+            .iter()
+            .filter(|(_, ok)| !ok)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(
+            requeue_naked.is_empty(),
+            "these `MailboxRequeue` port methods take no `MailboxRequeueAccess` witness: \
+             {requeue_naked:?}\n\nFix: add the parameter. Why: the flip is keyed by a bare \
+             Uuid, so without the witness any `CommandDeps`/ctx holder can requeue any row — \
+             the exact #304 shape, on the write side."
+        );
+        assert!(
+            app_src.contains("pub(crate) fn granted() -> Self"),
+            "the in-crate mint `MailboxRequeueAccess::granted()` is gone or widened — it must \
+             stay `pub(crate)`; widening it slides the write door from compiler-enforced to \
+             convention (#510)."
         );
     }
 
@@ -3071,6 +3186,10 @@ keys:
             ("crates/actor_client/src/enqueue.rs", "cancel_reminder", true, "test-only reference impl behind `test-fixtures`"),
             ("crates/actor_client/src/enqueue.rs", "schedule_reminder", true, "test-only reference impl behind `test-fixtures`"),
             ("crates/actor_client/src/mailbox.rs", "for_tests", true, "the D5 test-only witness mint, cfg-gated"),
+            // The #510 supervision READ doors: the generated ADMIN resolvers' only path to the
+            // lane/poison rows now that the port methods demand the witness.
+            ("crates/actor_client/src/supervision.rs", "mailbox_lanes", false, "the ADMIN mailboxLanes supervision read door (#510)"),
+            ("crates/actor_client/src/supervision.rs", "poisoned_messages", false, "the ADMIN poisonedMailboxMessages supervision read door (#315/#510)"),
         ];
         let is_door = |f: &FnNode| DOORS.iter().any(|(p, n, _, _)| *p == f.rel && *n == f.name);
         let is_ungated_door =
@@ -3603,6 +3722,15 @@ keys:
             client_manifest.contains("test-fixtures = []"),
             "actor_client no longer declares the `test-fixtures` feature — move this guard with it"
         );
+        // #510: `application` declares the same feature for the requeue-port witness's test mint
+        // (`MailboxRequeueAccess::for_tests`). Same rule, second declaring crate.
+        let application_manifest =
+            std::fs::read_to_string(root.join("crates/application/Cargo.toml"))
+                .expect("crates/application/Cargo.toml readable");
+        assert!(
+            application_manifest.contains("test-fixtures = []"),
+            "application no longer declares the `test-fixtures` feature — move this guard with it"
+        );
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -3629,8 +3757,9 @@ keys:
             let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
                 panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
             });
-            if rel == "crates/actor_client/Cargo.toml" {
-                continue; // the declaring crate itself
+            if rel == "crates/actor_client/Cargo.toml" || rel == "crates/application/Cargo.toml"
+            {
+                continue; // the declaring crates themselves (#510 added application)
             }
             let mut section = String::new();
             for line in src.lines() {

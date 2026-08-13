@@ -30,11 +30,12 @@ use domain::shared::errors::DomainError;
 use serde_json::json;
 use std::sync::Arc;
 
+use actor_client::supervision::{MailboxLaneRow, PoisonedMessageRow};
 use application::queries::{
     CartReadRepository, CartRow, CatalogReadRepository, CatalogRow, CustomerReadRepository,
     CustomerRow, DeliveryPartnerAvailabilityFilter, DeliveryPartnerAvailabilityRow,
-    DeliverySatisfactionRow, MailboxLaneRow, OrderConversationRow, OrderFilter,
-    PoisonedMessageRow, PricingPolicyRow, ProspectFilter, ProspectionPipelineRow,
+    DeliverySatisfactionRow, OrderConversationRow, OrderFilter,
+    PricingPolicyRow, ProspectFilter, ProspectionPipelineRow,
     ProspectionReadRepository, PricingPolicyReadRepository, ReadScope, ReclamationFilter,
     ReclamationRow, RefundFilter, RefundRow, RestaurantFilter, RestaurantReadRepository,
     RestaurantRow, UberEstimationPolicyReadRepository, UberEstimationPolicyRow,
@@ -423,14 +424,18 @@ impl application::queries::DeliverySatisfactionReadRepository for Empty {
     }
 }
 #[async_trait]
-impl application::queries::MailboxLaneRepository for Empty {
-    async fn list(&self) -> Result<Vec<MailboxLaneRow>, DomainError> {
+impl actor_client::supervision::MailboxLaneRepository for Empty {
+    async fn list(
+        &self,
+        _access: actor_client::mailbox::MailboxAccess,
+    ) -> Result<Vec<MailboxLaneRow>, DomainError> {
         Ok(vec![])
     }
     async fn poisoned(
         &self,
         _actor_type: Option<String>,
         _limit: i64,
+        _access: actor_client::mailbox::MailboxAccess,
     ) -> Result<Vec<PoisonedMessageRow>, DomainError> {
         Ok(vec![])
     }

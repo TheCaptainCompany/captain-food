@@ -24,6 +24,30 @@
 > spent, the architect's run report flips the flag back to `true` — executing the ADR, not a new
 > decision.
 
+> 🚪 **2026-08-13 — ONE JOURNAL, ONE DOOR IS NOW LEVEL 4 ON ALL THREE SURFACES** ([#510 "Follow-up
+> to #506: move the mailbox query ports behind a capability witness so a resolver cannot name
+> them"](https://github.com/TheCaptainCompany/captain-food/issues/510), PR
+> [#536](https://github.com/TheCaptainCompany/captain-food/pull/536)): the mailbox writes were
+> compiler-sealed by #304, the SPEC-side reads walled by #507's validator rules, and the last open
+> surface — the supervision QUERY ports — is now witness-gated too, **asymmetrically, because the
+> two ports' legitimate callers sit on opposite sides of the `actor_client → application` arrow**.
+> The READ port (`MailboxLaneRepository` + its two row types) MOVED to `actor_client::supervision`,
+> where its `list`/`poisoned` methods demand the existing `MailboxAccess(pub(crate) ())` witness;
+> the generated resolvers read through two declared door functions (`mailbox_lanes` /
+> `poisoned_messages`) that mint internally — the `operationStatus` shape. The WRITE port
+> (`MailboxRequeue`) SEALED IN PLACE in `application` behind a new `MailboxRequeueAccess`
+> witness minted only inside `requeue_mailbox_message`. The arbitration SQL moved byte-identical;
+> zero diff in `schema.generated.graphql`/`acl.rs`/`command_router.rs`; the dead resolver-side
+> half of `wired_mutation_dispatch` (pre-Runtime-D vestige) is deleted; `build_schema`'s ReadDeps
+> registration is now an exhaustive no-`..` destructure so a field added without a `.data()` call
+> is a lint at the site, not a 500 on the supervision screen (the #529 class). The
+> `every_mailbox_port_method_demands_the_access_witness` guard now covers both supervision ports.
+> **Honest residuals**: code INSIDE `application` can still mint the requeue witness (the crate is
+> the boundary, not the function); the `test-fixtures`-gated mints remain a deliberate test door
+> (CI-guarded out of release graphs); and `crates/server` still holds raw SQL over a pool — that is
+> [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)'s
+> half, untouched here.
+
 > 🔐 **2026-08-13 — A TOKEN MUST NOW PROVE THE PRODUCT, NOT ONLY THE PROVIDER** ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519),
 > [ADR-20260813-013211](adr/ADR-20260813-013211-a-token-must-prove-the-product-not-only-the-provider.md),
 > [SPEC-LOG row](SPEC-LOG.md)). The group is about to put every product behind ONE Supabase project,

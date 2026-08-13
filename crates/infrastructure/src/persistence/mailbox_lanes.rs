@@ -5,9 +5,9 @@
 //! numbers are a monitoring snapshot, not a serialized truth (the worker's completion transaction
 //! is the authority on a lane).
 
-use application::queries::{
-    MailboxLaneRepository, MailboxLaneRow, MailboxRequeue, PoisonedMessageRow, RequeueOutcome,
-};
+use actor_client::mailbox::MailboxAccess;
+use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow, PoisonedMessageRow};
+use application::queries::{MailboxRequeue, MailboxRequeueAccess, RequeueOutcome};
 use async_trait::async_trait;
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
@@ -44,7 +44,7 @@ fn decode_lane(row: &PgRow) -> Result<MailboxLaneRow, DomainError> {
 
 #[async_trait]
 impl MailboxLaneRepository for PgMailboxLaneRepository {
-    async fn list(&self) -> Result<Vec<MailboxLaneRow>, DomainError> {
+    async fn list(&self, _access: MailboxAccess) -> Result<Vec<MailboxLaneRow>, DomainError> {
         // LEFT JOIN LATERAL keeps the aggregate scan on the drain/scheduler partial indexes:
         // one indexed probe per lane rather than a full-table GROUP BY, so the page stays cheap
         // even while a backlog is large (which is exactly when someone is staring at it).
@@ -81,6 +81,7 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
         &self,
         actor_type: Option<String>,
         limit: i64,
+        _access: MailboxAccess,
     ) -> Result<Vec<PoisonedMessageRow>, DomainError> {
         // Same poison predicate as the lane counter above — the detail view behind it (#315).
         // Newest first: the row an operator is hunting is almost always the one that just paged.
@@ -136,6 +137,7 @@ impl MailboxRequeue for PgMailboxRequeue {
     async fn requeue_if_poisoned(
         &self,
         message_id: uuid::Uuid,
+        _access: MailboxRequeueAccess,
     ) -> Result<RequeueOutcome, DomainError> {
         // The arbitration IS the write: rows in any other state never match the predicate, so
         // there is nothing to race — a concurrent duplicate requeue simply finds RECEIVED below.
