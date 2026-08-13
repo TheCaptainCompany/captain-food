@@ -14,9 +14,12 @@ OtpSendIsGuardedByCountryAndBudget:
     An SMS OTP is sent ONLY to a dialing code on the served allowlist, ONLY within this number's
     per-hour and per-day allowance, and ONLY while the platform's global daily SMS ceiling has room;
     otherwise the request is refused with a typed reason and NOTHING is handed to the sender. The
-    allowlist is the economic control (premium-payout ranges are what makes SMS pumping profitable),
-    the global ceiling is the only control that bounds the TOTAL bill (an attacker rotates numbers),
-    and the guard is fail-closed — a number that cannot be parsed is refused, never sent.
+    global ceiling is the ECONOMIC control and the only one that bounds the TOTAL spend — an
+    attacker rotates numbers so per-number caps multiply, and a ceiling-capped day grosses an
+    attacker a few euros, which destroys the pumping economics for every range; the allowlist's job
+    is cost containment (never paying a premium destination rate for a message we never wanted)
+    plus refusing what we cannot serve; and the guard is fail-closed — a number that cannot be
+    parsed is refused, never sent.
 
     One phone number has ONE budget, whichever door asks and however the number is written:
     '0612345678', '00612345678' and '612345678' under '+33' share a single counter, and requesting a

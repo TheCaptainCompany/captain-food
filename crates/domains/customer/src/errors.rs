@@ -4,7 +4,7 @@
 
 use domain_common::errors::ErrorDef;
 
-/// The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the economic control against SMS pumping (premium-payout ranges are what makes the attack pay), which is why the refusal is fail-closed — an unparseable number lands here too, never on a send.
+/// The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.
 /// Context: `dialingCode`.
 pub const PHONE_COUNTRY_NOT_SERVED: ErrorDef = ErrorDef {
     code: "PhoneCountryNotServed",
