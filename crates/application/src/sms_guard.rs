@@ -2,16 +2,22 @@
 //!
 //! `requestPhoneVerification` takes no identity (a visitor has none yet) and every accepted send
 //! spends real money on OUR OVHcloud account (ADR-20260722-174500). That is precisely the shape
-//! SMS-pumping automates: drive OTP requests at premium-payout ranges the attacker shares revenue on,
-//! and the invoice arrives overnight. See ADR-20260813-021500 for the posture.
+//! SMS-pumping automates: drive OTP requests at premium-payout ranges the attacker shares revenue
+//! on. The account is a PREPAID credit pack (`specs/common/configuration.yaml`
+//! `OVH_SMS_SERVICE_NAME`: with no credits the credentials authenticate and the send still fails),
+//! so the failure mode is not an invoice — a burn night drains the pack, every OTP send then fails,
+//! nobody can sign up or sign in, and refilling is founder-gated: a phone-login outage of unknown
+//! duration. See ADR-20260813-021500 for the posture.
 //!
 //! Three guards doing three DIFFERENT jobs — none substitutes for another:
 //!
-//! 1. **The country allowlist** removes the attack's *economics*. There is no revenue share on a
-//!    French mobile. This is the control that matters most, and it is the cheapest.
-//! 2. **Per-number caps** (hour, day) with an escalating cooldown stop one number being pumped.
-//! 3. **The global daily ceiling** is the ONLY guard that bounds the total bill, because per-number
-//!    caps *multiply* under number rotation instead of limiting. It is a hard, loud stop.
+//! 1. **The global daily ceiling** is the ECONOMIC control and the only guard that bounds the total
+//!    spend, because per-number caps *multiply* under number rotation instead of limiting. At the
+//!    default 200/day an attacker's gross is a few euros and their revenue share a fraction of it,
+//!    so the ceiling alone destroys the pumping economics for every range. A hard, loud stop.
+//! 2. **The country allowlist** contains cost and refuses what we cannot serve — the served-country
+//!    decision made executable. Cheap and fail-closed; it is not what makes pumping unprofitable.
+//! 3. **Per-number caps** (hour, day) with an escalating cooldown stop one number being pumped.
 //!
 //! ## What lives here and what does not
 //!
@@ -38,15 +44,28 @@ use domain::shared::errors::DomainError;
 
 /// The default served dialing codes (`SMS_ALLOWED_DIALING_CODES`).
 ///
-/// `+33` is V0's traffic (Tours). The rest are on the list for an economic reason, not a political
-/// one: **pumping profit lives in high-payout ranges, and none of BE/CH/UK/DE/ES/IT/US is one.**
-/// Tours has international students and Loire-valley tourists — a real single-digit share of signups
-/// — so a `+33`-only list would refuse real customers while buying no additional protection.
+/// `+33` is V0's traffic (Tours); the rest cover Tours's international students and Loire-valley
+/// tourists — a real single-digit share of signups a `+33`-only list would refuse for no additional
+/// protection. **A calling code is not a destination.** Before widening this list, the question is
+/// what a send to EVERY territory the code reaches pays, because the attacker picks the territory
+/// and we pay its rate:
 ///
-/// Widening this is not a matter of taste: adding a code opens a spend path, and the question to
-/// answer first is what a send to that range PAYS an attacker.
+/// - `+1` is deliberately absent (#535): it reaches every NANP territory — twenty-odd Caribbean and
+///   Pacific jurisdictions with their own operators and rates, including the premium ranges this
+///   allowlist exists to exclude — all billed as if they were a Boston number. Serving North
+///   America is a market decision nobody has taken; if it ever is taken, the shape is region
+///   resolution via a libphonenumber-class dependency, never a hand-maintained NANP area-code table
+///   (NANPA reassigns codes several times a year, so a stale table refuses an innocent US customer
+///   with a new area code).
+/// - `+44` also reaches Guernsey, Jersey and the Isle of Man — separate telecom jurisdictions with
+///   their own operators, commonly rated apart from the GB mainland.
+/// - `+41` is a COST line rather than a fraud one: Swiss termination is among Europe's more
+///   expensive, which is a drain-rate item under a prepaid credit pack.
+/// - `+33` is clean BECAUSE the French overseas territories carry their own codes (`+262`, `+590`,
+///   `+596`, `+594`, `+687`, `+689`, `+508`) — DOM-TOM is already unreachable here and would be a
+///   separate deliberate addition.
 pub const DEFAULT_ALLOWED_DIALING_CODES: &[&str] =
-    &["+33", "+32", "+41", "+44", "+49", "+34", "+39", "+1"];
+    &["+33", "+32", "+41", "+44", "+49", "+34", "+39"];
 
 /// Sends allowed to ONE number per rolling hour (`SMS_MAX_SENDS_PER_NUMBER_PER_HOUR`). Three covers
 /// the real fumbling customer: one send plus one or two resends.
@@ -58,9 +77,10 @@ pub const DEFAULT_MAX_PER_NUMBER_PER_DAY: i32 = 5;
 /// repeats. Server-side: the client's resend countdown is a courtesy, never an enforcement point.
 pub const DEFAULT_BACKOFF_SECONDS: &[i64] = &[30, 120, 600];
 /// Platform-wide sends per rolling day (`SMS_MAX_SENDS_PER_DAY_GLOBAL`) — the kill switch and the
-/// only ceiling on the bill. A DELIBERATELY CONSERVATIVE GUESS: the per-message price of our OVH
-/// credit pack is recorded nowhere in this repository, so no ceiling here can be derived. Re-derive
-/// it from the real EUR/SMS once that price is known (ADR-20260813-021500).
+/// only ceiling on the spend. DERIVABLE, not a guess: OVH SMS France is €0.06 HT/SMS at 100
+/// credits, €0.058 at 1 000 (PROP-20260724-233605, founder-approved 2026-07-24,
+/// screenshot-confirmed), so 200/day is €12/day worst case France-rated. Still unknown: OVH's
+/// per-destination multipliers and which pack was actually purchased (ADR-20260813-021500).
 pub const DEFAULT_MAX_PER_DAY_GLOBAL: i32 = 200;
 
 /// One hour, in seconds.
@@ -535,11 +555,23 @@ mod tests {
         // Tours has international students and tourists: refusing these buys no protection, since
         // none of these ranges pays an attacker anything.
         let p = SmsSendPolicy::default();
-        for code in ["+33", "+32", "+41", "+44", "+49", "+34", "+39", "+1"] {
+        for code in ["+33", "+32", "+41", "+44", "+49", "+34", "+39"] {
             assert!(
                 p.authorize_recipient(&dc(code), &nn("612345678")).is_ok(),
                 "{code} must be served"
             );
+        }
+    }
+
+    #[test]
+    fn a_calling_code_is_not_a_destination_bare_plus_one_is_refused() {
+        // `+1` reaches every NANP territory — including the premium-payout Caribbean ranges this
+        // allowlist exists to exclude — all billed as if they were a Boston number, so the DEFAULT
+        // list does not serve it (#535). Serving North America is a market decision, not a default.
+        let p = SmsSendPolicy::default();
+        match p.authorize_recipient(&dc("+1"), &nn("6175551234")) {
+            Err(SmsRefusal::CountryNotServed { dialing_code }) => assert_eq!(dialing_code, "+1"),
+            other => panic!("expected +1 to be refused as not served, got {other:?}"),
         }
     }
 

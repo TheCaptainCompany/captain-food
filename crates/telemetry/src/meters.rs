@@ -316,9 +316,13 @@ pub mod otp_send {
     /// configuration: the attacker chooses the dialing code, so labelling it verbatim would let them
     /// mint unbounded time series — a metrics-cost incident driven from an anonymous endpoint.
     /// Everything else collapses to `other`, which is all an operator needs; the specific range
-    /// belongs on the span.
-    const LABELLED_DIALING_CODES: &[&str] =
-        &["+33", "+32", "+41", "+44", "+49", "+34", "+39", "+1"];
+    /// belongs on the span. This set MUST match the served default
+    /// (`application::sms_guard::DEFAULT_ALLOWED_DIALING_CODES`): a label for a code that cannot be
+    /// served is a series that can never move, and a served code without a label is invisible.
+    /// Known cost, owed and recorded in ADR-20260813-021500 (#535): every refused `+1` now collapses
+    /// into `other`, so the North American refusal cohort is unmeasurable until an
+    /// observed-but-not-served label set exists.
+    const LABELLED_DIALING_CODES: &[&str] = &["+33", "+32", "+41", "+44", "+49", "+34", "+39"];
 
     fn dialing_code_label(dialing_code: &str) -> &'static str {
         LABELLED_DIALING_CODES
