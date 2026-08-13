@@ -2,6 +2,33 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔐 **2026-08-13 — A TOKEN MUST NOW PROVE THE PRODUCT, NOT ONLY THE PROVIDER** ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519),
+> [ADR-20260813-013211](adr/ADR-20260813-013211-a-token-must-prove-the-product-not-only-the-provider.md),
+> [SPEC-LOG row](SPEC-LOG.md)). The group is about to put every product behind ONE Supabase project,
+> which retires the two separators the verifier leaned on — `aud` is the constant every Supabase user
+> of every project carries, and `iss` becomes identical across siblings. Three fixes, all with tests
+> seen RED first:
+> - **Issuer is mandatory, and the compiler holds it.** `AuthContext` carries one
+>   `Option<Verifier { jwks_url: String, issuer: String }>` with a single constructor, so *"no issuer
+>   ⇒ skip the issuer check"* — previously reachable whenever `SUPABASE_URL` resolved empty, which is
+>   exactly the configuration in which a **staging token verified in production** — is not a state the
+>   type can hold. Unset now REFUSES: `503` on every role path, anonymous on `/public`.
+> - **Roles fail closed.** `parse_role` returns `Option`; absent or unrecognised grants NOTHING. The
+>   old `_ => Customer` catch-all is what would have landed a sibling product's user on
+>   `/customer/graphql` as an authenticated customer.
+> - **A positive product check.** All claims move under `app_metadata.captain_food = { role,
+>   customer_id, restaurant_id, restaurant_account_id, rider_id }` — nested rather than renamed
+>   because Supabase merges `app_metadata` SHALLOWLY, so one owned key is what another product's write
+>   cannot reach into. A token without that object is refused. **No read-side tolerance for the flat
+>   shape** (Q-L3: no real phone-verified end user; the only producers were the smoke script, updated
+>   here, and the test suite).
+> - **⚠️ STILL OWED, and NOT code**: `specs/common/configuration.yaml` still points staging and
+>   production at the SAME Supabase project (`zcshlzhiinwmpzujuiep`). This change removes the
+>   fail-open half of that risk, not the shared-project half — splitting them is a founder/provisioning
+>   action. Also unchanged: no OTP rate limit ([#516](https://github.com/TheCaptainCompany/captain-food/issues/516)),
+>   and `public_credential_degraded_total{reason=role_not_customer}` now covers two populations
+>   pending [#517](https://github.com/TheCaptainCompany/captain-food/issues/517).
+
 > 🔐 **2026-08-13 — IDENTITY: SUPABASE AUTH IS RETAINED FOR V0, AND THE WINDOW TO OWN IDENTITY CLOSES
 > AT THE FIRST REAL ORDER** (founder directive + ten-lens mob;
 > [ADR-20260813-004634](adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md),

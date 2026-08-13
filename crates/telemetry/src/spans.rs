@@ -280,7 +280,7 @@ pub fn record_authorized(span: &Span, authorized: bool) {
 
 /// `claims.stamp` (CLIENT) — the customer claim stamp onto the auth provider's user
 /// (`customer-identification` contract, #437): the admin GET+PUT inside the identity ACL that
-/// writes `captain_customer_id` + `captain_role` at phone verification. Emitted by the ACL, so it
+/// writes `app_metadata.captain_food` = `{ role, customer_id }` at phone verification. Emitted by the ACL, so it
 /// nests under the ambient verify-flow span and shares its trace/correlation.
 ///
 /// `business.result` (stamped | failed) and `otel.status_code` are late-bound: the outcome is only

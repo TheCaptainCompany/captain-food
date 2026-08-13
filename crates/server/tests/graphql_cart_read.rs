@@ -823,9 +823,13 @@ async fn jwks_endpoint() -> String {
     format!("http://{addr}/jwks")
 }
 
+/// OUR identity project. `iss` is MANDATORY since #519 -- this fixture used to mint tokens with no
+/// `iss` at all, against a verifier built with an empty `SUPABASE_URL`.
+const TEST_SUPABASE_URL: &str = "https://captain-under-test.supabase.co";
+
 /// The credential a signed-in storefront customer's browser actually sends: a Supabase-shaped JWT
-/// whose `sub` is the auth subject and whose `app_metadata.captain_customer_id` is the DOMAIN id —
-/// two DIFFERENT uuids, so an implementation deriving identity from `sub` cannot pass.
+/// whose `sub` is the auth subject and whose `app_metadata.captain_food.customer_id` is the DOMAIN
+/// id — two DIFFERENT uuids, so an implementation deriving identity from `sub` cannot pass.
 fn signed_customer_jwt(sub: uuid::Uuid, customer: uuid::Uuid) -> String {
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some("captain-test-es256".into());
@@ -837,8 +841,9 @@ fn signed_customer_jwt(sub: uuid::Uuid, customer: uuid::Uuid) -> String {
     let claims = json!({
         "sub": sub.to_string(),
         "aud": "authenticated",
+        "iss": format!("{TEST_SUPABASE_URL}/auth/v1"),
         "exp": exp,
-        "app_metadata": { "captain_role": "CUSTOMER", "captain_customer_id": customer.to_string() },
+        "app_metadata": { "captain_food": { "role": "CUSTOMER", "customer_id": customer.to_string() } },
     });
     let key = jsonwebtoken::EncodingKey::from_ec_pem(TEST_EC_PRIVATE_KEY_PEM.as_bytes())
         .expect("test EC key parses");
@@ -915,7 +920,10 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
         None,
     );
     server::graphql_routes(schema, server::TenantLookup(Some(restaurants)))
-        .layer(axum::Extension(server::AuthContext::from_config(jwks_endpoint().await, String::new())))
+        .layer(axum::Extension(server::AuthContext::from_config(
+            jwks_endpoint().await,
+            TEST_SUPABASE_URL.into(),
+        )))
 }
 
 /// `POST /public/graphql` as the storefront sends it: the anonymous role path, the `captain_auth`

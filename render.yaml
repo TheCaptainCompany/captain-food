@@ -68,7 +68,7 @@ services:
       - key: SUPABASE_JWKS_URL
         sync: false
       # Pre-shared service tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047),
-      # comma-separated. Optional — unset means only a Supabase JWT (captain_role EXTERNAL) reaches /external.
+      # comma-separated. Optional — unset means only a Supabase JWT (captain_food.role EXTERNAL) reaches /external.
       - key: EXTERNAL_API_TOKENS
         sync: false
       # Stripe webhook signing secret (`whsec_…`) for `POST /adapters/stripe/webhooks` signature verification

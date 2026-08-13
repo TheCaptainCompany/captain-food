@@ -215,7 +215,7 @@ keys:
     gates: >
       Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin
       `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT
-      /auth/v1/admin/users/{authRef} writing `captain_customer_id` + `captain_role` at phone
+      /auth/v1/admin/users/{authRef} writing `app_metadata.captain_food` = `{ role, customer_id }` at phone
       verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED
       (verification stands, but the session is never rotated or parked, so login degrades to a
       fresh-OTP retry once configured — an unstamped token is never parked). Never used on the
@@ -325,7 +325,7 @@ keys:
     secret: true
     gates: >
       Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047).
-      Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
+      Unset, only a Supabase JWT with `captain_food.role` EXTERNAL reaches /external.
     deploy:
       from_secret:
         production: EXTERNAL_API_TOKENS

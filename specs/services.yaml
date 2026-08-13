@@ -163,9 +163,14 @@ identity:
     stamp_customer_claim:
       description: >
         Write the customer domain claims onto the provider-side auth user identified by `authRef`
-        (#437 — the paying customer's session must carry the claim): sets `captain_customer_id`
-        AND `captain_role` together. The provider merges claim metadata SHALLOWLY, so callers
-        always send BOTH keys in one write — a single-key write silently drops the sibling claim.
+        (#437 — the paying customer's session must carry the claim): sets `app_metadata.captain_food`
+        = `{ role: CUSTOMER, customer_id }`, both keys together. Every claim of ours lives INSIDE
+        that one product-owned object (#519), because the provider merges claim metadata SHALLOWLY:
+        one owned key means a sibling product sharing the identity project cannot touch our claims,
+        and — the reason it matters — the object's ABSENCE is what proves a token was not minted for
+        this product, once `iss` and `aud` are identical across the group. The merge therefore
+        REPLACES our object wholesale, so callers always send it complete in one write — a
+        single-key write silently drops the sibling claim.
         Idempotent on redelivery: a no-op when the stamped id already equals the target; a
         DIFFERENT already-stamped customer id is a hard error, never an overwrite. FAIL-CLOSED on
         the credential: without the admin secret (SUPABASE_SECRET_KEY) the operation errors — it

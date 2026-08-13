@@ -201,7 +201,7 @@ pub struct Config {
     pub auth_session_key: String,
     /// Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
     pub supabase_sms_hook_secret: Option<String>,
-    /// Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT /auth/v1/admin/users/{authRef} writing `captain_customer_id` + `captain_role` at phone verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED (verification stands, but the session is never rotated or parked, so login degrades to a fresh-OTP retry once configured — an unstamped token is never parked). Never used on the anon OTP flows, which keep SUPABASE_PUBLISHABLE_KEY; never sent to any client.
+    /// Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT /auth/v1/admin/users/{authRef} writing `app_metadata.captain_food` = `{ role, customer_id }` at phone verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED (verification stands, but the session is never rotated or parked, so login degrades to a fresh-OTP retry once configured — an unstamped token is never parked). Never used on the anon OTP flows, which keep SUPABASE_PUBLISHABLE_KEY; never sent to any client.
     pub supabase_secret_key: Option<String>,
     /// Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export.
     pub honeycomb_api_key: Option<String>,
@@ -213,7 +213,7 @@ pub struct Config {
     pub otel_traces_sample_ratio: String,
     /// Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default.
     pub log_level: String,
-    /// Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047). Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
+    /// Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047). Unset, only a Supabase JWT with `captain_food.role` EXTERNAL reaches /external.
     pub external_api_tokens: Option<String>,
     /// Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`). Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for its hourly poll instead of starting in seconds.
     pub internal_trigger_token: Option<String>,

@@ -4008,7 +4008,7 @@ mod verify_phone_claim_stamp_tests {
         let payload: serde_json::Value =
             serde_json::from_slice(&bytes).expect("parked JWT payload is JSON");
         assert_eq!(
-            payload["app_metadata"]["captain_customer_id"],
+            payload["app_metadata"]["captain_food"]["customer_id"],
             serde_json::json!(outcome.customer_id.0.to_string()),
             "the parked token must carry the resolved customer's claim \
              (stamp BEFORE rotate; park ONLY the rotated token)"

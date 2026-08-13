@@ -135,7 +135,7 @@ async fn graphql_handler(
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
     // Authn/authz at the path boundary (ADR-0047): /public is open; every other path needs a valid
-    // Supabase JWT whose `captain_role` matches this path — so the role is now VERIFIED, not merely
+    // Supabase JWT whose `captain_food.role` matches this path — so the role is now VERIFIED, not merely
     // self-asserted by the URL. On success we inject BOTH the RequestRole — read by the generated
     // guard/visible ACL bindings that enforce per-field authz + filter introspection (ADR-0006) — and the
     // verified Principal (identity for resolvers).

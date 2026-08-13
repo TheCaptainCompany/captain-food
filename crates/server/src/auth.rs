@@ -3,10 +3,22 @@
 //!
 //! `/public/graphql` is open. Every other role path requires a valid Supabase **JWT**
 //! (`Authorization: Bearer <token>`), verified against the project's **public** keys fetched from
-//! `SUPABASE_JWKS_URL` — the signing secret never touches this server. The verified token yields a
-//! [`Principal`]; the request's path role must equal the principal's `app_metadata.captain_role`
-//! (absent ⇒ CUSTOMER), else `403`. Missing/invalid token on a non-public path ⇒ `401`; if JWKS is
-//! unreachable we **fail closed** (`503`) rather than allow.
+//! `SUPABASE_JWKS_URL` — the signing secret never touches this server. Missing/invalid token on a
+//! non-public path ⇒ `401`; if the verifier is unconfigured or JWKS is unreachable we **fail closed**
+//! (`503`) rather than allow.
+//!
+//! **What a token must PROVE (#519), in order — every step is necessary and none is skippable:**
+//! 1. **signature**, against a key from our JWKS, asymmetric only;
+//! 2. **`iss`**, equal to `{SUPABASE_URL}/auth/v1`. Mandatory: with no issuer configured there is no
+//!    [`Verifier`] at all and the path answers `503`. There is no "skip the check" state left to be
+//!    in — see [`Verifier`] for why that is a type property rather than a branch;
+//! 3. **`aud`**, `authenticated` — a shape check only. Every Supabase user of every project carries
+//!    it, so it is evidence of nothing about who minted the token;
+//! 4. **`app_metadata.captain_food`**, present, carrying a role this product recognises. This is the
+//!    only separator that survives ONE identity project serving several products of a group: at that
+//!    point `iss`, `aud` and the signing key are identical across siblings, and a token with no
+//!    Captain Food claims is a stranger's — refused (`403`), never defaulted to CUSTOMER;
+//! 5. the granted role must **equal the path role**, else `403`.
 //!
 //! **Open is not credential-blind (#469).** `/public` also READS whatever credential the request
 //! carries, because the storefront IS the open path (`web::router` pins the customer surfaces to
@@ -55,8 +67,23 @@ const JWKS_FAILURE_BACKOFF: Duration = Duration::from_secs(10);
 /// — the price is that a token signed with a brand-new key can be refused for at most this long
 /// after the key appears, which is bounded and self-healing; the alternative is not.
 const JWKS_ROTATION_REFETCH_MIN_INTERVAL: Duration = Duration::from_secs(5);
-/// Supabase issues user tokens with this audience.
+/// Supabase issues user tokens with this audience — and so does every OTHER Supabase project, for
+/// every one of its users. It is a shape check, not a proof of anything: keep validating it (a token
+/// that is not a user token is still refused), but never treat it as evidence about WHICH product or
+/// environment minted the token. That job belongs to [`Verifier::issuer`] and, once one identity
+/// project serves several products, to [`ProductClaims`] (#519).
 const SUPABASE_AUDIENCE: &str = "authenticated";
+
+// The `app_metadata` key holding THIS product's claims is `captain_food`, declared once by the ACL
+// that WRITES it (`infrastructure::integrations::supabase_auth::PRODUCT_CLAIM_KEY`). Supabase merges
+// `app_metadata` SHALLOWLY (`specs/services.yaml`), which is why the claims are NESTED under one
+// product-owned object rather than renamed as a set of flat `captain_*` keys: the merge sees one key,
+// and it is this one.
+//
+// `serde` needs a literal for the field name, so the reader spells it out and its agreement with the
+// writer's constant is proved by `tests::the_verifier_reads_what_the_claim_stamp_writes` — the two
+// sit in different crates with no shared type, and a transposition between them would otherwise
+// first surface as a production smoke timeout.
 
 /// The authenticated caller injected into the GraphQL context: ONE private field, an [`Identity`],
 /// with the role and its domain binding travelling together.
@@ -99,7 +126,7 @@ enum Identity {
     /// an anonymous browser reads.
     Anonymous,
     /// A machine caller on `/external`: the pre-shared service token (no subject) or a Supabase
-    /// token whose `captain_role` is EXTERNAL.
+    /// token whose `captain_food.role` is EXTERNAL.
     External { sub: Option<String> },
     /// Platform staff. ADMIN carries no domain binding — its scope IS the role.
     Admin { sub: String },
@@ -136,8 +163,8 @@ impl Principal {
     /// **Escalation is unspellable here by CONSTRUCTION**: the only identity this constructor can
     /// produce is [`Identity::Customer`], which has room for the customer claim and for nothing
     /// else — there is no `restaurant_id` to set, correctly or otherwise. A token carrying
-    /// `captain_restaurant_id` cannot leak a `ReadScope::Restaurant` onto the one path everyone can
-    /// reach, whatever the caller sends, and a non-CUSTOMER `captain_role` never reaches this
+    /// `captain_food.restaurant_id` cannot leak a `ReadScope::Restaurant` onto the one path everyone
+    /// can reach, whatever the caller sends, and a non-CUSTOMER role never reaches this
     /// constructor at all (see [`AuthContext::public_principal`], which degrades it to
     /// [`Principal::anonymous`]). The principal's role is who the caller IS; the per-field ACL keeps
     /// running against the PATH role (`RequestRole::Public`), injected separately, so this widens no
@@ -154,16 +181,17 @@ impl Principal {
 
     /// The verified principal of a ROLE path (`/customer`, `/restaurant`, `/rider`, …): the claim
     /// that MATCHES the path role becomes the identity, and every other claim in the token is
-    /// dropped rather than carried along. A `/restaurant` token's `captain_customer_id` was never
+    /// dropped rather than carried along. A `/restaurant` token's `captain_food.customer_id` was never
     /// read by anything — now it cannot even be held.
     ///
     /// `path_role` has already been checked equal to the token's granted role by
     /// [`AuthContext::authorize`]. `Public` cannot arrive here (the open path returns before), and
     /// maps to the anonymous identity if it ever did — fail closed, never a silent elevation.
     ///
-    /// Module-private (not even `pub(crate)`): it takes the token's raw `app_metadata`, so the only
-    /// caller that can reach it is the verifier that produced them.
-    fn role_path(path_role: RequestRole, sub: String, meta: &AppMetadata) -> Self {
+    /// Module-private (not even `pub(crate)`): it takes THIS PRODUCT's verified claim object, and
+    /// the only thing that yields one is [`AppMetadata::grant`] — so a caller cannot reach this
+    /// constructor with a token that proved no Captain Food role (#519).
+    fn role_path(path_role: RequestRole, sub: String, claims: &ProductClaims) -> Self {
         let bind = |claim: &Option<String>, f: fn(String, uuid::Uuid) -> Identity| match claim_uuid(
             claim,
         ) {
@@ -173,19 +201,19 @@ impl Principal {
         let identity = match path_role {
             RequestRole::Admin => Identity::Admin { sub },
             RequestRole::External => Identity::External { sub: Some(sub) },
-            RequestRole::Customer => bind(&meta.captain_customer_id, |sub, customer_id| {
+            RequestRole::Customer => bind(&claims.customer_id, |sub, customer_id| {
                 Identity::Customer { sub, customer_id }
             }),
-            RequestRole::Restaurant => bind(&meta.captain_restaurant_id, |sub, restaurant_id| {
+            RequestRole::Restaurant => bind(&claims.restaurant_id, |sub, restaurant_id| {
                 Identity::Restaurant { sub, restaurant_id }
             }),
             RequestRole::RestaurantAccount => {
-                bind(&meta.captain_restaurant_account_id, |sub, restaurant_account_id| {
+                bind(&claims.restaurant_account_id, |sub, restaurant_account_id| {
                     Identity::RestaurantAccount { sub, restaurant_account_id }
                 })
             }
             RequestRole::Rider => {
-                bind(&meta.captain_rider_id, |sub, rider_id| Identity::Rider { sub, rider_id })
+                bind(&claims.rider_id, |sub, rider_id| Identity::Rider { sub, rider_id })
             }
             RequestRole::Public => Identity::Anonymous,
         };
@@ -260,28 +288,70 @@ struct Claims {
     app_metadata: AppMetadata,
 }
 
+/// The provider's `app_metadata` bag, of which we read exactly ONE key (#519).
+///
+/// Everything else in there belongs to the provider or to a sibling product of the group, and this
+/// type deliberately cannot see it: a claim that is not inside [`PRODUCT_CLAIM`] is not a claim
+/// about us. That is also why the pre-#519 flat `captain_*` keys need no read-side tolerance —
+/// there is nowhere for them to land.
 #[derive(Debug, Default, Deserialize)]
 struct AppMetadata {
+    /// **The positive product proof.** Absent ⇒ the token belongs to some other product (or predates
+    /// the nesting), and no amount of valid signature, issuer or audience turns it into a principal
+    /// here. The field name IS the wire key [`PRODUCT_CLAIM_KEY`].
     #[serde(default)]
-    captain_role: Option<String>,
-    /// The single location a RESTAURANT principal acts for (#144). Server-controlled `app_metadata`,
-    /// exactly like `captain_role` — not user-editable, so it is trustworthy without a DB lookup.
+    captain_food: Option<ProductClaims>,
+}
+
+/// Captain Food's own claims — the object Supabase's shallow `app_metadata` merge treats as ONE
+/// value, so a write of ours replaces it wholesale and a sibling product's write cannot reach into
+/// it. Server-controlled (the admin-key stamp, `identity.stamp_customer_claim`), never user-editable,
+/// which is what makes them trustworthy without a per-request database lookup.
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
+struct ProductClaims {
+    /// The role this token acts as. Parsed by [`parse_role`], which FAILS CLOSED: absent or
+    /// unrecognised is no role at all, never a CUSTOMER baseline.
     #[serde(default)]
-    captain_restaurant_id: Option<String>,
+    role: Option<String>,
+    /// The single location a RESTAURANT principal acts for (#144).
+    #[serde(default)]
+    restaurant_id: Option<String>,
     /// The account a RESTAURANT_ACCOUNT principal acts for (#144) — a chain's manager reaches every
     /// location under it. This is why the two roles exist as distinct UserTypes rather than one
     /// restaurant role with a multiplicity problem.
     #[serde(default)]
-    captain_restaurant_account_id: Option<String>,
+    restaurant_account_id: Option<String>,
     /// The CUSTOMER's domain id (#433) — stamped when the Customer is registered/resolved
-    /// (verifyPhone), never user-editable. Replaces the per-request `auth_ref` bridge for read
-    /// scope; a token without it fails closed to Public.
+    /// (verifyPhone). Replaces the per-request `auth_ref` bridge for read scope; a token without it
+    /// fails closed to Public.
     #[serde(default)]
-    captain_customer_id: Option<String>,
+    customer_id: Option<String>,
     /// The RIDER's domain id (#433) — minted by the #415 per-person rider onboarding. Until that
     /// lands no rider token carries it, and rider reads fail closed.
     #[serde(default)]
-    captain_rider_id: Option<String>,
+    rider_id: Option<String>,
+}
+
+/// What a verified token PROVES about this product: a role that parsed, travelling with the claim
+/// object it came from. There is no constructor that yields a grant without a role, so
+/// "authenticated, role unknown, treat as customer" is not a value anybody downstream can be handed
+/// — [`Principal::role_path`] takes a `&ProductClaims` that only [`AppMetadata::grant`] produces.
+struct Grant<'a> {
+    role: RequestRole,
+    claims: &'a ProductClaims,
+}
+
+impl AppMetadata {
+    /// The ONE place a verified token becomes a grant, and the only gate between `/{role}/graphql`
+    /// and an authenticated principal. `None` means the token proves nothing about Captain Food:
+    /// either it carries no [`PRODUCT_CLAIM`] object (a sibling product's user under a shared
+    /// identity project, or a pre-#519 flat-claims token), or the object carries no role we
+    /// recognise. Both are refusals, never defaults.
+    fn grant(&self) -> Option<Grant<'_>> {
+        let claims = self.captain_food.as_ref()?;
+        let role = parse_role(claims.role.as_deref()?)?;
+        Some(Grant { role, claims })
+    }
 }
 
 struct CachedJwks {
@@ -289,14 +359,58 @@ struct CachedJwks {
     fetched: Instant,
 }
 
-/// Verifier state: the JWKS endpoint, the expected audience/issuer, an HTTP client, the cached key set,
+/// **The verification contract, as ONE value** (#519): the JWKS endpoint that supplies the signing
+/// keys AND the issuer those keys are trusted to have signed for.
+///
+/// Both halves are `String`, not `Option<String>`, and the pair is constructed only by
+/// [`Verifier::new`]. That is the whole point: BEFORE #519 the issuer was an `Option` derived from a
+/// possibly-empty `SUPABASE_URL`, and `verify` read it as *"`Some` ⇒ check it, `None` ⇒ skip"* — so
+/// the fail-open configuration was not a bug in a branch, it was a state the type permitted. A
+/// verifier that skips issuer validation is now unspellable: there is no `None` to take that branch,
+/// [`Verifier::validation`] is the only `Validation` this module builds, and it always sets both the
+/// issuer and the audience. With the configuration absent, the whole verifier is absent and every
+/// role path answers `503` — refusing, not skipping.
+struct Verifier {
+    jwks_url: String,
+    /// `{SUPABASE_URL}/auth/v1` — the `iss` a token must carry. Necessary and, under a group-wide
+    /// identity project, NOT sufficient: sibling products share it, which is why
+    /// [`AppMetadata::grant`] exists.
+    issuer: String,
+}
+
+impl Verifier {
+    /// The only constructor: both halves present and non-empty, or no verifier at all. Empty is
+    /// unset — a resolved `Config` supplies `""` for a key with no baked value and no env override.
+    fn new(jwks_url: String, supabase_url: String) -> Option<Self> {
+        let jwks_url = Some(jwks_url).filter(|s| !s.is_empty())?;
+        let issuer = Some(supabase_url)
+            .filter(|s| !s.is_empty())
+            .map(|u| format!("{}/auth/v1", u.trim_end_matches('/')))?;
+        Some(Self { jwks_url, issuer })
+    }
+
+    /// The only [`Validation`] built in this module, so "forgot to set the issuer" is not an edit a
+    /// call site can make. `exp` is validated by default; `set_issuer` also makes `iss` a REQUIRED
+    /// claim, so a token that simply omits it is refused rather than passing vacuously.
+    fn validation(&self, alg: Algorithm) -> Validation {
+        let mut validation = Validation::new(alg);
+        validation.set_audience(&[SUPABASE_AUDIENCE]);
+        validation.set_issuer(&[self.issuer.as_str()]);
+        validation
+    }
+}
+
+/// Verifier state: the JWKS endpoint + expected issuer, an HTTP client, the cached key set,
 /// and the pre-shared EXTERNAL service tokens (machine callers to `/external`).
 pub struct AuthContext {
-    jwks_url: Option<String>,
-    issuer: Option<String>,
+    /// `None` ⇒ this process cannot verify a token at all: `/public` degrades to anonymous and every
+    /// role path returns `503`. It is one field rather than two because a JWKS URL without an issuer
+    /// is not a weaker verifier, it is a verifier that cannot tell one project's tokens from
+    /// another's.
+    verifier: Option<Verifier>,
     /// Pre-shared secrets for EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs), presented via the
     /// `X-External-Api-Key` header. Loaded from `EXTERNAL_API_TOKENS` (comma-separated). Empty ⇒ no
-    /// service-token access to `/external` (a Supabase JWT with captain_role EXTERNAL still works).
+    /// service-token access to `/external` (a Supabase JWT with a Captain Food EXTERNAL role still works).
     external_tokens: Vec<String>,
     http: reqwest::Client,
     cache: RwLock<Option<CachedJwks>>,
@@ -322,21 +436,25 @@ impl AuthContext {
     /// baked into the digest, not set as a Render env var — the same trap `263f2a2` fixed for the smoke
     /// script. `EXTERNAL_API_TOKENS` stays an env read: it is a **secret**, delivered by CI into the
     /// service environment, and carries no baked value.
+    ///
+    /// **Both are now required together** (#519): `SUPABASE_URL` is not an optional refinement of
+    /// `SUPABASE_JWKS_URL`, it is half of the same contract, and both are already
+    /// `required: [staging, production]` in `specs/common/configuration.yaml`.
     pub fn from_config(jwks_url: String, supabase_url: String) -> Arc<Self> {
-        let jwks_url = Some(jwks_url).filter(|s| !s.is_empty());
-        let issuer = Some(supabase_url)
-            .filter(|s| !s.is_empty())
-            .map(|u| format!("{}/auth/v1", u.trim_end_matches('/')));
-        if jwks_url.is_none() {
-            tracing::warn!("SUPABASE_JWKS_URL resolved empty -- non-public GraphQL paths will return 503 (fail closed)");
+        let verifier = Verifier::new(jwks_url, supabase_url);
+        if verifier.is_none() {
+            tracing::warn!(
+                "SUPABASE_JWKS_URL and/or SUPABASE_URL resolved empty -- token verification is \
+                 DISABLED and non-public GraphQL paths will return 503 (fail closed). An unset \
+                 issuer never means 'skip the issuer check' (#519)."
+            );
         }
         let external_tokens: Vec<String> = std::env::var("EXTERNAL_API_TOKENS")
             .ok()
             .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
             .unwrap_or_default();
         Arc::new(Self {
-            jwks_url,
-            issuer,
+            verifier,
             external_tokens,
             http: jwks_client(),
             cache: RwLock::new(None),
@@ -347,7 +465,7 @@ impl AuthContext {
 
     /// Authorize a request for `path_role`. `/public` is always allowed and NEVER fails — it reads
     /// whatever credential is present and degrades to anonymous ([`Self::public_principal`]); every
-    /// other path requires a valid bearer token whose `captain_role` equals `path_role`.
+    /// other path requires a valid bearer token whose `captain_food.role` equals `path_role`.
     pub async fn authorize(&self, path_role: RequestRole, headers: &HeaderMap) -> Result<Principal, AuthError> {
         if path_role == RequestRole::Public {
             return Ok(self.public_principal(headers).await);
@@ -355,7 +473,7 @@ impl AuthContext {
         // EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs) present a pre-shared service token via
         // the `X-External-Api-Key` header instead of a user JWT. If a key header is present it is
         // authoritative (valid → allow, invalid → reject); if absent we fall through to JWT verification,
-        // so a Supabase user carrying captain_role EXTERNAL still works.
+        // so a Supabase user carrying a Captain Food EXTERNAL role still works.
         if path_role == RequestRole::External {
             if let Some(key) = headers.get("x-external-api-key").and_then(|v| v.to_str().ok()) {
                 return if self.external_key_valid(key) {
@@ -367,14 +485,16 @@ impl AuthContext {
         }
         let session_token = token(headers).ok_or(AuthError::Unauthorized)?;
         let claims = self.verify(session_token).await?;
-        let granted = claims
-            .app_metadata
-            .captain_role
-            .as_deref()
-            .map(parse_role)
-            .unwrap_or(RequestRole::Customer);
-        if role_permitted(path_role, granted) {
-            Ok(Principal::role_path(path_role, claims.sub, &claims.app_metadata))
+        // A verified token is not yet OUR token (#519). Under one identity project per product group
+        // the signature, the issuer and the audience are all identical across siblings, so the grant
+        // — the presence of a `captain_food` object carrying a role we recognise — is the separator.
+        // Absent ⇒ 403: the credential is genuine, it simply is not a credential for this product,
+        // and re-authenticating would not change that (which is what a 401 would invite).
+        let Some(grant) = claims.app_metadata.grant() else {
+            return Err(AuthError::Forbidden);
+        };
+        if role_permitted(path_role, grant.role) {
+            Ok(Principal::role_path(path_role, claims.sub, grant.claims))
         } else {
             Err(AuthError::Forbidden)
         }
@@ -396,7 +516,7 @@ impl AuthContext {
     ///   path, and elevating here would turn a dead claim leg into privilege escalation on the one
     ///   path anyone can reach. Staff lose nothing — their surfaces talk to `/restaurant`,
     ///   `/rider`, `/admin`, which are unchanged.
-    /// - **the CUSTOMER token carries no `captain_customer_id`** — `claim_absent` (reviewer S3).
+    /// - **the CUSTOMER token carries no `captain_food.customer_id`** — `claim_absent` (reviewer S3).
     ///   This is the KNOWN LIMITATION recorded on [`Principal`]: a token minted BEFORE the claim
     ///   stamp, i.e. every signed-in customer for one token lifetime after rollout. Such a caller
     ///   resolves to `ReadScope::Public` whichever way it is spelled — no cart, no ownership match,
@@ -425,20 +545,21 @@ impl AuthContext {
                 return Principal::anonymous();
             }
         };
-        let granted = claims
-            .app_metadata
-            .captain_role
-            .as_deref()
-            .map(parse_role)
-            .unwrap_or(RequestRole::Customer);
-        if granted != RequestRole::Customer {
+        // `role_not_customer` covers the whole population "the credential does not prove a Captain
+        // Food CUSTOMER" — a staff token, AND (since #519) a token that proves no Captain Food role
+        // at all: no `captain_food` object, or one whose role we do not recognise. From `/public`'s
+        // point of view these are one outcome and one action (serve the anonymous view), and folding
+        // them keeps the contract's `reason` set bounded as declared. Telling a sibling product's
+        // token apart from our own staff's in telemetry is #517's job, not this counter's.
+        let Some(grant) = claims.app_metadata.grant().filter(|g| g.role == RequestRole::Customer)
+        else {
             telemetry::meters::read_authorization::public_credential_degraded("role_not_customer");
             return Principal::anonymous();
-        }
+        };
         // No domain claim (or a malformed one) = nothing this path can act on: serve anonymous and
         // count it here, so the pre-claim-stamp window is a visible degrade rather than a
         // provisioning-gap alarm on every storefront request.
-        let Some(customer_id) = claim_uuid(&claims.app_metadata.captain_customer_id) else {
+        let Some(customer_id) = claim_uuid(&grant.claims.customer_id) else {
             telemetry::meters::read_authorization::public_credential_degraded("claim_absent");
             return Principal::anonymous();
         };
@@ -446,20 +567,19 @@ impl AuthContext {
     }
 
     /// Verify a JWT's signature (asymmetric, key + algorithm from the JWKS) and reserved claims.
+    ///
+    /// The [`Verifier`] is taken FIRST: with none configured there is nothing to verify against, so
+    /// this returns `Unavailable` (`503` on a role path, a counted degrade on `/public`) rather than
+    /// verifying a token with part of the contract switched off.
     async fn verify(&self, token: &str) -> Result<Claims, AuthError> {
+        let verifier = self.verifier.as_ref().ok_or(AuthError::Unavailable)?;
         let header = decode_header(token).map_err(|_| AuthError::Unauthorized)?;
         let kid = header.kid.ok_or(AuthError::Unauthorized)?;
         let jwk = self.key_for(&kid).await?;
         let alg = asymmetric_alg(&jwk, header.alg).ok_or(AuthError::Unauthorized)?;
         let key = DecodingKey::from_jwk(&jwk).map_err(|_| AuthError::Unauthorized)?;
 
-        let mut validation = Validation::new(alg);
-        validation.set_audience(&[SUPABASE_AUDIENCE]);
-        if let Some(iss) = &self.issuer {
-            validation.set_issuer(&[iss]);
-        }
-        // `exp` is validated by default.
-        decode::<Claims>(token, &key, &validation)
+        decode::<Claims>(token, &key, &verifier.validation(alg))
             .map(|data| data.claims)
             .map_err(|_| AuthError::Unauthorized)
     }
@@ -529,7 +649,7 @@ impl AuthContext {
     /// costs everyone else nothing — the difference between a degraded storefront and a 3-s-per-
     /// request storefront on a Friday evening.
     async fn refresh(&self) -> Result<(), AuthError> {
-        let url = self.jwks_url.as_deref().ok_or(AuthError::Unavailable)?;
+        let url = self.verifier.as_ref().map(|v| v.jwks_url.as_str()).ok_or(AuthError::Unavailable)?;
         let arrived = Instant::now();
         let _flight = self.refresh_lock.lock().await;
         // Someone else's fetch completed while we queued: it IS our fetch.
@@ -651,17 +771,24 @@ fn is_asymmetric(alg: Algorithm) -> bool {
     !matches!(alg, Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512)
 }
 
-/// Map a `captain_role` claim to a role. Unknown/absent ⇒ CUSTOMER (least-privilege authenticated baseline).
-fn parse_role(s: &str) -> RequestRole {
-    match s.trim().to_ascii_uppercase().as_str() {
+/// Map a `captain_food.role` claim to a role — **failing closed** (#519). Unknown, empty or
+/// unrecognised is `None`: NO role, never a CUSTOMER baseline.
+///
+/// The old catch-all (`_ => CUSTOMER`, called "the least-privilege authenticated baseline") was
+/// least-privilege only among roles we issue. It is not a baseline at all for a token from a
+/// DIFFERENT product of the group, which carries no role of ours and would have landed on
+/// `/customer/graphql` as an authenticated customer. `PUBLIC` is deliberately absent from the table:
+/// the open path is reached without a credential, never granted by one.
+fn parse_role(s: &str) -> Option<RequestRole> {
+    Some(match s.trim().to_ascii_uppercase().as_str() {
         "ADMIN" => RequestRole::Admin,
         "CUSTOMER" => RequestRole::Customer,
         "RESTAURANT" => RequestRole::Restaurant,
         "RESTAURANT_ACCOUNT" => RequestRole::RestaurantAccount,
         "RIDER" => RequestRole::Rider,
         "EXTERNAL" => RequestRole::External,
-        _ => RequestRole::Customer,
-    }
+        _ => return None,
+    })
 }
 
 /// A caller granted `granted` may act on the `path_role` path. Strict equality: an ADMIN token must use
@@ -672,15 +799,22 @@ fn role_permitted(path_role: RequestRole, granted: RequestRole) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use infrastructure::integrations::supabase_auth::PRODUCT_CLAIM_KEY;
+
     use super::*;
 
     #[test]
-    fn claim_maps_to_role_with_customer_default() {
-        assert_eq!(parse_role("ADMIN"), RequestRole::Admin);
-        assert_eq!(parse_role("admin"), RequestRole::Admin);
-        assert_eq!(parse_role("RESTAURANT_ACCOUNT"), RequestRole::RestaurantAccount);
-        assert_eq!(parse_role("EXTERNAL"), RequestRole::External);
-        assert_eq!(parse_role("nonsense"), RequestRole::Customer);
+    fn claim_maps_to_role_and_anything_else_maps_to_nothing() {
+        assert_eq!(parse_role("ADMIN"), Some(RequestRole::Admin));
+        assert_eq!(parse_role("admin"), Some(RequestRole::Admin));
+        assert_eq!(parse_role("RESTAURANT_ACCOUNT"), Some(RequestRole::RestaurantAccount));
+        assert_eq!(parse_role("EXTERNAL"), Some(RequestRole::External));
+        // #519: fail CLOSED. The old catch-all was `_ => CUSTOMER`, which turned every unrecognised
+        // string — including one from a product that has never heard of us — into a customer.
+        assert_eq!(parse_role("nonsense"), None);
+        assert_eq!(parse_role(""), None);
+        assert_eq!(parse_role("  "), None);
+        assert_eq!(parse_role("PUBLIC"), None, "the open path is reached, never granted");
     }
 
     #[test]
@@ -744,10 +878,20 @@ mod tests {
         Instant::now().checked_sub(JWKS_TTL * 2).unwrap_or_else(Instant::now)
     }
 
+    /// A verifier whose JWKS fetch can only FAIL: loopback port 9 (discard) refuses instantly and
+    /// resolves no DNS, so `refresh()` is a local no-op error. It replaces the pre-#519
+    /// `jwks_url: None`, which expressed the same intent by way of a state the type no longer has —
+    /// and which was also how every fixture ended up issuer-blind.
+    fn unfetchable_verifier() -> Verifier {
+        Verifier::new("http://127.0.0.1:9/jwks".into(), TEST_SUPABASE_URL.into())
+            .expect("both halves present")
+    }
+
     fn ctx_with_cache(set: JwkSet, fetched: Instant) -> AuthContext {
         AuthContext {
-            jwks_url: None, // any refresh() therefore fails — proves we never hit the network on a cache hit
-            issuer: None,
+            // A refresh therefore fails — proving we never hit the network on a cache hit — while the
+            // ISSUER is real, so these fixtures verify `iss` exactly as production does.
+            verifier: Some(unfetchable_verifier()),
             external_tokens: Vec::new(),
             http: reqwest::Client::new(),
             cache: RwLock::new(Some(CachedJwks { set, fetched })),
@@ -758,8 +902,7 @@ mod tests {
 
     fn ctx_with_external(tokens: &[&str]) -> AuthContext {
         AuthContext {
-            jwks_url: None,
-            issuer: None,
+            verifier: None,
             external_tokens: tokens.iter().map(|t| t.to_string()).collect(),
             http: reqwest::Client::new(),
             cache: RwLock::new(None),
@@ -778,14 +921,21 @@ mod tests {
             "https://example.test/jwks.json".into(),
             "https://proj.supabase.co/".into(),
         );
-        assert_eq!(ctx.jwks_url.as_deref(), Some("https://example.test/jwks.json"));
+        let v = ctx.verifier.as_ref().expect("both halves present -> a verifier");
+        assert_eq!(v.jwks_url, "https://example.test/jwks.json");
         // issuer is derived from supabase_url, trailing slash trimmed.
-        assert_eq!(ctx.issuer.as_deref(), Some("https://proj.supabase.co/auth/v1"));
+        assert_eq!(v.issuer, "https://proj.supabase.co/auth/v1");
 
-        // Empty resolved values (e.g. profile with no baked value and no env) → fail closed, no issuer.
-        let empty = AuthContext::from_config(String::new(), String::new());
-        assert!(empty.jwks_url.is_none(), "empty JWKS URL must yield no verifier (fail closed)");
-        assert!(empty.issuer.is_none());
+        // #519: the two halves are ONE contract. Either one missing ⇒ no verifier at all, so every
+        // role path fails closed — an issuer-less verifier is not a state this type can be in.
+        for (case, jwks, url) in [
+            ("both empty", "", ""),
+            ("no JWKS URL", "", "https://proj.supabase.co"),
+            ("no SUPABASE_URL", "https://example.test/jwks.json", ""),
+        ] {
+            let ctx = AuthContext::from_config(jwks.into(), url.into());
+            assert!(ctx.verifier.is_none(), "{case}: must yield no verifier (fail closed)");
+        }
     }
 
     #[test]
@@ -865,7 +1015,7 @@ mod tests {
     async fn concurrent_cold_requests_cost_exactly_one_jwks_fetch() {
         use std::sync::atomic::Ordering;
         let (url, hits) = counting_jwks(false).await;
-        let ctx = AuthContext::from_config(url, String::new());
+        let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
 
         let mut tasks = tokio::task::JoinSet::new();
         for _ in 0..50 {
@@ -885,7 +1035,7 @@ mod tests {
     async fn a_failed_fetch_is_not_re_attempted_by_the_next_request() {
         use std::sync::atomic::Ordering;
         let (url, hits) = counting_jwks(true).await;
-        let ctx = AuthContext::from_config(url, String::new());
+        let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
 
         for _ in 0..5 {
             assert!(ctx.key_for("captain-test-es256").await.is_err(), "a down JWKS fails closed");
@@ -900,7 +1050,7 @@ mod tests {
     async fn an_unknown_kid_cannot_drive_a_fetch_per_request() {
         use std::sync::atomic::Ordering;
         let (url, hits) = counting_jwks(false).await;
-        let ctx = AuthContext::from_config(url, String::new());
+        let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
 
         for _ in 0..10 {
             assert!(ctx.key_for("forged-kid").await.is_err(), "an unknown kid fails closed");
@@ -935,14 +1085,14 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
 
     /// Sign a Supabase-shaped customer JWT: `sub` is the AUTH subject (deliberately a different
     /// uuid from the claim — an implementation deriving identity from `sub` cannot pass), the
-    /// domain identity is `app_metadata.captain_customer_id` (#433/#437).
+    /// domain identity is `app_metadata.captain_food.customer_id` (#433/#437, nested by #519).
     fn signed_customer_jwt(sub: &str, customer_id: uuid::Uuid) -> String {
         signed_jwt(
             sub,
-            serde_json::json!({
-                "captain_role": "CUSTOMER",
-                "captain_customer_id": customer_id.to_string(),
-            }),
+            captain_food_claims(
+                "CUSTOMER",
+                serde_json::json!({ "customer_id": customer_id.to_string() }),
+            ),
             3600,
         )
     }
@@ -950,7 +1100,10 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
     /// OUR identity project, as the tests' `iss`. Before #519 the fixtures minted tokens with **no
     /// `iss` claim at all** and every context carried `issuer: None`, so the whole suite was
     /// issuer-blind BY CONSTRUCTION: not one assertion could have noticed that issuer validation
-    /// was optional.
+    /// was optional. `TEST_ISSUER` is written out rather than derived, and pinned equal to what
+    /// [`Verifier::new`] derives from `TEST_SUPABASE_URL` in
+    /// [`an_unset_issuer_refuses_every_role_path_instead_of_skipping_the_check`].
+    const TEST_SUPABASE_URL: &str = "https://captain-under-test.supabase.co";
     const TEST_ISSUER: &str = "https://captain-under-test.supabase.co/auth/v1";
     /// A DIFFERENT project on the same provider — the sibling product sharing the group's identity
     /// project, or staging pointed at production's. Same signing key on purpose: the signature is
@@ -1052,13 +1205,15 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
             // wholesale instead of constructing a customer-only principal, this is what would leak.
             let jwt = signed_jwt(
                 &sub,
-                serde_json::json!({
-                    "captain_role": role,
-                    "captain_restaurant_id": tenant.to_string(),
-                    "captain_restaurant_account_id": tenant.to_string(),
-                    "captain_rider_id": tenant.to_string(),
-                    "captain_customer_id": tenant.to_string(),
-                }),
+                captain_food_claims(
+                    role,
+                    serde_json::json!({
+                        "restaurant_id": tenant.to_string(),
+                        "restaurant_account_id": tenant.to_string(),
+                        "rider_id": tenant.to_string(),
+                        "customer_id": tenant.to_string(),
+                    }),
+                ),
                 3600,
             );
             let principal = ctx
@@ -1079,7 +1234,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         }
     }
 
-    /// #469, reviewer S3: a verified CUSTOMER token with NO `captain_customer_id` — the
+    /// #469, reviewer S3: a verified CUSTOMER token with NO `captain_food.customer_id` — the
     /// pre-claim-stamp window, which is EVERY signed-in customer for one token lifetime after
     /// rollout — degrades to anonymous and is counted as `claim_absent`, rather than becoming a
     /// `role: Customer, customer_id: None` principal.
@@ -1096,10 +1251,10 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         let sub = uuid::Uuid::from_u128(0xA3).to_string();
 
         for (case, app_metadata) in [
-            ("claim absent", serde_json::json!({ "captain_role": "CUSTOMER" })),
+            ("claim absent", captain_food_claims("CUSTOMER", serde_json::json!({}))),
             (
                 "claim malformed",
-                serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": "not-a-uuid" }),
+                captain_food_claims("CUSTOMER", serde_json::json!({ "customer_id": "not-a-uuid" })),
             ),
         ] {
             let jwt = signed_jwt(&sub, app_metadata, 3600);
@@ -1121,16 +1276,17 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         }
     }
 
-    /// #469, reviewer N1: `parse_role`'s catch-all (`_ => CUSTOMER`, the least-privilege
-    /// authenticated baseline) is reached by an UNKNOWN role string and by an ABSENT `captain_role`
-    /// — two branches the loop in `a_staff_token_on_the_open_path_stays_anonymous` cannot cover,
-    /// because it enumerates the five explicit non-CUSTOMER roles. Pinned so that an edit to that
-    /// arm cannot silently change what the open path grants.
+    /// #469 reviewer N1, **INVERTED by #519**. `parse_role`'s catch-all is reached by an UNKNOWN
+    /// role string and by an ABSENT one — two branches `a_staff_token_on_the_open_path_stays_anonymous`
+    /// cannot cover, because it enumerates the five explicit non-CUSTOMER roles.
     ///
-    /// The documented outcome: such a caller is treated as a CUSTOMER and gets THEIR OWN customer
-    /// scope — never a tenant one, even though the token carries every tenant claim.
+    /// It used to read `_ => CUSTOMER` and this test pinned the resulting *"least-privilege
+    /// authenticated baseline"*: such a caller got their own customer scope. That default is exactly
+    /// the #519 defect — it is a baseline only among roles WE issue, and it silently adopted any
+    /// token that verified. Same two branches, opposite expectation: **no role is no principal**,
+    /// even though this token carries every domain claim there is.
     #[tokio::test]
-    async fn an_unknown_or_absent_role_claim_is_the_customer_baseline_never_a_tenant_scope() {
+    async fn an_unknown_or_absent_role_claim_grants_nothing_not_even_the_customer_baseline() {
         let ctx = ctx_with_cache(signing_set(), Instant::now());
         let sub = uuid::Uuid::from_u128(0xA4).to_string();
         let customer = uuid::Uuid::from_u128(0x469C);
@@ -1138,15 +1294,15 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
 
         let with_claims = |role: Option<&str>| {
             let mut meta = serde_json::json!({
-                "captain_customer_id": customer.to_string(),
-                "captain_restaurant_id": tenant.to_string(),
-                "captain_restaurant_account_id": tenant.to_string(),
-                "captain_rider_id": tenant.to_string(),
+                "customer_id": customer.to_string(),
+                "restaurant_id": tenant.to_string(),
+                "restaurant_account_id": tenant.to_string(),
+                "rider_id": tenant.to_string(),
             });
             if let Some(role) = role {
-                meta["captain_role"] = serde_json::json!(role);
+                meta["role"] = serde_json::json!(role);
             }
-            meta
+            serde_json::json!({ "captain_food": meta })
         };
 
         for (case, role) in
@@ -1158,16 +1314,18 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 .await
                 .unwrap_or_else(|_| panic!("{case}: the open path must never refuse"));
             assert_eq!(
-                read_scope(&principal),
-                application::queries::ReadScope::Customer(
-                    domain::generated::scalars::CustomerId(customer)
-                ),
-                "{case}: the catch-all is the CUSTOMER baseline -- the caller's OWN scope"
+                principal.identity,
+                Identity::Anonymous,
+                "{case}: an unrecognised role is NOT the customer baseline"
             );
             assert_eq!(
-                principal.identity,
-                Identity::Customer { sub: sub.clone(), customer_id: customer },
-                "{case}: no tenant claim survives -- the identity has nowhere to put one"
+                read_scope(&principal),
+                application::queries::ReadScope::Public,
+                "{case}: no scope -- neither the caller's own nor a tenant one"
+            );
+            assert!(
+                ctx.authorize(RequestRole::Customer, &cookie_headers(&jwt)).await.is_err(),
+                "{case}: and the role path refuses outright"
             );
         }
     }
@@ -1185,7 +1343,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         // 1. EXPIRED — the stale cookie of a customer who left the tab open overnight.
         let expired = signed_jwt(
             &sub,
-            serde_json::json!({ "captain_role": "CUSTOMER", "captain_customer_id": customer.to_string() }),
+            captain_food_claims("CUSTOMER", serde_json::json!({ "customer_id": customer.to_string() })),
             -3600,
         );
         // 2. TAMPERED — a flipped payload byte, i.e. a forged claim.
@@ -1209,8 +1367,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         //    during a Supabase outage): still anonymous, still 200. `/public` worked with no JWKS
         //    at all before this change and must keep working.
         let no_verifier = AuthContext {
-            jwks_url: None,
-            issuer: None,
+            verifier: None,
             external_tokens: Vec::new(),
             http: jwks_client(),
             cache: RwLock::new(None),
@@ -1224,7 +1381,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         assert_eq!(principal.identity, Identity::Anonymous);
 
         // 4. NO credential at all: anonymous without touching the verifier (the cost of anonymous
-        //    browsing is unchanged — `jwks_url: None` here means any fetch attempt would fail, and
+        //    browsing is unchanged — no verifier here means any fetch attempt would fail, and
         //    the assertion above it would too).
         let anonymous = no_verifier
             .authorize(RequestRole::Public, &HeaderMap::new())
@@ -1399,6 +1556,39 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         }
     }
 
+    /// **The writer and the reader agree, proved on the writer's actual output.** The claim stamp
+    /// lives in `infrastructure` and the verifier here; nothing but this test connects them, and a
+    /// key renamed on one side would otherwise be discovered by a production smoke timeout —
+    /// customers logging in to a session that verifies as a stranger's.
+    ///
+    /// It also pins the NESTING, not just the names: the very same claims one level up are a
+    /// stranger's metadata (asserted in `app_metadata_claims_deserialize_and_malformed_uuids_fail_closed`).
+    #[test]
+    fn the_verifier_reads_what_the_claim_stamp_writes() {
+        let customer = uuid::Uuid::from_u128(0x437);
+        let body = infrastructure::integrations::supabase_auth::stamp_put_body(
+            &domain::generated::scalars::CustomerId(customer),
+        );
+        let claims: Claims = serde_json::from_value(serde_json::json!({
+            "sub": "auth-subject",
+            "app_metadata": body["app_metadata"],
+        }))
+        .expect("the stamped metadata is a Supabase-shaped claims payload");
+
+        let grant = claims.app_metadata.grant().expect("the stamp yields a grant");
+        assert_eq!(grant.role, RequestRole::Customer, "the stamp hardcodes CUSTOMER");
+        assert_eq!(
+            claim_uuid(&grant.claims.customer_id),
+            Some(customer),
+            "the stamped domain id is the one the verifier binds"
+        );
+        assert_eq!(
+            body["app_metadata"].get(PRODUCT_CLAIM_KEY).and_then(|v| v.get("role")),
+            Some(&serde_json::json!("CUSTOMER")),
+            "and the wire key is the one constant both crates name"
+        );
+    }
+
     /// **Role parsing fails CLOSED.** An absent or unrecognised role grants nothing — it does not
     /// fall back to CUSTOMER. The token below carries a perfectly good `customer_id`, so the only
     /// thing standing between it and a customer session is the role check.
@@ -1525,24 +1715,22 @@ mod read_scope_tests {
 
     use super::*;
 
-    /// A role-path principal built the way `authorize()` builds one — the verified `sub` plus the
-    /// token's `app_metadata`. Nothing here reaches inside the type: since the identity is a single
+    /// A role-path principal built the way `authorize()` builds one — the verified `sub` plus this
+    /// product's claim object. Nothing here reaches inside the type: since the identity is a single
     /// private value, a test CANNOT hand-assemble a role/claim pair the constructor would refuse,
     /// which is the guarantee the previous field-bag shape could not give.
     fn principal(role: RequestRole, sub: &str, claim: Option<uuid::Uuid>) -> Principal {
         let claim = claim.map(|c| c.to_string());
-        let meta = match role {
-            RequestRole::Customer => AppMetadata { captain_customer_id: claim, ..Default::default() },
-            RequestRole::Rider => AppMetadata { captain_rider_id: claim, ..Default::default() },
-            RequestRole::Restaurant => {
-                AppMetadata { captain_restaurant_id: claim, ..Default::default() }
-            }
+        let claims = match role {
+            RequestRole::Customer => ProductClaims { customer_id: claim, ..Default::default() },
+            RequestRole::Rider => ProductClaims { rider_id: claim, ..Default::default() },
+            RequestRole::Restaurant => ProductClaims { restaurant_id: claim, ..Default::default() },
             RequestRole::RestaurantAccount => {
-                AppMetadata { captain_restaurant_account_id: claim, ..Default::default() }
+                ProductClaims { restaurant_account_id: claim, ..Default::default() }
             }
-            _ => AppMetadata::default(),
+            _ => ProductClaims::default(),
         };
-        Principal::role_path(role, sub.to_string(), &meta)
+        Principal::role_path(role, sub.to_string(), &claims)
     }
 
     /// The pure claims function, per role. The load-bearing data shape (beck): `sub` and the claim
@@ -1595,16 +1783,16 @@ mod read_scope_tests {
     }
 
     /// The claim that does NOT match the path role is dropped at construction, not merely ignored
-    /// downstream (#469 review round 2). A `/restaurant` token carrying `captain_customer_id` used
-    /// to keep it on the principal; now the RESTAURANT identity has nowhere to put it.
+    /// downstream (#469 review round 2). A `/restaurant` token carrying `customer_id` used to keep
+    /// it on the principal; now the RESTAURANT identity has nowhere to put it.
     #[test]
     fn a_role_path_principal_keeps_only_the_claim_of_its_own_role() {
-        let every_claim = AppMetadata {
-            captain_role: Some("RESTAURANT".into()),
-            captain_restaurant_id: Some(uuid::Uuid::from_u128(11).to_string()),
-            captain_restaurant_account_id: Some(uuid::Uuid::from_u128(12).to_string()),
-            captain_customer_id: Some(uuid::Uuid::from_u128(13).to_string()),
-            captain_rider_id: Some(uuid::Uuid::from_u128(14).to_string()),
+        let every_claim = ProductClaims {
+            role: Some("RESTAURANT".into()),
+            restaurant_id: Some(uuid::Uuid::from_u128(11).to_string()),
+            restaurant_account_id: Some(uuid::Uuid::from_u128(12).to_string()),
+            customer_id: Some(uuid::Uuid::from_u128(13).to_string()),
+            rider_id: Some(uuid::Uuid::from_u128(14).to_string()),
         };
         let p = Principal::role_path(RequestRole::Restaurant, "sub".into(), &every_claim);
         assert_eq!(
@@ -1614,29 +1802,48 @@ mod read_scope_tests {
         assert_eq!(read_scope(&p), ReadScope::Restaurant(RestaurantId(uuid::Uuid::from_u128(11))));
     }
 
-    /// The serde seam the pure test cannot reach: a misspelled `captain_*` field name would
-    /// silently deserialize to `None` -> Public everywhere, and the first detector would be a
-    /// production smoke timeout. All four keys pinned; a malformed uuid claim fails closed.
+    /// The serde seam the pure test cannot reach: a misspelled claim field name would silently
+    /// deserialize to `None` -> Public everywhere, and the first detector would be a production
+    /// smoke timeout. All five keys pinned, INSIDE the product object; a malformed uuid claim fails
+    /// closed. The nesting is pinned too (#519): the same keys at the TOP level of `app_metadata`
+    /// are a stranger's metadata, and must deserialize to no grant at all.
     #[test]
     fn app_metadata_claims_deserialize_and_malformed_uuids_fail_closed() {
         let meta: AppMetadata = serde_json::from_str(
             r#"{
-                "captain_role": "CUSTOMER",
-                "captain_restaurant_id": "00000000-0000-0000-0000-000000000001",
-                "captain_restaurant_account_id": "00000000-0000-0000-0000-000000000002",
-                "captain_customer_id": "00000000-0000-0000-0000-000000000003",
-                "captain_rider_id": "00000000-0000-0000-0000-000000000004"
+                "provider": "phone",
+                "captain_food": {
+                    "role": "CUSTOMER",
+                    "restaurant_id": "00000000-0000-0000-0000-000000000001",
+                    "restaurant_account_id": "00000000-0000-0000-0000-000000000002",
+                    "customer_id": "00000000-0000-0000-0000-000000000003",
+                    "rider_id": "00000000-0000-0000-0000-000000000004"
+                }
             }"#,
         )
         .expect("app_metadata blob");
-        assert_eq!(claim_uuid(&meta.captain_restaurant_id), Some(uuid::Uuid::from_u128(1)));
-        assert_eq!(claim_uuid(&meta.captain_restaurant_account_id), Some(uuid::Uuid::from_u128(2)));
-        assert_eq!(claim_uuid(&meta.captain_customer_id), Some(uuid::Uuid::from_u128(3)));
-        assert_eq!(claim_uuid(&meta.captain_rider_id), Some(uuid::Uuid::from_u128(4)));
+        let grant = meta.grant().expect("a CUSTOMER role parses into a grant");
+        assert_eq!(grant.role, RequestRole::Customer);
+        assert_eq!(claim_uuid(&grant.claims.restaurant_id), Some(uuid::Uuid::from_u128(1)));
+        assert_eq!(claim_uuid(&grant.claims.restaurant_account_id), Some(uuid::Uuid::from_u128(2)));
+        assert_eq!(claim_uuid(&grant.claims.customer_id), Some(uuid::Uuid::from_u128(3)));
+        assert_eq!(claim_uuid(&grant.claims.rider_id), Some(uuid::Uuid::from_u128(4)));
 
         // Garbage never widens into an identity — indistinguishable from absent, by design.
         assert_eq!(claim_uuid(&Some("not-a-uuid".into())), None);
         assert_eq!(claim_uuid(&None), None);
+
+        // The pre-#519 FLAT shape, and a sibling product's object: neither is a grant. Supabase
+        // merges `app_metadata` shallowly, so the flat keys genuinely survive next to ours on an
+        // already-stamped auth user — this is what keeps them inert rather than authoritative.
+        for stranger in [
+            r#"{"captain_role":"ADMIN","captain_customer_id":"00000000-0000-0000-0000-000000000003"}"#,
+            r#"{"other_product":{"role":"ADMIN"}}"#,
+            r#"{}"#,
+        ] {
+            let meta: AppMetadata = serde_json::from_str(stranger).expect("app_metadata blob");
+            assert!(meta.grant().is_none(), "no captain_food object is no grant: {stranger}");
+        }
     }
 
     // #430's `an_empty_resolver_degrades_to_public` is DELETED deliberately: its premise (a
