@@ -7,9 +7,19 @@ held confirm-or-correct question on [PR #541, the PR realizing this ADR](https:/
 the founder answered, verbatim: **"Continue the work enforcement and split"** (2026-08-13; relayed
 ~14:05Z, container clock 16:51Z when this resolution was recorded). The provenance chain is
 therefore complete: verbatim antecedent 2026-08-12 → labeled elaboration in the 2026-08-13 resume
-prompt → verbatim confirmation 2026-08-13. (The hold as originally recorded: the harness's
-provenance check flagged the elaborated phrasing below, and the verbatim antecedent alone was
-judged sufficient to draft but not to merge a gate-weakening change.) Amends
+prompt → verbatim confirmation 2026-08-13. On the page the quote needs its referents: *"the
+enforcement"* and *"the split"* are the founder's own vocabulary from his message earlier the same
+day — verbatim: *"I'm going to swimming pool for 2h, work without me on the enforcement or the
+split"* (2026-08-13, ~10:00Z) — where they name
+[#510, the mailbox-ports enforcement](https://github.com/TheCaptainCompany/captain-food/issues/510)
+(his "finish the command journal removal") and the eleven-database storage split
+([#509](https://github.com/TheCaptainCompany/captain-food/issues/509)/[#513](https://github.com/TheCaptainCompany/captain-food/issues/513)/[#514](https://github.com/TheCaptainCompany/captain-food/issues/514)).
+So the confirmation reads "continue the work [on the] enforcement and [the] split" — the two
+chunks blocked at that moment solely by this gate's exit 2. The alternative parse — "keep
+enforcing the cap" — was considered and is excluded both by the 2026-08-12 antecedent ("Don't
+care about the budget right now understood?") and by that same-day usage. (The hold as originally
+recorded: the harness's provenance check flagged the elaborated phrasing below, and the verbatim
+antecedent alone was judged sufficient to draft but not to merge a gate-weakening change.) Amends
 [ADR-0014 "Weekly time budget for autonomous loops"](0014-weekly-loop-budget.md) for a bounded
 period; does not supersede it — the billing machinery, the append-only ledger and every integrity
 refusal of [ADR-20260812-011057](ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md)
