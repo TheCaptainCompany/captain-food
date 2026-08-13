@@ -85,12 +85,28 @@ and out of this change's scope. Reported, not silently absorbed.
 
 ### 5. Compiler first: an unguarded send is unspellable
 
-`OvhSmsClient::send` takes an `AuthorizedSmsRecipient` whose field is private to
+`OvhSmsClient::send` takes an `AuthorizedSmsRecipient` **by value**, whose field is private to
 `crate::sms_authorization` and which has no public constructor. The only way to obtain one is
 `SmsSendAuthorizer::authorize`, which claims the budget first. A caller holding a phone number and a
 message has **no path to the sender**. "Someone added a second call site and forgot the guard" is a
 type error, not a review finding — which matters because this money path already has more than one
-door. Verified by attempting the bypass: `error[E0624]: method 'send_authorized' is private`.
+door.
+
+Two properties, and **each needed its own mutant**, because the first one alone is not the guarantee:
+
+| Property | Mutant planted | `rustc` says |
+|---|---|---|
+| **Unforgeable** — no witness without a claim | call `send_authorized` directly, skipping the guard | `error[E0624]: method 'send_authorized' is private` |
+| **One claim, one send** — a witness is spent by sending | `let _ = sms.send(recipient, &message).await;` immediately before the real `sms.send(recipient, …)` | `error[E0382]: use of moved value: 'recipient'` … `move occurs because 'recipient' has type 'AuthorizedSmsRecipient', which does not implement the 'Copy' trait` / `value used here after move` |
+
+The second row is a **correction recorded on purpose**, because the first form of this decision got it
+wrong. `send` originally took `&AuthorizedSmsRecipient`, and the argument for one-claim-one-send was
+that the type is not `Clone`. That argument is false for a shared reference: `for _ in 0..1000 {
+sms.send(&w, m) }` compiles against a `&`-borrow and spends a thousand messages on one claim of quota
+— the budget bypassed by a loop, which is precisely the property the witness exists to provide. A
+missing `Clone` impl cannot stop that; only consuming the value can. So the rule is **move, not
+`Clone`**, and adding a `&` to any signature taking this type re-opens the hole. The lesson generalises
+past this file: *"not `Clone`"* bounds how many witnesses exist, never how many times one is used.
 
 ### 6. The counter is SHARED, and it is one atomic statement
 
@@ -128,7 +144,15 @@ to a Belgian visitor is an accusation aimed at someone who did nothing wrong.
   by the per-number caps (3/hour, 5/day — a customer who burns five has a delivery problem no sixth
   SMS fixes).
 - **Zero refusals reads identically to "the limiter is off"** — the inverted dead-man's switch. Hence
-  `otp_send_guard_enforcing`, recorded at composition.
+  `otp_send_guard_enforcing`, an **observable** gauge: its callback is invoked by the SDK on every
+  collection cycle, so the value is re-asserted by construction and stops being emitted the moment the
+  process dies. A synchronous `record` at composition would have been the defect wearing the fix's
+  name — it says "the guard was wired when this process booted" and then says nothing again, so the
+  series goes flat-`1` and stays flat-`1` however broken the guard becomes, which is a stale `1`
+  indistinguishable from a live `1` in exactly the case the gauge exists for. `authorize` additionally
+  re-declares the state where enforcement is actually DECIDED, dropping to `0` when the shared counter
+  is unreachable (ADR-20260810-231300; this is the metrics export path re-reading our own state, not a
+  poll of another component, so it is outside that ADR's push rule).
 - **Never alert on send rate**: Friday 19:00–21:30 looks exactly like an attack by volume. Alert on
   the RATIO of sends to verifications (an attack moves only the numerator — nobody verifies the codes)
   plus ceiling burn. The join cannot use `correlation_id`, which **breaks across the provider's
