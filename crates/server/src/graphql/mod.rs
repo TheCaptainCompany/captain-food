@@ -19,10 +19,3 @@ pub mod session;
 /// page renderer and nothing else until this module existed.
 pub mod tenant;
 
-/// The Runtime D1 flip gate (`PM_MAILBOX_DELIVERY`, #272 / ADR-20260801-023000), injected as
-/// schema data: the generated process-manager resolvers (placeOrder / approveRefund / denyRefund)
-/// carry BOTH arms and read this at request time — mailbox delivery through the prepare phase
-/// when true, the legacy journal+spawn path when false (gate-then-stabilize; the default flip is
-/// its own recorded decision).
-#[derive(Clone, Copy, Debug)]
-pub struct PmMailboxDelivery(pub bool);

@@ -61,7 +61,7 @@ Anything but `HTTP 200` for every block: fetch the body (drop `-o /dev/null`) �
 mermaid parse error with line/column. Do this for EVERY doc whose ```mermaid blocks you touched;
 "it looks right" has now failed twice.
 
-## Every sequence diagram carries a mermaid.live pan/zoom link (product-owner directive, 2026-07-28)
+## Every sequence diagram carries a mermaid.live pan/zoom link (founder directive, 2026-07-28)
 
 GitHub renders an inline mermaid block too small to read comfortably, and moving the diagram to its
 own page renders it just as small (that approach was tried and rolled back the same day). The fix:
@@ -72,7 +72,7 @@ the closing fence** it carries a link that opens the same source in mermaid.live
 <a href="https://mermaid.live/view#pako:…" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 ```
 
-**HTML anchor, not a Markdown link** (product-owner directive, 2026-07-28): the link must open in a
+**HTML anchor, not a Markdown link** (founder directive, 2026-07-28): the link must open in a
 NEW tab — the reader is mid-document and must not lose their place. Markdown cannot express
 `target`, so the link is written as a raw `<a target="_blank" rel="noopener noreferrer">`. Caveat:
 github.com's Markdown sanitizer strips `target`, so on GitHub itself use Ctrl/Cmd+click or

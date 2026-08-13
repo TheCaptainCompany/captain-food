@@ -15,10 +15,19 @@ corruptions in one day (ADR-20260812-011057):
 | **Usage** | `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json` — one file per recorded run | committed | `stop`, append-only |
 | **Running timer** | `$(git rev-parse --git-common-dir)/loop-budget-timer.json` | **never** (inside `.git/`) | `start` / `stop` |
 
-The cap is **43200s = 12 h/week** (customer directive 2026-08-08, all-day autonomous operation —
-ADR-20260808-223000; the historical default was 1800s = 30 min/week). The week's usage is the **sum**
-of that week's ledger files; it resets automatically each ISO week because the next week is a new
-directory. Usage is committed so the budget survives ephemeral cloud-routine runners (ADR-0014).
+**The cap lives in `.claude/loop-budget.json` and nowhere else** — do not restate it here or in any
+other prose, and do not derive it from a number you remember: read the file, or run
+`loop-budget.sh check`, which prints `used / cap`. The rule the number expresses: the cap is sized
+for **all-day autonomous operation** (customer directive 2026-08-08 — ADR-20260808-223000; the
+historical default was 1800s = 30 min/week), and it is the **sum of BOTH Claude accounts'
+allowances**, because one shared ledger records the runs of two accounts working this repo
+(founder directive 2026-08-12 — ADR-20260812-142454). A cap sized for a single account therefore
+halves the team's week silently, and that is a wrong "exhausted" verdict, not a safety margin.
+
+The week's usage is the **sum** of that week's ledger files; it resets automatically each ISO week
+because the next week is a new directory. Usage is committed so the budget survives ephemeral
+cloud-routine runners (ADR-0014). **Doubling the cap never doubles usage**: ledger entries are
+measured actual time, and inflating one steals from the next week.
 
 - Guard: `.claude/hooks/loop-budget.sh check|start|stop|status|reset|prune|audit|selftest`
   - `check` → exit 0 if budget remains, **exit 2 if spent** (skip the run). Strictly **read-only**.
@@ -71,6 +80,36 @@ the segments its own branch carries, so its total is a lower bound until branche
 merges add files rather than overwrite a number, merging can only raise it. That is the opposite of
 the old behaviour, where a merge could silently discard hours (a naive "take ours" would have thrown
 away 9128s — 2.5 h — of another session's recorded time).
+
+**The lower bound bites near the cap** (measured 2026-08-12): a `check` on an up-to-date `main`
+reported 626.2m while three entries on the unmerged
+[#500 "#242 Runtime D: retire command_journal"](https://github.com/TheCaptainCompany/captain-food/pull/500)
+branch carried another 99.3m — the true week total was 725.5m, a sixth of the week invisible to every
+other checkout. "Run `check` from a checkout CURRENT with origin/main" is necessary but **not
+sufficient**: main is still only a lower bound while any billed branch is unmerged. So, **near the cap,
+sum the week across all remote branches before dispatching** — every ledger path is unique and its
+content immutable, so unioning is safe:
+
+(That same measurement produced a *second*, wrong conclusion worth remembering: 725.5m was read as
+past the cap and 2026-W33 was declared exhausted. It was not — the cap was sized for one of the two
+accounts sharing the ledger, and the corrected cap makes 725.5m about half the week. A verdict of
+"exhausted" is a claim about the cap as much as about the usage; check both before standing a session
+down. See ADR-20260812-142454.)
+
+```sh
+git fetch origin
+week=$(date -u +%G-W%V)
+git branch -r | while read -r b; do git ls-tree -r --name-only "$b" -- ".claude/loop-budget/$week/"; done \
+  | sort -u | while read -r f; do git branch -r --format='%(refname)' \
+  | while read -r b; do git show "$b:$f" 2>/dev/null && break; done; done | grep '"seconds"' \
+  | grep -o '[0-9]*' | awk '{s+=$1} END {printf "%.1fm across all branches\n", s/60}'
+```
+
+If that total disagrees with `check`, **propagate the missing entries onto `main`**
+(`git checkout origin/<branch> -- .claude/loop-budget/<week>/` and commit) — this is not hand-editing
+budget state: the files are verbatim hook-written records, the eventual branch merge re-adds identical
+paths with identical content (no conflict, no double count), and if the branch dies unmerged the time
+was still spent, so main holding the entry is *more* correct, not less.
 
 **If you hit a merge conflict on `.claude/loop-budget.json`**, the branch is old enough to still carry
 the retired `secondsUsed`/`startedAt` counter. Resolution: **take `main`'s config-only file**, then

@@ -390,11 +390,10 @@ keys:
       delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
       fact delivered by the adapter process never reaches the monolith's push subscribers
       (polls unaffected) — which is why this is a deployment posture, not a default. The MONEY
-      lanes (Payment / PlaceOrderProcess / RefundProcess) additionally follow the
-      PM_MAILBOX_DELIVERY posture read from its RuntimePosture database row at spawn (#318,
-      ADR-20260803-104819) — the SAME row the monolith reads, so an adapter fleet can no longer
-      drift from it; while the posture is UNPROVABLE (row or table missing) the money lanes are
-      refused at spawn, and a transient read error just delays the fleet until the row answers.
+      lanes (Payment / PlaceOrderProcess / RefundProcess) used to be additionally gated on the
+      PM_MAILBOX_DELIVERY posture read at spawn; that gate RETIRED with `command_journal` in
+      #242 Runtime D (ADR-20260812-000000), so an adapter fleet now spawns exactly the lane set
+      the monolith does, with no posture read and nothing left to drift.
       Read by the adapter binaries only; the monolith ignores it (its composition root
       always runs the full fleet).
 
@@ -576,13 +575,12 @@ keys:
       Readiness at GET /deletion.
 
 
-  # PM_MAILBOX_DELIVERY is NO LONGER an env key (#318, ADR-20260803-104819): the Runtime D1
-  # money gate lives in its RuntimePosture database row (specs/database/tables/referential.yaml),
-  # read at startup by the monolith AND every standalone adapter fleet — per-process env was
-  # per-deploy state, and a drifted value on one adapter fleet was the silent paid-order stall.
-  # The gate's semantics (ADR-20260801-023000: PM mutations through the PM mailboxes, B2
-  # chaining, saga-runner trigger retirement; both arms client-byte-identical; gate-on startup
-  # backfill) are documented on the table row and unchanged by the move.
+  # PM_MAILBOX_DELIVERY is GONE. It was never an env key (#318, ADR-20260803-104819 moved it to a
+  # RuntimePosture database row), and in #242 Runtime D (ADR-20260812-000000) the gate itself
+  # retired with `command_journal`: its OFF arm was the legacy journal+spawn path, and with that
+  # table dropped there is no arm to fall back to. PM mutations deliver through the PM mailboxes,
+  # the Payment lane B2-chains inbound Stripe facts and the saga runner carries no Stripe-fact
+  # triggers -- unconditionally, in every process.
 
   RUN_RETENTION_SWEEP:
     type: bool

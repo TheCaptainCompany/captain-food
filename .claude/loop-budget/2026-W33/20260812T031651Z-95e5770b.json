@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 338,
+  "recordedAt": "2026-08-12T03:16:51.012Z",
+  "branch": "HEAD",
+  "note": "Bring cutover-local-rehearsal (draft PR #486) up to date with main so it carries the append-only budget hook: merge (not rebase), 3 conflicts resolved, gates re-run. Recorded on main rather than on the draft branch, which is not landing soon."
+}

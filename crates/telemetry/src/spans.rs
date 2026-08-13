@@ -51,7 +51,8 @@ pub fn command_receive(command_type: &str, actor: &str, channel: &str) -> Span {
     )
 }
 
-/// `command.journal` (INTERNAL) — the `command_journal` insert.
+/// `command.journal` (INTERNAL) — the `inbound_messages` insert (the span keeps its contract
+/// name; the acceptance contract is unchanged, ADR-20260720-015500).
 pub fn command_journal(message_id: &str) -> Span {
     tracing::info_span!(
         "command.journal",
@@ -408,7 +409,7 @@ mod tests {
         let spans = [
             command_receive("C", "A", "GRAPHQL"),
             command_journal("m"),
-            command_dispatch("m", "spawned"),
+            command_dispatch("m", crate::contract::dispatch_outcome::ENQUEUED),
             command_validate(),
             event_store_append("E", "s"),
             event_publish("E"),

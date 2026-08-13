@@ -542,10 +542,9 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     .await
     .expect("enqueue payment fact");
 
-    // The Payment lane's worker, WITH B2 chaining on: the recorded fact must chain in-tx.
-    let chaining_handler = Arc::new(
-        MailboxCommandHandler::new(deps_over(&pool, gateway.clone())).with_pm_fact_chaining(true),
-    );
+    // The Payment lane's worker: the recorded fact must chain its PM copy in-tx (B2 — unconditional
+    // since #242 Runtime D retired the gate that used to make it optional).
+    let chaining_handler = Arc::new(MailboxCommandHandler::new(deps_over(&pool, gateway.clone())));
     let chained_worker = MailboxWorker::new(
         pool.clone(),
         "w-PAY",

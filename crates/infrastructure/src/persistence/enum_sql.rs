@@ -8,7 +8,7 @@
 //! which is generated from `specs/scalars.yaml`).
 
 use domain::generated::scalars::{
-    CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
+    CartStatus, CityAvailabilityStatus, ComparisonBasis,
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
     DeliveryTimeliness, GbpLinkStatus,
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
@@ -113,12 +113,10 @@ enum_text!(ReclamationResolution {
     GOODWILL_CREDIT,
     REJECTED,
 });
-enum_text!(CommandJournalStatus { RECEIVED, SUCCEEDED, REJECTED, FAILED });
-enum_text!(CommandChannel { GRAPHQL, WORKER, INTERNAL });
 // --- Read-side per-instance authorization (#144) ---
 // ScopeMembership stores BOTH of these as TEXT (the variant name verbatim, like every enum column
 // since ADR-20260728). UserType's stored values are shared vocabulary with
-// `domain_events.user_type` / `command_journal.user_type` — a scalars.yaml variant RENAME would
+// `domain_events.user_type` / `inbound_messages.user_type` — a scalars.yaml variant RENAME would
 // strand historical rows, which is also why the UUIDv5 membership key pins its own literal
 // (`membership_id_is_pinned` in the projector).
 enum_text!(ScopeType { ORDER, RESTAURANT });
@@ -191,13 +189,6 @@ mod tests {
             DeliveryDispatchProcessStatus::from_text("FAILED").unwrap(),
             DeliveryDispatchProcessStatus::FAILED
         );
-        assert_eq!(CommandJournalStatus::FAILED.to_text(), "FAILED");
-        assert_eq!(
-            CommandJournalStatus::from_text("RECEIVED").unwrap(),
-            CommandJournalStatus::RECEIVED
-        );
-        assert_eq!(CommandChannel::INTERNAL.to_text(), "INTERNAL");
-        assert_eq!(CommandChannel::from_text("WORKER").unwrap(), CommandChannel::WORKER);
         assert!(RestaurantStatus::from_text("BOGUS").is_err());
     }
 }

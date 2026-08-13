@@ -39,10 +39,6 @@ pub struct MailboxCommandHandler {
     /// resolves a `schedules:` declaration's `after` against. Empty = no windows wired; a
     /// delivery that then needs one aborts for retry (wiring bug, never a terminal verdict).
     reminder_windows: std::collections::HashMap<&'static str, i64>,
-    /// The Runtime D1 gate (`PM_MAILBOX_DELIVERY`): when on, a recorded Payment fact chains its
-    /// PM-addressed copy in the SAME completion transaction (B2) — the saga runner's Stripe-fact
-    /// triggers retire behind the same gate at the composition root.
-    pm_fact_chaining: bool,
     /// Enqueue-side wake signals: a committed chain hop nudges the PM lane's worker post-commit,
     /// cutting the saga hop from the heartbeat poll to ~immediate (B2's "nudged" property).
     nudges: Option<std::sync::Arc<crate::persistence::mailbox_store::MailboxNudges>>,
@@ -59,7 +55,6 @@ impl MailboxCommandHandler {
             deps,
             event_bus: None,
             reminder_windows: Default::default(),
-            pm_fact_chaining: false,
             nudges: None,
             activations: None,
         }
@@ -82,12 +77,6 @@ impl MailboxCommandHandler {
         windows: std::collections::HashMap<&'static str, i64>,
     ) -> Self {
         self.reminder_windows = windows;
-        self
-    }
-
-    /// Turn on B2 chaining (the `PM_MAILBOX_DELIVERY` gate).
-    pub fn with_pm_fact_chaining(mut self, on: bool) -> Self {
-        self.pm_fact_chaining = on;
         self
     }
 
@@ -422,14 +411,13 @@ impl MailboxCommandHandler {
                         // Recorded facts may declare `schedules:` too (same third-effect rule).
                         super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
                             .await?;
-                        // B2 (gated): the recorded Stripe fact's PM-addressed copy rides THIS
-                        // transaction — atomic with the record, nudged post-commit.
-                        let chained = if self.pm_fact_chaining {
+                        // B2: the recorded Stripe fact's PM-addressed copy rides THIS
+                        // transaction — atomic with the record, nudged post-commit. UNCONDITIONAL
+                        // since #242 Runtime D: the gate that could turn it off is gone, and the
+                        // saga runner carries no Stripe-fact triggers to race it.
+                        let chained =
                             pm_delivery::chain_pm_copy_in_tx(&self.deps, tx, message, &event)
-                                .await?
-                        } else {
-                            None
-                        };
+                                .await?;
                         let promote = DeliveryActivation::promote_after_commit(
                             &self.activations,
                             activation.as_ref(),
@@ -438,11 +426,11 @@ impl MailboxCommandHandler {
                         self.fanout_delivery(&staged, chained, promote)
                     }
                     // Version clash at flush: someone appended between load and commit. That
-                    // someone is NOT necessarily a redelivery of this fact — the legacy-path PM
-                    // legs write the same Payment streams until Runtime D — so a terminal
-                    // DUPLICATE here could drop a fact that never reached the log. ABORT for
-                    // retry: the redelivery re-runs the fold-based dedupe against the moved
-                    // stream and lands Duplicate only if the fact is genuinely in it.
+                    // someone is NOT necessarily a redelivery of this fact — a concurrent PM-lane
+                    // delivery writes the same Payment streams — so a terminal DUPLICATE here
+                    // could drop a fact that never reached the log. ABORT for retry: the
+                    // redelivery re-runs the fold-based dedupe against the moved stream and lands
+                    // Duplicate only if the fact is genuinely in it.
                     Err(e) if is_version_conflict(&e) => {
                         if let Some(a) = &activation {
                             a.invalidate_scoped();

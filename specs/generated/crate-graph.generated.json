@@ -467,11 +467,6 @@
       "domain_crates": [],
       "path": "crates/bins/worker-erasure"
     },
-    "worker-journal-sweep": {
-      "kind": "worker",
-      "domain_crates": [],
-      "path": "crates/bins/worker-journal-sweep"
-    },
     "worker-retention": {
       "kind": "worker",
       "domain_crates": [],

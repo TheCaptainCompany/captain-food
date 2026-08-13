@@ -28,5 +28,5 @@ TWO TREES, ON PURPOSE, while the cutover is in flight:
 Rehearse the whole sequence locally before spending anything:
 docs/runbooks/cutover-local-rehearsal.md.
 
-Bins: 57. Build one image: `docker build -f deploy/generated/Dockerfile.bin --build-arg
+Bins: 56. Build one image: `docker build -f deploy/generated/Dockerfile.bin --build-arg
 BIN=<bin> .` Render the manifests: `kustomize build deploy/generated/manifests`.

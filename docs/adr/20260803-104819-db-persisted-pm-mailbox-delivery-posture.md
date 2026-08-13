@@ -6,6 +6,16 @@ Accepted — realizes [#318 "DB-persisted PM_MAILBOX_DELIVERY posture — precon
 worker fleets (ADR-20260803-002712 Q4)"](https://github.com/TheCaptainCompany/captain-food/issues/318),
 decided by [ADR-20260803-002712](20260803-002712-mailbox-poison-follow-ups-decided.md) Q4.
 
+**AMENDED 2026-08-12 by
+[ADR-20260812-000000](ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)
+([#242 "Write path becomes an actor mailbox"](https://github.com/TheCaptainCompany/captain-food/issues/242)
+Runtime D) — the row this ADR created is DELETED.** `PM_MAILBOX_DELIVERY` flipped ON and its gate
+was removed together with `command_journal`, so **the posture in this document's title no longer
+exists**: no process reads it at startup and `filter_lanes_by_posture` is gone. What STANDS is the
+MECHANISM — the `RuntimePosture` table, its one-row-per-posture shape and the fail-closed-by-cause
+read all remain deliberately, for the next process-wide posture, which is why this ADR is amended
+rather than superseded. Read the rest as the rationale for that mechanism, not as a live gate.
+
 ## Context
 
 The Runtime D1 money-path gate (`PM_MAILBOX_DELIVERY`, ADR-20260801-023000) was a per-process

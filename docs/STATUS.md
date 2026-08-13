@@ -2,6 +2,186 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📌 **2026-08-12 — THE FOLLOW-UP REGISTER: nine findings from tonight's mob reads are now ISSUES,
+> not paragraphs** (records-only). Each is linked from the register row it belongs to, so it is
+> reachable from the decision as well as from here:
+> - [#508](https://github.com/TheCaptainCompany/captain-food/issues/508) — `hubrise_connections.access_token`
+>   is **plaintext** and a non-expiring token, so the physical WAL archives carry it too (linked from
+>   [DECISIONS §32 ADP-1](proposals/DECISIONS.md), which called that table non-rederivable without
+>   saying it was unencrypted).
+> - [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) — the restore drill verifies
+>   **1 of the 11** databases the split creates (linked from **STO-6**).
+> - [#510](https://github.com/TheCaptainCompany/captain-food/issues/510) — mailbox query ports behind a
+>   capability witness: the level-4 half of #506 the validator rule cannot reach (linked from
+>   [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)
+>   and [PROP-20260802-130500 §1](proposals/PROP-20260802-130500-isolation-by-construction.md)).
+> - [#511](https://github.com/TheCaptainCompany/captain-food/issues/511) — JWKS single-flight test flake.
+> - [#512](https://github.com/TheCaptainCompany/captain-food/issues/512) — pool + `_sqlx_migrations`
+>   schema probe out of `crates/server`, the second level-4 half of #506 (same two links as #510).
+> - [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) — the adapter-isolation grant
+>   emitter and its **negative-path** test: nothing today proves a pod is REFUSED a database (linked
+>   from **ADP-1** and **STO-5**).
+> - [#514](https://github.com/TheCaptainCompany/captain-food/issues/514) — per-database migration chains
+>   and a `REQUIRED_SCHEMA_VERSION` **map**: eleven databases against today's one chain and one scalar
+>   constant (`crates/server/src/lib.rs:170`) — linked from **STO-1** / §35's **CUT-1** cutover row.
+> - [#515](https://github.com/TheCaptainCompany/captain-food/issues/515) — `join.captain.food`'s legal
+>   pages still lack a postal address, a phone and a named directeur de la publication, and name **no
+>   consumer mediator** (linked from **Q-L1**).
+> - [#502](https://github.com/TheCaptainCompany/captain-food/issues/502) — re-scoped in a comment: five
+>   stale `inbound_event_id` declarations survived [#500](https://github.com/TheCaptainCompany/captain-food/issues/500)
+>   in `specs/observability.yaml` (lines 506, 584, 648, 732, 966, each `source: "inbound.inbound_event_id"`
+>   against a table dropped by `20260731143000`), and the fix is to **type the reference** rather than to
+>   rename the survivors — an untyped `source:` string is the [#413](https://github.com/TheCaptainCompany/captain-food/issues/413)
+>   defect class again, invisible to the refs walker and therefore to every rename.
+
+> 🧭 **2026-08-12 — THE FOUNDER ANSWER SHEET: THE FLIP IS TAKEN, THE REGISTRY IS DESTROYED, AND
+> NOTHING IS PAID FOR UNTIL A WORKING VERSION CAN BE SEEN** (twelve founder answers + a ten-lens mob
+> read; [ADR-20260812-214021](adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md),
+> new [DECISIONS §35](proposals/DECISIONS.md); **records-only — no code, no specs, no generated
+> artifacts**).
+> **The headline is not one of the twelve answers, it is what they add up to: the critical path is
+> INVERTED.** *"I'm waiting for a working version before paying OVH"* turns **provision → deploy →
+> walk** into **walk → provision → deploy** — and the one leg the team cannot supply is the exit
+> condition, because *"a working version"* carries **no acceptance criterion**, which makes it a spend
+> gate with no exit. Recorded so it can be confirmed or replaced (**§35 INV-1, the one FOUNDER-OWED
+> leg**): **smoke L1→L4 green on local k3s plus a recorded browser walk** — order placed, paid,
+> restaurant told, tracking moving without a reload, order completing. Both halves are needed:
+> `prod-smoke.sh` never opens a browser, and a browser walk cannot assert a Stripe capture.
+> **The path is a MERGE, not a build** — `origin/cutover-local-rehearsal` /
+> [PR #486](https://github.com/TheCaptainCompany/captain-food/pull/486) already carries the
+> local-rehearsal runbook, the k3s CNPG overlay, the generated monolith overlay and the smoke's
+> `SMOKE_SCHEME`/`SMOKE_PUBLIC_BASE` overrides, with **L1+L2 passing and 45/45 migrations on an empty
+> database**, while `main`'s `tools/smoke/prod-smoke.sh:41,48-49` still hardcodes an unroutable
+> `https://api.captain.food` with no scheme override. Two gaps sit outside the merge:
+> `SUPABASE_SECRET_KEY` as its own repository secret (hard-stops L3, and L4 is downstream — presence
+> is a **confirmation**, since STATUS already records a secret of that name existing on 2026-08-09)
+> and **a webhook ingress for L4's `CAPTURED` assertion**. **Local is demo, never evidence**: the
+> overlay strips `barmanObjectStore`, so the **restore drill is the first post-provisioning act** and
+> no recovery claim may cite the rehearsal.
+> **The answers, and what each cost to check.** **JRN-1 = A** — take the `PM_MAILBOX_DELIVERY` flip
+> now in [PR #500 "#242 Runtime D: retire command_journal"](https://github.com/TheCaptainCompany/captain-food/pull/500)
+> inside the empty-log window, with **L4 as the release gate before traffic is routed**; verified
+> consequence: option (a)'s interim `command_journal` grant is **not owed at all** once #500 merges
+> (it drops the table and empties `RuntimePosture`), and that PR also already removes
+> `dispatch_outcome: spawned` and deletes the `CommandChannel`/`CommandJournalStatus` scalars.
+> **CUT-1 = B** — the cutover gets a **rule**, not a list: *IN = only what the empty log or a traffic
+> pause makes cheaper*, admitting **the eleven-database storage split** and excluding the pooler, the
+> API-tier split and the runtime decomposition. **DB-HA = A** (three instances, inside the cutover) is
+> **recorded, not incurred**: with `enablePodAntiAffinity` + `podAntiAffinityType: required` on a
+> hostname topology, `instances: 3` on one node leaves **two pods `Pending` forever**, so A is the
+> **EUR 67.80** trio and its +EUR 41.20 is unpayable until the EUR 26.60 base is — and the **60 Gi of
+> PVC it implies is unpriced anywhere in the repo**, because the runbook ADR-20260807-114122 cites for
+> the sizing detail (`docs/runbooks/mks-bootstrap.md §2`) **does not exist**. **SIR-1 = all NO**
+> (*delete and record the destruction*) closes the retroactive SIRENE risk **on attestation, not
+> inspection** — so the record owes how/when the rows ceased, a project list captured while absence is
+> still inspectable, whether any backup/PITR window survives, and a named attester; and **two
+> neutralisations are owed before any re-sync**, both live today (`sirene-sync.yml` is paused only by a
+> commented-out cron and **deliberately keeps `workflow_dispatch`**, writing the staging table from
+> `secrets.DATABASE_URL`, which must be revoked and the revocation logged). **The Art. 21 blocker
+> survives forward-looking** ([#505](https://github.com/TheCaptainCompany/captain-food/issues/505)):
+> `RestaurantListingOptedOut` folds into **nothing** (`generated/projectors.rs:59` is `=> state`).
+> **Q-L1 partially resolves** — `join.captain.food` publishes the association, RNA W372020229 and the
+> rights contact, and publishes **no postal address, no phone, no named directeur de la publication and
+> no consumer mediator**; its host block is GitHub Pages, so *verify, do not copy*. **Q-L3 = no real
+> phone-verified end user** — which both supports the empty-log window and dates the trigger (first
+> real customer order = DPIA + erasure + mediator deadline). **BND-6 = B** (kitchen time labelled
+> "ready" — the label IS the decision) · **BND-7 = A** (estimate, no remedy) · **Q1 = A**
+> (authenticated server-side only — graded: plausibly no consent banner, but **Art. 13 transparency
+> and lawful basis remain**) · **Q2 = A** (yes after the DPIA; it makes the restaurant a
+> controller/joint controller) · **Q7 = A** (not now, converging with MET-Q7 a day later) ·
+> **KEY-1** delete the stray key now — ⚠️ **its referent is recorded nowhere in the repo** and this
+> record does not invent one.
+> **Two recorded corrections landed with the sheet, as corrections rather than silent edits.**
+> (1) **STO-4's sequencing is WITHDRAWN**: its ~185/~235-of-220 arithmetic is a **57-pod bin-fleet**
+> figure and the fleet is OUT of the cutover, so with the monolith deployed eleven databases × one pod
+> is **~55 backends of 220**; the pooler is re-targeted as a blocking precondition of the
+> [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) bin flip, plus a
+> recommendation to cap the monolith's per-database pool. (2) **PROP-20260809-021351's gap table was
+> STALE and is corrected in place**: **G5, G6 and G7 are FIXED** (#420/#451/#424 — including the
+> subscription that now accepts the order's `DeliveryJob-` stream and dedupes on `updated_at`),
+> **C1 is only HALF fixed** (the total prices live on read; the competitor comparison still never
+> computes and moved from the projector to `cart_read.rs:187`), and **G7b, G8 and C2 are live** — G8
+> being *nobody is told about a paid order*, with `crates/application/src/ports.rs` declaring four
+> traits and **zero notification anything**.
+> **Backlog — a previously stated order is REVERSED, and the method clause is on the record**
+> ([ADR-20260810-215503](adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md) +
+> [BACKLOG.md](BACKLOG.md)): **[#429 "Production with test data"](https://github.com/TheCaptainCompany/captain-food/issues/429)
+> is re-pointed off OVH onto local k3s WITHOUT re-scoping** (ADR-20260809-050000 fixed its target as
+> the production deployment; the inversion changes the host, and under *"local is demo, never
+> evidence"* a local walk satisfies the spend gate and does **not** close #429), and the
+> **[#494](https://github.com/TheCaptainCompany/captain-food/issues/494) storage chain drops below
+> it** on *value-first: foundations first* — a foundation that cannot be applied is not first, and
+> #494 lands at a cutover now downstream of a payment decision it cannot unblock. **Nothing was
+> re-ranked to make it dispatchable.**
+
+> 🧾 **2026-08-12 — THE FOUNDER IS THE FOUNDER, AND EVERY FOUNDER MESSAGE GOES TO THE WHOLE TEAM**
+> (two founder directives, verbatim: *"Stop calling me product owner. I'm the founder / Tech CEO."*
+> and *"When I say something ask the team for answers never answer directly without asking the whole
+> team."*;
+> [ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
+> The mob principle ([ADR-20260809-013142](adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md))
+> extends from **dispatches to founder messages**, and coordinator-never-authors
+> ([ADR-20260810-011500](adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md))
+> from **the diff to the answer**: no answer is composed and no record lands before the whole roster
+> has been asked, with *"nothing in my lens"* a complete one-line answer. Three carve-outs, each
+> attributed: an **external-clock fact** is relayed in the same turn (business lens), **executing an
+> already-recorded rollback/abort path** needs no consult while going FORWARD through an incident does
+> (release lens), and **no lens output or aggregation of lenses is legal advice or clearance** (legal
+> lens). New rule: a record created from a founder directive carries a **`Consulted:` block, one line
+> per lens** — because a lens that was never asked is indistinguishable from a lens with nothing to
+> say (testing/UX/observability lenses, convergent). "Product owner" is swept from the LIVING
+> operating docs (`CLAUDE.md`, `PLAYBOOK`, `BACKLOG`, `docs/claude/*`, `proposals/README`, and the
+> register's `PRODUCT-OWNER-OWED` → `FOUNDER-OWED`); **historical ADRs and proposals keep their
+> vocabulary** and verbatim quotes stay verbatim. Legal caveat: the title is right for repo records
+> and is **not** a French corporate mandate — external artifacts must name the statutory capacity.
+
+> 🔒 **2026-08-12 — EACH ADAPTER OWNS ITS OWN, COMPLETELY ISOLATED DATABASE — decided, then
+> CORRECTED the same day** (founder directive, verbatim: *"Each adapter must have there own database
+> completely isolated"*;
+> [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md);
+> register row **ADP-1** in [DECISIONS §32](proposals/DECISIONS.md); records-only — no code, no
+> specs; execution rides
+> [#494 "Storage boundaries and least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)).
+> Supersedes
+> [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
+> §11's placement of integration staging in `DomainCommonDb` (map amended in place): **six adapter
+> databases** — `adapter-stripe` · `adapter-hubrise` (staging + the credential tables) ·
+> `adapter-uber-direct` · `adapter-coopcycle` · **`adapter-avelo37`** · `adapter-sirene` (the 655 MB
+> mirror) — each reachable by ONE app and nothing else, in the shared business cluster (STO-3's math
+> already priced per-thing clusters out; the wall is role + `CONNECT`, BND-3's mechanism). **Eleven
+> databases total** (5 business + 6 adapter).
+> **A full-roster mob found two defects in the first record of this and both are fixed**: (1) it
+> claimed *"avelo37 owns no table today"* — **false**, `external_avelo37_events` is declared
+> (`integration_staging.yaml:178`) and already retention-swept (`sweep_retention.sql:60`), so avelo37
+> would have been the ONE partner mirror left holding `CONNECT` on the write database while every
+> sibling moved out; (2) it recommended an `adapter-identity` database for `auth_sessions` on a
+> rationale that runs **backwards** — that table is AES-256-GCM encrypted under `AUTH_SESSION_KEY`
+> while `hubrise_connections.access_token` is **plaintext**, there is no such adapter crate or bin,
+> and its users are the actor path plus the BFF login route. The count did not move; the **membership**
+> did. **Both legs are now CLOSED**: leg 1 **(a)**, the `inbound_messages` front door stands — an
+> outbox+relay would hold a *bidirectional* platform grant inside each adapter database, and
+> `LISTEN`/`NOTIFY` being per-database would need an inward connection to all six or a forbidden
+> permanent poll; leg 2 **(b)**, `auth_sessions` **stays platform on `captain-write`**. The GraphQL
+> lens's dissent is recorded as the final-vision alternative (an identity bin owning the table AND
+> `/auth/session`+`/auth/refresh`+`/auth/logout`, which would also home the
+> [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) routes that have no bin home
+> today) — a larger slice, not taken now. Reframing finding: `AUTH_SESSION_KEY` is granted to **53 of
+> 56 pods** while exactly **two** decrypt a session, so narrowing the grant
+> ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4, emitter + negative
+> test in [#513](https://github.com/TheCaptainCompany/captain-food/issues/513)) buys more here than
+> the database wall. **That figure was first recorded as "53 of 57, every group but the four periodic
+> workers" and the correction makes it WORSE**: [#500](https://github.com/TheCaptainCompany/captain-food/issues/500)
+> deleted `worker-journal-sweep`, which was one of the four EXCLUDED workers, so the denominator fell
+> and the numerator did not — read the smaller number as a widened blast radius, not as progress
+> (three excluded workers remain: `worker-erasure`, `worker-retention`, `worker-sirene-sync`).
+> Named consequences: STO-4's pooler-first sequencing **hardens** (every adapter
+> bin holds two pools), `hubrise_connections` is the one NON-rederivable adapter table (a
+> non-expiring token only a human re-connect replaces) so it needs a backup story while staging
+> mirrors take the refetch posture — and that token is **plaintext**, so the same backup copies it
+> into the WAL archives ([#508](https://github.com/TheCaptainCompany/captain-food/issues/508)) — and
+> `sweep_retention()` forks per adapter database **including
+> the avelo37 leg the first record did not know existed**.
+
 > 🗂️ **2026-08-12 — THE APP INDEX IS GENERATED, AND IT SAYS THE SPLIT IS NOT CLEAN**
 > ([PROP-20260811-141654](proposals/PROP-20260811-141654-per-app-declaration-folders.md) slice A1,
 > [#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491);
@@ -171,26 +351,97 @@
 > consumer's projector folds a slim snapshot into its OWN read database -- the same
 > composition-in-the-projector answer STO-2(a) already gave for `ScopeMembership`.
 >
-> 📓 **The `journal` concern is CORRECT, and both tables still exist (JRN-1, §32).** Verbatim:
-> *"make sure we don't do both."* `inbound_events` is backfilled and DROPPED; **`command_journal` is
-> not**. Live on it today: the legacy arm of `placeOrder`/`approveRefund`/`denyRefund` writes it
-> whenever `PM_MAILBOX_DELIVERY` is false -- **and false is the seeded default**
-> (`specs/database/tables/referential.yaml:111`), so **`PlaceOrder`'s acceptance lives in
-> `command_journal` in the posture we actually run**; `operationStatus` and `operationStatusChanged`
-> read it **unconditionally on both arms**; the mailbox arm reads it for cross-arm duplicate
-> identity; `worker-journal-sweep` and `sweep_retention.sql` write it. **The API lens's finding is
-> VERIFIED and is worse than reported**: the permission matrix's *query*-path row grants the write
-> database **no `CONNECT` at all**, so as written it breaks the acceptance poll on **both** arms, not
-> just the journal fallback -- up to 30 polls at 1 s per action, i.e. every checkout, every
-> restaurant acceptance, every rider transition. **Recommendation: grant both reads now to the
-> platform graph, with the grant's REMOVAL as a named line in the `PM_MAILBOX_DELIVERY` default-flip
-> ADR's checklist** -- retiring first is the final-vision answer but the retirement rides a money-path
-> flip gated on a staging smoke that is downstream of #358, which is exactly the externally-forced
-> clause ADR-20260808-235113 carves out. **Nothing in flight makes the retirement harder**; the one
-> thing to watch is that `CommandJournal` must stay a PLATFORM write-path port and must never acquire
-> a `ports-{B}`/`read-{B}` home under REP-2. Full analysis:
+> 🧱 **2026-08-12 — A READ TARGET IS DECLARED, NEVER INFERRED: the `reads:` ownership wall is a gate**
+> ([#507 "fix(codegen): a read target is DECLARED, never inferred"](https://github.com/TheCaptainCompany/captain-food/pull/507),
+> MERGED as `158c85a`, closing [#506](https://github.com/TheCaptainCompany/captain-food/issues/506);
+> [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).
+> Retiring `command_journal` cost 110 files because the table had leaked out of its encapsulation into
+> resolver bodies -- founder verdict: *"it should never be used directly because we have to pass through
+> the actor clients that encapsulate the insert"* and *"it's unacceptable"*. Two absences allowed it, both now ERRORS, both **seen red on `786bcfa` first**:
+> (1) `reference: true` was an unguarded opt-in whose only counter-argument was a header comment, and a
+> BARE-NAME `reads: ['inbound_messages']` bypassed even the §1b ref-kind contract (a bare name is
+> invisible to the refs walker -- the #413 defect class) -- planting both **passed `make validate` with
+> zero errors**; (2) transience was inferred from a MISSING `reads:`, so deleting one line silently
+> exempted a query from every read-side rule -- also zero errors. That second one is what actually let
+> the journal through: the journal queries declared no `reads:` at all. Five new errors
+> (`reference-flag-not-a-read-target`, `reads-infrastructure-owned`,
+> `reads-infrastructure-with-read-model`, `transient-type-undeclared-infrastructure`,
+> `reads-not-a-ref`) in the new `validate::read_targets`, keyed on `refs::classify`'s `Kind` -- never on
+> a name pattern (`external_%` matches 1 of 7 categories) and never on the author's own `staging: true`.
+> The allowlist fails CLOSED in both directions, but only ONE of them is the compiler, and the precise
+> version is the reusable one: `refs::read_target_kind`'s match is exhaustive, so a new **`Kind`** does
+> not compile until it is classified -- while a new catalog **FILE** is accepted by `classify`'s
+> `_ => None` and fails closed at VALIDATE instead (`ref-kind-unknown` + `reads-unknown-view`).
+> `reservations.yaml` is the proof: no arm for months, built fine. Level 4 for the kind, level 3 for the
+> file. It gained the classifier arm it never had. Four transient types now DECLARE their table
+> (`readsInfrastructure:`): `MailboxLane` + `PoisonedMailboxMessage` + `Operation` -> the mailbox,
+> `PaymentIntent` -> the saga row -- and the key admits **`JournalTable` + `PmStateTable` ONLY**. That
+> narrowing came from the independent review, which found the first cut had wired it to the whole
+> infrastructure partition: `hubrise_connections` and `domain_events` under `readsInfrastructure:` on the
+> PUBLIC-reachable `Operation` type validated with ZERO errors, while the same `$ref` under `reads:` had
+> always been refused -- the new key had **opened a door that was shut**. Fixed, with the missing
+> mutation test added; the lesson is that a new permission needs its own red-first plant, not just the
+> rule it was added to serve. **Deliberately untouched**: `c4-l3` `components.*.reads`, the correct
+> home for infrastructure readers. **Honest limits, now FILED as the compiler-first halves of this
+> change** -- a validator rule is level 3, and both of these are reachable at level 4:
+> [#510 "mailbox query ports behind a capability witness"](https://github.com/TheCaptainCompany/captain-food/issues/510)
+> -- `crates/actor_client`'s `MailboxAccess(pub(crate) ())` witness closes the mailbox WRITE door but not
+> `MailboxLaneRepository`/`MailboxRequeue` (`crates/application/src/queries.rs`), and the existing witness
+> cannot be reused because `actor_client` depends on `application`; and
+> [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)
+> -- `sqlx` canNOT simply be dropped from `crates/server/Cargo.toml`: there is no `sqlx::query`, but there
+> IS `sqlx::raw_sql` (the `_sqlx_migrations` probe, `lib.rs:1497`) plus `PgPool`/`PgPoolOptions`/`Row` in
+> the composition root. **And the rule that earned this entry a correction of its own**: the
+> `reference: true` guard, taken alone, would NOT have caught `command_journal` -- the journal's queries
+> declared no `reads:` at all, so only the second absence (transience inferred from a missing key) closed
+> the path that was actually used.
+>
+> ✅ **2026-08-12 — THE JOURNAL CONCERN IS CLOSED: `inbound_messages` is the only journal (#242
+> Runtime D, [ADR-20260812-000000](adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)).**
+> Product-owner direction, 2026-08-11: *"Remove inbound events and command journal from the dsl, the
+> only tables that must remain is inbound messages"* -- answering the earlier *"make sure we don't do
+> both."* `inbound_events` was backfilled and DROPPED by `20260731143000`; `command_journal` is
+> dropped by `20260812000000`. With it go: the legacy journal+spawn arm of
+> `placeOrder`/`approveRefund`/`denyRefund` (the emitter now FAILS GENERATION on an unaddressed
+> mutation rather than falling back), the `operationStatus`/`operationStatusChanged` fallback and the
+> cross-arm duplicate read, the `worker-journal-sweep` CronJob (**57 apps -> 56**), the
+> `command_journal` leg of `sweep_retention()`, and the `CommandJournalStatus`/`CommandChannel`
+> scalars. **The `PM_MAILBOX_DELIVERY` gate is deleted, not defaulted ON**: its OFF arm WAS the
+> journal, so with the table gone OFF would have meant "mailbox mutations, no B2 chaining, saga
+> triggers back" -- the silent paid-order stall. The `RuntimePosture` mechanism (#318) stays with no
+> tenant; its fail-closed read keeps its test, which exercises the CONTRACT over an arbitrary key AND
+> the migration's idempotence over `PM_MAILBOX_DELIVERY` -- the only key the seed statement names, and
+> therefore the only one on which "an operator flip survives a re-apply" can fail for its stated
+> reason.
+>
+> 🧹 **The guard's PROSE outlived the guard, and three lens reviews plus the product owner missed it**
+> (found by the automated PR reviewer, corrected on the branch). The bin emitter still promised a
+> mechanism this change deletes: `pm-place-order`/`pm-refund` shipped *"the fleet reads the money
+> posture itself and refuses the lane when it is unprovable"*, and all fifteen `actor-*` bins shipped
+> *"posture-gated money lanes"* -- on lines no diff hunk touched, in the file an operator opens first
+> when a money PM pod is stuck at peak. The sibling that hid the same way: the five-line doc comment of
+> the deleted `pm_mailboxes` field, which Rust re-attached to the `only` field beside it, so
+> `ProcessManagerRunner` documented a gate flip on a field that picks a PM. All now say what is true
+> (the fleet drains exactly the lane set it is handed). **No gate is reachable** -- catching it needs a
+> source-text scanner over comment prose, the class ADR-20260803-234035/#329 rule out -- so the defence
+> is recorded as procedure in the ADR: when a mechanism is deleted, grep its VOCABULARY, not just its
+> identifiers, across the emitter and the generated output.
+>
+> ⚠️ **A leg reserved to the product owner was TAKEN, and it is recorded rather than assumed**:
+> [DECISIONS.md](proposals/DECISIONS.md) §32 JRN-1 held that flipping `PM_MAILBOX_DELIVERY` is a
+> money-path posture change needing *"a staging smoke and a one-line ADR"*. The ADR exists; **the
+> staging smoke does not, and was not performed** -- the flip was taken inside the empty-log /
+> production-down window, where a smoke of the gated form has nothing to smoke against. JRN-1 is
+> CLOSED saying exactly that, and is the place to object: while the log is still empty the reversal is
+> a `git revert` plus a down-migration, and it gets more expensive with every real order.
+>
+> ❗ **The other half of the API-lens finding STANDS and is NOT fixed here**: the permission matrix in
 > [PROP-20260811-093000](proposals/PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
-> §6.1.2.
+> §6.1.2 grants the *query* path **no `CONNECT` to the write database at all**, so the acceptance poll
+> breaks on the mailbox read too -- up to 30 polls at 1 s per action, i.e. every checkout, every
+> restaurant acceptance, every rider transition. The recommended `command_journal` grant-with-expiry is
+> now moot (the table is gone) and the proposal is updated in place; the `inbound_messages` read grant
+> is still owed.
 
 > ⏱️ **2026-08-11 — THE ETA IS THE PRODUCT, AND NOTHING COMPUTES IT; PLUS: ONE EVENT LOG**
 > ([PROP-20260811-150242](proposals/PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)

@@ -17,7 +17,7 @@ const SENTINEL: &str = "unhashed-pre-20260728";
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS external_sirene_restaurants, command_journal CASCADE;
+        DROP TABLE IF EXISTS external_sirene_restaurants, inbound_messages CASCADE;
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
           payload JSONB NULL,
@@ -34,11 +34,11 @@ async fn reset_schema(pool: &PgPool) {
           last_attempt_sync_at TIMESTAMPTZ NULL,
           attempt_sync_retry_count INTEGER NOT NULL DEFAULT 0
         );
-        -- The journal arm's evidence source (mirrors migrations/20260720030000, columns the arm reads)
-        -- + the ref_* lookup it resolves 'SUCCEEDED' through (ADR-0037 ordinals, never hardcoded).
-        CREATE TABLE command_journal (
+        -- The journal arm's evidence source: the ONE write-path journal (mirrors
+        -- migrations/20260731063000, only the columns the arm reads).
+        CREATE TABLE inbound_messages (
           message_id UUID PRIMARY KEY,
-          command_type TEXT NOT NULL,
+          message_type TEXT NOT NULL,
           status TEXT NOT NULL,
           completed_at TIMESTAMPTZ NULL
         );
@@ -112,7 +112,7 @@ async fn seed_journal_verdict(
     completed_at: chrono::DateTime<chrono::Utc>,
 ) {
     sqlx::query(
-        "INSERT INTO command_journal (message_id, command_type, status, completed_at) \
+        "INSERT INTO inbound_messages (message_id, message_type, status, completed_at) \
          VALUES ($1, $2, $3, $4)",
     )
     .bind(message_id)

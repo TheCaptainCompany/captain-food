@@ -1,23 +1,24 @@
-version: 4
+version: 5
 description: >
-  WRITE-PATH JOURNALS (ADR-20260720-015300 / -015400) — a fifth table category alongside the event
-  store, the projections, the seeded referential tables and the raw integration staging: durable
-  records of every write intent as an addressed actor message (inbound_messages, THE MAILBOX —
-  ADR-20260731-122500 "the mailbox is the only door": commands, adapted inbound facts and, later,
-  reminders) plus the residual command_journal (the PM legs' door until #242 Runtime D). Journals
-  NEVER write domain_events (aggregates own the log via the write-side Repository) and are never
-  replayed as state — the event log stays the single source of truth. command_journal backs the
-  pre-flip operationStatus history and PM-leg idempotency; the retired inbound_events table
-  (the drained adapters' handoff) is backfilled into the mailbox and DROPPED by the
-  20260731143000 migration. Neither is projected nor a GraphQL
-  `reads` target — the operationStatus resolver serves the journal directly (transient Operation
+  THE WRITE-PATH JOURNAL (ADR-20260731-122500 "the mailbox is the only door", #242 Runtime D) — a
+  fifth table category alongside the event store, the projections, the seeded referential tables
+  and the raw integration staging, and since Runtime D it holds exactly ONE journal:
+  `inbound_messages`, THE MAILBOX. Every write intent, whatever its channel — a GraphQL command, a
+  worker-issued command, an adapted inbound fact, a scheduled reminder — is one addressed actor
+  message on that single table; `mailbox_partitions` beside it is the per-lane registry, not a
+  second journal. The two predecessors are gone: `inbound_events` (the drained adapters' handoff)
+  was backfilled into the mailbox and DROPPED by the 20260731143000 migration, and
+  `command_journal` (the pre-mailbox command door, ADR-20260720-015300) by 20260812. The mailbox
+  NEVER writes domain_events (aggregates own the log via the write-side Repository) and is never
+  replayed as state — the event log stays the single source of truth. It is neither projected nor
+  a GraphQL `reads` target: the operationStatus resolver serves it directly (transient Operation
   type, no View_*).
 
 inbound_messages:
   description: >
     THE ACTOR MAILBOX (ADR-20260730-231500, PROP-20260728-152752) — one row per message to one
-    actor, unifying command_journal (requests) and the retired inbound_events (adapted facts) and
-    adding reminders (kind MESSAGE + scheduled_at): every write intent, whatever the channel, addressed
+    actor, unifying the retired command_journal (requests) and the retired inbound_events (adapted
+    facts) and adding reminders (kind MESSAGE + scheduled_at): every write intent, whatever the channel, addressed
     by (actor_type, actor_id) with actor_type an actors.yaml actor and actor_id the instance
     (= stream id). `position` (one sequence) is the consumption/checkpoint axis — assigned at
     insert for immediate rows, at PROMOTION for scheduled ones, hence nullable. `partition` =
@@ -27,8 +28,9 @@ inbound_messages:
     ownership_version guard. operationStatus reads kind = COMMAND rows by message_id — the
     acceptance contract (ADR-20260720-015500) is unchanged. Events appended by a delivery carry
     message_id as domain_events.cause_id. REALIZATION NOTE: live since #242 Runtime C (workers +
-    migrations + the resolver flip); inbound_events is backfilled and dropped; command_journal
-    below remains the PM legs' door until Runtime D.
+    migrations + the resolver flip), and the ONLY door since Runtime D — inbound_events was
+    backfilled and dropped (20260731143000), command_journal dropped with the PM legs' flip
+    (20260812).
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (#18 pattern)
     max_age: '90 days'
     applies_to: >
@@ -88,36 +90,3 @@ mailbox_partitions:
     claimed_by:        { type: text, nullable: true, note: "Worker instance id; NULL = unowned. Carries a reachable address once the direct-call door opens (D7)." }
     lease_until:       { type: timestamptz, nullable: true, note: "Past or NULL = claimable; renewed by heartbeat (~10s), ~30s ahead." }
     checkpoint:        { type: bigint, note: "Largest position with everything at or below it terminal, advanced with grace lag; a below-checkpoint audit expects 0 rows. Default 0." }
-
-command_journal:
-  description: >
-    DEPRECATED — end-of-life once #242 slice 3 migrates it into inbound_messages
-    (ADR-20260730-231500); stays the LIVE command journal until then.
-    One row per command submission, any channel (GRAPHQL / WORKER / INTERNAL), persisted BEFORE
-    handling. pk message_id is the write-path idempotency key: a replay with the same payload_hash
-    acknowledges against this row (acceptance `duplicate: true`); the same id with a different hash
-    is rejected (Conflict). Records rejections too — `status` + `error` are the source of the
-    operationStatus surface. The envelope lives in the COLUMNS; `payload` is the business command
-    only (ADR-0041). Events appended by the handler carry message_id as domain_events.cause_id.
-  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
-    max_age: '90 days'
-    applies_to: >
-      Terminal rows (SUCCEEDED/REJECTED/FAILED), aged from completed_at. RECEIVED rows are never
-      age-swept — the stale-RECEIVED sweep (ADR-20260720-015300) marks crashed runs FAILED first.
-  columns:
-    message_id:     { type: { $ref: 'scalars.yaml#/MessageId' }, pk: true, note: "Client-suppliable (MetadataInput) or server-generated UUIDv7 — the acceptance handle." }
-    correlation_id: { type: { $ref: 'scalars.yaml#/CorrelationId' }, index: true, note: "Effective correlation (client-supplied or defaulted to message_id); matches domain_events.correlation_id." }
-    cause_id:       { type: { $ref: 'scalars.yaml#/CauseId' }, nullable: true, note: "Parent message/event id when this command was caused by another message; null for a root command." }
-    session_id:     { type: { $ref: 'scalars.yaml#/SessionId' }, nullable: true, index: true, note: "X-SESSION-ID header — the anonymous ownership scope for operationStatus." }
-    trace_id:       { type: { $ref: 'scalars.yaml#/TraceId' }, nullable: true, note: "W3C trace-id (traceparent-derived or server-started); technical tracing, not business correlation." }
-    user_id:        { type: uuid, nullable: true, index: true, note: "Acting user's auth subject (null for anonymous) — the authenticated ownership scope. Envelope, mirrors domain_events.user_id semantics (ADR-0041)." }
-    user_type:      { type: { $ref: 'scalars.yaml#/UserType' }, note: "Role of the acting user; stored as its TEXT value verbatim (ADR-20260728)." }
-    channel:        { type: { $ref: 'scalars.yaml#/CommandChannel' }, note: "Dispatch surface the command arrived through." }
-    command_type:   { type: text, index: true, note: "commands.yaml key, e.g. 'PlaceOrder'." }
-    payload:        { type: jsonb, note: "The BUSINESS command payload only — the envelope is the columns (ADR-0041)." }
-    payload_hash:   { type: text, note: "sha256 hex over the canonical (serde_json) payload — the duplicate-vs-conflict discriminator." }
-    status:         { type: { $ref: 'scalars.yaml#/CommandJournalStatus' }, index: true, note: "RECEIVED → SUCCEEDED | REJECTED | FAILED; a stale-RECEIVED sweep marks crashed runs FAILED." }
-    error:          { type: jsonb, nullable: true, note: "{ code, context } on REJECTED/FAILED — the errors.yaml code surfaced as Operation.errorCode." }
-    received_at:    { type: timestamptz, index: true }
-    completed_at:   { type: timestamptz, nullable: true, note: "Terminal transition time; null while RECEIVED." }
-

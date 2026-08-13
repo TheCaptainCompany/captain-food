@@ -9,6 +9,14 @@ supervisable) stands; its realization is decided against the actual runtime prim
 [#272](https://github.com/TheCaptainCompany/captain-food/issues/272) /
 [PR #273](https://github.com/TheCaptainCompany/captain-food/pull/273) D1.
 
+**AMENDED 2026-08-12 by
+[ADR-20260812-000000](ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)
+([#242 "Write path becomes an actor mailbox"](https://github.com/TheCaptainCompany/captain-food/issues/242)
+Runtime D) — the `PM_MAILBOX_DELIVERY` gate this ADR shipped behind is GONE.** The two-phase
+delivery decided below is unchanged and is now the ONLY path: the gate flipped ON and was deleted
+with `command_journal`, so the legacy journal+spawn arm this ADR was gated against no longer exists.
+Wherever this document says the behaviour is gated, read *unconditional*.
+
 ## Decision
 
 `PlaceOrder`'s mailbox delivery runs in TWO phases inside ONE delivery:

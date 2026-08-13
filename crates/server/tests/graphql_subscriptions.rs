@@ -6,7 +6,7 @@
 //!   re-resolves the CURRENT Order from the read model and pushes it; identical consecutive states
 //!   are deduped; a terminal status completes the stream. A non-matching correlation yields nothing.
 //! - `operationStatusChanged(messageId)` (ADR-20260720-015500): snapshot-first from the
-//!   command_journal, then every OperationStatusBus transition; ownership-scoped (session/actor/
+//!   inbound_messages, then every OperationStatusBus transition; ownership-scoped (session/actor/
 //!   ADMIN) — a non-owned messageId yields an EMPTY stream; a terminal status completes it.
 //! - `paymentStatusChanged(orderId)`: re-resolves the PlaceOrderProcess run row on Payment-stream
 //!   envelopes; initiator-scoped; completes when the run resolves.
@@ -776,38 +776,52 @@ async fn order_status_changed_ignores_other_orders() {
     assert!(nothing.is_err(), "another order's envelope must yield nothing: {nothing:?}");
 }
 
-/// The journal entry an acceptance would have written (RECEIVED, session-owned).
-fn journal_entry(message_id: uuid::Uuid, session: uuid::Uuid) -> application::journal::CommandJournalEntry {
-    application::journal::CommandJournalEntry {
+/// The mailbox row an acceptance would have written (RECEIVED, session-owned) — through the D5
+/// `EntryFixture` door, since raw `MailboxEntry` construction does not compile outside actor_client.
+fn accepted_entry(message_id: uuid::Uuid, session: uuid::Uuid) -> actor_client::mailbox::MailboxEntry {
+    actor_client::mailbox::fixtures::EntryFixture {
         message_id,
+        kind: "COMMAND".into(),
+        actor_type: "Cart".into(),
+        actor_id: uuid::Uuid::new_v4(),
+        partition: 0,
+        message_type: "AddCartLine".into(),
+        payload: serde_json::json!({}),
+        payload_hash: "h".into(),
+        channel: "GRAPHQL".into(),
+        user_id: None,
+        user_type: "PUBLIC".to_string(),
         correlation_id: message_id,
         cause_id: None,
         session_id: Some(session),
         trace_id: None,
-        user_id: None,
-        user_type: "PUBLIC".to_string(),
-        channel: ds::CommandChannel::GRAPHQL,
-        command_type: "AddCartLine".into(),
-        payload: serde_json::json!({}),
-        payload_hash: "h".into(),
+        source: None,
+        external_id: None,
     }
+    .into()
 }
 
 /// Snapshot-first + status-bus transitions, completing on a terminal status (ADR-20260720-015500).
 #[tokio::test(flavor = "multi_thread")]
-async fn operation_status_changed_streams_the_journal_lifecycle() {
+async fn operation_status_changed_streams_the_mailbox_lifecycle() {
     let schema = build_schema(None, None, None);
-    let journal: Arc<dyn application::journal::CommandJournal> =
-        Arc::new(application::journal::mem::MemCommandJournal::default());
-    // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
-    // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
-    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
-        Arc::new(actor_client::mailbox::mem::MemMailbox::default());
+    // The ONE snapshot source since #242 Runtime D: the mailbox row the acceptance wrote.
+    let mailbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
     let status_bus = actor_client::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
     let session = uuid::Uuid::new_v4();
-    journal.insert(&journal_entry(message_id, session)).await.unwrap();
+    {
+        use actor_client::mailbox::Mailbox as _;
+        mailbox
+            .insert(
+                &accepted_entry(message_id, session),
+                actor_client::mailbox::MailboxAccess::for_tests(),
+            )
+            .await
+            .unwrap();
+    }
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> = mailbox;
 
     let query = format!(
         r#"subscription {{ operationStatusChanged(input: {{ messageId: "{message_id}" }}) {{ messageId status errorCode }} }}"#
@@ -817,7 +831,6 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
         Request::new(query)
             .data(RequestRole::Public)
             .data(server::graphql_session::SessionHeader(Some(session)))
-            .data(journal.clone())
             .data(mailbox.clone())
             .data(status_bus.clone()),
     );
@@ -861,20 +874,25 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
     assert!(end.is_none(), "stream must complete after a terminal status");
 }
 
-/// A messageId journaled under ANOTHER session yields an empty stream (no existence oracle).
+/// A messageId accepted under ANOTHER session yields an empty stream (no existence oracle).
 #[tokio::test(flavor = "multi_thread")]
 async fn operation_status_changed_hides_non_owned_operations() {
     let schema = build_schema(None, None, None);
-    let journal: Arc<dyn application::journal::CommandJournal> =
-        Arc::new(application::journal::mem::MemCommandJournal::default());
-    // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
-    // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
-    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
-        Arc::new(actor_client::mailbox::mem::MemMailbox::default());
+    let mailbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
     let status_bus = actor_client::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
-    journal.insert(&journal_entry(message_id, uuid::Uuid::new_v4())).await.unwrap();
+    {
+        use actor_client::mailbox::Mailbox as _;
+        mailbox
+            .insert(
+                &accepted_entry(message_id, uuid::Uuid::new_v4()),
+                actor_client::mailbox::MailboxAccess::for_tests(),
+            )
+            .await
+            .unwrap();
+    }
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> = mailbox;
 
     let query = format!(
         r#"subscription {{ operationStatusChanged(input: {{ messageId: "{message_id}" }}) {{ status }} }}"#
@@ -883,7 +901,6 @@ async fn operation_status_changed_hides_non_owned_operations() {
         Request::new(query)
             .data(RequestRole::Public)
             .data(server::graphql_session::SessionHeader(Some(uuid::Uuid::new_v4())))
-            .data(journal.clone())
             .data(mailbox.clone())
             .data(status_bus.clone()),
     );

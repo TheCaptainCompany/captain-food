@@ -122,9 +122,10 @@ const cmd    = process.env.BUDGET_CMD;
 const label  = process.env.BUDGET_LABEL || '?';
 
 // A timer older than this was left open by a run that died or never called `stop`. It is STALE by
-// definition and is NEVER billed. 4h is chosen against the cap itself: the weekly budget is 12h, so
-// a single unclosed segment beyond 4h would eat a third of the week in one write -- which is
-// precisely the observed failure (261 minutes, 36% of the cap, billed for a 16-minute run). Real
+// definition and is NEVER billed. 4h is chosen against the ORDER OF MAGNITUDE of the cap (read the
+// real value from .claude/loop-budget.json -- it is not restated here, and it changes): a single
+// unclosed segment beyond 4h would eat a large fraction of the week in one write -- which is
+// precisely the observed failure (261 minutes, 36% of the then-cap, billed for a 16-minute run). Real
 // segments measured in this repo are tens of minutes; a genuinely longer one is still recordable,
 // but only via an explicit `--elapsed`, because inventing 4h+ of budget deserves a human assertion.
 const STALE_TIMER_SECONDS = 4 * 3600;

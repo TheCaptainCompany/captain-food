@@ -55,7 +55,6 @@
     "projector-ordering": "ghcr.io/thecaptaincompany/captain-food/projector-ordering",
     "projector-payments": "ghcr.io/thecaptaincompany/captain-food/projector-payments",
     "worker-erasure": "ghcr.io/thecaptaincompany/captain-food/worker-erasure",
-    "worker-journal-sweep": "ghcr.io/thecaptaincompany/captain-food/worker-journal-sweep",
     "worker-retention": "ghcr.io/thecaptaincompany/captain-food/worker-retention",
     "worker-sirene-sync": "ghcr.io/thecaptaincompany/captain-food/worker-sirene-sync"
   },
@@ -114,7 +113,6 @@
     "projector-ordering": "runtime",
     "projector-payments": "runtime",
     "worker-erasure": "runtime",
-    "worker-journal-sweep": "runtime",
     "worker-retention": "runtime",
     "worker-sirene-sync": "runtime"
   }

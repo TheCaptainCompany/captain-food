@@ -68,17 +68,6 @@ impl application::queries::SlugReservationRepository for AlwaysFreeSlugs {
 fn schema_over(
     mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
 ) -> server::graphql_schema::CaptainSchema {
-    schema_with(mailbox, Arc::new(application::journal::mem::MemCommandJournal::default()), false)
-}
-
-/// The full-control variant: SHARED doubles + an explicit PM-mailbox gate, so one test can accept
-/// a command on the gate-ON arm and retry it on the gate-OFF arm against the same stores — the
-/// request-time rollback scenario the #272/#289 cross-arm checks exist for.
-fn schema_with(
-    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
-    journal: Arc<dyn application::journal::CommandJournal>,
-    pm_mailbox_delivery: bool,
-) -> server::graphql_schema::CaptainSchema {
     server::graphql_schema::build_schema(
         None,
         Some(server::graphql_schema::WriteDeps {
@@ -89,12 +78,10 @@ fn schema_with(
             payments: Arc::new(infrastructure::FailClosedPaymentGateway),
             pm_state: Arc::new(application::generated::pm_state::mem::MemPaymentProcessState::default()),
             refund_state: Arc::new(application::generated::pm_state::mem::MemRefundProcessState::default()),
-            journal,
             mailbox,
             status_bus: actor_client::OperationStatusBus::default(),
             auth_sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
             slug_reservations: Arc::new(AlwaysFreeSlugs),
-            pm_mailbox_delivery,
         }),
         None,
     )
@@ -234,15 +221,16 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
 }
 
 
-/// The #289 review's BLOCKING finding, pinned: the gated-PM LEGACY arm's cross-arm dedupe must
-/// hash the TYPED command form the mailbox arm stores — for a command with an ABSENT OPTIONAL,
-/// the null-stripped GraphQL input hashes differently, and before the fix a same-payload retry
-/// straddling a gate rollback got a synchronous Conflict instead of `duplicate: true`. On the
-/// money path (`placeOrder`/`approveRefund`), that is a 409 to a caller who did nothing wrong.
+/// The #289 review's BLOCKING finding, pinned in its post-#242-Runtime-D form: a retry of an
+/// accepted PM command whose payload carries an ABSENT OPTIONAL must replay as `duplicate: true`,
+/// never a synchronous Conflict. The bug was a hash-form mismatch — the null-stripped GraphQL input
+/// hashes differently from the TYPED command form the mailbox row stores — and on the money path
+/// (`placeOrder`/`approveRefund`) it means a 409 to a caller who did nothing wrong. The gated
+/// second arm that made this a CROSS-arm problem is gone; the hash-form trap is not, because the
+/// resolver still hashes an input form on the way in.
 #[tokio::test]
-async fn a_gate_rollback_retry_with_an_absent_optional_replays_as_duplicate_not_conflict() {
+async fn a_retry_with_an_absent_optional_replays_as_duplicate_not_conflict() {
     let mailbox = Arc::new(MemMailbox::default());
-    let journal: Arc<application::journal::mem::MemCommandJournal> = Arc::new(Default::default());
     let order_id = uuid::Uuid::from_u128(0x0D_0E);
     let message_id = uuid::Uuid::from_u128(0x7E57);
     // `reason` is deliberately ABSENT — the field whose explicit-null typed form diverges from the
@@ -252,28 +240,25 @@ async fn a_gate_rollback_retry_with_an_absent_optional_replays_as_duplicate_not_
         r#"mutation {{ approveRefund(input: {{ orderId: "{order_id}", amount: {{ amountCents: 500, currency: "EUR" }} }}, metadata: {{ messageId: "{message_id}" }}) {{ operationStatus duplicate }} }}"#
     );
 
-    // Gate ON: accepted on the MAILBOX arm — the typed hash is what the row stores.
-    let gate_on = schema_with(mailbox.clone(), journal.clone(), true);
-    let resp = gate_on
+    let schema = schema_over(mailbox.clone());
+    let resp = schema
         .execute(async_graphql::Request::new(mutation.clone()).data(RequestRole::Admin))
         .await;
-    assert!(resp.errors.is_empty(), "gate-ON accept errored: {:?}", resp.errors);
+    assert!(resp.errors.is_empty(), "the first accept errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
     assert_eq!(data["approveRefund"]["operationStatus"], "PENDING");
     assert_eq!(data["approveRefund"]["duplicate"], false);
     assert!(mailbox.entry(message_id).is_some(), "accepted onto the mailbox");
 
-    // Gate rolled back OFF, SAME stores: the retry lands on the LEGACY arm, whose cross-arm check
-    // consults the mailbox row. Same messageId + same input MUST replay as a duplicate.
-    let gate_off = schema_with(mailbox.clone(), journal, false);
-    let resp = gate_off
+    // Same messageId + same input: a replay, not a client bug.
+    let resp = schema
         .execute(async_graphql::Request::new(mutation).data(RequestRole::Admin))
         .await;
-    assert!(resp.errors.is_empty(), "the rollback retry must not Conflict: {:?}", resp.errors);
+    assert!(resp.errors.is_empty(), "the retry must not Conflict: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
     assert_eq!(
         data["approveRefund"]["duplicate"], true,
-        "a committed acceptance replays as a duplicate across the gate flip"
+        "a committed acceptance replays as a duplicate"
     );
     assert_eq!(mailbox.entries().len(), 1, "the retry wrote nothing new anywhere");
 }

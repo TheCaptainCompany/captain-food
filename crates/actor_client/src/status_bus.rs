@@ -2,7 +2,7 @@
 //! PROP-20260728-152752 §2.1): a `tokio::sync::broadcast` fan-out of post-commit operation
 //! completions, keyed by `message_id`. Relocated from `infrastructure` behind this boundary
 //! crate (#303, PROP-20260802-130500 D4) so the response stream — like the row read — is served
-//! by the one generic [`crate::ActorClient`], and re-keyed from the legacy `CommandJournalStatus`
+//! by the one generic [`crate::ActorClient`], and re-keyed from the retired `CommandJournalStatus`
 //! to the mailbox-native [`InboundMessageStatus`].
 //!
 //! Publishers (the write side of the bus, post-commit only): the mailbox delivery observer
@@ -25,7 +25,7 @@ use tokio::sync::broadcast;
 /// One operation lifecycle transition: the acceptance (RECEIVED) and the terminal completion.
 #[derive(Debug, Clone)]
 pub struct OperationUpdate {
-    /// The acceptance handle (`inbound_messages.message_id` / legacy `command_journal.message_id`
+    /// The acceptance handle (`inbound_messages.message_id`
     /// — one keyspace, globally unique).
     pub message_id: uuid::Uuid,
     pub correlation_id: uuid::Uuid,

@@ -318,10 +318,10 @@ impl From<CauseId> for ds::CauseId {
     }
 }
 
-/// Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.
+/// Unique id of one command submission — the idempotency key of the write path (inbound_messages pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MessageId(pub uuid::Uuid);
-async_graphql::scalar!(MessageId, "MessageId", "Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.");
+async_graphql::scalar!(MessageId, "MessageId", "Unique id of one command submission — the idempotency key of the write path (inbound_messages pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.");
 impl From<ds::MessageId> for MessageId {
     fn from(v: ds::MessageId) -> Self {
         Self(v.0)
@@ -888,68 +888,6 @@ impl From<OperationStatus> for ds::OperationStatus {
     }
 }
 
-/// Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED, REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status — the journal row keeps the original's real state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum CommandJournalStatus {
-    #[graphql(name = "RECEIVED")]
-    RECEIVED,
-    #[graphql(name = "SUCCEEDED")]
-    SUCCEEDED,
-    #[graphql(name = "REJECTED")]
-    REJECTED,
-    #[graphql(name = "FAILED")]
-    FAILED,
-}
-impl From<ds::CommandJournalStatus> for CommandJournalStatus {
-    fn from(v: ds::CommandJournalStatus) -> Self {
-        match v {
-            ds::CommandJournalStatus::RECEIVED => Self::RECEIVED,
-            ds::CommandJournalStatus::SUCCEEDED => Self::SUCCEEDED,
-            ds::CommandJournalStatus::REJECTED => Self::REJECTED,
-            ds::CommandJournalStatus::FAILED => Self::FAILED,
-        }
-    }
-}
-impl From<CommandJournalStatus> for ds::CommandJournalStatus {
-    fn from(v: CommandJournalStatus) -> Self {
-        match v {
-            CommandJournalStatus::RECEIVED => Self::RECEIVED,
-            CommandJournalStatus::SUCCEEDED => Self::SUCCEEDED,
-            CommandJournalStatus::REJECTED => Self::REJECTED,
-            CommandJournalStatus::FAILED => Self::FAILED,
-        }
-    }
-}
-
-/// Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment worker (e.g. the HubRise enricher), or an internal trigger endpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum CommandChannel {
-    #[graphql(name = "GRAPHQL")]
-    GRAPHQL,
-    #[graphql(name = "WORKER")]
-    WORKER,
-    #[graphql(name = "INTERNAL")]
-    INTERNAL,
-}
-impl From<ds::CommandChannel> for CommandChannel {
-    fn from(v: ds::CommandChannel) -> Self {
-        match v {
-            ds::CommandChannel::GRAPHQL => Self::GRAPHQL,
-            ds::CommandChannel::WORKER => Self::WORKER,
-            ds::CommandChannel::INTERNAL => Self::INTERNAL,
-        }
-    }
-}
-impl From<CommandChannel> for ds::CommandChannel {
-    fn from(v: CommandChannel) -> Self {
-        match v {
-            CommandChannel::GRAPHQL => Self::GRAPHQL,
-            CommandChannel::WORKER => Self::WORKER,
-            CommandChannel::INTERNAL => Self::INTERNAL,
-        }
-    }
-}
-
 /// What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum InboundMessageKind {
@@ -1028,7 +966,7 @@ impl From<InboundMessageStatus> for ds::InboundMessageStatus {
     }
 }
 
-/// Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).
+/// Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Succeeds the retired CommandChannel (whose INTERNAL became WORKER here, and which gained EXTERNAL for adapted facts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum InboundMessageChannel {
     #[graphql(name = "GRAPHQL")]
@@ -1716,10 +1654,10 @@ impl From<ScopeType> for ds::ScopeType {
     }
 }
 
-/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
+/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
-async_graphql::scalar!(ConversationMessageId, "ConversationMessageId", "Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).");
+async_graphql::scalar!(ConversationMessageId, "ConversationMessageId", "Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).");
 impl From<ds::ConversationMessageId> for ConversationMessageId {
     fn from(v: ds::ConversationMessageId) -> Self {
         Self(v.0)

@@ -173,7 +173,7 @@ failure rather than a misleading sentence.
 
 ### Non-negotiable rules
 
-- **`specs/**` is the team's work** (product-owner directive, 2026-08-10, verbatim in
+- **`specs/**` is the team's work** (founder directive, 2026-08-10, verbatim in
   [ADR-20260810-221840](docs/adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)):
   *"I'm surprise that I read that the spec was untouchable now that we have the team working together
   we don't need to have this constraint anymore … I'm pretty sure the team will ensure the right
@@ -193,7 +193,7 @@ failure rather than a misleading sentence.
   landed spec change writes one sentence in [docs/SPEC-LOG.md](docs/SPEC-LOG.md) — what the product now
   promises differently — in the **same commit**. C4 (`specs/architecture/*.yaml`) and observability
   contracts (`specs/observability.yaml`) are **source** DSL, not generated.
-- **Proposals are committed to the repo** (ADR-20260724-135945, product-owner directive): every
+- **Proposals are committed to the repo** (ADR-20260724-135945, founder directive): every
   proposal presented for approval lands in [docs/proposals/](docs/proposals/) as
   `PROP-YYYYMMDD-HHMMSS-<slug>.md` — the proposal as presented, alternatives considered, the
   approver's scope choices, status header linking the realizing PR/ADR. Proposals are LIVING
@@ -203,25 +203,25 @@ failure rather than a misleading sentence.
   **GitHub is never the record**: issue bodies, PR bodies and PR/issue comments carry LINKS into
   docs/proposals + docs/adr (and a tracking checklist at most) — never the design content itself;
   content drafted in a GitHub surface must land in the repo in the same change.
-  **Proportionality** (product-owner directive, 2026-07-31): the record matches the size of the
+  **Proportionality** (founder directive, 2026-07-31): the record matches the size of the
   decision — a real option space needing arbitration gets a proposal (+ tracking issue); a
   decision without alternatives gets an ADR (inline "options considered" at most); a small
   subject with no real decision needs NEITHER — the commit message and the PR's one-paragraph
   body are enough. Issues and PR bodies stay one paragraph + links + a checklist.
-- **Gate, then stabilize** (Rust-RFC import, product-owner approved 2026-07-31): behavior that
+- **Gate, then stabilize** (Rust-RFC import, founder-approved 2026-07-31): behavior that
   changes a critical path ships BEHIND a gate (env toggle / config flag / spec `activations`),
   and flipping the default is a SEPARATE, recorded decision (a one-line ADR) after the gated
   form has been smoked — never the same change. **Named concerns**: a proposal's header may
   carry a `Concerns` checklist; an unchecked concern mechanically blocks `Approved` (see
   docs/proposals/README.md) — enforced by the validator's proposal-hygiene rules.
-  **Every proposal MUST include** (product-owner directive, 2026-07-26): **per-use-case screen
+  **Every proposal MUST include** (founder directive, 2026-07-26): **per-use-case screen
   mockups**, **per-flow sequence diagrams** (mermaid, hexagonal-faithful), and **per-option pros/cons**
   for every decision it surfaces (a bare "A vs B" without trade-offs is incomplete) — see
   [docs/proposals/README.md](docs/proposals/README.md); `PROP-20260726-013207` is the reference example.
   **Every proposal has a tracking issue** (ADR-20260724-143000): create it before/with the proposal
   if missing, name it in the header, keep the two in step — an issue-less proposal is invisible to
   the prioritised backlog and gets lost.
-- **Compiler first; a check is the fallback** (product-owner directive, 2026-08-03,
+- **Compiler first; a check is the fallback** (founder directive, 2026-08-03,
   ADR-20260803-234035): before writing any gate, ask whether the TYPE SYSTEM can make the mistake
   unspellable — a capability witness with a `pub(crate)` constructor, a sealed marker trait, private
   fields, a newtype, an unrepresentable state. The enforcement hierarchy in PROP-20260802-130500 §1
@@ -231,7 +231,7 @@ failure rather than a misleading sentence.
   by [#329](https://github.com/TheCaptainCompany/captain-food/issues/329): seven review rounds and
   ~191 lines hardening a source-text scanner over a boundary the compiler already enforced, every
   gap in it found by a reviewer rather than by the scanner.
-- **Final vision first — no intermediate step where the final step can be built** (product-owner
+- **Final vision first — no intermediate step where the final step can be built** (founder
   directive, 2026-08-08, verbatim in
   [ADR-20260808-235113](docs/adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)):
   *"do not choose the easy path, choose the final clean vision … always put in place the final
@@ -241,7 +241,7 @@ failure rather than a misleading sentence.
   gate-then-stabilize — gating decides WHEN a finished thing takes over, never licenses a shim.
   Where staging is externally forced, the intermediate ships only with the final step already
   designed and recorded.
-- **Mob programming — every agent is in the dev** (product-owner directive, 2026-08-09, verbatim in
+- **Mob programming — every agent is in the dev** (founder directive, 2026-08-09, verbatim in
   [ADR-20260809-013142](docs/adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)):
   *"everyone is involved in the dev so … everyone will be able to detect issues during the dev."*
   A dispatch is a MOB: (1) **mob briefing** — the brief goes to the WHOLE roster in parallel before
@@ -253,8 +253,31 @@ failure rather than a misleading sentence.
   [#424](https://github.com/TheCaptainCompany/captain-food/issues/424), where a post-hoc UX pass
   found the built checkout state **could not render at all** — a finding that would have changed
   the work, for free, if the lens had been in the briefing.
+- **He is the FOUNDER / Tech CEO, and every founder message goes to the whole team before any answer**
+  (founder directives, 2026-08-12, verbatim in
+  [ADR-20260812-143619](docs/adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)):
+  *"Stop calling me product owner. I'm the founder / Tech CEO."* and *"When I say something ask the
+  team for answers never answer directly without asking the whole team."* The mob principle above
+  extends from **dispatches to founder messages**, and coordinator-never-authors below from **the diff
+  to the answer**: no answer is composed and no record lands before the whole roster has been asked;
+  *"nothing in my lens"* stays a complete one-line answer. **Three carve-outs**: an **external-clock
+  fact** (a billing suspension, a token expiry, a partner deadline, an opposition window) is relayed
+  in the same turn, verbatim from the register, with the mob's opinion following; **executing an
+  already-recorded rollback/abort path** needs no consult — the mob's involvement happened when the
+  path was written — while going FORWARD through an incident (a hotfix migration, flipping a gate to
+  escape) is a new decision and does get the mob (*am I executing a recorded path, or inventing
+  one?*); and **no lens output, and no aggregation of lenses, is legal advice or clearance** —
+  agreement between lenses never upgrades a hedged finding to a settled one. **A record created from a
+  founder directive carries a `Consulted:` block, one line per lens** (*"nothing in my lens"* is a
+  valid line), because a lens that was never asked is indistinguishable from a lens with nothing to
+  say — silence is ambiguous, the same defect class ADR-20260810-231300 records for monitoring. The
+  rename sweeps the LIVING operating docs only; **historical ADRs and proposals keep their vocabulary
+  and verbatim quotes stay verbatim**, and "product ownership" remains the name of the FUNCTION the
+  team holds (ADR-20260808-144738). **External artifacts** (mentions légales, partner onboarding,
+  association filings) must name the capacity the statutes actually confer — "founder / Tech CEO" is a
+  repo-internal title, not a French corporate mandate.
 - **Team ownership — sessions start by themselves, and the coordinator never authors the diff**
-  (product-owner directive, 2026-08-10, verbatim in
+  (founder directive, 2026-08-10, verbatim in
   [ADR-20260810-011500](docs/adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)):
   *"every next session start to work by itself without asking permission because the team has the
   ownership of the product"* — *"never do the job yourself, only the team agents have the ownership
@@ -263,16 +286,16 @@ failure rather than a misleading sentence.
   backlog → claim → the full mob loop above, with the **executor agent** writing EVERY phase of the
   diff (code, specs under recorded approval, records). The session lead is a COORDINATOR only:
   briefs, checkpoints, relaying, GitHub mechanics — never the product diff. The only thing brought
-  to the product owner is the **decision queue** (genuine option spaces, external/legal actions,
+  to the founder is the **decision queue** (genuine option spaces, external/legal actions,
   admin-gated provisioning), presented with options + trade-offs + a recommendation — never
   "shall I proceed?". The observable compliance signature: mob evidence in the PR body,
   executor-authored commits, coordinator pushes limited to claim commits and GitHub surfaces.
   The loop still starts unasked, AND its start is always accompanied by a compact action plan
-  shown to the product owner — chunk, phases, checkpoints, gates, out-of-scope fences,
+  shown to the founder — chunk, phases, checkpoints, gates, out-of-scope fences,
   anticipated decision points — as transparency, never as a permission request
   ([ADR-20260810-114242](docs/adr/ADR-20260810-114242-loop-start-action-plan.md)).
 - **No polling, only pushing — polling is a graceful fallback until pushing works again**
-  (product-owner directive, 2026-08-10, verbatim in
+  (founder directive, 2026-08-10, verbatim in
   [ADR-20260810-231300](docs/adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)):
   *"no polling only pushing, polling as graceful fallback until pushing works again."* Push is the
   primary transport for every state change one component must learn from another. **The second clause
@@ -292,7 +315,7 @@ failure rather than a misleading sentence.
   not *scan on a fixed interval*). The tiebreaker at the boundary: **does any component know this fact
   before the clock does?** If yes, it is propagation and must be pushed. Applies to the team's own
   loop too — agent completions arrive as push, so **do not reintroduce a polling status cron**.
-  **Second carve-out — MONITORING keeps a poll, permanently** (product-owner refinement, same ADR):
+  **Second carve-out — MONITORING keeps a poll, permanently** (founder refinement, same ADR):
   *"Monitoring could be excluded from this principle if we cannot design it pushable. In any case for
   monitoring will have a polling as fallback."* Still try to make it pushable; it may poll where push
   cannot be designed; and it **keeps a poll in every case, even where push works** — this clause is
@@ -310,7 +333,7 @@ failure rather than a misleading sentence.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
-- **A business metric IS A PROJECTION** (product-owner directive, 2026-08-11: *"Confirm the reversal,
+- **A business metric IS A PROJECTION** (founder directive, 2026-08-11: *"Confirm the reversal,
   go with the projections"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md),
   superseding [ADR-20260810-234225](docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
   in part). Every feature, for every persona, carries at least one — the unit is the **persona
@@ -328,7 +351,7 @@ failure rather than a misleading sentence.
   declaration, two outputs. Grammar, rules and the open rows:
   [PROP-20260810-234225](docs/proposals/PROP-20260810-234225-business-metrics-for-every-persona.md) D4/D6/D8/D9.
 - **Every reference in the DSL is a `$ref`; only a declaration may introduce a bare name**
-  (product-owner directive, 2026-08-11: *"we need to heavily strongly typed the spec no string in
+  (founder directive, 2026-08-11: *"we need to heavily strongly typed the spec no string in
   it"*; [ADR-20260811-014129](docs/adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)
   Decision 2). Four categories, in order: **(1)** a **declaration** introduces a name (`measures:
   [{ name: orders }]`) — correct, and the only place a bare name is; **(2)** a **reference** to
@@ -353,16 +376,16 @@ failure rather than a misleading sentence.
 - Review and validation gates are executable and **blocking**; never hand-edit generated output
   (`specs/generated/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
 - Every recurring agent/loop failure becomes a new rule, test, or ADR.
-- **Independent review before ready-for-review** (product-owner directive, 2026-08-01): a PR is
+- **Independent review before ready-for-review** (founder directive, 2026-08-01): a PR is
   marked ready only after a reviewer-agent pass over the FULL branch diff by eyes that did not
   write it (high-stakes changes — payments, migrations, erasure — get the multi-lens fan-out;
   the #270 five-lens review found six criticals in fully-gated work and is the model). After any
   decision that renames or reshapes something, grep the OLD term across specs/**, docs/** and
   open issue/PR bodies before the turn ends — staleness the compiler cannot catch is caught by
-  the sweep, not by the product owner. Prefer ONE SESSION PER WORK CHUNK: the repo carries the
+  the sweep, not by the founder. Prefer ONE SESSION PER WORK CHUNK: the repo carries the
   state (proposals, ADRs, checklists), so fresh context is cheap and long-context error rates
   are real.
-- **Every session records what it learned** (ADR-20260730-034635, product-owner directive), in the
+- **Every session records what it learned** (ADR-20260730-034635, founder directive), in the
   **same change** as the work — not just failures, and not only on the second occurrence. Operational
   findings (environment limits, tool behaviour, gate costs, workflow traps) go to
   [docs/claude/sessions.md](docs/claude/sessions.md) or the relevant topic file; decisions to an ADR;
@@ -376,12 +399,12 @@ failure rather than a misleading sentence.
   ADRs in the same change** — so concurrent sessions never diverge on state or intent. ADR ids are
   **date-time** (`ADR-YYYYMMDD-HHMMSS`) to avoid collisions (ADR-20260718-135417); legacy `0001`–`0047`
   keep their sequential ids.
-- **Respect the prioritised backlog — and the team now sets it** (product-owner directive,
+- **Respect the prioritised backlog — and the team now sets it** (founder directive,
   2026-08-10, [ADR-20260810-215503](docs/adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md):
   *"Don't care about the project field anymore the team decides without me"*): priorities live **in the
   GitHub Project "Prioritized backlog"** (Priority field + row order) — pick work from the top;
   skipping the top item needs a stated reason. The **`Priority` bucket and row order are the team's
-  to set**; the product owner may override either at any time, without justification, and the team
+  to set**; the founder may override either at any time, without justification, and the team
   adopts it immediately. What is NOT delegated: genuine option spaces
   ([docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md)), external/legal/admin-gated matters,
   `specs/**` approval — **a `Priority` is not an approval; ranking an AMBER item `Urgent` does not
@@ -393,7 +416,7 @@ failure rather than a misleading sentence.
   blocked top item is reported blocked, never re-ranked. Every bucket change or material row move is
   stated in the architect's run report with the method clause that justifies it; a re-ranking that
   reverses a previously stated order also gets a line in `docs/STATUS.md`.
-- **Spec- and docs-only changes go straight to `main`** (product-owner directive): commit and **push
+- **Spec- and docs-only changes go straight to `main`** (founder directive): commit and **push
   directly to `main`** — no branch, no PR, no claim ceremony — for changes confined to `specs/**`,
   `docs/**`, ADRs, `CLAUDE.md`, `STATUS.md`, and the generated artifacts they regenerate. **Keep `main`
   green**: run the same gate CI would (`make rust`) locally **before** pushing anything that touches

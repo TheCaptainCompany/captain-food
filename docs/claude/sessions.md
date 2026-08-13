@@ -27,7 +27,7 @@ hosting, storage or deployment topology matters.** Nothing regenerates that para
 covers it, so it drifts silently in the one file every session reads first. Measured cost: on
 2026-08-10 it still said *"Managed Postgres"* and cited the superseded `ADR-20260731-061609` for
 hosting, when the decision has been **CNPG in-cluster on OVH MKS** since `ADR-20260807-002705` — the
-product owner had to correct a session by hand on a fact the repo should have supplied. The cheap
+founder had to correct a session by hand on a fact the repo should have supplied. The cheap
 tell: **an ADR id cited in prose whose own `Status:` line says Superseded.** STATUS.md is the live
 state; CLAUDE.md is a summary of it, and summaries rot.
 
@@ -150,7 +150,12 @@ conflicted PR looks exactly like a slow runner. The tell is on the PR object, no
 Cost: ~40 minutes of heartbeats attributing a real conflict to runner backlog while auto-merge sat
 armed and could never fire. Habit: when an armed auto-merge does not land within one CI cycle, call
 `pull_request_read method:get minimal_output:true` and read `mergeable_state` before blaming the
-platform. Related: the conflict was SEMANTIC, not textual — one branch moved every
+platform. **And arming auto-merge is not delegating the merge**: on 2026-08-12 it failed to fire on
+**both** PRs of the day (#500 and #507) with every required check green and no conflict, and each
+had to be merged by hand. Whatever the cause, the operational rule is the one the protocol already
+states and sessions keep shortcutting — supervise until the PR reads **MERGED**. A session that
+arms auto-merge and walks away leaves a green PR sitting, and the next session finds the work
+apparently done and unmergeable-looking. Related: the conflict was SEMANTIC, not textual — one branch moved every
 `crates/infrastructure/tests/*.rs` into the `tests/main/` witness harness while the other added a
 test in the old layout, so git's auto-merge produced a file mixing both idioms. Resolve onto the
 NEW harness and re-run the moved test against a live database; a compile-only check would have
@@ -370,7 +375,7 @@ behind) against a schema 9 migrations ahead**: `deploy` green, `db-migrate` gree
 production quietly serving `426730b6` while every worker looped on
 `relation "inbound_events" does not exist`.
 
-Cost: a live incident, and ~30 minutes to diagnose from a startup log the product owner happened to
+Cost: a live incident, and ~30 minutes to diagnose from a startup log the founder happened to
 paste. Nothing in CI would ever have said a word.
 
 **So after any deploy, verify what is actually RUNNING before you believe it landed.** The startup line
@@ -542,7 +547,7 @@ unless the full payload is the point — a bare PR `get_diff` on a large PR retu
 (4) ONE SESSION PER WORK CHUNK (CLAUDE.md rigor rules) — the repo carries the state, so ending a
 session is free and long context measurably raises the staleness error rate.
 
-**Coordinator/executor split** (product-owner directive, 2026-08-07): a session that has planned a
+**Coordinator/executor split** (founder directive, 2026-08-07): a session that has planned a
 multi-step program NEVER executes the steps itself — it DISPATCHES each step to a fresh session
 (`create_session` with a complete standalone prompt naming the issue, the ADRs/proposal to read, the
 branch/PR to continue, and the gates), one step per session, sequentially — the next step is
@@ -620,7 +625,7 @@ read that as divergent work someone will lose — confirm with `ls .git/shallow`
 disconnect while reading sideband packet` — consistently, not transiently, so the retry-with-backoff
 rule does not apply — and no GitHub MCP tool deletes a branch (`create_branch` exists, there is no
 delete). **A branch created in-session cannot be cleaned up from in-session**: say so and leave it
-to the product owner rather than burning turns on syntax variants (cost: four retries plus a tool
+to the founder rather than burning turns on syntax variants (cost: four retries plus a tool
 search, 2026-08-05). The practical consequence: for a docs-only change that belongs on `main`, push
 straight to `main` and never create the branch in the first place.
 
@@ -630,6 +635,13 @@ gate by design (its own comment says so). And `make rust ... | tail` reports the
 0), so a background run can notify "exit 0" over a red gate (cost: one commit pushed on a
 believed-green gate before the output was re-read, 2026-08-01). Redirect to a file and echo `$?`
 separately, then read both.
+**A GREEN `check-drift` is SILENT — it prints no success line at all** (`Makefile:74-75`: the only
+output is the failure `echo`; the emitter chatter you see on stdout comes from its `generate`
+dependency, not from the check). So there is nothing to grep FOR: `make check-drift | grep -i drift`
+matches nothing on success **and** returns grep's exit 1, i.e. a green gate reported as a failure —
+and on a red gate the same pipeline reports grep's 0. Never infer this gate's result from its text.
+Capture to a file, read `$?` on the line after the command, and treat "empty output, exit 0" as the
+success signal (cost: two wasted runs re-deriving a gate that had been green both times, 2026-08-12).
 
 **`ld terminated with signal 7 [Bus error]` at link time is the DISK ALLOWANCE, not a toolchain
 fault.** The linker mmaps its output; at 98% used it dies with a bus error that looks like
@@ -643,7 +655,7 @@ with a body containing backticks: bash command-substitutes `` ` `` inside double
 with the phrase silently deleted (cost: one garbled money-path commit message, an amend and a
 force-push, 2026-08-01). `git commit -F - << 'MSG' … MSG` (quoted delimiter) is immune.
 
-**After a product-owner merge, diff CONTENT before declaring a remainder.** A squash merge takes
+**After a founder merge, diff CONTENT before declaring a remainder.** A squash merge takes
 the WHOLE branch at its head — "the PO merged early, only slice N is in" is a belief about the
 commit graph, not the content. Verify with `git diff main <branch-tip>` (and read the merged PR
 body's checklist — its state at merge time is the record): if `main` is ahead and nothing is
@@ -803,7 +815,7 @@ Hub via `hub.docker.com/v2/repositories/{org}/{repo}/tags`). Vendor the manifest
 and record url+sha256 in a PIN.json a test recomputes — a header comment inside the vendored file
 would silently break the checksum.
 
-**The interactive decision form (2026-08-08, product-owner directive: keep this approach)** — when
+**The interactive decision form (2026-08-08, founder directive: keep this approach)** — when
 a batch of decisions goes to the customer, do NOT deliver a wall of markdown: publish the brief as
 an **interactive artifact** and let them answer at their own tempo. **This binds even when the
 customer is LIVE in-session, and `AskUserQuestion` is NOT a substitute for a batch of 3+** — the
@@ -1057,6 +1069,18 @@ containing seven hex characters.
 green, quotes the claim it previously made, explains why that claim was false, and then says what
 can honestly be said instead — that the evidence is ordinary, the assertion of specific values a
 wrong implementation would not produce.
+
+**Restore a plant with `git checkout -- <path>`, NEVER from a copy you took yourself.** The rule
+above is what creates this hazard: proving red means editing a committed file, and the obvious
+mechanics — `cp <file> /tmp/x` before, `cp /tmp/x <file>` after — are **not re-entrant**. Plant
+once, prove red, restore from `/tmp`; plant a *second* mutation in the same file and the `cp`
+snapshots the **already-planted** text, so the "restore" writes the first mutation back and the
+tree is silently wrong. It survives `make validate` whenever the mutation is one the validator was
+never taught to refuse, which is exactly the case a red-first proof is about, and the diff that
+reaches review then contains a deliberate defect nobody wrote on purpose. Git already holds the
+pristine copy: `git checkout -- <path>` is idempotent, needs no bookkeeping, and cannot restore the
+wrong generation. Verify with `git status --short` before every gate run, not only at the end —
+a clean tree is the only evidence the plants are gone.
 
 ### Do not push a feature branch while its executor is still working
 

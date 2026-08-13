@@ -3,18 +3,18 @@
 //! seam" the ingress ACL (`acl.rs`) and the outbound client (`api.rs`) were built for:
 //!
 //! ```text
-//! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ journal ──▶ domain write
-//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → command_journal → ImportCatalog handler
-//!   inventory callback → get_inventory(locationId)→ map_inventory→ command_journal → update_offer_stock handler (per sku)
+//! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ mailbox ──▶ domain write
+//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → mailbox → ImportCatalog handler
+//!   inventory callback → get_inventory(locationId)→ map_inventory→ mailbox → update_offer_stock handler (per sku)
 //! ```
 //!
 //! # Journaled sends (ADR-20260720-015300, #15)
 //!
-//! Every command this enricher issues goes through the WORKER-channel journaling dispatch
-//! ([`application::dispatch::dispatch_journaled`]), never straight to a handler: `message_id` =
+//! Every command this enricher issues goes through the WORKER-channel mailbox door (the typed
+//! actor clients), never straight to a handler: `message_id` =
 //! UUIDv5 of (callback id, command type[, offer id]) so a HubRise redelivery replays the SAME id and
-//! dedupes on `command_journal` instead of double-applying; `cause_id` = UUIDv5(callback id) — the
-//! mirrored callback's identity — so the chain `external_hubrise_callbacks → command_journal →
+//! dedupes on the mailbox pk instead of double-applying; `cause_id` = UUIDv5(callback id) — the
+//! mirrored callback's identity — so the chain `external_hubrise_callbacks → inbound_messages →
 //! domain_events` is fully traceable end to end.
 //!
 //! # Why the two directions differ (CLAUDE.md "Commands vs inbound events")
@@ -538,10 +538,10 @@ pub fn hubrise_system_user_id() -> uuid::Uuid {
     uuid::Uuid::new_v5(&hubrise_namespace(), b"system:hubrise-webhook")
 }
 
-/// Records HubRise-driven catalog/inventory writes through the WORKER-channel journaling dispatch and
+/// Records HubRise-driven catalog/inventory writes through the WORKER-channel mailbox door and
 /// the ordinary command handlers. Generic over the [`HubRisePuller`] so the dispatch (import, per-SKU
-/// stock, `OfferNotFound` skip, journal dedup) is unit-testable in memory; `dyn EventStore` /
-/// `dyn CommandJournal` keep it off the concrete Postgres adapters. The pull token is resolved PER
+/// stock, `OfferNotFound` skip, mailbox dedup) is unit-testable in memory; `dyn EventStore` /
+/// `dyn Mailbox` keep it off the concrete Postgres adapters. The pull token is resolved PER
 /// CALLBACK from the connected account (`hubrise_connections`, issue #20) — the former global
 /// `HUBRISE_ACCESS_TOKEN` fallback is retired.
 pub struct HubRiseEnricher<P: HubRisePuller> {
@@ -591,7 +591,7 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
         }
     }
 
-    /// Enrich one verified callback. Only `Err(DomainError)` (event store / journal unreachable)
+    /// Enrich one verified callback. Only `Err(DomainError)` (event store / mailbox unreachable)
     /// should make the endpoint answer 5xx; every other outcome is definitive and ACKed.
     pub async fn enrich(
         &self,
@@ -731,7 +731,6 @@ impl<P: HubRisePuller> Enricher for HubRiseEnricher<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use application::journal::mem::MemCommandJournal;
     use application::ports::{version_conflict, Actor, EventStore};
     use domain::generated::events::{CatalogCreated, DomainEvent};
     use domain::generated::scalars::CatalogName;
@@ -1049,7 +1048,7 @@ mod tests {
         })
         .await;
         // loc_2 is not in the connection snapshot (only loc_1 is connected): no token to pull with —
-        // a definitive skip, and NOTHING journaled (the pull never happens; FakePuller would panic
+        // a definitive skip, and NOTHING enqueued (the pull never happens; FakePuller would panic
         // on a wrong token anyway).
         let cb: HubRiseCallback = serde_json::from_value(serde_json::json!({
             "id": "cb_9", "resource_type": "inventory", "event_type": "update",

@@ -2,7 +2,7 @@
 
 **Start a run**: open a new Claude Code session on this repo with the prompt
 *"You are the coordinator — execute docs/claude/autonomous-run.md."* That is the whole ceremony;
-this file carries the rest. (Product-owner directive, 2026-08-08: *"let the team work
+this file carries the rest. (Founder directive, 2026-08-08: *"let the team work
 autonomously and ask my help if needed."*)
 
 ## Ground yourself first (read in order)
@@ -46,7 +46,7 @@ cannot look them up).
 Norman+Patton, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
 person's name — that demotes the others.
 
-### Every dispatch is a MOB (product-owner directive, 2026-08-09, ADR-20260809-013142)
+### Every dispatch is a MOB (founder directive, 2026-08-09, ADR-20260809-013142)
 
 The roster is **invited by default** — the coordinator no longer picks a subset (that discretion is
 where a PM re-emerges, ADR-20260808-144738 D4). Three moments, and the FIRST is the load-bearing one:

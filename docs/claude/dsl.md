@@ -70,7 +70,7 @@ one catalog is a validation error (`scope-duplicate-item`).
 
 ## Hard rules
 
-- **`specs/**` is ordinary work** (product-owner directive 2026-08-10,
+- **`specs/**` is ordinary work** (founder directive 2026-08-10,
   [ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)) —
   the freeze is lifted; execution loops may add and amend DSL content **and structure**. Three
   questions before any edit lands: **(1)** does it contradict or create a recorded decision

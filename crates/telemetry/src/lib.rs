@@ -51,10 +51,11 @@ pub mod spans;
 
 pub use contract::{attr, dispatch_outcome, journal_status, metric, span};
 
-/// The `business.channel` value for the GraphQL dispatch surface — `scalars.yaml` `CommandChannel`.
+/// The `business.channel` value for the GraphQL dispatch surface — `scalars.yaml`
+/// `InboundMessageChannel`.
 /// Named here so the generated resolvers do not each carry a bare string literal.
 pub const CHANNEL_GRAPHQL: &str = "GRAPHQL";
-/// `business.channel` for on-app workers routing through `dispatch_journaled`.
+/// `business.channel` for on-app workers enqueueing through a typed actor client.
 pub const CHANNEL_WORKER: &str = "WORKER";
 
 /// Everything this crate needs, read from the generated configuration reader by the composition root.

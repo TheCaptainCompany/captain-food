@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 24594,
+  "recordedAt": "2026-08-12T14:29:14.045Z",
+  "branch": "claude/captain-food-resume-4rvcz6",
+  "note": "Coordination session of 2026-08-12 (session_01XTrJE7m5TGkKRRPKj5ZFqZ): full-roster mob briefing (10 lens agents, 8 relaunched after a model rate limit killed them mid-run), the ADP-1 records (adapter-per-database ADR + DECISIONS row + living-proposal amendments), the W33 cross-branch ledger propagation, and this two-account cap correction. Measured as wall clock from the FIRST observable action of this session in the checkout -- git reflog 'branch: Created from HEAD' for claude/captain-food-resume-4rvcz6 at 2026-08-12T07:39:07Z -- to date -u at 2026-08-12T14:29:01Z: 24594s. Not rounded down; the 4h20m gap between the 07:44 and 12:04 commits is the rate-limit relaunch stretch and is billed as elapsed, since the session was open throughout. No timer was open: start refused while the cap was wrong."
+}

@@ -5758,7 +5758,8 @@ fn kernel_errors_module_exists_whenever_any_scope_declares_errors() {
 /// header used to state it as a fact about the DEPLOYABLE ("linking a domain crate is the ONLY way
 /// that scope's vocabulary exists in this deployable … unspellable rather than merely unrouted").
 /// That is false wherever the image reaches the `domain` facade behind the list, through
-/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written. A comment
+/// `bin_runtime` / `server` / `web` — 50 of the 57 bins when this test was written (56 since #242
+/// Runtime D retired `worker-journal-sweep`). A comment
 /// claiming an enforcement the build does not provide is worse than no comment: it stops the next
 /// reviewer looking (CLAUDE.md), which is exactly how the sentence survived four families' wiring.
 /// So the sentence is DERIVED, not trusted: resolved closure reaches `crates/domain` ⇒ the emitted
@@ -6071,7 +6072,7 @@ fn deploy_tree_is_complete_both_ways() {
         workers.iter().any(|b| b.name == "bam" && b.schedule.is_none()),
         "bam stays the always-on worker Deployment (do not respawn it as a CronJob)"
     );
-    for expected in ["worker-sirene-sync", "worker-retention", "worker-journal-sweep", "worker-erasure"] {
+    for expected in ["worker-sirene-sync", "worker-retention", "worker-erasure"] {
         let w = workers
             .iter()
             .find(|b| b.name == expected)
@@ -7076,5 +7077,352 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     let live = warning_profile(&issues);
     if let Err(msg) = check_warning_baseline(&root, &live) {
         panic!("{msg}");
+    }
+}
+
+/// §5c-bis — the read-target ownership wall (`validate::read_targets`, ADR-20260812-214500).
+///
+/// Every mutation here was SEEN RED before the rules existed: on the parent commit, planting
+/// `reference: true` on `inbound_messages` plus a `reads:` binding into it produced ZERO issues —
+/// `make validate` passed while the API exposed the actor mailbox. That is the whole reason these
+/// exist, so they mutate the REAL committed catalog rather than a hand-built fixture: a rule proven
+/// only against a fixture is a rule that can drift away from the specs it is supposed to police.
+mod read_target_ownership {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// Insert/replace a key on a table declared in a `database/tables/*.yaml` file.
+    fn set_table_key(model: &mut Model, file: &str, table: &str, key: &str, yaml: &str) {
+        model
+            .defs
+            .get_mut(file)
+            .and_then(|v| v.get_mut(table))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("{}#/{} is a declared table", file, table))
+            .insert(Value::from(key), serde_yaml::from_str(yaml).expect("test yaml parses"));
+    }
+
+    /// Insert/replace a key on an api.yaml output type.
+    fn set_type_key(model: &mut Model, ty: &str, key: &str, yaml: &str) {
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut("types"))
+            .and_then(|v| v.get_mut(ty))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("api.yaml types.{} is declared", ty))
+            .insert(Value::from(key), serde_yaml::from_str(yaml).expect("test yaml parses"));
+    }
+
+    fn remove_type_key(model: &mut Model, ty: &str, key: &str) {
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut("types"))
+            .and_then(|v| v.get_mut(ty))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("api.yaml types.{} is declared", ty))
+            .remove(Value::from(key))
+            .unwrap_or_else(|| panic!("api.yaml types.{}.{} was there to remove", ty, key));
+    }
+
+    fn find<'a>(issues: &'a [Issue], rule: &str) -> Option<&'a Issue> {
+        issues.iter().find(|i| i.rule == rule)
+    }
+
+    /// The exact mutation the dispatch named: one word (`reference: true`) on the actor mailbox, plus a
+    /// `reads:` binding into it. Both halves are refused, and BOTH are errors — the declaration-site
+    /// rule matters on its own, because it fires in the PR that widens the wall rather than the later
+    /// PR that walks through it.
+    #[test]
+    fn planting_reference_true_on_the_mailbox_does_not_open_the_reads_wall() {
+        let mut m = real_model();
+        set_table_key(&mut m, "database/tables/journals.yaml", "inbound_messages", "reference", "true");
+        set_type_key(
+            &mut m,
+            "CustomerProfile",
+            "reads",
+            "[{ $ref: 'database/tables/journals.yaml#/inbound_messages' }]",
+        );
+        let issues = validate(&m).issues;
+
+        let flag = find(&issues, "reference-flag-not-a-read-target").expect(
+            "`reference: true` on a journal table must be an error -- this is the one-word plant",
+        );
+        assert!(matches!(flag.level, Level::Error), "must be an ERROR, not a warning: {}", flag.message);
+        assert!(flag.location.ends_with("journals.yaml/inbound_messages"), "{}", flag.location);
+        assert!(flag.message.contains("journal table"), "names the category: {}", flag.message);
+
+        let bound = find(&issues, "reads-infrastructure-owned")
+            .expect("a reads: binding into a journal table must be an error");
+        assert!(matches!(bound.level, Level::Error), "must be an ERROR, not a warning: {}", bound.message);
+        assert_eq!(bound.location, "api.yaml/types.CustomerProfile");
+        assert!(bound.message.contains("inbound_messages"), "names the table: {}", bound.message);
+        assert!(bound.message.contains("journals.yaml"), "names the owner file: {}", bound.message);
+    }
+
+    /// The same wall, from the other side: NO `reference: true` this time. `reads-infrastructure-owned`
+    /// must not depend on the flag — an adapter staging mirror is refused on ownership alone, and the
+    /// message says staging rather than "unknown view" (the name exists; it is the OWNER that is wrong).
+    #[test]
+    fn reads_onto_an_adapter_staging_table_is_refused_without_any_flag() {
+        let mut m = real_model();
+        set_type_key(
+            &mut m,
+            "CustomerProfile",
+            "reads",
+            "[{ $ref: 'database/tables/integration_staging.yaml#/external_hubrise_callbacks' }]",
+        );
+        let issues = validate(&m).issues;
+        let hit = find(&issues, "reads-infrastructure-owned").expect("staging is never a read target");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
+        assert!(hit.message.contains("staging table"), "names the category: {}", hit.message);
+        assert!(
+            find(&issues, "reference-flag-not-a-read-target").is_none(),
+            "no flag was planted, so the declaration-site rule must stay quiet"
+        );
+    }
+
+    /// The rule follows the DECLARED CATEGORY, not the table's name and not a hardcoded filename: the
+    /// same brand-new table is legal in `referential.yaml` and refused in `journals.yaml`, purely
+    /// because of which catalog declares it. This is what makes the wall survive a table MOVING between
+    /// files — and what would fail if the rule ever grew an `if file == "..."`.
+    #[test]
+    fn legality_follows_the_declaring_catalog_not_the_table_name() {
+        let table = "columns:\n  code: { type: text, pk: true }\nreference: true\ndescription: t\n";
+
+        let mut legal = real_model();
+        legal
+            .defs
+            .get_mut("database/tables/referential.yaml")
+            .and_then(|v| v.as_mapping_mut())
+            .expect("referential catalog")
+            .insert(Value::from("ProbePolicy"), serde_yaml::from_str(table).unwrap());
+        assert!(
+            find(&validate(&legal).issues, "reference-flag-not-a-read-target").is_none(),
+            "a seeded reference table is exactly what `reference: true` is for"
+        );
+
+        let mut refused = real_model();
+        refused
+            .defs
+            .get_mut("database/tables/journals.yaml")
+            .and_then(|v| v.as_mapping_mut())
+            .expect("journals catalog")
+            .insert(Value::from("ProbePolicy"), serde_yaml::from_str(table).unwrap());
+        let report = validate(&refused);
+        let hit = find(&report.issues, "reference-flag-not-a-read-target")
+            .expect("the identical table, declared as a journal, must be refused");
+        assert!(hit.location.ends_with("journals.yaml/ProbePolicy"), "{}", hit.location);
+    }
+
+    /// Hole 2 — transience by omission, which is how the journal actually leaked: dropping the
+    /// declaration must be an error, not a silent exemption. Before this rule, deleting the line was
+    /// the whole bypass.
+    #[test]
+    fn a_transient_type_that_declares_no_infrastructure_is_refused() {
+        for ty in ["Operation", "MailboxLane", "PoisonedMailboxMessage", "PaymentIntent"] {
+            let mut m = real_model();
+            remove_type_key(&mut m, ty, "readsInfrastructure");
+            let issues = validate(&m).issues;
+            let hit = find(&issues, "transient-type-undeclared-infrastructure")
+                .unwrap_or_else(|| panic!("{} declares neither reads nor readsInfrastructure", ty));
+            assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
+            assert_eq!(hit.location, format!("api.yaml/types.{}", ty));
+        }
+    }
+
+    /// A nested output type reached through its parent's `reads:` is NOT a transient type — the
+    /// obligation lands where a store is actually touched. Without this, the rule would demand a
+    /// declaration from `Product`/`Offer`/`Option` and be worked around by annotating them falsely.
+    #[test]
+    fn a_nested_output_type_owes_no_declaration() {
+        let issues = validate(&real_model()).issues;
+        for ty in ["Product", "Offer", "Option", "OptionList", "MutationAcceptance"] {
+            assert!(
+                !issues.iter().any(|i| i.rule == "transient-type-undeclared-infrastructure"
+                    && i.location == format!("api.yaml/types.{}", ty)),
+                "{} is reached through a parent's reads, not from a store of its own",
+                ty
+            );
+        }
+    }
+
+    /// `readsInfrastructure:` is not a second door onto the read side, and not a way to join across the
+    /// CQRS seam: a projection there is the wrong KIND (§1b), and declaring both lists is refused here.
+    #[test]
+    fn reads_infrastructure_is_neither_a_read_model_nor_a_companion_to_one() {
+        let mut m = real_model();
+        set_type_key(
+            &mut m,
+            "Operation",
+            "readsInfrastructure",
+            "[{ $ref: 'database/tables/projection_tables.yaml#/Customer' }]",
+        );
+        assert!(
+            validate(&m).issues.iter().any(|i| i.rule == "ref-kind"
+                && i.message.contains("projection table")
+                && i.location.contains("readsInfrastructure")),
+            "a projection belongs under `reads:` -- the REF_CONTRACT row is what proves this"
+        );
+
+        let mut both = real_model();
+        set_type_key(
+            &mut both,
+            "CustomerProfile",
+            "readsInfrastructure",
+            "[{ $ref: 'database/tables/journals.yaml#/inbound_messages' }]",
+        );
+        let report = validate(&both);
+        let hit = find(&report.issues, "reads-infrastructure-with-read-model")
+            .expect("a type is a projection or a transient write-path view, never both");
+        assert_eq!(hit.location, "api.yaml/types.CustomerProfile");
+    }
+
+    /// The #413 defect class, closed for this site: a BARE name is collected by `name_list` but
+    /// invisible to the §1b refs walker, so it would walk past every rule above. `View_Reclamation` is
+    /// a perfectly legal target — it is the missing `$ref` that is refused, nothing else.
+    #[test]
+    fn a_bare_name_reads_entry_is_refused_even_when_the_target_is_legal() {
+        let mut m = real_model();
+        set_type_key(&mut m, "CustomerProfile", "reads", "['View_Reclamation']");
+        let report = validate(&m);
+        let hit = find(&report.issues, "reads-not-a-ref")
+            .expect("a bare-name reads entry escapes the ref-kind contract");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
+        assert!(hit.message.contains("View_Reclamation"), "{}", hit.message);
+    }
+
+    /// Asserted-alive: the committed catalog trips none of the new rules. Deliberately NOT
+    /// `issues.is_empty()` — the catalog carries warnings by design (the ratchet owns those), so a
+    /// blanket assertion would either be false or would have to be weakened later.
+    #[test]
+    fn the_committed_catalog_trips_no_read_target_ownership_rule() {
+        let issues = validate(&real_model()).issues;
+        for rule in [
+            "reference-flag-not-a-read-target",
+            "reads-infrastructure-owned",
+            "reads-infrastructure-with-read-model",
+            "transient-type-undeclared-infrastructure",
+            "reads-not-a-ref",
+        ] {
+            assert!(
+                find(&issues, rule).is_none(),
+                "{} fires on the committed specs: {:?}",
+                rule,
+                issues.iter().filter(|i| i.rule == rule).map(|i| (&i.location, &i.message)).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// The discriminator itself. `read_target_kind`'s match is EXHAUSTIVE over `Kind`, so a new **`Kind`**
+    /// cannot compile until it has been classified. (A new catalog FILE is the weaker case — `classify`'s
+    /// `_ => None` accepts it and it fails closed at VALIDATE instead; see
+    /// `the_reservation_catalog_is_classified`, which exists precisely because a catalog went unclassified
+    /// for months and built fine.) This test pins the published sets against the function so the
+    /// REF_CONTRACT rows and the runtime check can never disagree.
+    #[test]
+    fn read_target_kind_classifies_every_store_kind_consistently() {
+        for k in refs::READ_TARGET_KINDS {
+            assert_eq!(refs::read_target_kind(*k), Some(true), "{} must be readable", k.name());
+        }
+        for k in refs::INFRASTRUCTURE_TABLE_KINDS {
+            assert_eq!(refs::read_target_kind(*k), Some(false), "{} must not be readable", k.name());
+        }
+        // A non-store kind is not a read target and not an infrastructure table — it is not a store.
+        assert_eq!(refs::read_target_kind(refs::Kind::Aggregate), None);
+        assert_eq!(refs::read_target_kind(refs::Kind::TableColumn), None);
+    }
+
+    /// `readsInfrastructure:` must never be the WEAKER door. The set it admits is strictly narrower
+    /// than "not a projection": the credential store, the adapter staging mirrors and the raw event log
+    /// are refused here exactly as they are under `reads:`.
+    ///
+    /// This is the mutation the first cut of this suite was missing, and its absence is why the defect
+    /// shipped: `readsInfrastructure` was wired to the whole infrastructure partition, so planting
+    /// `hubrise_connections` and `domain_events` on the PUBLIC-reachable `Operation` type validated with
+    /// ZERO errors — while the SAME `$ref` under `reads:` had always been refused. The new key had
+    /// opened a door that was previously shut, to the leaked-OAuth-token exposure this whole wall exists
+    /// to prevent. Serving a query from one of these must cost a reviewed edit to `TRANSIENT_READ_KINDS`.
+    #[test]
+    fn reads_infrastructure_admits_only_the_mailbox_and_saga_rows() {
+        for target in [
+            "database/tables/integration_connections.yaml#/hubrise_connections",
+            "database/tables/integration_connections.yaml#/auth_sessions",
+            "database/tables/integration_staging.yaml#/external_stripe_events",
+            "database/tables/eventstore.yaml#/domain_events",
+            "database/tables/reservations.yaml#/slug_reservations",
+        ] {
+            let mut m = real_model();
+            set_type_key(&mut m, "Operation", "readsInfrastructure", &format!("[{{ $ref: '{}' }}]", target));
+            let report = validate(&m);
+            let hit = report
+                .issues
+                .iter()
+                .find(|i| i.rule == "ref-kind" && i.location.contains("readsInfrastructure"))
+                .unwrap_or_else(|| {
+                    panic!("{} must not be reachable through readsInfrastructure -- it is not a mailbox or a saga row", target)
+                });
+            assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+            assert!(
+                hit.message.contains("journal table") && hit.message.contains("process-manager state table"),
+                "the message must name the two admissible categories: {}",
+                hit.message
+            );
+        }
+    }
+
+    /// The other half of the same wall: the two categories that ARE served today keep working, so the
+    /// narrowing above is a wall and not a wrecking ball. `readsInfrastructure` is also proven to be
+    /// what makes them legal -- the committed catalog validates only because the four sites declare it.
+    #[test]
+    fn the_mailbox_and_the_saga_row_remain_declarable() {
+        for (ty, target) in [
+            ("Operation", "database/tables/journals.yaml#/inbound_messages"),
+            ("MailboxLane", "database/tables/journals.yaml#/mailbox_partitions"),
+            ("PaymentIntent", "database/tables/process_managers.yaml#/payment_process_manager"),
+        ] {
+            let mut m = real_model();
+            set_type_key(&mut m, ty, "readsInfrastructure", &format!("[{{ $ref: '{}' }}]", target));
+            let report = validate(&m);
+            assert!(
+                !report.issues.iter().any(|i| i.location.contains("readsInfrastructure")),
+                "{} -> {} is exactly what the key is for: {:?}",
+                ty,
+                target,
+                report
+                    .issues
+                    .iter()
+                    .filter(|i| i.location.contains("readsInfrastructure"))
+                    .map(|i| (i.rule, &i.message))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// `reservations.yaml` had NO classifier arm, so `slug_reservations` resolved to no `Kind` at all —
+    /// a `reads:` into it reported "does not name a classifiable definition", which reads like a broken
+    /// ref rather than a refused one, and any rule keyed on `Kind` would have skipped it entirely.
+    #[test]
+    fn the_reservation_catalog_is_classified() {
+        let m = real_model();
+        let node = m
+            .defs
+            .get("database/tables/reservations.yaml")
+            .and_then(|v| v.get("slug_reservations"))
+            .expect("slug_reservations is declared");
+        assert_eq!(
+            refs::classify(
+                "database/tables/reservations.yaml",
+                &["slug_reservations".to_string()],
+                node,
+                &BTreeSet::new()
+            ),
+            Some(refs::Kind::ReservationTable)
+        );
     }
 }
