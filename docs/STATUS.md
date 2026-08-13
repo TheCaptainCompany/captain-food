@@ -20,9 +20,64 @@
 > stale once, 1602.0m written before its own branch's follow-up entries landed). Re-derive, never
 > trust: `bash .claude/hooks/loop-budget.sh status`, or near the cap the cross-branch union snippet
 > in [docs/claude/loops.md](claude/loops.md). **Exit condition** (event-bounded, pre-recorded path back):
-> when [DECISIONS §35 INV-1](proposals/DECISIONS.md) is met AND the first infrastructure euro is
-> spent, the architect's run report flips the flag back to `true` — executing the ADR, not a new
-> decision.
+> when [DECISIONS §35 INV-1](proposals/DECISIONS.md) is met — its acceptance criterion now EXISTS:
+> the founder's six-clause walk,
+> [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
+> — AND the first infrastructure euro is spent, the architect's run report flips the flag back to
+> `true` — executing the ADR, not a new decision.
+
+> 🎯 **2026-08-13 — THE ACCEPTANCE CRITERION EXISTS: SIX CLAUSES WALKED ON THE LOCAL STACK, WITH THE
+> FRONT DOOR DELIBERATELY UNLOCKED FROM THE INSIDE** (founder directive + ten-lens mob;
+> [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+> [DECISIONS §35 INV-1](proposals/DECISIONS.md) resolved; **records-only — no code, no specs, no
+> generated artifacts**, so no SPEC-LOG row is owed).
+> - **The criterion, verbatim**: *"For the acceptance, i need to have all the dbs, apps deployed
+>   locally and working without considering the authentication contraints with supabase from the
+>   creation of the customer, payment authorisation, order creation order accepted delivered payment
+>   captured"* — six observable clauses (customer created → payment authorised → order created →
+>   accepted → delivered → captured), each asserted through the deployed local stack's **own API and
+>   read models**, plus a **browser walk of storefront + backoffice queue** (a labeled bot rider is
+>   fine). **Supersedes the team's two-half proposal**: the browser-walk-**with-login** half drops
+>   from gating to demo artifact — login
+>   ([#529](https://github.com/TheCaptainCompany/captain-food/issues/529)/[#532](https://github.com/TheCaptainCompany/captain-food/issues/532))
+>   is OUT of acceptance and is the named first lane after it, with
+>   [#533](https://github.com/TheCaptainCompany/captain-food/issues/533) opening the
+>   first-real-order gate.
+> - **Two stated assumptions** (correctable by the founder at zero cost): *all the apps* = the
+>   monolith and its surfaces until the
+>   [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover (CUT-1 = B excluded
+>   the fleet); *creation of the customer* = the real `verifyPhone` via Supabase's
+>   test-phone/static-OTP facility (a genuine `CustomerRegistered`, zero SMS), with the
+>   claim-stamped fallback labeled honestly if the facility proves unavailable.
+> - **The auth bypass is unlocked from the inside, never weakened**: real tokens through the real
+>   fail-closed verifier (admin-minted, or a local-JWKS stub as the recorded fallback) — the
+>   fail-open shape was deliberately deleted
+>   ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519)/[PR #520](https://github.com/TheCaptainCompany/captain-food/pull/520))
+>   and stays deleted.
+> - **⚠️ The criterion's biggest finding is a D2 record↔code drift**: the founder's clause order
+>   restates his OWN [ADR-20260808-195315](adr/ADR-20260808-195315-customer-brief-answers.md) §1.2
+>   (*"Authorise on checkout. Capture on delivered / picked up"*, which supersedes
+>   [ADR-20260719-014434](adr/20260719-014434-checkout-snapshot-on-paymentintentcreated.md)'s
+>   capture-at-checkout on that point), while the code **captures at confirm** and materializes the
+>   Order on `PaymentCaptured` (`rules.yaml#/OrderMaterializedOnPaymentCapture`; no `AUTHORIZED`
+>   state; `capture_method` unset in the Stripe adapter). **Implementing D2 joins the acceptance
+>   path as its own GREEN slice** — cheap now, inside the empty-log window; the walk harness's
+>   capture assertions are written against D2 semantics, and any interim walk on the implemented
+>   flow is labeled as such.
+> - **The program of record** (ADR §5): [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
+>   (merging) → split slice 1 → smoke **L5 lifecycle legs** (accept → ready → dispatch-job-present →
+>   delivered, each seen red first) → the four **non-auth browser walls** + local-issuer tooling →
+>   the **D2 slice** → [#514 "per-database migration chains"](https://github.com/TheCaptainCompany/captain-food/issues/514)
+>   + Database CRs + local overlay as ONE slice (the delivered leg forces the
+>   `View_DeliveryJob`→table conversion there) → **acceptance**: the walk in his clause order,
+>   storefront + backoffice in a browser, on the all-databases stack, evidenced by a **checkable
+>   JSON record** (causal event chain by `cause_id` + all eleven migration heads), synthetic
+>   identities stated, Stripe Connect shape verified in the script.
+> - **The honesty sentence** (verbatim from the mob): *"This acceptance proves the order machine
+>   end-to-end with the front door deliberately unlocked from the inside — no path from a real
+>   customer's phone through OTP sign-in to this flow has ever been walked, so 'accepted' certifies
+>   the machine, never that a customer can use it, and the auth walk (#529/#532) is the named
+>   remainder between this record and the first real order."*
 
 > 🔐 **2026-08-13 — A TOKEN MUST NOW PROVE THE PRODUCT, NOT ONLY THE PROVIDER** ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519),
 > [ADR-20260813-013211](adr/ADR-20260813-013211-a-token-must-prove-the-product-not-only-the-provider.md),
