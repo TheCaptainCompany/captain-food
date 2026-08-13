@@ -1162,11 +1162,14 @@ impl IdentityService for FakeIdentity {
         input: crate::generated::services::IdentityStampCustomerClaimInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        // Record what a correct provider would hold after the stamp: BOTH claims, per the
-        // shallow-merge rule of services.yaml identity.stamp_customer_claim.
+        // Record what a correct provider would hold after the stamp: BOTH claims, inside the ONE
+        // product-owned object, per the shallow-merge rule of services.yaml
+        // identity.stamp_customer_claim (nested by #519 -- the verifier refuses a token without it).
         *self.stamped.lock().expect("fake identity mutex") = Some(serde_json::json!({
-            "captain_role": "CUSTOMER",
-            "captain_customer_id": input.customer_id.0.to_string(),
+            "captain_food": {
+                "role": "CUSTOMER",
+                "customer_id": input.customer_id.0.to_string(),
+            }
         }));
         Ok(())
     }

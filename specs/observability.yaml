@@ -376,9 +376,10 @@ customer-identification:
         - { key: "messaging.system", type: string, required: true }
         - { key: "business.result", type: string, required: true }
     # The claim stamp (identity.stamp_customer_claim, #437): after the OTP verifies and the
-    # customer resolves, the provider-side auth user is stamped with captain_customer_id +
-    # captain_role so the session the customer keeps CARRIES the domain claim. `failed` here means
-    # verification stood but no session was rotated or parked (fail-closed on the credential).
+    # customer resolves, the provider-side auth user is stamped with app_metadata.captain_food
+    # ({ role, customer_id }, nested by #519) so the session the customer keeps CARRIES the domain
+    # claim. `failed` here means verification stood but no session was rotated or parked
+    # (fail-closed on the credential).
     - name: "claims.stamp"
       kind: CLIENT
       required: true
@@ -1106,10 +1107,17 @@ read-authorization:
     #                          case (a stale cookie): alert on the rate of change, never the count.
     #   verifier_unavailable — JWKS unconfigured or unreachable. Any sustained non-zero rate means
     #                          identified customers are being served the anonymous view.
-    #   role_not_customer    — a verified ADMIN/RESTAURANT/RIDER token presented to /public, which
-    #                          stays anonymous by design ("role = path", ADR-0047).
+    #   role_not_customer    — the credential does not prove a Captain Food CUSTOMER. Two
+    #                          populations, one outcome and one action: a verified
+    #                          ADMIN/RESTAURANT/RIDER token, which stays anonymous by design
+    #                          ("role = path", ADR-0047); and (#519) a token proving no Captain Food
+    #                          role AT ALL — no app_metadata.captain_food object, or an unrecognised
+    #                          role in it. The second is the ordinary shape of a SIBLING PRODUCT's
+    #                          user once one identity project serves the whole group, where `iss`
+    #                          and `aud` no longer separate products. Telling the two apart in
+    #                          telemetry is #517's subject, not this counter's.
     #   claim_absent         — a verified CUSTOMER token carrying no (or a malformed)
-    #                          captain_customer_id: the pre-claim-stamp window, EXPECTED and
+    #                          captain_food.customer_id: the pre-claim-stamp window, EXPECTED and
     #                          high-volume for one token lifetime after a rollout. It is counted
     #                          HERE rather than as read_authorization_bridge_unresolved_total
     #                          precisely so that window cannot read as a provisioning incident — on

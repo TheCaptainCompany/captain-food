@@ -22,7 +22,7 @@ observed state.
 
 ## Auth
 
-Non-public GraphQL paths require a Supabase JWT whose `app_metadata.captain_role` matches the path
+Non-public GraphQL paths require a Supabase JWT whose `app_metadata.captain_food.role` matches the path
 (ADR-0047). The script mints role tokens through the deployment's **own** auth provider. The two Supabase
 values have different homes since ADR-20260729-020000 ("non-secret config rides the artifact"):
 `SUPABASE_URL` is a non-secret baked per-profile into the image and **removed from the Render env**, so the

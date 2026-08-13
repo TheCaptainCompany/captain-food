@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 2226,
+  "recordedAt": "2026-08-13T01:46:25.986Z",
+  "branch": "519-token-verification-hardening",
+  "note": "#519 token verification hardening: issuer mandatory (type-level), roles fail closed, positive captain_food product claim"
+}
