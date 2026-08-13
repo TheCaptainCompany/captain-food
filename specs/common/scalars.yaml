@@ -217,6 +217,17 @@ MoneyCents:
   description: "Monetary amount in minor units (e.g. cents)."
 
 
+RetryAfterSeconds:
+  type: integer
+  minimum: 0
+  description: >
+    How long the caller must wait before the same request can succeed, in seconds — the SERVER's own
+    remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a
+    screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no
+    useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never
+    "retry immediately".
+
+
 PageLimit:
   type: integer
   minimum: 1

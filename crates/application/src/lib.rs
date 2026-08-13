@@ -23,6 +23,7 @@ pub mod ports;
 pub mod queries;
 pub mod reminders;
 pub mod repository;
+pub mod sms_guard;
 pub mod staging;
 
 // The PM state ports are GENERATED from specs/database/tables/process_managers.yaml (issue #27);

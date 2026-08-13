@@ -14,12 +14,14 @@ pub mod integrations;
 pub mod mailbox;
 pub mod persistence;
 pub mod process_manager;
+pub mod sms_authorization;
 pub mod projection;
 
 pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpOrderLinkProbe};
 // Stripe/HubRise webhook adapters moved to their own crates (`crates/adapters/*`, ADR-20260718-213352).
 pub use integrations::payments::FailClosedPaymentGateway;
 pub use integrations::ovh_sms::OvhSmsClient;
+pub use sms_authorization::{AuthorizedSmsRecipient, SmsSendAuthorizer};
 pub use integrations::supabase_sms_hook;
 pub use integrations::supabase_auth::{FailClosedIdentityService, SupabaseIdentityService};
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;

@@ -1676,7 +1676,7 @@ async fn test_catalog_import_is_rejected() {
 }
 
 /// tests.yaml#/tests/TestCustomerRequestPhoneVerification — "Sends an SMS OTP to a phone (localized via the dialing code); emits nothing"
-/// rules: PhoneVerificationRegistersOrIdentifies
+/// rules: PhoneVerificationRegistersOrIdentifies, OtpSendIsGuardedByCountryAndBudget
 #[tokio::test]
 async fn test_customer_request_phone_verification() {
     let bed = TestBed::new();
@@ -1686,6 +1686,20 @@ async fn test_customer_request_phone_verification() {
     let result = crate::commands::request_phone_verification(&bed.store, &bed.identity, cmd, &support::actor()).await;
     let _ = result.expect("TestCustomerRequestPhoneVerification: the spec expects acceptance");
     bed.assert_appended("TestCustomerRequestPhoneVerification", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards — "Refuses an OTP send to an unserved dialing code -- and hands nothing to the sender"
+/// rules: OtpSendIsGuardedByCountryAndBudget
+#[tokio::test]
+async fn test_customer_request_phone_verification_is_refused_by_the_send_guards() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestPhoneVerification { dialing_code: sc::DialingCode("+212".into()), national_number: sc::NationalPhoneNumber("612345678".into()), locale: Some(sc::Locale("fr-FR".into())) };
+    let result = crate::commands::request_phone_verification(&bed.store, &bed.identity, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards: the spec expects a typed rejection");
+    support::assert_thrown("TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards", &err, &["PhoneCountryNotServed", "RateLimited", "VerificationSendLimitReached", "VerificationSendCapacityExhausted"]);
+    bed.assert_appended("TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestCustomerVerifyPhoneRegisters — "Verifying the OTP on a new phone registers the customer"

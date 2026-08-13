@@ -51,6 +51,31 @@ pub enum AuthError {
     Resolver(#[from] ResolverError),
 }
 
+/// The translation key an OTP rejection must be RENDERED as (#516) — the only place a typed error
+/// code becomes screen copy.
+///
+/// Why this exists rather than showing the server's `message`: the four refused-send states need four
+/// different things said. A rate limit shown as "code incorrect" is a lie at the highest-friction tap
+/// in the funnel; "invalid number" to a Belgian visitor is an accusation aimed at someone who did
+/// nothing wrong; and a countdown to tomorrow is not information, so the daily cap must offer help
+/// instead of a timer. `RateLimited` additionally carries `retryAfterSeconds` in its context — the
+/// SERVER's own remaining window, which `auth.error.too_soon` interpolates. A client-side guess would
+/// be wrong exactly when it matters, and being wrong low means a wasted resend, which costs money.
+///
+/// `None` means "not one of the send refusals" — the caller falls back to the code's catalogued
+/// message. Note that the invalid-CODE state is deliberately still that fallback: it is untranslated
+/// runtime prose today, tracked as its own defect (#518), and folding it in here would be a second
+/// change hiding inside this one.
+pub fn refusal_translation_key(error_code: &str) -> Option<&'static str> {
+    match error_code {
+        "RateLimited" => Some("auth.error.too_soon"),
+        "VerificationSendLimitReached" => Some("auth.error.daily_cap"),
+        "PhoneCountryNotServed" => Some("auth.error.country_not_served"),
+        "VerificationSendCapacityExhausted" => Some("auth.error.unavailable"),
+        _ => None,
+    }
+}
+
 /// Step 1 — `send_otp` (`RequestPhoneVerification`): ask for the SMS. Returns the acceptance
 /// handle (the sheet flips to the OTP entry on acceptance; a rejection surfaces via settle).
 pub async fn request_otp(

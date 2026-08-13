@@ -76,11 +76,12 @@ pub const CONFLICT: ErrorDef = ErrorDef {
     message_fr: "Cet élément a été modifié entre-temps. Veuillez réessayer.",
 };
 
-/// Too many requests on this path.
+/// Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.
+/// Context: `retryAfterSeconds`.
 pub const RATE_LIMITED: ErrorDef = ErrorDef {
     code: "RateLimited",
-    message_en: "Too many requests. Please slow down.",
-    message_fr: "Trop de requêtes. Veuillez patienter.",
+    message_en: "Too many requests. Please wait {retryAfterSeconds}s and try again.",
+    message_fr: "Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer.",
 };
 
 /// Unexpected server error.

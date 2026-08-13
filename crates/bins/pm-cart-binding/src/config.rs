@@ -264,6 +264,16 @@ pub struct Config {
     pub surface_gateway_url: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
+    /// Comma-separated `DialingCode` allowlist for OTP delivery — EXACT membership, never a prefix match (a prefix test passes '+337…' and is not an allowlist). A number whose code is absent, or which cannot be parsed at all, is refused with `errors.yaml#/PhoneCountryNotServed` and NOTHING is handed to the sender (fail-closed). WHY THIS SET, AND WHY THE BOUNDARY IS "PAYOUT TIER" RATHER THAN "EU": pumping profit lives in high-payout mobile ranges, which these are not. V0 serves Tours, so '+33' is the traffic — but Tours has international students and Loire-valley tourists, a real single-digit share of signups, and a '+33'-only list would refuse those real customers while buying no additional protection, since none of BE/CH/UK/DE/ES/IT/US pays an attacker anything. Widening this list is therefore not a matter of taste: adding a code opens a spend path, and the question to answer first is what a send to that range PAYS, not which union the country belongs to. Unset, the default above applies. Set it to '+33' alone to harden further; there is no value that disables the check.
+    pub sms_allowed_dialing_codes: String,
+    /// OTP sends allowed to ONE canonical phone number per rolling hour. 3 covers the real fumbling customer (one send plus one or two resends); beyond that a further SMS is not what fixes their problem. Exceeding it is `errors.yaml#/RateLimited`, carrying the remaining window so the screen renders the server's countdown rather than guessing one.
+    pub sms_max_sends_per_number_per_hour: i64,
+    /// OTP sends allowed to ONE canonical phone number per rolling day — the backstop that stops an hourly allowance being harvested 24 times. Exceeding it is `errors.yaml#/VerificationSendLimitReached`, which deliberately offers help instead of a countdown, because counting down to tomorrow is not information.
+    pub sms_max_sends_per_number_per_day: i64,
+    /// Comma-separated cooldown after the Nth send to the same number, in seconds: 30s after the first, 2min after the second, 10min after the third and beyond (the last value repeats). This is the SERVER-SIDE control; the client's resend countdown is a courtesy, never an enforcement point — a caller that ignores it is refused, not served.
+    pub sms_send_backoff_seconds: String,
+    /// THE KILL SWITCH AND THE ONLY CEILING ON THE BILL. Total OTP sends allowed platform-wide per rolling day, across every number. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` until the ceiling is raised — which DOES turn real sign-ups away, and is the correct trade against an unbounded invoice, but only because it is loud (`otp_send_refused_total{reason=global_ceiling}`, and each refusal logs at ERROR). THE DEFAULT IS A DELIBERATELY CONSERVATIVE GUESS, NOT A COSTED NUMBER. The per-message price of our OVH credit pack is not recorded anywhere in this repository, so no ceiling here can be derived — 200/day is chosen as "comfortably above any plausible V0 day in Tours, low enough that the worst overnight case is tens of euros rather than hundreds". It must be re-derived from the real EUR/SMS the day that price is known (see ADR-20260813-021500). OPERABLE WITHOUT A DEPLOY, two ways, and both matter: setting the env key and restarting the surface changes the ceiling persistently, while `UPDATE sms_send_quota SET sent_count = <big> WHERE quota_key = 'global:day'` stops sends IMMEDIATELY on a live system with no rollout at all (and `DELETE` on that row restores them). The second is the one to use at 02:00.
+    pub sms_max_sends_per_day_global: i64,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
 }
@@ -397,6 +407,13 @@ impl Config {
         let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
         let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let sms_allowed_dialing_codes = raw("SMS_ALLOWED_DIALING_CODES");
+        let sms_allowed_dialing_codes = sms_allowed_dialing_codes.unwrap_or_else(|| "+33,+32,+41,+44,+49,+34,+39,+1".to_string());
+        let sms_max_sends_per_number_per_hour = raw("SMS_MAX_SENDS_PER_NUMBER_PER_HOUR").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3);
+        let sms_max_sends_per_number_per_day = raw("SMS_MAX_SENDS_PER_NUMBER_PER_DAY").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
+        let sms_send_backoff_seconds = raw("SMS_SEND_BACKOFF_SECONDS");
+        let sms_send_backoff_seconds = sms_send_backoff_seconds.unwrap_or_else(|| "30,120,600".to_string());
+        let sms_max_sends_per_day_global = raw("SMS_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -482,6 +499,11 @@ impl Config {
                 gateway_subgraph_urls,
                 surface_gateway_url,
                 captain_build_version,
+                sms_allowed_dialing_codes,
+                sms_max_sends_per_number_per_hour,
+                sms_max_sends_per_number_per_day,
+                sms_send_backoff_seconds,
+                sms_max_sends_per_day_global,
                 order_retention_window_days,
             },
             problems,
@@ -545,13 +567,18 @@ impl Config {
         out.push_str(&format!("  GATEWAY_SUBGRAPH_URLS      = {}\n", self.gateway_subgraph_urls));
         out.push_str(&format!("  SURFACE_GATEWAY_URL        = {}\n", self.surface_gateway_url));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  SMS_ALLOWED_DIALING_CODES  = {}\n", self.sms_allowed_dialing_codes));
+        out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_HOUR = {}\n", self.sms_max_sends_per_number_per_hour));
+        out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_DAY = {}\n", self.sms_max_sends_per_number_per_day));
+        out.push_str(&format!("  SMS_SEND_BACKOFF_SECONDS   = {}\n", self.sms_send_backoff_seconds));
+        out.push_str(&format!("  SMS_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.sms_max_sends_per_day_global));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 42;
+pub const KEY_COUNT: usize = 47;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -597,6 +624,11 @@ pub const DECLARED_KEYS: &[&str] = &[
     "GATEWAY_SUBGRAPH_URLS",
     "SURFACE_GATEWAY_URL",
     "CAPTAIN_BUILD_VERSION",
+    "SMS_ALLOWED_DIALING_CODES",
+    "SMS_MAX_SENDS_PER_NUMBER_PER_HOUR",
+    "SMS_MAX_SENDS_PER_NUMBER_PER_DAY",
+    "SMS_SEND_BACKOFF_SECONDS",
+    "SMS_MAX_SENDS_PER_DAY_GLOBAL",
     "ORDER_RETENTION_WINDOW_DAYS",
 ];
 

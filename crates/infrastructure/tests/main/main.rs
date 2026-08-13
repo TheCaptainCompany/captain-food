@@ -45,6 +45,7 @@ mod restaurant_projection;
 mod restaurant_write_path;
 mod retention_sweep;
 mod runtime_posture;
+mod sms_send_quota;
 mod scope_membership;
 mod sirene_registration;
 mod standalone_workers;

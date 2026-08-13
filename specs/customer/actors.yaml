@@ -15,10 +15,19 @@ Customer:
     # Identity via phone OTP / email magic link — WRAPPED Supabase Auth (ADR-0015). The handler calls
     # Supabase SYNCHRONOUSLY through the supabase-acl adapter; request/* emit nothing, verify/confirm
     # emit the verified FACT. The aggregate stays free of the Supabase SDK (the ACL boundary does the call).
+    # The SEND GUARDS (#516) are part of this message's contract, not an infrastructure detail: the
+    # send spends money on our own OVHcloud account from an anonymous endpoint, so a refusal must be a
+    # TYPED fact the screen can render honestly. Four distinguishable outcomes, in enforcement order:
+    # country not served -> too soon (RateLimited, with the server's countdown) -> this number's daily
+    # allowance -> the GLOBAL daily ceiling. Fail-closed: an unparseable number is PhoneCountryNotServed.
     - message: { $ref: 'commands.yaml#/RequestPhoneVerification' }
       emits: []
-      throws: []
-      effect: "Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev). No event."
+      throws:
+        - { $ref: 'errors.yaml#/PhoneCountryNotServed' }
+        - { $ref: 'errors.yaml#/RateLimited' }
+        - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+        - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+      effect: "Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev), REFUSING when the guards say so. No event."
     - message: { $ref: 'commands.yaml#/VerifyPhone' }
       emits:
         - { $ref: 'events.yaml#/CustomerRegistered' }
@@ -38,11 +47,18 @@ Customer:
         - { $ref: 'errors.yaml#/InvalidVerificationToken' }
         - { $ref: 'errors.yaml#/VerificationCodeExpired' }
       effect: "Verify the magic-link token server-side with Supabase, then link the email."
+    # Shares ONE send budget with RequestPhoneVerification (#516): the counter is keyed on the
+    # canonical phone number, never on the command, or the cap would be per-command and doubled by
+    # asking through the other door. So it carries the same four send-guard refusals.
     - message: { $ref: 'commands.yaml#/RequestPhoneChange' }
       emits: []
       throws:
         - { $ref: 'errors.yaml#/PhoneAlreadyInUse' }
-      effect: "Delegate to Supabase Auth: send an SMS OTP to the new phone. No event."
+        - { $ref: 'errors.yaml#/PhoneCountryNotServed' }
+        - { $ref: 'errors.yaml#/RateLimited' }
+        - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+        - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+      effect: "Delegate to Supabase Auth: send an SMS OTP to the new phone, REFUSING when the send guards say so. No event."
     - message: { $ref: 'commands.yaml#/ConfirmPhoneChange' }
       emits: [{ $ref: 'events.yaml#/CustomerPhoneChanged' }]
       throws:

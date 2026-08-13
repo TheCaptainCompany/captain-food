@@ -9,6 +9,20 @@ description: >
 PhoneVerificationRegistersOrIdentifies:
   description: "Phone-OTP verification registers a new customer or identifies a returning one; an invalid code is rejected."
 
+OtpSendIsGuardedByCountryAndBudget:
+  description: >
+    An SMS OTP is sent ONLY to a dialing code on the served allowlist, ONLY within this number's
+    per-hour and per-day allowance, and ONLY while the platform's global daily SMS ceiling has room;
+    otherwise the request is refused with a typed reason and NOTHING is handed to the sender. The
+    allowlist is the economic control (premium-payout ranges are what makes SMS pumping profitable),
+    the global ceiling is the only control that bounds the TOTAL bill (an attacker rotates numbers),
+    and the guard is fail-closed — a number that cannot be parsed is refused, never sent.
+
+    One phone number has ONE budget, whichever door asks and however the number is written:
+    '0612345678', '00612345678' and '612345678' under '+33' share a single counter, and requesting a
+    phone CHANGE draws on the same budget as requesting verification — a budget keyed on the request
+    rather than on the number is doubled by asking twice, differently.
+
 EmailVerificationUniqueTokenValid:
   description: "Email verification requires a unique email and a valid token; duplicates/invalid tokens are rejected."
 
