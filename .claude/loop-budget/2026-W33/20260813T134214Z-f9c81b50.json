@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 1520,
+  "recordedAt": "2026-08-13T13:42:14.497Z",
+  "branch": "budget-override-cap-not-a-stop-sign",
+  "note": "budget-override-cap-not-a-stop-sign: record the founder's do-not-gate-on-the-budget directive (ADR-20260813-132540) and make loop-budget.sh obey it (capIsAStopSign=false, selftest case 9 seen red first). Covers this dispatch (~20m, no timer -- start would have refused with the very exit 2 this change removes) PLUS the #510 executor's unbilled ~5m orientation stretch from its 14:20Z stand-down."
+}
