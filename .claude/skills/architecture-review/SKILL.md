@@ -85,10 +85,26 @@ current state of each. Cover, at minimum:
 
 Use parallel `Explore` subagents for breadth; verify their claims yourself before reporting.
 
+### 3bis. The unrealized-directive sweep (ADR-20260813-233418) — run EVERY time
+
+Before reporting, list the **dropped directives**: a decision marked **✅ DECIDED / Approved** (in
+`docs/proposals/DECISIONS.md`, a proposal `Status`, or an `Accepted` ADR) whose realizing work is
+**neither merged nor in-progress** — no open `status/in-progress` issue, no live PR, no merged
+realizing PR/ADR. These are recorded intent silently waiting for a human to repeat it (the Uber Eats
+directive sat approved-but-undone for two weeks; the capture posture drifted with no gate). Surface
+them at the **top** of the report, ranked by the value method (`docs/BACKLOG.md`), so the next session
+executes recorded intent without the founder re-stating it.
+
+The signal is the **intersection** of a repo marker (a ✅/Approved decision) and live GitHub state (no
+realizing work) — the offline validator cannot see PR/issue state, which is why this is a standing
+review step and **not** a validator rule. Do **not** approximate it with "empty `Realized by` header":
+~30 proposals carry an un-maintained `_(filled at completion)_` while already shipped, so that signal
+is mostly false positives (ADR-20260813-233418 records the judgment).
+
 ### 4. Report
 
-Lead with **what changed**. Then only genuinely new findings. A quiet day is a two-line report — do
-not pad it. Never restate the backlog.
+Lead with **what changed**, then the **unrealized-directive sweep** (§3bis), then only genuinely new
+findings. A quiet day is a two-line report — do not pad it. Never restate the backlog.
 
 ### 5. File what is new
 

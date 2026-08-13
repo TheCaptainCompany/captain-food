@@ -26,6 +26,24 @@
 > — AND the first infrastructure euro is spent, the architect's run report flips the flag back to
 > `true` — executing the ADR, not a new decision.
 
+> 🔁 **2026-08-13 — "I'M REPEATING MYSELF": RECORDED INTENT MUST EXECUTE ITSELF, AND THE UBER EATS
+> ONBOARDING WEDGE** (two founder directives;
+> [ADR-20260813-233418](adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md),
+> DECISIONS §11 D8/D9/D10 + §37). **Process (higher value)**: a recorded decision was not executing
+> itself — the Uber Eats directive sat approved-but-undone for two weeks, the capture-on-delivered
+> posture drifted with no gate — so two light anti-repeat mechanisms land: an **unrealized-directive
+> sweep** as a standing architect-run step (`.claude/skills/architecture-review/SKILL.md` §3bis; a
+> validator rule was judged and rejected as noise — ~30 proposals carry stale `_(filled at
+> completion)_` headers, and the offline gate cannot see live PR state), and an **`Enforced by:`
+> field** on the ADR template so a recorded behavioral guarantee names the `rules.yaml` entry+test
+> that pins it (the capture-timing rule lands inside #544, keyed on a Captain authorization).
+> **Product**: the Uber Eats catalog/order-sync directive + the onboarding wedge (bootstrap a
+> no-HubRise restaurant's own menu from Uber Eats → flip Captain to source → push) refined into the
+> living PROP-20260730-032306 §3bis/Slice F, reconciled with the recorded no-scraping constraint
+> (`specs/integrations/sirene.md:67`) via the licensed Menu API + own-menu-only. D8/D9/D10 are the
+> new founder-owed rows. Docs-only; landed on `main` from an isolated worktree (the shared checkout
+> was on the #543/`494` branch).
+
 > 🎯 **2026-08-13 — THE ACCEPTANCE CRITERION EXISTS: SIX CLAUSES WALKED ON THE LOCAL STACK, WITH THE
 > FRONT DOOR DELIBERATELY UNLOCKED FROM THE INSIDE** (founder directive + ten-lens mob;
 > [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
