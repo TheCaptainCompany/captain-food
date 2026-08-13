@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 750,
+  "recordedAt": "2026-08-13T02:11:46.003Z",
+  "branch": "519-token-verification-hardening",
+  "note": "#519 review round 1: required_spec_claims derived from the matchers (BLOCKING) + 3 non-blocking; concurrent with another session's open timer, which this run restored untouched"
+}
