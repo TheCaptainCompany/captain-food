@@ -1,3 +1,4 @@
 {
-  "weeklyBudgetSeconds": 86400
+  "weeklyBudgetSeconds": 86400,
+  "capIsAStopSign": false
 }

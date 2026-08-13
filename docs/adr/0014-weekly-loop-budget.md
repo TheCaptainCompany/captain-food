@@ -1,7 +1,10 @@
 # ADR-0014 — Weekly time budget for autonomous loops (loop-state guard)
 
 ## Status
-Accepted (realizes the former backlog item P-13)
+Accepted (realizes the former backlog item P-13).
+Amended by [ADR-20260813-132540](ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md)
+(the cap is not a stop sign until [DECISIONS §35 INV-1](../proposals/DECISIONS.md) is met and the
+first infrastructure euro is spent; billing and the ledger unchanged).
 
 ## Context
 Autonomous loops/routines must not quietly consume quota. Claude Code has **no native cap** to limit a

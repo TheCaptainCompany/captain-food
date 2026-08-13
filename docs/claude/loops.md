@@ -24,6 +24,14 @@ allowances**, because one shared ledger records the runs of two accounts working
 (founder directive 2026-08-12 — ADR-20260812-142454). A cap sized for a single account therefore
 halves the team's week silently, and that is a wrong "exhausted" verdict, not a safety margin.
 
+**The cap is currently NOT a stop sign** (founder directive 2026-08-12, operationalized 2026-08-13 —
+[ADR-20260813-132540](../adr/ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md)):
+`.claude/loop-budget.json` sets `"capIsAStopSign": false`, so an over-cap `check`/`start` still
+prints the exhaustion message but exits 0 — do not stand a run down for it, and do not report the
+percentage as a constraint. Billing is unchanged: `start`/`stop` stay mandatory, the ledger stays
+append-only, and every integrity refusal (exit 3) still fires. The override is event-bounded (the
+ADR records the path back); do not restate the number here — read the ledger or `status`.
+
 The week's usage is the **sum** of that week's ledger files; it resets automatically each ISO week
 because the next week is a new directory. Usage is committed so the budget survives ephemeral
 cloud-routine runners (ADR-0014). **Doubling the cap never doubles usage**: ledger entries are

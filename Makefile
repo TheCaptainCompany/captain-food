@@ -133,18 +133,23 @@ night-loop: validate generate
 	@echo "night-loop: complete."
 
 # Self-imposed WEEKLY time budget (Claude Code has no native cap). State: .claude/loop-budget.json
-# (default 30 min/week; resets each ISO week). `budget-check` exits 2 when the week's budget is spent.
+# (resets each ISO week). `budget-check` exits 2 when the week's budget is spent -- unless the config
+# sets "capIsAStopSign": false, in which case over-cap is reported on stderr but exits 0
+# (ADR-20260813-132540).
 budget-check:
 	bash .claude/hooks/loop-budget.sh check
 
-# Budget-aware night loop: skip cleanly when the weekly budget is spent, else run and record elapsed.
+# Budget-aware night loop: skip cleanly when the guard refuses, else run and record elapsed.
+# A non-zero `start` is NOT always "budget exhausted": exit 2 = over cap (only while the cap is a
+# stop sign), exit 3 = timer integrity (a run timer is already open). The guard's own stderr above
+# this message says which.
 budgeted-loop:
 	@if bash .claude/hooks/loop-budget.sh start; then \
 		$(MAKE) night-loop; rc=$$?; \
 		bash .claude/hooks/loop-budget.sh stop; \
 		exit $$rc; \
 	else \
-		echo "budgeted-loop: skipped -- weekly budget exhausted (resets Monday)."; \
+		echo "budgeted-loop: skipped -- loop-budget.sh start refused; its stderr above says why (over cap, or a timer is already open)."; \
 	fi
 
 docs: generate

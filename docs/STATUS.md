@@ -2,6 +2,28 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⏱️ **2026-08-13 — THE WEEKLY CAP IS NOT A STOP SIGN; billing continues** (founder, 2026-08-12,
+> verbatim: *"Don't care about the budget right now understood?"*, operationalized by the
+> 2026-08-13 resume prompt — provenance labeled in
+> [ADR-20260813-132540](adr/ADR-20260813-132540-the-weekly-cap-stops-being-a-stop-sign.md);
+> hold resolved: founder-**confirmed** 2026-08-13, verbatim *"Continue the work enforcement and
+> split"*, given as a user turn in the coordinating session's conversation in direct response to
+> the held question about the realizing PR — the founder posts no GitHub comments, and the session
+> transcript, not GitHub, is the record).
+> `.claude/loop-budget.json` now carries `"capIsAStopSign": false`: `loop-budget.sh check`/`start`
+> still print the over-cap state loudly but exit 0, so no session stands down for it (the #510
+> executor did, on 2026-08-13 ~13:20Z container clock, against an already-lifted gate — the cost that forced the
+> record). Integrity refusals (stale timer, double-open, audit) and the append-only ledger are
+> unchanged. **The report that replaces the constraint**: W33 had recorded **1646.4 minutes
+> (~27.4h) as of 2026-08-13 ~17:05Z** — a number, not a gate, and a SNAPSHOT, not a live value: a
+> minute count pinned in prose is stale the moment the next run bills (this very paragraph shipped
+> stale once, 1602.0m written before its own branch's follow-up entries landed). Re-derive, never
+> trust: `bash .claude/hooks/loop-budget.sh status`, or near the cap the cross-branch union snippet
+> in [docs/claude/loops.md](claude/loops.md). **Exit condition** (event-bounded, pre-recorded path back):
+> when [DECISIONS §35 INV-1](proposals/DECISIONS.md) is met AND the first infrastructure euro is
+> spent, the architect's run report flips the flag back to `true` — executing the ADR, not a new
+> decision.
+
 > 🔐 **2026-08-13 — A TOKEN MUST NOW PROVE THE PRODUCT, NOT ONLY THE PROVIDER** ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519),
 > [ADR-20260813-013211](adr/ADR-20260813-013211-a-token-must-prove-the-product-not-only-the-provider.md),
 > [SPEC-LOG row](SPEC-LOG.md)). The group is about to put every product behind ONE Supabase project,

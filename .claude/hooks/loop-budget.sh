@@ -3,7 +3,8 @@
 # Claude Code has NO native "minutes per week" cap, so we track it ourselves in committed state that
 # survives ephemeral cloud-routine runners. The budget resets each ISO week.
 #
-#   loop-budget.sh check                 # exit 0 if budget remains this week, 2 if exhausted (skip the run)
+#   loop-budget.sh check                 # exit 0 if budget remains this week, 2 if exhausted (skip the run);
+#                                        # over-cap exits 0 when config sets "capIsAStopSign": false (see below)
 #   loop-budget.sh start                 # check + open a run timer (writes NOTHING tracked)
 #   loop-budget.sh stop [--note "..."]   # close the timer and APPEND the segment to the ledger
 #   loop-budget.sh stop --elapsed 900    # record a run whose timer was never opened / was stale
@@ -32,6 +33,11 @@
 #      no process mutates is a file that does not conflict.
 #
 # Configure the cap by editing "weeklyBudgetSeconds" in .claude/loop-budget.json.
+# "capIsAStopSign" (same file, default true) decides whether over-cap REFUSES (exit 2) or is only
+# REPORTED (exit 0, message unchanged). It gates ONLY the over-cap verdict: billing, the append-only
+# ledger, and every integrity refusal (exit 3: stale timer, double-open, vanishing stop) are
+# identical in both states. Founder override 2026-08-13; path back = flip the field to true
+# (ADR-20260813-132540 records when).
 # ---------------------------------------------------------------------------------------------
 set -uo pipefail
 
@@ -150,6 +156,9 @@ const now = Date.now();
 const wk = isoWeek(new Date(now));
 const cfg = readJson(CONFIG) || {};
 const budget = Number(cfg.weeklyBudgetSeconds) > 0 ? Number(cfg.weeklyBudgetSeconds) : 1800;
+// Default TRUE: an absent field keeps today's behaviour, so branches that predate the field parse
+// fine and flipping the override off is deleting one line (ADR-20260813-132540).
+const capIsAStopSign = cfg.capIsAStopSign !== false;
 
 // ---- the ledger: one file per recorded segment, the week's usage is their sum -------------------
 function weekDir(week) { return path.join(LEDGER, week); }
@@ -202,8 +211,13 @@ if (cmd === 'check' || cmd === 'start') {
   // working tree -- an earlier version called save() on both paths and re-stamped an unrelated
   // checkout, tripping the stop-gate on a branch doing no loop work at all.
   if (over) {
+    // The message is IDENTICAL in both flag states, on purpose: the override changes only the exit
+    // code, never the loudness -- a silent fallback is worse than the gate it replaced
+    // (ADR-20260810-231300(b); the defect class is "degraded and nobody can tell").
     console.error(`⛔ weekly loop budget exhausted: ${summary()}; resets Monday.`);
-    process.exit(EXIT_OVER);
+    if (capIsAStopSign) process.exit(EXIT_OVER);
+    console.error(`   capIsAStopSign=false (ADR-20260813-132540): over-cap is REPORTED, not a refusal. Billing and integrity guards unchanged.`);
+    if (cmd === 'check') process.exit(EXIT_OK);
   }
   if (cmd === 'start') {
     const t = openTimer();
@@ -220,7 +234,7 @@ if (cmd === 'check' || cmd === 'start') {
       console.error(`   It is NOT billed: an unclosed timer measures wall-clock since a dead run, not work done.`);
     }
     fs.writeFileSync(TIMER, JSON.stringify({ startedAt: now, branch: label, pid: process.pid }, null, 2) + '\n');
-    console.error(`✓ loop budget OK: ${summary()}. Timer open (untracked: ${TIMER}).`);
+    console.error(`✓ ${over ? 'loop budget OVER CAP (override active)' : 'loop budget OK'}: ${summary()}. Timer open (untracked: ${TIMER}).`);
     process.exit(EXIT_OK);
   }
   console.error(`✓ loop budget OK: ${summary()}.`);
@@ -275,7 +289,7 @@ if (cmd === 'stop') {
   const r = record(seconds, note);
   console.error(`• loop budget: +${mins(seconds)}m -> ${mins(r.after)}m / ${mins(budget)}m used (week ${wk}).`);
   console.error(`  recorded as ${path.relative(process.env.ROOT || '.', r.file)} (a NEW file -- commit it).`);
-  process.exit(r.after >= budget ? EXIT_OVER : EXIT_OK);
+  process.exit(r.after >= budget && capIsAStopSign ? EXIT_OVER : EXIT_OK);
 }
 
 if (cmd === 'status') {
@@ -285,7 +299,9 @@ if (cmd === 'status') {
   console.error(`  ${segs.length} segment(s) this week; timer file: ${TIMER}`);
   const t = openTimer();
   console.error(t ? `  OPEN TIMER: ${describe(t)}${t.age > STALE_TIMER_SECONDS ? '  <-- STALE, will not be billed' : ''}` : `  no open timer`);
-  process.exit(over ? EXIT_OVER : EXIT_OK);
+  // status is the REPORT command (the ADR names it as the constraint's replacement), so under the
+  // override it must be the last place still emitting a refusal signal (ADR-20260813-132540).
+  process.exit(over && capIsAStopSign ? EXIT_OVER : EXIT_OK);
 }
 
 if (cmd === 'reset') {
