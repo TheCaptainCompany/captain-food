@@ -655,6 +655,114 @@ UBER_EATS_PRIVATE_KEY             (secret, base64)
 - Direct's keys (`UBER_DIRECT_RESTAURANT_*`, later `_MARKETPLACE_*`) land with Slice E, retiring
   `UBER_DIRECT_CLIENT_SECRET` and `UBER_DIRECT_SCOPE` (D6).
 
+### 6.1 Two declared Uber apps → which credential SET carries which capability (founder directive, 2026-08-13)
+
+Founder, verbatim (relayed to the whole team per
+[ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md);
+Consulted line in §9):
+
+> "We going to have configuration keys for the declared product on uber eats called:
+> - captain food restaurant => this will concern catalog orders and delivery (uber direct) for the restaurant
+> - captain food marketplace => delivery (uber direct) only"
+
+There are **two declared apps/products on the Uber developer dashboard**, and capability attaches to
+the app, so the config-key sets group by app:
+
+| Declared Uber app | Eats Marketplace API (catalog + orders) | Uber Direct (delivery) | Credential sets |
+|---|---|---|---|
+| **Captain Food Restaurant** | ✅ yes — this app is the one registered on the Eats Marketplace suite (ADR line 18) | ✅ `uber_direct:restaurant` | `UBER_EATS_*` (§6, asymmetric app auth) **+** `UBER_DIRECT_RESTAURANT_*` (D6) |
+| **Captain Food Marketplace** | ❌ **none** — no catalog, no orders | ✅ `uber_direct:marketplace` | `UBER_DIRECT_MARKETPLACE_*` **only** |
+
+So the **Eats Marketplace API credentials (`UBER_EATS_*`, catalog + orders) bind to the *Captain Food
+Restaurant* app**, alongside that app's restaurant-surface Uber Direct org. The *Captain Food
+Marketplace* app is **delivery-only** — it carries the marketplace-surface Uber Direct org and nothing
+else. This is exactly consistent with D2/D5 (two Direct orgs keyed by acquisition surface, ADR
+Decision 5) and with §6's "Eats is one app, one relationship" — that one app is now **named**: Captain
+Food Restaurant. The delivery half is already partly realized (`UBER_DIRECT_*` in
+`specs/delivery/configuration.yaml:108-181`, pre-D6 symmetric, to be split into
+`_RESTAURANT_`/`_MARKETPLACE_` asymmetric at Slice E); **what is new here is only the binding of the
+`UBER_EATS_*` set to the Restaurant app**, and this section RECORDS that structure — the actual
+`configuration.yaml` keys land under a later executor slice, not here.
+
+> ⚠️ **"Marketplace" is overloaded THREE ways — do not wire this backwards.** (a) Uber's **Eats
+> Marketplace *API*** product = catalog + orders; (b) Captain's **marketplace delivery *org*** =
+> `uber_direct:marketplace`; (c) the founder's **declared app *Captain Food Marketplace***. ADR
+> Decision 1's phrase *"`UBER_EATS_*` is the Marketplace app (order centralization + menu sync)"* uses
+> sense (a) — "the app on the Eats **Marketplace API** suite" — which per ADR line 18 is **Captain
+> Food Restaurant**. Read carelessly it looks like sense (c) and would wire catalog + orders to the
+> *Captain Food Marketplace* app — **the exact inverse of the directive**. The rule, unmissable:
+> **catalog + orders live on the RESTAURANT app; the MARKETPLACE app is delivery-only.** This is a
+> **clarification of ambiguous prose, not a decision reversal** — no decided row (D2/D5/D6) ever
+> assigned catalog/orders to a *Captain Food Marketplace* app, and this section contradicts none of
+> them.
+
+### 6.2 Test and prod keys, and per-order mode selection — "test directly on production" (founder directive, 2026-08-13)
+
+Founder, verbatim: *"We going to have test and prod keys to be able to test directly on production."*
+This **restates a recorded 2026-07-29 directive** already live in the tree —
+`specs/delivery/configuration.yaml:94-107`: *"do like for the stripe, have both environment keys"*,
+with today's deliberate state being **both profiles → `_TEST` on purpose** until a live Uber app
+exists (a test app exercised with test keys on production), and *"when the live app arrives,
+production flips to `_PROD` here and nowhere else."* That it had to be re-stated is itself a data
+point for the AR-1 unrealized-directive sweep (ADR-20260813-233418): **#257 is recorded-but-unbuilt**,
+which is exactly the class the sweep surfaces.
+
+**Two mechanisms, and the directive means the second** (the config distinguishes them, `:103-107`):
+
+1. **Test keys on production** (built today): both deploy profiles resolve to the `_TEST` secret, so
+   production runs the test credential. This is done.
+2. **Choosing the credential per ORDER** — a test order on a live restaurant — which *"needs both
+   sets loaded at once"*. This is **[#257](https://github.com/TheCaptainCompany/captain-food/issues/257)**
+   (title **unverified this session — GitHub access was disabled, HTTP 403**; the config describes it
+   as *the per-order credential-selection mechanism*, coordinator to confirm the exact title). The
+   founder's *"test directly on production"* = mechanism 2 = the realization of #257. This section
+   **records that the founder confirmed #257**; it does **not** re-spec it.
+
+**External gate, stated so no one blocks the wrong thing:** the #257 **mechanism** (both sets loaded,
+mode chosen per order) is **buildable now with the existing test credentials** — it needs no live
+keys. The real **PROD credential set** is externally gated: a live Uber-approved app is downstream of
+**D7** (SASU / licence / Provider entity) and Uber certification. So build the selector now against
+test creds; wire the `_PROD` secret when the live app lands. Neither blocks the other.
+
+#### Guardrail 1 — mode coherence is an ORDER-level invariant (a rule, not a founder decision)
+
+The mode is a property of the **order**, chosen **once**, and must be **coherent across every
+integration that order touches**: a test order runs **test Stripe AND test Uber together** — never a
+test delivery against a real charge, never a real courier on a test payment. Stripe's mode is readable
+from the key (`sk_test_`/`sk_live_`, `mode_of: stripe`), but **Uber Direct keys carry no such marker**
+(`configuration.yaml:103-105`), so coherence cannot be reconstructed after the fact from the
+credentials — it has to be **decided at the order and carried**.
+
+- **This interacts with the in-flight capture-on-delivered slice
+  [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)**: a **test order must not
+  trigger a real Stripe capture**. #544's capture leg and #257's per-order credential selector must
+  read **one order-mode source of truth**, not decide mode independently.
+- **Recommended design (single SoT, under existing doctrine):** mode is a **fact on the order**,
+  frozen at placement and folded — the *same* pattern D3 already set for `acquisitionSurface` (not
+  derivable at dispatch: the write path is acceptance-first, the `Host`/request context is gone by the
+  time the saga runs). The capture leg and the delivery selector both read that one field.
+- **Classification:** this is a **correctness invariant with one right answer, so it is a RULE**
+  (`rules.yaml`, pinned by a test under ADR-20260813-233418 AR-2), **not** a founder-owed DECISIONS
+  row — there is no option space to arbitrate. Where the SoT lives resolves under D3's precedent.
+
+#### Guardrail 2 — a test-mode order in production must be observable (a contract, not a founder decision)
+
+With per-order selection the mode is **no longer readable from the deploy profile**, and Uber keys
+carry no marker — so unless the **order records and exposes which mode it ran**, a test order is
+**invisible in production**. The order must carry its mode (Guardrail 1's field serves both), and a
+**test-mode order in prod must be countable and alertable**: an unexpected volume of `mode=test`
+orders on a live restaurant, or a `mode=live` order that dispatched on a test courier, is an incident.
+
+- **Classification:** this is an **observability contract** (`specs/observability.yaml` territory) —
+  recommend the shape (`orders_by_mode{mode}` foldable, with an alert on live/test incoherence and on
+  test-order volume in prod), **do not build it here**. It is the gap the config comment already names
+  (nothing can report Uber's mode); named as a **missing contract**, team-owned, no founder input due.
+
+**Verdict: clarification / advance, not a reversal.** The directive moves the recorded *"both profiles
+→ `_TEST` on purpose"* state toward its **already-anticipated** next step (*"when the live app
+arrives, production flips to `_PROD`"*) and confirms #257 as the per-order mechanism. No recorded row
+fixes a *different* mode-selection design, so nothing is contradicted — no DECISIONS reversal row.
+
 ---
 
 ## 7. Verification plan
@@ -734,3 +842,30 @@ Every lens invited; "nothing in my lens" is a complete one-line answer.
   when Slice D lands: "an `ExternalOrderReceived` order marked delivered triggers **no** capture." See
   the boundary note in the run report; #544's branch carries no capture code yet, so this is a
   reviewer check for #545, not a current defect.
+
+**Consulted addendum — the 2026-08-13 config-structure follow-up (§6.1):**
+
+- **config / topology lens**: The two-declared-apps mapping is a **clarification, not a reversal** —
+  checked against ADR Decision 1 (line 26-27), Decision 5 (line 47-50) and the decided D2/D6: "the
+  Marketplace app" in Decision 1 means the app on the Eats **Marketplace API** suite (Captain Food
+  Restaurant, ADR line 18), and no decided row ever bound catalog/orders to a *Captain Food
+  Marketplace* app. Recorded the three-way "marketplace" disambiguation so an executor cannot wire it
+  backwards. Nothing in the ACL direction changes, so no new mockup/sequence needed.
+- **graphql-architect / legal / ux / dba / observability / payments**: Nothing in my lens — this is a
+  credential-set-to-app binding, no domain, money, screen or contract shape moves.
+
+**Consulted addendum — the 2026-08-13 test/prod-keys follow-up (§6.2):**
+
+- **config / topology lens**: *"test and prod keys to test directly on production"* **restates** the
+  recorded 2026-07-29 directive (`configuration.yaml:94-107`) and confirms **#257** as the per-order
+  credential-selection mechanism — **clarification/advance, not a reversal**: it moves the recorded
+  *"both → `_TEST` on purpose"* state to its already-anticipated `_PROD` flip. Mechanism buildable now
+  on test creds; the PROD credential set is externally gated on D7 + Uber certification.
+- **payments / capture-boundary lens**: mode coherence is an **order-level invariant** — a test order
+  must never trigger a real Stripe capture. #544's capture leg and #257's selector must share **one
+  order-mode SoT** (recommended: a fact on the order, D3 precedent). Raised as a **rule** (AR-2), not a
+  founder decision.
+- **observability lens**: per-order mode is unreadable from the profile and Uber keys carry no marker,
+  so a **test-mode order in prod is invisible** unless the order exposes its mode — a **missing
+  observability contract** (`orders_by_mode{mode}` + incoherence alert), recommended not built.
+- **legal / ux / dba / graphql-architect**: Nothing in my lens.

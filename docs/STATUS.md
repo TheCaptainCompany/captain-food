@@ -42,7 +42,23 @@
 > living PROP-20260730-032306 §3bis/Slice F, reconciled with the recorded no-scraping constraint
 > (`specs/integrations/sirene.md:67`) via the licensed Menu API + own-menu-only. D8/D9/D10 are the
 > new founder-owed rows. Docs-only; landed on `main` from an isolated worktree (the shared checkout
-> was on the #543/`494` branch).
+> was on the #543/`494` branch). **Follow-up (same day)**: a config-structure directive — two declared
+> Uber apps, *Captain Food Restaurant* = Eats Marketplace API (catalog+orders) **+**
+> `uber_direct:restaurant`, *Captain Food Marketplace* = `uber_direct:marketplace` **only** — folded
+> into PROP-20260730-032306 §6.1 with the three-way "marketplace" disambiguation. **Verdict:
+> clarification of ambiguous ADR-Decision-1 prose, NOT a reversal** (no decided row bound
+> catalog/orders to a *Captain Food Marketplace* app; ADR line 18 registers the Eats suite under
+> Captain Food Restaurant), so no DECISIONS register row. **Second follow-up (same day)**: *"test and
+> prod keys to test directly on production"* — restates the recorded 2026-07-29 keys directive
+> (`specs/delivery/configuration.yaml:94-107`) and confirms **#257** (per-order credential selection,
+> both sets loaded) as its realization; folded into PROP §6.2. Two guardrails raised, **both
+> team-owned, neither a founder-owed DECISIONS row**: mode coherence as an **order-level rule** (a
+> test order must not trigger a real Stripe capture — #544's capture leg and #257's selector share one
+> order-mode SoT, recommended a fact on the order per D3), and a **missing observability contract** (a
+> test-mode order in prod must be countable/alertable, since Uber keys carry no mode marker). Mechanism
+> buildable now on test creds; the real PROD key set is externally gated on D7 + Uber certification.
+> **Clarification/advance, not a reversal.** #257's exact title is UNVERIFIED — GitHub access was
+> disabled this session (HTTP 403).
 
 > 🎯 **2026-08-13 — THE ACCEPTANCE CRITERION EXISTS: SIX CLAUSES WALKED ON THE LOCAL STACK, WITH THE
 > FRONT DOOR DELIBERATELY UNLOCKED FROM THE INSIDE** (founder directive + ten-lens mob;
