@@ -16,10 +16,13 @@ keys:
   # shares revenue on, and the bill arrives overnight.
   #
   # Three guards, and they do DIFFERENT jobs — do not treat one as a substitute for another:
-  #   * the ALLOWLIST removes the attack's economics (there is no revenue share on a French mobile);
-  #   * the PER-NUMBER caps stop one number being pumped;
-  #   * the GLOBAL DAILY CEILING is the only one that bounds the TOTAL BILL, because an attacker
-  #     rotates numbers and per-number caps then multiply instead of limiting.
+  #   * the GLOBAL DAILY CEILING is the ECONOMIC control and the only one that bounds the TOTAL
+  #     SPEND, because an attacker rotates numbers and per-number caps then multiply instead of
+  #     limiting — at 200/day an attacker's gross is a few euros, which already destroys the
+  #     pumping economics for every range;
+  #   * the ALLOWLIST contains cost and refuses what we cannot serve — the served-country decision
+  #     made executable;
+  #   * the PER-NUMBER caps stop one number being pumped.
   #
   # All FIVE keys have defaults, so the guards are ON with no configuration. The env override exists
   # so the ceiling can be raised or dropped to zero WITHOUT a deploy (the kill switch).
@@ -27,20 +30,29 @@ keys:
 
   SMS_ALLOWED_DIALING_CODES:
     type: string
-    default: "+33,+32,+41,+44,+49,+34,+39,+1"
+    default: "+33,+32,+41,+44,+49,+34,+39"
     gates: >
       Comma-separated `DialingCode` allowlist for OTP delivery — EXACT membership, never a prefix
       match (a prefix test passes '+337…' and is not an allowlist). A number whose code is absent, or
       which cannot be parsed at all, is refused with `errors.yaml#/PhoneCountryNotServed` and NOTHING
       is handed to the sender (fail-closed).
 
-      WHY THIS SET, AND WHY THE BOUNDARY IS "PAYOUT TIER" RATHER THAN "EU": pumping profit lives in
-      high-payout mobile ranges, which these are not. V0 serves Tours, so '+33' is the traffic — but
-      Tours has international students and Loire-valley tourists, a real single-digit share of
-      signups, and a '+33'-only list would refuse those real customers while buying no additional
-      protection, since none of BE/CH/UK/DE/ES/IT/US pays an attacker anything. Widening this list is
-      therefore not a matter of taste: adding a code opens a spend path, and the question to answer
-      first is what a send to that range PAYS, not which union the country belongs to.
+      WHY THIS SET — A CALLING CODE IS NOT A DESTINATION. V0 serves Tours, so '+33' is the traffic;
+      the rest cover Tours's international students and Loire-valley tourists, a real single-digit
+      share of signups a '+33'-only list would refuse for no additional protection. Before WIDENING
+      this list, the question is what a send to EVERY territory the code reaches pays, because the
+      attacker picks the territory and we pay its rate: '+1' is deliberately ABSENT (#535) since it
+      reaches every NANP territory — twenty-odd Caribbean and Pacific jurisdictions with their own
+      operators and rates, including the premium ranges this allowlist exists to exclude, all billed
+      as if they were a Boston number; '+44' also reaches Guernsey, Jersey and the Isle of Man
+      (separate telecom jurisdictions, own operators, commonly rated apart from the GB mainland);
+      '+41' is a COST line rather than a fraud one, Swiss termination being among Europe's more
+      expensive under a prepaid credit pack; '+33' is clean BECAUSE the French overseas territories
+      carry their own codes ('+262', '+590', '+596', '+594', '+687', '+689', '+508'), so DOM-TOM is
+      already unreachable and would be a separate deliberate addition. Serving North America would be
+      a market decision, and its shape is region resolution via a libphonenumber-class dependency —
+      never a hand-maintained NANP area-code table, which NANPA reassignments stale several times a
+      year (ADR-20260813-021500, amended by #535).
 
       Unset, the default above applies. Set it to '+33' alone to harden further; there is no value
       that disables the check.

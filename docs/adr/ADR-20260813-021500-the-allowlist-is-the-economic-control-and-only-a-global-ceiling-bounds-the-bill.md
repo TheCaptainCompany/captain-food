@@ -1,6 +1,13 @@
-# ADR-20260813-021500 — The allowlist is the economic control, and only a global ceiling bounds the bill
+# ADR-20260813-021500 — The ceiling is the economic control; the allowlist is the served-country decision
 
-**Status**: Accepted (2026-08-13)
+> Title corrected 2026-08-13 with [#535](https://github.com/TheCaptainCompany/captain-food/issues/535);
+> the file keeps its original slug so links stay valid. The first form of this record claimed the
+> allowlist was the economic control — §1 below records why that was backwards at V0 scale.
+
+**Status**: Accepted (2026-08-13) · **Amended** (2026-08-13, [#535 "The SMS allowlist admits every NANP territory under a bare `+1`"](https://github.com/TheCaptainCompany/captain-food/issues/535)):
+`+1` dropped from the default allowlist; four false assertions in the first form corrected in place —
+§1's economic claim, §3's "the price is recorded nowhere / owed by the founder", the Context's
+misattributed founder quote, and the failure mode (an invoice — it is a prepaid-pack outage).
 **Tracking**: [#516 "The OTP endpoint is anonymous with no rate limit and no country allowlist, on our own SMS account"](https://github.com/TheCaptainCompany/captain-food/issues/516)
 **Relates to**: [ADR-20260722-174500](20260722-174500-identity-federation-cross-tenant-personalization.md) (OVH is our own SMS account) ·
 [ADR-20260803-234035](ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md) (compiler first) ·
@@ -12,33 +19,69 @@
 `requestPhoneVerification` is anonymous **by design** — a visitor has no identity yet to rate-limit —
 and it had **no limit of any kind**. Every accepted send spends real money on our own OVHcloud
 account. That is the exact shape SMS-pumping automates: drive OTP requests at premium-payout mobile
-ranges the attacker shares revenue on, and the invoice arrives overnight. The founder's recorded
-position on cost — *"too expensive for me, I don't have the money for that"* at €67.80/month — makes
-this a money defect, not a hardening nicety.
+ranges the attacker shares revenue on.
+
+**The failure mode is an outage, not an invoice** (corrected with #535 — the first form of this
+record said the founder wakes to a bill). The OVH SMS account is a **prepaid credit pack**:
+`specs/common/configuration.yaml` (`OVH_SMS_SERVICE_NAME`) records that the account must hold SMS
+credits, and with none the credentials still authenticate while the send fails at OVH. So a burn
+night drains the pack, every OTP send then fails, and **nobody can sign up or sign in** — phone OTP
+is the primary V0 login. Recovery is founder-gated: DECISIONS.md §35 INV-1 records *"I'm waiting for
+a working version before paying OVH"*, so the outage has **unknown duration**. That — not a bill —
+is what these guards bound, and it is the strongest argument for keeping the spend paths narrow.
+
+(The first form of this record also cited *"too expensive for me, I don't have the money for that"*
+at €67.80/month as the founder's SMS cost position. That quote is from
+[ADR-20260807-114122](ADR-20260807-114122-mks-starts-at-one-node.md) and is about the
+**MKS/CNPG hosting trio**, not SMS — corrected so the two budgets are never conflated in a decision
+about either.)
 
 ## Decision
 
-### 1. The country allowlist is the ECONOMIC control, and it is not the rate cap
+### 1. The CEILING is the economic control; the allowlist contains cost and refuses what we cannot serve
 
-A rate cap limits how fast an attacker spends; the allowlist decides **whether spending pays them at
-all**. Pumping profit lives in high-payout ranges, so an allowlist that excludes those removes the
-attack's economics outright, at near-zero cost to real customers. It is the cheapest guard and the
-most effective one, and it must be **fail-closed**: an unparseable number is refused, never sent.
+**Corrected with #535 — the first form of this section said the opposite, and it was backwards at V0
+scale.** At 200 sends/day, an attacker's gross is a few euros and their revenue share a fraction of
+that: the global ceiling has already destroyed the pumping economics for **every** range, including
+the ones the allowlist admits. So the ceiling is the economic control. The allowlist's job — still a
+good reason to have one — is **cost containment plus refusing what we cannot serve**: it keeps the
+drain rate on a prepaid pack down and makes the served-country decision executable and fail-closed
+(an unparseable number is refused, never sent).
 
-**The boundary is PAYOUT TIER, not "EU"**, and the default set says so:
-`+33,+32,+41,+44,+49,+34,+39,+1`. A `+33`-only list was considered and rejected — Tours has
-international students and Loire-valley tourists, a real single-digit share of signups, and none of
-BE/CH/UK/DE/ES/IT/US pays an attacker anything, so `+33`-only would refuse real customers while buying
-no additional protection. It is configuration (`SMS_ALLOWED_DIALING_CODES`) with that reasoning in its
-declaration, because the next person to widen it must have to read *why* the boundary is where it is:
-**adding a code opens a spend path, and the question to answer first is what a send to that range
-PAYS.**
+**The default set answers ONE question — which countries does V0 Tours serve** — and the answer is
+`+33,+32,+41,+44,+49,+34,+39`. A `+33`-only list was considered and rejected — Tours has
+international students and Loire-valley tourists, a real single-digit share of signups, and
+`+33`-only would refuse those real customers for no additional protection. It is configuration
+(`SMS_ALLOWED_DIALING_CODES`) with the reasoning in its declaration, because the next person to widen
+it must read *why* the boundary is where it is.
+
+**A calling code is not a destination** (#535 — the first form of this record reasoned about `+1` as
+"US", which is the false instruction that admitted it). `+1` reaches every NANP territory — twenty-odd
+Caribbean and Pacific jurisdictions with their own operators and rates, **including the premium-payout
+ranges this allowlist exists to exclude — all billed as if they were a Boston number**. So bare `+1`
+is out of the default, and that IS the final shape of this decision: dropping
+`+1` fully answers *which countries does V0 Tours serve*
+([ADR-20260808-235113](ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) is satisfied:
+this is the answer, not an interim), whereas an NANP **area-code** allowlist
+would implement *serve North America* — a market-expansion decision nobody has taken and not the
+team's to take. Nor would a hand-maintained area-code table be the final shape if that decision were
+ever taken: NANPA reassigns codes several times a year, so a stale table refuses an innocent US
+customer with a new area code — the final shape there is region resolution through a
+libphonenumber-class dependency, triggered by a market decision rather than queued. The same lens,
+applied to what stays: `+44` also reaches Guernsey, Jersey and the Isle of Man (separate telecom
+jurisdictions, own operators, commonly rated apart from the GB mainland) — an accepted, named cost;
+`+41` is a cost item rather than a fraud one, Swiss termination being among Europe's more expensive
+under a prepaid pack; `+33` is clean **because** the French overseas territories carry their own
+codes (`+262`, `+590`, `+596`, `+594`, `+687`, `+689`, `+508`), so DOM-TOM is already unreachable
+and would be a separate deliberate addition. **The question to answer before widening is what a send
+to EVERY territory the code reaches pays.**
 
 ### 2. Per-number caps do not bound spend — an attacker rotates numbers
 
 3/hour and 5/day per number, with a 30s → 2min → 10min cooldown, stop **one** number being pumped.
-They do not put a ceiling on the **total**, which is the actual failure mode: the founder wakes to an
-invoice. Under number rotation, per-number caps *multiply* rather than limit.
+They do not put a ceiling on the **total**, which is the actual failure mode: the prepaid pack is
+drained overnight and phone login stops for everyone, for a founder-gated, unknown duration (see
+Context). Under number rotation, per-number caps *multiply* rather than limit.
 
 So the money control is a **global daily ceiling with a hard kill switch**
 (`SMS_MAX_SENDS_PER_DAY_GLOBAL`). Once the day's budget is spent, OTP sends stop — for everyone,
@@ -53,16 +96,18 @@ the env key changes the ceiling persistently on the next rollout, while
 *immediately* on a live system with no rollout at all (`DELETE` on that row restores them). Both are
 tested.
 
-### 3. The per-message price is UNKNOWN, and the default is a guess that says so
+### 3. The per-message price IS recorded, and the ceiling is derivable from it
 
-No EUR/SMS figure exists anywhere in this repository — `specs/common/configuration.yaml` names the OVH
-account and its credentials but never a price. **A sane ceiling cannot be derived without one, so none
-was invented.** The default is **200 sends/day**, chosen as "comfortably above any plausible V0 day in
-Tours, low enough that the worst overnight case is tens of euros rather than hundreds".
+**Corrected with #535 — the first form of this section claimed no EUR/SMS figure exists anywhere in
+this repository and that the price was owed by the founder. Both claims were false.**
+[PROP-20260724-233605](../proposals/PROP-20260724-233605-ovh-sms-hook.md) (line 14,
+founder-approved 2026-07-24, screenshot-confirmed) records **OVH SMS France at €0.06 HT/SMS at 100
+credits, €0.058 at 1 000 (3% remise), plus 20 free credits on a new account**.
 
-**Owed by the founder**: the real per-message price of the OVH credit pack. The ceiling must be
-re-derived from it, and until then the number above is a placeholder wearing a justification, not a
-budget.
+With that anchor, the **200 sends/day** default is **derivable rather than a guess**: €12/day worst
+case France-rated. The remaining unknowns are OVH's **per-destination price multipliers** (a
+non-France send costs more than €0.06) and **which pack was actually purchased** — those refine the
+ceiling; they do not block deriving it.
 
 ### 4. The wall is at the send seam, not at the command
 
@@ -165,6 +210,20 @@ to a Belgian visitor is an accusation aimed at someone who did nothing wrong.
 - **No `domain_events` row per send.** The command emits nothing, so a BAM fold cannot see this path —
   it is OTLP-only, and it must stay that way: a per-refusal event is a log an anonymous attacker gets
   to drive.
+- **OWED (#535, named here so it is not lost; deliberately not built in that change): an
+  observed-but-not-served telemetry label set.** `specs/observability.yaml` bounds the
+  `dialing_code` label to the allowlist plus `other`, and the Rust label list matches the served
+  default — so with `+1` dropped, **every refused `+1` collapses into `other` and the North American
+  refusal cohort is unmeasurable**, meaning the `+1` decision itself can no longer be re-derived from
+  production signal. The fix is a small bounded set of codes we are willing to OBSERVE without
+  serving (`+1` first), distinct from the served set.
+- **OWED (#535, ranked by the business lens above the `+1` hole itself): a credit-balance gauge.**
+  The dead-man's switch for "phone login is about to stop working": the pack drains silently, and
+  the first symptom today would be every OTP send failing. OVH will not push the balance, and
+  silence must not read as healthy — this falls squarely under monitoring's **permanent-poll
+  carve-out** in
+  [ADR-20260810-231300](ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)
+  (the observer is outside what it observes and has no durable record to reconcile against).
 - **A per-IP cap was deliberately NOT built.** Nothing in this repository proves our ingress overwrites
   `X-Forwarded-For`, no IP extraction exists anywhere today, and a cap on a client-controllable header
   is theatre — the forgeability class is already documented at `crates/server/src/graphql/tenant.rs:49`.
@@ -175,6 +234,12 @@ to a Belgian visitor is an accusation aimed at someone who did nothing wrong.
 - **Rate cap only, no allowlist.** Rejected: it slows the spend without removing the payout, so the
   attack still pays, just more slowly.
 - **`+33` only.** Rejected: refuses real Tours customers for no additional protection (§1).
+- **Keep North America behind an NANP area-code allowlist** (instead of dropping `+1`, #535).
+  Rejected: it answers a different question — *serve North America* is a market-expansion decision
+  nobody has taken — and a hand-maintained area-code table would not be the final shape even then,
+  because NANPA reassigns codes several times a year and a stale table refuses innocent customers.
+  If that market decision is ever taken, the shape is region resolution through a
+  libphonenumber-class dependency (§1).
 - **In-memory per-pod limiter.** Rejected: allowance × replicas, reset per deploy — for a money
   ceiling, not a ceiling (§6).
 - **Guard in the command handler only.** Rejected: the euro is not spent there (§4).

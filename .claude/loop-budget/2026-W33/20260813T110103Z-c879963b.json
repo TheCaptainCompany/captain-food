@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 1301,
+  "recordedAt": "2026-08-13T11:01:03.655Z",
+  "branch": "535-drop-plus-one-from-sms-allowlist",
+  "note": "start on '510-mailbox-ports-behind-the-witness', stop on '535-drop-plus-one-from-sms-allowlist'"
+}
