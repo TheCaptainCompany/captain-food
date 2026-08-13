@@ -44,7 +44,11 @@
 > `every_mailbox_port_method_demands_the_access_witness` guard now covers both supervision ports.
 > **Honest residuals**: code INSIDE `application` can still mint the requeue witness (the crate is
 > the boundary, not the function); the `test-fixtures`-gated mints remain a deliberate test door
-> (CI-guarded out of release graphs); and `crates/server` still holds raw SQL over a pool — that is
+> (CI-guarded out of release graphs — the #536 review proved the guard's wholesale skip of the two
+> declaring manifests was a hole, since `actor_client` depends on `application`: the fixed gate now
+> scans them too, allowing only the `test-fixtures = []` declaration line, which also refuses the
+> `default = ["test-fixtures"]` variant, and the trait-impl/derive watch on the witness now covers
+> `MailboxRequeueAccess` across all of `application`); and `crates/server` still holds raw SQL over a pool — that is
 > [#512 "pool + schema probe out of `crates/server`"](https://github.com/TheCaptainCompany/captain-food/issues/512)'s
 > half, untouched here.
 

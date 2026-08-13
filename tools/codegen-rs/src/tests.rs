@@ -2843,6 +2843,130 @@ keys:
              stay `pub(crate)`; widening it slides the write door from compiler-enforced to \
              convention (#510)."
         );
+
+        // The requeue witness gets the same TRAIT-IMPL watch the read witness has above (#536
+        // review): `impl Default for MailboxRequeueAccess` — or a derive spelling the same thing
+        // in one word — is a public mint for every crate in the workspace, and the actor_client
+        // walk never enters `application`. Same-crate coherence lets such an impl live in ANY
+        // module of the crate, so the whole of `crates/application/src` is walked, not just the
+        // port file.
+        fn scan_requeue(
+            items: &[syn::Item],
+            rel: &str,
+            is_port_file: bool,
+            saw_struct: &mut bool,
+            leaks: &mut Vec<String>,
+        ) {
+            const REQ: &str = "MailboxRequeueAccess";
+            const HARMLESS: &[&str] =
+                &["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "PartialOrd", "Ord"];
+            for item in items {
+                match item {
+                    syn::Item::Mod(m) => {
+                        if let Some((_, inner)) = &m.content {
+                            scan_requeue(inner, rel, is_port_file, saw_struct, leaks);
+                        }
+                    }
+                    syn::Item::Impl(i) if mentions(&i.self_ty, REQ) => {
+                        if i.trait_.is_some() {
+                            leaks.push(format!(
+                                "  {rel}: a trait impl on the requeue witness (`{}`) — \
+                                 `Default`, `From`, `FromStr` and friends are all public mints",
+                                i.trait_
+                                    .as_ref()
+                                    .map(|(_, p, _)| quote::quote!(#p).to_string())
+                                    .unwrap_or_default()
+                            ));
+                        } else if !is_port_file {
+                            leaks.push(format!(
+                                "  {rel}: an inherent impl on the requeue witness outside \
+                                 crates/application/src/queries.rs — keep the mints where the \
+                                 port lives"
+                            ));
+                        }
+                    }
+                    syn::Item::Struct(s) if s.ident == REQ => {
+                        *saw_struct = true;
+                        let mut derived: Vec<String> = Vec::new();
+                        for a in &s.attrs {
+                            derived.extend(derives_from_meta(&a.meta));
+                        }
+                        for tok in derived {
+                            if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
+                                leaks.push(format!(
+                                    "  {rel}: `derive({tok})` on the requeue witness — a derive \
+                                     is a trait impl in one word, and anything that can \
+                                     construct `Self` (`Default`, `From`, `FromStr`, \
+                                     `Deserialize`, …) is a public mint for every crate in the \
+                                     workspace"
+                                ));
+                            }
+                        }
+                        for f in s.fields.iter() {
+                            if is_pub(&f.vis) {
+                                leaks.push(format!(
+                                    "  {rel}: the requeue witness's field is `pub` — \
+                                     `MailboxRequeueAccess(())` now compiles in every crate and \
+                                     the write door re-opens"
+                                ));
+                            }
+                        }
+                    }
+                    syn::Item::Type(t) if mentions(&t.ty, REQ) => {
+                        leaks.push(format!(
+                            "  {rel}: `type {} = MailboxRequeueAccess` — an alias lets a later \
+                             public item yield the witness without ever naming it",
+                            t.ident
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let app_src_root = root.join("crates/application/src");
+        let mut app_files = Vec::new();
+        let mut stack = vec![app_src_root];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).expect("application sources are readable").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    app_files.push(p);
+                }
+            }
+        }
+        app_files.sort();
+        let mut saw_requeue_struct = false;
+        let mut requeue_leaks: Vec<String> = Vec::new();
+        for p in &app_files {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let text =
+                std::fs::read_to_string(p).expect("a partially-scanned crate is a silent no-op");
+            let file = syn::parse_file(&text)
+                .unwrap_or_else(|e| panic!("{rel} does not parse ({e}) — this guard reads the AST"));
+            scan_requeue(
+                &file.items,
+                &rel,
+                rel == app_rel,
+                &mut saw_requeue_struct,
+                &mut requeue_leaks,
+            );
+        }
+        assert!(
+            saw_requeue_struct,
+            "no `struct MailboxRequeueAccess` found in crates/application/src — renamed or \
+             moved? move this watch with it, never let it scan for nothing"
+        );
+        assert!(
+            requeue_leaks.is_empty(),
+            "the MailboxRequeueAccess witness leaks:\n{}\n\n\
+             Fix: keep every impl and construction of the requeue witness in \
+             `crates/application/src/queries.rs`, and keep the only public mint `for_tests()` \
+             under the test-fixtures cfg gate. Why: ONE public route to the witness reopens the \
+             requeue write door for every crate in the workspace.",
+            requeue_leaks.join("\n")
+        );
     }
 
     /// What one function BODY does, read from the AST rather than its text.
@@ -3757,18 +3881,33 @@ keys:
             let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
                 panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
             });
-            if rel == "crates/actor_client/Cargo.toml" || rel == "crates/application/Cargo.toml"
-            {
-                continue; // the declaring crates themselves (#510 added application)
-            }
+            // The DECLARING manifests are NOT skipped (#536 review): the previous wholesale skip
+            // left two proven holes. `actor_client` depends on `application` (the other declaring
+            // crate), so a release-graph grant could hide in the very manifest the scan ignored —
+            // the reviewer's plant (`application = { path = "../application", features =
+            // ["test-fixtures"] }` in actor_client's [dependencies]) passed the gate and made
+            // `MailboxRequeueAccess::for_tests()` compile in a release check of `server`. And
+            // `default = ["test-fixtures"]` in a declaring crate's own [features] lights the
+            // feature for every dependent with no grant anywhere. So the ONLY line these two
+            // manifests may say outside [dev-dependencies] is the declaration itself.
+            let declaring = rel == "crates/actor_client/Cargo.toml"
+                || rel == "crates/application/Cargo.toml";
             let mut section = String::new();
             for line in src.lines() {
                 let t = line.trim();
+                // A full-line comment cannot grant a feature, and the declaring manifests
+                // document this very guard next to their declaration — prose must not trip it.
+                if t.starts_with('#') {
+                    continue;
+                }
                 if t.starts_with('[') {
                     section = t.trim_start_matches('[').trim_end_matches(']').to_string();
                     continue;
                 }
                 if t.contains("test-fixtures") {
+                    if declaring && section == "features" && t == "test-fixtures = []" {
+                        continue; // the declaration line — the one sanctioned non-dev mention
+                    }
                     if section.contains("dev-dependencies") {
                         dev_grants += 1;
                     } else {
@@ -3786,7 +3925,9 @@ keys:
             offenders.is_empty(),
             "`test-fixtures` is enabled OUTSIDE [dev-dependencies] — a release artifact would \
              ship the sealed type's test constructors:\n{}\n\nFix: move the grant to that \
-             crate's [dev-dependencies] (tests get it; the shipped lib/bin never does).",
+             crate's [dev-dependencies] (tests get it; the shipped lib/bin never does). If the \
+             line is `default = [\"test-fixtures\"]` in a declaring crate, delete it — a default \
+             feature is a grant to every dependent at once.",
             offenders.join("\n")
         );
     }
