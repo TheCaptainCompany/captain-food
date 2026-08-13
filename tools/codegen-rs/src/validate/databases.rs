@@ -281,7 +281,12 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
         }
     }
     let declared: BTreeSet<&str> = decls.iter().map(|d| d.name.as_str()).collect();
-    if !declared.contains(WRITE_DATABASE) {
+    // Required the moment any covered-kind table exists (so a fixture/degenerate model with no
+    // store needs no catalog, while the real tree cannot lose it silently).
+    let any_covered = validate::table_kinds(model)
+        .values()
+        .any(|(_, k)| DERIVED_WRITE_KINDS.contains(k) || DECLARED_KINDS.contains(k));
+    if any_covered && !declared.contains(WRITE_DATABASE) {
         issues.push(err(
             "database-write-unit-undeclared",
             DATABASES_FILE.to_string(),

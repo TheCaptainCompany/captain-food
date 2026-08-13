@@ -139,6 +139,13 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
             }
             root_scoped_files.push(f);
         }
+        // The database catalog starts empty when absent (fixture/degenerate models) — §18 then
+        // requires it the moment any covered-kind table exists, so the REAL tree cannot lose it
+        // silently while a minimal test model needs no boilerplate.
+        if f == "database/databases.yaml" && !p.exists() {
+            defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
+            continue;
+        }
         load(&mut defs, f.to_string(), &p)?;
     }
     // ── Per-scope fragments: specs/{scope}/{kind}.yaml merged into the logical catalogs ──────────
