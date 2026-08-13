@@ -11,6 +11,13 @@
 # not a business fact — same stance as payment_process_manager.client_secret), never referenced by
 # api.yaml (no GraphQL type reads them, so no navigation edge can ever surface a token), never
 # projected. Re-connecting the same account UPSERTs (token refresh + location catch-up).
+#
+# PLACEMENT (#494 slice 1): every connection table declares `database:` as a `$ref` into
+# database/databases.yaml. The HubRise pair lands in `adapter_hubrise` (ADP-1 / ADR-20260812-115930
+# — completely isolated, and the one adapter database that must be inside a backup story, because a
+# non-expiring token only a human re-connect can replace is the one non-rederivable adapter state).
+# `auth_sessions` and `sms_send_quota` are PLATFORM state on `captain_write` (ADP-1 leg 2 (b)):
+# their users are the actor path, the BFF login route and the retention sweep — not adapters.
 
 # Auth-session parking (#112, PROP-20260724-150500): the identity provider issues its session at
 # VERIFICATION time (inside the async VerifyPhone/verify-email handler), but the client only holds
@@ -19,6 +26,7 @@
 # X-SESSION-ID (the operationStatus ownership rule) exchanges it for the httpOnly cookie and DELETES
 # the row (single-read). Short TTL — an unclaimed session expires in minutes and is swept.
 auth_sessions:
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     One row per just-verified identity awaiting cookie pickup: the provider session ciphertext,
     keyed by the acceptance messageId, owned by the journaling anonymous session. Single-read,
@@ -43,6 +51,7 @@ auth_sessions:
 # ceiling into a suggestion — and the global daily ceiling in particular is meaningless unless every
 # pod counts into the same row.
 sms_send_quota:
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     One row per quota bucket, each an atomic window counter: 'phone:<E.164>:hour',
     'phone:<E.164>:day' and the platform-wide 'global:day'. Claimed by a SINGLE
@@ -70,6 +79,7 @@ sms_send_quota:
       same rule and simply recreated by the next send.
 
 hubrise_connections:
+  database: { $ref: 'database/databases.yaml#/adapter_hubrise' }
   description: >
     One row per connected HubRise Account: the account-scoped, non-expiring OAuth access token,
     keyed by the RestaurantAccount the connect flow provisioned for it (restaurant_account_id =
@@ -84,6 +94,7 @@ hubrise_connections:
     last_connected_at:     { type: timestamptz }               # bumped on every re-connect (token refresh)
 
 hubrise_connection_locations:
+  database: { $ref: 'database/databases.yaml#/adapter_hubrise' }
   description: >
     Callback→token resolution: HubRise callbacks carry a location_id (not the account id), so each
     connect snapshots the account's locations here — the enricher resolves callback.location_id →

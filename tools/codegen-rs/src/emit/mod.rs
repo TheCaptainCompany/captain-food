@@ -4,6 +4,7 @@ pub(crate) mod actor_clients; // actor_client crate: typed per-actor mailbox cli
 pub(crate) mod app_index; // specs/generated/apps.generated.md: the per-app index (#491, PROP-20260811-141654 slice A1)
 pub(crate) mod behaviour_tests; // application behaviour_tests.rs from tests.yaml (§7 corpus)
 pub(crate) mod bins; // per-deployable bin crates under crates/bins/ (#382, ADR-20260807-183024 step 3)
+pub(crate) mod databases; // specs/generated/databases.generated.{md,json}: the placement inventory (#494 slice 1)
 pub(crate) mod deploy; // deploy/generated/: K8s manifests, Dockerfile.bin, images/secret contracts, pin ledger (#349, step 4)
 pub(crate) mod docs; // documentation.generated.{md,html} + context map + story parsing
 pub(crate) mod domain_scopes; // per-scope domain crates + kernel + crate graph (#373)
@@ -21,6 +22,7 @@ pub(crate) use actor_clients::*;
 pub(crate) use app_index::*;
 pub(crate) use behaviour_tests::*;
 pub(crate) use bins::*;
+pub(crate) use databases::*;
 pub(crate) use deploy::*;
 pub(crate) use docs::*;
 pub(crate) use domain_scopes::*;

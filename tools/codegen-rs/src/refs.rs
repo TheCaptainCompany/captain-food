@@ -66,6 +66,10 @@ pub(crate) enum Kind {
     EventStoreTable,
     /// A write-side uniqueness reservation table (`tables/reservations.yaml`, ADR-20260728-011344).
     ReservationTable,
+    /// A declared DATABASE (`database/databases.yaml`, #494 slice 1) — what a table's `database:`
+    /// placement key points at. Without this arm the catalog fails closed at validate
+    /// (`ref-kind-unknown` on every placement — the `reservations.yaml` precedent).
+    Database,
     /// A column of any of the table kinds above.
     TableColumn,
     Screen,
@@ -110,6 +114,7 @@ impl Kind {
             Kind::ConnectionTable => "connection table",
             Kind::EventStoreTable => "event-store table",
             Kind::ReservationTable => "write-side reservation table",
+            Kind::Database => "database",
             Kind::TableColumn => "table column",
             Kind::Screen => "screen",
             Kind::Persona => "persona",
@@ -203,6 +208,9 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::Test
         | Kind::Fixture
         | Kind::TranslationKey
+        // A database is a PLACEMENT target, not a store a `reads:` may bind — the tables inside it
+        // keep their own per-kind classification above.
+        | Kind::Database
         | Kind::TableColumn
         | Kind::Screen
         | Kind::Persona
@@ -300,6 +308,8 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
                 None
             }
         }
+        // The database catalog (#494 slice 1): each top-level entry is one of the eleven databases.
+        "database/databases.yaml" => top.then_some(Kind::Database),
         "database/tables/projection_tables.yaml" => table_kind(Kind::ProjectionTable),
         "database/tables/process_managers.yaml" => table_kind(Kind::PmStateTable),
         "database/tables/referential.yaml" => table_kind(Kind::ReferentialTable),
@@ -489,7 +499,12 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("database/projection_views.yaml", "*.columns.*.from[*]",   &[Kind::Event, Kind::MessageProperty]),
     ("database/projection_views.yaml", "*.columns.*.fk",        &[Kind::TableColumn]),
 
-    // Real tables (globbed): every column types to a domain scalar; FKs name a column.
+    // Real tables (globbed): every column types to a domain scalar; FKs name a column. `database`
+    // is the single-home PLACEMENT key (#494 slice 1) — a `$ref` into database/databases.yaml,
+    // never a bare string (ADR-20260811-014129 D2: a bare name is the #413 invisible-to-the-walker
+    // class — a typo'd or truncated database name would place a credential store nowhere, silently;
+    // a `$ref` makes it a resolved reference or a red validator).
+    ("database/tables/*.yaml", "*.database",          &[Kind::Database]),
     ("database/tables/*.yaml", "*.tombstone",         &[Kind::Event]),
     ("database/tables/*.yaml", "*.fedBy[*]",          &[Kind::Event]),
     ("database/tables/*.yaml", "*.columns.*.type",    &[Kind::Scalar, Kind::EnumScalar]),
@@ -519,7 +534,7 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
 pub(crate) const STRUCTURAL_SEGMENTS: &[&str] = &[
     "actions", "activities", "actor", "after", "args", "by", "call", "cancelled_on", "columns",
     "command", "content", "context", "deletion", "deliver", "emits", "event", "expect", "fixtures",
-    "from", "from_hook", "given", "guard", "inputs",
+    "database", "from", "from_hook", "given", "guard", "inputs",
     "acting", "claims", "identity", "lifecycle", "mailbox", "match", "message", "messages", "model",
     "mutations", "of", "on", "operations", "params", "payload", "ports", "principals", "receipt",
     "reminders", "removedBy", "requires",

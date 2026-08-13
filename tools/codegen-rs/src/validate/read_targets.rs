@@ -48,7 +48,9 @@
 use crate::*;
 
 /// Every table declared under `database/tables/*.yaml`, mapped to `(file, kind)` by the §1b classifier.
-fn table_kinds(model: &Model) -> BTreeMap<String, (String, refs::Kind)> {
+/// Shared with §18 (validate/databases.rs) and the databases inventory emitter — one classification,
+/// every consumer.
+pub(crate) fn table_kinds(model: &Model) -> BTreeMap<String, (String, refs::Kind)> {
     let handled = BTreeSet::new();
     let mut out = BTreeMap::new();
     for (file, val) in model.defs.iter().filter(|(k, _)| k.starts_with("database/tables/")) {

@@ -215,7 +215,7 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 10] = [
+    let artifacts: [(&str, String); 12] = [
         // The CI env-sync manifest (PROP-20260729-014500): which repo secret supplies which service
         // env key, per profile. Baked values are NOT here — they ride the image (D5).
         ("render-config-sync.json", emit_render_sync_manifest(&model)),
@@ -224,6 +224,10 @@ fn main() {
         // and the input contract for step (3)'s bin emitter.
         ("crate-graph.generated.json", emit_crate_graph(&model)),
         ("translations.generated.json", emit_translations_json(&model)),
+        // The database placement inventory (#494 slice 1): the eleven databases + each covered
+        // table's RESOLVED database set — the interface #509/#513/#514 build against.
+        ("databases.generated.json", emit_databases_json(&model)),
+        ("databases.generated.md", emit_databases_md(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
         ("schema.generated.sql", emit_schema_sql(&model, &specs)),
         ("c4.generated.dsl", emit_structurizr(&model)),
