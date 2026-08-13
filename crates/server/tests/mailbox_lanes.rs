@@ -22,6 +22,10 @@ use infrastructure::{
 use server::graphql_acl::RequestRole;
 use sqlx::PgPool;
 
+/// Both tests in this binary drop and reseed the SAME mailbox tables; cargo runs them on
+/// separate threads, so without this lock one test's reset races the other's assertions.
+static DB_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Fresh mailbox tables from the ACTUAL migration file — dropped first so the test is re-runnable
 /// against a dirty database (the migration itself is forward-only and runs once in production).
 async fn reset_mailbox_tables(pool: &PgPool) {
@@ -98,6 +102,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
 #[tokio::test]
 async fn mailbox_lanes_join_counts_and_admin_guard() {
     let Some(url) = db_test_gate::database_url("mailbox_lanes") else { return };
+    let _serialized = DB_GATE.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_mailbox_tables(&pool).await;
     seed(&pool).await;
@@ -148,6 +153,48 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     assert_eq!(lanes[1]["claimedBy"], serde_json::Value::Null);
 
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
+    for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::Rider] {
+        let resp = schema
+            .execute(async_graphql::Request::new(query).data(role))
+            .await;
+        assert_eq!(resp.errors.len(), 1, "{role:?} should be refused: {:?}", resp.errors);
+    }
+}
+
+/// The PINNING test for #510 (Tidy First, commit 1): the ADMIN `poisonedMailboxMessages` GraphQL
+/// surface, executed end to end BEFORE the supervision read port moves behind the capability
+/// witness — green on this tree and green after the move is the proof the refactor preserved
+/// behaviour rather than merely compiling. Asserts three things: (1) a seeded cap-poisoned row
+/// (terminal FAILED + `DeliveryInfrastructureError`) is served to ADMIN with its messageId and
+/// errorCode; (2) a terminal handler REJECTION with another error code is NOT listed — the poison
+/// predicate, not "any failure"; (3) every non-ADMIN role is refused by the generated guard.
+#[tokio::test]
+async fn poisoned_mailbox_messages_detail_and_admin_guard() {
+    let Some(url) = db_test_gate::database_url("mailbox_lanes") else { return };
+    let _serialized = DB_GATE.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_mailbox_tables(&pool).await;
+    sqlx::raw_sql(
+        "INSERT INTO inbound_messages (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, channel, user_type, correlation_id, status, attempts, error, completed_at) VALUES\n\
+           ('00000000-0000-0000-0000-00000000b001', 'COMMAND', 'Cart', '10000000-0000-0000-0000-000000000002', 1, 'AddCartLine', '{}', 'p1', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-00000000b001', 'FAILED', 5, '{\"code\": \"DeliveryInfrastructureError\", \"context\": {\"error\": \"transient dependency outage\"}}', now()),\n\
+           ('00000000-0000-0000-0000-00000000b002', 'COMMAND', 'Cart', '10000000-0000-0000-0000-000000000002', 1, 'AddCartLine', '{}', 'p2', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-00000000b002', 'REJECTED', 1, '{\"code\": \"CartNotFound\", \"context\": {}}', now());",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed one poisoned + one rejected row");
+
+    let schema = schema_over(&pool);
+    let query = "{ poisonedMailboxMessages { messageId errorCode } }";
+    let resp = schema
+        .execute(async_graphql::Request::new(query).data(RequestRole::Admin))
+        .await;
+    assert!(resp.errors.is_empty(), "admin poisonedMailboxMessages errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json data");
+    let rows = data["poisonedMailboxMessages"].as_array().expect("rows array");
+    assert_eq!(rows.len(), 1, "only the cap-poisoned row is listed (never a handler verdict): {rows:?}");
+    assert_eq!(rows[0]["messageId"], "00000000-0000-0000-0000-00000000b001");
+    assert_eq!(rows[0]["errorCode"], "DeliveryInfrastructureError");
+
     for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::Rider] {
         let resp = schema
             .execute(async_graphql::Request::new(query).data(role))
