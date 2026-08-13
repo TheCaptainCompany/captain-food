@@ -1,6 +1,6 @@
 # Runbook — rehearse the OVH cutover locally, on k3s
 
-**Why this exists.** The product owner will not pay for OVH until the team can show something that
+**Why this exists.** The founder will not pay for OVH until the team can show something that
 actually deploys. This runbook is that demonstration, and it is repeatable: a single-node k3s stands
 in for MKS long enough to run the **whole cutover sequence** — CNPG operator, `captain-db` Cluster,
 `initdb`, the full migration chain, the monolith image, `/health`, the smoke — with no cloud account
@@ -108,11 +108,18 @@ kubectl -n captain-prod port-forward svc/captain-db-rw 15432:5432 &
 DATABASE_URL="postgresql://app:${PGPASS}@127.0.0.1:15432/app" "$S/sqlx" migrate run --source migrations
 ```
 
-Expect the full chain to apply against the empty database, ending at `20260810113000`. Verify:
+Expect the full chain to apply against the empty database, ending at `20260812000000`. Verify:
 
 ```sql
-select max(version), count(*) from _sqlx_migrations where success;   -- 20260810113000 | 45
+select max(version), count(*) from _sqlx_migrations where success;   -- 20260812000000 | 46
 ```
+
+> **These two numbers go stale every time a migration lands** — they did once already, between the
+> first rehearsal (45 / `20260810113000`) and this merge, because
+> [#500](https://github.com/TheCaptainCompany/captain-food/pull/500) added
+> `20260812000000_drop_command_journal.sql`. Do not trust them; derive them:
+> `ls migrations/*.sql | wc -l` and the last entry of `ls migrations/*.sql | sort`, which must equal
+> `REQUIRED_SCHEMA_VERSION` in `crates/server/src/lib.rs` (a codegen test asserts that equality).
 
 > `kubectl port-forward` is flaky here: it drops after the first connection with
 > `an error occurred forwarding ... connection reset by peer`. Re-establish it per command rather
@@ -175,7 +182,7 @@ host glibc. Verify:
 ```bash
 IP=$(kubectl -n captain-prod get pod -l app.kubernetes.io/name=server -o jsonpath='{.items[0].status.podIP}')
 curl -s "http://$IP:8080/ping"     # pong
-curl -s "http://$IP:8080/health"   # {"status":"ok","db":"up",...,"requiredSchemaVersion":20260810113000}
+curl -s "http://$IP:8080/health"   # {"status":"ok","db":"up",...,"requiredSchemaVersion":20260812000000}
 ```
 
 `kubectl logs` does **not** work here (the kubelet's `:10250` endpoint returns `EOF`). Read

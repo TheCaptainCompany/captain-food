@@ -85,8 +85,8 @@ containers:
   # -- THE CURRENTLY DEPLOYED RUNTIME (transitional, #358) --
   # Every other container below is where we are GOING. This one is what is RUNNING, and until #358
   # it had no home in any spec and therefore no manifest anywhere in deploy/ — the repo could
-  # describe a future cluster in 84 objects and could not describe the one workload a cutover has
-  # to move. `deploy_tree: monolith` routes it to its own generated overlay
+  # describe a future cluster in 80-odd objects and could not describe the one workload a cutover
+  # has to move. `deploy_tree: monolith` routes it to its own generated overlay
   # (deploy/generated/monolith/) instead of the per-bin manifests tree; deleting this container is
   # what retires the monolith, and it prunes the overlay with it.
   # `ingress_host: api.captain.food` is the monolith-era API host (ADR-0036) — the bins tree

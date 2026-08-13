@@ -770,20 +770,31 @@
 > `cutover-local-rehearsal`,
 > [runbook](runbooks/cutover-local-rehearsal.md), [ADR-20260811-004500](adr/ADR-20260811-004500-role-paths-live-on-audience-hosts-api-host-is-a-webhook-address.md)).
 >
-> **The hole that was found first.** `deploy/generated/manifests/` held 57 per-bin Deployments for a
-> topology that runs nowhere — and **zero manifests for the monolith `server`, the process that
-> actually serves every customer**. The repo could describe a future cluster in 84 objects and could
+> **The hole that was found first.** `deploy/generated/manifests/` held a per-bin Deployment/CronJob
+> for every derived bin (57 when the hole was found; **56** since
+> [#500](https://github.com/TheCaptainCompany/captain-food/pull/500) retired `worker-journal-sweep`)
+> for a topology that runs nowhere — and **zero manifests for the monolith `server`, the process that
+> actually serves every customer**. The repo could describe a future cluster in 83 objects and could
 > not describe the one workload a cutover has to move. `server` is now a declared c4-l2 container
 > (`deploy_tree: monolith`) and `deploy/generated/monolith/` is emitted from it: Namespace +
 > Deployment + Service + Ingress, `kubectl apply -k` and nothing else. Retiring the monolith is now a
 > spec deletion that prunes the overlay, and a codegen test asserts both directions.
 >
-> **What actually ran on a single-node k3s**, in this order, watched: CNPG 1.27.4 operator →
-> `captain-db` Cluster **`Cluster in healthy state`** with `initdb` complete → `sqlx migrate run`
-> applied the **full 45-migration chain** to the empty database, `max(version) = 20260810113000` →
+> **What actually ran on a single-node k3s**, in this order, watched, **on 2026-08-11 against the
+> 45-migration chain of that day**: CNPG 1.27.4 operator → `captain-db` Cluster **`Cluster in healthy
+> state`** with `initdb` complete → `sqlx migrate run` applied the full chain to the empty database →
 > the generated monolith overlay applied verbatim → the pod reached `1/1 Running` → **`/health` =
-> 200** with `requiredSchemaVersion: 20260810113000` and **`/ping` = `pong`** → `prod-smoke.sh`
+> 200** with a matching `requiredSchemaVersion` and **`/ping` = `pong`** → `prod-smoke.sh`
 > **L1 and L2 PASS** against it.
+>
+> **Re-verified on 2026-08-13, after merging `main`** — because #500 landed a migration in between and
+> a stale empirical claim is worse than none. `sqlx-cli 0.8.3 migrate run` against a freshly created,
+> empty Postgres 16 database applies the **full 46-migration chain**, `max(version) =
+> **20260812000000**` = `REQUIRED_SCHEMA_VERSION`, with #500's `ACCESS EXCLUSIVE` write fence and
+> `RECEIVED`-straggler guard passing on an empty table. The **k3s leg was NOT re-run**: it is a
+> multi-hour stand-up whose own runbook forbids a concurrent workspace `cargo build`, and the gates
+> this merge needed are exactly that build. Everything above the schema line therefore remains
+> 2026-08-11 evidence, unchanged by the merge; the schema line is fresh.
 >
 > **What it does NOT prove**, stated plainly because a spending decision rests on it: nothing about
 > OVH, Cinder volumes or `Retain`; **nothing about backup or restore** (the rehearsal overlay removes
@@ -804,9 +815,17 @@
 > `SUPABASE_SECRET_KEY`) is retired: auth that depends on the platform being decommissioned cannot
 > verify the platform replacing it.
 >
-> **Needs the product owner**: create the repo secret `SUPABASE_SECRET_KEY` (the `prod-smoke`
-> workflow now reads it and fails loudly without it). Still open for the console session: everything
-> in [#362](https://github.com/TheCaptainCompany/captain-food/issues/362) — ingress-nginx and
+> **The two gaps between this branch and a money-path walk, stated not solved.** (1)
+> `SUPABASE_SECRET_KEY` as a repository secret the `prod-smoke` workflow can read — and this is a
+> **confirmation, not a creation**: STATUS already records (2026-08-09, verified) that an Actions
+> secret of that name exists and that `render-config-sync` reaches it through `toJSON(secrets)`;
+> nothing in the repo can tell whether it is scoped to this workflow or still holds the value the
+> smoke needs, so the founder confirms or re-points it. (2) **A webhook ingress**, so Stripe can reach
+> L4's `CAPTURED` assertion: `stripe listen --forward-to` is outbound-only and **nothing in the repo
+> uses it** (grepped, zero hits) — the rehearsal cluster has no inbound address at all, so L4 cannot
+> be walked locally however green L1–L3 get. Both are FOUNDER actions and neither is built here.
+> Still open for the console session: everything in
+> [#362](https://github.com/TheCaptainCompany/captain-food/issues/362) — ingress-nginx and
 > cert-manager are vendorable and pinnable offline exactly like `cnpg-operator/PIN.json`, and are the
 > next slice.
 

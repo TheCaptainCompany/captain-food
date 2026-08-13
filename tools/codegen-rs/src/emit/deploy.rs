@@ -37,7 +37,7 @@
 //! is the manifest for the thing we ACTUALLY deploy — Namespace + Deployment + Service + Ingress
 //! for the one `server` process, derived from the same specs (the `server` c4-l2 container carrying
 //! `deploy_tree: monolith`, the same secret-key contract, the same screens-derived host set). Until
-//! this existed, the repo could describe a future cluster in 84 objects and could not describe the
+//! this existed, the repo could describe a future cluster in 80-odd objects and could not describe the
 //! ONE workload a cutover has to move — a hole that would have been discovered at the console.
 //! The monolith serves EVERY host at `/` because its routes are explicit and host-independent
 //! (`crates/server/src/hosts.rs` does host routing in the router FALLBACK), so one Service behind

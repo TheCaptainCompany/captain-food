@@ -6121,7 +6121,7 @@ fn deploy_tree_is_complete_both_ways() {
 }
 
 /// THE WORKLOAD WE ACTUALLY DEPLOY has a manifest (#358). Until this test existed, the repo
-/// emitted 57 Deployments for a topology that runs nowhere and ZERO for the monolith that serves
+/// emitted a workload per derived bin for a topology that runs nowhere and ZERO for the one that serves
 /// every paying customer — a hole nobody could see, because every other completeness rule here
 /// checks the bins tree against itself. This one checks the monolith against the SPEC that
 /// declares it, so retiring the monolith is a spec deletion (and this test then asserts the
