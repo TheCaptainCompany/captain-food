@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 540,
+  "recordedAt": "2026-08-13T13:52:11.226Z",
+  "branch": "budget-override-cap-not-a-stop-sign",
+  "note": "budget-override-cap-not-a-stop-sign correction round: provenance relabel (verbatim founder quote is the 2026-08-12 antecedent; the longer phrasing is the resume prompt's elaboration), ADR held-for-founder-confirmation line, 14:20Z->13:20Z container-clock fix. Comment-only in the selftest; no behaviour change."
+}
