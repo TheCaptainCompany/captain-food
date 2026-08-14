@@ -259,6 +259,19 @@ moves checkout to authorize-then-capture, a card authorization typically expires
 That bounds scheduling directly, so the two decisions must be taken together rather than discovered in
 sequence.
 
+**Decision note 2026-08-14 (PR #545 capture-on-delivered five-lens review — D6 is now a SOLVENCY
+constraint, not just capacity):** with capture timing decided as *capture on delivered / picked up*
+([PROP-20260726-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md),
+[ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)), the same-day-only
+recommendation is **load-bearing for the capture posture**, not merely a capacity model. An order
+scheduled ~6 days out, delivered on day 6, meets a near- or already-expired ~7-day card authorization
+-> an `AUTHORIZATION_EXPIRED` capture failure on a **valid, fulfilled** order — food COGS and rider
+payout sunk with no money left to capture. So the constraint is a **hard sequencing dependency**: any
+future multi-day scheduling MUST ship card re-authorization / off-session charging
+([#175](https://github.com/TheCaptainCompany/captain-food/issues/175) `SetCustomerPaymentMethod`)
+**first**. The permanent-capture-failure loss this exposes is a founder-owed decision
+([DECISIONS §38 LOSS-1](DECISIONS.md)).
+
 ### D7 — Order modification scope
 
 | Option | Pros | Cons |

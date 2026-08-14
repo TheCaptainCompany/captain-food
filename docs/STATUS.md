@@ -2,6 +2,24 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💳 **2026-08-14 — PR #545 "capture on delivered" IS IN A POST-REVIEW FIX ROUND**
+> ([PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545), tracking issue
+> [#544](https://github.com/TheCaptainCompany/captain-food/issues/544), branch `544-capture-on-delivered`).
+> The five-lens review found a **CRITICAL: a circular read dependency made capture inert** — being
+> fixed on-branch by the executor; do not concurrently touch branch `544`. The review's
+> **non-code carry-forwards are recorded** (this run, docs-only): the founder-owed
+> permanent-capture-failure loss-allocation decision + operator runbook
+> ([DECISIONS §38 LOSS-1](proposals/DECISIONS.md)); a dba **forward-trap** hazard for the unbuilt
+> at-table advance-capture arm (`PaymentCaptured`-on-`PENDING` would swallow `PaymentAuthorized` and
+> never fire `PlaceOrderProcess` — money captured, order never materialized;
+> [PROP-20260726-165000 D2](proposals/PROP-20260726-165000-marketplace-economics-and-money-movement.md));
+> same-day-only scheduling reframed as a **solvency** constraint requiring #175 before any multi-day
+> scheduling ([PROP-20260726-164500 D6](proposals/PROP-20260726-164500-order-operational-safety.md));
+> a seven-question legal counsel packet
+> ([BRIEF-20260814](legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md), **no lens output is
+> legal clearance**); and a `bam` settlement-funnel projection as an ADR-20260811-014129 completeness
+> follow-up (issue to be created, related to #484).
+
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
 > slice 1, [PR #543](https://github.com/TheCaptainCompany/captain-food/pull/543)):
