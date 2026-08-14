@@ -3428,9 +3428,11 @@ keys:
         );
     }
 
-    /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
-    /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
-    /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.
+    /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3; #558 ENF-1
+    /// adds jsonwebtoken/aes-gcm): `sqlx` (talk to the database), `reqwest` (reach the network),
+    /// `jsonwebtoken` (verify identity tokens) and `aes-gcm` (hold secret-at-rest crypto) may
+    /// appear in a crate's RELEASE dependency sections only when that crate is explicitly
+    /// allowlisted here WITH its reason.
     /// This is the side door the typed mailbox clients cannot see — "add sqlx to some crate and
     /// just query the table" — turned into a red test on the very `Cargo.toml` diff that grants
     /// the capability. cargo-deny was considered and skipped: it is not present in the dev/CI
@@ -3482,6 +3484,12 @@ keys:
              "the ADR-0047 auth verifier fetches the Supabase JWKS over HTTPS (identity wrapper lives in server today; measured holder kept with this WHY)"),
             ("crates/gateway_runtime/Cargo.toml", "reqwest",
              "the role gateway IS a proxy (#385, D8): it forwards each GraphQL request to the owning subgraph Service — network reach is its entire job, and it holds neither sqlx nor any domain crate"),
+            // ── jsonwebtoken — who may verify identity tokens (Supabase identity-only, wrapped) ──
+            ("crates/server/Cargo.toml", "jsonwebtoken",
+             "the ADR-0047 auth verifier validates Supabase-issued JWTs against the project's PUBLIC keys (JWKS) — the signing secret never touches us; the identity wrapper lives in server today (Supabase identity-only, wrapped — it holds no business data). The day an identity bin moves this dep, the bidirectional check fails loudly and forces the grant to move with it"),
+            // ── aes-gcm — who may hold the auth-session secret-at-rest crypto ──
+            ("crates/infrastructure/Cargo.toml", "aes-gcm",
+             "auth-session encryption at rest (#112): AES-256-GCM over the parked provider tokens under the AUTH_SESSION_KEY secret — the adapter layer owns the secret-at-rest boundary, RustCrypto same family as hmac/sha2"),
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -3542,7 +3550,7 @@ keys:
             let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
                 panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
             });
-            for cap in ["sqlx", "reqwest"] {
+            for cap in ["sqlx", "reqwest", "jsonwebtoken", "aes-gcm"] {
                 let holds = release_grants(&src, cap);
                 let excused = ALLOWED.iter().any(|(p, c, _)| *p == rel && *c == cap);
                 if holds && !excused {
