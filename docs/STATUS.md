@@ -12,8 +12,10 @@
 > comms/payments-dissolve-into-order), `Catalog` → `read_catalog`, `Customer`/`Restaurant`/
 > `SlugAlias`/`ProspectionPipeline`/`City` → `read_common`, the pricing trio
 > (`PricingPolicy`/`Uber*Policy`) **replicated into every read database** (declared readers span
-> three of them), the dispatch trio + `RuntimePosture` → `captain_write` (write-side-only ports;
-> a replay restore would revert an admin-flipped posture). The §18 refusal arm ("business placement
+> three of them), the dispatch trio + `RuntimePosture` → `captain_write` (the trio's sole port is
+> write-side; the posture is placed by the replay revert alone — its governed set is restricted to no
+> side, so a future non-`captain_write` tenant would put a fail-closed startup read across the wall,
+> recorded as a tripwire on the declaration). The §18 refusal arm ("business placement
 > is an open register row") is now a **requirement arm** that consumes the same resolution the
 > inventory emitter walks, so validation and emission cannot disagree; the ADP-1 wall runs on every
 > single-home placement. **TWO NEW OPEN ROWS, both blocking the physical split.** **STO-7**

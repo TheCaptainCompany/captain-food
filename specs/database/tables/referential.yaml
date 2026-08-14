@@ -139,9 +139,15 @@ RestaurantDispatchConfig:
 
 RuntimePosture:
   reference: true
-  # STO-2 closure: startup-read by EVERY governed process — write-side by nature — and seeded/UPDATEd,
-  # never folded, so in a replay database a restore would silently REVERT an admin-flipped posture to
-  # seed: the documented worst failure for a fleet-consistency table on a money path. Hence captain_write (pitr).
+  # STO-2 closure: seeded/UPDATEd, never folded, so in a replay database a restore would silently
+  # REVERT an admin-flipped posture to seed: the documented worst failure for a fleet-consistency
+  # table on a money path. Hence captain_write (pitr). The governed set is NOT a second argument for
+  # that placement: the only tenant the mechanism ever had (PM_MAILBOX_DELIVERY, retired in #242)
+  # happened to be write-side, while the contract below restricts its startup readers to no side.
+  # Recorded tripwire: a posture whose governed set includes any non-captain_write app (a projector,
+  # a subgraph bin, the gateway, an adapter) puts a FAIL-CLOSED startup read across the wall, into the
+  # database the split most wants unreachable — that posture's slice owes its own decision (replicate
+  # the row, push the value, or a recorded CONNECT).
   database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     Process-wide runtime postures — ONE row per posture, read at startup by EVERY process the

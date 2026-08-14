@@ -2,7 +2,7 @@
 //!
 //! Decided by PROP-20260811-093000 (DECISIONS §32 rows STO-1(a)/STO-2(a)) and ADR-20260812-115930
 //! "Each adapter owns its own, completely isolated database" (ADP-1, both legs closed). The catalog
-//! is `specs/database/databases.yaml`: the eleven databases as declarations — name, owning role,
+//! is `specs/database/databases.yaml`: every database as a declaration — name, owning role,
 //! K8s object-name binding, recovery posture — and NOTHING else (grants are #513, migration chains
 //! #514, drill legs #509).
 //!
@@ -403,8 +403,11 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
                             loc.clone(),
                             format!(
                                 "table '{}' is placed in '{}', which {} does not declare — a placement must name \
-                                 one of the eleven declared databases.",
-                                table, db, DATABASES_FILE
+                                 one of the {} databases that file declares.",
+                                table,
+                                db,
+                                DATABASES_FILE,
+                                declared.len()
                             ),
                         ));
                     }

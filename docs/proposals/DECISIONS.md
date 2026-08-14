@@ -1425,12 +1425,17 @@ missed reads"*.
   `crates/infrastructure/src/persistence/referential.rs:136`'s *"later API-writable via partner
   self-registration"* ([#61](https://github.com/TheCaptainCompany/captain-food/issues/61)) is a
   recorded future decision, not solved here.
-- **`RuntimePosture` → `captain_write`** — **corrects §11**: its design contract is startup-read by
-  EVERY governed process, write-side by nature (zero production callers today — its first tenant
-  retired with `command_journal` in #242), and the recovery posture decides it: `RuntimePosture` is
-  seeded and UPDATEd, never folded, so in a `recovery: replay` database a restore would silently
-  revert an admin-flipped posture to seed — the documented worst failure for a fleet-consistency
-  table on a money path.
+- **`RuntimePosture` → `captain_write`** — **corrects §11**: the recovery posture alone decides it.
+  `RuntimePosture` is seeded and UPDATEd, never folded, so in a `recovery: replay` database a restore
+  would silently revert an admin-flipped posture to seed — the documented worst failure for a
+  fleet-consistency table on a money path. Its reader set is NOT a second argument, and the earlier
+  *"write-side by nature"* reading was an inference from today's zero tenants: the design contract is
+  a startup read by EVERY process the posture governs, restricted to no side, and the only tenant the
+  mechanism ever had (PM_MAILBOX_DELIVERY, retired with `command_journal` in #242) merely happened to
+  be write-side. **Recorded tripwire on the declaration**: a future posture whose governed set
+  includes any non-`captain_write` app (a projector, a subgraph bin, the gateway, an adapter) puts a
+  FAIL-CLOSED startup read across the wall — that posture's slice owes its own decision (replicate
+  the row, push the value, or a recorded CONNECT).
 
 **Three cross-wall reads the map does NOT resolve** — recorded honestly rather than implied closed.
 **(1) and (2) were found at the mob checkpoint (2026-08-14); (3) was found LATER, by the post-ready
