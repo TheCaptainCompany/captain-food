@@ -2968,10 +2968,12 @@
 > `message_type`, or delivery would route on a lie). (2) the generated
 > `ReminderSchedule` is `#[non_exhaustive]`, so an out-of-crate spec literal — the forgery route
 > into `scheduled_entry` — is a compile error (E0639); specs come from the generated table only.
-> **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` only in an
-> explicit per-crate allowlist with WHYs (server keeps both exceptions: PgPool construction +
-> /health probe; Supabase JWKS fetch), bidirectional (stale entries fail), verified red on a
-> planted grant. **D5**: cross-crate test access rides the `test-fixtures` cargo feature (mem
+> **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` and (#558
+> ENF-1) `jsonwebtoken`/`aes-gcm` only in an explicit per-crate allowlist with WHYs (server keeps
+> both sqlx exceptions: PgPool construction + /health probe; Supabase JWKS fetch; and is the sole
+> `jsonwebtoken` holder — ADR-0047 identity verifier; infrastructure is the sole `aes-gcm` holder —
+> #112 auth-session secret-at-rest), bidirectional (stale entries fail), verified red on a
+> planted grant for every controlled capability. **D5**: cross-crate test access rides the `test-fixtures` cargo feature (mem
 > double, `EntryFixture` full-field mirror keeping out-of-crate freeze tests exhaustive, reference
 > impls), dev-dependencies only — guard `test_fixtures_feature_never_reaches_a_release_artifact`
 > fails any release-graph grant (verified red). The textual door guard stays as belt-and-braces,
