@@ -2,6 +2,27 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🎯 **2026-08-14 — THE ACCEPTANCE KEYSTONE NOW PROMISES MORE: FULL ENFORCEMENT + FULL SPLIT ARE IN
+> SCOPE** (founder directive, verbatim *"The acceptance include the full enforcement and full split"*;
+> recorded in
+> [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
+> — new "Scope clarification (2026-08-14)" section). This **supersedes the single-DB intermediate**
+> the 2026-08-13 re-sequence had scoped ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)
+> harness + L5 on a single-database stack, split deferred — [DECISIONS §39](proposals/DECISIONS.md)):
+> under final-vision-first (ADR-20260808-235113) that stack would be rebuilt, so the harness and the
+> six-clause walk now target the **physically-split, least-privilege, write-authorization-enforced
+> eleven-database stack from the start**. **Grounded by a read-only architect verification against
+> `origin/main`** (four founder questions, `file:line`): the mailbox door (#536) and §18 placement
+> gate (#547) are genuinely compiler-/gate-enforced; the storage split is today only a
+> **declared-and-gated MAP** (one CNPG cluster `captain-db`, one database `app`, zero per-db grants —
+> #513/#514/#509 unmerged); and the **`inbound_messages` write path is convention-only** (raw
+> `INSERT` in `infrastructure` behind no gate — `mailbox_store.rs:98`), so hardening it compiler-first
+> joins "full enforcement" alongside the cross-tenant write-auth fix (§39 IDOR-1 / #178).
+> **Re-sequenced keystone tail** (before the walk): physical split band #513 -> #514 -> #509 -> the
+> write-auth fix -> harden the `inbound_messages` write path -> #556 harness on the SPLIT stack -> L5
+> -> browser walls -> the six-clause acceptance walk. This run is **docs-only** (ADR + this entry); no
+> code, no claim, no backlog re-rank.
+
 > 🔒 **2026-08-14 — L5 acceptance-walk executor handed back on two real problems; the architect
 > assessed, re-sequenced and recorded (docs-only run)**
 > ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /

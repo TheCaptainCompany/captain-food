@@ -229,6 +229,89 @@ record:
 - If the Supabase test-phone facility proves unavailable, the §2 fallback label is mandatory in
   the evidence artifact — a silent substitution would misstate what clause 1 proved.
 
+## Scope clarification (founder directive, 2026-08-14) — full enforcement + full split are IN the keystone
+
+The founder tightened the acceptance criterion. Verbatim (2026-08-14, in session; relayed by the
+coordinator):
+
+> **"The acceptance include the full enforcement and full split."**
+
+This is a scope clarification of the SAME decision, not a new one. It resolves an ambiguity §5 left
+open and it **overrides the single-DB intermediate** the coordinating session had scoped (the
+2026-08-13 re-sequence that put the local harness [#556] + L5 on a single-database stack with the
+split deferred — [DECISIONS §39](../proposals/DECISIONS.md)). Under **final-vision-first**
+([ADR-20260808-235113](ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)) a single-DB
+walk that must then be rebuilt on the split stack is the throwaway intermediate that directive
+forbids: the harness and the walk target the **split, least-privilege, write-authorization-enforced
+eleven-database stack from the start**.
+
+**"Full split"** = the eleven databases PHYSICALLY isolated with least-privilege grants and deployed,
+not only slice 1's declaration site. Slice 1 ([#543](https://github.com/TheCaptainCompany/captain-food/issues/543)
++ [#547](https://github.com/TheCaptainCompany/captain-food/issues/547)) is **merged** and gives a
+declared-and-gated placement MAP (`specs/database/databases.yaml`, the §18 validator
+`tools/codegen-rs/src/validate/databases.rs`, the generated inventory) — but on `main` today there is
+**one** CNPG cluster (`deploy/platform/cnpg/cluster.yaml`: `name: captain-db`, one database `app`,
+owner `app`) and **zero** per-database grants in `migrations/**`. The physical split is therefore
+still the later slices, now pulled INTO the keystone and sequenced before the walk:
+[#513](https://github.com/TheCaptainCompany/captain-food/issues/513) (grants + negative-path test),
+[#514](https://github.com/TheCaptainCompany/captain-food/issues/514) (per-database migration chains),
+[#509](https://github.com/TheCaptainCompany/captain-food/issues/509) (restore drill).
+
+**"Full enforcement"** = the compiler/gate barriers real end-to-end. Two are done and verified on
+`main`; two join the keystone:
+
+- **Done — the mailbox door (#536, `971a377`)**: the read ports (`MailboxLaneRepository`,
+  `crates/actor_client/src/supervision.rs:76`) and the write requeue port (`MailboxRequeue` +
+  `MailboxRequeueAccess`, `crates/application/src/queries.rs:736/764`) are unnameable without a
+  witness whose constructor is `pub(crate)`; `MailboxEntry`'s `pub(crate)` fields
+  (`crates/actor_client/src/mailbox.rs:23`) make row construction **compiler-unspellable** outside
+  the crate. This is level-4-and-above per ADR-20260803-234035.
+- **Done — §18 placement gate (#547)**: a misplacement makes `make validate` RED, committed
+  red-on-mutant (`tools/codegen-rs/src/validate/databases.rs:564–616` assert
+  `database-placement-missing` / `database-adapter-mismatch`).
+- **In scope — write authorization** ([DECISIONS §39 IDOR-1](../proposals/DECISIONS.md) /
+  [#178](https://github.com/TheCaptainCompany/captain-food/issues/178)): the cross-tenant write IDOR
+  is no longer only a "before first real order" fast-follow — acceptance PROVES it. A walk on a
+  genuinely-split, least-privilege stack that still lets one tenant write another's aggregate would
+  certify a machine that leaks across tenants.
+- **In scope — the `inbound_messages` write-path soft spot (this run's finding)**: the mailbox
+  *port* is sealed, but the raw SQL `INSERT INTO inbound_messages` lives in `infrastructure`
+  (`crates/infrastructure/src/persistence/mailbox_store.rs:98`, `mailbox/mod.rs:137`,
+  `mailbox/pm_delivery.rs:253/380`) and **no gate scans for a raw INSERT that bypasses
+  `MailboxEntry`/`MailboxAccess`**. Any crate holding `sqlx` (infrastructure, adapters/\*, server,
+  sirene_ingest, actor_runtime, bin_runtime) could mint a rogue mailbox row with a hand-written
+  literal INSERT — **convention-only, not compiler- or gate-enforced**. Full enforcement means
+  hardening this compiler-first (a repository facade the SQL lives behind, or a gate that forbids the
+  raw INSERT string outside the sanctioned adapter). This closes the same class ADP-1's DB grant
+  (INSERT-only into `inbound_messages`) was meant to bound but does not yet, because the grants are
+  unmerged (#513).
+
+### The re-sequenced keystone program (supersedes §5's sequence)
+
+Steps 1–4 of §5 stand (mailbox door + slice 1 done; L5 lifecycle legs; the four non-auth browser
+walls; the D2 capture slice — landed via [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)
+/ [PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545)). What changes is the tail —
+the walk no longer deploys on a single-DB stack:
+
+1. **The physical split, as its own sequenced band, BEFORE the walk**: #513 (per-database grants,
+   least-privilege, with the negative-path test proving a foreign write is refused) → #514
+   (per-database migration chains + `REQUIRED_SCHEMA_VERSION` map, the Database CRs, the local
+   overlay; the delivered leg forces the `View_DeliveryJob` → table conversion here, since a SQL VIEW
+   cannot fold across database boundaries) → #509 (restore drill legs).
+2. **The write-authorization fix** (§39 IDOR-1 / #178) — part of what acceptance proves.
+3. **Harden the `inbound_messages` write path** compiler-first (the finding above), so full
+   enforcement is real and not asserted.
+4. **[#556](https://github.com/TheCaptainCompany/captain-food/issues/556) local harness re-targeted
+   at the split stack** (not single-DB) → **L5 lifecycle legs** → the browser walls → **acceptance**:
+   the six-clause walk in the founder's order, storefront + backoffice in a browser, on the
+   genuinely-split, least-privilege, write-auth-enforced eleven-database stack, evidenced by the
+   checkable JSON artifact (causal `cause_id` chain + all eleven migration heads + the Connect-shape
+   check).
+
+Everything else in this ADR — the six clauses, the auth-bypass posture (§3), the D2 semantics (§4),
+the honesty sentence (§6) — is unchanged. The founder's *"just keep me informed"* standing rule
+(ADR-20260810-221840) applies: this is the team's reading of his sentence, correctable at zero cost.
+
 ## Consulted (ADR-20260812-143619)
 
 All ten lenses read the founder's sentence before this record was written. Nothing here is legal
@@ -275,3 +358,15 @@ one.
   in the script (separate charges & transfers is the recorded posture); and **test mode waives
   KYB** — this acceptance proves **nothing about payout readiness**, which arrives only with the
   SASU's onboarded Connect account. *A grade, not clearance.*
+
+### Consulted — the 2026-08-14 scope clarification (full enforcement + full split)
+
+- **architect** — this was a **read-only verification run** grounding the re-scope; the four founder
+  questions (Q1–Q4) were answered against `origin/main` with `file:line` proof before this section
+  was written. The clarification is a scope tightening of the SAME decision, so it amends this ADR
+  rather than opening a new one. The finding that changes the enforcement scope is the
+  `inbound_messages` write-path soft spot: the mailbox *port* is compiler-sealed (#536) but the raw
+  `INSERT` is convention-only — hardening it compiler-first is now part of "full enforcement". The
+  full ten-lens mob consult belongs to the DISPATCH when execution of the re-sequenced band starts
+  (mob briefing, ADR-20260809-013142); it was not convened for this docs-only recording, and that is
+  stated rather than implied — a lens never asked is not a lens with nothing to say.
