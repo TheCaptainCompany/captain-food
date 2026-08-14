@@ -26,6 +26,15 @@ Capture is **per service type**: DELIVERY captures on `delivered`, PICKUP/collec
 `picked up`, at-table service captures **in advance** (at checkout). This is later than the
 recommended capture-on-acceptance. Team notes carried, not blocking:
 
+> **Refined 2026-08-14 — see
+> [ADR-20260814-141350](ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md).** The
+> founder refined the COLLECTION leg: capture at **prepared / ready** (`OrderMarkedReady`), one step
+> before pickup — READY is collection's last controlled moment (collection is the customer's action,
+> not a platform step), so this protects against cook-then-no-show. DELIVERY (on `delivered`) and
+> at-table (advance) are unchanged. This annotation is a forward pointer, not a rewrite of the
+> decision above.
+
+
 - A card authorization is valid ~7 days — same-day orders are safely inside it; the scheduled-order
   window (PROP-164500 D6) stays bounded by authorization life, as already recorded.
 - Capture now happens **after fulfilment cost is sunk** (food cooked, ride done). Capture of a

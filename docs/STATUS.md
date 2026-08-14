@@ -2,6 +2,23 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
+> *"For the pickup order the payment captured must happen when the order is prepared don't you
+> think?"*). Refines [ADR-20260808-195315 §1.2](adr/ADR-20260808-195315-customer-brief-answers.md) and
+> the just-shipped [#544/PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545): the
+> `PaymentSettlementProcess` capture trigger becomes **per service type** — DELIVERY on `OrderDelivered`
+> (unchanged), **COLLECTION on `OrderMarkedReady` (READY)**. READY is collection's last controlled
+> moment (collection is the customer's action, not a platform step), so this protects the restaurant
+> from cook-then-no-show and is symmetric with capture-on-delivered for delivery. Record:
+> [ADR-20260814-141350](adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md),
+> register [DECISIONS §41 CAP-READY](proposals/DECISIONS.md). **Business: HOLDS. Legal: defensible
+> lawful prepayment, not a blocker** — sharpens CAP-3/CAP-5 for collection (charged before possession;
+> counsel-gated build constraints on the unbuilt receipt engine + checkout copy, not a decision
+> blocker). Empty log → additive, no migration. **Not yet implemented**: a fast-follow to #544, issue
+> to be created; the code change branches the settlement PM per `service_type` (read from
+> `OrderTracking`) and updates `PaymentCapturedOnFulfilment` + its tests. One behaviour change to pin:
+> a READY collection order cancelled by the restaurant is now CAPTURED → routes to REFUND, not release.
+
 > 🎯 **2026-08-14 — THE ACCEPTANCE KEYSTONE NOW PROMISES MORE: FULL ENFORCEMENT + FULL SPLIT ARE IN
 > SCOPE** (founder directive, verbatim *"The acceptance include the full enforcement and full split"*;
 > recorded in

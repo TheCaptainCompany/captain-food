@@ -82,3 +82,26 @@ must be answered before launch.
   fulfilled order whose capture failed (CAP-7 / LOSS-1).
 - **HYGIENE**: "release" vs "refund" wording (CAP-4); post-void bank-side hold visibility support
   copy (CAP-6).
+
+## Addendum — 2026-08-14: COLLECTION captures at READY, before possession
+
+The founder refined the COLLECTION capture trigger from "picked up" to **prepared / ready**
+(`OrderMarkedReady`) — recorded in
+[ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md).
+DELIVERY (capture at `delivered`) is unchanged, so for delivery capture still coincides with the
+physical handover; **for collection the charge now occurs BEFORE possession transfers.** The legal
+lens's verdict is that this is a **lawful prepayment**, not a genuinely problematic shape (the
+consumer consented at checkout to "authorize now, charge on fulfilment"; prepayment before
+click-and-collect possession is ordinary commerce) — but it sharpens two of the questions above for
+collection specifically. **No lens output is legal clearance** (ADR-20260812-143619).
+
+- **CAP-3 addendum (disclosure).** For a COLLECTION order the L221-5 pre-contract disclosure must
+  state the charge occurs when the order is **READY** — before the customer collects — not at
+  collection. Confirm the required wording for a "charged before you pick up" collection flow.
+- **CAP-5 addendum (tax-point, the real caveat).** For DELIVERY the earlier assumption held capture ≈
+  delivery ≈ possession. For COLLECTION, capture (encaissement) now **precedes possession**. Confirm
+  the VAT fait générateur / exigibilité for a collection (takeaway) sale: does it attach at READY
+  (encaissement of the prepayment) or at collection (delivery of goods)? This is load-bearing for the
+  unbuilt receipt engine ([#174](https://github.com/TheCaptainCompany/captain-food/issues/174)),
+  which must key the tax-point correctly per service type and must not fire a "sale complete" receipt
+  at READY if the fait générateur is collection.

@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-08-14 (L5-handback + write-authz IDOR register run)** — the L5 acceptance-walk
+Last reconciled: **2026-08-14 (founder-directive run — "FOR THE PICKUP ORDER THE PAYMENT CAPTURED MUST HAPPEN WHEN THE ORDER IS PREPARED")** — the founder refined the COLLECTION capture trigger. **New §41 records CAP-READY (✅ DECIDED): a COLLECTION order captures at `OrderMarkedReady` (READY), not at `OrderDelivered` (pickup) — READY is collection's last controlled moment, so capture-at-ready protects against cook-then-no-show and is symmetric with capture-on-delivered for delivery.** Refines [ADR-20260808-195315 §1.2](../adr/ADR-20260808-195315-customer-brief-answers.md) and the just-shipped [#544/PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545); record [ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md) with a per-lens `Consulted:` block. **Business: HOLDS. Legal: DEFENSIBLE lawful prepayment, not a blocker** — but it sharpens CAP-3 (disclosure: charged at READY, before collection) and CAP-5 (VAT tax-point decoupled from possession for collection), recorded as a collection addendum in the counsel packet and as row **CAP-READY-LEGAL** (🟠 counsel-gated build constraints on the unbuilt receipt engine + checkout copy, NOT a decision blocker). Empty log → the per-service-type capture-trigger change is additive with no migration; it is a **fast-follow to #544** (issue text drafted in the run report, issue to be created). Previously: **2026-08-14 (L5-handback + write-authz IDOR register run)** — the L5 acceptance-walk
 executor ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /
 PR [#555](https://github.com/TheCaptainCompany/captain-food/pull/555)) correctly **stopped** on two real
 problems. This run re-verified the **cross-tenant write IDOR** on `main` and opened **§39 IDOR-1** — already
@@ -1675,6 +1675,26 @@ standalone final gate**; its interim source-text scope must be "the mailbox modu
 `mailbox_store.rs`," and its DB half is the `inbound_messages` INSERT-only grant already specified in
 PROP-20260811-093000 (the `graphql_{scope}` mutation-path row) + [#513](https://github.com/TheCaptainCompany/captain-food/issues/513).
 Refinement recorded on #557 in the 2026-08-14 architect run report; no separate register row is owed.
+
+---
+
+## 41. Collection captures at READY, not at pickup — refinement of §1.2 (founder directive, 2026-08-14)
+
+Record: [ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md),
+refining [ADR-20260808-195315 §1.2](../adr/ADR-20260808-195315-customer-brief-answers.md) and the
+just-shipped [#544/PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545) behaviour.
+Founder directive, verbatim: *"For the pickup order the payment captured must happen when the order is
+prepared don't you think?"*
+
+**This is a refinement of a recorded decision, not a silent spec edit** — §1.2 recorded capture on
+"delivered / **picked up** / paid in advance for at-table," and the founder refines the collection leg
+from "picked up" to "prepared / ready." Recorded per CLAUDE.md's decision-reversal rule (question 1:
+does it change a recorded decision → yes → register row + dated ADR before any spec touches).
+
+| # | Decision | Verdict | Status |
+|---|---|---|---|
+| **CAP-READY** ✅ **DECIDED (founder directive) 2026-08-14** | **For a COLLECTION order, capture at `OrderMarkedReady` (READY) instead of at `OrderDelivered` (pickup).** DELIVERY (capture on `OrderDelivered`) and at-table (advance) are unchanged. The pinned COLLECTION event is **`OrderMarkedReady`** — there is no distinct "prepared" event; `OrderPreparationStarted` is prep START (→PREPARING, `specs/ordering/events.yaml:199`), `OrderMarkedReady` is prep FINISH (→READY, `specs/ordering/events.yaml:229`). Rationale: READY is collection's last controlled moment (collection is the customer's action, not a platform step), so capture-at-ready protects the restaurant against cook-then-no-show and is MORE symmetric with capture-on-delivered for delivery, not a special case. **Business verdict: HOLDS** (net positive; collection no-show is materially higher than delivery, and the food was made for the customer). **Legal verdict: DEFENSIBLE lawful prepayment, not a blocker** — recorded as decided | ✅ **DECIDED.** Empty log → additive, no migration. Fast-follow to #544 (per-service-type capture trigger); tracking-issue text drafted in the 2026-08-14 architect run report, **issue to be created — NOT dispatchable until the issue exists**. **Behaviour change to pin in a test**: a READY collection order cancelled by the restaurant is now CAPTURED, so it routes to REFUND (`RefundProcess`) not release (`PaymentSettlementProcess` AUTHORIZED arm). GREEN once the issue is filed: touches `specs/payments/**` + `specs/common/rules.yaml` + `specs/tests.yaml`, reverses no recorded decision (it *implements* this one) |
+| **CAP-READY-LEGAL** 🟠 **COUNSEL-GATED (open) — sharpened 2026-08-14** | Capturing a COLLECTION order at READY takes payment **before possession transfers** (collection). Lawful prepayment, but it sharpens two already-open counsel questions for collection specifically: **CAP-3** (L221-5 disclosure must state the charge occurs at READY, before you collect) and **CAP-5** (VAT tax-point — fait générateur / exigibilité now decoupled from the physical handover for collection). Recorded as a CAP-3/CAP-5 collection addendum in [BRIEF-20260814-capture-on-delivered-counsel-packet](../legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md). **No lens output is legal clearance** (ADR-20260812-143619) | 🟠 **Build constraints on the unbuilt receipt engine ([#174](https://github.com/TheCaptainCompany/captain-food/issues/174)) and the checkout disclosure copy — NOT a blocker to the CAP-READY capture-trigger decision.** Neither clears without a French avocat |
 
 ---
 
