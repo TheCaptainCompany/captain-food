@@ -19,18 +19,22 @@
 //! - Staging and connection tables DECLARE `database:` as a `$ref` into the catalog. Absence is an
 //!   ERROR, never `captain_write`-by-omission — a defaulted placement is how a credential store
 //!   lands next to `domain_events` silently, which is the exact hole ADP-1 closes.
-//! - `replicated: read-databases` is the replicated placement class (STO-2(a): `ScopeMembership`
-//!   and the `ref_*` enum family are DECIDED replicated). The resolved set is every database
-//!   declared `recovery: replay` — that equivalence is definitional, not a naming pun: a read
-//!   database is precisely one whose whole content is a re-derivable fold of the log, which is
-//!   what makes N replicated copies cost nothing conceptually.
+//! - `replicated: read-databases` is the replicated placement class (STO-2(a), consciously
+//!   EXTENDED by the STO-2 closure to seeded referentials: `ScopeMembership` and the pricing
+//!   referentials `PricingPolicy`/`UberEstimationPolicy`/`UberSplitPolicy`). The resolved set is
+//!   every database declared `recovery: replay` — that equivalence is definitional, not a naming
+//!   pun: a read database is precisely one whose whole content is a re-derivable fold of the log
+//!   (a seeded referential's replicated copies are re-seeded, which is why the seed script is part
+//!   of each read database's recovery path).
 //!
-//! COMPLETENESS IS PER-KIND, WITH NO DEFAULT. Business read models and referential tables outside
-//! the replicated class carry NO placement yet: that is register row STO-2's open remainder
-//! (DECISIONS §32 — "a working recommendation, not a decision, and needs a yes"), and a `database:`
-//! key on one of them is refused here so a spec edit cannot silently close a register row. THIS
-//! RULE WIDENS TO ALL TABLE KINDS WHEN STO-2's ROW CLOSES — at that point the refusal arm flips to
-//! a requirement arm and every table resolves to a placement.
+//! COMPLETENESS IS PER-KIND, WITH NO DEFAULT — AND SINCE STO-2's ROW CLOSED (2026-08-14, DECISIONS
+//! §32 "STO-2 closure"; #562) IT COVERS EVERY BUSINESS KIND: projection and referential tables
+//! declare `database:` as a `$ref` (single-home) or `replicated: read-databases`, and ABSENCE IS
+//! AN ERROR for them exactly as for staging/connection tables. The requirement CONSUMES the same
+//! resolution the inventory emitter walks ([`resolve_placements`]): a covered-kind table ABSENT
+//! from the resolved output with no more specific diagnostic is an error, so the validator and
+//! `databases.generated.{md,json}` cannot disagree by construction — a naive standalone check
+//! could report green while the emitter silently dropped the table.
 //!
 //! The `tracking` database (`BehaviorEventTrackingDb`) is declared with ZERO tables and there is
 //! deliberately NO waiver mechanism recorded for it: its first table owes a placement and the
@@ -74,8 +78,10 @@ pub(crate) const DERIVED_WRITE_KINDS: &[refs::Kind] = &[
 /// plus the two platform connection tables).
 pub(crate) const DECLARED_KINDS: &[refs::Kind] = &[refs::Kind::StagingTable, refs::Kind::ConnectionTable];
 
-/// Table kinds that MAY declare `replicated:` (the STO-2(a) shapes: the authorization index and the
-/// `ref_*` enum family's kind). Anything else declaring it is refused.
+/// Table kinds that MUST declare a placement as EITHER a single-home `database:` `$ref` OR
+/// `replicated: read-databases` (the business kinds — STO-2 closed 2026-08-14, DECISIONS §32
+/// "STO-2 closure"). Only these kinds may take the replicated class; anything else declaring it
+/// is refused.
 pub(crate) const REPLICABLE_KINDS: &[refs::Kind] = &[refs::Kind::ProjectionTable, refs::Kind::ReferentialTable];
 
 /// One declared database, verbatim from the catalog.
@@ -171,19 +177,19 @@ pub(crate) fn resolve_placements(model: &Model) -> Vec<TablePlacement> {
                 mode: PlacementMode::Derived,
                 databases: vec![WRITE_DATABASE.to_string()],
             });
-        } else if DECLARED_KINDS.contains(&kind) {
+        } else if DECLARED_KINDS.contains(&kind) || REPLICABLE_KINDS.contains(&kind) {
             if let Some(db) = declared_database(node).filter(|db| declared.contains(db.as_str())) {
                 out.push(TablePlacement { table, kind, mode: PlacementMode::Declared, databases: vec![db] });
+            } else if REPLICABLE_KINDS.contains(&kind)
+                && node.get("replicated").and_then(|v| v.as_str()) == Some(REPLICATED_TOKEN)
+            {
+                out.push(TablePlacement {
+                    table,
+                    kind,
+                    mode: PlacementMode::Replicated,
+                    databases: replay.clone(),
+                });
             }
-        } else if node.get("replicated").and_then(|v| v.as_str()) == Some(REPLICATED_TOKEN)
-            && REPLICABLE_KINDS.contains(&kind)
-        {
-            out.push(TablePlacement {
-                table,
-                kind,
-                mode: PlacementMode::Replicated,
-                databases: replay.clone(),
-            });
         }
     }
     out
@@ -304,12 +310,19 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
         .collect();
 
     // ── 18b. Per-kind placement completeness + the ADP-1 membership wall ─────────────────────────
+    // THE REQUIREMENT CONSUMES THE RESOLUTION (#562): `resolved` is the inventory emitter's own
+    // walk. A covered-kind table absent from it must leave an error behind — the specific
+    // diagnostics below say WHY it is absent (bad `$ref`, unknown database, bad replicated token),
+    // and the `database-placement-missing` fallback fires when no diagnostic did — so the
+    // validator and `databases.generated.{md,json}` cannot disagree by construction.
+    let resolved: BTreeSet<String> = resolve_placements(model).into_iter().map(|p| p.table).collect();
     for (table, (file, kind)) in validate::table_kinds(model) {
         let node = match model.defs.get(&file).and_then(|v| v.get(table.as_str())) {
             Some(n) => n,
             None => continue,
         };
         let loc = format!("{}/{}", file, table);
+        let before = issues.len();
         let has_db = node.get("database").is_some();
         let has_repl = node.get("replicated").is_some();
         if has_db && has_repl {
@@ -335,8 +348,9 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
                     ),
                 ));
             }
-        } else if DECLARED_KINDS.contains(&kind) {
-            if has_repl {
+        } else if DECLARED_KINDS.contains(&kind) || REPLICABLE_KINDS.contains(&kind) {
+            let replicable = REPLICABLE_KINDS.contains(&kind);
+            if !replicable && has_repl {
                 issues.push(err(
                     "database-placement-not-declarable",
                     loc.clone(),
@@ -348,43 +362,91 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
                     ),
                 ));
             }
-            let db = match node.get("database") {
-                None => {
-                    issues.push(err(
-                        "database-placement-missing",
-                        loc,
-                        format!(
-                            "table '{}' ({}) declares no `database:` placement. Every staging/connection table names \
-                             its database as a `$ref` into {} — absence is an error, never '{}'-by-omission \
-                             (ADP-1, ADR-20260812-115930).",
-                            table,
-                            kind.name(),
-                            DATABASES_FILE,
-                            WRITE_DATABASE
-                        ),
-                    ));
-                    continue;
-                }
-                Some(v) => match declared_database(node) {
-                    Some(db) => {
-                        if !declared.contains(db.as_str()) {
-                            issues.push(err(
-                                "database-placement-unknown-database",
-                                loc,
-                                format!(
-                                    "table '{}' is placed in '{}', which {} does not declare — a placement must name \
-                                     one of the eleven declared databases.",
-                                    table, db, DATABASES_FILE
-                                ),
-                            ));
-                            continue;
+            if replicable {
+                if let Some(v) = node.get("replicated") {
+                    match v.as_str() {
+                        Some(REPLICATED_TOKEN) => {
+                            if replay_count == 0 {
+                                issues.push(err(
+                                    "database-replicated-empty",
+                                    loc.clone(),
+                                    format!(
+                                        "table '{}' is `replicated: {}` but no database declares `recovery: replay` — \
+                                         the replicated class resolves to the read databases, and an empty set is a \
+                                         placement to nowhere.",
+                                        table, REPLICATED_TOKEN
+                                    ),
+                                ));
+                            }
                         }
-                        db
+                        _ => issues.push(err(
+                            "database-placement-invalid",
+                            loc.clone(),
+                            format!(
+                                "table '{}' has `replicated: {:?}` — the only replicated class is the bare token \
+                                 '{}' (every `recovery: replay` database).",
+                                table, v, REPLICATED_TOKEN
+                            ),
+                        )),
+                    }
+                }
+            }
+            // The single-home value validation — ONE path for staging/connection AND the business
+            // kinds (beck's trap (b): a bare string or an unknown database must not satisfy the
+            // requirement on any kind), ending in the ADP-1 membership wall, HOISTED here from the
+            // staging/connection-only branch so it runs on every resolved single-home placement.
+            if let Some(v) = node.get("database") {
+                match declared_database(node) {
+                    Some(db) if !declared.contains(db.as_str()) => {
+                        issues.push(err(
+                            "database-placement-unknown-database",
+                            loc.clone(),
+                            format!(
+                                "table '{}' is placed in '{}', which {} does not declare — a placement must name \
+                                 one of the eleven declared databases.",
+                                table, db, DATABASES_FILE
+                            ),
+                        ));
+                    }
+                    Some(db) => {
+                        // The ADP-1 membership wall, both directions.
+                        match adapter_token_of(&table, &adapter_tokens) {
+                            Some(tok) => {
+                                let expected = format!("adapter_{}", tok);
+                                if db != expected {
+                                    issues.push(err(
+                                        "database-adapter-mismatch",
+                                        loc.clone(),
+                                        format!(
+                                            "table '{}' carries adapter '{}' in its name but is placed in '{}' — it belongs in \
+                                             '{}': each adapter owns its own, completely isolated database \
+                                             (ADR-20260812-115930; this is the error that nearly shipped, with avelo37 as the \
+                                             one mirror left inside the write database).",
+                                            table, tok, db, expected
+                                        ),
+                                    ));
+                                }
+                            }
+                            None => {
+                                if db.starts_with("adapter_") {
+                                    issues.push(err(
+                                        "database-adapter-mismatch",
+                                        loc.clone(),
+                                        format!(
+                                            "table '{}' names no adapter but is placed in '{}' — an adapter database holds \
+                                             nothing foreign (ADR-20260812-115930's inward clause: no role other than the \
+                                             database's one owning app holds CONNECT).",
+                                            table, db
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
                     }
                     None => {
                         issues.push(err(
                             "database-placement-not-a-ref",
-                            loc,
+                            loc.clone(),
                             format!(
                                 "table '{}' has a `database:` that is not a single-segment `$ref` into {} (got {:?}). \
                                  A bare string is invisible to the refs walker (ADR-20260811-014129 D2, the #413 \
@@ -392,90 +454,42 @@ pub(crate) fn validate_databases(model: &Model, issues: &mut Vec<Issue>) {
                                 table, DATABASES_FILE, v, DATABASES_FILE
                             ),
                         ));
-                        continue;
-                    }
-                },
-            };
-            // The ADP-1 membership wall, both directions.
-            match adapter_token_of(&table, &adapter_tokens) {
-                Some(tok) => {
-                    let expected = format!("adapter_{}", tok);
-                    if db != expected {
-                        issues.push(err(
-                            "database-adapter-mismatch",
-                            loc,
-                            format!(
-                                "table '{}' carries adapter '{}' in its name but is placed in '{}' — it belongs in \
-                                 '{}': each adapter owns its own, completely isolated database \
-                                 (ADR-20260812-115930; this is the error that nearly shipped, with avelo37 as the \
-                                 one mirror left inside the write database).",
-                                table, tok, db, expected
-                            ),
-                        ));
-                    }
-                }
-                None => {
-                    if db.starts_with("adapter_") {
-                        issues.push(err(
-                            "database-adapter-mismatch",
-                            loc,
-                            format!(
-                                "table '{}' names no adapter but is placed in '{}' — an adapter database holds \
-                                 nothing foreign (ADR-20260812-115930's inward clause: no role other than the \
-                                 database's one owning app holds CONNECT).",
-                                table, db
-                            ),
-                        ));
                     }
                 }
             }
-        } else if REPLICABLE_KINDS.contains(&kind) {
-            if has_db {
-                issues.push(err(
-                    "database-placement-not-declarable",
-                    loc.clone(),
+            // The completeness fallback: absent from the emitter's resolution and no diagnostic
+            // above explains why ⇒ the placement is MISSING.
+            if !resolved.contains(&table) && issues.len() == before {
+                let requirement = if replicable {
                     format!(
-                        "'{}' is a {} — business-table placement is register row STO-2's OPEN remainder \
-                         (DECISIONS §32: \"a working recommendation, not a decision, and needs a yes\"); a \
-                         `database:` key here would silently close that row. This refusal flips to a requirement \
-                         when STO-2 closes.",
-                        table,
-                        kind.name()
-                    ),
+                        "Every projection/referential table declares `database:` as a `$ref` into {} or \
+                         `replicated: {}` — STO-2 CLOSED 2026-08-14 (DECISIONS §32 \"STO-2 closure\"): absence \
+                         is an error, never a default, and a table missing here would otherwise be silently \
+                         absent from the generated inventory.",
+                        DATABASES_FILE, REPLICATED_TOKEN
+                    )
+                } else {
+                    format!(
+                        "Every staging/connection table names its database as a `$ref` into {} — absence is an \
+                         error, never '{}'-by-omission (ADP-1, ADR-20260812-115930).",
+                        DATABASES_FILE, WRITE_DATABASE
+                    )
+                };
+                issues.push(err(
+                    "database-placement-missing",
+                    loc,
+                    format!("table '{}' ({}) declares no placement. {}", table, kind.name(), requirement),
                 ));
-            }
-            if let Some(v) = node.get("replicated") {
-                match v.as_str() {
-                    Some(REPLICATED_TOKEN) => {
-                        if replay_count == 0 {
-                            issues.push(err(
-                                "database-replicated-empty",
-                                loc,
-                                format!(
-                                    "table '{}' is `replicated: {}` but no database declares `recovery: replay` — \
-                                     the replicated class resolves to the read databases, and an empty set is a \
-                                     placement to nowhere.",
-                                    table, REPLICATED_TOKEN
-                                ),
-                            ));
-                        }
-                    }
-                    _ => issues.push(err(
-                        "database-placement-invalid",
-                        loc,
-                        format!(
-                            "table '{}' has `replicated: {:?}` — the only replicated class is the bare token \
-                             '{}' (every `recovery: replay` database).",
-                            table, v, REPLICATED_TOKEN
-                        ),
-                    )),
-                }
             }
         } else if has_db || has_repl {
             issues.push(err(
                 "database-placement-not-declarable",
                 loc,
-                format!("'{}' is a {} — no placement grammar is open for this kind yet (see STO-2).", table, kind.name()),
+                format!(
+                    "'{}' is a {} — no placement grammar is open for this kind (see DECISIONS §32).",
+                    table,
+                    kind.name()
+                ),
             ));
         }
     }
@@ -630,10 +644,14 @@ mod tests {
         assert!(has(&issues, "database-placement-not-declarable"), "{}", render(&issues));
     }
 
-    /// A `database:` key on an OPEN business kind (a referential table): declaring it here would
-    /// silently close register row STO-2, so it is refused until that row closes.
+    /// #562's direction-2 witness — the INVERSION (same fixture, flipped assertion) of the
+    /// pre-closure test `a_placement_on_an_open_business_kind_is_refused`: STO-2 CLOSED 2026-08-14
+    /// (DECISIONS §32 "STO-2 closure"), so a `database:` on a business kind is the requirement
+    /// being SATISFIED, never a refusal. Seen RED before the flip (2026-08-14) with:
+    /// `database-placement-not-declarable ... business-table placement is register row STO-2's
+    /// OPEN remainder`.
     #[test]
-    fn a_placement_on_an_open_business_kind_is_refused() {
+    fn a_placement_on_a_business_kind_is_accepted_since_sto2_closed() {
         let m = model(&[
             ("database/databases.yaml", &catalog()),
             (
@@ -642,7 +660,113 @@ mod tests {
             ),
         ]);
         let issues = db_issues(&m);
-        assert!(has(&issues, "database-placement-not-declarable"), "{}", render(&issues));
+        assert!(issues.is_empty(), "a declared business placement satisfies the closed-row requirement, got:\n{}", render(&issues));
+    }
+
+    // ── #562: STO-2 closed — placement is a REQUIREMENT on the replicable kinds, proven against
+    // the same resolution the inventory emitter walks (a table of a covered kind absent from
+    // `resolve_placements` output is an error, so validate and emit cannot disagree by
+    // construction). One red mutant per RULE direction, no per-table matrix.
+
+    /// A projection table with NO placement key — RED before the flip (nothing fired), the
+    /// requirement's first witness.
+    #[test]
+    fn a_projection_table_with_no_placement_is_missing() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/projection_tables.yaml",
+                "OrderTracking:\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-missing"), "{}", render(&issues));
+    }
+
+    /// A referential table with NO placement key — the second REPLICABLE_KIND's witness.
+    #[test]
+    fn a_referential_table_with_no_placement_is_missing() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/referential.yaml",
+                "PricingPolicy:\n  reference: true\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-missing"), "{}", render(&issues));
+    }
+
+    /// A bare-string `database:` on a replicable kind must NOT satisfy the requirement — the #413
+    /// invisible-to-the-refs-walker class, enforced on the widened kinds exactly as on
+    /// staging/connection tables (beck's trap (b)).
+    #[test]
+    fn a_bare_string_placement_on_a_replicable_kind_is_not_a_ref() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/referential.yaml",
+                "PricingPolicy:\n  reference: true\n  database: read_order\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-not-a-ref"), "{}", render(&issues));
+        assert!(!has(&issues, "database-placement-missing"), "one gap, one diagnostic:\n{}", render(&issues));
+    }
+
+    /// A replicable kind's `$ref` into a database the catalog does not declare — same value
+    /// validation as the DECLARED_KINDS path.
+    #[test]
+    fn an_unknown_database_on_a_replicable_kind_is_flagged() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/projection_tables.yaml",
+                "OrderTracking:\n  database: { $ref: 'database/databases.yaml#/read_nowhere' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-placement-unknown-database"), "{}", render(&issues));
+    }
+
+    /// The ADP-1 wall is HOISTED, not duplicated: a projection table placed inside an adapter
+    /// database trips the inward clause exactly as a connection table does (farley's trap (c) —
+    /// before the hoist the wall ran only on the DECLARED_KINDS branch).
+    #[test]
+    fn a_projection_table_inside_an_adapter_database_is_a_mismatch() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/projection_tables.yaml",
+                "OrderTracking:\n  database: { $ref: 'database/databases.yaml#/adapter_stripe' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let issues = db_issues(&m);
+        assert!(has(&issues, "database-adapter-mismatch"), "{}", render(&issues));
+    }
+
+    /// The resolver's replicable-declared branch (farley's trap (a)): a business table with a valid
+    /// `database:` `$ref` is PRESENT in `resolve_placements` output — the emitter walks the same
+    /// resolution the requirement consumes, so validator-green while inventory-absent is
+    /// unrepresentable.
+    #[test]
+    fn a_declared_replicable_placement_resolves_into_the_inventory() {
+        let m = model(&[
+            ("database/databases.yaml", &catalog()),
+            (
+                "database/tables/referential.yaml",
+                "PricingPolicy:\n  reference: true\n  database: { $ref: 'database/databases.yaml#/read_order' }\n  columns:\n    id: { type: uuid }\n",
+            ),
+            (
+                "database/tables/projection_tables.yaml",
+                "ScopeMembership:\n  replicated: read-databases\n  columns:\n    id: { type: uuid }\n",
+            ),
+        ]);
+        let placements = resolve_placements(&m);
+        let pricing = placements.iter().find(|p| p.table == "PricingPolicy").expect("declared business placement resolves");
+        assert!(pricing.mode == PlacementMode::Declared && pricing.databases == vec!["read_order".to_string()]);
+        let membership = placements.iter().find(|p| p.table == "ScopeMembership").expect("replicated placement resolves");
+        assert!(membership.mode == PlacementMode::Replicated && membership.databases == vec!["read_order".to_string()]);
     }
 
     /// `replicated:` with no `recovery: replay` database in the catalog — a placement to nowhere.
