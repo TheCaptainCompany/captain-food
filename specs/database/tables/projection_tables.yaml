@@ -6,6 +6,28 @@ description: >
   projector; queries read them exactly like the fold views (api.yaml `reads`). Same metadata as a view
   (aggregate/slice/fedBy/rules/columns with `from` lineage) so the validator still proves API↔read-model.
 
+  READER SETS IN THIS FILE ARE A LOWER BOUND, NOT A CLOSED SET (2026-08-14, DECISIONS §32 "the method
+  finding"). Every `# STO-2 closure` comment below that enumerates readers carries a two-line marker
+  saying so, and the claim class "sole reader" is RETIRED here — including where it happens to be true.
+  Three known limits of any hand-walk: (1) FIVE reader classes are known today (subgraph resolvers,
+  `CommandDeps` write-path handlers, PM hook ports, gateway middleware, and a repository a BIN
+  CONSTRUCTS FOR ITSELF — adapters included, per gated mode); (2) SCOPE granularity is not GRANT
+  granularity — CONNECT is held by an APP/role, so "only the ordering scope reads it" is silent about
+  `pm-cart-binding` being a different bin from `graphql-ordering`; (3) hand-written wrapper seams
+  escape the DSL walker (`ReclamationProcess` is the known instance). The crossings ARE largely
+  declared already — the PM `read:` steps in `specs/*/processmanager.yaml` carry
+  `model: { $ref: 'database/tables/projection_tables.yaml#/X' }` — so the derivation is mechanical and
+  must be MADE mechanical rather than re-walked by hand. (4) — the INVERSE limit, belonging to that
+  DERIVATION rather than to the hand-walk, and sitting ALONGSIDE (1)-(3) rather than replacing them:
+  a `read:` step declares the model SHAPE a leg consumes, NOT the physical SOURCE. Three of the
+  thirteen are `captain_write` stream folds that never touch the projection they name —
+  `specs/delivery/processmanager.yaml:43` and `specs/ordering/processmanager.yaml:41` on `Restaurant`,
+  and `specs/ordering/processmanager.yaml:31` on `Cart` (both PlaceOrder reads: that leg is a
+  hand-written command handler, not a generated PM pipeline). So the hand method failed by MISSING
+  crossings and a verbatim mechanical derivation fails by INVENTING them; deriving is right only once
+  the declaration distinguishes source from shape (a declared source, or an explicit exception list) —
+  DECISIONS §32 limit (4), #513's own sub-step.
+
   Conventions (in addition to a view's):
     - projector : how the table is maintained from domain_events. Always `app` — an application-layer
                   (Rust) projector subscribing to domain_events, in crates/application/infrastructure
@@ -19,6 +41,43 @@ Restaurant:
   projector: app   # mechanically foldable (+ a cross-stream default_currency lookup from the account stream), but maintained by the app-layer projector for uniformity
   aggregate: Restaurant
   slice: V0
+  # STO-2 closure (DECISIONS §32, 2026-08-14). FOUR reader classes beyond the network subgraph, and
+  # THIS LINE'S OWN HISTORY IS THE WARNING: it said "two readers ... both recorded", the post-ready
+  # independent review made it three, and round 2 of that review made it four. Treat the list as a
+  # LOWER BOUND (DECISIONS §32 "the method finding"). (1) The gateway tenant-host-router
+  # reads this table on EVERY request's hot path (c4-l3.yaml tenant-host-router). (2) rider.yaml's job
+  # screen renders restaurantName/Phone via a join against
+  # this table — moving either side of that join breaks one-tap call-restaurant at pickup, a
+  # stranded-order exception. (3) OPEN cross-wall dependency, NOT resolved by this placement (register
+  # row STO-8, the captain_write -> read_common wall): the mailbox worker declares
+  # `CommandDeps.restaurants: RestaurantReadRepository` and FOUR handlers read `restaurant` through
+  # it — create_catalog `by_id` (commands.rs:2763, RestaurantNotFound), add_product and update_product
+  # via ensure_prices_use_restaurant_currency `by_id` (:2737, the CurrencyMismatch guard reading
+  # default_currency — ADR-0016), and mark_restaurant_as_favorite `by_id` (:3491, RestaurantNotFound).
+  # Lower stakes than Customer's: all four already treat a not-yet-projected row as passing or
+  # rejecting explicitly, and none sits on checkout. NOTE the write path does NOT read this table for
+  # the checkout guards — place_order folds RestaurantState from the restaurant's own STREAM
+  # (commands.rs:2394), which is captain_write-local and crosses no wall.
+  # (4) NOT an open question of (3)'s kind — it CONTRADICTS A CLOSED ROW, so it is AMBER and
+  # founder-owned: register row STO-10, which REOPENS ADP-1 (ADR-20260812-115930, decided by
+  # directive). A FIFTH reader class no formula contained — a repository the BIN CONSTRUCTS FOR
+  # ITSELF: the HubRise adapter builds its own PgRestaurantRepository (adapters/hubrise/src/main.rs:54)
+  # and `await_restaurant_projection` polls `by_id` 40x at 250 ms before create_catalog
+  # (connect.rs:314-325). adapter_hubrise -> read_common is a SECOND outward grant where ADP-1 allows
+  # exactly one (INSERT into inbound_messages), so post-split HubRise onboarding stalls SILENTLY, as a
+  # ten-second timeout on a poll that can never resolve. The poll ALSO breaches ADR-20260810-231300:
+  # the projector knows it folded RestaurantRegistered before the clock does, so this is propagation
+  # and must be PUSHED — as written it has no declared degraded mode, no observability contract and no
+  # detected path back. Same bin, gated mode: with RUN_MAILBOX_WORKERS on it spawns
+  # standalone mailbox workers for RestaurantAccount/Restaurant/Catalog (main.rs:43-52), so the
+  # adapter pod ALSO hosts class (3)'s CommandDeps reads — #513's app<->database CONNECT model cannot
+  # assume one app class per bin.
+  # margin_rate is a commercial secret; read_common making it physically
+  # readable by the marketplace subgraph role is a RECORDED deferral (#513 column narrowing), not an accident.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_common' }
   fedBy:
     - { $ref: 'events.yaml#/RestaurantRegistered' }
     - { $ref: 'events.yaml#/RestaurantUpdated' }
@@ -177,6 +236,13 @@ SlugAlias:
   projector: app   # one row per SUPERSEDED label -- the projector keys on previousSlug, not the aggregate id
   aggregate: Restaurant
   slice: V0
+  # STO-2 closure: read by ZERO api.yaml types — its reader is the gateway 301 path (hosts.rs,
+  # c4-l3.yaml tenant-host-router), co-located with Restaurant which the same middleware reads on the
+  # same request. Deliberately NOT co-located with slug_reservations (write-side, captain_write).
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: >
     Superseded storefront labels, so a renamed restaurant's OLD host keeps resolving
     (ADR-20260728-011344). `hosts.rs` resolves an incoming Host header against `Restaurant.slug` first
@@ -210,6 +276,19 @@ ProspectionPipeline:
   projector: app   # weighted 0–10 score COMPUTED from listing facts (never in an event) — application logic
   aggregate: Prospect
   slice: V1
+  # STO-2 closure: read by the admin prospectionPipeline query (network scope) — NOT its sole reader;
+  # the first version of this line said "sole reader" (corrected by the post-ready independent review).
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-8, the SAME
+  # captain_write -> read_common wall as Customer's, lower stakes): record_prospect_contact reads
+  # `last_contacted_at` through `CommandDeps.prospection: ProspectionReadRepository`
+  # (commands.rs:2626) for the >= 7-day anti-spam invariant. The contact TIME is envelope metadata
+  # (occurred_at) invisible to the fold, so this projection is the ONLY source. Post-split as mapped
+  # the guard cannot read at all: B2B outreach either blocks, or loses its spam ceiling if the read
+  # is degraded to "no row" (the handler already treats a not-yet-projected prospect as passing).
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: "B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query."
   fedBy:
     - { $ref: 'events.yaml#/RestaurantRegistered' }
@@ -264,6 +343,25 @@ Customer:
   projector: app   # scalar folds + jsonb ACCUMULATIONS (favorites/addresses/ratings) — maintained by the app-layer projector
   aggregate: Customer
   slice: V0
+  # STO-2 closure: BND-3(a) shared read store. NOT a sole-reader table — the first version of this
+  # line said "sole reader is the customer scope's `me`/identity path", which this table's OWN `note`
+  # four lines below already contradicted (it names VerifyPhone). Corrected by the post-ready
+  # independent review, AFTER the mob checkpoint.
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-8, DECISIONS §32 —
+  # a DIFFERENT wall from STO-7's): the mailbox worker is a captain_write app whose generated
+  # composition root declares `CommandDeps.customers: CustomerReadRepository`
+  # (crates/infrastructure/src/generated/command_router.rs), and FOUR handlers read `customer`
+  # through it — verify_phone `by_phone` (commands.rs:3257, the new-vs-returning decision ON THE
+  # LOGIN PATH), request_email_verification `by_email` (:3363, EmailAlreadyInUse), and
+  # request_phone_change / confirm_phone_change `by_phone` (:3414, :3453, PhoneAlreadyInUse).
+  # Post-split as mapped, captain_write holds no CONNECT on read_common: sign-in either fails
+  # outright, or — worse, if the lookup were ever degraded to "not found" — SILENTLY RE-REGISTERS a
+  # returning customer as new, forking a second Customer stream and orphaning their order history.
+  # Customer cannot simply move to captain_write: it is a genuine read model with subgraph readers.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: "Identity/lookup read model: resolves a returning phone (or auth_ref) to an existing Customer, backs VerifyPhone idempotency + auth resolution, and serves the `me` query (CustomerProfile). Also bound when CustomerIdentified stamps carts. The stored `locale` localizes authenticated SMS/email sends."
   fedBy:
     - { $ref: 'events.yaml#/CustomerRegistered' }
@@ -348,6 +446,34 @@ Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog
   slice: V0
+  # STO-2 closure: BND-1(a) keeps catalog its own boundary/database. NOT a sole-reader table — the
+  # first version of this line said "sole reader is the catalog scope" and that was FALSE (corrected
+  # by the post-ready independent review, AFTER the mob checkpoint): the readers are the catalog
+  # scope's api.yaml types AND the captain_write command handlers named below.
+  # Its uberPrice derivation reads UberEstimationPolicy — replicated into this database (referential.yaml).
+  # OPEN cross-wall dependency, same shape and same chosen direction as OrderTracking's: the uberPrice
+  # rule also reads Restaurant.cuisine_category, single-home in read_common — post-split this projector
+  # keeps its own fold-local restaurant→cuisine_category lookup (RestaurantRegistered/RestaurantUpdated);
+  # Restaurant is deliberately NOT replicated. Implementation belongs to the physical-split slice.
+  # OPEN cross-wall dependency #2 — the WRITE PATH reads this table (register row STO-7, WIDENED to
+  # name it; DECISIONS §32). The mailbox worker is a captain_write app and its GENERATED composition
+  # root declares the dependency: `CommandDeps.catalogs: CatalogReadRepository`
+  # (crates/infrastructure/src/generated/command_router.rs). Four handlers read `catalog` through it
+  # — add_cart_line and change_cart_line_quantity via require_orderable_line (commands.rs:796, 1006:
+  # the availability+stock OVERSELL GUARD, fail-closed OfferNotFound/OfferUnavailable/
+  # InsufficientStock/InvalidOptionSelection), place_order via pricing::price_cart (commands.rs:2458
+  # -> pricing.rs:56: ServerPriceAuthority repricing, fail-closed PriceUnresolvable), and
+  # configure_catalog_slug via slug_taken (commands.rs:2799). `offer_by_id` and `slug_taken` are
+  # DEFAULT trait methods over `by_restaurant` (queries.rs:231,249), i.e. literally SELECT ... FROM
+  # catalog. Post-split as mapped, captain_write holds no CONNECT on read_catalog: EVERY add-to-cart
+  # and EVERY checkout fails closed and the oversell guard never runs — at Friday 19:00-21:30 peak.
+  # STO-7 option (a) (a fold-local snapshot for the CART SCREEN, in read_order) does NOT reach this
+  # wall: it is the same catalog-authority question asked from captain_write, which is why STO-7 now
+  # names both paths and neither may be decided without the other.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_catalog' }
   fedBy:
     - { $ref: 'events.yaml#/CatalogCreated' }
     - { $ref: 'events.yaml#/CatalogCategoryAdded' }
@@ -400,6 +526,25 @@ Cart:
   projector: app   # hand-written fold (crates/application/src/projectors/cart.rs) — a PURE, money-free fold of the cart events; NO catalog/policy read inside the fold
   aggregate: Cart
   slice: V0
+  # STO-2 closure: its SUBGRAPH reader is the ordering scope (the order boundary, BND-1(a)). Its read-time
+  # estimated breakdown/comparison reads PricingPolicy + Uber*Policy — replicated into this database.
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-7, DECISIONS §32):
+  # read-time pricing reads the LIVE Catalog projection (read_catalog) at query time — see this
+  # table's own note — so post-split as mapped the cart screen cannot resolve names/prices (the #424
+  # "built state cannot render" class, on the checkout path, at peak). STO-7 must be decided BEFORE
+  # OR WITH the physical split of read_order/read_catalog.
+  # SECOND OPEN cross-wall dependency, the same THIRD direction — captain_write -> read_order
+  # (register row STO-9; post-ready independent review, round 2). "Sole reader is the ordering scope"
+  # was contradicted by this table's OWN rules/notes below, which name CartBindingProcess: a
+  # captain_write PM (this very inventory derives its state row into captain_write) whose
+  # CustomerIdentified leg calls `CartReadRepository::open_by_session`
+  # (process_managers/cart_binding.rs:17-37). Post-split it holds no CONNECT here, so a guest who
+  # builds a cart and then signs in AT CHECKOUT never gets it bound — the basket is empty on the far
+  # side of the login, at peak intent, and the abandonment is indistinguishable from a change of mind.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only
     identity, status and the REPRICING INPUTS (per line: offer_id, quantity, selected_option_ids).
@@ -455,6 +600,36 @@ OrderTracking:
   projector: app   # tip Σ-by-recipient + uber_* comparison COMPUTED by the projector — application logic
   aggregate: Order
   slice: V0
+  # STO-2 closure. The ISOLATION is the reason this sits in read_order rather than a shared read
+  # database: catalog-import and prospection bursts must never head-of-line-block the customer
+  # anxiety-curve projector at Friday 19:00–21:30 peak. The uber_* fold reads UberEstimationPolicy +
+  # UberSplitPolicy — replicated into this database (referential.yaml).
+  # OPEN cross-wall dependency, direction recorded (mob checkpoint 2026-08-14): the uber_* fold ALSO
+  # reads Restaurant.cuisine_category — Restaurant is single-home in read_common and OrderPlaced does
+  # not carry cuisineCategory, so nothing puts it in this database today; post-split that read either
+  # crosses the wall or silently nulls the ADR-0025 receipt. Chosen direction: this projector keeps a
+  # FOLD-LOCAL restaurant→cuisine_category lookup in its OWN database, folded from
+  # RestaurantRegistered/RestaurantUpdated (replay-correct, no cross-wall CONNECT); Restaurant itself
+  # is deliberately NOT replicated — that would widen the margin_rate exposure this file defers.
+  # Implementation belongs to the physical-split slice, not to the placement declaration.
+  # SECOND OPEN cross-wall dependency, in a THIRD wall direction the map did not have — captain_write
+  # -> read_order (register row STO-9; found by the post-ready independent review, round 2). Three
+  # write-side PMs read this table through `OrderReadRepository` (`SELECT ... FROM ordertracking`,
+  # infrastructure/src/persistence/order.rs:28) while running on the mailbox worker, a captain_write
+  # app. THE MONEY LEG: SettlementHooks reads the row for `payment_intent_id` on ALL FOUR legs, before
+  # every Stripe capture and every release (process_managers/payment_settlement.rs:53-99 — its own doc
+  # comment already says "the intent of the row `read_order` admitted", so the code knew it crossed).
+  # Post-split the settlement PM holds no CONNECT here and that read ERRORS rather than skipping (the
+  # HookOutcome::Skip arm covers a genuinely absent row, not an unreachable table), so the lane stalls
+  # in retry: capture-at-DELIVERED never runs and the authorization ages out — food delivered, money
+  # never collected — and release-on-reject never runs, so a rejected customer's hold stays held.
+  # Riding the same wall, lower stakes: DispatchOpenHooks.orders (delivery_dispatch.rs:83, the
+  # OrderMarkedReady birth leg) and on_reclamation_resolved's `orders` (reclamation.rs:91).
+  # STO-9 must be decided BEFORE OR WITH the physical split of read_order.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary
     source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status
@@ -690,6 +865,14 @@ OrderConversation:
   projector: app   # message timeline appended + PUBLIC/INTERNAL split + order-status fold = application logic
   aggregate: Conversation
   slice: V0
+  # STO-2 closure: the SUBGRAPH reads it behind comms-scope types, and BND-1(a)/§31 records
+  # Conversation → order ("comms dissolves as a boundary"), so the subgraph serving them IS the order
+  # boundary's role — no SECOND subgraph gains CONNECT (a claim about subgraphs only, per the marker). PII note: the free text will incidentally carry allergy
+  # statements (Art. 9 special category) — the future PII inventory must not class this as ordinary contact data.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The per-order conversation read model (#129). Folds the conversation's own messages AND the order's
     status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status
@@ -781,6 +964,13 @@ CustomerCreditBalance:
   projector: app   # balance is a SUM (Σ granted − Σ consumed) — NOT foldable into a View_* (a fold view is a per-column state-fold, not an aggregate); the materialized-projector pattern (#158, ADR-20260726-163737) maintains it
   aggregate: CustomerCredit
   slice: V0
+  # STO-2 closure: §31/BND-1 records CustomerCredit → order, and its known reader (the payments-scope
+  # customerCredit query) is served by the order boundary's subgraph — read_common would hand that
+  # subgraph a second CONNECT, the exact STO-2(b) rejection.
+  # READER SET = LOWER BOUND, not a closed set (2026-08-14): five known reader classes; an APP holds
+  # CONNECT, so a scope-granular claim is not a grant-granular one; hand-written seams escape the
+  # walker. Derive it mechanically, never from this comment — DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a
     ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream

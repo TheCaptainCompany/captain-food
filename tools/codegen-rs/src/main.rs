@@ -224,7 +224,7 @@ fn main() {
         // and the input contract for step (3)'s bin emitter.
         ("crate-graph.generated.json", emit_crate_graph(&model)),
         ("translations.generated.json", emit_translations_json(&model)),
-        // The database placement inventory (#494 slice 1): the eleven databases + each covered
+        // The database placement inventory (#494 slice 1): every declared database + each covered
         // table's RESOLVED database set — the interface #509/#513/#514 build against.
         ("databases.generated.json", emit_databases_json(&model)),
         ("databases.generated.md", emit_databases_md(&model)),

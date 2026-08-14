@@ -27,15 +27,21 @@ description: >
       (ADR-20260811-014129 Decision 2: a reference is a `$ref`; a bare string is invisible to the
       refs walker — the #413 defect class). Absence is an ERROR, never `captain_write`-by-omission.
     - `replicated: read-databases` is the REPLICATED placement class (STO-2(a)): the table is
-      projected into EVERY read database — the resolved set is every database declared
-      `recovery: replay`, which is the definition of a read database (its whole content is a
-      re-derivable fold of the log), not a naming pun. `ScopeMembership` and the `ref_*` enum
-      family are DECIDED replicated; `projection_checkpoint` (runtime machinery, not spec-declared)
-      is per-read-database by the same rule.
-    - Business read models and referential tables beyond the replicated class carry NO placement
-      yet: that is register row STO-2's open remainder (DECISIONS §32 — "a working recommendation,
-      not a decision, and needs a yes"). Declaring one here before the row closes is refused by the
-      validator; the completeness rule widens to all kinds when STO-2 closes.
+      projected — or, for a seeded referential, SEEDED — into EVERY read database; the resolved set
+      is every database declared `recovery: replay`, which is the definition of a read database
+      (its whole content is a re-derivable fold of the log), not a naming pun. In the class:
+      `ScopeMembership`, and the pricing referentials `PricingPolicy` / `UberEstimationPolicy` /
+      `UberSplitPolicy` (STO-2 closure — their declared readers span TWO read databases,
+      `read_order` and `read_catalog`, across four reader sites; >= 2 is exactly what rules out a
+      single home, and the `read_common` copy follows from THIS CLASS GRAMMAR — every
+      `recovery: replay` database — not from any declared reader);
+      `projection_checkpoint` (runtime machinery, not spec-declared) is per-read-database by the
+      same rule.
+    - Every business read model and referential table DECLARES its placement (`database:` `$ref` or
+      `replicated:`): register row STO-2 CLOSED 2026-08-14 (DECISIONS §32 "STO-2 closure" — the
+      17-table map with per-table port evidence), so absence is an ERROR for these kinds too, never
+      a default. A seeded referential's SEED SCRIPT is part of its database's recovery path — a
+      replay-only restore comes back empty otherwise (#509's drill asserts seeded row counts).
 
   RECOVERY is the one attribute carried beyond identity, because the drill slice (#509) consumes it
   and non-rederivability must be declared where the database is:
@@ -55,6 +61,11 @@ captain_write:
     the two PLATFORM connection tables that are deliberately NOT adapter state:
     `auth_sessions` (ADP-1 leg 2 (b) — encrypted, used by the actor path and the BFF login route,
     not by any adapter) and `sms_send_quota` (a cross-replica money ceiling on the OTP send path).
+    And, since the STO-2 closure (DECISIONS §32), the write-side-read configuration: the dispatch
+    trio `DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` (the only port the
+    derivation finds is `DispatchStrategyRepository`, used by the dispatch PM and the offer-timeout worker)
+    and `RuntimePosture` (startup-read by every governed process; seeded/UPDATEd, never folded, so
+    a replay restore would silently revert an admin-flipped posture — it must sit on the pitr path).
   owner: migrator          # PROP-20260811-093000 §6.1 — the CI-only DDL credential owns the business schemas
   k8sName: captain-write
   recovery: pitr
@@ -63,11 +74,30 @@ captain_write:
 
 read_order:
   description: >
-    `OrderDb` in PROP-20260811-093000 §11 — the ORDER boundary's read models (the map recommends
-    Cart, OrderTracking, OrderConversation, CustomerCreditBalance; that placement is STO-2's open
-    remainder, not yet declared), plus the replicated authorization index and its own
-    `projection_checkpoint`. Written by its projector role, read by its subgraph role; no other
-    subgraph holds CONNECT — the wall the split is bought for.
+    `OrderDb` in PROP-20260811-093000 §11 — the ORDER boundary's read models: Cart, OrderTracking,
+    OrderConversation and CustomerCreditBalance (DECLARED — STO-2 closure, DECISIONS §32; comms and
+    payments scopes serve inside the order boundary per §31/BND-1), plus the replicated
+    authorization index, the replicated pricing referentials and its own `projection_checkpoint`.
+    Written by its projector role and read by its subgraph role. The earlier form of this sentence
+    added *"no other SUBGRAPH holds CONNECT — the wall the split is bought for"*, and that shape is
+    the mechanism of a four-round failure: scoping the claim to subgraphs excludes BY CONSTRUCTION
+    the app classes that actually hold CONNECT (`pm-*`, `actor-*`, `adapter-*`), so every round of
+    review kept finding readers the sentence had defined away. NON-subgraph readers are part of its
+    reader set and are recorded here on purpose: the mailbox worker (a `captain_write` app) reads
+    `OrderTracking` on the FOUR settlement legs — the `payment_intent_id` read that precedes every
+    Stripe capture and every release — plus the dispatch birth leg and reclamation resolution, and
+    reads `Cart` to bind a guest's open carts at sign-in. An OPEN cross-wall dependency, register row
+    STO-9 (DECISIONS §32); the physical split of this database is BLOCKED on it, INDEPENDENTLY of
+    STO-7. Those PM reads are DECLARED in the DSL (`specs/*/processmanager.yaml` `read:` steps carry
+    `model: { $ref: 'database/tables/projection_tables.yaml#/X' }`), so #513's grant emitter must
+    derive them mechanically rather than from this paragraph — but NOT VERBATIM: a `read:` step
+    declares the model SHAPE a leg consumes, not the physical SOURCE. Three of the thirteen are
+    `captain_write` STREAM FOLDS that never touch the projection they name, one of them on THIS
+    database (`Cart` on the PlaceOrder leg, `specs/ordering/processmanager.yaml:31` -> `commands.rs`
+    `require_cart`, folded from the cart's own stream), so a literal derivation grants CONNECT for a
+    path no code takes. Until the grammar can distinguish projection-read from stream-fold (a
+    declared source, or an explicit exception list) the derivation must carry that distinction —
+    DECISIONS §32 limit (4).
   owner: migrator
   k8sName: read-order
   recovery: replay
@@ -75,8 +105,12 @@ read_order:
 read_catalog:
   description: >
     `CatalogDb` in PROP-20260811-093000 §11 — the catalog boundary's read models (the Catalog
-    projection; placement itself is STO-2's open remainder), plus the replicated authorization
-    index and its own `projection_checkpoint`.
+    projection, DECLARED — STO-2 closure, DECISIONS §32), plus the replicated authorization index,
+    the replicated pricing referentials (the Catalog uberPrice derivation reads
+    UberEstimationPolicy locally) and its own `projection_checkpoint`.
+    NON-subgraph readers are part of its reader set and are recorded on purpose: the mailbox worker
+    (a `captain_write` app) reads `Catalog` on the WRITE path — the add-to-cart oversell guard and
+    the checkout repricing — an OPEN cross-wall dependency, register row STO-7 (DECISIONS §32).
   owner: migrator
   k8sName: read-catalog
   recovery: replay
@@ -84,9 +118,23 @@ read_catalog:
 read_common:
   description: >
     `DomainCommonDb` in PROP-20260811-093000 §11 — the shared read database for the remaining
-    scopes' read models (the map recommends Customer, Restaurant, SlugAlias, ProspectionPipeline,
-    the rider read models and the seeded referential tables; all STO-2 open remainder), plus the
-    replicated authorization index and its own `projection_checkpoint`. Distinct from the
+    scopes' read models: Customer, Restaurant, SlugAlias, ProspectionPipeline and the City
+    referential (DECLARED — STO-2 closure, DECISIONS §32; the rider `View_*` read models follow
+    their conversion), plus the replicated authorization index, the replicated pricing referentials
+    and its own `projection_checkpoint`. THREE NON-subgraph reader classes are part of its reader set
+    and are recorded here on purpose: (1) the gateway tenant-host-router reads Restaurant + SlugAlias
+    on EVERY request's hot path (c4-l3.yaml tenant-host-router); (2) the mailbox worker (a
+    `captain_write` app) reads `Customer` on the LOGIN path plus `Restaurant` and
+    `ProspectionPipeline` for write-side guards — an OPEN cross-wall dependency, register row STO-8
+    (DECISIONS §32); (3) the HubRise ADAPTER bin, which builds its own restaurant repository and polls
+    `Restaurant` for projection visibility during onboarding — a crossing ADP-1 does not admit at all,
+    register row STO-10. The first record of this description named only (1), the second only (1)+(2)
+    — read this list as a LOWER BOUND (DECISIONS §32 "the method finding"). And a bound in the OTHER
+    direction, because this database is where a naive derivation OVER-grants: the two declared PM
+    `read:` steps on `Restaurant` (`specs/delivery/processmanager.yaml:43`,
+    `specs/ordering/processmanager.yaml:41`) are implemented as `captain_write` STREAM FOLDS, not as
+    reads of this database — a `read:` step declares the model SHAPE, not the physical SOURCE — so
+    #513 must NOT emit CONNECT here from them (DECISIONS §32 limit (4)). Distinct from the
     `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
   owner: migrator
   k8sName: read-common
@@ -158,7 +206,7 @@ adapter_avelo37:
 adapter_sirene:
   description: >
     The SIRENE mirror's isolated database (655 MB once, #231). The stated naming asymmetry: no
-    `crates/adapters/sirene` crate exists — the mirror's sole reader/writer is the
+    `crates/adapters/sirene` crate exists — the mirror's declared reader/writer is the
     `worker-sirene-sync` CronJob (plus the offline `sirene_ingest` loader), and the database is
     named for the partner data, not for a crate invented to justify it. The test it passes is the
     one that matters: exactly one app connects, and it owns the mirror.

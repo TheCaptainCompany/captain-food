@@ -876,20 +876,34 @@ it is the final shape of those five read models, and a defect fix that stands al
 captain-db  (CNPG cluster, one WAL timeline, one PITR)
 ├── captain-write     domain_events · domain_stream · inbound_messages · mailbox_partitions
 │                     · 4x *_process_manager · slug_reservations
-│                     · projection_watermark · auth_sessions       [actor_* · projector_* (SELECT)
+│                     · projection_watermark · auth_sessions
+│                     · DeliveryChannelCatalog · CityDeliveryRanking · RestaurantDispatchConfig
+│                     · RuntimePosture (write-side-read config -- STO-2 closure)
+│                                                                  [actor_* · projector_* (SELECT)
 │                                                                   · deletion_engine
 │                                                                   · graphql_* -- inbound_messages
 │                                                                     INSERT+SELECT ONLY, 6.1.1]
-├── OrderDb           Cart · OrderTracking · OrderConversation · CustomerCreditBalance
-│                     + ScopeMembership + ref_* + projection_checkpoint
-│                                                    [projector_ordering · graphql_ordering (SELECT)]
-├── CatalogDb         Catalog + ScopeMembership + ref_* + projection_checkpoint
-│                                                    [projector_catalog  · graphql_catalog (SELECT)]
-├── DomainCommonDb    Customer · Restaurant · SlugAlias · ProspectionPipeline · Rider read models
-│                     · referential (PricingPolicy, City, ...)
-│                     + ScopeMembership + ref_* + projection_checkpoint
-│                                         [projector_{customer,network,delivery,payments,comms}
-│                                          · graphql_{...} (SELECT)]
+├── read_order        Cart · OrderTracking · OrderConversation · CustomerCreditBalance
+│                     + ScopeMembership + replicated referentials + projection_checkpoint
+│                                                    [projector_order · graphql_order (SELECT)]
+├── read_catalog      Catalog + ScopeMembership + replicated referentials + projection_checkpoint
+│                                                    [projector_catalog  · graphql_catalog (SELECT)
+│                                          !! mailbox worker (captain_write) reads Catalog on the
+│                                             WRITE path -- oversell guard + checkout repricing;
+│                                             UNRESOLVED, register row STO-7]
+├── read_common       Customer · Restaurant · SlugAlias · ProspectionPipeline · City
+│                     · Rider read models (View_* -- placement follows their conversion)
+│                     + ScopeMembership + replicated referentials + projection_checkpoint
+│                                         [projector_{customer,network,delivery}
+│                                          · graphql_{...} (SELECT)
+│                                          · gateway tenant-host-router (Restaurant + SlugAlias,
+│                                            every request's hot path, c4-l3.yaml:33-35)
+│                                          !! mailbox worker (captain_write) reads Customer on the
+│                                             LOGIN path, + Restaurant / ProspectionPipeline
+│                                             write-side guards; UNRESOLVED, register row STO-8]
+│
+│   replicated into EVERY read database (recovery: replay -- STO-2(a) class):
+│     ScopeMembership · PricingPolicy · UberEstimationPolicy · UberSplitPolicy
 ├── adapter-stripe        external_stripe_events                                  [adapter_stripe ONLY]
 ├── adapter-hubrise       external_hubrise_callbacks · hubrise_connections
 │                         · hubrise_connection_locations                          [adapter_hubrise ONLY]
@@ -920,10 +934,36 @@ plaintext, no such adapter crate or bin exists, and its users are the actor path
 so the database would have been named for a non-existent adapter with a non-adapter `CONNECT` list on the
 sign-in path. The count is unchanged at six adapter databases; the **membership** changed.
 
-Placement of `Cart`/`OrderConversation`/`CustomerCreditBalance` above is the **recommendation**,
-not a decision — it is register row STO-2 (its staging/connections leg is answered by ADP-1). The
+**The map above is now a DECISION, not a recommendation** — register row **STO-2 CLOSED 2026-08-14**
+([DECISIONS §32, "STO-2 closure"](DECISIONS.md#32-storage-boundaries-and-least-privilege-database-users--prop-20260811-093000)):
+the 17-table remainder is declared in the spec with per-table port evidence, and the closure
+**corrects this section's first version in four places** — the pricing referentials
+(`PricingPolicy`/`UberEstimationPolicy`/`UberSplitPolicy`) are **replicated** into every read
+database (their FOUR declared reader sites — the `OrderTracking` `uber_*` fold, the `Catalog`
+`uberPrice` derivation, the `Cart` read-time breakdown, the admin policy queries — resolve to **two**
+read databases, `read_order` and `read_catalog`, and spanning ≥ 2 is what rules out a single home;
+the `read_common` copy follows from the replicated class grammar, not from a reader); the
+dispatch-config trio (`DeliveryChannelCatalog`/`CityDeliveryRanking`/`RestaurantDispatchConfig`)
+and `RuntimePosture` are **`captain_write`** (their only consumers are write-side apps; a
+replay-restore would silently revert an admin-flipped posture); `CustomerCreditBalance` stays in
+the order boundary's `read_order` per §31's `CustomerCredit → order`. The `ref_*` family this
+section's first version replicated no longer exists (ADR-20260728-170000). The
 `graphql_*` line on `captain-write` is **not** a recommendation: without it every mutation fails
 (§6.1.1 (ii)).
+
+**The `!!` lines in the tree are the part that is decided-but-not-yet-buildable, and they point the
+other way to every other reader annotation here.** Each `CONNECT` list above reads *"which roles may
+reach INTO this database"*; the two `!!` lines record a reach that **has no legal role yet**: the
+`captain_write` mailbox worker holds four read-repository ports (`CommandDeps` in
+`crates/infrastructure/src/generated/command_router.rs`) into read models this map places on the far
+side of a wall — `Catalog` (the add-to-cart oversell guard and `place_order`'s repricing, both
+fail-closed) and `Customer`/`Restaurant`/`ProspectionPipeline` (the login path's new-vs-returning
+decision plus write-side guards). **Placement is unaffected; the physical split is BLOCKED on
+register rows STO-7 and STO-8.** The generalisable lesson, and the one this section is the evidence
+for: this map's reader annotations were derived from `api.yaml` resolvers plus hand-added special
+cases, which cannot see a write app's port set — **an app's `CONNECT` set must be derived from its
+DECLARED reads, write-path apps included** ([#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s
+grant emitter), never from a tree drawn by hand.
 
 ---
 
@@ -954,14 +994,23 @@ not a decision — it is register row STO-2 (its staging/connections leg is answ
 
 Copied to [#494](https://github.com/TheCaptainCompany/captain-food/issues/494)'s checklist on approval.
 
-1. Placement of the ~65 unnamed objects — specifically `Cart`, `OrderConversation`,
-   `CustomerCreditBalance`, `SlugAlias`/`slug_reservations` (STO-2). ~~The SIRENE mirror and the
-   Stripe/HubRise staging tables~~ — **answered 2026-08-12**: per-adapter isolated databases
-   (ADP-1, [ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)).
+1. ~~Placement of the ~65 unnamed objects — specifically `Cart`, `OrderConversation`,
+   `CustomerCreditBalance`, `SlugAlias`/`slug_reservations` (STO-2)~~ — **answered in two steps**:
+   the staging/connection leg 2026-08-12 by per-adapter isolated databases (ADP-1,
+   [ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)),
+   and the remaining 17 tables 2026-08-14 by the **STO-2 closure**
+   ([DECISIONS §32](DECISIONS.md#32-storage-boundaries-and-least-privilege-database-users--prop-20260811-093000))
+   — the real remainder was 17, not ~65: the `ref_*` family was already deleted
+   (ADR-20260728-170000).
 2. Does the placement map live in the DSL (recommended — the grant emitter needs it) or in the deploy
    layer?
-3. `ScopeMembership` replicated per read database (recommended) — confirm, and decide whether the
-   `ref_*` enum tables follow the same rule.
+3. ~~`ScopeMembership` replicated per read database (recommended) — confirm, and decide whether the
+   `ref_*` enum tables follow the same rule~~ — **answered**: `ScopeMembership` is declared
+   `replicated: read-databases` (#494 slice 1); the `ref_*` enum tables no longer exist
+   (ADR-20260728-170000), and the STO-2 closure applies the same replicated class to the pricing
+   referentials (`PricingPolicy`/`UberEstimationPolicy`/`UberSplitPolicy`), whose declared readers
+   span two read databases (`read_order` and `read_catalog`) — ≥ 2 is what rules out a single home,
+   and the `read_common` copy comes from the class grammar rather than from a reader.
 4. Does the capability witness on `EventStore::append` land **before** or **with** the per-actor roles?
 5. Does the restore drill's replay leg assert row counts, or a stronger property (a full read-model
    hash) that would also prove fold determinism?

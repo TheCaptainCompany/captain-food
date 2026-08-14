@@ -1,5 +1,5 @@
 //! Emit `specs/generated/databases.generated.{md,json}` — THE DATABASE PLACEMENT INVENTORY
-//! (#494 slice 1): the eleven declared databases, each table's RESOLVED database set, and the
+//! (#494 slice 1): every declared database, each table's RESOLVED database set, and the
 //! recovery postures.
 //!
 //! THIS ARTIFACT IS THE INTERFACE THE NEXT SLICES BUILD AGAINST — read it, never the prose maps:
@@ -14,8 +14,10 @@
 //!
 //! A table's `databases` is always a SET, even while every single-home value is a singleton — the
 //! replicated class (STO-2(a)) already resolves to N, and the erasure sweep (#528) needs the full
-//! set shape. Tables of kinds outside the covered set (business read models, referential tables —
-//! register row STO-2's open remainder) are deliberately ABSENT rather than defaulted.
+//! set shape. Since STO-2 CLOSED (2026-08-14, DECISIONS §32 "STO-2 closure"; #562) EVERY
+//! spec-declared table kind is covered, and the validator's completeness requirement consumes THIS
+//! resolution (`validate::resolve_placements`), so nothing can be validator-green and
+//! inventory-absent.
 
 use crate::*;
 
@@ -116,8 +118,9 @@ pub(crate) fn emit_databases_md(model: &Model) -> String {
     out.push_str(
         "Every table of a covered kind, with its resolved database SET (a set even while single-home — \
          the replicated class resolves to N, and #528's erasure sweep needs the full set shape). \
-         Business read models and referential tables outside the replicated class are deliberately \
-         absent: their placement is register row STO-2's open remainder, never a default.\n\n",
+         Since STO-2 closed (DECISIONS §32 \"STO-2 closure\", 2026-08-14) every spec-declared table \
+         kind is covered: business read models and referential tables declare `database:` or \
+         `replicated:` and an absent placement is a validator ERROR, never a default.\n\n",
     );
     out.push_str("| Table | Kind | Placement | Databases |\n|---|---|---|---|\n");
     for p in validate::resolve_placements(model) {

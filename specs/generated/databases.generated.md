@@ -8,10 +8,10 @@ Resolved from [`specs/database/databases.yaml`](../database/databases.yaml) and 
 
 | Database | K8s object | Owning role | Recovery | Tables (resolved) |
 |---|---|---|---|---|
-| `captain_write` | `captain-write` | `migrator` | pitr | `auth_sessions` · `cart_binding_process_manager` · `delivery_dispatch_process_manager` · `domain_events` · `domain_stream` · `inbound_messages` · `mailbox_partitions` · `payment_process_manager` · `refund_process_manager` · `slug_reservations` · `sms_send_quota` |
-| `read_order` | `read-order` | `migrator` | replay | `ScopeMembership` |
-| `read_catalog` | `read-catalog` | `migrator` | replay | `ScopeMembership` |
-| `read_common` | `read-common` | `migrator` | replay | `ScopeMembership` |
+| `captain_write` | `captain-write` | `migrator` | pitr | `CityDeliveryRanking` · `DeliveryChannelCatalog` · `RestaurantDispatchConfig` · `RuntimePosture` · `auth_sessions` · `cart_binding_process_manager` · `delivery_dispatch_process_manager` · `domain_events` · `domain_stream` · `inbound_messages` · `mailbox_partitions` · `payment_process_manager` · `refund_process_manager` · `slug_reservations` · `sms_send_quota` |
+| `read_order` | `read-order` | `migrator` | replay | `Cart` · `CustomerCreditBalance` · `OrderConversation` · `OrderTracking` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
+| `read_catalog` | `read-catalog` | `migrator` | replay | `Catalog` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
+| `read_common` | `read-common` | `migrator` | replay | `City` · `Customer` · `PricingPolicy` · `ProspectionPipeline` · `Restaurant` · `ScopeMembership` · `SlugAlias` · `UberEstimationPolicy` · `UberSplitPolicy` |
 | `tracking` | `tracking` | `migrator` | backup-required | *(none yet — see the catalog's entry for what its first table owes)* |
 | `adapter_stripe` | `adapter-stripe` | `adapter_stripe` | refetch | `external_stripe_events` |
 | `adapter_hubrise` | `adapter-hubrise` | `adapter_hubrise` | backup-required | `external_hubrise_callbacks` · `hubrise_connection_locations` · `hubrise_connections` |
@@ -22,11 +22,28 @@ Resolved from [`specs/database/databases.yaml`](../database/databases.yaml) and 
 
 ## Tables
 
-Every table of a covered kind, with its resolved database SET (a set even while single-home — the replicated class resolves to N, and #528's erasure sweep needs the full set shape). Business read models and referential tables outside the replicated class are deliberately absent: their placement is register row STO-2's open remainder, never a default.
+Every table of a covered kind, with its resolved database SET (a set even while single-home — the replicated class resolves to N, and #528's erasure sweep needs the full set shape). Since STO-2 closed (DECISIONS §32 "STO-2 closure", 2026-08-14) every spec-declared table kind is covered: business read models and referential tables declare `database:` or `replicated:` and an absent placement is a validator ERROR, never a default.
 
 | Table | Kind | Placement | Databases |
 |---|---|---|---|
+| `Cart` | projection table | declared | `read_order` |
+| `Catalog` | projection table | declared | `read_catalog` |
+| `City` | referential table | declared | `read_common` |
+| `CityDeliveryRanking` | referential table | declared | `captain_write` |
+| `Customer` | projection table | declared | `read_common` |
+| `CustomerCreditBalance` | projection table | declared | `read_order` |
+| `DeliveryChannelCatalog` | referential table | declared | `captain_write` |
+| `OrderConversation` | projection table | declared | `read_order` |
+| `OrderTracking` | projection table | declared | `read_order` |
+| `PricingPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
+| `ProspectionPipeline` | projection table | declared | `read_common` |
+| `Restaurant` | projection table | declared | `read_common` |
+| `RestaurantDispatchConfig` | referential table | declared | `captain_write` |
+| `RuntimePosture` | referential table | declared | `captain_write` |
 | `ScopeMembership` | projection table | replicated | `read_order` · `read_catalog` · `read_common` |
+| `SlugAlias` | projection table | declared | `read_common` |
+| `UberEstimationPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
+| `UberSplitPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
 | `auth_sessions` | connection table | declared | `captain_write` |
 | `cart_binding_process_manager` | process-manager state table | derived | `captain_write` |
 | `delivery_dispatch_process_manager` | process-manager state table | derived | `captain_write` |

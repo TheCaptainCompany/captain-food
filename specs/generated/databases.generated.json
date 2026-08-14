@@ -6,6 +6,10 @@
       "owner": "migrator",
       "recovery": "pitr",
       "tables": [
+        "CityDeliveryRanking",
+        "DeliveryChannelCatalog",
+        "RestaurantDispatchConfig",
+        "RuntimePosture",
         "auth_sessions",
         "cart_binding_process_manager",
         "delivery_dispatch_process_manager",
@@ -24,7 +28,14 @@
       "owner": "migrator",
       "recovery": "replay",
       "tables": [
-        "ScopeMembership"
+        "Cart",
+        "CustomerCreditBalance",
+        "OrderConversation",
+        "OrderTracking",
+        "PricingPolicy",
+        "ScopeMembership",
+        "UberEstimationPolicy",
+        "UberSplitPolicy"
       ]
     },
     "read_catalog": {
@@ -32,7 +43,11 @@
       "owner": "migrator",
       "recovery": "replay",
       "tables": [
-        "ScopeMembership"
+        "Catalog",
+        "PricingPolicy",
+        "ScopeMembership",
+        "UberEstimationPolicy",
+        "UberSplitPolicy"
       ]
     },
     "read_common": {
@@ -40,7 +55,15 @@
       "owner": "migrator",
       "recovery": "replay",
       "tables": [
-        "ScopeMembership"
+        "City",
+        "Customer",
+        "PricingPolicy",
+        "ProspectionPipeline",
+        "Restaurant",
+        "ScopeMembership",
+        "SlugAlias",
+        "UberEstimationPolicy",
+        "UberSplitPolicy"
       ]
     },
     "tracking": {
@@ -101,8 +124,133 @@
     }
   },
   "tables": {
+    "Cart": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_order"
+      ]
+    },
+    "Catalog": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_catalog"
+      ]
+    },
+    "City": {
+      "kind": "referential table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "CityDeliveryRanking": {
+      "kind": "referential table",
+      "placement": "declared",
+      "databases": [
+        "captain_write"
+      ]
+    },
+    "Customer": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "CustomerCreditBalance": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_order"
+      ]
+    },
+    "DeliveryChannelCatalog": {
+      "kind": "referential table",
+      "placement": "declared",
+      "databases": [
+        "captain_write"
+      ]
+    },
+    "OrderConversation": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_order"
+      ]
+    },
+    "OrderTracking": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_order"
+      ]
+    },
+    "PricingPolicy": {
+      "kind": "referential table",
+      "placement": "replicated",
+      "databases": [
+        "read_order",
+        "read_catalog",
+        "read_common"
+      ]
+    },
+    "ProspectionPipeline": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "Restaurant": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "RestaurantDispatchConfig": {
+      "kind": "referential table",
+      "placement": "declared",
+      "databases": [
+        "captain_write"
+      ]
+    },
+    "RuntimePosture": {
+      "kind": "referential table",
+      "placement": "declared",
+      "databases": [
+        "captain_write"
+      ]
+    },
     "ScopeMembership": {
       "kind": "projection table",
+      "placement": "replicated",
+      "databases": [
+        "read_order",
+        "read_catalog",
+        "read_common"
+      ]
+    },
+    "SlugAlias": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "UberEstimationPolicy": {
+      "kind": "referential table",
+      "placement": "replicated",
+      "databases": [
+        "read_order",
+        "read_catalog",
+        "read_common"
+      ]
+    },
+    "UberSplitPolicy": {
+      "kind": "referential table",
       "placement": "replicated",
       "databases": [
         "read_order",

@@ -2,6 +2,63 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗄️ **2026-08-14 — EVERY TABLE HAS A DECLARED HOME: STO-2 CLOSED, PLACEMENT IS NOW A VALIDATOR
+> REQUIREMENT** ([#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make
+> placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562) /
+> PR [#563](https://github.com/TheCaptainCompany/captain-food/pull/563)). The 17-table remainder
+> (the row's "~65" counted the `ref_*` family deleted 2026-07-28) is placed by port evidence —
+> map + per-table lineage in [DECISIONS §32 "STO-2 closure"](proposals/DECISIONS.md): order-boundary
+> read models → `read_order` (incl. `OrderConversation`/`CustomerCreditBalance` per §31's
+> comms/payments-dissolve-into-order), `Catalog` → `read_catalog`, `Customer`/`Restaurant`/
+> `SlugAlias`/`ProspectionPipeline`/`City` → `read_common`, the pricing trio
+> (`PricingPolicy`/`Uber*Policy`) **replicated into every read database** (four reader sites
+> resolving to TWO of them, `read_order` + `read_catalog` — two is what rules out a single home; the
+> `read_common` copy comes from the replicated class grammar, not from a reader), the dispatch trio + `RuntimePosture` → `captain_write` (the trio's sole port is
+> write-side; the posture is placed by the replay revert alone — its governed set is restricted to no
+> side, so a future non-`captain_write` tenant would put a fail-closed startup read across the wall,
+> recorded as a tripwire on the declaration). The §18 refusal arm ("business placement
+> is an open register row") is now a **requirement arm** that consumes the same resolution the
+> inventory emitter walks, so validation and emission cannot disagree; the ADP-1 wall runs on every
+> single-home placement. **FOUR NEW OPEN ROWS.** **STO-7**
+> (`read_order`/`read_catalog`) — *who is the catalog's pricing-and-orderability authority?* TWO
+> paths cross that wall: the cart's read-time pricing (found at the mob checkpoint; post-split the
+> cart cannot render names/prices, the #424 class) **and the checkout WRITE path** (found by the
+> post-ready independent review — the mailbox worker's `CommandDeps.catalogs` backs the add-to-cart
+> oversell guard and `place_order`'s repricing, so post-split every add-to-cart and every checkout
+> fails closed). **STO-8** (`read_common`) — *may a `captain_write` app read `read_common`?* Nine
+> handlers do, headed by `verify_phone`'s new-vs-returning read of `Customer` **on the login path**,
+> whose degraded form silently re-registers returning customers as new. **STO-9** (`read_order`, a
+> THIRD wall direction found by review round 2) — **the money one**: `SettlementHooks` reads
+> `OrderTracking` for `payment_intent_id` immediately before EVERY Stripe capture and release, so
+> post-split capture never runs, the authorization expires and **the food is delivered while the money
+> is never collected**; the dispatch, reclamation and guest-cart-binding PMs ride the same wall. It is
+> its own row because deciding STO-7 + STO-8 does NOT unblock `read_order` while that read
+> fail-closes. **STO-10 is different in kind — AMBER, founder-owned**: the HubRise adapter bin already
+> reads `read_common` (its own repository + a 40× projection poll), a SECOND outward grant where
+> **ADP-1 allows exactly one**, so it REOPENS a closed directive rather than asking a new question —
+> and the poll breaches the no-polling ADR as well.
+> **THE METHOD FINDING OUTRANKS THE MAP, and it is worse than "we were careless": the crossings were
+> ALREADY DECLARED IN TYPED DSL.** Thirteen `read:` steps in `specs/*/processmanager.yaml` carry
+> `model: { $ref: 'database/tables/projection_tables.yaml#/X' }` — eight of them on `OrderTracking`,
+> the settlement legs — and `process_manager/runner.rs:141` says so in a comment. Four consecutive
+> hand-sweeps rediscovered by hand what the loader can resolve, each miss found by a READER and never
+> by the sweep, and **round 4 found crossings that round 3's own written formula already covered**.
+> **Completeness is therefore WITHDRAWN as a class, with its reason**, rather than re-claimed by a
+> fifth sweep: reader sets in `projection_tables.yaml`/`databases.yaml` now carry a uniform
+> non-exhaustiveness marker, the *"sole reader"* phrasing is retired everywhere (including where it is
+> true), and `read_order`'s *"no other SUBGRAPH holds CONNECT"* — the sentence shape that excluded the
+> `pm-*`/`adapter-*` classes by construction — is rewritten to the honest form. Known limits are named,
+> including the one PM a DSL walker still misses (`ReclamationProcess`, whose read lives in a
+> `description:` string behind a hand-written seam). The 17 placements are UNCHANGED and each still
+> follows from a recorded decision. Nothing physical moved — no grants, CRs or migrations
+> (#513/#514/#509 unchanged; **#513's grant emitter must derive CONNECT MECHANICALLY from the declared
+> `read:` steps + generated composition roots, never from this prose — but NOT VERBATIM: a `read:` step
+> declares the model SHAPE a leg consumes, not the physical SOURCE, and THREE of the thirteen are
+> `captain_write` stream folds (`Restaurant` in delivery + ordering, `Cart` on PlaceOrder), so a literal
+> derivation over-grants `read_common`/`read_order` for paths no code takes.** The symmetry is the
+> lesson: the hand method failed by MISSING crossings, the naive derivation fails by INVENTING them, and
+> deriving is right only once the declaration distinguishes source from shape — DECISIONS §32 limit (4)).
+
 > 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
 > *"For the pickup order the payment captured must happen when the order is prepared don't you
 > think?"*). Refines [ADR-20260808-195315 §1.2](adr/ADR-20260808-195315-customer-brief-answers.md) and
@@ -177,8 +234,10 @@
 > staging/connection tables declare `database:` as a `$ref`, `ScopeMembership` is
 > `replicated: read-databases` (STO-2(a)), and the ADP-1 membership wall is red in both directions
 > (the avelo37 flip [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)
-> documents nearly shipping now names its own mismatch). Business-table placement stays **open**
-> (register row STO-2) and declaring one is refused so a spec edit cannot silently close the row.
+> documents nearly shipping now names its own mismatch). Business-table placement was **open** at
+> this slice (register row STO-2) and declaring one was refused so a spec edit could not silently
+> close the row — **superseded 2026-08-14: STO-2 closed and the refusal flipped to a requirement
+> ([#562](https://github.com/TheCaptainCompany/captain-food/issues/562), entry above)**.
 > The resolved inventory is GENERATED — `specs/generated/databases.generated.{md,json}` — and is
 > the interface [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) (drill legs),
 > [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) (grant emitter) and

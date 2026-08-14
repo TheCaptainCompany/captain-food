@@ -9,6 +9,14 @@ description: >
 
 PricingPolicy:
   reference: true
+  # STO-2 closure (DECISIONS §32, 2026-08-14): replicated — its declared readers span read databases
+  # (the Cart read-time breakdown in read_order, the admin query on the order boundary). Migrator-
+  # seeded-only: no subgraph role writes it; changes go by migration with effective_from (fee_rate IS
+  # the take rate). The SEED SCRIPT is part of each read database's recovery path — a replay-only
+  # restore comes back EMPTY here (silent misprice / dead checkout); #509's drill asserts seeded row
+  # counts. Recorded tripwire: commands.rs names a FUTURE write-path reader (ADR-0016/0017 pricing
+  # plug-in) that replication does NOT reach (captain_write is not replay) — that slice owes its own decision.
+  replicated: read-databases
   description: >
     Calibratable Captain service-fee policy (ADR-0016/0017); one active row per currency. Seeded with the
     ADR-0017 indicative values: fee_rate 5.0, buyer_share 60.0, margin_low 55.0, margin_high 70.0.
@@ -22,6 +30,12 @@ PricingPolicy:
 
 UberEstimationPolicy:
   reference: true
+  # STO-2 closure: replicated — read at FOLD time by the OrderTracking uber_* receipt (read_order)
+  # and the Catalog uberPrice derivation (read_catalog), plus the admin query; single-home would make
+  # the ADR-0025 receipt degrade SILENTLY (indistinguishable from the legitimate no-cuisine null).
+  # Migrator-seeded-only; uber_* values are published comparative-advertising claims — changes by
+  # migration with effective_from. Seed script is part of each read database's recovery path (#509).
+  replicated: read-databases
   description: >
     Per-cuisine Uber Eats price mark-up coefficient (ADR-0024); one row per CuisineCategory. Seeded:
     FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35.
@@ -32,6 +46,10 @@ UberEstimationPolicy:
 
 UberSplitPolicy:
   reference: true
+  # STO-2 closure: replicated — same readers as UberEstimationPolicy (OrderTracking fold, Cart
+  # read-time comparison, admin query). Migrator-seeded-only; changes by migration with
+  # effective_from. Seed script is part of each read database's recovery path (#509).
+  replicated: read-databases
   description: >
     Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0024/0025); one row per
     currency. Seeded: uber_commission_pct 30.0, rider_base_cents 285, rider_per_km_cents 80,
@@ -53,6 +71,9 @@ UberSplitPolicy:
 
 City:
   reference: true
+  # STO-2 closure: zero runtime readers today (only city_id keys elsewhere); the read-side admin/city
+  # surface reads it when it lands. Seed script (V0: Tours) is part of read_common's recovery path (#509).
+  database: { $ref: 'database/databases.yaml#/read_common' }
   description: >
     A city Captain operates in (#60). The routing scope: CityDeliveryRanking is keyed by city_id and a
     restaurant's dispatch config names its city. Seeded (V0: Tours).
@@ -63,6 +84,12 @@ City:
 
 DeliveryChannelCatalog:
   reference: true
+  # STO-2 closure: the only port the derivation finds is DispatchStrategyRepository, consumed write-side
+  # (DeliveryDispatchProcess PM + DeliveryOfferTimeoutWorker, captain_write apps joining PM state) —
+  # no read-side port exists, so a read database would hand a write-path app a cross-wall CONNECT.
+  # "Later API-writable via partner self-registration" (#61) is a recorded future decision, not solved
+  # here. Seed script is part of captain_write's recovery path (#509).
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     Catalog of known delivery channels/partners with their SPEC-LEVEL defaults (#60). One row per channel.
     Per-scope USAGE (ranking, TTL overrides) is runtime config (CityDeliveryRanking), not here. Every
@@ -77,6 +104,9 @@ DeliveryChannelCatalog:
 
 CityDeliveryRanking:
   reference: true
+  # STO-2 closure: same sole write-side port as DeliveryChannelCatalog (DispatchStrategyRepository).
+  # Seed script (Tours ranking) is part of captain_write's recovery path (#509).
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     Per-city ORDERED channel list Captain walks when it dispatches (#60) — the runtime 'content' the spec
     cannot anticipate. Resolution: the latest effective_from set for a city, ordered by rank; a row with a
@@ -91,6 +121,9 @@ CityDeliveryRanking:
 
 RestaurantDispatchConfig:
   reference: true
+  # STO-2 closure: same sole write-side port as DeliveryChannelCatalog (DispatchStrategyRepository).
+  # Seeded/managed rows are part of captain_write's recovery path (#509).
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     Per-restaurant dispatch config (#60): the restaurant's city (routing scope), whether Captain or the
     restaurant dispatches, and — for self-dispatch — the restaurant's own delay threshold driving the
@@ -106,6 +139,16 @@ RestaurantDispatchConfig:
 
 RuntimePosture:
   reference: true
+  # STO-2 closure: seeded/UPDATEd, never folded, so in a replay database a restore would silently
+  # REVERT an admin-flipped posture to seed: the documented worst failure for a fleet-consistency
+  # table on a money path. Hence captain_write (pitr). The governed set is NOT a second argument for
+  # that placement: the only tenant the mechanism ever had (PM_MAILBOX_DELIVERY, retired in #242)
+  # happened to be write-side, while the contract below restricts its startup readers to no side.
+  # Recorded tripwire: a posture whose governed set includes any non-captain_write app (a projector,
+  # a subgraph bin, the gateway, an adapter) puts a FAIL-CLOSED startup read across the wall, into the
+  # database the split most wants unreachable — that posture's slice owes its own decision (replicate
+  # the row, push the value, or a recorded CONNECT).
+  database: { $ref: 'database/databases.yaml#/captain_write' }
   description: >
     Process-wide runtime postures — ONE row per posture, read at startup by EVERY process the
     posture governs (#318, ADR-20260803-104819). A posture is DELIBERATELY not an env key:
