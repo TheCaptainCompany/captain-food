@@ -5783,9 +5783,9 @@ _On payment AUTHORIZATION (funds held on the card, not captured — ADR-20260808
 <a id="rule-paymentcapturedonfulfilment"></a>
 #### 📐 Rule: `PaymentCapturedOnFulfilment`
 
-_An AUTHORIZED payment is captured when the order is handed to the customer (OrderDelivered — the one handover fact for DELIVERY and COLLECTION alike): PaymentSettlementProcess requests the full-amount capture, and the settled inbound PaymentCaptured records that the money moved. Orders that never charge ($0 replacements) and payments not in the AUTHORIZED state are never captured._
+_A payment is captured on handover (OrderDelivered — the one fact for DELIVERY and COLLECTION alike) ONLY when the order carries a Captain AUTHORIZATION to capture: an order whose OrderTracking row has a payment_intent_id AND payment_status AUTHORIZED. The delivery fact alone NEVER captures — an order with no Captain PaymentIntent ($0 replacements today; post-V0 external orders ingested from Uber Eats, already paid on the partner's rails with no Captain authorization, ADR-20260813-233418 AR-2) is structurally skipped, not captured. PaymentSettlementProcess requests the full-amount capture; the settled inbound PaymentCaptured records that the money moved. The concrete external-order regression test (an ExternalOrderReceived order marked delivered triggers no capture) lands with the external-orders slice — the event does not exist yet._
 
-- **Verified by**: [🧪 `TestCaptureRequestedOnOrderDelivered`](#test-testcapturerequestedonorderdelivered), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
+- **Verified by**: [🧪 `TestCaptureRequestedOnOrderDelivered`](#test-testcapturerequestedonorderdelivered), [🧪 `TestNoCaptureWithoutCaptainAuthorization`](#test-testnocapturewithoutcaptainauthorization), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
 
 <a id="rule-authorizationreleasedwithoutcapture"></a>
 #### 📐 Rule: `AuthorizationReleasedWithoutCapture`
@@ -7253,6 +7253,16 @@ _Rejects a partial refund resolution that exceeds the order's captured total_
 _Requests the Stripe capture when an AUTHORIZED order is delivered / picked up_
 
 - **Given**: _(none)_
+- **When**: [📩 `OrderDelivered`](#command-orderdelivered)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
+
+<a id="test-testnocapturewithoutcaptainauthorization"></a>
+#### 🧪 Test: `TestNoCaptureWithoutCaptainAuthorization`
+
+_Delivery alone never captures: an order with no Captain authorization (no payment intent) is structurally skipped_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
 - **When**: [📩 `OrderDelivered`](#command-orderdelivered)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)

@@ -2786,6 +2786,20 @@ async fn test_capture_requested_on_order_delivered() {
     bed.assert_appended("TestCaptureRequestedOnOrderDelivered", &before, &[]);
 }
 
+/// tests.yaml#/tests/TestNoCaptureWithoutCaptainAuthorization — "Delivery alone never captures: an order with no Captain authorization (no payment intent) is structurally skipped"
+/// rules: PaymentCapturedOnFulfilment
+#[tokio::test]
+async fn test_no_capture_without_captain_authorization() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("replacement-order-1")), vec![fx_order_placed_replacement()]).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderDelivered { order_id: sc::OrderId(support::uid("replacement-order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")) };
+    let result = crate::process_managers::payment_settlement::on_order_delivered(&bed.store, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestNoCaptureWithoutCaptainAuthorization: the spec expects acceptance");
+    bed.assert_appended("TestNoCaptureWithoutCaptainAuthorization", &before, &[]);
+}
+
 /// tests.yaml#/tests/TestReleaseRequestedOnOrderRejected — "Releases the uncaptured hold when the restaurant rejects an AUTHORIZED order (no refund — no capture)"
 /// rules: AuthorizationReleasedWithoutCapture
 #[tokio::test]

@@ -870,7 +870,7 @@ pub mod payment_settlement_process {
 
     /// Non-structural hooks for the generated `OrderDelivered` leg — the seams the step DSL cannot express
     /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
+    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The capture keys on the PRESENCE OF A CAPTAIN AUTHORIZATION, never on the delivery fact alone (rules.yaml#/PaymentCapturedOnFulfilment): the read skips orders with no payment_intent_id and the guard skips payments not AUTHORIZED — so a $0 replacement today, and a post-V0 EXTERNAL order (Uber Eats ingest: already paid on the partner's rails, no Captain PaymentIntent — ADR-20260813-233418 AR-2), can never trip a phantom capture; the concrete ExternalOrderReceived regression test lands with that slice. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
     #[async_trait::async_trait]
     pub trait OrderDeliveredHooks: Send + Sync {
         /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). The fulfilled order, with its folded payment state. Return `Skip` to end the leg as a benign no-op.
@@ -881,7 +881,7 @@ pub mod payment_settlement_process {
     }
 
     /// EVENT leg `events.yaml#/OrderDelivered` — generated step pipeline (issue #25).
-    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
+    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The capture keys on the PRESENCE OF A CAPTAIN AUTHORIZATION, never on the delivery fact alone (rules.yaml#/PaymentCapturedOnFulfilment): the read skips orders with no payment_intent_id and the guard skips payments not AUTHORIZED — so a $0 replacement today, and a post-V0 EXTERNAL order (Uber Eats ingest: already paid on the partner's rails, no Captain PaymentIntent — ADR-20260813-233418 AR-2), can never trip a phantom capture; the concrete ExternalOrderReceived regression test lands with that slice. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
     pub async fn on_order_delivered(
         payment: &dyn crate::generated::services::PaymentService,
         hooks: &dyn OrderDeliveredHooks,
