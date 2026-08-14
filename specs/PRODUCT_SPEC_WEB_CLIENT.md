@@ -147,7 +147,7 @@ Constraints:
 
 - As a customer, I want to see order status in real-time.
 - Statuses:
-  - `PLACED` (payment captured, order sent to restaurant)
+  - `PLACED` (payment authorized — funds held, captured at handover per ADR-20260808-195315 §1.2 — order sent to restaurant)
   - `ACCEPTED`
   - `REJECTED`
   - `PREPARING`

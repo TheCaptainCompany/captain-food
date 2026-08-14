@@ -150,7 +150,7 @@ external system sometimes just INFORMS us of a fact that already happened — no
 nothing to refuse. Those are **inbound (integration) events**, recorded directly through the
 Anti-Corruption Layer (idempotently keyed), without a command. Rule of thumb: originator can be
 told "no" → command; stating an already-occurred fact → inbound event. Captain.Food inbound
-events: Stripe `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`; HubRise inventory sync +
+events: Stripe `PaymentAuthorized`/`PaymentCaptured`/`PaymentReleased`/`PaymentFailed`/`PaymentRefunded`; HubRise inventory sync +
 externally-channeled order updates; delivery partners' `DeliveryStatusUpdated`/
 `DeliveryAcceptedByPartner`. Note the request/report split: a refund is REQUESTED by a command
 (`RejectOrder`, `CancelOrder*`) but the `PaymentRefunded` FACT is REPORTED by Stripe. Contrast
