@@ -107,7 +107,7 @@ PlaceOrder:
     mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     orderId:
       $ref: 'scalars.yaml#/OrderId'
-      description: "Client-generated id for the order the saga will materialize on payment capture."
+      description: "Client-generated id for the order the saga will materialize on payment authorization (ADR-20260808-195315 §1.2)."
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
     cartId:

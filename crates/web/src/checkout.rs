@@ -385,6 +385,9 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 {mount_key.map(|pk| view! {
                     <div data-c="stripe_express_checkout_element" id=crate::stripe::MOUNT_ID data-pk=pk></div>
                 })}
+                // Authorize-then-capture disclosure (#544): the card is HELD now and DEBITED on
+                // delivery. Persistent on the pay step — framing the hold as a charge is wrong.
+                <p data-c="text" id="payment_hold_notice" data-size="sm">{t("checkout.payment.hold_notice")}</p>
                 // Test-mode banner (#440): persistent on the pay step while the key is pk_test_.
                 {test_mode.then(|| view! {
                     <p data-c="text" id="test_mode_banner" data-size="sm">{t("checkout.test_mode.banner")}</p>

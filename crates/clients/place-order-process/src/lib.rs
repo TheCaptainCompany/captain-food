@@ -31,7 +31,7 @@ mod sealed {
 }
 
 impl sealed::Sealed for domain::generated::commands::PlaceOrder {}
-impl sealed::Sealed for domain::generated::events::PaymentCaptured {}
+impl sealed::Sealed for domain::generated::events::PaymentAuthorized {}
 impl sealed::Sealed for domain::generated::events::PaymentFailed {}
 
 /// GENERATED from actors.yaml `PlaceOrderProcess.receives`: marker for every COMMAND the `PlaceOrderProcess` actor
@@ -58,10 +58,10 @@ pub trait PlaceOrderProcessFact: sealed::Sealed + serde::Serialize + Send {
     fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
-impl PlaceOrderProcessFact for domain::generated::events::PaymentCaptured {
-    const EVENT_TYPE: &'static str = "PaymentCaptured";
+impl PlaceOrderProcessFact for domain::generated::events::PaymentAuthorized {
+    const EVENT_TYPE: &'static str = "PaymentAuthorized";
     fn into_domain_event(self) -> domain::generated::events::DomainEvent {
-        domain::generated::events::DomainEvent::PaymentCaptured(self)
+        domain::generated::events::DomainEvent::PaymentAuthorized(self)
     }
 }
 

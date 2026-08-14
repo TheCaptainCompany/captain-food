@@ -122,6 +122,12 @@ impl PaymentService for HttpPaymentService {
     async fn request(&self, input: PaymentRequestInput, meta: &ServiceCallMeta) -> Result<PaymentRequestOutput, DomainError> {
         post_call(&self.http, &self.base_url, "/services/payment/request", input, meta).await
     }
+    async fn capture(&self, input: PaymentCaptureInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/payment/capture", input, meta).await
+    }
+    async fn release(&self, input: PaymentReleaseInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/payment/release", input, meta).await
+    }
     async fn refund(&self, input: PaymentRefundInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/payment/refund", input, meta).await
     }

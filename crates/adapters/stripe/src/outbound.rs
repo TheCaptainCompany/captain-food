@@ -2,11 +2,21 @@
 //! (services.yaml `payment`, issue #26 — replaces the composition root's
 //! `FailClosedPaymentGateway` stand-in when `STRIPE_SECRET_KEY` is configured).
 //!
-//! - `payment.request` → `POST {base}/v1/payment_intents` (form-encoded), tagging the intent's
-//!   `metadata` with the [`ServiceCallMeta`] business refs (`orderId`/`restaurantId`/`cartId`,
-//!   copied VERBATIM) so the INBOUND webhook ACL (acl.rs) can map `payment_intent.*` facts back
-//!   onto our aggregates. `confirm=false`: the FRONTEND confirms with the returned `client_secret`
+//! - `payment.request` → `POST {base}/v1/payment_intents` (form-encoded,
+//!   `capture_method=manual` — authorize-then-capture, ADR-20260808-195315 §1.2: confirmation
+//!   HOLDS the funds, the money moves at capture), tagging the intent's `metadata` with the
+//!   [`ServiceCallMeta`] business refs (`orderId`/`restaurantId`/`cartId`, copied VERBATIM) so the
+//!   INBOUND webhook ACL (acl.rs) can map `payment_intent.*` facts back onto our aggregates.
+//!   `confirm=false`: the FRONTEND confirms with the returned `client_secret`
 //!   (specs/PRODUCT_SPEC_WEB_CLIENT.md checkout).
+//! - `payment.capture` → `POST {base}/v1/payment_intents/{id}/capture` (full authorized amount;
+//!   PaymentSettlementProcess's fulfilment leg); the settled `PaymentCaptured` stays an inbound
+//!   webhook fact. A failed capture ALSO bumps `payment_capture_failed_total{reason}` here — the
+//!   paging half of the observability contract (specs/observability.yaml#/payment-settlement).
+//! - `payment.release` → `POST {base}/v1/payment_intents/{id}/cancel` (void an uncaptured hold;
+//!   the rejection/timeout path needs no refund because no capture — §1.3); the settled
+//!   `PaymentReleased` arrives as the `payment_intent.canceled` webhook fact. Failures bump the
+//!   warn-level `payment_release_failed_total{reason}` (a dead void self-heals by expiry).
 //! - `payment.refund` → `POST {base}/v1/refunds` (`payment_intent` + `amount`); the refund OUTCOME
 //!   (`PaymentRefunded`) stays an inbound webhook fact, never this call's return value.
 //!
@@ -18,7 +28,8 @@
 //! the request encoding and response/error mapping are PURE functions, unit-tested without network.
 
 use application::generated::services::{
-    PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
+    PaymentCaptureInput, PaymentRefundInput, PaymentReleaseInput, PaymentRequestInput,
+    PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use async_trait::async_trait;
 use domain::generated::scalars::PaymentIntentId;
@@ -123,6 +134,43 @@ impl PaymentService for StripePaymentGateway {
         result
     }
 
+    async fn capture(&self, input: PaymentCaptureInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        // Full-amount capture (no amount_to_capture: Stripe captures the whole authorization by
+        // default — partial capture is the recorded open tips discussion, ADR-20260808-195315
+        // §1.4). Deterministic per intent: a redelivered fulfilment trigger re-runs the call and
+        // Stripe answers with the SAME capture instead of erroring on the second attempt.
+        let key = capture_idempotency_key(&input);
+        let path = format!("/v1/payment_intents/{}/capture", input.payment_intent_id.0);
+        let (status, body) = self.post_form(&path, &[], Some(&key)).await?;
+        let result = decode_capture_response(status, &body);
+        if let Err(e) = &result {
+            // The PAGING half of the payment-settlement contract: food cooked, money did not move.
+            // Reason mirrors the wrapper's CaptureFailureReason classification over the same error
+            // contract (application::process_managers::payment_settlement::classify_capture_error).
+            telemetry::meters::payment_settlement::capture_failed(capture_failure_label(e));
+        }
+        result
+    }
+
+    async fn release(&self, input: PaymentReleaseInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        // Void of an UNCAPTURED authorization ("no need to refund because no capture", §1.3).
+        // Same idempotency posture as capture: a redelivered abort trigger lands on the same
+        // cancellation. The released fact arrives as the `payment_intent.canceled` webhook.
+        let key = release_idempotency_key(&input);
+        let path = format!("/v1/payment_intents/{}/cancel", input.payment_intent_id.0);
+        let (status, body) = self.post_form(&path, &[], Some(&key)).await?;
+        let result = decode_cancel_response(status, &body);
+        if let Err(e) = &result {
+            // Warn-level (never a page): a failed void self-heals — the hold expires within ~7 days.
+            let reason = match e {
+                DomainError::Repository(_) => "transient",
+                _ => "deterministic",
+            };
+            telemetry::meters::payment_settlement::release_failed(reason);
+        }
+        result
+    }
+
     async fn refund(&self, input: PaymentRefundInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         let form = encode_refund_form(&input);
         // Deterministic per (intent, amount): a redelivered ApproveRefund re-runs the call and
@@ -142,6 +190,32 @@ pub fn intent_idempotency_key(meta: &ServiceCallMeta) -> Option<String> {
 /// The refund idempotency key: deterministic over the refunded intent and amount.
 pub fn refund_idempotency_key(input: &PaymentRefundInput) -> String {
     format!("refund:{}:{}", input.payment_intent_id.0, input.amount.amount_cents.0)
+}
+
+/// The capture idempotency key: deterministic per intent (full-amount capture, one per payment).
+pub fn capture_idempotency_key(input: &PaymentCaptureInput) -> String {
+    format!("capture:{}", input.payment_intent_id.0)
+}
+
+/// The release (void) idempotency key: deterministic per intent.
+pub fn release_idempotency_key(input: &PaymentReleaseInput) -> String {
+    format!("release:{}", input.payment_intent_id.0)
+}
+
+/// The `payment_capture_failed_total{reason}` label for a capture-call error — the SAME
+/// classification the saga wrapper records on the PaymentCaptureFailed fact (typed
+/// scalars.yaml#/CaptureFailureReason values), derived from this adapter's own error contract.
+fn capture_failure_label(err: &DomainError) -> &'static str {
+    match err {
+        DomainError::Invariant(msg) if msg.starts_with("PaymentDeclined") => "CARD_DECLINED",
+        DomainError::Invariant(msg)
+            if msg.contains("expired") || msg.contains("canceled") || msg.contains("cancelled") =>
+        {
+            "AUTHORIZATION_EXPIRED"
+        }
+        DomainError::Invariant(_) => "GATEWAY_REFUSED",
+        _ => "GATEWAY_UNAVAILABLE",
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -165,6 +239,10 @@ pub fn encode_create_intent_form(
     for (key, value) in &meta.refs {
         form.push((format!("metadata[{key}]"), value.clone()));
     }
+    // Authorize-then-capture (ADR-20260808-195315 §1.2): confirmation HOLDS the funds
+    // (`payment_intent.amount_capturable_updated` → PaymentAuthorized); the money moves only at
+    // the explicit capture on fulfilment. Without this, Stripe captures automatically at confirm.
+    form.push(("capture_method".into(), "manual".into()));
     form.push(("confirm".into(), "false".into()));
     form
 }
@@ -280,6 +358,26 @@ pub fn decode_refund_response(status: u16, body: &str) -> Result<(), DomainError
     Err(map_error("request_refund", status, body))
 }
 
+/// Parse a `POST /v1/payment_intents/{id}/capture` response: 2xx = capture ACCEPTED (settlement
+/// arrives as the inbound `PaymentCaptured` webhook fact); errors map like create-intent — a
+/// decline is the canonical `PaymentDeclined`, a deterministic refusal (already captured/canceled,
+/// expired authorization) `PaymentGatewayRefused`, transient failures `Repository`.
+pub fn decode_capture_response(status: u16, body: &str) -> Result<(), DomainError> {
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    Err(map_error("capture_payment_intent", status, body))
+}
+
+/// Parse a `POST /v1/payment_intents/{id}/cancel` response: 2xx = void ACCEPTED (the released
+/// fact arrives as the inbound `PaymentReleased` webhook — `payment_intent.canceled`).
+pub fn decode_cancel_response(status: u16, body: &str) -> Result<(), DomainError> {
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    Err(map_error("cancel_payment_intent", status, body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,8 +399,11 @@ mod tests {
             .with_ref("cartId", "33333333-3333-4333-8333-333333333333")
     }
 
+    /// ADR-20260808-195315 §1.2: `capture_method=manual` is what makes the confirm an
+    /// AUTHORIZATION (funds held) instead of an automatic capture — the money moves only at the
+    /// explicit capture on fulfilment. Losing this one pair silently reverts the whole posture.
     #[test]
-    fn create_intent_form_encodes_amount_lowercase_currency_metadata_and_no_confirm() {
+    fn create_intent_form_encodes_manual_capture_metadata_and_no_confirm() {
         let form = encode_create_intent_form(&request(), &meta());
         assert_eq!(
             form,
@@ -322,6 +423,7 @@ mod tests {
                     "metadata[restaurantId]".to_string(),
                     "22222222-2222-4222-8222-222222222222".to_string()
                 ),
+                ("capture_method".to_string(), "manual".to_string()),
                 ("confirm".to_string(), "false".to_string()),
             ]
         );
@@ -341,6 +443,44 @@ mod tests {
             amount: Money { amount_cents: MoneyCents(500), currency: CurrencyCode("EUR".into()) },
         });
         assert_eq!(key, "refund:pi_123:500");
+        // Capture/release keys are per-intent: a redelivered fulfilment/abort trigger must land
+        // on the SAME gateway object (rules.yaml#/PaymentCapturedOnFulfilment idempotency half).
+        assert_eq!(
+            capture_idempotency_key(&PaymentCaptureInput {
+                payment_intent_id: PaymentIntentId("pi_123".into()),
+            }),
+            "capture:pi_123"
+        );
+        assert_eq!(
+            release_idempotency_key(&PaymentReleaseInput {
+                payment_intent_id: PaymentIntentId("pi_123".into()),
+            }),
+            "release:pi_123"
+        );
+    }
+
+    /// Capture/cancel responses: 2xx accepted; a decline stays the canonical PaymentDeclined; a
+    /// deterministic refusal (already captured, expired auth → canceled intent) is terminal.
+    #[test]
+    fn capture_and_cancel_responses_map_like_create_intent() {
+        assert!(decode_capture_response(200, r#"{"id":"pi_1","status":"succeeded"}"#).is_ok());
+        assert!(decode_cancel_response(200, r#"{"id":"pi_1","status":"canceled"}"#).is_ok());
+        let declined = r#"{"error":{"type":"card_error","code":"card_declined","message":"Your card was declined."}}"#;
+        match decode_capture_response(402, declined) {
+            Err(DomainError::Invariant(msg)) => assert!(msg.starts_with("PaymentDeclined: "), "{msg}"),
+            other => panic!("expected PaymentDeclined, got {other:?}"),
+        }
+        let already = r#"{"error":{"type":"invalid_request_error","code":"payment_intent_unexpected_state","message":"This PaymentIntent could not be captured because it has a status of canceled."}}"#;
+        match decode_capture_response(400, already) {
+            Err(DomainError::Invariant(msg)) => {
+                assert!(msg.starts_with("PaymentGatewayRefused: "), "{msg}")
+            }
+            other => panic!("expected terminal PaymentGatewayRefused, got {other:?}"),
+        }
+        match decode_cancel_response(500, "oops") {
+            Err(DomainError::Repository(msg)) => assert!(msg.contains("HTTP 500"), "{msg}"),
+            other => panic!("expected Repository, got {other:?}"),
+        }
     }
 
     #[test]

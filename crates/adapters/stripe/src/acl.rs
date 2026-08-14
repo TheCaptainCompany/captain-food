@@ -3,7 +3,12 @@
 //! its side; there is nothing to validate and nothing to reject, so no command is involved: the ACL
 //! translates the Stripe wire shape into the already-modelled domain events and records them as facts:
 //!
-//! - `payment_intent.succeeded`      → `PaymentCaptured`
+//! - `payment_intent.amount_capturable_updated` → `PaymentAuthorized` (funds held — the
+//!   authorize-then-capture posture, ADR-20260808-195315 §1.2: this is the fact that materializes
+//!   the order; capture follows on fulfilment)
+//! - `payment_intent.succeeded`      → `PaymentCaptured` (the money moved — the capture's settlement)
+//! - `payment_intent.canceled`       → `PaymentReleased` (the uncaptured hold is gone — the void's
+//!   settlement, or the authorization's own ~7-day expiry)
 //! - `payment_intent.payment_failed` → `PaymentFailed`
 //! - `charge.refunded`               → `PaymentRefunded`
 //!
@@ -43,7 +48,10 @@
 use std::sync::Arc;
 
 use domain::generated::entities::Money;
-use domain::generated::events::{DomainEvent, PaymentCaptured, PaymentFailed, PaymentRefunded};
+use domain::generated::events::{
+    DomainEvent, PaymentAuthorized, PaymentCaptured, PaymentFailed, PaymentRefunded,
+    PaymentReleased,
+};
 use domain::generated::scalars::{
     CurrencyCode, MoneyCents, OrderId, PaymentIntentId, RefundId, RestaurantId,
 };
@@ -208,10 +216,12 @@ struct StripePaymentIntent {
     id: String,
     amount: i64,
     amount_received: Option<i64>,
+    amount_capturable: Option<i64>,
     currency: String,
     #[serde(default)]
     metadata: std::collections::HashMap<String, String>,
     last_payment_error: Option<StripeApiError>,
+    cancellation_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -288,6 +298,34 @@ fn metadata_uuid_opt(
 /// caller logs it and acknowledges the delivery (a retry would not fix the payload).
 pub fn map_stripe_event(event: &StripeEvent) -> Result<StripeMapOutcome, String> {
     match event.event_type.as_str() {
+        "payment_intent.amount_capturable_updated" => {
+            let pi: StripePaymentIntent = parse_object(event)?;
+            let restaurant_id = metadata_uuid(&pi.metadata, "restaurantId")
+                .map_err(|e| format!("{}: {e}", event.event_type))?;
+            let order_id = metadata_uuid_opt(&pi.metadata, "orderId")
+                .map_err(|e| format!("{}: {e}", event.event_type))?;
+            // `amount_capturable` is the confirmed hold; fall back to the intent amount.
+            let held = pi.amount_capturable.filter(|a| *a > 0).unwrap_or(pi.amount);
+            Ok(StripeMapOutcome::Mapped(DomainEvent::PaymentAuthorized(PaymentAuthorized {
+                payment_intent_id: PaymentIntentId(pi.id.clone()),
+                order_id: order_id.map(OrderId),
+                restaurant_id: RestaurantId(restaurant_id),
+                amount: to_money(held, &pi.currency),
+            })))
+        }
+        "payment_intent.canceled" => {
+            let pi: StripePaymentIntent = parse_object(event)?;
+            let restaurant_id = metadata_uuid(&pi.metadata, "restaurantId")
+                .map_err(|e| format!("{}: {e}", event.event_type))?;
+            let order_id = metadata_uuid_opt(&pi.metadata, "orderId")
+                .map_err(|e| format!("{}: {e}", event.event_type))?;
+            Ok(StripeMapOutcome::Mapped(DomainEvent::PaymentReleased(PaymentReleased {
+                payment_intent_id: PaymentIntentId(pi.id.clone()),
+                order_id: order_id.map(OrderId),
+                restaurant_id: RestaurantId(restaurant_id),
+                reason: pi.cancellation_reason.clone().map(|r| truncate_chars(&r, 500)),
+            })))
+        }
         "payment_intent.succeeded" => {
             let pi: StripePaymentIntent = parse_object(event)?;
             let restaurant_id = metadata_uuid(&pi.metadata, "restaurantId")
@@ -454,6 +492,18 @@ impl StripeWebhookIngestor {
         // id — the same derivation the typed drift guard pins.
         let corr = stripe_correlation_id(&event.id);
         let recorded = match domain_event {
+            DomainEvent::PaymentAuthorized(e) => {
+                let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
+                PaymentClient::new(self.mailbox.clone(), lane)
+                    .record(e, "stripe", &event.id, corr)
+                    .await?
+            }
+            DomainEvent::PaymentReleased(e) => {
+                let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
+                PaymentClient::new(self.mailbox.clone(), lane)
+                    .record(e, "stripe", &event.id, corr)
+                    .await?
+            }
             DomainEvent::PaymentCaptured(e) => {
                 let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
                 PaymentClient::new(self.mailbox.clone(), lane)
@@ -472,7 +522,7 @@ impl StripeWebhookIngestor {
                     .record(e, "stripe", &event.id, corr)
                     .await?
             }
-            // The ACL maps exactly the three payment facts; a NEW family must be routed here (its
+            // The ACL maps exactly the five payment facts; a NEW family must be routed here (its
             // typed client + lane) in the same change that teaches the ACL to map it. Recorded as
             // unmappable (mirror kept), never a 5xx retry storm.
             other => {
@@ -648,6 +698,61 @@ mod tests {
         );
         // Stripe minor units + lowercase code → Money { amountCents, uppercased ISO currency }.
         assert_eq!(captured.amount, Money { amount_cents: MoneyCents(2350), currency: CurrencyCode("EUR".into()) });
+    }
+
+    /// The authorize-then-capture entry fact (ADR-20260808-195315 §1.2): the confirmed hold maps
+    /// to PaymentAuthorized with the capturable amount — this is what materializes the order.
+    #[test]
+    fn amount_capturable_updated_maps_to_payment_authorized() {
+        let event = event_from_json(serde_json::json!({
+            "id": "evt_1PXauthorized",
+            "type": "payment_intent.amount_capturable_updated",
+            "data": { "object": {
+                "id": "pi_3NabcSample",
+                "object": "payment_intent",
+                "amount": 2350,
+                "amount_capturable": 2350,
+                "currency": "eur",
+                "status": "requires_capture",
+                "metadata": { "restaurantId": RESTAURANT_ID, "orderId": ORDER_ID }
+            } }
+        }));
+        let StripeMapOutcome::Mapped(DomainEvent::PaymentAuthorized(authorized)) =
+            map_stripe_event(&event).unwrap()
+        else {
+            panic!("expected PaymentAuthorized");
+        };
+        assert_eq!(authorized.payment_intent_id, PaymentIntentId("pi_3NabcSample".into()));
+        assert_eq!(authorized.order_id, Some(OrderId(uuid::Uuid::parse_str(ORDER_ID).unwrap())));
+        assert_eq!(
+            authorized.amount,
+            Money { amount_cents: MoneyCents(2350), currency: CurrencyCode("EUR".into()) }
+        );
+    }
+
+    /// The void's settlement ("no need to refund because no capture", §1.3): the canceled intent
+    /// maps to PaymentReleased carrying Stripe's cancellation_reason.
+    #[test]
+    fn payment_intent_canceled_maps_to_payment_released() {
+        let event = event_from_json(serde_json::json!({
+            "id": "evt_1PXcanceled",
+            "type": "payment_intent.canceled",
+            "data": { "object": {
+                "id": "pi_3NabcSample",
+                "amount": 2350,
+                "currency": "eur",
+                "status": "canceled",
+                "cancellation_reason": "requested_by_customer",
+                "metadata": { "restaurantId": RESTAURANT_ID, "orderId": ORDER_ID }
+            } }
+        }));
+        let StripeMapOutcome::Mapped(DomainEvent::PaymentReleased(released)) =
+            map_stripe_event(&event).unwrap()
+        else {
+            panic!("expected PaymentReleased");
+        };
+        assert_eq!(released.payment_intent_id, PaymentIntentId("pi_3NabcSample".into()));
+        assert_eq!(released.reason.as_deref(), Some("requested_by_customer"));
     }
 
     #[test]

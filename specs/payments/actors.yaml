@@ -10,25 +10,42 @@ Payment:
   identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
   mailbox:
     partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
-  description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
+  description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), authorized at checkout confirmation, captured on fulfilment (ADR-20260808-195315 §1.2) or released on abort."
   # The refund decision facts (RefundOpened/Approved/Denied) do not move the payment status —
-  # only the settled Stripe fact (PaymentRefunded) does.
+  # only the settled Stripe fact (PaymentRefunded) does. PaymentCaptureFailed does not move it
+  # either: the money is still only HELD, so the payment stays AUTHORIZED until a retried capture
+  # settles (PaymentCaptured) or the hold dies (PaymentReleased).
   lifecycle:
     status: { $ref: 'scalars.yaml#/PaymentStatus' }
     initial:
       - event: { $ref: 'events.yaml#/PaymentIntentCreated' }
         to: PENDING
     transitions:
-      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentCaptured' }, to: CAPTURED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentAuthorized' }, to: AUTHORIZED }
+      # PENDING → CAPTURED stays legal: the recorded third arm (at-table service pays in advance,
+      # ADR-20260808-195315 §1.2 — not built yet) captures at checkout, and a webhook race that
+      # delivers the capture before the authorization must still record the fact that happened.
+      - { from: [PENDING, AUTHORIZED], event: { $ref: 'events.yaml#/PaymentCaptured' }, to: CAPTURED }
       - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentFailed' }, to: FAILED }
+      - { from: [AUTHORIZED], event: { $ref: 'events.yaml#/PaymentReleased' }, to: RELEASED }
       - { from: [CAPTURED], event: { $ref: 'events.yaml#/PaymentRefunded' }, to: REFUNDED }
-    terminal: [FAILED, REFUNDED]
+    terminal: [FAILED, REFUNDED, RELEASED]
   receives:
-    - message: 
+    - message:
         $ref: 'events.yaml#/PaymentIntentCreated'
       emits: [{ $ref: 'events.yaml#/PaymentIntentCreated' }]
+    - message: { $ref: 'events.yaml#/PaymentAuthorized' }
+      emits: [{ $ref: 'events.yaml#/PaymentAuthorized' }]
+      effect: "Inbound Stripe fact (payment_intent.amount_capturable_updated): the hold is confirmed; PlaceOrderProcess materializes the Order on the chained copy."
     - message: { $ref: 'events.yaml#/PaymentCaptured' }
       emits: [{ $ref: 'events.yaml#/PaymentCaptured' }]
+      effect: "Inbound Stripe fact (payment_intent.succeeded): the money moved — the settlement of the capture PaymentSettlementProcess requested on fulfilment."
+    - message: { $ref: 'events.yaml#/PaymentCaptureFailed' }
+      emits: [{ $ref: 'events.yaml#/PaymentCaptureFailed' }]
+      effect: "PaymentSettlementProcess delivers the capture failure (typed reason); the Payment records it WITHOUT moving the status (still AUTHORIZED — retry or expiry decides). Alertable: an operator must act."
+    - message: { $ref: 'events.yaml#/PaymentReleased' }
+      emits: [{ $ref: 'events.yaml#/PaymentReleased' }]
+      effect: "Inbound Stripe fact (payment_intent.canceled): the uncaptured hold is gone — the settlement of the void requested on rejection/cancellation (or the hold's own expiry)."
     - message: { $ref: 'events.yaml#/PaymentFailed' }
       emits: [{ $ref: 'events.yaml#/PaymentFailed' }]
     - message:

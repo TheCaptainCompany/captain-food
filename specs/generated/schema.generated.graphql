@@ -150,9 +150,11 @@ enum DeliveryStatus {
 
 enum PaymentStatus {
   PENDING
+  AUTHORIZED
   CAPTURED
   FAILED
   REFUNDED
+  RELEASED
 }
 
 enum OperationStatus {
@@ -405,6 +407,13 @@ enum RefundStatus {
   APPROVED
   DENIED
   REFUNDED
+}
+
+enum CaptureFailureReason {
+  CARD_DECLINED
+  AUTHORIZATION_EXPIRED
+  GATEWAY_REFUSED
+  GATEWAY_UNAVAILABLE
 }
 
 # ==============================================================================

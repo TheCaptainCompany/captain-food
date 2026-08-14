@@ -12,8 +12,12 @@
 #   L4  money path   — cart -> placeOrder (CUSTOMER role, ACCEPTANCE-FIRST: MutationAcceptance ->
 #                      poll operationStatus(messageId) to SUCCEEDED, ADR-20260720-015500) -> find
 #                      the Stripe PaymentIntent by its orderId metadata -> server-side confirm with
-#                      pm_card_visa -> webhook -> inbound_events drain -> order-tracking read model
-#                      shows the order PLACED with paymentStatus CAPTURED (bounded polling).
+#                      pm_card_visa (manual capture: confirm AUTHORIZES, requires_capture) ->
+#                      webhook (PaymentAuthorized) -> mailbox -> order-tracking read model shows
+#                      the order PLACED with paymentStatus AUTHORIZED (bounded polling).
+#                      Capture happens on delivered/picked up (ADR-20260808-195315 §1.2); the
+#                      delivered-leg capture assertions belong to the FUTURE L5 fulfilment leg of
+#                      the acceptance program (ADR-20260813-191111), not to L4.
 #
 # Safe to re-run against production: TEST-mode money only (sk_test key), one dedicated tenant,
 # idempotent fixtures, fresh cart/order ids per run.
@@ -35,7 +39,7 @@
 #   SMOKE_SCHEME          default https; set `http` when smoking a port-forwarded local stack.
 #   SMOKE_TENANT_SLUG     default smoke-test
 #   SMOKE_APP_PROFILE     which baked config profile the deployment runs (default production)
-#   SMOKE_ORDER_TIMEOUT   seconds to wait for the captured order (default 90)
+#   SMOKE_ORDER_TIMEOUT   seconds to wait for the authorized order (default 90)
 set -euo pipefail
 
 # --- Config ---------------------------------------------------------------------------------------
@@ -512,11 +516,14 @@ l4() {
   confirm=$(curl -sS -m 30 -X POST "$STRIPE_API/v1/payment_intents/$pi/confirm" \
     -u "$STRIPE_SECRET_KEY:" -d "payment_method=pm_card_visa" \
     -d "return_url=https://smoke-test.captain.food/checkout/return")
-  [ "$(printf '%s' "$confirm" | jq -r '.status // empty')" = "succeeded" ] \
-    || fail "L4: PaymentIntent confirm did not succeed: $(printf '%s' "$confirm" | jq -c '{status, error}' | head -c 500)"
-  say "      L4: payment intent confirmed (succeeded) — waiting for the webhook + saga"
+  # Manual capture (ADR-20260808-195315 s1.2): a confirmed intent is AUTHORIZED, not captured --
+  # Stripe reports `requires_capture` (funds held). `succeeded` here would mean the deploy is
+  # still creating automatic-capture intents: fail with the posture named.
+  [ "$(printf '%s' "$confirm" | jq -r '.status // empty')" = "requires_capture" ] \
+    || fail "L4: PaymentIntent confirm did not reach requires_capture (authorize-then-capture, ADR-20260808-195315): $(printf '%s' "$confirm" | jq -c '{status, error}' | head -c 500)"
+  say "      L4: payment intent confirmed (requires_capture — funds held) — waiting for the webhook + saga"
 
-  # 4. The inbound webhook (PaymentCaptured) drives the saga: OrderPlaced + projection. Poll —
+  # 4. The inbound webhook (PaymentAuthorized) drives the saga: OrderPlaced + projection. Poll —
   #    AS THE CUSTOMER (#433): the token now carries this run's captain_food.customer_id (asserted on
   #    the token itself at mint), so this is the customer-POSITIVE production proof #430 could not
   #    give: the paying customer reads their own order through the membership guard.
@@ -528,21 +535,24 @@ l4() {
     status=$(printf '%s' "$resp" | jq -r '.data.order.status // empty')
     pay_status=$(printf '%s' "$resp" | jq -r '.data.order.paymentStatus // empty')
     last="status=${status:-<no order row>} paymentStatus=${pay_status:-<none>}"
-    if [ "$pay_status" = "CAPTURED" ] && [ -n "$status" ]; then
-      say "      L4: customer read their captured order — asserting the read guard before declaring victory"
+    # AUTHORIZED, not CAPTURED (ADR-20260808-195315 s1.2): placement follows the authorization;
+    # the money moves on delivered/picked up. The capture assertion moves to the future L5
+    # fulfilment leg (ADR-20260813-191111 program).
+    if [ "$pay_status" = "AUTHORIZED" ] && [ -n "$status" ]; then
+      say "      L4: customer read their authorized order — asserting the read guard before declaring victory"
       l4_negative
-      pass "L4 money path: order $order_id $last (intent $pi captured via webhook; customer-positive + read guard held)"
+      pass "L4 money path: order $order_id $last (intent $pi authorized via webhook; capture deferred to fulfilment; customer-positive + read guard held)"
       return 0
     fi
     sleep 5; t=$((t+5))
   done
-  # Diagnosability on timeout (farley): ONE admin read separates "capture never happened" from
-  # "capture landed but the customer's claim scope is broken" — otherwise both are the same 90s.
+  # Diagnosability on timeout (farley): ONE admin read separates "authorization never happened" from
+  # "authorization landed but the customer's claim scope is broken" — otherwise both are the same 90s.
   admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
   resp=$(gql "$ADMIN_BASE/admin/graphql" "$admin" \
     'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
-  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = capture/projection broken)"
+  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = authorization/projection broken)"
 }
 
 # --- Run ------------------------------------------------------------------------------------------

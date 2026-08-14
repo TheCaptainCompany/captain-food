@@ -22,6 +22,7 @@
 
 pub mod cart_binding;
 pub mod delivery_dispatch;
+pub mod payment_settlement;
 pub mod place_order;
 pub mod reclamation;
 pub mod refund;

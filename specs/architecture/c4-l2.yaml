@@ -50,6 +50,7 @@ boundedContexts:
       - { $ref: 'actors.yaml#/CustomerCredit' }
     processManagers:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+      - { $ref: 'processmanager.yaml#/PaymentSettlementProcess' }
       - { $ref: 'processmanager.yaml#/RefundProcess' }
       - { $ref: 'processmanager.yaml#/ReclamationProcess' }
   platform:
@@ -310,6 +311,11 @@ containers:
     description: "The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact."
     realizes:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+  pm-payment-settlement:
+    technology: "Rust — mailbox worker bin"
+    description: "The settlement saga (ADR-20260808-195315 §1.2/§1.3): capture the authorized payment on fulfilment, release the hold on rejection/cancellation."
+    realizes:
+      - { $ref: 'processmanager.yaml#/PaymentSettlementProcess' }
   pm-refund:
     technology: "Rust — mailbox worker bin"
     description: "The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded."
@@ -458,7 +464,9 @@ relationships:
   - { from: actor-mailbox-supervision, to: event-store, description: "Lease supervision lanes; record operator facts" }
   # PM bins: same drain/append + their outbound ports
   - { from: pm-place-order, to: event-store, description: "Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced" }
-  - { from: pm-place-order, to: stripe, description: "Create PaymentIntents (outbound payment port)" }
+  - { from: pm-place-order, to: stripe, description: "Create manual-capture PaymentIntents (outbound payment port)" }
+  - { from: pm-payment-settlement, to: event-store, description: "Drain fulfilment/abort triggers; record PaymentCaptureFailed on a declined capture" }
+  - { from: pm-payment-settlement, to: stripe, description: "Capture on fulfilment / void on abort (outbound payment port)" }
   - { from: pm-refund, to: event-store, description: "Drain RefundProcess lanes; append refund decision facts" }
   - { from: pm-refund, to: stripe, description: "Request refunds (outbound payment port)" }
   - { from: pm-delivery-dispatch, to: event-store, description: "Drain dispatch lanes; append dispatch facts" }
@@ -470,7 +478,7 @@ relationships:
   - { from: adapter-uber-direct, to: event-store, description: "Record verified courier/status facts through the mailbox" }
   - { from: adapter-coopcycle, to: event-store, description: "Record verified courier/status facts through the mailbox" }
   - { from: adapter-avelo37, to: event-store, description: "Record verified courier/status facts through the mailbox (pre-milestone: undeployed)" }
-  - { from: stripe, to: adapter-stripe, description: "Payment webhooks (PaymentCaptured/Failed/Refunded)" }
+  - { from: stripe, to: adapter-stripe, description: "Payment webhooks (PaymentAuthorized/Captured/Released/Failed/Refunded)" }
   - { from: hubrise, to: adapter-hubrise, description: "Catalog/inventory callbacks (inbound facts)" }
   - { from: delivery-partner, to: adapter-uber-direct, description: "Courier acceptance/status webhooks (inbound facts) — ADR-0031" }
   - { from: delivery-partner, to: adapter-coopcycle, description: "Per-instance courier/status webhooks (inbound facts) — ADR-0031" }

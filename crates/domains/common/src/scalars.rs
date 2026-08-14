@@ -178,14 +178,16 @@ pub enum DeliveryStatus {
     CANCELLED,
 }
 
-/// Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded).
+/// Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/ Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection, cancellation or expiry — "no need to refund because no capture").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum PaymentStatus {
     PENDING,
+    AUTHORIZED,
     CAPTURED,
     FAILED,
     REFUNDED,
+    RELEASED,
 }
 
 /// Live status of a command/operation streamed by the operationStatusChanged subscription: PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."

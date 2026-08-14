@@ -412,6 +412,9 @@ screens:
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:
           - { type: stripe_express_checkout_element, id: stripe_payment, payment_intent_source: "{{ payment_status.clientSecret }}", on_confirm: { type: confirm_payment } }
+          # Authorize-then-capture disclosure (#544): the card is HELD now, DEBITED on delivery.
+          # Persistent on the pay step — framing the hold as a charge would be factually wrong.
+          - { type: text, id: payment_hold_notice, value: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment.hold_notice' }, style: { size: sm } }
           # Test-mode banner (#440): while the delivered publishable key is `pk_test_` (all of them,
           # pre-launch — scalars.yaml#/StripePublishableKeyTest anchors the slot), the pay step says
           # so persistently. Derived client-side from the key's own prefix, never a separate flag.

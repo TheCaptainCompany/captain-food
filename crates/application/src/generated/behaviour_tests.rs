@@ -397,9 +397,24 @@ fn fx_payment_intent_created_collection() -> DomainEvent {
     DomainEvent::PaymentIntentCreated(evs::PaymentIntentCreated { payment_intent_id: sc::PaymentIntentId("pi_123".into()), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: sc::CustomerId(support::uid("cust-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, checkout: ent::CheckoutSnapshot { order_id: sc::OrderId(support::uid("order-1")), cart_id: sc::CartId(support::uid("cart-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: sc::CustomerId(support::uid("cust-1")), mode: None, r#ref: None, customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, items: vec![ent::OrderLineItem { offer_id: sc::OfferId(support::uid("off-1")), product_id: Some(sc::ProductId(support::uid("prod-1"))), name: sc::ProductName("Margherita".into()), offer_name: Some(sc::OfferName("Default".into())), quantity: 2, unit_price: ent::Money { amount_cents: sc::MoneyCents(980), currency: sc::CurrencyCode("EUR".into()) }, selected_options: Vec::new(), line_total: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } }], total_amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, breakdown: ent::PaymentBreakdown { articles: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, delivery: ent::Money { amount_cents: sc::MoneyCents(0), currency: sc::CurrencyCode("EUR".into()) }, service_fee: ent::Money { amount_cents: sc::MoneyCents(0), currency: sc::CurrencyCode("EUR".into()) }, total: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, restaurant_contribution: ent::Money { amount_cents: sc::MoneyCents(0), currency: sc::CurrencyCode("EUR".into()) }, restaurant_payout: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, rider_payout: ent::Money { amount_cents: sc::MoneyCents(0), currency: sc::CurrencyCode("EUR".into()) }, captain_net: ent::Money { amount_cents: sc::MoneyCents(0), currency: sc::CurrencyCode("EUR".into()) } }, note: None } })
 }
 
+/// tests.yaml#/fixtures/paymentAuthorized — events.yaml#/PaymentAuthorized
+fn fx_payment_authorized() -> DomainEvent {
+    DomainEvent::PaymentAuthorized(evs::PaymentAuthorized { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } })
+}
+
 /// tests.yaml#/fixtures/paymentCaptured — events.yaml#/PaymentCaptured
 fn fx_payment_captured() -> DomainEvent {
     DomainEvent::PaymentCaptured(evs::PaymentCaptured { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } })
+}
+
+/// tests.yaml#/fixtures/paymentCaptureFailed — events.yaml#/PaymentCaptureFailed
+fn fx_payment_capture_failed() -> DomainEvent {
+    DomainEvent::PaymentCaptureFailed(evs::PaymentCaptureFailed { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: sc::CaptureFailureReason::CARD_DECLINED, detail: Some("Your card was declined.".to_string()) })
+}
+
+/// tests.yaml#/fixtures/paymentReleased — events.yaml#/PaymentReleased
+fn fx_payment_released() -> DomainEvent {
+    DomainEvent::PaymentReleased(evs::PaymentReleased { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: Some("requested_by_customer".to_string()) })
 }
 
 /// tests.yaml#/fixtures/paymentFailed — events.yaml#/PaymentFailed
@@ -2649,19 +2664,19 @@ async fn test_place_order_rejects_test_restaurant_for_live_order() {
     bed.assert_appended("TestPlaceOrderRejectsTestRestaurantForLiveOrder", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestPlaceOrderPaymentCapturedPlacesOrder — "On payment capture the saga materializes the order and closes the cart"
-/// rules: OrderMaterializedOnPaymentCapture
+/// tests.yaml#/tests/TestPlaceOrderPaymentAuthorizedPlacesOrder — "On payment authorization (funds held, not captured) the saga materializes the order and closes the cart"
+/// rules: OrderMaterializedOnPaymentAuthorization
 #[tokio::test]
-async fn test_place_order_payment_captured_places_order() {
+async fn test_place_order_payment_authorized_places_order() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
     bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created()]).await;
     let before = bed.snapshot();
-    let ev = evs::PaymentCaptured { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
-    let result = crate::process_managers::place_order::on_payment_captured(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await;
-    let _ = result.expect("TestPlaceOrderPaymentCapturedPlacesOrder: the spec expects acceptance");
-    bed.assert_appended("TestPlaceOrderPaymentCapturedPlacesOrder", &before, &[
+    let ev = evs::PaymentAuthorized { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
+    let result = crate::process_managers::place_order::on_payment_authorized(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await;
+    let _ = result.expect("TestPlaceOrderPaymentAuthorizedPlacesOrder: the spec expects acceptance");
+    bed.assert_appended("TestPlaceOrderPaymentAuthorizedPlacesOrder", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_placed()),
         (format!("Cart-{}", support::uid("cart-1")), fx_cart_checked_out()),
     ]);
@@ -2681,12 +2696,13 @@ async fn test_place_order_payment_failed_places_nothing() {
     bed.assert_appended("TestPlaceOrderPaymentFailedPlacesNothing", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestRefundOnOrderRejected — "Requests a Stripe refund when an order is rejected by the restaurant"
+/// tests.yaml#/tests/TestRefundOnOrderRejected — "Requests a Stripe refund when an order is rejected by the restaurant AFTER capture"
 /// rules: RefundOnRejectionOrCancellation
 #[tokio::test]
 async fn test_refund_on_order_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::OrderRejectedByRestaurant { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: "Out of ingredients".to_string() };
     let result = crate::process_managers::refund::on_order_rejected(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await;
@@ -2702,6 +2718,7 @@ async fn test_refund_on_order_rejected() {
 async fn test_refund_on_order_cancelled_by_customer() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::OrderCancelledByCustomer { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: Some("Changed my mind".to_string()) };
     let result = crate::process_managers::refund::on_order_cancelled_by_customer(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await;
@@ -2717,6 +2734,7 @@ async fn test_refund_on_order_cancelled_by_customer() {
 async fn test_refund_on_order_cancelled_by_restaurant() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::OrderCancelledByRestaurant { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: "Kitchen closed".to_string() };
     let result = crate::process_managers::refund::on_order_cancelled_by_restaurant(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await;
@@ -2732,6 +2750,7 @@ async fn test_refund_on_order_cancelled_by_restaurant() {
 async fn test_refund_on_refund_requested() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::RefundRequested { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, reason: Some("Late delivery".to_string()) };
     let result = crate::process_managers::refund::on_refund_requested(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await;
@@ -2752,6 +2771,72 @@ async fn test_refund_settled_fact_recorded() {
     let result = crate::process_managers::refund::on_payment_refunded(&bed.refund_pm, &ev).await;
     let _ = result.expect("TestRefundSettledFactRecorded: the spec expects acceptance");
     bed.assert_appended("TestRefundSettledFactRecorded", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCaptureRequestedOnOrderDelivered — "Requests the Stripe capture when an AUTHORIZED order is delivered / picked up"
+/// rules: PaymentCapturedOnFulfilment
+#[tokio::test]
+async fn test_capture_requested_on_order_delivered() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderDelivered { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")) };
+    let result = crate::process_managers::payment_settlement::on_order_delivered(&bed.store, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestCaptureRequestedOnOrderDelivered: the spec expects acceptance");
+    bed.assert_appended("TestCaptureRequestedOnOrderDelivered", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestNoCaptureWithoutCaptainAuthorization — "Delivery alone never captures: an order with no Captain authorization (no payment intent) is structurally skipped"
+/// rules: PaymentCapturedOnFulfilment
+#[tokio::test]
+async fn test_no_capture_without_captain_authorization() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("replacement-order-1")), vec![fx_order_placed_replacement()]).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderDelivered { order_id: sc::OrderId(support::uid("replacement-order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")) };
+    let result = crate::process_managers::payment_settlement::on_order_delivered(&bed.store, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestNoCaptureWithoutCaptainAuthorization: the spec expects acceptance");
+    bed.assert_appended("TestNoCaptureWithoutCaptainAuthorization", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReleaseRequestedOnOrderRejected — "Releases the uncaptured hold when the restaurant rejects an AUTHORIZED order (no refund — no capture)"
+/// rules: AuthorizationReleasedWithoutCapture
+#[tokio::test]
+async fn test_release_requested_on_order_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderRejectedByRestaurant { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: "Out of ingredients".to_string() };
+    let result = crate::process_managers::payment_settlement::on_order_rejected(&bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReleaseRequestedOnOrderRejected: the spec expects acceptance");
+    bed.assert_appended("TestReleaseRequestedOnOrderRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReleaseRequestedOnOrderCancelledByCustomer — "Releases the uncaptured hold when the customer cancels an AUTHORIZED order"
+/// rules: AuthorizationReleasedWithoutCapture
+#[tokio::test]
+async fn test_release_requested_on_order_cancelled_by_customer() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderCancelledByCustomer { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: Some("Changed my mind".to_string()) };
+    let result = crate::process_managers::payment_settlement::on_order_cancelled_by_customer(&bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReleaseRequestedOnOrderCancelledByCustomer: the spec expects acceptance");
+    bed.assert_appended("TestReleaseRequestedOnOrderCancelledByCustomer", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReleaseRequestedOnOrderCancelledByRestaurant — "Releases the uncaptured hold when the restaurant cancels an AUTHORIZED order after acceptance"
+/// rules: AuthorizationReleasedWithoutCapture
+#[tokio::test]
+async fn test_release_requested_on_order_cancelled_by_restaurant() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderCancelledByRestaurant { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: "Kitchen closed".to_string() };
+    let result = crate::process_managers::payment_settlement::on_order_cancelled_by_restaurant(&bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReleaseRequestedOnOrderCancelledByRestaurant: the spec expects acceptance");
+    bed.assert_appended("TestReleaseRequestedOnOrderCancelledByRestaurant", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestCartBindingOnCustomerIdentified — "Binds a returning visitor's open guest carts when they are identified"
@@ -3032,7 +3117,7 @@ async fn test_cart_bound_to_customer() {
 }
 
 /// tests.yaml#/tests/TestCartCheckedOutRecorded — "The Cart records the checkout fact delivered by PlaceOrderProcess and closes (idempotent)"
-/// rules: OrderMaterializedOnPaymentCapture
+/// rules: OrderMaterializedOnPaymentAuthorization
 #[tokio::test]
 async fn test_cart_checked_out_recorded() {
     let bed = TestBed::new();
@@ -3048,7 +3133,7 @@ async fn test_cart_checked_out_recorded() {
 }
 
 /// tests.yaml#/tests/TestOrderPlacedBirthRecorded — "The Order is born by recording the OrderPlaced fact delivered by PlaceOrderProcess (idempotent)"
-/// rules: OrderMaterializedOnPaymentCapture
+/// rules: OrderMaterializedOnPaymentAuthorization
 #[tokio::test]
 async fn test_order_placed_birth_recorded() {
     let bed = TestBed::new();
@@ -3077,19 +3162,67 @@ async fn test_payment_intent_created_recorded() {
     ]);
 }
 
-/// tests.yaml#/tests/TestPaymentCapturedRecorded — "The Payment records the inbound Stripe capture fact (delivered via the ACL, idempotent)"
-/// rules: OrderMaterializedOnPaymentCapture
+/// tests.yaml#/tests/TestPaymentAuthorizedRecorded — "The Payment records the inbound Stripe authorization fact (funds held; delivered via the ACL, idempotent)"
+/// rules: OrderMaterializedOnPaymentAuthorization
+#[tokio::test]
+async fn test_payment_authorized_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created()]).await;
+    let before = bed.snapshot();
+    let ev = evs::PaymentAuthorized { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
+    let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::PaymentAuthorized(ev), &support::actor()).await;
+    let _ = result.expect("TestPaymentAuthorizedRecorded: the spec expects acceptance");
+    bed.assert_appended("TestPaymentAuthorizedRecorded", &before, &[
+        ("Payment-pi_123".to_string(), fx_payment_authorized()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestPaymentCapturedRecorded — "The Payment records the inbound Stripe capture fact — the money moved on fulfilment (idempotent)"
+/// rules: PaymentCapturedOnFulfilment
 #[tokio::test]
 async fn test_payment_captured_recorded() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
-    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created()]).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_authorized()]).await;
     let before = bed.snapshot();
     let ev = evs::PaymentCaptured { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
     let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::PaymentCaptured(ev), &support::actor()).await;
     let _ = result.expect("TestPaymentCapturedRecorded: the spec expects acceptance");
     bed.assert_appended("TestPaymentCapturedRecorded", &before, &[
         ("Payment-pi_123".to_string(), fx_payment_captured()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestPaymentCaptureFailedRecorded — "The Payment records the capture failure delivered by PaymentSettlementProcess (typed reason; status stays AUTHORIZED)"
+/// rules: CaptureFailureIsRecordedAndPaged
+#[tokio::test]
+async fn test_payment_capture_failed_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_authorized()]).await;
+    let before = bed.snapshot();
+    let ev = evs::PaymentCaptureFailed { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: sc::CaptureFailureReason::CARD_DECLINED, detail: Some("Your card was declined.".to_string()) };
+    let result = bed.record_fact(&"Payment-pi_123".to_string(), DomainEvent::PaymentCaptureFailed(ev)).await;
+    let _ = result.expect("TestPaymentCaptureFailedRecorded: the spec expects acceptance");
+    bed.assert_appended("TestPaymentCaptureFailedRecorded", &before, &[
+        ("Payment-pi_123".to_string(), fx_payment_capture_failed()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestPaymentReleasedRecorded — "The Payment records the inbound Stripe release fact — the uncaptured hold is gone, no money moved (idempotent)"
+/// rules: AuthorizationReleasedWithoutCapture
+#[tokio::test]
+async fn test_payment_released_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_intent_created(), fx_payment_authorized()]).await;
+    let before = bed.snapshot();
+    let ev = evs::PaymentReleased { payment_intent_id: sc::PaymentIntentId("pi_123".into()), order_id: Some(sc::OrderId(support::uid("order-1"))), restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: Some("requested_by_customer".to_string()) };
+    let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::PaymentReleased(ev), &support::actor()).await;
+    let _ = result.expect("TestPaymentReleasedRecorded: the spec expects acceptance");
+    bed.assert_appended("TestPaymentReleasedRecorded", &before, &[
+        ("Payment-pi_123".to_string(), fx_payment_released()),
     ]);
 }
 
@@ -3606,18 +3739,18 @@ async fn test_rider_status_change_is_rejected() {
     bed.assert_appended("TestRiderStatusChangeIsRejected", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestPaymentCaptureOrphanIsFlagged — "A capture matching no checkout run aborts the saga with a typed error (never a silent skip)"
+/// tests.yaml#/tests/TestPaymentAuthorizationOrphanIsFlagged — "An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)"
 /// rules: OrphanPaymentEventFlagged
 #[tokio::test]
-async fn test_payment_capture_orphan_is_flagged() {
+async fn test_payment_authorization_orphan_is_flagged() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let ev = evs::PaymentCaptured { payment_intent_id: sc::PaymentIntentId("pi_unknown".into()), order_id: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
-    let result = crate::process_managers::place_order::on_payment_captured(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await;
-    let err = result.expect_err("TestPaymentCaptureOrphanIsFlagged: the spec expects a typed rejection");
-    support::assert_thrown("TestPaymentCaptureOrphanIsFlagged", &err, &["PaymentEventOrphaned"]);
-    bed.assert_appended("TestPaymentCaptureOrphanIsFlagged", &before, &[]);
+    let ev = evs::PaymentAuthorized { payment_intent_id: sc::PaymentIntentId("pi_unknown".into()), order_id: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) } };
+    let result = crate::process_managers::place_order::on_payment_authorized(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await;
+    let err = result.expect_err("TestPaymentAuthorizationOrphanIsFlagged: the spec expects a typed rejection");
+    support::assert_thrown("TestPaymentAuthorizationOrphanIsFlagged", &err, &["PaymentEventOrphaned"]);
+    bed.assert_appended("TestPaymentAuthorizationOrphanIsFlagged", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestConversationOpened — "Opens the per-order conversation"
@@ -4215,6 +4348,7 @@ async fn test_reclamation_process_grants_goodwill_credit() {
 async fn test_reclamation_process_settles_full_refund() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: Some(sc::ReclamationReason("Order arrived damaged".into())), refund_amount: None };
     let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
@@ -4231,6 +4365,7 @@ async fn test_reclamation_process_settles_full_refund() {
 async fn test_reclamation_process_settles_partial_refund() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::PARTIAL_REFUND, note: Some(sc::ReclamationReason("One dish was missing".into())), refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }) };
     let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
@@ -4247,6 +4382,7 @@ async fn test_reclamation_process_settles_partial_refund() {
 async fn test_reclamation_process_refund_over_captured_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
+    bed.seed(&"Payment-pi_123".to_string(), vec![fx_payment_captured()]).await;
     let before = bed.snapshot();
     let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::PARTIAL_REFUND, note: Some(sc::ReclamationReason("Over the captured total".into())), refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(5000), currency: sc::CurrencyCode("EUR".into()) }) };
     let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;

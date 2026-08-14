@@ -306,8 +306,13 @@ DeliveryStatus:
 
 PaymentStatus:
   type: string
-  enum: [PENDING, CAPTURED, FAILED, REFUNDED]
-  description: "Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded)."
+  enum: [PENDING, AUTHORIZED, CAPTURED, FAILED, REFUNDED, RELEASED]
+  description: >
+    Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/
+    Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds
+    held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved
+    (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection,
+    cancellation or expiry — "no need to refund because no capture").
 
 
 OperationStatus:
@@ -374,7 +379,7 @@ PaymentProcessStatus:
   type: string
   enum:
     - AWAITING_PAYMENT_RESULT  # PaymentIntent created, cart locked; waiting for the Stripe outcome
-    - ORDER_PLACED             # payment captured; Order materialized and cart closed — terminal (success)
+    - ORDER_PLACED             # payment authorized (funds held); Order materialized and cart closed — terminal (success); capture follows on fulfilment
     - FAILED                   # payment failed; cart stays OPEN — terminal (failure)
   description: "State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart)."
 

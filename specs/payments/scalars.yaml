@@ -19,3 +19,15 @@ RefundStatus:
     REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved
     (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded).
     Distinct from RefundProcessStatus, the RefundProcess state-table run status.
+
+
+CaptureFailureReason:
+  type: string
+  enum: [CARD_DECLINED, AUTHORIZATION_EXPIRED, GATEWAY_REFUSED, GATEWAY_UNAVAILABLE]
+  description: >
+    Why capturing a confirmed authorization failed AFTER fulfilment (PaymentCaptureFailed — the
+    food is cooked and the money did not move, ADR-20260808-195315 §1.2 team note): CARD_DECLINED =
+    the issuer refused the capture; AUTHORIZATION_EXPIRED = the ~7-day hold lapsed before capture;
+    GATEWAY_REFUSED = Stripe refused the request deterministically (already captured/canceled,
+    keying bug); GATEWAY_UNAVAILABLE = transport/5xx — the capture MAY have succeeded provider-side
+    (the settled PaymentCaptured webhook supersedes this fact when it did).

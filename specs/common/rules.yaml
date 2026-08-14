@@ -7,10 +7,19 @@ description: >
   (typically a happy path + its rejection). Keyed by PascalCase name; description is the guarantee.
 
 CheckoutSnapshotFrozenAtIntent:
-  description: "When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store."
+  description: "When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment authorization — no out-of-log store."
 
-OrderMaterializedOnPaymentCapture:
-  description: "On payment capture the order is materialized and the cart is closed."
+OrderMaterializedOnPaymentAuthorization:
+  description: "On payment AUTHORIZATION (funds held on the card, not captured — ADR-20260808-195315 §1.2) the order is materialized and the cart is closed; the money moves only at capture, on fulfilment."
+
+PaymentCapturedOnFulfilment:
+  description: "A payment is captured on handover (OrderDelivered — the one fact for DELIVERY and COLLECTION alike) ONLY when the order carries a Captain AUTHORIZATION to capture: an order whose OrderTracking row has a payment_intent_id AND payment_status AUTHORIZED. The delivery fact alone NEVER captures — an order with no Captain PaymentIntent ($0 replacements today; post-V0 external orders ingested from Uber Eats, already paid on the partner's rails with no Captain authorization, ADR-20260813-233418 AR-2) is structurally skipped, not captured. PaymentSettlementProcess requests the full-amount capture; the settled inbound PaymentCaptured records that the money moved. The concrete external-order regression test (an ExternalOrderReceived order marked delivered triggers no capture) lands with the external-orders slice — the event does not exist yet."
+
+AuthorizationReleasedWithoutCapture:
+  description: "A rejected or cancelled order whose payment is AUTHORIZED but not captured RELEASES the hold (Stripe void) instead of refunding — 'no need to refund because no capture' (ADR-20260808-195315 §1.3). Post-capture rejection/cancellation still opens the ordinary refund path (RefundProcess)."
+
+CaptureFailureIsRecordedAndPaged:
+  description: "A capture that fails after fulfilment — food cooked, money did not move — is never silent: PaymentSettlementProcess records PaymentCaptureFailed with a typed reason on the Payment and the paging counter fires (observability.yaml#/payment-settlement). The payment stays AUTHORIZED so a retried capture can still settle."
 
 RefundRequiresApproval:
   description: "Only an explicit decision — by the RESTAURANT for its own orders, or by an ADMIN — resolves a pending refund: ApproveRefund (possibly partial) requests the Stripe refund, DenyRefund closes it; both are rejected when no refund is pending approval for the order."

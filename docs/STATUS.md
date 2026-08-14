@@ -2,6 +2,46 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💳 **2026-08-13 — CAPTURE ON DELIVERED IS IMPLEMENTED: the recorded posture (ADR-20260808-195315
+> §1.2/§1.3) and the code no longer disagree** ([#544 "Capture on delivered: implement the recorded
+> authorize-then-capture posture"](https://github.com/TheCaptainCompany/captain-food/issues/544),
+> the D2 slice of the acceptance program in
+> [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+> landed inside the empty-log window). The Stripe intent is created `capture_method=manual`;
+> confirmation AUTHORIZES (`payment_intent.amount_capturable_updated` → new `PaymentAuthorized`,
+> which is now what materializes the Order — rule renamed to
+> `OrderMaterializedOnPaymentAuthorization`); the new **`PaymentSettlementProcess`** captures on
+> `OrderDelivered` (the one handover fact for DELIVERY and COLLECTION) and RELEASES the hold
+> (Stripe void → new `PaymentReleased`) on rejection/cancellation — *"no need to refund because no
+> capture"*; post-capture aborts still refund (RefundProcess's CAPTURED guards untouched). The
+> capture keys on the PRESENCE of a Captain authorization, never the delivery fact alone
+> (ADR-20260813-233418 AR-2: $0 replacements and future Uber Eats external orders are structurally
+> skipped). Capture-declined-after-fulfilment is recorded (`PaymentCaptureFailed`, typed reason)
+> **and pages** (`payment_capture_failed_total`, `observability.yaml#/payment-settlement`).
+> `PaymentStatus` = `PENDING → AUTHORIZED → CAPTURED → REFUNDED`, `AUTHORIZED → RELEASED`,
+> `PENDING → FAILED`. Smoke L4 now asserts `requires_capture` at confirm and `paymentStatus ==
+> AUTHORIZED` post-placement; the capture assertion moves to the future L5 delivered leg.
+> OrderTracking folds the full new surface: OrderPlaced seeds AUTHORIZED for a charging order
+> (the authorization precedes the row by the saga invariant, so `PaymentAuthorized` is
+> deliberately not in its fedBy), `PaymentCaptured`/`PaymentReleased`/`PaymentRefunded` flip it —
+> landed once the [#543](https://github.com/TheCaptainCompany/captain-food/pull/543) fence on
+> `specs/database/**` lifted mid-run (+2 `event-not-projected` in the ratchet: `PaymentAuthorized`
+> by design, `PaymentCaptureFailed` until its operator surface exists). At-table advance capture
+> (§1.2's third arm) and the acceptance-timeout auto-cancel (§1.3) remain unbuilt; both ride the
+> recorded arms when they land.
+> **FIX ROUND 2026-08-14 (a five-lens review of the #544 PR):** the feature above shipped INERT —
+> the settlement guard reads `OrderTracking.payment_intent_id` to know what to capture, but that
+> column was only written when `PaymentCaptured` folded, the fact capture PRODUCES; so every
+> delivered order read NULL → skipped → the hold expired at ~7 days, restaurant never paid. Fixed by
+> seeding `payment_intent_id` from `OrderPlaced` (which carries it) at the row's birth, proven RED-then-GREEN
+> by a new end-to-end DB test through the real projector AND the real saga runner. Same round:
+> corrected customer copy that falsely promised a REFUND on rejection (a released hold is not a
+> charge) + a checkout hold-disclosure; and declared a **dead-man's-switch** on the age of the oldest
+> still-authorized order (`observability.yaml#/payment-settlement`), because the paging counter only
+> fires on a failed ATTEMPT, never on a capture that is never attempted — its reconciling-sweep
+> runtime is a tracked CRITICAL follow-up. **MERGED via [PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545)
+> after a delta re-review PASS (the CRITICAL fix's RED independently reproduced).**
+
 > ✅ **2026-08-14 — FOUNDER DELEGATED A DECISION BATCH TO THE TEAM** (*"You don't need me for that"* +
 > *"Go ahead team!!"*, the founder pasting back the decision list with its recommendations; authority
 > [ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
@@ -24,11 +64,11 @@
 > harness, below the keystone) → (e) Uber aggregator-shape (post-V0) + #257/D11 implementation. This run
 > is docs-only; no code, no claim.
 
-> 💳 **2026-08-14 — PR #545 "capture on delivered" IS IN A POST-REVIEW FIX ROUND**
+> 💳 **2026-08-14 — the #544 five-lens review's carry-forwards (recorded)**
 > ([PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545), tracking issue
-> [#544](https://github.com/TheCaptainCompany/captain-food/issues/544), branch `544-capture-on-delivered`).
-> The five-lens review found a **CRITICAL: a circular read dependency made capture inert** — being
-> fixed on-branch by the executor; do not concurrently touch branch `544`. The review's
+> [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)).
+> The review found a **CRITICAL (a circular read dependency made capture inert)** — now FIXED,
+> delta-verified, and merged. Its
 > **non-code carry-forwards are recorded** (this run, docs-only): the founder-owed
 > permanent-capture-failure loss-allocation decision + operator runbook
 > ([DECISIONS §38 LOSS-1](proposals/DECISIONS.md)); a dba **forward-trap** hazard for the unbuilt
@@ -40,7 +80,10 @@
 > a seven-question legal counsel packet
 > ([BRIEF-20260814](legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md), **no lens output is
 > legal clearance**); and a `bam` settlement-funnel projection as an ADR-20260811-014129 completeness
-> follow-up (issue to be created, related to #484).
+> follow-up ([#549](https://github.com/TheCaptainCompany/captain-food/issues/549), related to #484).
+> Blocking review follow-ups filed: [#550](https://github.com/TheCaptainCompany/captain-food/issues/550)
+> (CRITICAL — the dead-man's-switch reconciling-sweep runtime, blocks real orders) and
+> [#551](https://github.com/TheCaptainCompany/captain-food/issues/551) (capture-failure alert split).
 
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
@@ -151,16 +194,16 @@
 >   fail-open shape was deliberately deleted
 >   ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519)/[PR #520](https://github.com/TheCaptainCompany/captain-food/pull/520))
 >   and stays deleted.
-> - **⚠️ The criterion's biggest finding is a D2 record↔code drift**: the founder's clause order
+> - **⚠️ The criterion's biggest finding was a D2 record↔code drift** — the founder's clause order
 >   restates his OWN [ADR-20260808-195315](adr/ADR-20260808-195315-customer-brief-answers.md) §1.2
->   (*"Authorise on checkout. Capture on delivered / picked up"*, which supersedes
->   [ADR-20260719-014434](adr/20260719-014434-checkout-snapshot-on-paymentintentcreated.md)'s
->   capture-at-checkout on that point), while the code **captures at confirm** and materializes the
->   Order on `PaymentCaptured` (`rules.yaml#/OrderMaterializedOnPaymentCapture`; no `AUTHORIZED`
->   state; `capture_method` unset in the Stripe adapter). **Implementing D2 joins the acceptance
->   path as its own GREEN slice** — cheap now, inside the empty-log window; the walk harness's
->   capture assertions are written against D2 semantics, and any interim walk on the implemented
->   flow is labeled as such.
+>   (*"Authorise on checkout. Capture on delivered / picked up"*) while the code captured at
+>   confirm. **RESOLVED 2026-08-13 by the D2 slice**
+>   ([#544 "Capture on delivered"](https://github.com/TheCaptainCompany/captain-food/issues/544),
+>   see the capture-on-delivered entry at the top of this file): the Order materializes on
+>   `PaymentAuthorized` (`rules.yaml#/OrderMaterializedOnPaymentAuthorization`), `AUTHORIZED`
+>   exists, `capture_method=manual` is set, and `PaymentSettlementProcess` captures on the
+>   delivered fact. The walk harness's capture assertions can now run against the implemented
+>   semantics.
 > - **The program of record** (ADR §5): [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
 >   (merging) → split slice 1 → smoke **L5 lifecycle legs** (accept → ready → dispatch-job-present →
 >   delivered, each seen red first) → the four **non-auth browser walls** + local-issuer tooling →

@@ -315,8 +315,12 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
 /// The dispatch expression for a WHEN event on a PROCESS MANAGER (an `ev` binding is in scope).
 pub(crate) fn bt_pm_event_call(pm: &str, event: &str) -> String {
     match (pm, event) {
-        ("PlaceOrderProcess", "PaymentCaptured") => "crate::process_managers::place_order::on_payment_captured(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await".into(),
+        ("PlaceOrderProcess", "PaymentAuthorized") => "crate::process_managers::place_order::on_payment_authorized(&bed.store, &bed.payment_pm, &ev, &support::envelope()).await".into(),
         ("PlaceOrderProcess", "PaymentFailed") => "crate::process_managers::place_order::on_payment_failed(&bed.payment_pm, &ev, &support::envelope()).await".into(),
+        ("PaymentSettlementProcess", "OrderDelivered") => "crate::process_managers::payment_settlement::on_order_delivered(&bed.store, &bed.orders, &bed.payments, &ev, &support::envelope()).await".into(),
+        ("PaymentSettlementProcess", "OrderRejectedByRestaurant") => "crate::process_managers::payment_settlement::on_order_rejected(&bed.orders, &bed.payments, &ev, &support::envelope()).await".into(),
+        ("PaymentSettlementProcess", "OrderCancelledByCustomer") => "crate::process_managers::payment_settlement::on_order_cancelled_by_customer(&bed.orders, &bed.payments, &ev, &support::envelope()).await".into(),
+        ("PaymentSettlementProcess", "OrderCancelledByRestaurant") => "crate::process_managers::payment_settlement::on_order_cancelled_by_restaurant(&bed.orders, &bed.payments, &ev, &support::envelope()).await".into(),
         ("RefundProcess", "OrderRejectedByRestaurant") => "crate::process_managers::refund::on_order_rejected(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await".into(),
         ("RefundProcess", "OrderCancelledByCustomer") => "crate::process_managers::refund::on_order_cancelled_by_customer(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await".into(),
         ("RefundProcess", "OrderCancelledByRestaurant") => "crate::process_managers::refund::on_order_cancelled_by_restaurant(&bed.store, &bed.refund_pm, &bed.orders, &ev, &support::envelope()).await".into(),
@@ -555,7 +559,7 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
             } else {
                 // Aggregate ← delivered/inbound fact: record it on its stream through the write
                 // path (Stripe payment facts go through the real inbound recording function).
-                if matches!(msg.as_str(), "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded") {
+                if matches!(msg.as_str(), "PaymentAuthorized" | "PaymentCaptured" | "PaymentReleased" | "PaymentFailed" | "PaymentRefunded") {
                     out.push_str(&format!(
                         "    let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::{}(ev), &support::actor()).await;\n",
                         msg

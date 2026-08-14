@@ -34,6 +34,30 @@ impl PaymentService for FailClosedPaymentGateway {
         )))
     }
 
+    async fn capture(
+        &self,
+        input: application::generated::services::PaymentCaptureInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Err(DomainError::Invariant(format!(
+            "PaymentGatewayRefused: capture gateway not configured (fail-closed stand-in; intent {}) \
+             — set STRIPE_SECRET_KEY to enable the real Stripe adapter",
+            input.payment_intent_id.0
+        )))
+    }
+
+    async fn release(
+        &self,
+        input: application::generated::services::PaymentReleaseInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Err(DomainError::Invariant(format!(
+            "PaymentGatewayRefused: release gateway not configured (fail-closed stand-in; intent {}) \
+             — set STRIPE_SECRET_KEY to enable the real Stripe adapter",
+            input.payment_intent_id.0
+        )))
+    }
+
     async fn refund(
         &self,
         input: PaymentRefundInput,

@@ -907,7 +907,7 @@ pub struct ChangeCartLineQuantityInput {
 pub struct PlaceOrderInput {
     #[graphql(name = "mode")]
     pub mode: Option<Mode>,
-    /// Client-generated id for the order the saga will materialize on payment capture.
+    /// Client-generated id for the order the saga will materialize on payment authorization (ADR-20260808-195315 §1.2).
     #[graphql(name = "orderId")]
     pub order_id: OrderId,
     #[graphql(name = "restaurantId")]

@@ -35,16 +35,23 @@ The process managers run as **state-table orchestrators executing their DSL legs
   behind `RUN_PROCESS_MANAGERS` (default on).
 - **Payment aggregate** (`domain::payment`, stream `Payment-{paymentIntentId}`): `place_order`
   delivers `PaymentIntentCreated` (with the frozen checkout, ADR-20260719-014434) there; the
-  **stateless Stripe ACL** delivers `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded` there via
-  `application::payments::record_inbound_payment_event` (dedup = the aggregate's fold; the old
+  **stateless Stripe ACL** delivers
+  `PaymentAuthorized`/`PaymentCaptured`/`PaymentReleased`/`PaymentFailed`/`PaymentRefunded` there
+  via `application::payments::record_inbound_payment_event` (dedup = the aggregate's fold; the old
   `StripeEvent-{id}` envelope streams and the fail-closed `CheckoutSnapshotSource` seam are retired —
-  the capture leg reads the snapshot straight off the Payment stream).
+  the materialization leg reads the snapshot straight off the Payment stream). Since
+  [#544 "Capture on delivered"](https://github.com/TheCaptainCompany/captain-food/issues/544)
+  (ADR-20260808-195315 §1.2) the intent is `capture_method=manual`: confirmation AUTHORIZES,
+  `PaymentSettlementProcess` captures on fulfilment / releases on abort, and
+  `PaymentCaptureFailed` (saga-recorded, typed reason) pages when the capture declines after the
+  food is made.
 
-## The four process managers — status
+## The process managers — status
 
 | Saga | Legs | Status |
 |---|---|---|
-| PlaceOrderProcess | `PlaceOrder` cmd → intent + run row; `PaymentCaptured` → `OrderPlaced` + `CartCheckedOut` from the frozen snapshot; `PaymentFailed` → run FAILED, cart stays OPEN; orphans throw | ✅ implemented (Stripe create-intent still the fail-closed stand-in gateway) |
+| PlaceOrderProcess | `PlaceOrder` cmd → manual-capture intent + run row; `PaymentAuthorized` (funds held) → `OrderPlaced` + `CartCheckedOut` from the frozen snapshot; `PaymentFailed` → run FAILED, cart stays OPEN; orphans throw | ✅ implemented (Stripe create-intent still the fail-closed stand-in gateway when `STRIPE_SECRET_KEY` unset) |
+| PaymentSettlementProcess ([#544](https://github.com/TheCaptainCompany/captain-food/issues/544)) | `OrderDelivered` → `payment.capture` (guarded on a PRESENT Captain authorization: `payment_intent_id` + `payment_status=AUTHORIZED` — $0 replacements/external orders structurally skipped); rejection/cancellations → `payment.release` (void, "no need to refund because no capture"); capture failure → `PaymentCaptureFailed` recorded + `payment_capture_failed_total` pages | ✅ implemented (stateless — idempotency = the guard + `capture:{pi}`/`release:{pi}` Stripe keys) |
 | RefundProcess | refundable facts open PENDING_APPROVAL (payment CAPTURED only) + deliver `RefundOpened` to the Payment stream; `ApproveRefund`/`DenyRefund` (RESTAURANT own orders / ADMIN) → Stripe `request_refund` + decision on the Payment; `PaymentRefunded` settles | ✅ implemented end-to-end (real Stripe outbound; `pendingRefunds` query over `View_PendingRefunds`, approve/deny mutations + story steps — ADR-20260720-003142) |
 | CartBindingProcess | `CustomerIdentified` → `BindCartToCustomer` per OPEN cart of the session (Cart emits `CartBoundToCustomer`; projection folds same-stream) | ✅ implemented — the old cross-stream projector gap is gone |
 | DeliveryDispatchProcess | `OrderMarkedReady` (DELIVERY) → `DeliveryRequested` birth (UUIDv5 job id) + partner `offer_job` (attempt 1); decline → bounded re-offer (cap 3, `offer_attempts` in the run row), exhaustion → `DeliveryDispatchFailed` + run FAILED; DELIVERED/`DeliveryCompleted` → send `MarkOrderDelivered` | ✅ implemented (`offer_job` = no-op stand-in; offer **timeouts** deferred — ADR-20260720-004556) |

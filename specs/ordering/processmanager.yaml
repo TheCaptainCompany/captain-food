@@ -11,10 +11,12 @@ PlaceOrderProcess:
   type: process-manager
   description: >
     The checkout saga. On PlaceOrder: reads the OPEN cart, re-validates and prices it server-side
-    against the live catalog, creates the Stripe PaymentIntent, and freezes the full priced checkout
-    onto PaymentIntentCreated (ADR-20260719-014434) — the state row (one live run per cart) is what
-    prevents concurrent checkouts of the same cart. On PaymentCaptured: materializes the Order and
-    closes the cart from the frozen snapshot alone. On PaymentFailed: resolves the run; the cart
+    against the live catalog, creates the Stripe PaymentIntent (manual capture,
+    ADR-20260808-195315 §1.2), and freezes the full priced checkout onto PaymentIntentCreated
+    (ADR-20260719-014434) — the state row (one live run per cart) is what prevents concurrent
+    checkouts of the same cart. On PaymentAuthorized (funds held, not captured): materializes the
+    Order and closes the cart from the frozen snapshot alone — capture happens later, on
+    fulfilment, driven by PaymentSettlementProcess. On PaymentFailed: resolves the run; the cart
     stays OPEN.
   state_table: { $ref: 'database/tables/process_managers.yaml#/payment_process_manager' }
   ports:
@@ -64,17 +66,19 @@ PlaceOrderProcess:
               process_status: { const: AWAITING_PAYMENT_RESULT }
               payment_status: { const: PENDING }
 
-    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+    - message: { $ref: 'events.yaml#/PaymentAuthorized' }
       description: >
-        The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the
-        cart from the checkout snapshot frozen on PaymentIntentCreated.
+        The Stripe authorization outcome (recorded by the Payment aggregate): the hold is confirmed —
+        materialize the Order and close the cart from the checkout snapshot frozen on
+        PaymentIntentCreated. The money has NOT moved: PaymentSettlementProcess captures on
+        fulfilment (rules.yaml#/OrderMaterializedOnPaymentAuthorization).
       steps:
         - state:
-            by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' } } }
-            note: "Load the checkout run this capture belongs to."
+            by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentAuthorized/properties/paymentIntentId' } } }
+            note: "Load the checkout run this authorization belongs to."
         - guard:
             throws: { $ref: 'errors.yaml#/PaymentEventOrphaned' }
-            note: "ERROR — a capture matching no run means money was taken with no order to materialize; abort and surface (the fact stays recorded on the Payment)."
+            note: "ERROR — an authorization matching no run means a hold exists with no order to materialize; abort and surface (the fact stays recorded on the Payment)."
         - state:
             expect: { process_status: { const: AWAITING_PAYMENT_RESULT } }
             note: "Already-resolved run → skip (benign Stripe re-delivery)."
@@ -92,7 +96,7 @@ PlaceOrderProcess:
               orderId: { from_state: order_id }
         - state:
             set:
-              payment_status: { const: CAPTURED }
+              payment_status: { const: AUTHORIZED }
               process_status: { const: ORDER_PLACED }
               last_processed_stripe_event_id: { from_envelope: event_id }
 

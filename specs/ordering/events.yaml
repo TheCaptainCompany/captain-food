@@ -163,8 +163,11 @@ OrderPlaced:
       $ref: 'scalars.yaml#/PaymentIntentId'
       nullable: true
       description: >
-        The captured Stripe PaymentIntent for a paid order. ABSENT for a no-charge replacement order
-        (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).
+        The AUTHORIZED Stripe PaymentIntent for a paid order (authorize-then-capture,
+        ADR-20260808-195315 §1.2): the hold is placed at checkout and captured later on fulfilment
+        (OrderDelivered) — the OrderTracking projection seeds this id and its AUTHORIZED status from
+        this field. ABSENT for a no-charge replacement order (replacementOf set) — no money moved,
+        so there is no PaymentIntent (ADR-20260726-171736).
   required:
     - orderId
     - restaurantId

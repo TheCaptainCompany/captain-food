@@ -19,7 +19,7 @@ Verified on `main` at commit `835da95`:
 | No notification mechanism exists — no push, SMS, email, printer or sound | repo-wide; `OvhSmsClient` is wired only to the Supabase auth OTP hook |
 | The back office declares **no `subscription:`** on any screen | `specs/screens/restaurant_backoffice.yaml` (the customer's `order_tracking` *does* subscribe) |
 | Nothing watches an unaccepted order | `specs/processmanager.yaml` declares 4 PMs, none triggered by `OrderPlaced` |
-| Money is captured **before** acceptance, and refunds need human approval | `rules.yaml#/OrderMaterializedOnPaymentCapture`, `#/RefundRequiresApproval` |
+| ~~Money is captured **before** acceptance~~ — since [#544 "Capture on delivered"](https://github.com/TheCaptainCompany/captain-food/issues/544) (ADR-20260808-195315 §1.2) checkout only AUTHORIZES and the money moves at handover; refunds still need human approval | `rules.yaml#/OrderMaterializedOnPaymentAuthorization`, `#/PaymentCapturedOnFulfilment`, `#/RefundRequiresApproval` |
 | Opening hours are never enforced; no `RestaurantClosed` error exists | `processmanager.yaml:95-114` guard list; `specs/errors.yaml` |
 | `BUSY` is referenced by no guard, rule, PM or projection | `crates/application/src/commands.rs:2023` checks `PAUSED` only |
 | `PAUSED` has no duration and no auto-resume | `commands.yaml#/ChangeOrderAcceptanceMode` takes `{restaurantId, mode}` |

@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 4057,
+  "recordedAt": "2026-08-14T00:14:23.164Z",
+  "branch": "544-capture-on-delivered",
+  "note": "544 capture-on-delivered executor run (timer opened 2026-08-13T23:06:38Z was consumed by a concurrent session's stop; billed by wall clock)"
+}

@@ -5,12 +5,14 @@
 //!
 //! - `build_order_placed` — the frozen checkout snapshot read back from the `Payment-<intentId>`
 //!   stream (ADR-20260719-193500; a missing birth is the same `PaymentEventOrphaned` anomaly class);
+//!   triggered by `PaymentAuthorized` (funds held, not captured — ADR-20260808-195315 §1.2; capture
+//!   follows on fulfilment, PaymentSettlementProcess);
 //! - the per-aggregate idempotency predicates (order fold, cart still OPEN);
 //! - `finalize` — NULLing the spent `client_secret` when the run resolves (ADR-20260720-015500).
 //!
 //! The COMMAND leg (`commands.yaml#/PlaceOrder`) stays `commands::place_order` (pricing non-goal).
 
-use domain::generated::events::{CartCheckedOut, DomainEvent, OrderPlaced, PaymentCaptured, PaymentFailed};
+use domain::generated::events::{CartCheckedOut, DomainEvent, OrderPlaced, PaymentAuthorized, PaymentFailed};
 use domain::generated::scalars::CartStatus;
 use domain::shared::errors::DomainError;
 use serde_json::json;
@@ -26,19 +28,19 @@ fn orphaned(payment_intent_id: &domain::generated::scalars::PaymentIntentId) -> 
     DomainError::rejected("PaymentEventOrphaned", json!({ "paymentIntentId": payment_intent_id }))
 }
 
-/// Hooks for the `PaymentCaptured` leg: the frozen snapshot, the fold predicates, the secret clearing.
-pub struct PlaceOrderCapturedHooks<'a> {
+/// Hooks for the `PaymentAuthorized` leg: the frozen snapshot, the fold predicates, the secret clearing.
+pub struct PlaceOrderAuthorizedHooks<'a> {
     pub store: &'a dyn EventStore,
 }
 
 #[async_trait::async_trait]
-impl place_order_process::PaymentCapturedHooks for PlaceOrderCapturedHooks<'_> {
+impl place_order_process::PaymentAuthorizedHooks for PlaceOrderAuthorizedHooks<'_> {
     /// The frozen checkout, read back from the Payment aggregate's own stream: the run exists, so its
     /// Payment (born by PaymentIntentCreated) must too — a missing birth is the same orphan anomaly
     /// class, never a silent skip.
     async fn build_order_placed(
         &self,
-        event: &PaymentCaptured,
+        event: &PaymentAuthorized,
         row: &PaymentProcessRow,
     ) -> Result<HookOutcome<OrderPlaced>, DomainError> {
         let (payment_events, _) =
@@ -94,15 +96,16 @@ impl place_order_process::PaymentFailedHooks for PlaceOrderFailedHooks {
     }
 }
 
-/// EVENT leg `events.yaml#/PaymentCaptured` (rules.yaml#/OrderMaterializedOnPaymentCapture) — the
-/// generated pipeline with this module's hooks.
-pub async fn on_payment_captured(
+/// EVENT leg `events.yaml#/PaymentAuthorized` (rules.yaml#/OrderMaterializedOnPaymentAuthorization)
+/// — the generated pipeline with this module's hooks. The money has NOT moved: capture follows on
+/// fulfilment (PaymentSettlementProcess, ADR-20260808-195315 §1.2).
+pub async fn on_payment_authorized(
     store: &dyn EventStore,
     state: &dyn PaymentProcessStateStore,
-    event: &PaymentCaptured,
+    event: &PaymentAuthorized,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
-    place_order_process::on_payment_captured(store, state, &PlaceOrderCapturedHooks { store }, event, env)
+    place_order_process::on_payment_authorized(store, state, &PlaceOrderAuthorizedHooks { store }, event, env)
         .await
 }
 
@@ -169,8 +172,8 @@ mod tests {
             note: None,
         }
     }
-    fn captured() -> PaymentCaptured {
-        PaymentCaptured {
+    fn authorized() -> PaymentAuthorized {
+        PaymentAuthorized {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             order_id: Some(OrderId(uid(1))),
             restaurant_id: RestaurantId(uid(3)),
@@ -236,16 +239,17 @@ mod tests {
         store.seed(&format!("Cart-{}", uid(2)), open_cart_events());
     }
 
-    /// tests.yaml#/TestPlaceOrderPaymentCapturedPlacesOrder —
-    /// rules.yaml#/OrderMaterializedOnPaymentCapture: on payment capture the saga materializes the
-    /// order from the frozen snapshot, closes the cart, and resolves the run row.
+    /// tests.yaml#/TestPlaceOrderPaymentAuthorizedPlacesOrder —
+    /// rules.yaml#/OrderMaterializedOnPaymentAuthorization: on payment AUTHORIZATION (funds held,
+    /// not captured) the saga materializes the order from the frozen snapshot, closes the cart,
+    /// and resolves the run row; capture follows on fulfilment.
     #[tokio::test]
-    async fn payment_captured_places_order_and_closes_cart() {
+    async fn payment_authorized_places_order_and_closes_cart() {
         let store = MemStore::default();
         let state = MemPaymentProcessState::default();
         given(&store, &state).await;
 
-        let outcome = on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap();
+        let outcome = on_payment_authorized(&store, &state, &authorized(), &envelope()).await.unwrap();
         assert_eq!(outcome, Outcome::Completed);
 
         // THEN: the order is born PLACED from the frozen checkout…
@@ -267,47 +271,48 @@ mod tests {
         // …and the row is resolved with the Stripe dedup key.
         let row = state.by_cart(CartId(uid(2))).await.unwrap().unwrap();
         assert_eq!(row.process_status, PaymentProcessStatus::ORDER_PLACED);
-        assert_eq!(row.payment_status, PaymentStatus::CAPTURED);
+        assert_eq!(row.payment_status, PaymentStatus::AUTHORIZED);
         assert_eq!(
             row.last_processed_stripe_event_id,
             Some(ExternalReference(envelope().event_id.to_string()))
         );
     }
 
-    /// rules.yaml#/OrderMaterializedOnPaymentCapture (idempotency corollary): a re-delivered capture
-    /// finds the run resolved (`state.expect` fails) and skips — no duplicate order.
+    /// rules.yaml#/OrderMaterializedOnPaymentAuthorization (idempotency corollary): a re-delivered
+    /// authorization finds the run resolved (`state.expect` fails) and skips — no duplicate order.
     #[tokio::test]
-    async fn payment_captured_re_delivery_is_a_benign_skip() {
+    async fn payment_authorized_re_delivery_is_a_benign_skip() {
         let store = MemStore::default();
         let state = MemPaymentProcessState::default();
         given(&store, &state).await;
 
-        on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap();
+        on_payment_authorized(&store, &state, &authorized(), &envelope()).await.unwrap();
         let first_order = store.stream(&format!("Order-{}", uid(1)));
-        let second = on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap();
+        let second = on_payment_authorized(&store, &state, &authorized(), &envelope()).await.unwrap();
         assert!(matches!(second, Outcome::Skipped(ref m) if m.contains("benign Stripe re-delivery")), "{second:?}");
         assert_eq!(store.stream(&format!("Order-{}", uid(1))), first_order);
     }
 
-    /// tests.yaml#/TestPaymentCaptureOrphanIsFlagged — rules.yaml#/OrphanPaymentEventFlagged: a
-    /// capture matching no checkout run aborts the saga with the typed error (never a silent skip).
+    /// tests.yaml#/TestPaymentAuthorizationOrphanIsFlagged — rules.yaml#/OrphanPaymentEventFlagged:
+    /// an authorization matching no checkout run aborts the saga with the typed error (never a
+    /// silent skip) — a hold exists with no order to materialize.
     #[tokio::test]
-    async fn orphan_capture_is_flagged_with_the_typed_error() {
+    async fn orphan_authorization_is_flagged_with_the_typed_error() {
         let store = MemStore::default();
         let state = MemPaymentProcessState::default();
-        let err = on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap_err();
+        let err = on_payment_authorized(&store, &state, &authorized(), &envelope()).await.unwrap_err();
         assert_eq!(err.code(), Some("PaymentEventOrphaned"), "{err:?}");
     }
 
     /// rules.yaml#/OrphanPaymentEventFlagged (Payment-stream corollary): a run whose Payment stream
     /// has no `PaymentIntentCreated` birth is the same orphan anomaly class.
     #[tokio::test]
-    async fn capture_with_a_run_but_no_payment_stream_is_flagged() {
+    async fn authorization_with_a_run_but_no_payment_stream_is_flagged() {
         let store = MemStore::default();
         let state = MemPaymentProcessState::default();
         use crate::pm_state::PaymentProcessStateStore as _;
         state.upsert(&awaiting_row()).await.unwrap(); // row, but NO Payment stream seeded
-        let err = on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap_err();
+        let err = on_payment_authorized(&store, &state, &authorized(), &envelope()).await.unwrap_err();
         assert_eq!(err.code(), Some("PaymentEventOrphaned"), "{err:?}");
     }
 
@@ -329,7 +334,7 @@ mod tests {
         assert_eq!(row.process_status, PaymentProcessStatus::FAILED);
         assert_eq!(row.payment_status, PaymentStatus::FAILED);
 
-        // A re-delivered failure (or a late capture on the failed run) is a benign skip.
+        // A re-delivered failure (or a late authorization on the failed run) is a benign skip.
         let again = on_payment_failed(&state, &failed(), &envelope()).await.unwrap();
         assert!(matches!(again, Outcome::Skipped(_)), "{again:?}");
         // An orphan failure (no run) is the same typed error as an orphan capture.

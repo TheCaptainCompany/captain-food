@@ -3,9 +3,17 @@
 //! Postgres: set `DATABASE_URL` (see restaurant_projection.rs for a throwaway docker one-liner).
 //! Without it the test SKIPS (prints and returns) so `cargo test` stays green offline.
 
+use std::sync::{Arc, Mutex};
+
+use application::generated::services::{
+    PaymentCaptureInput, PaymentRefundInput, PaymentReleaseInput, PaymentRequestInput,
+    PaymentRequestOutput, PaymentService, ServiceCallMeta,
+};
 use application::queries::{OrderFilter, ReadScope, OrderReadRepository as _};
+use async_trait::async_trait;
 use domain::generated::scalars::{CustomerId, OrderId, OrderStatus, RestaurantId};
-use infrastructure::{PgOrderRepository, ProjectionWorker};
+use domain::shared::errors::DomainError;
+use infrastructure::{PgOrderRepository, ProcessManagerRunner, ProjectionWorker};
 use sqlx::PgPool;
 
 async fn append_event(
@@ -92,9 +100,10 @@ async fn order_events_fold_into_the_read_model() {
     worker.run_once().await.expect("run_once (placed)");
 
     // The row materialized, enums stored as their TEXT values, breakdown leaves extracted,
-    // payment already CAPTURED: PlaceOrderProcess emits OrderPlaced only in reaction to
-    // PaymentCaptured (V0 prepaid-online), and that capture sits EARLIER in the log than the row it
-    // would fold into — the creation arm carries the saga invariant instead of losing it.
+    // payment AUTHORIZED (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess
+    // emits OrderPlaced only in reaction to PaymentAuthorized, and that authorization sits EARLIER
+    // in the log than the row it would fold into — the creation arm carries the saga invariant
+    // instead of losing it. Capture arrives later, on fulfilment, through the PaymentCaptured arm.
     let (status, service_type, total, articles, payment_status): (String, String, i64, i64, String) =
         sqlx::query_as(
             "SELECT status, service_type, total_amount_cents, articles_cents, payment_status \
@@ -108,7 +117,7 @@ async fn order_events_fold_into_the_read_model() {
     assert_eq!(service_type, "DELIVERY"); // ServiceType::DELIVERY
     assert_eq!(total, 2560);
     assert_eq!(articles, 1960);
-    assert_eq!(payment_status, "CAPTURED");
+    assert_eq!(payment_status, "AUTHORIZED");
     let checkpoint: i64 =
         sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Order'")
             .fetch_one(&pool)
@@ -416,4 +425,151 @@ async fn delivery_facts_move_the_customers_delivery_mirror() {
             .await
             .expect("Order checkpoint");
     assert_eq!(checkpoint, 6);
+}
+
+/// A payment gateway SPY: records every capture/release call so the settlement path can be
+/// asserted end-to-end. Settlement legs never open an intent or refund, so those stay
+/// `unreachable!()` — but capture/release are real recording seams (HIGH-2: no DB test drove
+/// `OrderDelivered -> PaymentSettlementProcess -> capture` before this one).
+#[derive(Default)]
+struct SettlementSpy {
+    captures: Mutex<Vec<String>>,
+    releases: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl PaymentService for SettlementSpy {
+    async fn request(
+        &self,
+        _input: PaymentRequestInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<PaymentRequestOutput, DomainError> {
+        unreachable!("settlement never opens an intent")
+    }
+    async fn capture(
+        &self,
+        input: PaymentCaptureInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        self.captures.lock().unwrap().push(input.payment_intent_id.0);
+        Ok(())
+    }
+    async fn release(
+        &self,
+        input: PaymentReleaseInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        self.releases.lock().unwrap().push(input.payment_intent_id.0);
+        Ok(())
+    }
+    async fn refund(
+        &self,
+        _input: PaymentRefundInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("settlement never refunds — that is RefundProcess")
+    }
+}
+
+/// HIGH-2 / CRITICAL-1 regression, end-to-end through the REAL projector AND the REAL saga runner
+/// (rules.yaml#/PaymentCapturedOnFulfilment). A charging order is folded `OrderPlaced(intent
+/// present) -> OrderAcceptedByRestaurant -> OrderDelivered` by the ProjectionWorker into the
+/// `ordertracking` read model, then the ProcessManagerRunner drains `OrderDelivered` into
+/// PaymentSettlementProcess, whose guard reads THAT row's `payment_intent_id`.
+///
+/// This is the test that masks nothing: it never hand-injects the read-model row. Before the
+/// CRITICAL-1 wiring fix (OrderPlaced added to `payment_intent_id.from`), the projector's OrderPlaced
+/// arm hardcodes `payment_intent_id: None`, so the guard reads NULL, SKIPS, and NO capture is ever
+/// requested — the whole feature is inert and this assertion goes RED. With the seed wired, the row
+/// is born AUTHORIZED carrying its intent and delivery captures the full authorized hold.
+#[tokio::test]
+async fn delivered_order_captures_through_the_real_projected_intent() {
+    let Some(db) = crate::common::TestDb::acquire("order_projection").await else { return };
+    let pool = db.pool();
+
+    let order_id = uuid::Uuid::new_v4();
+    let restaurant_id = uuid::Uuid::new_v4();
+    let customer_id = uuid::Uuid::new_v4();
+    let stream = format!("Order-{order_id}");
+
+    // 1) Birth: a paid order carrying its AUTHORIZED PaymentIntent (authorize-then-capture).
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": order_id,
+            "ref": "CF-0544",
+            "restaurantId": restaurant_id,
+            "customerId": customer_id,
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "DELIVERY",
+            "items": [{
+                "offerId": uuid::Uuid::new_v4(),
+                "name": "Margherita",
+                "quantity": 1,
+                "unitPrice": money(980),
+                "lineTotal": money(980)
+            }],
+            "totalAmount": money(1580),
+            "breakdown": {
+                "articles": money(980), "delivery": money(400), "serviceFee": money(200),
+                "total": money(1580), "restaurantContribution": money(160),
+                "restaurantPayout": money(820), "riderPayout": money(400), "captainNet": money(360)
+            },
+            "paymentIntentId": "pi_capture_544"
+        }),
+    )
+    .await;
+    // 2) …through acceptance to hand-over — the lifecycle the ellipsis covers (payment_status stays
+    //    AUTHORIZED across it; only fulfilment settles).
+    append_event(
+        &pool,
+        &stream,
+        2,
+        "OrderAcceptedByRestaurant",
+        serde_json::json!({ "orderId": order_id, "restaurantId": restaurant_id, "estimatedReadyAt": "2026-08-14T19:30:00Z" }),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        3,
+        "OrderDelivered",
+        serde_json::json!({ "orderId": order_id, "restaurantId": restaurant_id }),
+    )
+    .await;
+
+    // The REAL read-model fold — NOT a hand-injected fixture.
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("project the order lifecycle");
+    let (payment_status, payment_intent_id): (String, Option<String>) = sqlx::query_as(
+        "SELECT payment_status, payment_intent_id FROM ordertracking WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("delivered order row");
+    // The seed CRITICAL-1 restores: born AUTHORIZED, carrying its intent — pre-fix this id is NULL.
+    assert_eq!(payment_status, "AUTHORIZED", "capture has not run yet — the hold is still authorized");
+    assert_eq!(
+        payment_intent_id.as_deref(),
+        Some("pi_capture_544"),
+        "the OrderPlaced seed carries the intent id into the read model (CRITICAL-1)",
+    );
+
+    // 3) The saga runner drains OrderDelivered into PaymentSettlementProcess, whose guard reads THAT
+    //    projected row and requests the capture of the FULL authorized intent.
+    let spy = Arc::new(SettlementSpy::default());
+    let runner = ProcessManagerRunner::new(pool.clone())
+        .with_only("PaymentSettlementProcess")
+        .with_payments(spy.clone());
+    runner.run_once().await.expect("settlement drains clean");
+
+    assert_eq!(
+        *spy.captures.lock().unwrap(),
+        vec!["pi_capture_544".to_string()],
+        "OrderDelivered captured the authorized hold (INERT before CRITICAL-1's fix)",
+    );
+    assert!(spy.releases.lock().unwrap().is_empty(), "a delivered order captures, never releases");
 }

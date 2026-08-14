@@ -837,25 +837,31 @@ impl From<DeliveryStatus> for ds::DeliveryStatus {
     }
 }
 
-/// Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded).
+/// Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/ Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection, cancellation or expiry — "no need to refund because no capture").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum PaymentStatus {
     #[graphql(name = "PENDING")]
     PENDING,
+    #[graphql(name = "AUTHORIZED")]
+    AUTHORIZED,
     #[graphql(name = "CAPTURED")]
     CAPTURED,
     #[graphql(name = "FAILED")]
     FAILED,
     #[graphql(name = "REFUNDED")]
     REFUNDED,
+    #[graphql(name = "RELEASED")]
+    RELEASED,
 }
 impl From<ds::PaymentStatus> for PaymentStatus {
     fn from(v: ds::PaymentStatus) -> Self {
         match v {
             ds::PaymentStatus::PENDING => Self::PENDING,
+            ds::PaymentStatus::AUTHORIZED => Self::AUTHORIZED,
             ds::PaymentStatus::CAPTURED => Self::CAPTURED,
             ds::PaymentStatus::FAILED => Self::FAILED,
             ds::PaymentStatus::REFUNDED => Self::REFUNDED,
+            ds::PaymentStatus::RELEASED => Self::RELEASED,
         }
     }
 }
@@ -863,9 +869,11 @@ impl From<PaymentStatus> for ds::PaymentStatus {
     fn from(v: PaymentStatus) -> Self {
         match v {
             PaymentStatus::PENDING => Self::PENDING,
+            PaymentStatus::AUTHORIZED => Self::AUTHORIZED,
             PaymentStatus::CAPTURED => Self::CAPTURED,
             PaymentStatus::FAILED => Self::FAILED,
             PaymentStatus::REFUNDED => Self::REFUNDED,
+            PaymentStatus::RELEASED => Self::RELEASED,
         }
     }
 }
@@ -2857,6 +2865,39 @@ impl From<RefundStatus> for ds::RefundStatus {
             RefundStatus::APPROVED => Self::APPROVED,
             RefundStatus::DENIED => Self::DENIED,
             RefundStatus::REFUNDED => Self::REFUNDED,
+        }
+    }
+}
+
+/// Why capturing a confirmed authorization failed AFTER fulfilment (PaymentCaptureFailed — the food is cooked and the money did not move, ADR-20260808-195315 §1.2 team note): CARD_DECLINED = the issuer refused the capture; AUTHORIZATION_EXPIRED = the ~7-day hold lapsed before capture; GATEWAY_REFUSED = Stripe refused the request deterministically (already captured/canceled, keying bug); GATEWAY_UNAVAILABLE = transport/5xx — the capture MAY have succeeded provider-side (the settled PaymentCaptured webhook supersedes this fact when it did).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CaptureFailureReason {
+    #[graphql(name = "CARD_DECLINED")]
+    CARD_DECLINED,
+    #[graphql(name = "AUTHORIZATION_EXPIRED")]
+    AUTHORIZATION_EXPIRED,
+    #[graphql(name = "GATEWAY_REFUSED")]
+    GATEWAY_REFUSED,
+    #[graphql(name = "GATEWAY_UNAVAILABLE")]
+    GATEWAY_UNAVAILABLE,
+}
+impl From<ds::CaptureFailureReason> for CaptureFailureReason {
+    fn from(v: ds::CaptureFailureReason) -> Self {
+        match v {
+            ds::CaptureFailureReason::CARD_DECLINED => Self::CARD_DECLINED,
+            ds::CaptureFailureReason::AUTHORIZATION_EXPIRED => Self::AUTHORIZATION_EXPIRED,
+            ds::CaptureFailureReason::GATEWAY_REFUSED => Self::GATEWAY_REFUSED,
+            ds::CaptureFailureReason::GATEWAY_UNAVAILABLE => Self::GATEWAY_UNAVAILABLE,
+        }
+    }
+}
+impl From<CaptureFailureReason> for ds::CaptureFailureReason {
+    fn from(v: CaptureFailureReason) -> Self {
+        match v {
+            CaptureFailureReason::CARD_DECLINED => Self::CARD_DECLINED,
+            CaptureFailureReason::AUTHORIZATION_EXPIRED => Self::AUTHORIZATION_EXPIRED,
+            CaptureFailureReason::GATEWAY_REFUSED => Self::GATEWAY_REFUSED,
+            CaptureFailureReason::GATEWAY_UNAVAILABLE => Self::GATEWAY_UNAVAILABLE,
         }
     }
 }
