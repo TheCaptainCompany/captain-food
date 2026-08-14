@@ -92,9 +92,10 @@ async fn order_events_fold_into_the_read_model() {
     worker.run_once().await.expect("run_once (placed)");
 
     // The row materialized, enums stored as their TEXT values, breakdown leaves extracted,
-    // payment already CAPTURED: PlaceOrderProcess emits OrderPlaced only in reaction to
-    // PaymentCaptured (V0 prepaid-online), and that capture sits EARLIER in the log than the row it
-    // would fold into — the creation arm carries the saga invariant instead of losing it.
+    // payment AUTHORIZED (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess
+    // emits OrderPlaced only in reaction to PaymentAuthorized, and that authorization sits EARLIER
+    // in the log than the row it would fold into — the creation arm carries the saga invariant
+    // instead of losing it. Capture arrives later, on fulfilment, through the PaymentCaptured arm.
     let (status, service_type, total, articles, payment_status): (String, String, i64, i64, String) =
         sqlx::query_as(
             "SELECT status, service_type, total_amount_cents, articles_cents, payment_status \
@@ -108,7 +109,7 @@ async fn order_events_fold_into_the_read_model() {
     assert_eq!(service_type, "DELIVERY"); // ServiceType::DELIVERY
     assert_eq!(total, 2560);
     assert_eq!(articles, 1960);
-    assert_eq!(payment_status, "CAPTURED");
+    assert_eq!(payment_status, "AUTHORIZED");
     let checkpoint: i64 =
         sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Order'")
             .fetch_one(&pool)

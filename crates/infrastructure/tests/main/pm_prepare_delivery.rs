@@ -514,11 +514,13 @@ async fn approve_refund_flushes_fact_and_run_row_in_one_commit() {
     assert_eq!(run.get::<Option<i64>, _>("approved_amount_cents"), Some(500));
 }
 
-/// The full UC1 second half under B2 (ADR-20260731-203000): the Payment lane records the inbound
-/// `PaymentCaptured` AND enqueues the PM-addressed copy in the SAME commit; the PlaceOrderProcess
-/// lane then materializes the order from the frozen checkout — durable, fenced, cause-chained.
+/// The full UC1 second half under B2 (ADR-20260731-203000), authorize-then-capture form
+/// (ADR-20260808-195315 §1.2): the Payment lane records the inbound `PaymentAuthorized` (funds
+/// held) AND enqueues the PM-addressed copy in the SAME commit; the PlaceOrderProcess lane then
+/// materializes the order from the frozen checkout — durable, fenced, cause-chained. Capture is a
+/// LATER fact (fulfilment) with no saga hop.
 #[tokio::test]
-async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
+async fn payment_authorized_chains_to_the_pm_lane_and_materializes_the_order() {
     let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
     let pool = db.pool();
     seed_checkout_world(&pool, true).await;
@@ -533,8 +535,8 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
 
     // Leg 2 — the inbound Stripe fact on the Payment lane, with B2 chaining ON.
     let payment_actor = actor_client::surrogate_actor_id("Payment", "pi_prepare_test");
-    let captured = serde_json::json!({
-        "eventType": "PaymentCaptured",
+    let authorized = serde_json::json!({
+        "eventType": "PaymentAuthorized",
         "payload": {
             "paymentIntentId": "pi_prepare_test",
             "orderId": uid(ORDER),
@@ -547,13 +549,13 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
         "INSERT INTO inbound_messages \
            (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, \
             channel, user_type, correlation_id, source, external_id) \
-         VALUES ($1, 'EVENT', 'Payment', $2, $3, 'PaymentCaptured', $4, 'hFACT', 'EXTERNAL', \
+         VALUES ($1, 'EVENT', 'Payment', $2, $3, 'PaymentAuthorized', $4, 'hFACT', 'EXTERNAL', \
                  'EXTERNAL', $1, 'stripe', 'evt_1')",
     )
     .bind(fact_id)
     .bind(payment_actor)
     .bind(actor_client::stable_partition(&payment_actor, 5))
-    .bind(&captured)
+    .bind(&authorized)
     .execute(&pool)
     .await
     .expect("enqueue payment fact");
@@ -575,7 +577,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     // The fact is recorded on the Payment stream AND the chained hop exists — one commit.
     let recorded: i64 = sqlx::query(
         "SELECT count(*) AS n FROM domain_events WHERE stream_name = 'Payment-pi_prepare_test' \
-         AND event_type = 'PaymentCaptured'",
+         AND event_type = 'PaymentAuthorized'",
     )
     .fetch_one(&pool)
     .await
@@ -584,7 +586,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     assert_eq!(recorded, 1);
     let chained = sqlx::query(
         "SELECT message_id, actor_id, cause_id, status FROM inbound_messages \
-         WHERE actor_type = 'PlaceOrderProcess' AND kind = 'EVENT' AND message_type = 'PaymentCaptured'",
+         WHERE actor_type = 'PlaceOrderProcess' AND kind = 'EVENT' AND message_type = 'PaymentAuthorized'",
     )
     .fetch_one(&pool)
     .await
@@ -594,7 +596,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     let chained_id: uuid::Uuid = chained.get("message_id");
     assert_eq!(
         chained_id,
-        uuid::Uuid::new_v5(&uid(ORDER), format!("PaymentCaptured:{fact_id}").as_bytes()),
+        uuid::Uuid::new_v5(&uid(ORDER), format!("PaymentAuthorized:{fact_id}").as_bytes()),
         "deterministic chain identity"
     );
 
@@ -632,7 +634,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     .await
     .expect("run row");
     assert_eq!(run.get::<String, _>("process_status"), "ORDER_PLACED");
-    assert_eq!(run.get::<String, _>("payment_status"), "CAPTURED");
+    assert_eq!(run.get::<String, _>("payment_status"), "AUTHORIZED");
     assert_eq!(run.get::<Option<String>, _>("client_secret"), None, "spent credential NULLed");
 
     // Redelivering the chained hop is benign: the run row's expect skips it (IGNORED).
@@ -649,7 +651,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
             .await
             .expect("row")
             .get("status");
-    assert_eq!(redelivered, "IGNORED", "a re-delivered capture is a benign skip");
+    assert_eq!(redelivered, "IGNORED", "a re-delivered authorization is a benign skip");
 }
 
 /// Review CRITICAL-1: a DETERMINISTIC gateway refusal (Stripe 4xx invalid_request /
@@ -735,8 +737,9 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
     let pool = db.pool();
     seed_checkout_world(&pool, true).await;
 
-    // The pre-flip world: a checkout ran (intent + PM row), Stripe reported the capture, and the
-    // fact was RECORDED on the Payment stream — but the runner died before reacting.
+    // The pre-flip world: a checkout ran (intent + PM row), Stripe reported the AUTHORIZATION
+    // (authorize-then-capture, ADR-20260808-195315 §1.2), and the fact was RECORDED on the
+    // Payment stream — but the runner died before reacting.
     let gateway = Arc::new(StubGateway::default());
     enqueue_pm(&pool, "PlaceOrderProcess", uid(ORDER), 0xB1, "PlaceOrder", place_order_payload(None))
         .await;
@@ -754,7 +757,7 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
         .append(
             "Payment-pi_prepare_test",
             1,
-            &[DomainEvent::PaymentCaptured(domain::generated::events::PaymentCaptured {
+            &[DomainEvent::PaymentAuthorized(domain::generated::events::PaymentAuthorized {
                 payment_intent_id: PaymentIntentId("pi_prepare_test".into()),
                 order_id: Some(OrderId(uid(ORDER))),
                 restaurant_id: RestaurantId(uid(RESTAURANT)),
@@ -763,7 +766,7 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
             &actor,
         )
         .await
-        .expect("record the capture pre-flip");
+        .expect("record the authorization pre-flip");
     // The runner's checkpoint table exists in the full schema; create the minimal one here.
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS projection_checkpoint (\n\
@@ -779,7 +782,7 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
         infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(&pool, &pm_state)
             .await
             .expect("backfill");
-    assert_eq!(enqueued, 1, "exactly the un-reacted capture");
+    assert_eq!(enqueued, 1, "exactly the un-reacted authorization");
     // Idempotent: a restart re-scan collides on the deterministic pk.
     let again = infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(&pool, &pm_state)
         .await
@@ -794,5 +797,5 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
         .await
         .expect("count")
         .get("n");
-    assert_eq!(placed, 1, "the paid order got told about");
+    assert_eq!(placed, 1, "the authorized order got told about");
 }
