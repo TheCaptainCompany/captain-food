@@ -39,7 +39,51 @@
 > charge) + a checkout hold-disclosure; and declared a **dead-man's-switch** on the age of the oldest
 > still-authorized order (`observability.yaml#/payment-settlement`), because the paging counter only
 > fires on a failed ATTEMPT, never on a capture that is never attempted — its reconciling-sweep
-> runtime is a tracked CRITICAL follow-up.
+> runtime is a tracked CRITICAL follow-up. **MERGED via [PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545)
+> after a delta re-review PASS (the CRITICAL fix's RED independently reproduced).**
+
+> ✅ **2026-08-14 — FOUNDER DELEGATED A DECISION BATCH TO THE TEAM** (*"You don't need me for that"* +
+> *"Go ahead team!!"*, the founder pasting back the decision list with its recommendations; authority
+> [ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
+> **Recorded as adopted on their recommendations** ([DECISIONS](proposals/DECISIONS.md) header +
+> rows): **STRIX-1** (GO — single gated, sandboxed, bounded, dev-only run) · **STRIX-2** (bounded run
+> with hard time + token caps) → [PROP-20260814-000240](proposals/PROP-20260814-000240-strix-security-audit.md)
+> **Approved**, three Concerns checked · **D8** (bootstrap-then-flip source) · **D9** (Uber is
+> merchant-of-record, informational record only) · **D10** (post-V0, design the aggregator shape now) ·
+> **D11** (option 1 — either side in test ⇒ the ORDER is test, ticket unmistakably marked / off the
+> live kitchen flow) — **D11 UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257)**.
+> **LOSS-1 is DELIBERATELY KEPT OPEN / founder-flagged** (added after the delegated list, commits Captain
+> to absorbing real money — out of the delegation's explicit scope). **Operating-model signal**: this
+> extends the team's delegated authority (ADR-20260810-215503, backlog priority) to **this class of
+> product decision** — the team decides + informs going forward; money-liability / external-legal /
+> admin-gated matters stay founder-owned. **Re-ranked value stack** (keystone unchanged — the acceptance
+> criterion [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
+> stays TOP): (a) finish capture-on-delivered (#545, in flight) → (b) acceptance smoke L5 lifecycle walk
+> → (c) **GraphQL query cost/depth limiter** (new peak-readiness issue, HIGH — founder flagged it
+> higher-leverage than Strix) → (d) Strix containment-harness + bounded run (approved, gated behind the
+> harness, below the keystone) → (e) Uber aggregator-shape (post-V0) + #257/D11 implementation. This run
+> is docs-only; no code, no claim.
+
+> 💳 **2026-08-14 — the #544 five-lens review's carry-forwards (recorded)**
+> ([PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545), tracking issue
+> [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)).
+> The review found a **CRITICAL (a circular read dependency made capture inert)** — now FIXED,
+> delta-verified, and merged. Its
+> **non-code carry-forwards are recorded** (this run, docs-only): the founder-owed
+> permanent-capture-failure loss-allocation decision + operator runbook
+> ([DECISIONS §38 LOSS-1](proposals/DECISIONS.md)); a dba **forward-trap** hazard for the unbuilt
+> at-table advance-capture arm (`PaymentCaptured`-on-`PENDING` would swallow `PaymentAuthorized` and
+> never fire `PlaceOrderProcess` — money captured, order never materialized;
+> [PROP-20260726-165000 D2](proposals/PROP-20260726-165000-marketplace-economics-and-money-movement.md));
+> same-day-only scheduling reframed as a **solvency** constraint requiring #175 before any multi-day
+> scheduling ([PROP-20260726-164500 D6](proposals/PROP-20260726-164500-order-operational-safety.md));
+> a seven-question legal counsel packet
+> ([BRIEF-20260814](legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md), **no lens output is
+> legal clearance**); and a `bam` settlement-funnel projection as an ADR-20260811-014129 completeness
+> follow-up ([#549](https://github.com/TheCaptainCompany/captain-food/issues/549), related to #484).
+> Blocking review follow-ups filed: [#550](https://github.com/TheCaptainCompany/captain-food/issues/550)
+> (CRITICAL — the dead-man's-switch reconciling-sweep runtime, blocks real orders) and
+> [#551](https://github.com/TheCaptainCompany/captain-food/issues/551) (capture-failure alert split).
 
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)

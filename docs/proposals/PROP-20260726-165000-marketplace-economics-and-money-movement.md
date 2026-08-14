@@ -13,6 +13,25 @@
 > authorization** (no refund on that path). Consequence carried into D5: an after-delivery tip is
 > a post-capture second payment.
 
+> **Forward hazard 2026-08-14 (PR #545 five-lens review, dba lens — recorded, NOT reachable today)**:
+> the decided per-service-type posture has a third arm the other two do not — **capture in advance
+> for at-table service** (an auto-/advance-capture that captures *before* the customer is present).
+> It is unbuilt, and there is no at-table `ServiceType` yet (`specs/common/scalars.yaml:271-276`,
+> `EAT_IN` explicitly not offered), so it has **no dedicated issue** — this hazard should be attached
+> to the at-table arm's issue when one is opened. The trap is compounding, so it is recorded now:
+> under [PR #545 "capture on delivered"](https://github.com/TheCaptainCompany/captain-food/pull/545)'s
+> authorize-first design, `PlaceOrderProcess` materializes the `Order` **only** on `PaymentAuthorized`,
+> while the `Payment` aggregate keeps a direct `PENDING → CAPTURED` transition on `PaymentCaptured`
+> (`specs/payments/actors.yaml:22`) and a `PaymentAuthorized` arriving past `PENDING` is swallowed as
+> already-recorded. So the day the advance-capture arm lands, a `PaymentCaptured` on a still-`PENDING`
+> payment drives `PENDING→CAPTURED`, the following `PaymentAuthorized` is swallowed, and
+> `PlaceOrderProcess` never fires: **money captured, order never materialized** — the worst failure
+> mode (money moved, nobody told). Today's manual-capture DELIVERY/COLLECTION posture closes the
+> ordering (every order is Authorized→Captured), so it cannot happen yet. **Build constraint, pinned
+> by a test when the arm lands**: `PlaceOrderProcess` MUST also materialize the `Order` on a
+> `PaymentCaptured`-from-`PENDING`, not only on `PaymentAuthorized`. Tracked at
+> [DECISIONS §38](../proposals/DECISIONS.md).
+
 ---
 
 ## 1. Context

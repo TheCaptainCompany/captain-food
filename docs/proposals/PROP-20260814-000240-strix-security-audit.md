@@ -1,13 +1,13 @@
 # PROP-20260814-000240 — Strix autonomous pentest: a first gated, sandboxed, defensive run
 
-- **Status**: Proposed
+- **Status**: Approved (founder-delegated 2026-08-14 — *"You don't need me for that"* + *"Go ahead team!!"*, the founder pasting back the decision list with its recommendations; authority governed by [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)). STRIX-1 = **GO** for a single gated, sandboxed, bounded, **dev-only** run; STRIX-2 = **bounded run with hard time + token caps** on the shared Claude quota. GO authorizes **proceeding to BUILD the D-A containment harness and RUN under this plan** — it is **not** a raw-run authorization: the run is gated behind the harness landing.
 - **Date**: 2026-08-14
 - **Tracking issue**: [#548 "Evaluate Strix for a gated pre-launch DAST pass against our own endpoints (authorized defensive)"](https://github.com/TheCaptainCompany/captain-food/issues/548)
 - **Realized by**: _(filled at completion)_
 - **Concerns**:
-  - [ ] sandbox-containment: the run executes third-party exploit code — it lands only under the D-A containment (throwaway container, no repo write, no real secrets, dev-only egress)
-  - [ ] quota-safety: an autonomous looping agent must not be pointed at the shared Claude account quota without a bounded scope + token cap (D-B)
-  - [ ] compliance-framing: the output is a pentest evidence pack for counsel, NEVER a PCI/RGPD certificate or clearance (D-C)
+  - [x] sandbox-containment: the run executes third-party exploit code — it lands only under the D-A containment (throwaway container, no repo write, no real secrets, dev-only egress). **CHECKED**: D-A's recommended option (checksum-pinned artifact, throwaway container, no repo write, no real secrets, egress allow-listed to the dev target) strictly dominates and is team-owned; GO authorizes building that harness first and gates the run behind it — the containment is the precondition, not an afterthought.
+  - [x] quota-safety: an autonomous looping agent must not be pointed at the shared Claude account quota without a bounded scope + token cap (D-B). **CHECKED**: adopted as STRIX-2 = bounded run with an explicit scope + hard time cap + hard token cap on the shared proxy, the cap set low enough that a runaway loop cannot starve the team's own loop; escalate to a separate key only if a first bounded run proves the cap too tight (D-B recommended option).
+  - [x] compliance-framing: the output is a pentest evidence pack for counsel, NEVER a PCI/RGPD certificate or clearance (D-C). **CHECKED**: D-C is a hard legal-lens constraint with no option space — the artifact is a defensive-pentest evidence pack for counsel and the team, never a PCI-DSS/RGPD certificate, attestation or clearance; no lens output in this document is legal clearance ([ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
 
 > **Framing (hard line, up front).** This is **authorized defensive security testing of our own
 > pre-launch product against our own endpoints.** Every option below is scoped to that. No lens
