@@ -95,6 +95,16 @@ pub mod metric {
     pub const PLACE_ORDER_DURATION_MS: &str = "place_order_duration_ms";
     pub const ORDERS_PLACED_TOTAL: &str = "orders_placed_total";
     pub const CHECKOUT_PAYMENT_FAILURES_TOTAL: &str = "checkout_payment_failures_total";
+    /// `payment-settlement` contract (ADR-20260808-195315 §1.2): capturing a confirmed
+    /// authorization FAILED after fulfilment — the food is cooked and the money did not move, the
+    /// inverse of the paid-order-nobody-told-about class. Attribute `reason` =
+    /// scalars.yaml#/CaptureFailureReason. PAGES on ANY increment; the recorded
+    /// PaymentCaptureFailed fact on the Payment stream is the durable twin this counter taps.
+    pub const PAYMENT_CAPTURE_FAILED_TOTAL: &str = "payment_capture_failed_total";
+    /// `payment-settlement` contract: voiding an uncaptured authorization failed — warn-level,
+    /// never a page: the hold self-heals (Stripe expires it within ~7 days and reports
+    /// PaymentReleased). Attribute `reason` (deterministic | transient).
+    pub const PAYMENT_RELEASE_FAILED_TOTAL: &str = "payment_release_failed_total";
     /// `place-order` contract (#440): the checkout shell rendered WITHOUT a mountable payment
     /// element — a DEFECT counter (the customer_claim_stamp_failed_total pattern), attribute
     /// `reason`. A degraded render produces ZERO place-order runs (the customer cannot even try),

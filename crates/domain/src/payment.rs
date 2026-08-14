@@ -1,7 +1,10 @@
 //! Payment aggregate — the PURE write-side state fold (ADR-0035). Born by `PaymentIntentCreated`
 //! (emitted by PlaceOrderProcess, carrying the frozen checkout snapshot — ADR-20260719-014434), then
-//! driven to a terminal state by the inbound Stripe facts (`PaymentCaptured`/`PaymentFailed`/
-//! `PaymentRefunded`) and the refund decisions RefundProcess delivers (`RefundApproved`/`RefundDenied`).
+//! driven to a terminal state by the inbound Stripe facts (`PaymentAuthorized`/`PaymentCaptured`/
+//! `PaymentReleased`/`PaymentFailed`/`PaymentRefunded`; authorize-then-capture,
+//! ADR-20260808-195315 §1.2), the capture failure PaymentSettlementProcess delivers
+//! (`PaymentCaptureFailed` — records without moving the status) and the refund decisions
+//! RefundProcess delivers (`RefundApproved`/`RefundDenied`).
 //! Everything on this inbox is a FACT to record, never a command to reject
 //! (`specs/actors.yaml#/Payment`): the only decision left to the caller is idempotency —
 //! [`already_records`] answers "is this re-delivered fact already reflected?", so appending it again
@@ -44,8 +47,12 @@ pub struct PaymentState {
     pub restaurant_id: RestaurantId,
     /// The intent amount (== checkout.totalAmount == checkout.breakdown.total).
     pub amount: Money,
-    /// PENDING → CAPTURED | FAILED, CAPTURED → REFUNDED — folded from the Stripe facts.
+    /// PENDING → AUTHORIZED | FAILED, AUTHORIZED → CAPTURED | RELEASED, CAPTURED → REFUNDED —
+    /// folded from the Stripe facts (specs/payments/actors.yaml#/Payment/lifecycle).
     pub status: PaymentStatus,
+    /// Whether PaymentSettlementProcess recorded a capture failure (`PaymentCaptureFailed`) — the
+    /// status stays AUTHORIZED (funds still held); a retried capture or the hold's expiry decides.
+    pub capture_failed: bool,
     /// Whether RefundProcess opened a refund for decision on this payment (`RefundOpened` recorded —
     /// the refund-queue fact View_PendingRefunds folds; rules.yaml#/PendingRefundVisibleUntilDecided).
     pub refund_opened: bool,
@@ -79,6 +86,7 @@ fn apply(state: Option<PaymentState>, event: &DomainEvent) -> Option<PaymentStat
                 restaurant_id: e.restaurant_id,
                 amount: e.amount.clone(),
                 status,
+                capture_failed: false,
                 refund_opened: false,
                 refund_decision: None,
                 refund_id: None,
@@ -92,6 +100,7 @@ fn apply(state: Option<PaymentState>, event: &DomainEvent) -> Option<PaymentStat
         s.status = next;
     }
     match event {
+        DomainEvent::PaymentCaptureFailed(_) => s.capture_failed = true,
         DomainEvent::PaymentRefunded(e) => s.refund_id = Some(e.refund_id.clone()),
         DomainEvent::RefundOpened(_) => s.refund_opened = true,
         DomainEvent::RefundApproved(_) => s.refund_decision = Some(RefundDecision::Approved),
@@ -108,7 +117,13 @@ pub fn already_records(state: &PaymentState, event: &DomainEvent) -> bool {
     match event {
         // The stream exists at all ⇔ the birth is recorded.
         DomainEvent::PaymentIntentCreated(_) => true,
+        // "Already reflected" for the authorization is `status != PENDING`: appending a (late or
+        // re-delivered) authorization onto a CAPTURED/RELEASED/FAILED payment would fold the status
+        // BACKWARDS (the recorded fact wins at fold time), so any post-PENDING state absorbs it.
+        DomainEvent::PaymentAuthorized(_) => state.status != PaymentStatus::PENDING,
         DomainEvent::PaymentCaptured(_) => state.status == PaymentStatus::CAPTURED,
+        DomainEvent::PaymentCaptureFailed(_) => state.capture_failed,
+        DomainEvent::PaymentReleased(_) => state.status == PaymentStatus::RELEASED,
         DomainEvent::PaymentFailed(_) => state.status == PaymentStatus::FAILED,
         // Keyed by the Stripe Refund id, not just the status — a different refund is a new fact.
         DomainEvent::PaymentRefunded(e) => state.refund_id.as_ref() == Some(&e.refund_id),
@@ -126,8 +141,9 @@ mod tests {
         CheckoutSnapshot, CustomerContact, PaymentBreakdown,
     };
     use crate::generated::events::{
-        PaymentCaptured, PaymentFailed, PaymentIntentCreated, PaymentRefunded, RefundApproved,
-        RefundDenied, RefundOpened,
+        PaymentAuthorized, PaymentCaptureFailed, PaymentCaptured, PaymentFailed,
+        PaymentIntentCreated, PaymentRefunded, PaymentReleased, RefundApproved, RefundDenied,
+        RefundOpened,
     };
     use crate::generated::scalars::{
         CartId, CurrencyCode, CustomerDisplayName, CustomerId, MoneyCents, PhoneNumber, ServiceType,
@@ -183,12 +199,37 @@ mod tests {
             },
         })
     }
+    fn authorized() -> DomainEvent {
+        DomainEvent::PaymentAuthorized(PaymentAuthorized {
+            payment_intent_id: pi(),
+            order_id: Some(order_id()),
+            restaurant_id: restaurant_id(),
+            amount: money(1000),
+        })
+    }
     fn captured() -> DomainEvent {
         DomainEvent::PaymentCaptured(PaymentCaptured {
             payment_intent_id: pi(),
             order_id: Some(order_id()),
             restaurant_id: restaurant_id(),
             amount: money(1000),
+        })
+    }
+    fn capture_failed() -> DomainEvent {
+        DomainEvent::PaymentCaptureFailed(PaymentCaptureFailed {
+            payment_intent_id: pi(),
+            order_id: order_id(),
+            restaurant_id: restaurant_id(),
+            reason: crate::generated::scalars::CaptureFailureReason::CARD_DECLINED,
+            detail: Some("Your card was declined.".into()),
+        })
+    }
+    fn released() -> DomainEvent {
+        DomainEvent::PaymentReleased(PaymentReleased {
+            payment_intent_id: pi(),
+            order_id: Some(order_id()),
+            restaurant_id: restaurant_id(),
+            reason: Some("requested_by_customer".into()),
         })
     }
     fn failed() -> DomainEvent {
@@ -250,10 +291,49 @@ mod tests {
         assert_eq!(s.refund_id, None);
     }
 
+    /// tests.yaml#/TestPaymentAuthorizedRecorded (fold half) — the authorize-then-capture
+    /// lifecycle: PENDING → AUTHORIZED → CAPTURED, with PENDING → CAPTURED kept legal for the
+    /// recorded at-table advance-capture arm (ADR-20260808-195315 §1.2).
     #[test]
-    fn capture_and_failure_reach_their_terminal_status() {
+    fn authorization_capture_release_and_failure_fold_through_the_lifecycle() {
+        assert_eq!(fold(&[intent_created(), authorized()]).unwrap().status, PaymentStatus::AUTHORIZED);
+        assert_eq!(
+            fold(&[intent_created(), authorized(), captured()]).unwrap().status,
+            PaymentStatus::CAPTURED
+        );
         assert_eq!(fold(&[intent_created(), captured()]).unwrap().status, PaymentStatus::CAPTURED);
+        assert_eq!(
+            fold(&[intent_created(), authorized(), released()]).unwrap().status,
+            PaymentStatus::RELEASED
+        );
         assert_eq!(fold(&[intent_created(), failed()]).unwrap().status, PaymentStatus::FAILED);
+    }
+
+    /// rules.yaml#/CaptureFailureIsRecordedAndPaged (fold half): the failure is recorded WITHOUT
+    /// moving the status — the money is still only held; a retried capture still settles.
+    #[test]
+    fn capture_failure_is_recorded_without_moving_the_status() {
+        let s = fold(&[intent_created(), authorized(), capture_failed()]).unwrap();
+        assert_eq!(s.status, PaymentStatus::AUTHORIZED);
+        assert!(s.capture_failed);
+        assert!(already_records(&s, &capture_failed())); // re-delivered failure appends nothing
+        // A retried capture still reaches CAPTURED after a recorded failure.
+        let s = fold(&[intent_created(), authorized(), capture_failed(), captured()]).unwrap();
+        assert_eq!(s.status, PaymentStatus::CAPTURED);
+    }
+
+    /// The already-records guard that keeps a late authorization from folding a settled payment
+    /// BACKWARDS: any post-PENDING state absorbs a (re-)delivered PaymentAuthorized.
+    #[test]
+    fn late_authorization_never_regresses_a_settled_payment() {
+        let s = fold(&[intent_created(), authorized(), captured()]).unwrap();
+        assert!(already_records(&s, &authorized()));
+        let s = fold(&[intent_created(), authorized(), released()]).unwrap();
+        assert!(already_records(&s, &authorized()));
+        assert!(already_records(&s, &released()));
+        let fresh = fold(&[intent_created()]).unwrap();
+        assert!(!already_records(&fresh, &authorized()));
+        assert!(!already_records(&fresh, &released()));
     }
 
     #[test]

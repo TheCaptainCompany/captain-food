@@ -612,14 +612,14 @@ pub mod delivery_dispatch_process {
 /// Generated step pipelines for `processmanager.yaml#/PlaceOrderProcess`.
 pub mod place_order_process {
 
-    /// Non-structural hooks for the generated `PaymentCaptured` leg — the seams the step DSL cannot express
+    /// Non-structural hooks for the generated `PaymentAuthorized` leg — the seams the step DSL cannot express
     /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
+    /// The Stripe authorization outcome (recorded by the Payment aggregate): the hold is confirmed — materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. The money has NOT moved: PaymentSettlementProcess captures on fulfilment (rules.yaml#/OrderMaterializedOnPaymentAuthorization). 
     #[async_trait::async_trait]
-    pub trait PaymentCapturedHooks: Send + Sync {
+    pub trait PaymentAuthorizedHooks: Send + Sync {
         /// Build the FULL `OrderPlaced` payload — the DSL `with` covers only [orderId]; the rest is computed
         /// (spec note: — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.). `Skip` ends the leg as a benign no-op; `Err` aborts and surfaces.
-        async fn build_order_placed(&self, event: &domain::generated::events::PaymentCaptured, row: &crate::pm_state::PaymentProcessRow) -> Result<super::HookOutcome<domain::generated::events::OrderPlaced>, domain::shared::errors::DomainError>;
+        async fn build_order_placed(&self, event: &domain::generated::events::PaymentAuthorized, row: &crate::pm_state::PaymentProcessRow) -> Result<super::HookOutcome<domain::generated::events::OrderPlaced>, domain::shared::errors::DomainError>;
 
         /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
         /// `OrderPlaced` be appended? (A re-delivered trigger must find the fact already recorded.)
@@ -634,18 +634,18 @@ pub mod place_order_process {
         fn finalize(&self, _row: &mut crate::pm_state::PaymentProcessRow) {}
     }
 
-    /// EVENT leg `events.yaml#/PaymentCaptured` — generated step pipeline (issue #25).
-    /// The Stripe outcome (recorded by the Payment aggregate): materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. 
-    pub async fn on_payment_captured(
+    /// EVENT leg `events.yaml#/PaymentAuthorized` — generated step pipeline (issue #25).
+    /// The Stripe authorization outcome (recorded by the Payment aggregate): the hold is confirmed — materialize the Order and close the cart from the checkout snapshot frozen on PaymentIntentCreated. The money has NOT moved: PaymentSettlementProcess captures on fulfilment (rules.yaml#/OrderMaterializedOnPaymentAuthorization). 
+    pub async fn on_payment_authorized(
         store: &dyn crate::ports::EventStore,
         state: &dyn crate::pm_state::PaymentProcessStateStore,
-        hooks: &dyn PaymentCapturedHooks,
-        event: &domain::generated::events::PaymentCaptured,
+        hooks: &dyn PaymentAuthorizedHooks,
+        event: &domain::generated::events::PaymentAuthorized,
         env: &crate::process_managers::TriggerEnvelope,
     ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
         use crate::process_managers::Outcome;
         let actor = crate::process_managers::saga_actor(env);
-        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this capture belongs to.
+        // state.by payment_intent_id — load the run this trigger correlates to. Load the checkout run this authorization belongs to.
         let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
             return Err(domain::shared::errors::DomainError::rejected("PaymentEventOrphaned", serde_json::json!({ "paymentIntentId": &event.payment_intent_id })));
         };
@@ -679,7 +679,7 @@ pub mod place_order_process {
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
         let mut updated = crate::pm_state::PaymentProcessRow {
-            payment_status: domain::generated::scalars::PaymentStatus::CAPTURED,
+            payment_status: domain::generated::scalars::PaymentStatus::AUTHORIZED,
             process_status: domain::generated::scalars::PaymentProcessStatus::ORDER_PLACED,
             last_processed_stripe_event_id: Some(domain::generated::scalars::ExternalReference(env.event_id.to_string())),
             ..row
@@ -855,6 +855,185 @@ pub mod reclamation_process {
             return Ok(Outcome::Completed);
         }
         Ok(leg_outcome)
+    }
+}
+
+/// Generated step pipelines for `processmanager.yaml#/PaymentSettlementProcess`.
+pub mod payment_settlement_process {
+
+    /// Columns of `OrderTracking` consumed by this PM's `read order` step, typed by their consumers.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct OrderRead {
+        /// Feeds the `= AUTHORIZED` guard.
+        pub payment_status: String,
+    }
+
+    /// Non-structural hooks for the generated `OrderDelivered` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
+    #[async_trait::async_trait]
+    pub trait OrderDeliveredHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). The fulfilled order, with its folded payment state. Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Build the `payment.capture` input for this leg. — Capture the FULL authorized amount (partial capture / tips-at-delivery is the recorded open tips discussion, ADR-20260808-195315 §1.4); PaymentCaptured settles asynchronously. `Skip` skips just this call — the leg continues.
+        async fn input_payment_capture(&self, event: &domain::generated::events::OrderDelivered, order: &OrderRead) -> Result<super::HookOutcome<crate::generated::services::PaymentCaptureInput>, domain::shared::errors::DomainError>;
+    }
+
+    /// EVENT leg `events.yaml#/OrderDelivered` — generated step pipeline (issue #25).
+    /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
+    pub async fn on_order_delivered(
+        payment: &dyn crate::generated::services::PaymentService,
+        hooks: &dyn OrderDeliveredHooks,
+        event: &domain::generated::events::OrderDelivered,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // read `order` ← OrderTracking where order_id = message.orderId. The fulfilled order, with its folded payment state.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = AUTHORIZED — benign alternative: Nothing authorized → nothing to capture: $0 replacements never charge; released/refunded runs have nothing held; an already-captured payment is a benign redelivery.
+        if order.payment_status != "AUTHORIZED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not AUTHORIZED — Nothing authorized → nothing to capture: $0 replacements never charge; released/refunded runs have nothing held; an already-captured payment is a benign redelivery.", order.payment_status)));
+        }
+        // call payment.capture — Capture the FULL authorized amount (partial capture / tips-at-delivery is the recorded open tips discussion, ADR-20260808-195315 §1.4); PaymentCaptured settles asynchronously.
+        match hooks.input_payment_capture(event, &order).await? {
+            super::HookOutcome::Ready(input) => {
+                payment.capture(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+            }
+            super::HookOutcome::Skip(reason) => {
+                tracing::warn!(saga = "PaymentSettlementProcess", port = "payment", operation = "capture", %reason, "service call skipped");
+            }
+        }
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `OrderRejectedByRestaurant` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant rejected the order before capture — release the hold (Stripe void); the settled fact arrives as inbound PaymentReleased. The acceptance-timeout auto-cancel (§1.3, unbuilt) rides this same arm.
+    #[async_trait::async_trait]
+    pub trait OrderRejectedByRestaurantHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Build the `payment.release` input for this leg. — Void the uncaptured intent — no refund machinery, the customer was never charged. `Skip` skips just this call — the leg continues.
+        async fn input_payment_release(&self, event: &domain::generated::events::OrderRejectedByRestaurant, order: &OrderRead) -> Result<super::HookOutcome<crate::generated::services::PaymentReleaseInput>, domain::shared::errors::DomainError>;
+    }
+
+    /// EVENT leg `events.yaml#/OrderRejectedByRestaurant` — generated step pipeline (issue #25).
+    /// The restaurant rejected the order before capture — release the hold (Stripe void); the settled fact arrives as inbound PaymentReleased. The acceptance-timeout auto-cancel (§1.3, unbuilt) rides this same arm.
+    pub async fn on_order_rejected_by_restaurant(
+        payment: &dyn crate::generated::services::PaymentService,
+        hooks: &dyn OrderRejectedByRestaurantHooks,
+        event: &domain::generated::events::OrderRejectedByRestaurant,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = AUTHORIZED — benign alternative: Nothing held → nothing to release (post-capture rejection is RefundProcess's CAPTURED arm).
+        if order.payment_status != "AUTHORIZED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not AUTHORIZED — Nothing held → nothing to release (post-capture rejection is RefundProcess's CAPTURED arm).", order.payment_status)));
+        }
+        // call payment.release — Void the uncaptured intent — no refund machinery, the customer was never charged.
+        match hooks.input_payment_release(event, &order).await? {
+            super::HookOutcome::Ready(input) => {
+                payment.release(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+            }
+            super::HookOutcome::Skip(reason) => {
+                tracing::warn!(saga = "PaymentSettlementProcess", port = "payment", operation = "release", %reason, "service call skipped");
+            }
+        }
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `OrderCancelledByCustomer` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The customer cancelled before capture — release the hold.
+    #[async_trait::async_trait]
+    pub trait OrderCancelledByCustomerHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Build the `payment.release` input for this leg. `Skip` skips just this call — the leg continues.
+        async fn input_payment_release(&self, event: &domain::generated::events::OrderCancelledByCustomer, order: &OrderRead) -> Result<super::HookOutcome<crate::generated::services::PaymentReleaseInput>, domain::shared::errors::DomainError>;
+    }
+
+    /// EVENT leg `events.yaml#/OrderCancelledByCustomer` — generated step pipeline (issue #25).
+    /// The customer cancelled before capture — release the hold.
+    pub async fn on_order_cancelled_by_customer(
+        payment: &dyn crate::generated::services::PaymentService,
+        hooks: &dyn OrderCancelledByCustomerHooks,
+        event: &domain::generated::events::OrderCancelledByCustomer,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = AUTHORIZED — benign alternative: Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm).
+        if order.payment_status != "AUTHORIZED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not AUTHORIZED — Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm).", order.payment_status)));
+        }
+        // call payment.release
+        match hooks.input_payment_release(event, &order).await? {
+            super::HookOutcome::Ready(input) => {
+                payment.release(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+            }
+            super::HookOutcome::Skip(reason) => {
+                tracing::warn!(saga = "PaymentSettlementProcess", port = "payment", operation = "release", %reason, "service call skipped");
+            }
+        }
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `OrderCancelledByRestaurant` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// The restaurant cancelled after acceptance but before capture — release the hold.
+    #[async_trait::async_trait]
+    pub trait OrderCancelledByRestaurantHooks: Send + Sync {
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
+
+        /// Build the `payment.release` input for this leg. `Skip` skips just this call — the leg continues.
+        async fn input_payment_release(&self, event: &domain::generated::events::OrderCancelledByRestaurant, order: &OrderRead) -> Result<super::HookOutcome<crate::generated::services::PaymentReleaseInput>, domain::shared::errors::DomainError>;
+    }
+
+    /// EVENT leg `events.yaml#/OrderCancelledByRestaurant` — generated step pipeline (issue #25).
+    /// The restaurant cancelled after acceptance but before capture — release the hold.
+    pub async fn on_order_cancelled_by_restaurant(
+        payment: &dyn crate::generated::services::PaymentService,
+        hooks: &dyn OrderCancelledByRestaurantHooks,
+        event: &domain::generated::events::OrderCancelledByRestaurant,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        // read `order` ← OrderTracking where order_id = message.orderId.
+        let order = match hooks.read_order(event.order_id).await? {
+            super::HookOutcome::Ready(v) => v,
+            super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
+        };
+        // guard order.payment_status = AUTHORIZED — benign alternative: Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm).
+        if order.payment_status != "AUTHORIZED" {
+            return Ok(Outcome::Skipped(format!("order.payment_status is {:?}, not AUTHORIZED — Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm).", order.payment_status)));
+        }
+        // call payment.release
+        match hooks.input_payment_release(event, &order).await? {
+            super::HookOutcome::Ready(input) => {
+                payment.release(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+            }
+            super::HookOutcome::Skip(reason) => {
+                tracing::warn!(saga = "PaymentSettlementProcess", port = "payment", operation = "release", %reason, "service call skipped");
+            }
+        }
+        Ok(Outcome::Completed)
     }
 }
 

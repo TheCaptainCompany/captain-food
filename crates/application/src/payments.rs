@@ -1,6 +1,7 @@
 //! Recording INBOUND Stripe payment facts on the Payment aggregate (ADR-20260719-193500 §3): the
-//! stateless Stripe ACL translates a webhook into `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`
-//! and delivers it HERE — no `StripeEvent-%` envelope streams, no adapter idempotency table. Dedup is
+//! stateless Stripe ACL translates a webhook into `PaymentAuthorized`/`PaymentCaptured`/
+//! `PaymentReleased`/`PaymentFailed`/`PaymentRefunded` and delivers it HERE — no `StripeEvent-%`
+//! envelope streams, no adapter idempotency table. Dedup is
 //! the AGGREGATE's business decision: `domain::payment::already_records` answers "is this re-delivered
 //! fact already reflected?", so a Stripe webhook retry appends nothing.
 //!
@@ -37,16 +38,19 @@ pub enum RecordOutcome {
 /// event outside the Payment inbox (a routing bug in the caller).
 fn payment_intent_of(event: &DomainEvent) -> Option<PaymentIntentId> {
     match event {
+        DomainEvent::PaymentAuthorized(e) => Some(e.payment_intent_id.clone()),
         DomainEvent::PaymentCaptured(e) => Some(e.payment_intent_id.clone()),
+        DomainEvent::PaymentReleased(e) => Some(e.payment_intent_id.clone()),
         DomainEvent::PaymentFailed(e) => Some(e.payment_intent_id.clone()),
         DomainEvent::PaymentRefunded(e) => Some(e.payment_intent_id.clone()),
         _ => None,
     }
 }
 
-/// Record one inbound Stripe payment fact (`PaymentCaptured` | `PaymentFailed` | `PaymentRefunded`)
-/// on its `Payment-<intentId>` stream, idempotently by the aggregate's own fold. The `actor` is the
-/// ACL's system identity (EXTERNAL, correlation = the webhook's, ADR-0041).
+/// Record one inbound Stripe payment fact (`PaymentAuthorized` | `PaymentCaptured` |
+/// `PaymentReleased` | `PaymentFailed` | `PaymentRefunded`) on its `Payment-<intentId>` stream,
+/// idempotently by the aggregate's own fold. The `actor` is the ACL's system identity (EXTERNAL,
+/// correlation = the webhook's, ADR-0041).
 pub async fn record_inbound_payment_event(
     store: &dyn EventStore,
     event: DomainEvent,
@@ -140,7 +144,7 @@ mod tests {
         })
     }
 
-    /// rules.yaml#/OrderMaterializedOnPaymentCapture (recording half): the inbound fact lands on the
+    /// rules.yaml#/PaymentCapturedOnFulfilment (recording half): the inbound fact lands on the
     /// Payment stream; a webhook re-delivery is absorbed by the aggregate's own fold.
     #[tokio::test]
     async fn records_once_and_absorbs_re_delivery() {

@@ -108,6 +108,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
         c_process_managers = component "process-managers" "Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch)." "Instrumented"
         c_message_consumers = component "message-consumers" "Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER)." "Instrumented"
       }
+      ct_pm_payment_settlement = container "pm-payment-settlement" "The settlement saga (ADR-20260808-195315 §1.2/§1.3): capture the authorized payment on fulfilment, release the hold on rejection/cancellation." "Rust — mailbox worker bin" {
+        a_PaymentSettlementProcess = component "PaymentSettlementProcess" "" "ProcessManager"
+      }
       ct_pm_refund = container "pm-refund" "The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded." "Rust — mailbox worker bin" {
         a_RefundProcess = component "RefundProcess" "" "ProcessManager"
       }
@@ -199,7 +202,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_actor_catalog -> ct_event_store "Lease Catalog lanes; append Catalog events"
     ct_actor_mailbox_supervision -> ct_event_store "Lease supervision lanes; record operator facts"
     ct_pm_place_order -> ct_event_store "Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced"
-    ct_pm_place_order -> x_stripe "Create PaymentIntents (outbound payment port)"
+    ct_pm_place_order -> x_stripe "Create manual-capture PaymentIntents (outbound payment port)"
+    ct_pm_payment_settlement -> ct_event_store "Drain fulfilment/abort triggers; record PaymentCaptureFailed on a declined capture"
+    ct_pm_payment_settlement -> x_stripe "Capture on fulfilment / void on abort (outbound payment port)"
     ct_pm_refund -> ct_event_store "Drain RefundProcess lanes; append refund decision facts"
     ct_pm_refund -> x_stripe "Request refunds (outbound payment port)"
     ct_pm_delivery_dispatch -> ct_event_store "Drain dispatch lanes; append dispatch facts"
@@ -209,7 +214,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_adapter_uber_direct -> ct_event_store "Record verified courier/status facts through the mailbox"
     ct_adapter_coopcycle -> ct_event_store "Record verified courier/status facts through the mailbox"
     ct_adapter_avelo37 -> ct_event_store "Record verified courier/status facts through the mailbox (pre-milestone: undeployed)"
-    x_stripe -> ct_adapter_stripe "Payment webhooks (PaymentCaptured/Failed/Refunded)"
+    x_stripe -> ct_adapter_stripe "Payment webhooks (PaymentAuthorized/Captured/Released/Failed/Refunded)"
     x_hubrise -> ct_adapter_hubrise "Catalog/inventory callbacks (inbound facts)"
     x_delivery_partner -> ct_adapter_uber_direct "Courier acceptance/status webhooks (inbound facts) — ADR-0031"
     x_delivery_partner -> ct_adapter_coopcycle "Per-instance courier/status webhooks (inbound facts) — ADR-0031"
@@ -352,6 +357,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       autolayout lr
     }
     component ct_pm_place_order "PmPlaceOrderComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_pm_payment_settlement "PmPaymentSettlementComponents" {
       include *
       autolayout lr
     }

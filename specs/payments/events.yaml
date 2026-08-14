@@ -5,8 +5,13 @@ description: >
   (`events.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
 
 
-PaymentCaptured:
-  description: "Payment was successfully authorized/captured for an order."
+PaymentAuthorized:
+  description: >
+    The customer's card authorization is confirmed: funds are HELD on the card, not yet moved
+    (ADR-20260808-195315 §1.2 — authorize on checkout, capture on delivered/picked up). Inbound
+    Stripe fact (`payment_intent.amount_capturable_updated`); PlaceOrderProcess materializes the
+    Order on it. The hold is valid ~7 days — the bound the scheduled-order window is recorded
+    against.
   type: object
   properties:
     paymentIntentId:
@@ -14,7 +19,32 @@ PaymentCaptured:
     orderId:
       $ref: 'scalars.yaml#/OrderId'
       nullable: true
-      description: "Null when captured before the Order aggregate is created in the saga."
+      description: "Null when authorized before the Order aggregate is created in the saga."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The capturable amount (the server-priced checkout total the intent was created with)."
+  required:
+    - paymentIntentId
+    - restaurantId
+    - amount
+
+
+PaymentCaptured:
+  description: >
+    The authorized payment was CAPTURED — the money moved. Under the authorize-then-capture posture
+    (ADR-20260808-195315 §1.2) this is the settlement fact alone (capture on delivered / picked up,
+    driven by PaymentSettlementProcess), no longer the authorized-and-captured composite of the
+    automatic-capture era. Inbound Stripe fact (`payment_intent.succeeded`).
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: "Null when captured before the Order aggregate is created in the saga (defensive: at-table advance capture is the recorded third arm, not built yet)."
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
     amount:
@@ -25,8 +55,67 @@ PaymentCaptured:
     - amount
 
 
+PaymentCaptureFailed:
+  description: >
+    Capturing a confirmed authorization FAILED after fulfilment — the food is cooked (or picked up)
+    and the money did not move (ADR-20260808-195315 §1.2 team note). Recorded by
+    PaymentSettlementProcess from the capture call's outcome, with a typed reason; alertable
+    (observability.yaml#/payment-settlement) because an operator must act — this is the inverse of
+    the paid-order-nobody-told-about failure class. The payment stays AUTHORIZED: a later retried
+    capture settles as PaymentCaptured; a dead hold expires to PaymentReleased.
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      $ref: 'scalars.yaml#/CaptureFailureReason'
+    detail:
+      type: string
+      maxLength: 500
+      nullable: true
+      description: "Gateway error detail for the operator (Stripe code/message), never parsed by the domain."
+  required:
+    - paymentIntentId
+    - orderId
+    - restaurantId
+    - reason
+
+
+PaymentReleased:
+  description: >
+    An uncaptured authorization was RELEASED — the hold on the customer's card is gone without any
+    money moving ("no need to refund because no capture", ADR-20260808-195315 §1.3). Inbound Stripe
+    fact (`payment_intent.canceled`), settling the void PaymentSettlementProcess requests on
+    rejection/cancellation (and the fact an expired authorization reports on its own). Terminal.
+  type: object
+  properties:
+    paymentIntentId:
+      $ref: 'scalars.yaml#/PaymentIntentId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: "Null when released before the Order aggregate was created (a checkout abandoned pre-materialization)."
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+      description: "Stripe cancellation_reason as reported (requested_by_customer, abandoned, ...), for the operator."
+  required:
+    - paymentIntentId
+    - restaurantId
+
+
 PaymentFailed:
-  description: "Payment authorization/capture failed; no order is placed."
+  description: >
+    Payment authorization failed at checkout confirmation (card declined before any hold existed);
+    no order is placed and the cart stays OPEN. Inbound Stripe fact
+    (`payment_intent.payment_failed`).
   type: object
   properties:
     paymentIntentId:

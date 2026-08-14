@@ -7,7 +7,17 @@ use crate::scalars::*;
 use domain_common::entities::*;
 use domain_common::scalars::*;
 
-/// Payment was successfully authorized/captured for an order.
+/// The customer's card authorization is confirmed: funds are HELD on the card, not yet moved (ADR-20260808-195315 §1.2 — authorize on checkout, capture on delivered/picked up). Inbound Stripe fact (`payment_intent.amount_capturable_updated`); PlaceOrderProcess materializes the Order on it. The hold is valid ~7 days — the bound the scheduled-order window is recorded against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentAuthorized {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: Option<OrderId>,
+    pub restaurant_id: RestaurantId,
+    pub amount: Money,
+}
+
+/// The authorized payment was CAPTURED — the money moved. Under the authorize-then-capture posture (ADR-20260808-195315 §1.2) this is the settlement fact alone (capture on delivered / picked up, driven by PaymentSettlementProcess), no longer the authorized-and-captured composite of the automatic-capture era. Inbound Stripe fact (`payment_intent.succeeded`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentCaptured {
@@ -17,7 +27,28 @@ pub struct PaymentCaptured {
     pub amount: Money,
 }
 
-/// Payment authorization/capture failed; no order is placed.
+/// Capturing a confirmed authorization FAILED after fulfilment — the food is cooked (or picked up) and the money did not move (ADR-20260808-195315 §1.2 team note). Recorded by PaymentSettlementProcess from the capture call's outcome, with a typed reason; alertable (observability.yaml#/payment-settlement) because an operator must act — this is the inverse of the paid-order-nobody-told-about failure class. The payment stays AUTHORIZED: a later retried capture settles as PaymentCaptured; a dead hold expires to PaymentReleased.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentCaptureFailed {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub reason: CaptureFailureReason,
+    pub detail: Option<String>,
+}
+
+/// An uncaptured authorization was RELEASED — the hold on the customer's card is gone without any money moving ("no need to refund because no capture", ADR-20260808-195315 §1.3). Inbound Stripe fact (`payment_intent.canceled`), settling the void PaymentSettlementProcess requests on rejection/cancellation (and the fact an expired authorization reports on its own). Terminal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentReleased {
+    pub payment_intent_id: PaymentIntentId,
+    pub order_id: Option<OrderId>,
+    pub restaurant_id: RestaurantId,
+    pub reason: Option<String>,
+}
+
+/// Payment authorization failed at checkout confirmation (card declined before any hold existed); no order is placed and the cart stays OPEN. Inbound Stripe fact (`payment_intent.payment_failed`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentFailed {

@@ -376,6 +376,15 @@
       ],
       "path": "crates/bins/pm-delivery-dispatch"
     },
+    "pm-payment-settlement": {
+      "actor": "PaymentSettlementProcess",
+      "kind": "process-manager",
+      "domain_crates": [
+        "domain-ordering",
+        "domain-payments"
+      ],
+      "path": "crates/bins/pm-payment-settlement"
+    },
     "pm-place-order": {
       "actor": "PlaceOrderProcess",
       "kind": "process-manager",

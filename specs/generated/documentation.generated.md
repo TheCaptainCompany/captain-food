@@ -3572,7 +3572,7 @@ A refund opened for decision on a paid order (RefundProcess): REQUESTED until th
 | <a id="type-refund--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
 | <a id="type-refund--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
 
-### 🎭 Actors _(11)_
+### 🎭 Actors _(12)_
 
 <a id="actor-conversation"></a>
 #### 🎭 Actor: `Conversation`
@@ -3696,13 +3696,13 @@ stateDiagram-v2
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
 
-_⚙️ process manager_ — The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order materializes only when Stripe reports the capture: the PaymentCaptured reaction re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process state; the customer retries by resubmitting checkout.
+_⚙️ process manager_ — The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the cart against the live catalog, prices server-side, creates the Stripe PaymentIntent (manual capture, ADR-20260808-195315 s1.2) and freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order materializes when Stripe confirms the AUTHORIZATION (funds held, not captured): the PaymentAuthorized reaction re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and emits OrderPlaced idempotently; capture happens on fulfilment, driven by PaymentSettlementProcess. A PaymentFailed reaction records the outcome on the process state; the customer retries by resubmitting checkout.
 
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
-| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
+| [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry._ | — |
 
 Sequence (generated from the typed steps):
@@ -3738,13 +3738,13 @@ sequenceDiagram
   PM->>ST: set cart_id=PlaceOrder.cartId, order_id=PlaceOrder.orderId, payment_intent_id=payment.request, process_status=AWAITING_PAYMENT_RESULT, payment_status=PENDING
   end
   rect rgb(245,245,245)
-  IN->>PM: PaymentCaptured (event)
-  PM->>ST: by payment_intent_id=PaymentCaptured.paymentIntentId
+  IN->>PM: PaymentAuthorized (event)
+  PM->>ST: by payment_intent_id=PaymentAuthorized.paymentIntentId
   PM--xIN: throws PaymentEventOrphaned
   PM->>ST: expect process_status=AWAITING_PAYMENT_RESULT
   PM->>AG_Order: deliver OrderPlaced — the aggregate records it
   PM->>AG_Cart: deliver CartCheckedOut — the aggregate records it
-  PM->>ST: set payment_status=CAPTURED, process_status=ORDER_PLACED, last_processed_stripe_event_id=envelope.event_id
+  PM->>ST: set payment_status=AUTHORIZED, process_status=ORDER_PLACED, last_processed_stripe_event_id=envelope.event_id
   end
   rect rgb(245,245,245)
   IN->>PM: PaymentFailed (event)
@@ -3758,12 +3758,15 @@ sequenceDiagram
 <a id="actor-payment"></a>
 #### 🎭 Actor: `Payment`
 
-_🧩 aggregate_ — A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state.
+_🧩 aggregate_ — A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), authorized at checkout confirmation, captured on fulfilment (ADR-20260808-195315 §1.2) or released on abort.
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | — |
+| [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `PaymentAuthorized`](#event-paymentauthorized) | — |
 | [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `PaymentCaptured`](#event-paymentcaptured) | — |
+| [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed) | [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed) | — |
+| [⚡ `PaymentReleased`](#event-paymentreleased) | [⚡ `PaymentReleased`](#event-paymentreleased) | — |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | [⚡ `PaymentFailed`](#event-paymentfailed) | — |
 | [⚡ `PaymentRefunded`](#event-paymentrefunded) | [⚡ `PaymentRefunded`](#event-paymentrefunded) | — |
 | [⚡ `RefundOpened`](#event-refundopened) | [⚡ `RefundOpened`](#event-refundopened) | — |
@@ -3775,11 +3778,15 @@ Lifecycle (generated from the declared state machine):
 ```mermaid
 stateDiagram-v2
   [*] --> PENDING : PaymentIntentCreated
+  PENDING --> AUTHORIZED : PaymentAuthorized
   PENDING --> CAPTURED : PaymentCaptured
+  AUTHORIZED --> CAPTURED : PaymentCaptured
   PENDING --> FAILED : PaymentFailed
+  AUTHORIZED --> RELEASED : PaymentReleased
   CAPTURED --> REFUNDED : PaymentRefunded
   FAILED --> [*]
   REFUNDED --> [*]
+  RELEASED --> [*]
 ```
 
 <a id="actor-customercredit"></a>
@@ -3869,13 +3876,13 @@ sequenceDiagram
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
 
-_⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN cart, re-validates and prices it server-side against the live catalog, creates the Stripe PaymentIntent, and freezes the full priced checkout onto PaymentIntentCreated (ADR-20260719-014434) — the state row (one live run per cart) is what prevents concurrent checkouts of the same cart. On PaymentCaptured: materializes the Order and closes the cart from the frozen snapshot alone. On PaymentFailed: resolves the run; the cart stays OPEN.
+_⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN cart, re-validates and prices it server-side against the live catalog, creates the Stripe PaymentIntent (manual capture, ADR-20260808-195315 §1.2), and freezes the full priced checkout onto PaymentIntentCreated (ADR-20260719-014434) — the state row (one live run per cart) is what prevents concurrent checkouts of the same cart. On PaymentAuthorized (funds held, not captured): materializes the Order and closes the cart from the frozen snapshot alone — capture happens later, on fulfilment, driven by PaymentSettlementProcess. On PaymentFailed: resolves the run; the cart stays OPEN.
 
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
-| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
+| [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 
 Sequence (generated from the typed steps):
@@ -3911,13 +3918,13 @@ sequenceDiagram
   PM->>ST: set cart_id=PlaceOrder.cartId, order_id=PlaceOrder.orderId, payment_intent_id=payment.request, process_status=AWAITING_PAYMENT_RESULT, payment_status=PENDING
   end
   rect rgb(245,245,245)
-  IN->>PM: PaymentCaptured (event)
-  PM->>ST: by payment_intent_id=PaymentCaptured.paymentIntentId
+  IN->>PM: PaymentAuthorized (event)
+  PM->>ST: by payment_intent_id=PaymentAuthorized.paymentIntentId
   PM--xIN: throws PaymentEventOrphaned
   PM->>ST: expect process_status=AWAITING_PAYMENT_RESULT
   PM->>AG_Order: deliver OrderPlaced — the aggregate records it
   PM->>AG_Cart: deliver CartCheckedOut — the aggregate records it
-  PM->>ST: set payment_status=CAPTURED, process_status=ORDER_PLACED, last_processed_stripe_event_id=envelope.event_id
+  PM->>ST: set payment_status=AUTHORIZED, process_status=ORDER_PLACED, last_processed_stripe_event_id=envelope.event_id
   end
   rect rgb(245,245,245)
   IN->>PM: PaymentFailed (event)
@@ -3950,6 +3957,54 @@ sequenceDiagram
   IN->>PM: ReclamationResolved (event)
   PM->>AG_CustomerCredit: send GrantCustomerCredit — the aggregate validates
   Note over PM: skip unless precondition holds
+  end
+```
+
+<a id="actor-paymentsettlementprocess"></a>
+#### 🎭 Actor: `PaymentSettlementProcess`
+
+_⚙️ process manager_ — Drives an AUTHORIZED payment to its settlement (ADR-20260808-195315 §1.2/§1.3, the authorize-then-capture posture): CAPTURE on fulfilment — OrderDelivered is the handover fact for BOTH service types (DELIVERY hands over at the door, COLLECTION at the counter; the Order lifecycle has one READY→DELIVERED transition) — and RELEASE (Stripe void of the uncaptured intent) on rejection/cancellation: "no need to refund because no capture". The recorded third arm — at-table service captures IN ADVANCE at checkout — is not built (no such service type yet); when the acceptance-timeout auto-cancel lands (§1.3) its cancellation fact rides the same release arms. Stateless (no state table): idempotency is the OrderTracking payment_status guard plus the adapter's deterministic Stripe idempotency keys (capture:{intentId} / release:{intentId}, ADR-20260801-023000) — a redelivered trigger lands on the SAME gateway object. Settlement always arrives asynchronously as the inbound facts the Payment aggregate records (PaymentCaptured / PaymentReleased), never as these calls' return values. The capture-failure branch — a deterministic decline or an unreachable gateway maps the call's outcome to a recorded PaymentCaptureFailed with a typed reason + the paging counter — is carried in the hand-written wrapper seam (crate::process_managers::payment_settlement), the same seam pattern as ReclamationProcess: "on call error, deliver X" is not expressible in the step DSL. The release arms need no failure fact: a failed void self-heals — the hold expires on its own within ~7 days — so the outcome is a counter (payment_release_failed_total), not a page. Post-capture rejection/cancellation stays RefundProcess's job (its payment_status = CAPTURED guards): the two sagas partition the same triggers by payment state, capture-side here, refund-side there.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [⚡ `OrderDelivered`](#event-orderdelivered) | [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed) | — |
+| [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant) | _The restaurant rejected the order before capture — release the hold (Stripe void); the settled fact arrives as inbound PaymentReleased. The acceptance-timeout auto-cancel (§1.3, unbuilt) rides this same arm._ | — |
+| [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer) | _The customer cancelled before capture — release the hold._ | — |
+| [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | _The restaurant cancelled after acceptance but before capture — release the hold._ | — |
+
+Sequence (generated from the typed steps):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant IN as Inbox (trigger)
+  participant PM as PaymentSettlementProcess (decides)
+  participant RM_OrderTracking as OrderTracking (read model)
+  participant PT_payment as port payment (adapter)
+  rect rgb(245,245,245)
+  IN->>PM: OrderDelivered (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderDelivered.orderId]
+  Note over PM: skip unless order.payment_status == AUTHORIZED
+  PM->>PT_payment: capture
+  end
+  rect rgb(245,245,245)
+  IN->>PM: OrderRejectedByRestaurant (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderRejectedByRestaurant.orderId]
+  Note over PM: skip unless order.payment_status == AUTHORIZED
+  PM->>PT_payment: release
+  end
+  rect rgb(245,245,245)
+  IN->>PM: OrderCancelledByCustomer (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByCustomer.orderId]
+  Note over PM: skip unless order.payment_status == AUTHORIZED
+  PM->>PT_payment: release
+  end
+  rect rgb(245,245,245)
+  IN->>PM: OrderCancelledByRestaurant (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByRestaurant.orderId]
+  Note over PM: skip unless order.payment_status == AUTHORIZED
+  PM->>PT_payment: release
   end
 ```
 
@@ -4381,7 +4436,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="command-placeorder--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
-| <a id="command-placeorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Client-generated id for the order the saga will materialize on payment capture. |
+| <a id="command-placeorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Client-generated id for the order the saga will materialize on payment authorization (ADR-20260808-195315 §1.2). |
 | <a id="command-placeorder--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-placeorder--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ | The OPEN cart to check out; its lines become the order's line items. |
 | <a id="command-placeorder--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | Resolved from the now-authenticated session; bound onto the cart at checkout. REQUIRED (#144) — the description above already asserted the customer has verified their phone by this point, but the field was nullable and absent from `required`, so nothing enforced it. Non-null makes it a structural (GraphQL) rejection rather than a domain invariant: the client cannot submit an unidentified checkout at all, so no new errors.yaml code is needed.  |
@@ -4736,12 +4791,12 @@ Spend a customer's available store credit at checkout (rejected if it exceeds th
 | <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
 | <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
-### ⚡ Events _(40)_
+### ⚡ Events _(43)_
 
 <a id="event-paymentintentcreated"></a>
 #### ⚡ Event: `PaymentIntentCreated`
 
-A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
+A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentAuthorized arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
 
 - **Emitted by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
@@ -5014,7 +5069,7 @@ Restaurant has started preparing an accepted order (status PREPARING).
 Restaurant has rejected the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
-- **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
+- **Consumed by**: [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
@@ -5043,7 +5098,7 @@ Restaurant has marked the order as ready for pickup/delivery.
 The order has been delivered to the customer.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Consumed by**: —
+- **Consumed by**: [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess)
 - **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
@@ -5057,7 +5112,7 @@ The order has been delivered to the customer.
 The customer cancelled the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
-- **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
+- **Consumed by**: [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
@@ -5072,7 +5127,7 @@ The customer cancelled the order.
 The restaurant cancelled the order after initial acceptance.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
-- **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
+- **Consumed by**: [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
@@ -5275,26 +5330,75 @@ The order's retention window elapsed — at this moment the order IS expired: no
 | --- | --- | --- | --- |
 | <a id="event-orderexpired--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
-<a id="event-paymentcaptured"></a>
-#### ⚡ Event: `PaymentCaptured`
+<a id="event-paymentauthorized"></a>
+#### ⚡ Event: `PaymentAuthorized`
 
-Payment was successfully authorized/captured for an order.
+The customer's card authorization is confirmed: funds are HELD on the card, not yet moved (ADR-20260808-195315 §1.2 — authorize on checkout, capture on delivered/picked up). Inbound Stripe fact (`payment_intent.amount_capturable_updated`); PlaceOrderProcess materializes the Order on it. The hold is valid ~7 days — the bound the scheduled-order window is recorded against.
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment)
 - **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentauthorized--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentauthorized--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when authorized before the Order aggregate is created in the saga. |
+| <a id="event-paymentauthorized--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentauthorized--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The capturable amount (the server-priced checkout total the intent was created with). |
+
+<a id="event-paymentcaptured"></a>
+#### ⚡ Event: `PaymentCaptured`
+
+The authorized payment was CAPTURED — the money moved. Under the authorize-then-capture posture (ADR-20260808-195315 §1.2) this is the settlement fact alone (capture on delivered / picked up, driven by PaymentSettlementProcess), no longer the authorized-and-captured composite of the automatic-capture era. Inbound Stripe fact (`payment_intent.succeeded`).
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
 - **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-paymentcaptured--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
-| <a id="event-paymentcaptured--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when captured before the Order aggregate is created in the saga. |
+| <a id="event-paymentcaptured--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when captured before the Order aggregate is created in the saga (defensive: at-table advance capture is the recorded third arm, not built yet). |
 | <a id="event-paymentcaptured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-paymentcaptured--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+
+<a id="event-paymentcapturefailed"></a>
+#### ⚡ Event: `PaymentCaptureFailed`
+
+Capturing a confirmed authorization FAILED after fulfilment — the food is cooked (or picked up) and the money did not move (ADR-20260808-195315 §1.2 team note). Recorded by PaymentSettlementProcess from the capture call's outcome, with a typed reason; alertable (observability.yaml#/payment-settlement) because an operator must act — this is the inverse of the paid-order-nobody-told-about failure class. The payment stays AUTHORIZED: a later retried capture settles as PaymentCaptured; a dead hold expires to PaymentReleased.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentcapturefailed--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentcapturefailed--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-paymentcapturefailed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentcapturefailed--reason"></a>`reason` | [🔤 `CaptureFailureReason`](#scalar-capturefailurereason) | ✅ |  |
+| <a id="event-paymentcapturefailed--detail"></a>`detail` | `string` | ⬜ | Gateway error detail for the operator (Stripe code/message), never parsed by the domain. |
+
+<a id="event-paymentreleased"></a>
+#### ⚡ Event: `PaymentReleased`
+
+An uncaptured authorization was RELEASED — the hold on the customer's card is gone without any money moving ("no need to refund because no capture", ADR-20260808-195315 §1.3). Inbound Stripe fact (`payment_intent.canceled`), settling the void PaymentSettlementProcess requests on rejection/cancellation (and the fact an expired authorization reports on its own). Terminal.
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-paymentreleased--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-paymentreleased--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Null when released before the Order aggregate was created (a checkout abandoned pre-materialization). |
+| <a id="event-paymentreleased--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-paymentreleased--reason"></a>`reason` | `string` | ⬜ | Stripe cancellation_reason as reported (requested_by_customer, abandoned, ...), for the operator. |
 
 <a id="event-paymentfailed"></a>
 #### ⚡ Event: `PaymentFailed`
 
-Payment authorization/capture failed; no order is placed.
+Payment authorization failed at checkout confirmation (card declined before any hold existed); no order is placed and the cart stays OPEN. Inbound Stripe fact (`payment_intent.payment_failed`).
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment)
 - **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `Payment`](#actor-payment)
@@ -5435,7 +5539,7 @@ An option chosen by the customer on a line item, priced at order time.
 <a id="entity-checkoutsnapshot"></a>
 #### 📦 Entity: `CheckoutSnapshot`
 
-The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentAuthorized fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5573,7 +5677,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(36)_
+### 🔤 Scalars _(37)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5583,7 +5687,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-moneycents"></a>🔤 `MoneyCents` | integer | Monetary amount in minor units (e.g. cents). |
 | <a id="scalar-ordernote"></a>🔤 `OrderNote` | string |  |
 | <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
-| <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
+| <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| AUTHORIZED \| CAPTURED \| FAILED \| REFUNDED \| RELEASED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/ Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection, cancellation or expiry — "no need to refund because no capture").  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 | <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
@@ -5613,6 +5717,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
 | <a id="scalar-refundid"></a>🔤 `RefundId` | string | Stripe Refund id (provider reference). Example: 're_3Nabc...'. |
 | <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
+| <a id="scalar-capturefailurereason"></a>🔤 `CaptureFailureReason` | enum (CARD_DECLINED \| AUTHORIZATION_EXPIRED \| GATEWAY_REFUSED \| GATEWAY_UNAVAILABLE) | Why capturing a confirmed authorization failed AFTER fulfilment (PaymentCaptureFailed — the food is cooked and the money did not move, ADR-20260808-195315 §1.2 team note): CARD_DECLINED = the issuer refused the capture; AUTHORIZATION_EXPIRED = the ~7-day hold lapsed before capture; GATEWAY_REFUSED = Stripe refused the request deterministically (already captured/canceled, keying bug); GATEWAY_UNAVAILABLE = transport/5xx — the capture MAY have succeeded provider-side (the settled PaymentCaptured webhook supersedes this fact when it did).  |
 
 ### ⛔ Errors _(40)_
 
@@ -5659,21 +5764,42 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 
-### 📐 Business rules _(48)_
+### 📐 Business rules _(51)_
 
 <a id="rule-checkoutsnapshotfrozenatintent"></a>
 #### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
 
-_When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store._
+_When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment authorization — no out-of-log store._
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPaymentIntentCreatedRecorded`](#test-testpaymentintentcreatedrecorded)
 
-<a id="rule-ordermaterializedonpaymentcapture"></a>
-#### 📐 Rule: `OrderMaterializedOnPaymentCapture`
+<a id="rule-ordermaterializedonpaymentauthorization"></a>
+#### 📐 Rule: `OrderMaterializedOnPaymentAuthorization`
 
-_On payment capture the order is materialized and the cart is closed._
+_On payment AUTHORIZATION (funds held on the card, not captured — ADR-20260808-195315 §1.2) the order is materialized and the cart is closed; the money moves only at capture, on fulfilment._
 
-- **Verified by**: [🧪 `TestPlaceOrderPaymentCapturedPlacesOrder`](#test-testplaceorderpaymentcapturedplacesorder), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
+- **Verified by**: [🧪 `TestPlaceOrderPaymentAuthorizedPlacesOrder`](#test-testplaceorderpaymentauthorizedplacesorder), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentAuthorizedRecorded`](#test-testpaymentauthorizedrecorded)
+
+<a id="rule-paymentcapturedonfulfilment"></a>
+#### 📐 Rule: `PaymentCapturedOnFulfilment`
+
+_An AUTHORIZED payment is captured when the order is handed to the customer (OrderDelivered — the one handover fact for DELIVERY and COLLECTION alike): PaymentSettlementProcess requests the full-amount capture, and the settled inbound PaymentCaptured records that the money moved. Orders that never charge ($0 replacements) and payments not in the AUTHORIZED state are never captured._
+
+- **Verified by**: [🧪 `TestCaptureRequestedOnOrderDelivered`](#test-testcapturerequestedonorderdelivered), [🧪 `TestPaymentCapturedRecorded`](#test-testpaymentcapturedrecorded)
+
+<a id="rule-authorizationreleasedwithoutcapture"></a>
+#### 📐 Rule: `AuthorizationReleasedWithoutCapture`
+
+_A rejected or cancelled order whose payment is AUTHORIZED but not captured RELEASES the hold (Stripe void) instead of refunding — 'no need to refund because no capture' (ADR-20260808-195315 §1.3). Post-capture rejection/cancellation still opens the ordinary refund path (RefundProcess)._
+
+- **Verified by**: [🧪 `TestReleaseRequestedOnOrderRejected`](#test-testreleaserequestedonorderrejected), [🧪 `TestReleaseRequestedOnOrderCancelledByCustomer`](#test-testreleaserequestedonordercancelledbycustomer), [🧪 `TestReleaseRequestedOnOrderCancelledByRestaurant`](#test-testreleaserequestedonordercancelledbyrestaurant), [🧪 `TestPaymentReleasedRecorded`](#test-testpaymentreleasedrecorded)
+
+<a id="rule-capturefailureisrecordedandpaged"></a>
+#### 📐 Rule: `CaptureFailureIsRecordedAndPaged`
+
+_A capture that fails after fulfilment — food cooked, money did not move — is never silent: PaymentSettlementProcess records PaymentCaptureFailed with a typed reason on the Payment and the paging counter fires (observability.yaml#/payment-settlement). The payment stays AUTHORIZED so a retried capture can still settle._
+
+- **Verified by**: [🧪 `TestPaymentCaptureFailedRecorded`](#test-testpaymentcapturefailedrecorded)
 
 <a id="rule-refundrequiresapproval"></a>
 #### 📐 Rule: `RefundRequiresApproval`
@@ -5967,7 +6093,7 @@ _The settled refund fact reported back by Stripe is recorded._
 
 _A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped._
 
-- **Verified by**: [🧪 `TestPaymentCaptureOrphanIsFlagged`](#test-testpaymentcaptureorphanisflagged)
+- **Verified by**: [🧪 `TestPaymentAuthorizationOrphanIsFlagged`](#test-testpaymentauthorizationorphanisflagged)
 
 <a id="rule-creditgrantincreasesbalance"></a>
 #### 📐 Rule: `CreditGrantIncreasesBalance`
@@ -5997,7 +6123,7 @@ _Store credit is consumed at most once per order: the debit is keyed by the clie
 
 - **Verified by**: [🧪 `TestConsumeSameOrderTwiceIsNoOp`](#test-testconsumesameordertwiceisnoop)
 
-### 🧪 Tests _(11)_
+### 🧪 Tests _(12)_
 
 **[🎭 `Conversation`](#actor-conversation)**
 
@@ -6271,7 +6397,7 @@ _The Cart records the checkout fact delivered by PlaceOrderProcess and closes (i
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `CartCheckedOut`](#command-cartcheckedout)
 - **Then**: [⚡ `CartCheckedOut`](#event-cartcheckedout)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
 **[🎭 `Order`](#actor-order)**
 
@@ -6503,7 +6629,7 @@ _The Order is born by recording the OrderPlaced fact delivered by PlaceOrderProc
 - **Given**: _(none)_
 - **When**: [📩 `OrderPlaced`](#command-orderplaced)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
 <a id="test-testplacereplacementordercopiesitems"></a>
 #### 🧪 Test: `TestPlaceReplacementOrderCopiesItems`
@@ -6729,15 +6855,15 @@ _A production (LIVE) order against a TEST restaurant is rejected (test-mode isol
 - **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
 - **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
 
-<a id="test-testplaceorderpaymentcapturedplacesorder"></a>
-#### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`
+<a id="test-testplaceorderpaymentauthorizedplacesorder"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentAuthorizedPlacesOrder`
 
-_On payment capture the saga materializes the order and closes the cart_
+_On payment authorization (funds held, not captured) the saga materializes the order and closes the cart_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
 <a id="test-testplaceorderpaymentfailedplacesnothing"></a>
 #### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
@@ -6749,13 +6875,13 @@ _On payment failure the saga aborts and places no order (cart stays open)_
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
 
-<a id="test-testpaymentcaptureorphanisflagged"></a>
-#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
+<a id="test-testpaymentauthorizationorphanisflagged"></a>
+#### 🧪 Test: `TestPaymentAuthorizationOrphanIsFlagged`
 
-_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
+_An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
 - **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
 - **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
 
@@ -6771,15 +6897,45 @@ _The Payment is born by recording PaymentIntentCreated with the frozen checkout 
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Verifies**: [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
 
+<a id="test-testpaymentauthorizedrecorded"></a>
+#### 🧪 Test: `TestPaymentAuthorizedRecorded`
+
+_The Payment records the inbound Stripe authorization fact (funds held; delivered via the ACL, idempotent)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **Then**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
+
 <a id="test-testpaymentcapturedrecorded"></a>
 #### 🧪 Test: `TestPaymentCapturedRecorded`
 
-_The Payment records the inbound Stripe capture fact (delivered via the ACL, idempotent)_
+_The Payment records the inbound Stripe capture fact — the money moved on fulfilment (idempotent)_
 
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
 - **Then**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+- **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
+
+<a id="test-testpaymentcapturefailedrecorded"></a>
+#### 🧪 Test: `TestPaymentCaptureFailedRecorded`
+
+_The Payment records the capture failure delivered by PaymentSettlementProcess (typed reason; status stays AUTHORIZED)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
+- **When**: [📩 `PaymentCaptureFailed`](#command-paymentcapturefailed)
+- **Then**: [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed)
+- **Verifies**: [📐 `CaptureFailureIsRecordedAndPaged`](#rule-capturefailureisrecordedandpaged)
+
+<a id="test-testpaymentreleasedrecorded"></a>
+#### 🧪 Test: `TestPaymentReleasedRecorded`
+
+_The Payment records the inbound Stripe release fact — the uncaptured hold is gone, no money moved (idempotent)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
+- **When**: [📩 `PaymentReleased`](#command-paymentreleased)
+- **Then**: [⚡ `PaymentReleased`](#event-paymentreleased)
+- **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
 <a id="test-testpaymentfailedrecorded"></a>
 #### 🧪 Test: `TestPaymentFailedRecorded`
@@ -6878,9 +7034,9 @@ _Consuming store credit again for the same order is a benign no-op (exactly-once
 <a id="test-testrefundonorderrejected"></a>
 #### 🧪 Test: `TestRefundOnOrderRejected`
 
-_Requests a Stripe refund when an order is rejected by the restaurant_
+_Requests a Stripe refund when an order is rejected by the restaurant AFTER capture_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -6890,7 +7046,7 @@ _Requests a Stripe refund when an order is rejected by the restaurant_
 
 _Requests a Stripe refund when the customer cancels the order_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -6900,7 +7056,7 @@ _Requests a Stripe refund when the customer cancels the order_
 
 _Requests a Stripe refund when the restaurant cancels the order_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -6910,7 +7066,7 @@ _Requests a Stripe refund when the restaurant cancels the order_
 
 _Validates eligibility and requests a Stripe refund on a customer refund request_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `RefundRequested`](#command-refundrequested)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -7017,15 +7173,15 @@ _A production (LIVE) order against a TEST restaurant is rejected (test-mode isol
 - **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
 - **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
 
-<a id="test-testplaceorderpaymentcapturedplacesorder"></a>
-#### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`
+<a id="test-testplaceorderpaymentauthorizedplacesorder"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentAuthorizedPlacesOrder`
 
-_On payment capture the saga materializes the order and closes the cart_
+_On payment authorization (funds held, not captured) the saga materializes the order and closes the cart_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
-- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
 <a id="test-testplaceorderpaymentfailedplacesnothing"></a>
 #### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
@@ -7037,13 +7193,13 @@ _On payment failure the saga aborts and places no order (cart stays open)_
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
 
-<a id="test-testpaymentcaptureorphanisflagged"></a>
-#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
+<a id="test-testpaymentauthorizationorphanisflagged"></a>
+#### 🧪 Test: `TestPaymentAuthorizationOrphanIsFlagged`
 
-_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
+_An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
 - **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
 - **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
 
@@ -7064,7 +7220,7 @@ _Grants store credit when a claim is resolved as GOODWILL_CREDIT_
 
 _Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolution IS the approval)_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
 - **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
@@ -7074,7 +7230,7 @@ _Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolutio
 
 _Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
 - **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
@@ -7084,19 +7240,61 @@ _Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND_
 
 _Rejects a partial refund resolution that exceeds the order's captured total_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
 - **Thrown**: [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured)
 - **Verifies**: [📐 `RefundResolutionCappedAtCaptured`](#rule-refundresolutioncappedatcaptured)
+
+**[🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess)**
+
+<a id="test-testcapturerequestedonorderdelivered"></a>
+#### 🧪 Test: `TestCaptureRequestedOnOrderDelivered`
+
+_Requests the Stripe capture when an AUTHORIZED order is delivered / picked up_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderDelivered`](#command-orderdelivered)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
+
+<a id="test-testreleaserequestedonorderrejected"></a>
+#### 🧪 Test: `TestReleaseRequestedOnOrderRejected`
+
+_Releases the uncaptured hold when the restaurant rejects an AUTHORIZED order (no refund — no capture)_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
+
+<a id="test-testreleaserequestedonordercancelledbycustomer"></a>
+#### 🧪 Test: `TestReleaseRequestedOnOrderCancelledByCustomer`
+
+_Releases the uncaptured hold when the customer cancels an AUTHORIZED order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
+
+<a id="test-testreleaserequestedonordercancelledbyrestaurant"></a>
+#### 🧪 Test: `TestReleaseRequestedOnOrderCancelledByRestaurant`
+
+_Releases the uncaptured hold when the restaurant cancels an AUTHORIZED order after acceptance_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
 **[🎭 `RefundProcess`](#actor-refundprocess)**
 
 <a id="test-testrefundonorderrejected"></a>
 #### 🧪 Test: `TestRefundOnOrderRejected`
 
-_Requests a Stripe refund when an order is rejected by the restaurant_
+_Requests a Stripe refund when an order is rejected by the restaurant AFTER capture_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -7106,7 +7304,7 @@ _Requests a Stripe refund when an order is rejected by the restaurant_
 
 _Requests a Stripe refund when the customer cancels the order_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -7116,7 +7314,7 @@ _Requests a Stripe refund when the customer cancels the order_
 
 _Requests a Stripe refund when the restaurant cancels the order_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -7126,7 +7324,7 @@ _Requests a Stripe refund when the restaurant cancels the order_
 
 _Validates eligibility and requests a Stripe refund on a customer refund request_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **When**: [📩 `RefundRequested`](#command-refundrequested)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
@@ -7171,7 +7369,7 @@ _A refund decision on an order with no refund pending approval is rejected_
 - **Thrown**: [⛔ `RefundNotPending`](#error-refundnotpending)
 - **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
-### 📡 Observability _(3)_
+### 📡 Observability _(4)_
 
 <a id="obs-place-order"></a>
 #### 📡 Contract: `place-order`
@@ -7179,7 +7377,7 @@ _A refund decision on an order with no refund pending approval is rejected_
 _criticality: **high**_
 
 - **Workflow**: saga [📦 `PlaceOrderProcess`](#entity-placeorderprocess) · command [📩 `PlaceOrder`](#command-placeorder)
-- **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) · **Inbound**: [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentFailed`](#event-paymentfailed)
+- **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) · **Inbound**: [⚡ `PaymentAuthorized`](#event-paymentauthorized), [⚡ `PaymentFailed`](#event-paymentfailed)
 
 **Run identity**
 
@@ -7236,6 +7434,34 @@ _criticality: **high**_
 - **Metrics**: `refund_duration_ms` _(histogram)_ · **Business metrics**: `refunds_settled_total` _(counter)_, `saga_compensation_total` _(counter)_
 - **Status rules**: success ⇐ spans [`refund.request`, `event.store.append`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 2%
+
+<a id="obs-payment-settlement"></a>
+#### 📡 Contract: `payment-settlement`
+
+_criticality: **high**_
+
+- **Workflow**: saga [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess)
+- **Emits**: — · **Inbound**: [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `event.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `order_id` | `domain.aggregate_id` | ✅ | [🔤 `OrderId`](#scalar-orderid) |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `event.consume.trigger` | `CONSUMER` | ✅ | — | `business.event_type`*, `business.correlation_id`* |
+| `payment.capture` | `CLIENT` | ⬜ | — | `messaging.system`*, `business.result`* |
+| `payment.release` | `CLIENT` | ⬜ | — | `messaging.system`*, `business.result`* |
+
+- **Metrics**: `payment_capture_failed_total` _(counter)_, `payment_release_failed_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`event.consume.trigger`]
+- **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
 
 <a id="obs-reclamation-sla"></a>
 #### 📡 Contract: `reclamation-sla`
@@ -10469,7 +10695,7 @@ _criticality: **high**_
 _criticality: **high**_
 
 - **Workflow**: 
-- **Emits**: — · **Inbound**: [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentFailed`](#event-paymentfailed), [⚡ `PaymentRefunded`](#event-paymentrefunded)
+- **Emits**: — · **Inbound**: [⚡ `PaymentAuthorized`](#event-paymentauthorized), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentFailed`](#event-paymentfailed), [⚡ `PaymentRefunded`](#event-paymentrefunded)
 
 **Run identity**
 
@@ -11648,7 +11874,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | --- | --- | --- |
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
-| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `ReclamationProcess`](#entity-reclamationprocess) |
+| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `ReclamationProcess`](#entity-reclamationprocess) |
 | 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
@@ -11706,6 +11932,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-customer-credit` | Rust — mailbox worker bin | Drains CustomerCredit lanes (goodwill-credit ledger); appends its domain events.<br>realizes: [🎭 `CustomerCredit`](#actor-customercredit) |
 | 🧱 `actor-mailbox-supervision` | Rust — mailbox worker bin | Drains MailboxSupervision lanes (operator interventions recorded as facts, #315).<br>realizes: [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
 | 🧱 `pm-place-order` | Rust — mailbox worker bin | The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact.<br>realizes: [📦 `PlaceOrderProcess`](#entity-placeorderprocess) |
+| 🧱 `pm-payment-settlement` | Rust — mailbox worker bin | The settlement saga (ADR-20260808-195315 §1.2/§1.3): capture the authorized payment on fulfilment, release the hold on rejection/cancellation.<br>realizes: [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess) |
 | 🧱 `pm-refund` | Rust — mailbox worker bin | The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded.<br>realizes: [📦 `RefundProcess`](#entity-refundprocess) |
 | 🧱 `pm-cart-binding` | Rust — mailbox worker bin | Binds anonymous carts to identified customers.<br>realizes: [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
 | 🧱 `pm-delivery-dispatch` | Rust — mailbox worker bin | Dispatches ready DELIVERY orders to partners/riders (ADR-0031).<br>realizes: [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
@@ -11790,7 +12017,9 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | `actor-catalog` → `event-store` | Lease Catalog lanes; append Catalog events |
 | `actor-mailbox-supervision` → `event-store` | Lease supervision lanes; record operator facts |
 | `pm-place-order` → `event-store` | Drain PlaceOrderProcess lanes; append PaymentIntentCreated/OrderPlaced |
-| `pm-place-order` → `stripe` | Create PaymentIntents (outbound payment port) |
+| `pm-place-order` → `stripe` | Create manual-capture PaymentIntents (outbound payment port) |
+| `pm-payment-settlement` → `event-store` | Drain fulfilment/abort triggers; record PaymentCaptureFailed on a declined capture |
+| `pm-payment-settlement` → `stripe` | Capture on fulfilment / void on abort (outbound payment port) |
 | `pm-refund` → `event-store` | Drain RefundProcess lanes; append refund decision facts |
 | `pm-refund` → `stripe` | Request refunds (outbound payment port) |
 | `pm-delivery-dispatch` → `event-store` | Drain dispatch lanes; append dispatch facts |
@@ -11800,7 +12029,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | `adapter-uber-direct` → `event-store` | Record verified courier/status facts through the mailbox |
 | `adapter-coopcycle` → `event-store` | Record verified courier/status facts through the mailbox |
 | `adapter-avelo37` → `event-store` | Record verified courier/status facts through the mailbox (pre-milestone: undeployed) |
-| `stripe` → `adapter-stripe` | Payment webhooks (PaymentCaptured/Failed/Refunded) |
+| `stripe` → `adapter-stripe` | Payment webhooks (PaymentAuthorized/Captured/Released/Failed/Refunded) |
 | `hubrise` → `adapter-hubrise` | Catalog/inventory callbacks (inbound facts) |
 | `delivery-partner` → `adapter-uber-direct` | Courier acceptance/status webhooks (inbound facts) — ADR-0031 |
 | `delivery-partner` → `adapter-coopcycle` | Per-instance courier/status webhooks (inbound facts) — ADR-0031 |

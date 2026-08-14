@@ -2,7 +2,7 @@
 
 # Captain.Food -- the app index
 
-**56 deployable apps.** Every column below is derived: the app list from the c4-l2 container topology, the boundary from `specs/architecture/c4-l2.yaml` `boundedContexts` (five business contexts + `platform`), the DECLARED domain crates from each bin's generated manifest, and the RESOLVED ones by MEASURING the workspace crate graph with cargo's own resolver (normal links, workspace members). `check-drift` holds this file to all of it.
+**57 deployable apps.** Every column below is derived: the app list from the c4-l2 container topology, the boundary from `specs/architecture/c4-l2.yaml` `boundedContexts` (five business contexts + `platform`), the DECLARED domain crates from each bin's generated manifest, and the RESOLVED ones by MEASURING the workspace crate graph with cargo's own resolver (normal links, workspace members). `check-drift` holds this file to all of it.
 
 Read it for one question -- **is the split clean?** It is clean when no app spans two business boundaries AND every app's resolved domain set equals its declared one. Sections 2 and 3 answer both without arithmetic.
 
@@ -13,7 +13,7 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 | family | apps | honest | fat | unmeasured | what one app of this family IS |
 |---|---:|---:|---:|---:|---|
 | `actor` | 15 | 0 | 15 | 0 | a mailbox worker draining ONE aggregate's lanes -- the one-writer-per-aggregate promise, deployed |
-| `pm` | 5 | 0 | 5 | 0 | a mailbox worker running ONE saga; a declared cross-scope bridge |
+| `pm` | 6 | 0 | 6 | 0 | a mailbox worker running ONE saga; a declared cross-scope bridge |
 | `projector` | 7 | 0 | 7 | 0 | a projection worker folding the single log, filtered to its scope, on its own checkpoint (D4) |
 | `worker` | 3 | 0 | 3 | 0 | a periodic pass; the declared cadence renders a CronJob, no cadence an always-on Deployment |
 | `adapter` | 5 | 0 | 5 | 0 | one partner ACL: verify, mirror into that partner's journal, translate, enqueue |
@@ -22,7 +22,7 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 | `fo` | 2 | 0 | 2 | 0 | a front-office surface: assets + SSR for one public audience, speaking only to its gateway |
 | `bo` | 3 | 0 | 3 | 0 | a back-office surface: assets + SSR for one operator audience |
 | `bam` | 1 | 1 | 0 | 0 | the business-activity projector -- a cross-scope consumer BY DESIGN |
-| **total** | **56** | **8** | **48** | **0** | |
+| **total** | **57** | **8** | **49** | **0** | |
 
 ## 2. Per boundary -- is the split clean?
 
@@ -33,33 +33,33 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 | **catalog** | 4 | 0 | 4 | 0 | 0 | 4 |
 | **customer** | 8 | 2 | 6 | 0 | 1 | 6 |
 | **delivery** | 11 | 1 | 10 | 0 | 1 | 10 |
-| **order** | 16 | 0 | 16 | 0 | 0 | 16 |
+| **order** | 17 | 0 | 17 | 0 | 0 | 17 |
 | **platform** | 8 | 3 | 5 | 0 | 1 | 6 |
 | **restaurant** | 9 | 2 | 7 | 0 | 0 | 7 |
-| **total** | **56** | **8** | **48** | **0** | **3** | **49** |
+| **total** | **57** | **8** | **49** | **0** | **3** | **50** |
 
 **The verdicts:**
 
-- **No app spans two boundaries** -- not yet. 3 of 56 apps DECLARE crates from more than one business boundary (`pm-cart-binding` = customer+order; `pm-delivery-dispatch` = delivery+order; `bam` = catalog+customer+delivery+order+restaurant). On the graph the build actually resolves, 49 do.
-- **resolved == declared** -- 8 of 56 apps. 48 link domain crates their manifest never names.
-- **Which dependency carries the facade in** -- `bin_runtime` into 44, `infrastructure` into 9, `server` into 8, `surface_runtime` into 5, `stripe-adapter` into 4, `avelo37-adapter` into 2, `coopcycle-adapter` into 2, `uber-direct-adapter` into 2, `actor_client` into 1, `application` into 1, `hubrise-adapter` into 1. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.
+- **No app spans two boundaries** -- not yet. 3 of 57 apps DECLARE crates from more than one business boundary (`pm-cart-binding` = customer+order; `pm-delivery-dispatch` = delivery+order; `bam` = catalog+customer+delivery+order+restaurant). On the graph the build actually resolves, 50 do.
+- **resolved == declared** -- 8 of 57 apps. 49 link domain crates their manifest never names.
+- **Which dependency carries the facade in** -- `bin_runtime` into 45, `infrastructure` into 9, `server` into 8, `stripe-adapter` into 5, `surface_runtime` into 5, `avelo37-adapter` into 2, `coopcycle-adapter` into 2, `uber-direct-adapter` into 2, `actor_client` into 1, `application` into 1, `hubrise-adapter` into 1. Splitting the crate at the top of that list is the single largest move available; section 4's `via` column says which apps it would free.
 - **Roles no bounded context claims** -- `ADMIN`, `EXTERNAL`. Their gateways are indexed under `platform` because nothing else is derivable, NOT because a context decided so; a `roles:` entry in `c4-l2.yaml` moves them with no edit here.
-- **One row is decided and not yet spec'd** -- DECISIONS.md D9 closes `CartBindingProcess` into `order`, and `specs/architecture/c4-l2.yaml` still homes it in `customer`. This index renders the SPEC, so `pm-cart-binding` reads `customer` above; when that one-liner lands the table reads customer 8 -> 7, order 16 -> 17, and this bullet disappears.
+- **One row is decided and not yet spec'd** -- DECISIONS.md D9 closes `CartBindingProcess` into `order`, and `specs/architecture/c4-l2.yaml` still homes it in `customer`. This index renders the SPEC, so `pm-cart-binding` reads `customer` above; when that one-liner lands the table reads customer 8 -> 7, order 17 -> 18, and this bullet disappears.
 
 ## 3. What the boundaries share
 
 Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.
 
-**No crate the apps reach is boundary-EXCLUSIVE: all 44 are linked from apps of two or more boundaries, and 44 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 56 deployables actually link the crate, and it ranges from 8 to 56.
+**No crate the apps reach is boundary-EXCLUSIVE: all 44 are linked from apps of two or more boundaries, and 44 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 57 deployables actually link the crate, and it ranges from 8 to 57.
 
-| reached by | apps (of 56) | crates | which |
+| reached by | apps (of 57) | crates | which |
 |---|---:|---:|---|
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 56 | 2 | `bin_probes`, `telemetry` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 49 | 9 | `domain`, `domain-catalog`, `domain-common`, `domain-comms`, `domain-customer`, `domain-delivery`, `domain-network`, `domain-ordering`, `domain-payments` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 44 | 7 | `actor_client`, `actor_runtime`, `application`, `bin_runtime`, `client-restaurant`, `infrastructure`, `sirene_ingest` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 57 | 2 | `bin_probes`, `telemetry` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 50 | 9 | `domain`, `domain-catalog`, `domain-common`, `domain-comms`, `domain-customer`, `domain-delivery`, `domain-network`, `domain-ordering`, `domain-payments` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 45 | 7 | `actor_client`, `actor_runtime`, `application`, `bin_runtime`, `client-restaurant`, `infrastructure`, `sirene_ingest` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 15 | 1 | `gateway_runtime` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 13 | 4 | `app-core`, `shared_types`, `surface_runtime`, `web` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 12 | 3 | `client-delivery-job`, `client-payment`, `stripe-adapter` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 13 | 6 | `app-core`, `client-payment`, `shared_types`, `stripe-adapter`, `surface_runtime`, `web` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 12 | 1 | `client-delivery-job` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 10 | 3 | `avelo37-adapter`, `coopcycle-adapter`, `uber-direct-adapter` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 9 | 3 | `client-catalog`, `client-restaurant-account`, `hubrise-adapter` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 8 | 12 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-rider`, `server` |
@@ -90,12 +90,13 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `actor-restaurant-account` | restaurant | lane `RestaurantAccount` | common + network | **all 8** | **fat +6** | `bin_runtime` | 11 | -- |
 | `actor-rider` | delivery | lane `Rider` | common + delivery | **all 8** | **fat +6** | `bin_runtime` | 15 | -- |
 
-### `pm` -- 5 app(s)
+### `pm` -- 6 app(s)
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
 | `pm-cart-binding` | customer | saga `CartBindingProcess` | customer + ordering | **all 8** | **fat +6** | `bin_runtime` | 11 | -- |
 | `pm-delivery-dispatch` | delivery | saga `DeliveryDispatchProcess`; ports delivery | delivery + ordering | **all 8** | **fat +6** | `application`, `avelo37-adapter`, `bin_runtime`, `coopcycle-adapter`, `infrastructure`, `uber-direct-adapter` | 15 | -- |
+| `pm-payment-settlement` | order | saga `PaymentSettlementProcess`; ports payment | ordering + payments | **all 8** | **fat +6** | `bin_runtime`, `stripe-adapter` | 13 | -- |
 | `pm-place-order` | order | saga `PlaceOrderProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 13 | -- |
 | `pm-reclamation` | order | saga `ReclamationProcess`; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 13 | -- |
 | `pm-refund` | order | saga `RefundProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 13 | -- |
@@ -184,7 +185,7 @@ The distinct pod grants, largest first: what a compromise of any app in that gro
 |---:|---:|---|---|
 | 18 | 1 | `bam` | `HUBRISE_WEBHOOK_SECRET`, `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | 15 | 7 | `actor-delivery-job`, `actor-delivery-partner-registration`, `actor-rider`, `pm-delivery-dispatch`, `projector-delivery`, `adapter-uber-direct`, `graphql-delivery` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`, `UBER_DIRECT_WEBHOOK_SECRET` |
-| 13 | 8 | `actor-customer-credit`, `actor-payment`, `pm-place-order`, `pm-reclamation`, `pm-refund`, `projector-payments`, `adapter-stripe`, `graphql-payments` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| 13 | 9 | `actor-customer-credit`, `actor-payment`, `pm-payment-settlement`, `pm-place-order`, `pm-reclamation`, `pm-refund`, `projector-payments`, `adapter-stripe`, `graphql-payments` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | 12 | 4 | `actor-catalog`, `projector-catalog`, `adapter-hubrise`, `graphql-catalog` | `HUBRISE_WEBHOOK_SECRET`, `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME` |
 | 11 | 21 | `actor-cart`, `actor-conversation`, `actor-customer`, `actor-mailbox-supervision`, `actor-order`, `actor-prospect`, `actor-reclamation`, `actor-restaurant`, `actor-restaurant-account`, `pm-cart-binding`, `projector-comms`, `projector-customer`, `projector-network`, `projector-ordering`, `adapter-avelo37`, `adapter-coopcycle`, `graphql-common`, `graphql-comms`, `graphql-customer`, `graphql-network`, `graphql-ordering` | `DATABASE_URL`, `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME` |
 | 10 | 12 | `gateway-admin`, `gateway-customer`, `gateway-external`, `gateway-public`, `gateway-restaurant`, `gateway-restaurant-account`, `gateway-rider`, `fo-marketplace`, `fo-storefront`, `bo-admin`, `bo-restaurant`, `bo-rider` | `AUTH_SESSION_KEY`, `SUPABASE_SMS_HOOK_SECRET`, `SUPABASE_SECRET_KEY`, `HONEYCOMB_API_KEY`, `EXTERNAL_API_TOKENS`, `INTERNAL_TRIGGER_TOKEN`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME` |

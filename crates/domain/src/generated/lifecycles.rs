@@ -337,7 +337,7 @@ pub mod payment {
     use crate::generated::scalars::PaymentStatus;
 
     /// Terminal states — no outgoing transitions.
-    pub const TERMINAL: &[PaymentStatus] = &[PaymentStatus::FAILED, PaymentStatus::REFUNDED];
+    pub const TERMINAL: &[PaymentStatus] = &[PaymentStatus::FAILED, PaymentStatus::REFUNDED, PaymentStatus::RELEASED];
 
     /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
     pub fn initial(event: &DomainEvent) -> Option<PaymentStatus> {
@@ -352,8 +352,11 @@ pub mod payment {
     /// dynamic-target arm matches only when the event's carried state equals the declared target.
     pub fn transition(from: PaymentStatus, event: &DomainEvent) -> Option<PaymentStatus> {
         match (from, event) {
+            (PaymentStatus::PENDING, DomainEvent::PaymentAuthorized(_)) => Some(PaymentStatus::AUTHORIZED),
             (PaymentStatus::PENDING, DomainEvent::PaymentCaptured(_)) => Some(PaymentStatus::CAPTURED),
+            (PaymentStatus::AUTHORIZED, DomainEvent::PaymentCaptured(_)) => Some(PaymentStatus::CAPTURED),
             (PaymentStatus::PENDING, DomainEvent::PaymentFailed(_)) => Some(PaymentStatus::FAILED),
+            (PaymentStatus::AUTHORIZED, DomainEvent::PaymentReleased(_)) => Some(PaymentStatus::RELEASED),
             (PaymentStatus::CAPTURED, DomainEvent::PaymentRefunded(_)) => Some(PaymentStatus::REFUNDED),
             _ => None,
         }
@@ -365,8 +368,10 @@ pub mod payment {
     /// (event-carried) target is the event's payload field.
     pub fn target(event: &DomainEvent) -> Option<PaymentStatus> {
         match event {
+            DomainEvent::PaymentAuthorized(_) => Some(PaymentStatus::AUTHORIZED),
             DomainEvent::PaymentCaptured(_) => Some(PaymentStatus::CAPTURED),
             DomainEvent::PaymentFailed(_) => Some(PaymentStatus::FAILED),
+            DomainEvent::PaymentReleased(_) => Some(PaymentStatus::RELEASED),
             DomainEvent::PaymentRefunded(_) => Some(PaymentStatus::REFUNDED),
             _ => None,
         }

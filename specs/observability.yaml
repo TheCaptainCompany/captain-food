@@ -130,7 +130,7 @@ place-order:
       - { $ref: 'events.yaml#/OrderPlaced' }
       - { $ref: 'events.yaml#/CartCheckedOut' }
     inbound:
-      - { $ref: 'events.yaml#/PaymentCaptured' }
+      - { $ref: 'events.yaml#/PaymentAuthorized' }
       - { $ref: 'events.yaml#/PaymentFailed' }
 
   run_identity:
@@ -215,7 +215,10 @@ place-order:
   status_rules:
     success:
       required_spans: ["command.receive", "command.journal", "pricing.compute", "payment.intent.create", "event.store.append", "event.publish", "event.consume.projection"]
-      conditions: ["payment.intent.create.business.result == 'captured'"]
+      # 'authorized' is recorded by the webhook path (payment_intent.amount_capturable_updated ->
+      # PaymentAuthorized), never by the create call itself; capture success lives in the
+      # payment-settlement contract (ADR-20260808-195315 §1.2).
+      conditions: ["payment.intent.create.business.result == 'authorized'"]
     technical_error:
       any_span_errors: true
     business_rejected:
@@ -342,6 +345,69 @@ refund:
 
   latency_budget: { max_p95_ms: 1000, max_p99_ms: 3000 }
   error_budget: { max_error_rate_pct: 2.0 }
+
+# =====================================================================
+# payment-settlement — capture on fulfilment / release on abort (ADR-20260808-195315 §1.2/§1.3)
+# OrderDelivered -> payment.capture (money moves; inbound PaymentCaptured settles);
+# rejection/cancellation -> payment.release (hold voided; inbound PaymentReleased settles).
+# THE alarm of this workflow: `payment_capture_failed_total` — a capture that fails after
+# fulfilment means the food is cooked and the money did not move, the inverse of the
+# paid-order-nobody-told-about class. It PAGES (any increment is actionable): the recorded
+# PaymentCaptureFailed fact carries the typed reason, the counter is the dead-man-visible tap.
+# `payment_release_failed_total` is a warn-level counter, not a page: a failed void self-heals —
+# the authorization expires on its own within ~7 days and Stripe reports PaymentReleased.
+# =====================================================================
+payment-settlement:
+  feature: payment-settlement
+  criticality: high
+  workflow:
+    saga: { $ref: 'processmanager.yaml#/PaymentSettlementProcess' }
+    inbound:
+      - { $ref: 'events.yaml#/OrderDelivered' }
+      - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+      - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+      - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+
+  run_identity:
+    - { name: correlation_id, source: "event.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: order_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/OrderId' }, required: true }
+
+  spans:
+    - name: "event.consume.trigger"
+      kind: CONSUMER
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+    - name: "payment.capture"
+      kind: CLIENT
+      required: false   # the release arms never open it; required on the OrderDelivered arm's happy path
+      attributes:
+        - { key: "messaging.system", type: string, required: true }
+        - { key: "business.result", type: string, required: true }
+    - name: "payment.release"
+      kind: CLIENT
+      required: false
+      attributes:
+        - { key: "messaging.system", type: string, required: true }
+        - { key: "business.result", type: string, required: true }
+
+  metrics:
+    # PAGES (alert on ANY increment — food cooked, money did not move; label = CaptureFailureReason).
+    - { name: "payment_capture_failed_total", type: counter, attributes: ["reason"] }
+    # Warn-level: a failed void self-heals via the ~7-day authorization expiry.
+    - { name: "payment_release_failed_total", type: counter, attributes: ["reason"] }
+
+  status_rules:
+    success:
+      required_spans: ["event.consume.trigger"]
+      conditions: ["payment_capture_failed_total did not increment for this correlation_id"]
+    technical_error:
+      any_span_errors: true
+
+  latency_budget: { max_p95_ms: 1000, max_p99_ms: 3000 }
+  error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
 # customer-identification — phone-OTP sign-in wrapping Supabase Auth (ADR-0015)
@@ -530,7 +596,9 @@ stripe-webhook-ingestion:
   workflow:
     aggregate: { $ref: 'actors.yaml#/Payment' }
     inbound:
+      - { $ref: 'events.yaml#/PaymentAuthorized' }
       - { $ref: 'events.yaml#/PaymentCaptured' }
+      - { $ref: 'events.yaml#/PaymentReleased' }
       - { $ref: 'events.yaml#/PaymentFailed' }
       - { $ref: 'events.yaml#/PaymentRefunded' }
 

@@ -56,7 +56,7 @@ Cart:
         - { $ref: 'errors.yaml#/CartNotFound' }
     - message: { $ref: 'events.yaml#/CartCheckedOut' }
       emits: [{ $ref: 'events.yaml#/CartCheckedOut' }]
-      effect: "PlaceOrderProcess delivers the checkout fact on payment capture; the Cart records it and closes (idempotent)."
+      effect: "PlaceOrderProcess delivers the checkout fact on payment authorization (ADR-20260808-195315 §1.2); the Cart records it and closes (idempotent)."
 
 
 Order:
@@ -270,12 +270,13 @@ PlaceOrderProcess:
     partitions: 5            # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
   description: >
     The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the
-    cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and
-    freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order
-    materializes only when Stripe reports the capture: the PaymentCaptured reaction
-    re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and
-    emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process
-    state; the customer retries by resubmitting checkout.
+    cart against the live catalog, prices server-side, creates the Stripe PaymentIntent (manual
+    capture, ADR-20260808-195315 s1.2) and freezes the checkout as PaymentIntentCreated -- the
+    ORDER IS NOT PLACED YET. The order materializes when Stripe confirms the AUTHORIZATION (funds
+    held, not captured): the PaymentAuthorized reaction re-materializes the frozen checkout from
+    PaymentIntentCreated's log (no external store) and emits OrderPlaced idempotently; capture
+    happens on fulfilment, driven by PaymentSettlementProcess. A PaymentFailed reaction records
+    the outcome on the process state; the customer retries by resubmitting checkout.
   receives:
     - message: { $ref: 'commands.yaml#/PlaceOrder' }
       emits:
@@ -292,10 +293,10 @@ PlaceOrderProcess:
         - { $ref: 'errors.yaml#/PriceMismatch' }
         - { $ref: 'errors.yaml#/PriceUnresolvable' }
         - { $ref: 'errors.yaml#/PaymentDeclined' }
-    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+    - message: { $ref: 'events.yaml#/PaymentAuthorized' }
       emits:
         - { $ref: 'events.yaml#/OrderPlaced' }
-      effect: "Inbound Stripe fact: re-materialize the frozen checkout and place the order, idempotently (a redelivered capture is a no-op)."
+      effect: "Inbound Stripe fact (funds held): re-materialize the frozen checkout and place the order, idempotently (a redelivered authorization is a no-op)."
     - message: { $ref: 'events.yaml#/PaymentFailed' }
       emits: []
       effect: "Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry."

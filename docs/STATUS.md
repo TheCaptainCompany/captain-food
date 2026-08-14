@@ -2,6 +2,32 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💳 **2026-08-13 — CAPTURE ON DELIVERED IS IMPLEMENTED: the recorded posture (ADR-20260808-195315
+> §1.2/§1.3) and the code no longer disagree** ([#544 "Capture on delivered: implement the recorded
+> authorize-then-capture posture"](https://github.com/TheCaptainCompany/captain-food/issues/544),
+> the D2 slice of the acceptance program in
+> [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+> landed inside the empty-log window). The Stripe intent is created `capture_method=manual`;
+> confirmation AUTHORIZES (`payment_intent.amount_capturable_updated` → new `PaymentAuthorized`,
+> which is now what materializes the Order — rule renamed to
+> `OrderMaterializedOnPaymentAuthorization`); the new **`PaymentSettlementProcess`** captures on
+> `OrderDelivered` (the one handover fact for DELIVERY and COLLECTION) and RELEASES the hold
+> (Stripe void → new `PaymentReleased`) on rejection/cancellation — *"no need to refund because no
+> capture"*; post-capture aborts still refund (RefundProcess's CAPTURED guards untouched). The
+> capture keys on the PRESENCE of a Captain authorization, never the delivery fact alone
+> (ADR-20260813-233418 AR-2: $0 replacements and future Uber Eats external orders are structurally
+> skipped). Capture-declined-after-fulfilment is recorded (`PaymentCaptureFailed`, typed reason)
+> **and pages** (`payment_capture_failed_total`, `observability.yaml#/payment-settlement`).
+> `PaymentStatus` = `PENDING → AUTHORIZED → CAPTURED → REFUNDED`, `AUTHORIZED → RELEASED`,
+> `PENDING → FAILED`. Smoke L4 now asserts `requires_capture` at confirm and `paymentStatus ==
+> AUTHORIZED` post-placement; the capture assertion moves to the future L5 delivered leg. **Known
+> follow-up (fenced by the #543 sibling slice owning `specs/database/**`)**: OrderTracking's
+> `payment_status` fold does not yet list `PaymentAuthorized`/`PaymentReleased` in its `fedBy` —
+> the projector seeds AUTHORIZED from OrderPlaced (spec note there is one commit stale) and a
+> released rejection shows AUTHORIZED until that fold lands (+3 `event-not-projected` warnings
+> banked in the ratchet). At-table advance capture (§1.2's third arm) and the acceptance-timeout
+> auto-cancel (§1.3) remain unbuilt; both ride the recorded arms when they land.
+
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
 > slice 1, [PR #543](https://github.com/TheCaptainCompany/captain-food/pull/543)):
@@ -111,16 +137,16 @@
 >   fail-open shape was deliberately deleted
 >   ([#519](https://github.com/TheCaptainCompany/captain-food/issues/519)/[PR #520](https://github.com/TheCaptainCompany/captain-food/pull/520))
 >   and stays deleted.
-> - **⚠️ The criterion's biggest finding is a D2 record↔code drift**: the founder's clause order
+> - **⚠️ The criterion's biggest finding was a D2 record↔code drift** — the founder's clause order
 >   restates his OWN [ADR-20260808-195315](adr/ADR-20260808-195315-customer-brief-answers.md) §1.2
->   (*"Authorise on checkout. Capture on delivered / picked up"*, which supersedes
->   [ADR-20260719-014434](adr/20260719-014434-checkout-snapshot-on-paymentintentcreated.md)'s
->   capture-at-checkout on that point), while the code **captures at confirm** and materializes the
->   Order on `PaymentCaptured` (`rules.yaml#/OrderMaterializedOnPaymentCapture`; no `AUTHORIZED`
->   state; `capture_method` unset in the Stripe adapter). **Implementing D2 joins the acceptance
->   path as its own GREEN slice** — cheap now, inside the empty-log window; the walk harness's
->   capture assertions are written against D2 semantics, and any interim walk on the implemented
->   flow is labeled as such.
+>   (*"Authorise on checkout. Capture on delivered / picked up"*) while the code captured at
+>   confirm. **RESOLVED 2026-08-13 by the D2 slice**
+>   ([#544 "Capture on delivered"](https://github.com/TheCaptainCompany/captain-food/issues/544),
+>   see the capture-on-delivered entry at the top of this file): the Order materializes on
+>   `PaymentAuthorized` (`rules.yaml#/OrderMaterializedOnPaymentAuthorization`), `AUTHORIZED`
+>   exists, `capture_method=manual` is set, and `PaymentSettlementProcess` captures on the
+>   delivered fact. The walk harness's capture assertions can now run against the implemented
+>   semantics.
 > - **The program of record** (ADR §5): [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
 >   (merging) → split slice 1 → smoke **L5 lifecycle legs** (accept → ready → dispatch-job-present →
 >   delivered, each seen red first) → the four **non-auth browser walls** + local-issuer tooling →

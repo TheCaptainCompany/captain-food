@@ -164,6 +164,36 @@ pub mod place_order {
     }
 }
 
+/// The `payment-settlement` contract (ADR-20260808-195315 §1.2/§1.3): capture on fulfilment,
+/// release on abort. Emitted at the Stripe ADAPTER boundary (the same seam as
+/// [`place_order::payment_failure`]) — application saga code stays telemetry-free.
+pub mod payment_settlement {
+    use super::*;
+
+    fn capture_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::PAYMENT_CAPTURE_FAILED_TOTAL).build())
+    }
+
+    fn release_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::PAYMENT_RELEASE_FAILED_TOTAL).build())
+    }
+
+    /// `payment_capture_failed_total{reason}` — PAGES on ANY increment: food cooked, money did not
+    /// move. `reason` is the typed scalars.yaml#/CaptureFailureReason set; the recorded
+    /// PaymentCaptureFailed fact on the Payment stream is this counter's durable twin.
+    pub fn capture_failed(reason: &str) {
+        capture_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `payment_release_failed_total{reason}` — warn-level, never a page: a failed void self-heals
+    /// (the authorization expires within ~7 days and Stripe reports PaymentReleased).
+    pub fn release_failed(reason: &str) {
+        release_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
 /// Technical + BAM metrics for the `read-authorization` contract (#144).
 pub mod read_authorization {
     use opentelemetry::metrics::Gauge;
@@ -433,9 +463,11 @@ mod tests {
         super::acceptance::duplicate("WORKER");
         super::acceptance::sync_conflict("PlaceOrder");
         super::acceptance::completed("SUCCEEDED", 12.5);
-        super::place_order::duration("captured", 431.0);
+        super::place_order::duration("authorized", 431.0);
         super::place_order::placed("PLACED");
         super::place_order::payment_failure("card_declined");
+        super::payment_settlement::capture_failed("CARD_DECLINED");
+        super::payment_settlement::release_failed("transient");
         super::read_authorization::checked("ORDER", "CUSTOMER", false, 1.5);
         super::read_authorization::bridge_unresolved("CUSTOMER");
         super::read_authorization::lag_positions(0);

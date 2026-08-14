@@ -22,7 +22,8 @@ use std::time::Duration;
 use application::generated::services::{DeliveryService, PaymentService};
 use application::ports::{is_version_conflict, NoopDeliveryService};
 use application::process_managers::{
-    cart_binding, delivery_dispatch, place_order, reclamation, refund, Outcome, TriggerEnvelope,
+    cart_binding, delivery_dispatch, payment_settlement, place_order, reclamation, refund, Outcome,
+    TriggerEnvelope,
 };
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
@@ -48,6 +49,7 @@ const PUSH_SAFETY_INTERVAL: Duration = Duration::from_secs(60);
 #[derive(Clone, Copy, Debug)]
 enum ProcessManager {
     PlaceOrder,
+    PaymentSettlement,
     Refund,
     CartBinding,
     DeliveryDispatch,
@@ -68,7 +70,21 @@ const REGISTRY: &[PmGroup] = &[
     PmGroup {
         checkpoint: "pm:PlaceOrderProcess",
         pm: ProcessManager::PlaceOrder,
-        triggers: &["PaymentCaptured", "PaymentFailed"],
+        triggers: &["PaymentAuthorized", "PaymentFailed"],
+    },
+    PmGroup {
+        // Capture on fulfilment / release on abort (ADR-20260808-195315 §1.2/§1.3). ORDER events,
+        // so the runner drains them (the mailbox chains only the Stripe facts). Stateless: no
+        // state table — idempotency is the OrderTracking payment_status guard + the adapter's
+        // deterministic Stripe idempotency keys.
+        checkpoint: "pm:PaymentSettlementProcess",
+        pm: ProcessManager::PaymentSettlement,
+        triggers: &[
+            "OrderDelivered",
+            "OrderRejectedByRestaurant",
+            "OrderCancelledByCustomer",
+            "OrderCancelledByRestaurant",
+        ],
     },
     PmGroup {
         checkpoint: "pm:RefundProcess",
@@ -306,7 +322,12 @@ impl ProcessManagerRunner {
         let triggers: Vec<String> = group
             .triggers
             .iter()
-            .filter(|t| !matches!(**t, "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded"))
+            .filter(|t| {
+                !matches!(
+                    **t,
+                    "PaymentAuthorized" | "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded"
+                )
+            })
             .map(|t| t.to_string())
             .collect();
         if triggers.is_empty() {
@@ -390,11 +411,44 @@ impl ProcessManagerRunner {
         let env = &trigger.envelope;
         match (pm, &trigger.event) {
             // --- PlaceOrderProcess ---------------------------------------------------------------
-            (ProcessManager::PlaceOrder, DomainEvent::PaymentCaptured(e)) => {
-                place_order::on_payment_captured(&self.store, &self.payment_state, e, env).await
+            (ProcessManager::PlaceOrder, DomainEvent::PaymentAuthorized(e)) => {
+                place_order::on_payment_authorized(&self.store, &self.payment_state, e, env).await
             }
             (ProcessManager::PlaceOrder, DomainEvent::PaymentFailed(e)) => {
                 place_order::on_payment_failed(&self.payment_state, e, env).await
+            }
+            // --- PaymentSettlementProcess (ADR-20260808-195315 §1.2/§1.3) -------------------------
+            (ProcessManager::PaymentSettlement, DomainEvent::OrderDelivered(e)) => {
+                payment_settlement::on_order_delivered(
+                    &self.store,
+                    &self.orders,
+                    self.payments.as_ref(),
+                    e,
+                    env,
+                )
+                .await
+            }
+            (ProcessManager::PaymentSettlement, DomainEvent::OrderRejectedByRestaurant(e)) => {
+                payment_settlement::on_order_rejected(&self.orders, self.payments.as_ref(), e, env)
+                    .await
+            }
+            (ProcessManager::PaymentSettlement, DomainEvent::OrderCancelledByCustomer(e)) => {
+                payment_settlement::on_order_cancelled_by_customer(
+                    &self.orders,
+                    self.payments.as_ref(),
+                    e,
+                    env,
+                )
+                .await
+            }
+            (ProcessManager::PaymentSettlement, DomainEvent::OrderCancelledByRestaurant(e)) => {
+                payment_settlement::on_order_cancelled_by_restaurant(
+                    &self.orders,
+                    self.payments.as_ref(),
+                    e,
+                    env,
+                )
+                .await
             }
             // --- RefundProcess -------------------------------------------------------------------
             (ProcessManager::Refund, DomainEvent::OrderRejectedByRestaurant(e)) => {

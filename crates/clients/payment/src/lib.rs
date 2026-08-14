@@ -30,10 +30,13 @@ mod sealed {
     pub trait Sealed {}
 }
 
+impl sealed::Sealed for domain::generated::events::PaymentAuthorized {}
+impl sealed::Sealed for domain::generated::events::PaymentCaptureFailed {}
 impl sealed::Sealed for domain::generated::events::PaymentCaptured {}
 impl sealed::Sealed for domain::generated::events::PaymentFailed {}
 impl sealed::Sealed for domain::generated::events::PaymentIntentCreated {}
 impl sealed::Sealed for domain::generated::events::PaymentRefunded {}
+impl sealed::Sealed for domain::generated::events::PaymentReleased {}
 impl sealed::Sealed for domain::generated::events::RefundApproved {}
 impl sealed::Sealed for domain::generated::events::RefundDenied {}
 impl sealed::Sealed for domain::generated::events::RefundOpened {}
@@ -48,6 +51,20 @@ pub trait PaymentFact: sealed::Sealed + serde::Serialize + Send {
     /// from the domain enum's own serde representation, never from a hand-built literal that
     /// could drift from it.
     fn into_domain_event(self) -> domain::generated::events::DomainEvent;
+}
+
+impl PaymentFact for domain::generated::events::PaymentAuthorized {
+    const EVENT_TYPE: &'static str = "PaymentAuthorized";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentAuthorized(self)
+    }
+}
+
+impl PaymentFact for domain::generated::events::PaymentCaptureFailed {
+    const EVENT_TYPE: &'static str = "PaymentCaptureFailed";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentCaptureFailed(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::PaymentCaptured {
@@ -75,6 +92,13 @@ impl PaymentFact for domain::generated::events::PaymentRefunded {
     const EVENT_TYPE: &'static str = "PaymentRefunded";
     fn into_domain_event(self) -> domain::generated::events::DomainEvent {
         domain::generated::events::DomainEvent::PaymentRefunded(self)
+    }
+}
+
+impl PaymentFact for domain::generated::events::PaymentReleased {
+    const EVENT_TYPE: &'static str = "PaymentReleased";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentReleased(self)
     }
 }
 

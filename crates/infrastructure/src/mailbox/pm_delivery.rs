@@ -184,7 +184,12 @@ pub(super) async fn chain_target_of(
         }
     };
     match event {
-        E::PaymentCaptured(e) => {
+        // Authorize-then-capture (ADR-20260808-195315 §1.2): the AUTHORIZATION is what
+        // materializes the order, so IT chains to PlaceOrderProcess. The later PaymentCaptured is
+        // pure settlement — recorded on the Payment stream and folded by OrderTracking, with no
+        // saga hop (PlaceOrderProcess's run is already resolved; PaymentSettlementProcess reacts
+        // to ORDER events, which the saga runner drains).
+        E::PaymentAuthorized(e) => {
             let order = match e.order_id {
                 Some(order_id) => Some(order_id.0),
                 None => by_intent(&e.payment_intent_id).await?,
@@ -306,7 +311,7 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
 
     let rows = sqlx::query(
         "SELECT id, position, event_type, payload, correlation_id, user_id, user_type FROM domain_events \
-         WHERE (event_type IN ('PaymentCaptured', 'PaymentFailed') AND position > $1) \
+         WHERE (event_type IN ('PaymentAuthorized', 'PaymentFailed') AND position > $1) \
             OR (event_type = 'PaymentRefunded' AND position > $2) \
          ORDER BY position",
     )

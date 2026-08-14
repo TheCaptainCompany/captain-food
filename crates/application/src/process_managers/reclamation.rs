@@ -380,6 +380,20 @@ mod tests {
         ) -> Result<PaymentRequestOutput, DomainError> {
             unreachable!("ReclamationProcess never creates intents")
         }
+        async fn capture(
+            &self,
+            _input: crate::generated::services::PaymentCaptureInput,
+            _meta: &ServiceCallMeta,
+        ) -> Result<(), DomainError> {
+            unreachable!("ReclamationProcess never captures — that is PaymentSettlementProcess's port use")
+        }
+        async fn release(
+            &self,
+            _input: crate::generated::services::PaymentReleaseInput,
+            _meta: &ServiceCallMeta,
+        ) -> Result<(), DomainError> {
+            unreachable!("ReclamationProcess never voids — that is PaymentSettlementProcess's port use")
+        }
         async fn refund(
             &self,
             input: PaymentRefundInput,

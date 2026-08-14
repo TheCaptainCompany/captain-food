@@ -291,11 +291,23 @@ impl TestBed {
                     .await
                     .expect("seed payment run");
             }
+            DomainEvent::PaymentAuthorized(e) => {
+                if let Some(order_id) = e.order_id {
+                    self.orders.set_payment(order_id, "AUTHORIZED", &e.payment_intent_id);
+                }
+                self.orders.set_payment_by_intent("AUTHORIZED", &e.payment_intent_id);
+            }
             DomainEvent::PaymentCaptured(e) => {
                 if let Some(order_id) = e.order_id {
                     self.orders.set_payment(order_id, "CAPTURED", &e.payment_intent_id);
                 }
                 self.orders.set_payment_by_intent("CAPTURED", &e.payment_intent_id);
+            }
+            DomainEvent::PaymentReleased(e) => {
+                if let Some(order_id) = e.order_id {
+                    self.orders.set_payment(order_id, "RELEASED", &e.payment_intent_id);
+                }
+                self.orders.set_payment_by_intent("RELEASED", &e.payment_intent_id);
             }
             // --- Refund PM run -------------------------------------------------------------
             DomainEvent::RefundRequested(e) => {
@@ -484,7 +496,12 @@ pub fn tracking_row_from_order_placed(
         placed_at: chrono::Utc::now(),
         status_changed_at: chrono::Utc::now(),
         payment_intent_id: e.payment_intent_id.clone(),
-        payment_status: "CAPTURED".to_string(),
+        // Authorize-then-capture (ADR-20260808-195315 §1.2): OrderPlaced happens on AUTHORIZATION,
+        // so a charging order seeds AUTHORIZED (capture follows on fulfilment); a $0 replacement
+        // (no intent) keeps the historical CAPTURED = "nothing owed" — mirrors the projector
+        // (crate::projectors::order_tracking payment_status hook).
+        payment_status: if e.payment_intent_id.is_some() { "AUTHORIZED" } else { "CAPTURED" }
+            .to_string(),
         restaurant_stars: None,
         rating_comment: None,
         rider_thumb: None,
@@ -1003,6 +1020,20 @@ impl PaymentService for FakeGateway {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             client_secret: "pi_123_secret".into(),
         })
+    }
+    async fn capture(
+        &self,
+        _input: crate::generated::services::PaymentCaptureInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+    async fn release(
+        &self,
+        _input: crate::generated::services::PaymentReleaseInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
     }
     async fn refund(&self, _input: PaymentRefundInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         Ok(())

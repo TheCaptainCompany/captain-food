@@ -3875,6 +3875,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pm-payment-settlement"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "domain-ordering",
+ "domain-payments",
+ "regex",
+ "serde_json",
+ "stripe-adapter",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pm-place-order"
 version = "0.1.0"
 dependencies = [

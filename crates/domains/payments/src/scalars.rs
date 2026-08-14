@@ -17,3 +17,13 @@ pub enum RefundStatus {
     DENIED,
     REFUNDED,
 }
+
+/// Why capturing a confirmed authorization failed AFTER fulfilment (PaymentCaptureFailed — the food is cooked and the money did not move, ADR-20260808-195315 §1.2 team note): CARD_DECLINED = the issuer refused the capture; AUTHORIZATION_EXPIRED = the ~7-day hold lapsed before capture; GATEWAY_REFUSED = Stripe refused the request deterministically (already captured/canceled, keying bug); GATEWAY_UNAVAILABLE = transport/5xx — the capture MAY have succeeded provider-side (the settled PaymentCaptured webhook supersedes this fact when it did).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CaptureFailureReason {
+    CARD_DECLINED,
+    AUTHORIZATION_EXPIRED,
+    GATEWAY_REFUSED,
+    GATEWAY_UNAVAILABLE,
+}

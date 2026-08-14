@@ -49,6 +49,7 @@ resources:
   - bins/graphql-payments.yaml
   - bins/pm-cart-binding.yaml
   - bins/pm-delivery-dispatch.yaml
+  - bins/pm-payment-settlement.yaml
   - bins/pm-place-order.yaml
   - bins/pm-reclamation.yaml
   - bins/pm-refund.yaml

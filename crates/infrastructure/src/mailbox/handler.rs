@@ -359,7 +359,11 @@ impl MailboxCommandHandler {
 
         use domain::generated::events::DomainEvent as E;
         let outcome = match &event {
-            E::PaymentCaptured(_) | E::PaymentFailed(_) | E::PaymentRefunded(_) => {
+            E::PaymentAuthorized(_)
+            | E::PaymentCaptured(_)
+            | E::PaymentReleased(_)
+            | E::PaymentFailed(_)
+            | E::PaymentRefunded(_) => {
                 application::payments::record_inbound_payment_event(
                     store.as_ref(),
                     event.clone(),
@@ -563,8 +567,8 @@ impl MailboxCommandHandler {
             occurred_at: message.received_at,
         };
         let outcome = match (message.actor_type.as_str(), &event) {
-            ("PlaceOrderProcess", E::PaymentCaptured(e)) => {
-                place_order::on_payment_captured(
+            ("PlaceOrderProcess", E::PaymentAuthorized(e)) => {
+                place_order::on_payment_authorized(
                     staging.as_ref() as &dyn EventStore,
                     &payment_staging,
                     e,

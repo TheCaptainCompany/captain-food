@@ -84,7 +84,7 @@ enum_text!(InboundMessageStatus {
 enum_text!(ComparisonBasis { ESTIMATED, REAL });
 enum_text!(ThumbRating { UP, DOWN });
 enum_text!(DeliveryTimeliness { ON_TIME, ACCEPTABLE_DELAY, TOO_LATE });
-enum_text!(PaymentStatus { PENDING, CAPTURED, FAILED, REFUNDED });
+enum_text!(PaymentStatus { PENDING, AUTHORIZED, CAPTURED, FAILED, REFUNDED, RELEASED });
 enum_text!(PaymentProcessStatus { AWAITING_PAYMENT_RESULT, ORDER_PLACED, FAILED });
 enum_text!(RefundStatus { REQUESTED, APPROVED, DENIED, REFUNDED });
 enum_text!(RefundProcessStatus {

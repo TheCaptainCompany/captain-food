@@ -61,6 +61,20 @@ pub struct PaymentRequestOutput {
     pub client_secret: String,
 }
 
+/// Input of `payment.capture`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentCaptureInput {
+    pub payment_intent_id: PaymentIntentId,
+}
+
+/// Input of `payment.release`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentReleaseInput {
+    pub payment_intent_id: PaymentIntentId,
+}
+
 /// Input of `payment.refund`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,12 +83,18 @@ pub struct PaymentRefundInput {
     pub amount: Money,
 }
 
-/// Payments capability — provider-agnostic (ACL: Stripe behind it). `request` opens the payment for a priced checkout (PlaceOrderProcess command leg); `refund` asks the provider to give money back (RefundProcess approval leg) — settlement always comes back asynchronously as the inbound PaymentCaptured / PaymentRefunded facts recorded by the Payment aggregate, never through these return values.
+/// Payments capability — provider-agnostic (ACL: Stripe behind it). `request` opens the payment for a priced checkout as an AUTHORIZATION (manual capture, ADR-20260808-195315 §1.2 — PlaceOrderProcess command leg); `capture` moves the held money on fulfilment and `release` voids an uncaptured hold on rejection/cancellation (PaymentSettlementProcess legs); `refund` asks the provider to give captured money back (RefundProcess approval leg) — settlement always comes back asynchronously as the inbound PaymentAuthorized / PaymentCaptured / PaymentReleased / PaymentRefunded facts recorded by the Payment aggregate, never through these return values.
 #[async_trait]
 pub trait PaymentService: Send + Sync {
-    /// Create the payment intent for a priced checkout; returns the intent id + the client secret the customer confirms with.
+    /// Create the payment intent (manual capture) for a priced checkout; returns the intent id + the client secret the customer confirms with. Confirmation AUTHORIZES only — the money moves at `capture`.
     /// Anticipated rejections: `errors.yaml#/PaymentDeclined`.
     async fn request(&self, input: PaymentRequestInput, meta: &ServiceCallMeta) -> Result<PaymentRequestOutput, DomainError>;
+    /// Capture the FULL authorized amount of a fulfilled order's intent (partial capture is the recorded open tips discussion, ADR-20260808-195315 §1.4); the settled fact arrives as inbound PaymentCaptured. Idempotent per intent (capture:{intentId}).
+    /// Anticipated rejections: `errors.yaml#/PaymentDeclined`.
+    async fn capture(&self, input: PaymentCaptureInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Cancel (void) an UNCAPTURED authorization — the rejection/timeout path needs no refund because no capture (§1.3); the settled fact arrives as inbound PaymentReleased. Idempotent per intent (release:{intentId}).
+    /// Anticipated rejections: none declared.
+    async fn release(&self, input: PaymentReleaseInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Request a (possibly partial) refund of a captured intent; the settled fact arrives as inbound PaymentRefunded.
     /// Anticipated rejections: `errors.yaml#/PaymentDeclined`.
     async fn refund(&self, input: PaymentRefundInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;

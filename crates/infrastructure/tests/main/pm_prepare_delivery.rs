@@ -108,6 +108,22 @@ impl PaymentService for StubGateway {
         })
     }
 
+    async fn capture(
+        &self,
+        _input: application::generated::services::PaymentCaptureInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("the PM command prepare path never captures (PaymentSettlementProcess's op)")
+    }
+
+    async fn release(
+        &self,
+        _input: application::generated::services::PaymentReleaseInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("the PM command prepare path never voids (PaymentSettlementProcess's op)")
+    }
+
     async fn refund(
         &self,
         input: PaymentRefundInput,
@@ -652,6 +668,22 @@ impl PaymentService for RefusingGateway {
         Err(DomainError::Invariant(
             "PaymentGatewayRefused: stripe create_payment_intent refused deterministically (HTTP 400, code 'parameter_missing'): No such payment_method".into(),
         ))
+    }
+
+    async fn capture(
+        &self,
+        _input: application::generated::services::PaymentCaptureInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("not exercised")
+    }
+
+    async fn release(
+        &self,
+        _input: application::generated::services::PaymentReleaseInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("not exercised")
     }
 
     async fn refund(

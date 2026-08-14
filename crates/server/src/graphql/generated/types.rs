@@ -178,7 +178,7 @@ pub struct OrderLineItem {
     pub line_total: Money,
 }
 
-/// The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+/// The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentAuthorized fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutSnapshot {

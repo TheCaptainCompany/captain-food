@@ -5,6 +5,107 @@ description: >
   (`processmanager.yaml#/Name`), so moving an item between scope folders never rewrites a ref.
 
 
+PaymentSettlementProcess:
+  type: process-manager
+  description: >
+    Drives an AUTHORIZED payment to its settlement (ADR-20260808-195315 §1.2/§1.3, the
+    authorize-then-capture posture): CAPTURE on fulfilment — OrderDelivered is the handover fact for
+    BOTH service types (DELIVERY hands over at the door, COLLECTION at the counter; the Order
+    lifecycle has one READY→DELIVERED transition) — and RELEASE (Stripe void of the uncaptured
+    intent) on rejection/cancellation: "no need to refund because no capture". The recorded third
+    arm — at-table service captures IN ADVANCE at checkout — is not built (no such service type
+    yet); when the acceptance-timeout auto-cancel lands (§1.3) its cancellation fact rides the same
+    release arms. Stateless (no state table): idempotency is the OrderTracking payment_status guard
+    plus the adapter's deterministic Stripe idempotency keys (capture:{intentId} / release:{intentId},
+    ADR-20260801-023000) — a redelivered trigger lands on the SAME gateway object. Settlement always
+    arrives asynchronously as the inbound facts the Payment aggregate records (PaymentCaptured /
+    PaymentReleased), never as these calls' return values. The capture-failure branch — a
+    deterministic decline or an unreachable gateway maps the call's outcome to a recorded
+    PaymentCaptureFailed with a typed reason + the paging counter — is carried in the hand-written
+    wrapper seam (crate::process_managers::payment_settlement), the same seam pattern as
+    ReclamationProcess: "on call error, deliver X" is not expressible in the step DSL. The release
+    arms need no failure fact: a failed void self-heals — the hold expires on its own within ~7 days
+    — so the outcome is a counter (payment_release_failed_total), not a page. Post-capture
+    rejection/cancellation stays RefundProcess's job (its payment_status = CAPTURED guards): the two
+    sagas partition the same triggers by payment state, capture-side here, refund-side there.
+  ports:
+    payment: { $ref: 'services.yaml#/payment' }
+  receives:
+    - message: { $ref: 'events.yaml#/OrderDelivered' }
+      description: >
+        The order was handed to the customer (delivered / picked up) — capture the authorized
+        payment. The capture keys on the PRESENCE OF A CAPTAIN AUTHORIZATION, never on the
+        delivery fact alone (rules.yaml#/PaymentCapturedOnFulfilment): the read skips orders with
+        no payment_intent_id and the guard skips payments not AUTHORIZED — so a $0 replacement
+        today, and a post-V0 EXTERNAL order (Uber Eats ingest: already paid on the partner's
+        rails, no Captain PaymentIntent — ADR-20260813-233418 AR-2), can never trip a phantom
+        capture; the concrete ExternalOrderReceived regression test lands with that slice. The
+        wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the
+        settled fact arrives as inbound PaymentCaptured.
+      emits:
+        # Wrapper-seam failure branch: the capture call's deterministic decline / transport failure
+        # is recorded on the Payment with a typed reason (not step-derived — declared here so
+        # behaviour-test coverage sees it).
+        - { $ref: 'events.yaml#/PaymentCaptureFailed' }
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderDelivered/properties/orderId' } } }
+            note: "The fulfilled order, with its folded payment state."
+        - guard:
+            that: { order: { payment_status: { const: AUTHORIZED } } }
+            skip: true
+            note: "Nothing authorized → nothing to capture: $0 replacements never charge; released/refunded runs have nothing held; an already-captured payment is a benign redelivery."
+        - call:
+            port: payment
+            operation: capture
+            note: "Capture the FULL authorized amount (partial capture / tips-at-delivery is the recorded open tips discussion, ADR-20260808-195315 §1.4); PaymentCaptured settles asynchronously."
+    - message: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+      description: "The restaurant rejected the order before capture — release the hold (Stripe void); the settled fact arrives as inbound PaymentReleased. The acceptance-timeout auto-cancel (§1.3, unbuilt) rides this same arm."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: AUTHORIZED } } }
+            skip: true
+            note: "Nothing held → nothing to release (post-capture rejection is RefundProcess's CAPTURED arm)."
+        - call:
+            port: payment
+            operation: release
+            note: "Void the uncaptured intent — no refund machinery, the customer was never charged."
+    - message: { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+      description: "The customer cancelled before capture — release the hold."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: AUTHORIZED } } }
+            skip: true
+            note: "Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm)."
+        - call:
+            port: payment
+            operation: release
+    - message: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+      description: "The restaurant cancelled after acceptance but before capture — release the hold."
+      steps:
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            as: order
+            where: { order_id: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } } }
+        - guard:
+            that: { order: { payment_status: { const: AUTHORIZED } } }
+            skip: true
+            note: "Nothing held → nothing to release (post-capture cancellation is RefundProcess's CAPTURED arm)."
+        - call:
+            port: payment
+            operation: release
+
+
 RefundProcess:
   type: process-manager
   description: >
