@@ -2,6 +2,28 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-14 — FOUNDER DELEGATED A DECISION BATCH TO THE TEAM** (*"You don't need me for that"* +
+> *"Go ahead team!!"*, the founder pasting back the decision list with its recommendations; authority
+> [ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
+> **Recorded as adopted on their recommendations** ([DECISIONS](proposals/DECISIONS.md) header +
+> rows): **STRIX-1** (GO — single gated, sandboxed, bounded, dev-only run) · **STRIX-2** (bounded run
+> with hard time + token caps) → [PROP-20260814-000240](proposals/PROP-20260814-000240-strix-security-audit.md)
+> **Approved**, three Concerns checked · **D8** (bootstrap-then-flip source) · **D9** (Uber is
+> merchant-of-record, informational record only) · **D10** (post-V0, design the aggregator shape now) ·
+> **D11** (option 1 — either side in test ⇒ the ORDER is test, ticket unmistakably marked / off the
+> live kitchen flow) — **D11 UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257)**.
+> **LOSS-1 is DELIBERATELY KEPT OPEN / founder-flagged** (added after the delegated list, commits Captain
+> to absorbing real money — out of the delegation's explicit scope). **Operating-model signal**: this
+> extends the team's delegated authority (ADR-20260810-215503, backlog priority) to **this class of
+> product decision** — the team decides + informs going forward; money-liability / external-legal /
+> admin-gated matters stay founder-owned. **Re-ranked value stack** (keystone unchanged — the acceptance
+> criterion [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
+> stays TOP): (a) finish capture-on-delivered (#545, in flight) → (b) acceptance smoke L5 lifecycle walk
+> → (c) **GraphQL query cost/depth limiter** (new peak-readiness issue, HIGH — founder flagged it
+> higher-leverage than Strix) → (d) Strix containment-harness + bounded run (approved, gated behind the
+> harness, below the keystone) → (e) Uber aggregator-shape (post-V0) + #257/D11 implementation. This run
+> is docs-only; no code, no claim.
+
 > 💳 **2026-08-14 — PR #545 "capture on delivered" IS IN A POST-REVIEW FIX ROUND**
 > ([PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545), tracking issue
 > [#544](https://github.com/TheCaptainCompany/captain-food/issues/544), branch `544-capture-on-delivered`).
