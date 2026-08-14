@@ -1360,11 +1360,34 @@ step**, while `crates/application/src/process_managers/reclamation.rs:91` takes
 (`:182`) the step DSL cannot express. A bounded, named hole is what makes a mechanical derivation
 honest; an unnamed one makes it another completeness claim.
 
+**And the fourth limit is the INVERSE of the other three — it belongs to the DERIVATION, not to the
+hand-walk, so it sits alongside them rather than replacing them: a `read:` step declares the model
+SHAPE a leg consumes, not the physical SOURCE.** THREE of the thirteen are implemented as stream
+folds inside `captain_write`, never touching the projection they name: `specs/delivery/processmanager.yaml:43`
+(`Restaurant` — `crates/application/src/process_managers/delivery_dispatch.rs:122-127` loads
+`restaurant_stream` and the doc comment says so out loud), and BOTH declared reads of the PlaceOrder
+leg, `specs/ordering/processmanager.yaml:41` (`Restaurant` — `commands.rs:2391-2394`, *"folded from
+ITS stream (authoritative, race-free)"*) and `:31` (`Cart` — `commands.rs:2419` `require_cart` →
+`load_cart`, a fold of the cart's own stream, under a `note:` that still says *"projection-priced
+lines"*). The predictor is visible: that leg is a hand-written COMMAND handler, not a generated PM
+pipeline. A verbatim derivation would therefore hand `pm-delivery-dispatch` and the ordering write
+app CONNECT on `read_common` — the exact STO-8 wall three open rows exist to keep narrow — and on
+`read_order`, for paths no code takes. **The symmetry is the durable lesson: the hand method failed by
+MISSING crossings (under-grant, four rounds); the naive mechanical derivation fails by INVENTING them
+(over-grant); the derivation is right only when the declaration distinguishes SOURCE from SHAPE.**
+Until the grammar can (a declared source, or an explicit exception list — #513 sub-step (a)'s design,
+not this closure's), the derivation must carry that distinction rather than consume the steps verbatim.
+
 **The binding consequence for [#513](https://github.com/TheCaptainCompany/captain-food/issues/513):
 its grant emitter must derive each app's CONNECT set MECHANICALLY — from the declared `read:` steps
 plus the generated composition roots — and must NOT be built from this prose or from any hand-walk of
 it.** A grant list assembled the way these reader sets were assembled would be wrong on the day it
 shipped, and its failure mode is `permission denied` inside a settlement handler at 20:40 on a Friday.
+**With limit (4) above as a binding caveat, not a footnote**: a `read:` step declares the model SHAPE a
+leg consumes, not the physical SOURCE, and three of the thirteen are `captain_write` stream folds, so
+consuming the steps VERBATIM over-grants `read_common` and `read_order` for paths no code takes. The
+derivation must distinguish projection-read from stream-fold — a declared source, or an explicit
+exception list — before it emits a grant.
 *(Whether the declared-reads mechanism becomes a BLOCKING prerequisite of #513 rather than a follow-up
 to it is under separate architect judgement; the requirement on the emitter holds either way, and that
 judgement's conclusion attaches here.)*
@@ -1582,6 +1605,12 @@ decision, all fail-closed. Three successive reviews each found more of the same 
 signature of a method that cannot be fixed by looking harder. It is [#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s
 grant emitter that consumes this: **the emitter must not derive CONNECT sets from this section's
 prose**, which is why the write-path readers are now named per table above rather than left implied.
+**Nor may it consume the declared steps VERBATIM, which is the same error in the other direction**: a
+`read:` step declares the model SHAPE a leg consumes, not the physical SOURCE, and three of the
+thirteen are stream folds inside `captain_write` (limit (4) above), so a literal derivation invents
+CONNECT on `read_common`/`read_order` that no code path uses. Deriving is right only once the
+declaration distinguishes source — a declared source key or an explicit exception list, which is
+#513's own sub-step (a) and not a detail it may skip.
 
 **Consulted** (ADR-20260812-143619): dba — traced every port; corrected the dispatch-config trio and
 `RuntimePosture` to `captain_write` · graphql-architect — the CONNECT-wall analysis; raised the

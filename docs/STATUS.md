@@ -52,7 +52,12 @@
 > `description:` string behind a hand-written seam). The 17 placements are UNCHANGED and each still
 > follows from a recorded decision. Nothing physical moved — no grants, CRs or migrations
 > (#513/#514/#509 unchanged; **#513's grant emitter must derive CONNECT MECHANICALLY from the declared
-> `read:` steps + generated composition roots, never from this prose**).
+> `read:` steps + generated composition roots, never from this prose — but NOT VERBATIM: a `read:` step
+> declares the model SHAPE a leg consumes, not the physical SOURCE, and THREE of the thirteen are
+> `captain_write` stream folds (`Restaurant` in delivery + ordering, `Cart` on PlaceOrder), so a literal
+> derivation over-grants `read_common`/`read_order` for paths no code takes.** The symmetry is the
+> lesson: the hand method failed by MISSING crossings, the naive derivation fails by INVENTING them, and
+> deriving is right only once the declaration distinguishes source from shape — DECISIONS §32 limit (4)).
 
 > 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
 > *"For the pickup order the payment captured must happen when the order is prepared don't you

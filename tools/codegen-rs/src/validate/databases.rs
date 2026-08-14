@@ -178,14 +178,19 @@ pub(crate) fn resolve_placements(model: &Model) -> Vec<TablePlacement> {
                 databases: vec![WRITE_DATABASE.to_string()],
             });
         } else if DECLARED_KINDS.contains(&kind) || REPLICABLE_KINDS.contains(&kind) {
-            // PRECEDENCE WHEN A TABLE CARRIES BOTH KEYS IS INCIDENTAL, NOT DECIDED: `database:` wins
-            // if its ref resolves, and an UNRESOLVABLE ref falls through to the `replicated:` arm
-            // below. Nobody chose that tiebreak, and it is unreachable for anything committed —
-            // `database-placement-conflict` refuses both-keys outright, so the gate blocks the
-            // ambiguity from landing and the validator↔inventory invariant holds. It becomes visible
-            // only when the inventory is regenerated locally from an already-erroring tree (an
-            // arbitrary one of the two readings is emitted), and it would need a real decision only
-            // if that conflict diagnostic were ever softened.
+            // TWO INCIDENTAL BEHAVIOURS LIVE IN THIS BRANCH — neither decided, both unreachable for
+            // anything committed because a diagnostic refuses the input first, and both visible only
+            // when the inventory is regenerated locally from an ALREADY-ERRORING tree. Each would
+            // need a real decision only if its gate were ever softened:
+            //   (a) PRECEDENCE WHEN A TABLE CARRIES BOTH KEYS: `database:` wins if its ref resolves,
+            //       and an UNRESOLVABLE ref falls through to the `replicated:` arm below. Nobody
+            //       chose that tiebreak; `database-placement-conflict` refuses both-keys outright,
+            //       so an arbitrary one of the two readings is emitted only off an erroring tree.
+            //   (b) A `replicated:` TABLE RESOLVES TO AN EMPTY DATABASE SET when no `recovery: replay`
+            //       database is declared — the row is PRESENT in the resolved output yet placed
+            //       NOWHERE, which reads as "placed" to anything counting rows. `database-replicated-empty`
+            //       refuses that catalog, so the empty set cannot land.
+            // Both keep the validator↔inventory invariant: the gate blocks the input, not the shape.
             if let Some(db) = declared_database(node).filter(|db| declared.contains(db.as_str())) {
                 out.push(TablePlacement { table, kind, mode: PlacementMode::Declared, databases: vec![db] });
             } else if REPLICABLE_KINDS.contains(&kind)

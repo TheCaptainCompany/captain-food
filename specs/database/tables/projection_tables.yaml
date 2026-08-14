@@ -17,7 +17,16 @@ description: >
   escape the DSL walker (`ReclamationProcess` is the known instance). The crossings ARE largely
   declared already — the PM `read:` steps in `specs/*/processmanager.yaml` carry
   `model: { $ref: 'database/tables/projection_tables.yaml#/X' }` — so the derivation is mechanical and
-  must be MADE mechanical rather than re-walked by hand.
+  must be MADE mechanical rather than re-walked by hand. (4) — the INVERSE limit, belonging to that
+  DERIVATION rather than to the hand-walk, and sitting ALONGSIDE (1)-(3) rather than replacing them:
+  a `read:` step declares the model SHAPE a leg consumes, NOT the physical SOURCE. Three of the
+  thirteen are `captain_write` stream folds that never touch the projection they name —
+  `specs/delivery/processmanager.yaml:43` and `specs/ordering/processmanager.yaml:41` on `Restaurant`,
+  and `specs/ordering/processmanager.yaml:31` on `Cart` (both PlaceOrder reads: that leg is a
+  hand-written command handler, not a generated PM pipeline). So the hand method failed by MISSING
+  crossings and a verbatim mechanical derivation fails by INVENTING them; deriving is right only once
+  the declaration distinguishes source from shape (a declared source, or an explicit exception list) —
+  DECISIONS §32 limit (4), #513's own sub-step.
 
   Conventions (in addition to a view's):
     - projector : how the table is maintained from domain_events. Always `app` — an application-layer
