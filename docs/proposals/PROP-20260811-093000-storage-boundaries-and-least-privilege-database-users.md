@@ -887,14 +887,20 @@ captain-db  (CNPG cluster, one WAL timeline, one PITR)
 │                     + ScopeMembership + replicated referentials + projection_checkpoint
 │                                                    [projector_order · graphql_order (SELECT)]
 ├── read_catalog      Catalog + ScopeMembership + replicated referentials + projection_checkpoint
-│                                                    [projector_catalog  · graphql_catalog (SELECT)]
+│                                                    [projector_catalog  · graphql_catalog (SELECT)
+│                                          !! mailbox worker (captain_write) reads Catalog on the
+│                                             WRITE path -- oversell guard + checkout repricing;
+│                                             UNRESOLVED, register row STO-7]
 ├── read_common       Customer · Restaurant · SlugAlias · ProspectionPipeline · City
 │                     · Rider read models (View_* -- placement follows their conversion)
 │                     + ScopeMembership + replicated referentials + projection_checkpoint
 │                                         [projector_{customer,network,delivery}
 │                                          · graphql_{...} (SELECT)
 │                                          · gateway tenant-host-router (Restaurant + SlugAlias,
-│                                            every request's hot path, c4-l3.yaml:33-35)]
+│                                            every request's hot path, c4-l3.yaml:33-35)
+│                                          !! mailbox worker (captain_write) reads Customer on the
+│                                             LOGIN path, + Restaurant / ProspectionPipeline
+│                                             write-side guards; UNRESOLVED, register row STO-8]
 │
 │   replicated into EVERY read database (recovery: replay -- STO-2(a) class):
 │     ScopeMembership · PricingPolicy · UberEstimationPolicy · UberSplitPolicy
@@ -942,6 +948,20 @@ the order boundary's `read_order` per §31's `CustomerCredit → order`. The `re
 section's first version replicated no longer exists (ADR-20260728-170000). The
 `graphql_*` line on `captain-write` is **not** a recommendation: without it every mutation fails
 (§6.1.1 (ii)).
+
+**The `!!` lines in the tree are the part that is decided-but-not-yet-buildable, and they point the
+other way to every other reader annotation here.** Each `CONNECT` list above reads *"which roles may
+reach INTO this database"*; the two `!!` lines record a reach that **has no legal role yet**: the
+`captain_write` mailbox worker holds four read-repository ports (`CommandDeps` in
+`crates/infrastructure/src/generated/command_router.rs`) into read models this map places on the far
+side of a wall — `Catalog` (the add-to-cart oversell guard and `place_order`'s repricing, both
+fail-closed) and `Customer`/`Restaurant`/`ProspectionPipeline` (the login path's new-vs-returning
+decision plus write-side guards). **Placement is unaffected; the physical split is BLOCKED on
+register rows STO-7 and STO-8.** The generalisable lesson, and the one this section is the evidence
+for: this map's reader annotations were derived from `api.yaml` resolvers plus hand-added special
+cases, which cannot see a write app's port set — **an app's `CONNECT` set must be derived from its
+DECLARED reads, write-path apps included** ([#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s
+grant emitter), never from a tree drawn by hand.
 
 ---
 

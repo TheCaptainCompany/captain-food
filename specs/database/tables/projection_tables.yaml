@@ -19,11 +19,23 @@ Restaurant:
   projector: app   # mechanically foldable (+ a cross-stream default_currency lookup from the account stream), but maintained by the app-layer projector for uniformity
   aggregate: Restaurant
   slice: V0
-  # STO-2 closure (DECISIONS §32, 2026-08-14). Two readers beyond the network subgraph, both recorded:
-  # the gateway tenant-host-router reads this table on EVERY request's hot path (c4-l3.yaml
-  # tenant-host-router), and rider.yaml's job screen renders restaurantName/Phone via a join against
+  # STO-2 closure (DECISIONS §32, 2026-08-14). THREE reader classes beyond the network subgraph — the
+  # first version of this line said "two readers ... both recorded" and missed the third (corrected by
+  # the post-ready independent review, AFTER the mob checkpoint). (1) The gateway tenant-host-router
+  # reads this table on EVERY request's hot path (c4-l3.yaml tenant-host-router). (2) rider.yaml's job
+  # screen renders restaurantName/Phone via a join against
   # this table — moving either side of that join breaks one-tap call-restaurant at pickup, a
-  # stranded-order exception. margin_rate is a commercial secret; read_common making it physically
+  # stranded-order exception. (3) OPEN cross-wall dependency, NOT resolved by this placement (register
+  # row STO-8, the captain_write -> read_common wall): the mailbox worker declares
+  # `CommandDeps.restaurants: RestaurantReadRepository` and FOUR handlers read `restaurant` through
+  # it — create_catalog `by_id` (commands.rs:2763, RestaurantNotFound), add_product and update_product
+  # via ensure_prices_use_restaurant_currency `by_id` (:2737, the CurrencyMismatch guard reading
+  # default_currency — ADR-0016), and mark_restaurant_as_favorite `by_id` (:3491, RestaurantNotFound).
+  # Lower stakes than Customer's: all four already treat a not-yet-projected row as passing or
+  # rejecting explicitly, and none sits on checkout. NOTE the write path does NOT read this table for
+  # the checkout guards — place_order folds RestaurantState from the restaurant's own STREAM
+  # (commands.rs:2394), which is captain_write-local and crosses no wall.
+  # margin_rate is a commercial secret; read_common making it physically
   # readable by the marketplace subgraph role is a RECORDED deferral (#513 column narrowing), not an accident.
   database: { $ref: 'database/databases.yaml#/read_common' }
   fedBy:
@@ -221,7 +233,15 @@ ProspectionPipeline:
   projector: app   # weighted 0–10 score COMPUTED from listing facts (never in an event) — application logic
   aggregate: Prospect
   slice: V1
-  # STO-2 closure: sole reader is the admin prospectionPipeline query (network scope).
+  # STO-2 closure: read by the admin prospectionPipeline query (network scope) — NOT its sole reader;
+  # the first version of this line said "sole reader" (corrected by the post-ready independent review).
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-8, the SAME
+  # captain_write -> read_common wall as Customer's, lower stakes): record_prospect_contact reads
+  # `last_contacted_at` through `CommandDeps.prospection: ProspectionReadRepository`
+  # (commands.rs:2626) for the >= 7-day anti-spam invariant. The contact TIME is envelope metadata
+  # (occurred_at) invisible to the fold, so this projection is the ONLY source. Post-split as mapped
+  # the guard cannot read at all: B2B outreach either blocks, or loses its spam ceiling if the read
+  # is degraded to "no row" (the handler already treats a not-yet-projected prospect as passing).
   database: { $ref: 'database/databases.yaml#/read_common' }
   note: "B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query."
   fedBy:
@@ -277,7 +297,21 @@ Customer:
   projector: app   # scalar folds + jsonb ACCUMULATIONS (favorites/addresses/ratings) — maintained by the app-layer projector
   aggregate: Customer
   slice: V0
-  # STO-2 closure: sole reader is the customer scope's `me`/identity path (BND-3(a) shared read store).
+  # STO-2 closure: BND-3(a) shared read store. NOT a sole-reader table — the first version of this
+  # line said "sole reader is the customer scope's `me`/identity path", which this table's OWN `note`
+  # four lines below already contradicted (it names VerifyPhone). Corrected by the post-ready
+  # independent review, AFTER the mob checkpoint.
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-8, DECISIONS §32 —
+  # a DIFFERENT wall from STO-7's): the mailbox worker is a captain_write app whose generated
+  # composition root declares `CommandDeps.customers: CustomerReadRepository`
+  # (crates/infrastructure/src/generated/command_router.rs), and FOUR handlers read `customer`
+  # through it — verify_phone `by_phone` (commands.rs:3257, the new-vs-returning decision ON THE
+  # LOGIN PATH), request_email_verification `by_email` (:3363, EmailAlreadyInUse), and
+  # request_phone_change / confirm_phone_change `by_phone` (:3414, :3453, PhoneAlreadyInUse).
+  # Post-split as mapped, captain_write holds no CONNECT on read_common: sign-in either fails
+  # outright, or — worse, if the lookup were ever degraded to "not found" — SILENTLY RE-REGISTERS a
+  # returning customer as new, forking a second Customer stream and orphaning their order history.
+  # Customer cannot simply move to captain_write: it is a genuine read model with subgraph readers.
   database: { $ref: 'database/databases.yaml#/read_common' }
   note: "Identity/lookup read model: resolves a returning phone (or auth_ref) to an existing Customer, backs VerifyPhone idempotency + auth resolution, and serves the `me` query (CustomerProfile). Also bound when CustomerIdentified stamps carts. The stored `locale` localizes authenticated SMS/email sends."
   fedBy:
@@ -363,12 +397,30 @@ Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog
   slice: V0
-  # STO-2 closure: sole reader is the catalog scope; BND-1(a) keeps catalog its own boundary/database.
+  # STO-2 closure: BND-1(a) keeps catalog its own boundary/database. NOT a sole-reader table — the
+  # first version of this line said "sole reader is the catalog scope" and that was FALSE (corrected
+  # by the post-ready independent review, AFTER the mob checkpoint): the readers are the catalog
+  # scope's api.yaml types AND the captain_write command handlers named below.
   # Its uberPrice derivation reads UberEstimationPolicy — replicated into this database (referential.yaml).
   # OPEN cross-wall dependency, same shape and same chosen direction as OrderTracking's: the uberPrice
   # rule also reads Restaurant.cuisine_category, single-home in read_common — post-split this projector
   # keeps its own fold-local restaurant→cuisine_category lookup (RestaurantRegistered/RestaurantUpdated);
   # Restaurant is deliberately NOT replicated. Implementation belongs to the physical-split slice.
+  # OPEN cross-wall dependency #2 — the WRITE PATH reads this table (register row STO-7, WIDENED to
+  # name it; DECISIONS §32). The mailbox worker is a captain_write app and its GENERATED composition
+  # root declares the dependency: `CommandDeps.catalogs: CatalogReadRepository`
+  # (crates/infrastructure/src/generated/command_router.rs). Four handlers read `catalog` through it
+  # — add_cart_line and change_cart_line_quantity via require_orderable_line (commands.rs:796, 1006:
+  # the availability+stock OVERSELL GUARD, fail-closed OfferNotFound/OfferUnavailable/
+  # InsufficientStock/InvalidOptionSelection), place_order via pricing::price_cart (commands.rs:2458
+  # -> pricing.rs:56: ServerPriceAuthority repricing, fail-closed PriceUnresolvable), and
+  # configure_catalog_slug via slug_taken (commands.rs:2799). `offer_by_id` and `slug_taken` are
+  # DEFAULT trait methods over `by_restaurant` (queries.rs:231,249), i.e. literally SELECT ... FROM
+  # catalog. Post-split as mapped, captain_write holds no CONNECT on read_catalog: EVERY add-to-cart
+  # and EVERY checkout fails closed and the oversell guard never runs — at Friday 19:00-21:30 peak.
+  # STO-7 option (a) (a fold-local snapshot for the CART SCREEN, in read_order) does NOT reach this
+  # wall: it is the same catalog-authority question asked from captain_write, which is why STO-7 now
+  # names both paths and neither may be decided without the other.
   database: { $ref: 'database/databases.yaml#/read_catalog' }
   fedBy:
     - { $ref: 'events.yaml#/CatalogCreated' }

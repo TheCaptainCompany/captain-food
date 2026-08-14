@@ -16,12 +16,23 @@
 > a replay restore would revert an admin-flipped posture). The §18 refusal arm ("business placement
 > is an open register row") is now a **requirement arm** that consumes the same resolution the
 > inventory emitter walks, so validation and emission cannot disagree; the ADP-1 wall runs on every
-> single-home placement. **NEW OPEN ROW STO-7** (must be decided before/with the physical
-> `read_order`/`read_catalog` split): `Cart`'s read-time pricing reads the LIVE `Catalog` across the
-> wall — post-split as mapped the cart cannot render names/prices (#424 class). The
-> `Restaurant.cuisine_category` cross-wall folds carry a recorded direction (fold-local lookup per
-> consuming projector; `Restaurant` deliberately NOT replicated). Nothing physical moved — no
-> grants, CRs or migrations (#513/#514/#509 unchanged).
+> single-home placement. **TWO NEW OPEN ROWS, both blocking the physical split.** **STO-7**
+> (`read_order`/`read_catalog`) — *who is the catalog's pricing-and-orderability authority?* TWO
+> paths cross that wall: the cart's read-time pricing (found at the mob checkpoint; post-split the
+> cart cannot render names/prices, the #424 class) **and the checkout WRITE path** (found by the
+> post-ready independent review — the mailbox worker's `CommandDeps.catalogs` backs the add-to-cart
+> oversell guard and `place_order`'s repricing, so post-split every add-to-cart and every checkout
+> fails closed). **STO-8** (`read_common`) — *may a `captain_write` app read `read_common`?* Nine
+> handlers do, headed by `verify_phone`'s new-vs-returning read of `Customer` **on the login path**,
+> whose degraded form silently re-registers returning customers as new. **The method, not the map,
+> is what needed fixing**: the closure derived readers from `api.yaml` resolvers plus two special
+> cases and missed the whole `captain_write` class — a table's reader set is
+> `resolvers ∪ CommandDeps ∪ PM ports ∪ gateway middleware`. The 17 placements are UNCHANGED and
+> each still follows from a recorded decision; the four *"sole reader"* claims are corrected at
+> source. The `Restaurant.cuisine_category` cross-wall folds carry a recorded direction (fold-local
+> lookup per consuming projector; `Restaurant` deliberately NOT replicated). Nothing physical moved
+> — no grants, CRs or migrations (#513/#514/#509 unchanged; #513's grant emitter must derive
+> CONNECT from declared reads INCLUDING write-path apps, never from prose).
 
 > 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
 > *"For the pickup order the payment captured must happen when the order is prepared don't you

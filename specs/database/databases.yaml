@@ -87,6 +87,9 @@ read_catalog:
     projection, DECLARED — STO-2 closure, DECISIONS §32), plus the replicated authorization index,
     the replicated pricing referentials (the Catalog uberPrice derivation reads
     UberEstimationPolicy locally) and its own `projection_checkpoint`.
+    NON-subgraph readers are part of its reader set and are recorded on purpose: the mailbox worker
+    (a `captain_write` app) reads `Catalog` on the WRITE path — the add-to-cart oversell guard and
+    the checkout repricing — an OPEN cross-wall dependency, register row STO-7 (DECISIONS §32).
   owner: migrator
   k8sName: read-catalog
   recovery: replay
@@ -97,10 +100,13 @@ read_common:
     scopes' read models: Customer, Restaurant, SlugAlias, ProspectionPipeline and the City
     referential (DECLARED — STO-2 closure, DECISIONS §32; the rider `View_*` read models follow
     their conversion), plus the replicated authorization index, the replicated pricing referentials
-    and its own `projection_checkpoint`. One NON-subgraph reader is part of its reader set and is
-    recorded here on purpose: the gateway tenant-host-router reads Restaurant + SlugAlias on EVERY
-    request's hot path (c4-l3.yaml tenant-host-router). Distinct from the `specs/common` kernel
-    scope: this is a shared READ store, not shared doctrine.
+    and its own `projection_checkpoint`. TWO NON-subgraph reader classes are part of its reader set
+    and are recorded here on purpose: (1) the gateway tenant-host-router reads Restaurant + SlugAlias
+    on EVERY request's hot path (c4-l3.yaml tenant-host-router); (2) the mailbox worker (a
+    `captain_write` app) reads `Customer` on the LOGIN path plus `Restaurant` and
+    `ProspectionPipeline` for write-side guards — an OPEN cross-wall dependency, register row STO-8
+    (DECISIONS §32). The first record of this description named only (1). Distinct from the
+    `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
   owner: migrator
   k8sName: read-common
   recovery: replay
