@@ -365,6 +365,10 @@ Catalog:
   slice: V0
   # STO-2 closure: sole reader is the catalog scope; BND-1(a) keeps catalog its own boundary/database.
   # Its uberPrice derivation reads UberEstimationPolicy — replicated into this database (referential.yaml).
+  # OPEN cross-wall dependency, same shape and same chosen direction as OrderTracking's: the uberPrice
+  # rule also reads Restaurant.cuisine_category, single-home in read_common — post-split this projector
+  # keeps its own fold-local restaurant→cuisine_category lookup (RestaurantRegistered/RestaurantUpdated);
+  # Restaurant is deliberately NOT replicated. Implementation belongs to the physical-split slice.
   database: { $ref: 'database/databases.yaml#/read_catalog' }
   fedBy:
     - { $ref: 'events.yaml#/CatalogCreated' }
@@ -420,6 +424,11 @@ Cart:
   slice: V0
   # STO-2 closure: sole reader is the ordering scope (the order boundary, BND-1(a)). Its read-time
   # estimated breakdown/comparison reads PricingPolicy + Uber*Policy — replicated into this database.
+  # OPEN cross-wall dependency, NOT resolved by this placement (register row STO-7, DECISIONS §32):
+  # read-time pricing reads the LIVE Catalog projection (read_catalog) at query time — see this
+  # table's own note — so post-split as mapped the cart screen cannot resolve names/prices (the #424
+  # "built state cannot render" class, on the checkout path, at peak). STO-7 must be decided BEFORE
+  # OR WITH the physical split of read_order/read_catalog.
   database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only
@@ -480,6 +489,14 @@ OrderTracking:
   # database: catalog-import and prospection bursts must never head-of-line-block the customer
   # anxiety-curve projector at Friday 19:00–21:30 peak. The uber_* fold reads UberEstimationPolicy +
   # UberSplitPolicy — replicated into this database (referential.yaml).
+  # OPEN cross-wall dependency, direction recorded (mob checkpoint 2026-08-14): the uber_* fold ALSO
+  # reads Restaurant.cuisine_category — Restaurant is single-home in read_common and OrderPlaced does
+  # not carry cuisineCategory, so nothing puts it in this database today; post-split that read either
+  # crosses the wall or silently nulls the ADR-0025 receipt. Chosen direction: this projector keeps a
+  # FOLD-LOCAL restaurant→cuisine_category lookup in its OWN database, folded from
+  # RestaurantRegistered/RestaurantUpdated (replay-correct, no cross-wall CONNECT); Restaurant itself
+  # is deliberately NOT replicated — that would widen the margin_rate exposure this file defers.
+  # Implementation belongs to the physical-split slice, not to the placement declaration.
   database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary

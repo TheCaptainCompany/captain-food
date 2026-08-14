@@ -2,6 +2,27 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗄️ **2026-08-14 — EVERY TABLE HAS A DECLARED HOME: STO-2 CLOSED, PLACEMENT IS NOW A VALIDATOR
+> REQUIREMENT** ([#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make
+> placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562) /
+> PR [#563](https://github.com/TheCaptainCompany/captain-food/pull/563)). The 17-table remainder
+> (the row's "~65" counted the `ref_*` family deleted 2026-07-28) is placed by port evidence —
+> map + per-table lineage in [DECISIONS §32 "STO-2 closure"](proposals/DECISIONS.md): order-boundary
+> read models → `read_order` (incl. `OrderConversation`/`CustomerCreditBalance` per §31's
+> comms/payments-dissolve-into-order), `Catalog` → `read_catalog`, `Customer`/`Restaurant`/
+> `SlugAlias`/`ProspectionPipeline`/`City` → `read_common`, the pricing trio
+> (`PricingPolicy`/`Uber*Policy`) **replicated into every read database** (declared readers span
+> three of them), the dispatch trio + `RuntimePosture` → `captain_write` (write-side-only ports;
+> a replay restore would revert an admin-flipped posture). The §18 refusal arm ("business placement
+> is an open register row") is now a **requirement arm** that consumes the same resolution the
+> inventory emitter walks, so validation and emission cannot disagree; the ADP-1 wall runs on every
+> single-home placement. **NEW OPEN ROW STO-7** (must be decided before/with the physical
+> `read_order`/`read_catalog` split): `Cart`'s read-time pricing reads the LIVE `Catalog` across the
+> wall — post-split as mapped the cart cannot render names/prices (#424 class). The
+> `Restaurant.cuisine_category` cross-wall folds carry a recorded direction (fold-local lookup per
+> consuming projector; `Restaurant` deliberately NOT replicated). Nothing physical moved — no
+> grants, CRs or migrations (#513/#514/#509 unchanged).
+
 > 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
 > *"For the pickup order the payment captured must happen when the order is prepared don't you
 > think?"*). Refines [ADR-20260808-195315 §1.2](adr/ADR-20260808-195315-customer-brief-answers.md) and
@@ -177,8 +198,10 @@
 > staging/connection tables declare `database:` as a `$ref`, `ScopeMembership` is
 > `replicated: read-databases` (STO-2(a)), and the ADP-1 membership wall is red in both directions
 > (the avelo37 flip [ADR-20260812-115930](adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)
-> documents nearly shipping now names its own mismatch). Business-table placement stays **open**
-> (register row STO-2) and declaring one is refused so a spec edit cannot silently close the row.
+> documents nearly shipping now names its own mismatch). Business-table placement was **open** at
+> this slice (register row STO-2) and declaring one was refused so a spec edit could not silently
+> close the row — **superseded 2026-08-14: STO-2 closed and the refusal flipped to a requirement
+> ([#562](https://github.com/TheCaptainCompany/captain-food/issues/562), entry above)**.
 > The resolved inventory is GENERATED — `specs/generated/databases.generated.{md,json}` — and is
 > the interface [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) (drill legs),
 > [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) (grant emitter) and
