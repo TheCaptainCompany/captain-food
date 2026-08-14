@@ -238,7 +238,61 @@ sequenceDiagram
 
 ---
 
-## 6. Alternatives considered for the cluster as a whole
+## 6. CI / pipeline posture — should Strix run before prod in CI? (FARLEY lens)
+
+**Direct answer: NO. Strix is NOT a CI gate, and never a pre-merge one.** A deterministic gate is
+the whole point of a deployment pipeline; Strix violates the property in four independent ways, any
+one of which disqualifies it:
+
+1. **Non-deterministic.** It is an LLM agent that explores differently every run — the same commit
+   yields different attack paths, different coverage, different verdicts. A gate built on it is
+   either *flaky* (it blocks a green deploy at random, so the team learns to ignore it) or *ignored*
+   (re-run until it passes, which is not a gate at all). **A gate you cannot trust is worse than no
+   gate** — it launders "we didn't check" into "CI is green".
+2. **Slow and quota-hungry.** It is an autonomous looping agent; we **hit the shared Claude account
+   API usage limit tonight** with our own agents (D-B). One such agent per push fits neither the
+   budget nor a Friday-peak deploy cadence where a hotfix must ship in minutes, not after a
+   multi-minute agentic scan.
+3. **Needs a running target.** DAST scans a *live deployment*, not a source tree — there is no
+   "pre-merge stage" for it to run in. A pre-merge CI job has no deployed target to point at.
+4. **Runs exploit code.** Per D-A it executes third-party exploit attempts inside a containment
+   sandbox. That is not something to run on every commit.
+
+**What DOES gate prod is the deterministic residue of a scan.** Every PoC-confirmed finding is
+migrated into a *deterministic* CI test — the authz-matrix (cross-tenant / cross-role), a GraphQL
+query-cost/depth assertion, an SSRF-guard negative test — that runs on **every push**, fast and
+reproducible, and blocks the merge on a build lacking the control. That migration is already this
+proposal's definition-of-done (§1 D1, §8); this section promotes it from a DoD line to the
+**explicit pipeline posture**: **the scanner FINDS, the deterministic tests GUARD.** The standing
+gate is never "re-run the scanner".
+
+**If a live scan sits in the pipeline at all**, its only correct place is a **post-deploy-to-staging
+RELEASE gate** — scan the *running* staging deployment before promoting it to prod — **never
+pre-merge**, because only a deployed target can be scanned (disqualifier 3) and a random-latency
+agentic step cannot sit on the merge path (disqualifiers 1–2). And because the scan is expensive and
+non-deterministic, even there it must be **scheduled or release-triggered, not per-deploy**: a
+nightly / pre-launch / release-candidate run whose output is triaged by a human, not a job that
+gates each promotion on a fresh agentic verdict.
+
+**This is the gate-then-stabilize + compiler-first hierarchy** (ADR-20260803-234035,
+PROP-20260802-130500 §1) applied to security findings: **promote every finding UP the enforcement
+ladder** — ideally to a compiler-unspellable state (the SMS-spend witness and the fail-closed
+verifier in §1 are the model — the mistake cannot be written), else to a deterministic test that
+fails on a build lacking the control — and **never leave "re-run the scanner" as the guard**, which
+is the bottom of the ladder (a manual, non-reproducible check). A finding whose only protection is a
+recurring scan has not been fixed; it has been *rescheduled*.
+
+**Worked anchor — the GraphQL query-cost/depth gap (§1).** The confirmed finding is "no depth /
+complexity / cost limiter exists anywhere in `crates/server/src/graphql`" (zero hits for
+`depth`/`complexity`). The durable prod gate is **the limiter itself plus a cost-limit CI test** that
+asserts a bounded-depth ceiling and *fails today* (proving the finding real, §8) — running on every
+push. It is emphatically **not** a recurring Strix scan that re-discovers the same missing limiter
+each time it happens to try a deep query. Strix's role is to have surfaced it once; the pipeline's
+role is to make its reappearance unspellable.
+
+---
+
+## 7. Alternatives considered for the cluster as a whole
 
 - **Do nothing / rely on gates only.** Rejected as the *sole* posture: leaves the unenumerated
   adversarial surface (SSRF steering, error-path leakage, chained exploits) unprobed before launch.
@@ -256,7 +310,7 @@ sequenceDiagram
 
 ---
 
-## 7. Verification plan — what a "pass" means
+## 8. Verification plan — what a "pass" means
 
 - **A finding is real** only with a reproducing request/response PoC (beck: PoC-before-treat). No PoC ⇒
   not a finding.
@@ -276,7 +330,7 @@ sequenceDiagram
 
 ---
 
-## 8. Open questions for the founder
+## 9. Open questions for the founder
 
 1. **STRIX-1 (D1 + adoption GO/NO-GO)** — Approve a **single gated, sandboxed, bounded** Strix breadth
    pass against a **dev** target, framed as a **defensive pentest evidence pack for counsel**, with
@@ -318,7 +372,11 @@ dominates in each.
   become deterministic CI tests (the durable artifact).
 - **farley**: the run is safe only behind the D-A containment (throwaway container, no repo write, no
   real secrets, dev-only egress) and a dev target with real fail-closed verifier + minted test tokens;
-  the harness must REFUSE to start against a prod-shaped target or with any real secret present.
+  the harness must REFUSE to start against a prod-shaped target or with any real secret present. On the
+  founder's CI question (§6): Strix is **not** a CI gate — non-deterministic, slow/quota-hungry, needs a
+  running target, runs exploit code; the deterministic residue (authz-matrix, GraphQL cost-limit,
+  SSRF-guard tests) is what gates prod on every push, and any live scan belongs only in a post-deploy
+  staging RELEASE gate, scheduled/release-triggered, never pre-merge.
 - **legal-specialist**: the artifact is a defensive pentest evidence pack for counsel; PCI scope is
   Stripe-mediated so nothing here certifies PCI; RGPD erasure endpoints are TESTED not certified; no
   lens agreement is clearance (ADR-20260812-143619). Authorized-test posture only.
@@ -333,7 +391,7 @@ dominates in each.
   during Friday peak.
 - **ux**: nothing in my lens (tooling, no user surface).
 
-## 9. Refs
+## 10. Refs
 
 - `crates/server/src/auth.rs:344-355,362-428,602-613,777-800,810-820` — fail-closed verifier, product
   claim, `alg`-confusion defence (`#519`/`#520`).
