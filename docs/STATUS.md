@@ -2,6 +2,49 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔒 **2026-08-14 — L5 acceptance-walk executor handed back on two real problems; the architect
+> assessed, re-sequenced and recorded (docs-only run)**
+> ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /
+> PR [#555](https://github.com/TheCaptainCompany/captain-food/pull/555) stopped rather than fabricate a walk).
+> **(1) SECURITY — the cross-tenant WRITE IDOR is confirmed on `main`.** Re-verified at every layer:
+> a valid `RESTAURANT` token can accept/reject/ready/deliver/tip/refund **another restaurant's** order,
+> and a `RIDER` token can claim any job as any rider, by supplying the victim's ids in the command
+> **payload** — nothing binds the token's verified `restaurant_id`/`rider_id` claim to the target
+> aggregate on the write path. Trace: `crates/server/src/graphql/acl.rs:98-106` (`RoleGuard` checks
+> the URL PATH role only) → `crates/server/src/graphql/generated/mutation.rs:6368` (`request_envelope`
+> carries `user_id`=sub + `user_type`=role text ONLY) → `crates/application/src/generated/handlers.rs:28-40`
+> (`accept_order` → `require_order(store, cmd.order_id, cmd.restaurant_id)`) →
+> `crates/application/src/commands.rs:1084-1094` (`require_order` matches the order's stored
+> `restaurant_id` against the **client-supplied** `cmd.restaurant_id`, never the token) and
+> `commands.rs:1278-1303` (`accept_delivery` uses `cmd.rider_id` from the payload). No `WriteScope`
+> exists repo-wide; `ReadScope` (`crates/application/src/queries.rs:787`) is read-only; `TenantScope`
+> is read by **0** mutations. **This is already tracked** — [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178)
+> / [PROP-20260726-171500](proposals/PROP-20260726-171500-write-side-per-instance-authorization.md)
+> (Status: **Proposed**, D1–D4 unanswered since **2026-07-26**, never surfaced in the register). Newly
+> opened as **[DECISIONS §39 IDOR-1](proposals/DECISIONS.md)**: **verdict — deadlined fast-follow, a
+> HARD V0-LAUNCH BLOCKER, NOT accepted-forever.** Harmless TODAY (Q-L3 empty-log window, single tenant,
+> acceptance deliberately walks auth-off from the inside, ADR-20260813-191111 §3/§6) but catastrophic
+> the moment a **second** real restaurant token exists — it must close **before/with** the first-real-order
+> gate ([#533](https://github.com/TheCaptainCompany/captain-food/issues/533)) and the auth walk
+> ([#529](https://github.com/TheCaptainCompany/captain-food/issues/529)/[#532](https://github.com/TheCaptainCompany/captain-food/issues/532)),
+> never after. Team-decidable + **founder-informed** (security-correctness sequencing). One material
+> change since the proposal: the read-side (#144) landed as **JWT claims** in `Identity`, not the
+> `ScopeMembership` projection PROP §2 assumed — so the fix is **smaller** (compare/derive from the
+> claim already verified in `Identity`, envelope-carried); the proposal needs that refresh.
+> **(2) SEQUENCING — the acceptance program had L5 before its harness.** L5's RED-first method needs a
+> runnable local stack + a way to mint real tokens through the **fail-closed** verifier without cloud
+> Supabase; today's `mint_token` requires cloud Supabase (`tools/smoke/prod-smoke.sh:170-227`). The
+> **local acceptance harness** (local-issuer/JWKS stub + offline role-claim `mint_token` + runnable
+> single-DB monolith stack + `sk_test`/`pk_test` Stripe wiring) is now recorded as **L5's true first
+> sub-step** (ADR-20260813-191111 §5 re-sequenced below; program-of-record bullet updated). **(3) L5b
+> re-scope**: its RED premise must prove the fail-closed shape that IS enforced (#519: role-mismatch or
+> no-`captain_food` token → 403) and frame the `restaurant_id` claim as a **READ-scoping** proof, NOT a
+> write-binding proof — unless §39 IDOR-1 is closed first, in which case L5b proves the write-binding.
+> **Keystone unchanged: acceptance stays TOP; the harness is only its first build step, no re-rank.**
+> **#554/#555 disposition recommended**: close PR #555 (executor stopped before a meaningful diff),
+> keep #554 open + blocked-by the new harness issue + re-scoped to the L5b premise, re-dispatch after
+> the harness lands. This run is docs-only; no code, no claim.
+
 > 💳 **2026-08-13 — CAPTURE ON DELIVERED IS IMPLEMENTED: the recorded posture (ADR-20260808-195315
 > §1.2/§1.3) and the code no longer disagree** ([#544 "Capture on delivered: implement the recorded
 > authorize-then-capture posture"](https://github.com/TheCaptainCompany/captain-food/issues/544),
@@ -58,8 +101,9 @@
 > product decision** — the team decides + informs going forward; money-liability / external-legal /
 > admin-gated matters stay founder-owned. **Re-ranked value stack** (keystone unchanged — the acceptance
 > criterion [ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
-> stays TOP): (a) finish capture-on-delivered (#545, in flight) → (b) acceptance smoke L5 lifecycle walk
-> → (c) **GraphQL query cost/depth limiter** (new peak-readiness issue, HIGH — founder flagged it
+> stays TOP): (a) finish capture-on-delivered (#545, in flight) → (b) the acceptance keystone — now
+> **local acceptance harness FIRST** (its true first sub-step, 2026-08-14 re-seq, ADR-20260813-191111 §5),
+> then smoke L5 lifecycle walk → (c) **GraphQL query cost/depth limiter** (new peak-readiness issue, HIGH — founder flagged it
 > higher-leverage than Strix) → (d) Strix containment-harness + bounded run (approved, gated behind the
 > harness, below the keystone) → (e) Uber aggregator-shape (post-V0) + #257/D11 implementation. This run
 > is docs-only; no code, no claim.
@@ -204,12 +248,19 @@
 >   exists, `capture_method=manual` is set, and `PaymentSettlementProcess` captures on the
 >   delivered fact. The walk harness's capture assertions can now run against the implemented
 >   semantics.
-> - **The program of record** (ADR §5): [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
->   (merging) → split slice 1 → smoke **L5 lifecycle legs** (accept → ready → dispatch-job-present →
->   delivered, each seen red first) → the four **non-auth browser walls** + local-issuer tooling →
->   the **D2 slice** → [#514 "per-database migration chains"](https://github.com/TheCaptainCompany/captain-food/issues/514)
+> - **The program of record** (ADR §5, **re-sequenced 2026-08-14 — harness before L5**):
+>   [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
+>   (merged) → split slice 1 → the **local acceptance harness** (local-issuer/JWKS stub + a `mint_token`
+>   that signs role + `captain_food` claims **offline** against a key the fail-closed verifier is pointed
+>   at, a runnable **single-DB monolith** stack target, and `sk_test`/`pk_test` Stripe wiring) — **the
+>   true first sub-step of L5**, without which no lifecycle leg can show RED or GREEN (today's `mint_token`
+>   needs cloud Supabase, `tools/smoke/prod-smoke.sh:170-227`) → smoke **L5 lifecycle legs** (accept →
+>   ready → dispatch-job-present → delivered, each seen red first) → the four **non-auth browser walls** →
+>   the **D2 slice** (DONE, [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)/[PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545)) →
+>   [#514 "per-database migration chains"](https://github.com/TheCaptainCompany/captain-food/issues/514)
 >   + Database CRs + local overlay as ONE slice (the delivered leg forces the
->   `View_DeliveryJob`→table conversion there) → **acceptance**: the walk in his clause order,
+>   `View_DeliveryJob`→table conversion there; the harness's single-DB stack is enough for L5, the
+>   eleven-DB stack is a precondition only for the final acceptance walk) → **acceptance**: the walk in his clause order,
 >   storefront + backoffice in a browser, on the all-databases stack, evidenced by a **checkable
 >   JSON record** (causal event chain by `cause_id` + all eleven migration heads), synthetic
 >   identities stated, Stripe Connect shape verified in the script.

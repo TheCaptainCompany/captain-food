@@ -157,6 +157,29 @@ this if reality disagrees, but this is the plan this record commits to:
    stated (§6) and the **Stripe Connect shape verified in the script** (separate charges &
    transfers, per ADR-20260808-195315 §1.1).
 
+**Re-sequencing 2026-08-14 (architect, under this section's own grant — "the architect owns
+re-cutting this if reality disagrees").** The original list ordered step 2 (smoke L5 lifecycle legs)
+**before** the local-issuer tooling (folded into step 3). Reality disagreed: L5's RED-first method
+needs a runnable local stack AND a way to mint real tokens through the **fail-closed** verifier
+without cloud Supabase, and today's `mint_token` requires cloud Supabase (magic-link admin API,
+`tools/smoke/prod-smoke.sh:170-227`). The L5 dispatch
+([#554](https://github.com/TheCaptainCompany/captain-food/issues/554) / PR
+[#555](https://github.com/TheCaptainCompany/captain-food/pull/555)) therefore correctly **stopped**:
+as sequenced it had no harness and could show neither RED nor GREEN. A new prerequisite step is
+inserted **before step 2** — the **local acceptance harness**: a local-issuer/JWKS stub whose
+asymmetric key the unmodified verifier is pointed at (the §3 recorded bypass, never a weakened
+verifier), an offline `mint_token` that signs the role + `captain_food.{restaurant_id,rider_id,
+customer_id}` claims, a runnable **single-DB monolith** stack target, and `sk_test`/`pk_test` Stripe
+wiring. The harness's single-DB stack is sufficient for L5 (the delivered leg's `View_DeliveryJob`
+is a SQL VIEW over one log there); the eleven-DB stack (step 5) remains a precondition only for the
+final acceptance walk (step 6). **This changes build-step ORDER only — not the criterion (§1), not
+the auth-bypass posture (§3), not the D2 semantics (§4, since implemented by #544/#545).** L5b (the
+auth/authz leg) is correspondingly re-scoped: it proves the fail-closed shape that IS enforced
+(#519: role-mismatch / no-`captain_food` token → 403) and frames the `restaurant_id` claim as a
+**READ-scoping** proof — the **write-binding does not exist** (cross-tenant write IDOR,
+[DECISIONS §39 IDOR-1](../proposals/DECISIONS.md) / [#178](https://github.com/TheCaptainCompany/captain-food/issues/178)),
+so L5b may prove write-binding only if §39 IDOR-1 is closed first.
+
 ### 6. The honesty sentence
 
 Carried verbatim from the mob's focus lens, because it is the sentence that must survive this
