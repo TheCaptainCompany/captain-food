@@ -19,6 +19,13 @@ Restaurant:
   projector: app   # mechanically foldable (+ a cross-stream default_currency lookup from the account stream), but maintained by the app-layer projector for uniformity
   aggregate: Restaurant
   slice: V0
+  # STO-2 closure (DECISIONS §32, 2026-08-14). Two readers beyond the network subgraph, both recorded:
+  # the gateway tenant-host-router reads this table on EVERY request's hot path (c4-l3.yaml
+  # tenant-host-router), and rider.yaml's job screen renders restaurantName/Phone via a join against
+  # this table — moving either side of that join breaks one-tap call-restaurant at pickup, a
+  # stranded-order exception. margin_rate is a commercial secret; read_common making it physically
+  # readable by the marketplace subgraph role is a RECORDED deferral (#513 column narrowing), not an accident.
+  database: { $ref: 'database/databases.yaml#/read_common' }
   fedBy:
     - { $ref: 'events.yaml#/RestaurantRegistered' }
     - { $ref: 'events.yaml#/RestaurantUpdated' }
@@ -177,6 +184,10 @@ SlugAlias:
   projector: app   # one row per SUPERSEDED label -- the projector keys on previousSlug, not the aggregate id
   aggregate: Restaurant
   slice: V0
+  # STO-2 closure: read by ZERO api.yaml types — its reader is the gateway 301 path (hosts.rs,
+  # c4-l3.yaml tenant-host-router), co-located with Restaurant which the same middleware reads on the
+  # same request. Deliberately NOT co-located with slug_reservations (write-side, captain_write).
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: >
     Superseded storefront labels, so a renamed restaurant's OLD host keeps resolving
     (ADR-20260728-011344). `hosts.rs` resolves an incoming Host header against `Restaurant.slug` first
@@ -210,6 +221,8 @@ ProspectionPipeline:
   projector: app   # weighted 0–10 score COMPUTED from listing facts (never in an event) — application logic
   aggregate: Prospect
   slice: V1
+  # STO-2 closure: sole reader is the admin prospectionPipeline query (network scope).
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: "B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query."
   fedBy:
     - { $ref: 'events.yaml#/RestaurantRegistered' }
@@ -264,6 +277,8 @@ Customer:
   projector: app   # scalar folds + jsonb ACCUMULATIONS (favorites/addresses/ratings) — maintained by the app-layer projector
   aggregate: Customer
   slice: V0
+  # STO-2 closure: sole reader is the customer scope's `me`/identity path (BND-3(a) shared read store).
+  database: { $ref: 'database/databases.yaml#/read_common' }
   note: "Identity/lookup read model: resolves a returning phone (or auth_ref) to an existing Customer, backs VerifyPhone idempotency + auth resolution, and serves the `me` query (CustomerProfile). Also bound when CustomerIdentified stamps carts. The stored `locale` localizes authenticated SMS/email sends."
   fedBy:
     - { $ref: 'events.yaml#/CustomerRegistered' }
@@ -348,6 +363,9 @@ Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog
   slice: V0
+  # STO-2 closure: sole reader is the catalog scope; BND-1(a) keeps catalog its own boundary/database.
+  # Its uberPrice derivation reads UberEstimationPolicy — replicated into this database (referential.yaml).
+  database: { $ref: 'database/databases.yaml#/read_catalog' }
   fedBy:
     - { $ref: 'events.yaml#/CatalogCreated' }
     - { $ref: 'events.yaml#/CatalogCategoryAdded' }
@@ -400,6 +418,9 @@ Cart:
   projector: app   # hand-written fold (crates/application/src/projectors/cart.rs) — a PURE, money-free fold of the cart events; NO catalog/policy read inside the fold
   aggregate: Cart
   slice: V0
+  # STO-2 closure: sole reader is the ordering scope (the order boundary, BND-1(a)). Its read-time
+  # estimated breakdown/comparison reads PricingPolicy + Uber*Policy — replicated into this database.
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     MONEY-FREE fold (PROP-20260810-231500 Option B, ADR-20260810-112836): the row stores only
     identity, status and the REPRICING INPUTS (per line: offer_id, quantity, selected_option_ids).
@@ -455,6 +476,11 @@ OrderTracking:
   projector: app   # tip Σ-by-recipient + uber_* comparison COMPUTED by the projector — application logic
   aggregate: Order
   slice: V0
+  # STO-2 closure. The ISOLATION is the reason this sits in read_order rather than a shared read
+  # database: catalog-import and prospection bursts must never head-of-line-block the customer
+  # anxiety-curve projector at Friday 19:00–21:30 peak. The uber_* fold reads UberEstimationPolicy +
+  # UberSplitPolicy — replicated into this database (referential.yaml).
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary
     source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status
@@ -690,6 +716,11 @@ OrderConversation:
   projector: app   # message timeline appended + PUBLIC/INTERNAL split + order-status fold = application logic
   aggregate: Conversation
   slice: V0
+  # STO-2 closure: read only behind comms-scope types, and BND-1(a)/§31 records Conversation → order
+  # ("comms dissolves as a boundary"), so the subgraph serving them IS the order boundary's role —
+  # read_order's no-other-subgraph wall holds. PII note: the free text will incidentally carry allergy
+  # statements (Art. 9 special category) — the future PII inventory must not class this as ordinary contact data.
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The per-order conversation read model (#129). Folds the conversation's own messages AND the order's
     status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status
@@ -781,6 +812,10 @@ CustomerCreditBalance:
   projector: app   # balance is a SUM (Σ granted − Σ consumed) — NOT foldable into a View_* (a fold view is a per-column state-fold, not an aggregate); the materialized-projector pattern (#158, ADR-20260726-163737) maintains it
   aggregate: CustomerCredit
   slice: V0
+  # STO-2 closure: §31/BND-1 records CustomerCredit → order, and its only reader (the payments-scope
+  # customerCredit query) is served by the order boundary's subgraph — read_common would hand that
+  # subgraph a second CONNECT, the exact STO-2(b) rejection.
+  database: { $ref: 'database/databases.yaml#/read_order' }
   note: >
     The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a
     ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream

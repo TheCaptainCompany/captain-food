@@ -27,15 +27,18 @@ description: >
       (ADR-20260811-014129 Decision 2: a reference is a `$ref`; a bare string is invisible to the
       refs walker — the #413 defect class). Absence is an ERROR, never `captain_write`-by-omission.
     - `replicated: read-databases` is the REPLICATED placement class (STO-2(a)): the table is
-      projected into EVERY read database — the resolved set is every database declared
-      `recovery: replay`, which is the definition of a read database (its whole content is a
-      re-derivable fold of the log), not a naming pun. `ScopeMembership` and the `ref_*` enum
-      family are DECIDED replicated; `projection_checkpoint` (runtime machinery, not spec-declared)
-      is per-read-database by the same rule.
-    - Business read models and referential tables beyond the replicated class carry NO placement
-      yet: that is register row STO-2's open remainder (DECISIONS §32 — "a working recommendation,
-      not a decision, and needs a yes"). Declaring one here before the row closes is refused by the
-      validator; the completeness rule widens to all kinds when STO-2 closes.
+      projected — or, for a seeded referential, SEEDED — into EVERY read database; the resolved set
+      is every database declared `recovery: replay`, which is the definition of a read database
+      (its whole content is a re-derivable fold of the log), not a naming pun. In the class:
+      `ScopeMembership`, and the pricing referentials `PricingPolicy` / `UberEstimationPolicy` /
+      `UberSplitPolicy` (STO-2 closure — their declared readers span three read databases);
+      `projection_checkpoint` (runtime machinery, not spec-declared) is per-read-database by the
+      same rule.
+    - Every business read model and referential table DECLARES its placement (`database:` `$ref` or
+      `replicated:`): register row STO-2 CLOSED 2026-08-14 (DECISIONS §32 "STO-2 closure" — the
+      17-table map with per-table port evidence), so absence is an ERROR for these kinds too, never
+      a default. A seeded referential's SEED SCRIPT is part of its database's recovery path — a
+      replay-only restore comes back empty otherwise (#509's drill asserts seeded row counts).
 
   RECOVERY is the one attribute carried beyond identity, because the drill slice (#509) consumes it
   and non-rederivability must be declared where the database is:
@@ -55,6 +58,11 @@ captain_write:
     the two PLATFORM connection tables that are deliberately NOT adapter state:
     `auth_sessions` (ADP-1 leg 2 (b) — encrypted, used by the actor path and the BFF login route,
     not by any adapter) and `sms_send_quota` (a cross-replica money ceiling on the OTP send path).
+    And, since the STO-2 closure (DECISIONS §32), the write-side-read configuration: the dispatch
+    trio `DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` (sole port
+    `DispatchStrategyRepository`, consumed only by the dispatch PM and the offer-timeout worker)
+    and `RuntimePosture` (startup-read by every governed process; seeded/UPDATEd, never folded, so
+    a replay restore would silently revert an admin-flipped posture — it must sit on the pitr path).
   owner: migrator          # PROP-20260811-093000 §6.1 — the CI-only DDL credential owns the business schemas
   k8sName: captain-write
   recovery: pitr
@@ -63,11 +71,12 @@ captain_write:
 
 read_order:
   description: >
-    `OrderDb` in PROP-20260811-093000 §11 — the ORDER boundary's read models (the map recommends
-    Cart, OrderTracking, OrderConversation, CustomerCreditBalance; that placement is STO-2's open
-    remainder, not yet declared), plus the replicated authorization index and its own
-    `projection_checkpoint`. Written by its projector role, read by its subgraph role; no other
-    subgraph holds CONNECT — the wall the split is bought for.
+    `OrderDb` in PROP-20260811-093000 §11 — the ORDER boundary's read models: Cart, OrderTracking,
+    OrderConversation and CustomerCreditBalance (DECLARED — STO-2 closure, DECISIONS §32; comms and
+    payments scopes serve inside the order boundary per §31/BND-1), plus the replicated
+    authorization index, the replicated pricing referentials and its own `projection_checkpoint`.
+    Written by its projector role, read by its subgraph role; no other subgraph holds CONNECT — the
+    wall the split is bought for.
   owner: migrator
   k8sName: read-order
   recovery: replay
@@ -75,8 +84,9 @@ read_order:
 read_catalog:
   description: >
     `CatalogDb` in PROP-20260811-093000 §11 — the catalog boundary's read models (the Catalog
-    projection; placement itself is STO-2's open remainder), plus the replicated authorization
-    index and its own `projection_checkpoint`.
+    projection, DECLARED — STO-2 closure, DECISIONS §32), plus the replicated authorization index,
+    the replicated pricing referentials (the Catalog uberPrice derivation reads
+    UberEstimationPolicy locally) and its own `projection_checkpoint`.
   owner: migrator
   k8sName: read-catalog
   recovery: replay
@@ -84,10 +94,13 @@ read_catalog:
 read_common:
   description: >
     `DomainCommonDb` in PROP-20260811-093000 §11 — the shared read database for the remaining
-    scopes' read models (the map recommends Customer, Restaurant, SlugAlias, ProspectionPipeline,
-    the rider read models and the seeded referential tables; all STO-2 open remainder), plus the
-    replicated authorization index and its own `projection_checkpoint`. Distinct from the
-    `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
+    scopes' read models: Customer, Restaurant, SlugAlias, ProspectionPipeline and the City
+    referential (DECLARED — STO-2 closure, DECISIONS §32; the rider `View_*` read models follow
+    their conversion), plus the replicated authorization index, the replicated pricing referentials
+    and its own `projection_checkpoint`. One NON-subgraph reader is part of its reader set and is
+    recorded here on purpose: the gateway tenant-host-router reads Restaurant + SlugAlias on EVERY
+    request's hot path (c4-l3.yaml tenant-host-router). Distinct from the `specs/common` kernel
+    scope: this is a shared READ store, not shared doctrine.
   owner: migrator
   k8sName: read-common
   recovery: replay
