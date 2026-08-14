@@ -31,7 +31,10 @@ description: >
       is every database declared `recovery: replay`, which is the definition of a read database
       (its whole content is a re-derivable fold of the log), not a naming pun. In the class:
       `ScopeMembership`, and the pricing referentials `PricingPolicy` / `UberEstimationPolicy` /
-      `UberSplitPolicy` (STO-2 closure — their declared readers span three read databases);
+      `UberSplitPolicy` (STO-2 closure — their declared readers span TWO read databases,
+      `read_order` and `read_catalog`, across four reader sites; >= 2 is exactly what rules out a
+      single home, and the `read_common` copy follows from THIS CLASS GRAMMAR — every
+      `recovery: replay` database — not from any declared reader);
       `projection_checkpoint` (runtime machinery, not spec-declared) is per-read-database by the
       same rule.
     - Every business read model and referential table DECLARES its placement (`database:` `$ref` or

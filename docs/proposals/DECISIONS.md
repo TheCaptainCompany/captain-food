@@ -1313,6 +1313,12 @@ placed tables read across a wall post-split**, two of them fail-closed on the ch
 on the login path (enumerated at each declaration and in the two open rows below). The placements
 themselves are UNCHANGED — every one still follows from a recorded decision — but *"sole reader"*
 was written four times and was wrong four times, so those words are now corrected at source.
+**Then the same class recurred once more, in a COUNTING claim rather than a reader claim**: after
+three rounds spent retiring *"sole reader"*, the post-ready review found the pricing trio's
+justification asserting *"declared readers span THREE read databases"* when they span **two**
+(`read_order` + `read_catalog`) — four reader SITES had slid into three DATABASES, in the one
+sentence that earns the STO-2(a) class extension. Corrected at all five sites; the conclusion is
+unchanged, because ≥ 2 is what the argument needs.
 
 **THE METHOD FINDING — the headline of this closure, and it outranks the map.** The strongest
 sentence first, because it changes what the failure WAS: **these crossings were already DECLARED, in
@@ -1446,13 +1452,19 @@ judgement's conclusion attaches here.)*
 
 - **`PricingPolicy` / `UberEstimationPolicy` / `UberSplitPolicy` → `replicated: read-databases`** —
   the STO-2(a) class, not read_common-with-a-tripwire, because the declared read-side consumers span
-  THREE read databases: `OrderTracking`'s rules compute the `uber_*` Captain-vs-Uber receipt
+  **TWO** read databases — `read_order` and `read_catalog` — across **FOUR reader sites**:
+  `OrderTracking`'s rules compute the `uber_*` Captain-vs-Uber receipt
   (ADR-0025) at FOLD time from `UberEstimationPolicy` + `UberSplitPolicy` (+
   `Restaurant.cuisine_category`) inside `read_order`'s projector; `Catalog`'s rules derive each
   offer's `uberPrice` (ADR-0022/0024) in `read_catalog`; `Cart`'s rules compute the estimated
   `PaymentBreakdown`/comparison at READ time from `PricingPolicy` + `Uber*Policy` (ADR-0018) on the
   order boundary's read path; and the admin policy queries (`specs/payments/api.yaml:53-72`,
-  `crates/application/src/queries.rs:658-696`) read from the order boundary's database. Single-home
+  `crates/application/src/queries.rs:658-696`) read from the order boundary's database (BND-1(a)/§31,
+  *"payments dissolves into order"*). **Resolve the four sites and they land in two databases** —
+  three in `read_order`, one in `read_catalog` — and **two is exactly what the argument needs**: any
+  reader set spanning ≥ 2 read databases rules out a single home. The third copy the class grammar
+  gives them, in `read_common`, arrives by REPLICATION into every `recovery: replay` database, not
+  because anything reads them there. Single-home
   `read_common` would leave the `read_order` projector unable to read its declared inputs and the
   ADR-0025 receipt would degrade SILENTLY — indistinguishable from the legitimate no-cuisine null
   (ux lens). **Recorded tripwire, not solved here**: `crates/application/src/commands.rs:2525`
@@ -1464,7 +1476,8 @@ judgement's conclusion attaches here.)*
   comparative-advertising claims). **Owned in the open (holub lens): this EXTENDS STO-2(a)'s class
   grammar rather than citing it** — "projected into every read database" becomes "projected, or for
   a seeded referential, SEEDED, into every read database". A conscious extension earned by the
-  three-database reader evidence above, not a mechanical consequence of the original row.
+  two-database reader evidence above (four reader sites resolving to `read_order` + `read_catalog`),
+  not a mechanical consequence of the original row.
 - **`City` → `read_common`** — the §11 map's home, uncontested; zero runtime readers today (only
   `city_id` keys elsewhere); the read-side admin/city surface reads it when it lands.
 - **`DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` →

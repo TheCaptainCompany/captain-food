@@ -11,8 +11,9 @@
 > read models → `read_order` (incl. `OrderConversation`/`CustomerCreditBalance` per §31's
 > comms/payments-dissolve-into-order), `Catalog` → `read_catalog`, `Customer`/`Restaurant`/
 > `SlugAlias`/`ProspectionPipeline`/`City` → `read_common`, the pricing trio
-> (`PricingPolicy`/`Uber*Policy`) **replicated into every read database** (declared readers span
-> three of them), the dispatch trio + `RuntimePosture` → `captain_write` (the trio's sole port is
+> (`PricingPolicy`/`Uber*Policy`) **replicated into every read database** (four reader sites
+> resolving to TWO of them, `read_order` + `read_catalog` — two is what rules out a single home; the
+> `read_common` copy comes from the replicated class grammar, not from a reader), the dispatch trio + `RuntimePosture` → `captain_write` (the trio's sole port is
 > write-side; the posture is placed by the replay revert alone — its governed set is restricted to no
 > side, so a future non-`captain_write` tenant would put a fail-closed startup read across the wall,
 > recorded as a tripwire on the declaration). The §18 refusal arm ("business placement

@@ -939,8 +939,10 @@ sign-in path. The count is unchanged at six adapter databases; the **membership*
 the 17-table remainder is declared in the spec with per-table port evidence, and the closure
 **corrects this section's first version in four places** — the pricing referentials
 (`PricingPolicy`/`UberEstimationPolicy`/`UberSplitPolicy`) are **replicated** into every read
-database (their declared readers span three read databases: the `OrderTracking` `uber_*` fold, the
-`Catalog` `uberPrice` derivation, the `Cart` read-time breakdown, the admin queries); the
+database (their FOUR declared reader sites — the `OrderTracking` `uber_*` fold, the `Catalog`
+`uberPrice` derivation, the `Cart` read-time breakdown, the admin policy queries — resolve to **two**
+read databases, `read_order` and `read_catalog`, and spanning ≥ 2 is what rules out a single home;
+the `read_common` copy follows from the replicated class grammar, not from a reader); the
 dispatch-config trio (`DeliveryChannelCatalog`/`CityDeliveryRanking`/`RestaurantDispatchConfig`)
 and `RuntimePosture` are **`captain_write`** (their only consumers are write-side apps; a
 replay-restore would silently revert an admin-flipped posture); `CustomerCreditBalance` stays in
@@ -1007,7 +1009,8 @@ Copied to [#494](https://github.com/TheCaptainCompany/captain-food/issues/494)'s
    `replicated: read-databases` (#494 slice 1); the `ref_*` enum tables no longer exist
    (ADR-20260728-170000), and the STO-2 closure applies the same replicated class to the pricing
    referentials (`PricingPolicy`/`UberEstimationPolicy`/`UberSplitPolicy`), whose declared readers
-   span three read databases.
+   span two read databases (`read_order` and `read_catalog`) — ≥ 2 is what rules out a single home,
+   and the `read_common` copy comes from the class grammar rather than from a reader.
 4. Does the capability witness on `EventStore::append` land **before** or **with** the per-actor roles?
 5. Does the restore drill's replay leg assert row counts, or a stronger property (a full read-model
    hash) that would also prove fold determinism?
