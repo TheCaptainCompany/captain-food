@@ -1625,6 +1625,59 @@ proposal for ~19 days and were never in this register until now.
 
 ---
 
+## 40. Capability-allowlist coverage — extend the manifest gate to security-sensitive dependencies (founder insight, 2026-08-14)
+
+Founder insight, 2026-08-14, verbatim: *"In .net the reference for the assembly of SQL controllable
+and we can decide that only repositories related to SQL are referring it no one else. Can we do the
+same? Otherwise we can put a unit test that will browse the source code to check that. I learn this
+solution thanks to you, it should be used for another purpose somewhere perhaps you can see it."*
+
+**The pattern is already realized, and the founder named it after the fact.** The .NET
+assembly-reference control maps exactly to the Cargo **crate dependency graph**: a crate can spell
+`sqlx::query!` only if its manifest declares `sqlx`, so restricting *which crates depend on `sqlx`* is
+a compiler-adjacent (level-1-ish) control, stronger than a source-text scan because it checks the
+structured edge, not a string. Cargo has **no** native `InternalsVisibleTo` / per-crate-allow, and
+`cargo-deny` `[bans]` cannot express a per-crate grant of a workspace-wide dep and is not in the CI
+image — so the enforcement is a **manifest-scanning unit test**, exactly the founder's fallback. That
+test **exists**: `capability_dependencies_are_allowlisted` (`tools/codegen-rs/src/tests.rs:3446`) walks
+every `Cargo.toml`, fails a non-allowlisted crate that grants `sqlx` or `reqwest`, and fails
+bidirectionally on a stale excuse (#290/PROP-20260802-130500 D3). Two sibling manifest gates predate
+it: `domain_and_application_never_depend_on_the_telemetry_sdk` (`tests.rs:1396` — the telemetry-SDK
+independence is a **manifest test**, not merely the c4-l3 `instrumented` flag) and
+`actor_runtime_depends_on_no_captain_food_crate` (`crates/actor_runtime/tests/dependency_rule.rs`). And
+the domain-scope crate graph is not even hand-maintained — `domain_scopes.rs:79` **derives** each
+`domain-{scope}` crate's `[dependencies]` from its spec `$ref` reach. The founder's "somewhere else"
+is therefore mostly *already there*; the genuine residue is the row below.
+
+**The gate controls two capabilities (`sqlx`, `reqwest`); two more security-sensitive ones are held by
+exactly one crate today, by convention only, ungated:** `jsonwebtoken` (identity / token verification,
+`crates/server/Cargo.toml:91`) and `aes-gcm` (secret-at-rest crypto for `auth_sessions`,
+`crates/infrastructure/Cargo.toml:67`). Nothing stops a business crate adding either — the exact hole
+the `sqlx` gate closes for SQL. `jsonwebtoken`-in-`server`-only **is** the "Supabase identity-only,
+wrapped" posture; it is real today and enforced by nobody.
+
+| # | Decision | Options & the trade-off | Recommendation / status |
+|---|---|---|---|
+| **ENF-1** 🟢 **TEAM-DECIDABLE — open 2026-08-14** | **Extend `capability_dependencies_are_allowlisted` to cover `jsonwebtoken` and `aes-gcm` (and name any other security-sensitive capability that should be crate-gated)?** The mechanism is proven and the change is one allowlist entry + one capability name in the scan loop per capability. The only real wrinkle is the **final home of identity verification**: §33 ADP-1's leg-2 dissent (GraphQL lens) wants a future **identity bin** owning `auth_sessions` + `/auth/session`·`/refresh`·`/logout`, which would move `jsonwebtoken`/`aes-gcm` out of `server`/`infrastructure`. A gate written as "server only / infrastructure only" now must be updated in the same change that stands up an identity bin — the gate is bidirectional, so it will *fail loudly* and force the update rather than drift silently, which is the desired behaviour | **(a) Add both capabilities now, allowlisted to their present single holders** (`jsonwebtoken`→`server`, `aes-gcm`→`infrastructure`), each with its WHY. Pros: closes two uncontrolled security capabilities with a proven, zero-risk mechanism; the bidirectional check makes the future identity-bin move safe (it cannot land without updating the grant). Cons: one more line to move when the identity bin lands — a feature of the gate, not a cost. **(b) Add `jsonwebtoken` only** — crypto-at-rest is arguably lower blast radius than token verification. Pros: smallest. Cons: leaves the secret-decryption capability ungated for no principled reason once you accept the mechanism. **(c) Do nothing / rely on review** — reproduces exactly the side-door the `sqlx` gate exists to remove, for the two most security-sensitive deps in the tree. ✅ **Recommended: (a).** GREEN once decided — touches only `tools/codegen-rs/src/tests.rs`, reverses no recorded decision, adds no spec surface. Kept as an open row (not self-closed) because it is a **new enforcement-coverage decision** the founder explicitly invited (*"it should be used for another purpose somewhere"*) and it brushes the contested identity-bin home; tracking-issue text drafted in the 2026-08-14 architect run report |
+
+**The founder's #557 note (inbound_messages side-door) resolves under the same lens — as sequencing,
+not a new decision.** The manifest/dependency-graph gate is the right final mechanism, but it is
+**crate-granular** and `INSERT INTO inbound_messages` lives in **three** files inside one already-`sqlx`
+crate (`crates/infrastructure/src/persistence/mailbox_store.rs`, `.../mailbox/pm_delivery.rs:253,380`,
+`.../mailbox/mod.rs:137`) — so a crate-level gate cannot single out that table until the mailbox SQL is
+its own crate. That crate is already the recorded plan: §33 REP-2's platform crate **`mailbox_pg`**
+(slice 3, [#497](https://github.com/TheCaptainCompany/captain-food/issues/497)). Once it is the sole
+holder of the `inbound_messages` write adapter, the capability-allowlist/crate-link boundary makes the
+raw INSERT unspellable elsewhere and #557's source-text gate is **deleted** (compiler-first subsumes it,
+[ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md) — deleting a
+subsumed gate is a correct outcome). **#557 is therefore a slice of / sequenced with #497, not a
+standalone final gate**; its interim source-text scope must be "the mailbox module," not "outside
+`mailbox_store.rs`," and its DB half is the `inbound_messages` INSERT-only grant already specified in
+PROP-20260811-093000 (the `graphql_{scope}` mutation-path row) + [#513](https://github.com/TheCaptainCompany/captain-food/issues/513).
+Refinement recorded on #557 in the 2026-08-14 architect run report; no separate register row is owed.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
