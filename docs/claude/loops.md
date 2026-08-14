@@ -83,6 +83,25 @@ primary checkout and `stop` in `/tmp/wt-NNN` billed different counters. Measured
 live checkouts of the same ISO week held `secondsUsed` of 4844 / 11615 / 13972 / 29078 / 29078 / 30543
 *simultaneously*, and whichever branch merged last silently decided the total.)
 
+**But the TIMER is shared and the RECEIPT is not — do not generalise the property above to the
+file.** The ledger path is resolved from the SCRIPT's own location
+(`ROOT="$(dirname "${BASH_SOURCE[0]}")/../.."`, then `$ROOT/.claude/loop-budget/<week>/`,
+`loop-budget.sh:58,96`), not from your cwd or your worktree. So invoking the MAIN checkout's copy by
+absolute path from a linked worktree bills the right timer and then writes the receipt **into the
+main checkout's working tree**, where the branch that owes it cannot commit it — and a dispatch that
+forbids touching the main checkout has implicitly forbidden the one place the guard writes. (Same
+resolution, same consequence, for `status`/`check`: they sum the ledger of the script's checkout,
+not yours.) Invoke the worktree's OWN copy — `bash "$(git rev-parse --show-toplevel)"/.claude/hooks/loop-budget.sh
+stop` — or copy the named file across before committing it. Cost 2026-08-14: ~3 minutes of
+branch-state checking, one duplicated file the coordinator had to reconcile by hand, and a ledger
+split across two trees.
+
+**On RESUME after a rate-limit cut, re-open `start` before touching the tree.** The timer does not
+survive the cut as an open segment you can just `stop` — either it is gone (`stop` exits 3, refusing
+to record a silent zero) or it is stale (discarded, unbilled). Working first and reconstructing later
+means the resumed segment is invisible to the ledger unless someone remembers `--elapsed`; that is
+how ~45 minutes went unbilled on 2026-08-14.
+
 What remains true, and is inherent rather than a defect: **usage converges upward**. A checkout sees
 the segments its own branch carries, so its total is a lower bound until branches merge — and because
 merges add files rather than overwrite a number, merging can only raise it. That is the opposite of

@@ -655,19 +655,30 @@ to the founder rather than burning turns on syntax variants (cost: four retries 
 search, 2026-08-05). The practical consequence: for a docs-only change that belongs on `main`, push
 straight to `main` and never create the branch in the first place.
 
-**Run `make rust` only on a COMMITTED tree, and never judge it through a pipe.** `check-drift`
-regenerates and then diffs the WHOLE tree — uncommitted source edits read as "drift" and fail the
-gate by design (its own comment says so). And `make rust ... | tail` reports the PIPE's exit (tail's
-0), so a background run can notify "exit 0" over a red gate (cost: one commit pushed on a
-believed-green gate before the output was re-read, 2026-08-01). Redirect to a file and echo `$?`
-separately, then read both.
-**A GREEN `check-drift` is SILENT — it prints no success line at all** (`Makefile:74-75`: the only
-output is the failure `echo`; the emitter chatter you see on stdout comes from its `generate`
-dependency, not from the check). So there is nothing to grep FOR: `make check-drift | grep -i drift`
-matches nothing on success **and** returns grep's exit 1, i.e. a green gate reported as a failure —
-and on a red gate the same pipeline reports grep's 0. Never infer this gate's result from its text.
-Capture to a file, read `$?` on the line after the command, and treat "empty output, exit 0" as the
-success signal (cost: two wasted runs re-deriving a gate that had been green both times, 2026-08-12).
+**Run `make rust` only on a COMMITTED tree, and read it ONLY by its exit code plus a post-gate
+`git status --short` — never by its output.** `check-drift` regenerates and then diffs the WHOLE
+tree — uncommitted source edits read as "drift" and fail the gate by design (its own comment says
+so). And `make rust ... | tail` reports the PIPE's exit (tail's 0), so a background run can notify
+"exit 0" over a red gate (cost: one commit pushed on a believed-green gate before the output was
+re-read, 2026-08-01). Redirect to a file and echo `$?` separately, then read both.
+**The output is unreadable in BOTH directions, which is why the exit code is the only verdict.**
+A GREEN `check-drift` is SILENT — it prints no success line at all (`Makefile:74-75`: the only
+output is the failure `echo`), and the `✓ wrote <artifact>` list you see scroll past comes from its
+`generate` dependency, so the tail of a PASSING gate is byte-for-byte the tail of a plain
+`make generate` and tells you nothing. A RED one prints a `--stat` of whatever is dirty under a
+message that only talks about generated files — i.e. your own uncommitted edits, listed as if they
+were drift. So there is nothing to grep FOR: `make check-drift | grep -i drift` matches nothing on
+success **and** returns grep's exit 1, i.e. a green gate reported as a failure — and on a red gate
+the same pipeline reports grep's 0. Never infer this gate's result from its text.
+**The procedure that always works: commit first → `make rust` → read `$?` → `git status --short`.**
+Exit 0 with an empty status is the only green; a non-empty status names in one cheap command what
+actually drifted, and whether the paths are yours or under `specs/generated/**` /
+`crates/**/generated/**` decides commit-vs-regenerate without spending a second gate cycle (costs:
+two wasted runs re-deriving a gate that had been green both times, 2026-08-12; a full ~4-minute
+cycle spent investigating a non-problem plus a near-misreport in the round after it, 2026-08-14).
+And `rust`'s closing `NOTE -- this gate does NOT run crates/** tests` is printed
+**unconditionally** — it is a standing caveat, not a verdict on your diff: when the change touches
+no `crates/**`, `make rust` IS the complete gate and that line is not asking you for anything.
 
 **`ld terminated with signal 7 [Bus error]` at link time is the DISK ALLOWANCE, not a toolchain
 fault.** The linker mmaps its output; at 98% used it dies with a bus error that looks like
