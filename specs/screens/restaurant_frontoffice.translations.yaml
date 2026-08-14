@@ -105,6 +105,10 @@ checkout.delivery_instructions: { messages: { en: "Delivery instructions", fr: "
 checkout.delivery_instructions_ph: { messages: { en: "Floor, door code, landmarks…", fr: "Étage, code d'accès, points de repère…" } }
 checkout.order_summary:    { messages: { en: "Order summary", fr: "Récapitulatif" } }
 checkout.payment:          { messages: { en: "Payment", fr: "Paiement" } }
+# Authorize-then-capture disclosure (#544, ADR-20260808-195315 §1.2): the card is AUTHORIZED at
+# checkout (a hold, not a charge) and only DEBITED when the order is handed over. Framing the hold
+# as an immediate charge would be factually wrong, so the pay step says so persistently.
+checkout.payment.hold_notice: { messages: { en: "Your card is authorized now and charged when your order is delivered.", fr: "Votre carte est autorisée maintenant, débitée à la livraison." } }
 checkout.processing:       { messages: { en: "Processing…", fr: "Traitement…" } }
 checkout.place_order:
   params: { total: "formatted order total" }
@@ -130,7 +134,7 @@ order.status.accepted.body:
   params: { restaurant: "restaurant name" }
   messages: { en: "{restaurant} is preparing your food.", fr: "{restaurant} prépare votre commande." }
 order.status.rejected.title: { messages: { en: "Order rejected", fr: "Commande refusée" } }
-order.status.rejected.body:  { messages: { en: "The restaurant couldn't accept your order. You will be refunded.", fr: "Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé." } }
+order.status.rejected.body:  { messages: { en: "The restaurant couldn't accept your order. Your card was not charged — the authorization has been released.", fr: "Le restaurant n'a pas pu accepter votre commande. Votre carte n'a pas été débitée ; l'autorisation a été annulée." } }
 order.status.preparing.title: { messages: { en: "Being prepared", fr: "En préparation" } }
 order.status.preparing.body:
   params: { minutes: "minutes remaining" }
@@ -142,7 +146,7 @@ order.status.out_for_delivery.body:  { messages: { en: "Your delivery is en rout
 order.status.delivered.title: { messages: { en: "Delivered!", fr: "Livré !" } }
 order.status.delivered.body:  { messages: { en: "Enjoy your meal. 🎉", fr: "Bon appétit. 🎉" } }
 order.status.cancelled.title: { messages: { en: "Order cancelled", fr: "Commande annulée" } }
-order.status.cancelled.body:  { messages: { en: "If you were charged, a refund is on its way.", fr: "Si vous avez été débité, un remboursement est en cours." } }
+order.status.cancelled.body:  { messages: { en: "If your card was already charged, a refund is on its way; otherwise the authorization is released and you were never charged.", fr: "Si votre carte a déjà été débitée, un remboursement est en cours ; sinon l'autorisation est annulée et vous n'avez jamais été débité." } }
 order.eta:        { messages: { en: "Estimated arrival", fr: "Arrivée estimée" } }
 order.id_label:   { messages: { en: "Order ID", fr: "N° de commande" } }
 order.rate:       { messages: { en: "Rate your order", fr: "Évaluer la commande" } }

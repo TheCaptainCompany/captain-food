@@ -311,7 +311,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
             estimated_ready_at: c.estimated_ready_at(state.as_ref(), env),
             placed_at: env.occurred_at,
             status_changed_at: env.occurred_at,
-            payment_intent_id: None,
+            payment_intent_id: e.payment_intent_id.clone(),
             payment_status: c.payment_status(state.as_ref(), env),
             restaurant_stars: None,
             rating_comment: None,

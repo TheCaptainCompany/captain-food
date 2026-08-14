@@ -356,6 +356,19 @@ refund:
 # PaymentCaptureFailed fact carries the typed reason, the counter is the dead-man-visible tap.
 # `payment_release_failed_total` is a warn-level counter, not a page: a failed void self-heals —
 # the authorization expires on its own within ~7 days and Stripe reports PaymentReleased.
+#
+# THE DEAD-MAN'S-SWITCH (ADR-20260810-231300, monitoring carve-out): `payment_capture_failed_total`
+# only fires on a failed capture ATTEMPT. The worse, SILENT failure is a NEVER-attempt — an order
+# whose OrderDelivered never arrives (courier app dies, the saga runner wedges, the mailbox stalls)
+# sits AUTHORIZED until the hold auto-releases at ~7 days: money never captured, and nothing pages,
+# because no attempt was ever made. Silence is ambiguous — a threshold that can only fire when a
+# signal ARRIVES goes quiet exactly when it should scream. `payment_authorized_unsettled_age_seconds`
+# is the liveness proof: the AGE of the OLDEST order still `payment_status = AUTHORIZED`, computed by
+# a timer-driven reconciling sweep over the OrderTracking read model (the "sleep until the next due
+# row" time-triggered pattern — NOT a fixed-interval poll of a push path). It PAGES above a threshold
+# set well under the 7-day expiry and above the delivery-SLA + webhook-lag envelope (~2h). The sweep
+# RUNTIME that emits this gauge is a tracked CRITICAL follow-up (a new reconciling worker/bin) — this
+# contract declares the signal so the runtime cannot land it silently or omit it.
 # =====================================================================
 payment-settlement:
   feature: payment-settlement
@@ -394,10 +407,21 @@ payment-settlement:
         - { key: "business.result", type: string, required: true }
 
   metrics:
-    # PAGES (alert on ANY increment — food cooked, money did not move; label = CaptureFailureReason).
+    # PAGES (food cooked, money did not move; label = CaptureFailureReason). ALERT ROUTING BY REASON
+    # CLASS (tracked follow-up — the split is an alert-rule change, not a code one): terminal reasons
+    # (CARD_DECLINED / AUTHORIZATION_EXPIRED / GATEWAY_REFUSED) page immediately; GATEWAY_UNAVAILABLE
+    # is transient (capture MAY have settled provider-side, superseded by the webhook) and should page
+    # only after retries are exhausted — keying the page off the idempotent recorded PaymentCaptureFailed
+    # fact, not the per-attempt increment, so a retried transient does not cry wolf on the one page
+    # that must be believed.
     - { name: "payment_capture_failed_total", type: counter, attributes: ["reason"] }
     # Warn-level: a failed void self-heals via the ~7-day authorization expiry.
     - { name: "payment_release_failed_total", type: counter, attributes: ["reason"] }
+    # DEAD-MAN'S-SWITCH (see header): the age of the oldest still-AUTHORIZED order, emitted by the
+    # timer-driven reconciling sweep. PAGES above the delivery-SLA + webhook-lag envelope and well
+    # under the ~7-day hold expiry — catches the never-attempted capture that the counter above
+    # cannot. Emitter runtime is a tracked CRITICAL follow-up; the signal is declared here first.
+    - { name: "payment_authorized_unsettled_age_seconds", type: gauge, attributes: [] }
 
   status_rules:
     success:

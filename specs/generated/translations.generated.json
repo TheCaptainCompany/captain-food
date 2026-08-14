@@ -631,6 +631,10 @@
     "en": "Payment",
     "fr": "Paiement"
   },
+  "checkout.payment.hold_notice": {
+    "en": "Your card is authorized now and charged when your order is delivered.",
+    "fr": "Votre carte est autorisée maintenant, débitée à la livraison."
+  },
   "checkout.payment_failed.back_to_cart": {
     "en": "Back to cart",
     "fr": "Revenir au panier"
@@ -1132,8 +1136,8 @@
     "fr": "Commande acceptée"
   },
   "order.status.cancelled.body": {
-    "en": "If you were charged, a refund is on its way.",
-    "fr": "Si vous avez été débité, un remboursement est en cours."
+    "en": "If your card was already charged, a refund is on its way; otherwise the authorization is released and you were never charged.",
+    "fr": "Si votre carte a déjà été débitée, un remboursement est en cours ; sinon l'autorisation est annulée et vous n'avez jamais été débité."
   },
   "order.status.cancelled.title": {
     "en": "Order cancelled",
@@ -1180,8 +1184,8 @@
     "fr": "Prêt à récupérer !"
   },
   "order.status.rejected.body": {
-    "en": "The restaurant couldn't accept your order. You will be refunded.",
-    "fr": "Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé."
+    "en": "The restaurant couldn't accept your order. Your card was not charged — the authorization has been released.",
+    "fr": "Le restaurant n'a pas pu accepter votre commande. Votre carte n'a pas été débitée ; l'autorisation a été annulée."
   },
   "order.status.rejected.title": {
     "en": "Order rejected",

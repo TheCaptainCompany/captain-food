@@ -386,7 +386,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `estimated_ready_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `placed_at` | `timestamptz` | `TIMESTAMPTZ` | — | OrderPlaced occurrence time. |
 | `status_changed_at` | `timestamptz` | `TIMESTAMPTZ` | — | Occurrence time of the latest status-changing event. |
-| `payment_intent_id` | `PaymentIntentId` | `TEXT` | nullable | The order's Stripe PaymentIntent (seeded by OrderPlaced, confirmed by the payment facts); RefundProcess reads it to open a pending refund and PaymentSettlementProcess to capture/release. |
+| `payment_intent_id` | `PaymentIntentId` | `TEXT` | nullable | The order's Stripe PaymentIntent, SEEDED by OrderPlaced (the birth fact carries it — a charging order is born with its authorized intent; a $0 replacement carries none) and re-confirmed by PaymentCaptured. PaymentSettlementProcess reads it on fulfilment to capture/release the hold, and RefundProcess reads it to open a pending refund. NOT fed by PaymentAuthorized: that fact precedes the row's birth, so the OrderPlaced seed carries it.
+ |
 | `payment_status` | `text` | `TEXT` | — | Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds AUTHORIZED for a charging order (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess emits it only in reaction to PaymentAuthorized, and that authorization sits earlier in the log than the row it would fold into ($0 replacements — no intent — keep the historical CAPTURED = "nothing owed"). PaymentCaptured flips it on fulfilment, PaymentReleased on a voided/expired hold, PaymentRefunded on settlement of a post-capture abort.
  |
 | `restaurant_stars` | `StarRating` | `INTEGER` | nullable | Customer's 0–5 rating of the restaurant; null until rated. |

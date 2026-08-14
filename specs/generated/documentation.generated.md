@@ -4206,7 +4206,7 @@ sequenceDiagram
 | `estimated_ready_at` | `timestamptz` _(derived)_ | [⚡ `OrderAcceptedByRestaurant`.`estimatedReadyAt`](#event-orderacceptedbyrestaurant--estimatedreadyat) | nullable |  |
 | `placed_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced) | — | OrderPlaced occurrence time. |
 | `status_changed_at` | `timestamptz` | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Occurrence time of the latest status-changing event. |
-| `payment_intent_id` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) _(derived)_ | [⚡ `PaymentCaptured`.`paymentIntentId`](#event-paymentcaptured--paymentintentid) | nullable | The order's Stripe PaymentIntent (seeded by OrderPlaced, confirmed by the payment facts); RefundProcess reads it to open a pending refund and PaymentSettlementProcess to capture/release. |
+| `payment_intent_id` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) _(derived)_ | [⚡ `OrderPlaced`.`paymentIntentId`](#event-orderplaced--paymentintentid), [⚡ `PaymentCaptured`.`paymentIntentId`](#event-paymentcaptured--paymentintentid) | nullable | The order's Stripe PaymentIntent, SEEDED by OrderPlaced (the birth fact carries it — a charging order is born with its authorized intent; a $0 replacement carries none) and re-confirmed by PaymentCaptured. PaymentSettlementProcess reads it on fulfilment to capture/release the hold, and RefundProcess reads it to open a pending refund. NOT fed by PaymentAuthorized: that fact precedes the row's birth, so the OrderPlaced seed carries it.  |
 | `payment_status` | `text` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded) | — | Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds AUTHORIZED for a charging order (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess emits it only in reaction to PaymentAuthorized, and that authorization sits earlier in the log than the row it would fold into ($0 replacements — no intent — keep the historical CAPTURED = "nothing owed"). PaymentCaptured flips it on fulfilment, PaymentReleased on a voided/expired hold, PaymentRefunded on settlement of a post-capture abort.  |
 | `restaurant_stars` | [🔤 `StarRating`](#scalar-starrating) _(derived)_ | [⚡ `RestaurantRated`.`stars`](#event-restaurantrated--stars) | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
 | `rating_comment` | [🔤 `RatingComment`](#scalar-ratingcomment) _(derived)_ | [⚡ `RestaurantRated`.`comment`](#event-restaurantrated--comment) | nullable |  |
@@ -5032,7 +5032,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ | Server-computed fee/split breakdown (ADR-0016/0017); breakdown.total == totalAmount. |
 | <a id="event-orderplaced--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 | <a id="event-orderplaced--replacementof"></a>`replacementOf` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Set when this order is a NO-CHARGE replacement remade for a resolved reclamation (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159): the id of the ORIGINAL order it replaces. A replacement is a normal Order that flows through the usual fulfilment/dispatch, but carries a $0 buyer total and NO paymentIntentId (no Stripe). Absent for an ordinary paid order.  |
-| <a id="event-orderplaced--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ⬜ | The captured Stripe PaymentIntent for a paid order. ABSENT for a no-charge replacement order (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).  |
+| <a id="event-orderplaced--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ⬜ | The AUTHORIZED Stripe PaymentIntent for a paid order (authorize-then-capture, ADR-20260808-195315 §1.2): the hold is placed at checkout and captured later on fulfilment (OrderDelivered) — the OrderTracking projection seeds this id and its AUTHORIZED status from this field. ABSENT for a no-charge replacement order (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).  |
 
 <a id="event-orderacceptedbyrestaurant"></a>
 #### ⚡ Event: `OrderAcceptedByRestaurant`
@@ -7469,7 +7469,7 @@ _criticality: **high**_
 | `payment.capture` | `CLIENT` | ⬜ | — | `messaging.system`*, `business.result`* |
 | `payment.release` | `CLIENT` | ⬜ | — | `messaging.system`*, `business.result`* |
 
-- **Metrics**: `payment_capture_failed_total` _(counter)_, `payment_release_failed_total` _(counter)_ · **Business metrics**: —
+- **Metrics**: `payment_capture_failed_total` _(counter)_, `payment_release_failed_total` _(counter)_, `payment_authorized_unsettled_age_seconds` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`event.consume.trigger`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
 
@@ -11725,6 +11725,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-checkout-delivery_instructions_ph"></a>`checkout.delivery_instructions_ph` | — | Floor, door code, landmarks… | Étage, code d'accès, points de repère… |
 | <a id="translation-checkout-order_summary"></a>`checkout.order_summary` | — | Order summary | Récapitulatif |
 | <a id="translation-checkout-payment"></a>`checkout.payment` | — | Payment | Paiement |
+| <a id="translation-checkout-payment-hold_notice"></a>`checkout.payment.hold_notice` | — | Your card is authorized now and charged when your order is delivered. | Votre carte est autorisée maintenant, débitée à la livraison. |
 | <a id="translation-checkout-processing"></a>`checkout.processing` | — | Processing… | Traitement… |
 | <a id="translation-checkout-place_order"></a>`checkout.place_order` | `total` | Place order — {total} | Commander — {total} |
 | <a id="translation-checkout-payment_failed-title"></a>`checkout.payment_failed.title` | — | Payment failed | Paiement refusé |
@@ -11740,7 +11741,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-status-accepted-title"></a>`order.status.accepted.title` | — | Order accepted | Commande acceptée |
 | <a id="translation-order-status-accepted-body"></a>`order.status.accepted.body` | `restaurant` | {restaurant} is preparing your food. | {restaurant} prépare votre commande. |
 | <a id="translation-order-status-rejected-title"></a>`order.status.rejected.title` | — | Order rejected | Commande refusée |
-| <a id="translation-order-status-rejected-body"></a>`order.status.rejected.body` | — | The restaurant couldn't accept your order. You will be refunded. | Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé. |
+| <a id="translation-order-status-rejected-body"></a>`order.status.rejected.body` | — | The restaurant couldn't accept your order. Your card was not charged — the authorization has been released. | Le restaurant n'a pas pu accepter votre commande. Votre carte n'a pas été débitée ; l'autorisation a été annulée. |
 | <a id="translation-order-status-preparing-title"></a>`order.status.preparing.title` | — | Being prepared | En préparation |
 | <a id="translation-order-status-preparing-body"></a>`order.status.preparing.body` | `minutes` | Estimated ready in {minutes} min. | Prêt dans environ {minutes} min. |
 | <a id="translation-order-status-ready-title"></a>`order.status.ready.title` | — | Ready for pickup! | Prêt à récupérer ! |
@@ -11750,7 +11751,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-status-delivered-title"></a>`order.status.delivered.title` | — | Delivered! | Livré ! |
 | <a id="translation-order-status-delivered-body"></a>`order.status.delivered.body` | — | Enjoy your meal. 🎉 | Bon appétit. 🎉 |
 | <a id="translation-order-status-cancelled-title"></a>`order.status.cancelled.title` | — | Order cancelled | Commande annulée |
-| <a id="translation-order-status-cancelled-body"></a>`order.status.cancelled.body` | — | If you were charged, a refund is on its way. | Si vous avez été débité, un remboursement est en cours. |
+| <a id="translation-order-status-cancelled-body"></a>`order.status.cancelled.body` | — | If your card was already charged, a refund is on its way; otherwise the authorization is released and you were never charged. | Si votre carte a déjà été débitée, un remboursement est en cours ; sinon l'autorisation est annulée et vous n'avez jamais été débité. |
 | <a id="translation-order-eta"></a>`order.eta` | — | Estimated arrival | Arrivée estimée |
 | <a id="translation-order-id_label"></a>`order.id_label` | — | Order ID | N° de commande |
 | <a id="translation-order-rate"></a>`order.rate` | — | Rate your order | Évaluer la commande |

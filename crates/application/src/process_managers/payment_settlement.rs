@@ -318,6 +318,57 @@ mod tests {
         }
     }
 
+    /// The OrderTracking row PaymentSettlement reads, PRODUCED BY THE REAL PROJECTOR fold of an
+    /// `OrderPlaced` (crate::projections::project_order_tracking) — never hand-set columns. This is
+    /// what makes the capture assertion predictive of CRITICAL-1: before OrderPlaced was wired into
+    /// the `payment_intent_id` column's lineage, the generated OrderPlaced arm hardcodes
+    /// `payment_intent_id: None`, so a folded charging order carries a NULL intent and the guard
+    /// skips — the same inertia the end-to-end order_projection.rs DB test proves against Postgres.
+    fn folded_order_row(intent: Option<&str>) -> OrderTrackingRow {
+        use crate::projections::{project_order_tracking, Envelope as ProjectionEnvelope};
+        use crate::projectors::order_tracking::OrderTrackingProjector;
+        use domain::generated::entities::{CustomerContact, Money, PaymentBreakdown};
+        use domain::generated::events::OrderPlaced;
+        let eur = |c: i64| Money { amount_cents: MoneyCents(c), currency: CurrencyCode("EUR".into()) };
+        let placed = OrderPlaced {
+            mode: None,
+            order_id: OrderId(uid(1)),
+            r#ref: Some(ExternalReference("order-1".into())),
+            restaurant_id: RestaurantId(uid(3)),
+            customer_id: CustomerId(uid(4)),
+            customer_contact: CustomerContact {
+                display_name: CustomerDisplayName("Johnny".into()),
+                email: None,
+                phone: PhoneNumber("+33612345678".into()),
+            },
+            service_type: ServiceType::DELIVERY,
+            delivery_address: None,
+            items: Vec::new(),
+            total_amount: eur(1960),
+            breakdown: PaymentBreakdown {
+                articles: eur(1960),
+                delivery: eur(0),
+                service_fee: eur(0),
+                total: eur(1960),
+                restaurant_contribution: eur(0),
+                restaurant_payout: eur(1960),
+                rider_payout: eur(0),
+                captain_net: eur(0),
+            },
+            note: None,
+            replacement_of: None,
+            payment_intent_id: intent.map(|i| PaymentIntentId(i.into())),
+        };
+        let env = ProjectionEnvelope {
+            stream_name: "Order-1".into(),
+            position: 1,
+            occurred_at: chrono::Utc::now(),
+            event: DomainEvent::OrderPlaced(placed),
+        };
+        project_order_tracking(&OrderTrackingProjector, None, &env)
+            .expect("OrderPlaced births an OrderTracking row")
+    }
+
     fn tracking_row(payment_status: &str, intent: Option<&str>) -> OrderTrackingRow {
         OrderTrackingRow {
             order_id: OrderId(uid(1)),
@@ -457,11 +508,21 @@ mod tests {
     }
 
     /// tests.yaml#/TestCaptureRequestedOnOrderDelivered — rules.yaml#/PaymentCapturedOnFulfilment
-    /// (the port-call half): an AUTHORIZED order's delivery captures the FULL authorized intent.
+    /// (the port-call half): an AUTHORIZED order's delivery captures the FULL authorized intent. The
+    /// row is FOLDED by the real projector from an OrderPlaced carrying the intent (not hand-set), so
+    /// this asserts CRITICAL-1's seed at the unit level too — pre-fix the fold yields a NULL intent
+    /// and this goes RED.
     #[tokio::test]
     async fn delivered_authorized_order_requests_the_capture() {
         let store = MemStore::default();
-        let orders = FakeOrders { row: Some(tracking_row("AUTHORIZED", Some("pi_123"))) };
+        let row = folded_order_row(Some("pi_123"));
+        assert_eq!(row.payment_status, "AUTHORIZED", "a charging order is born AUTHORIZED");
+        assert_eq!(
+            row.payment_intent_id.as_ref().map(|p| p.0.as_str()),
+            Some("pi_123"),
+            "the OrderPlaced seed carries the intent into the row (CRITICAL-1)",
+        );
+        let orders = FakeOrders { row: Some(row) };
         let gw = RecordingGateway::default();
         let out = on_order_delivered(&store, &orders, &gw, &delivered(), &envelope()).await.unwrap();
         assert_eq!(out, Outcome::Completed);

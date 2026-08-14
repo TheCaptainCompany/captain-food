@@ -599,9 +599,16 @@ OrderTracking:
         - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
       note: "Occurrence time of the latest status-changing event."
     payment_intent_id:
-      from: [{ $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' }]
+      from:
+        - { $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }
+        - { $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' }
       nullable: true
-      note: "The order's Stripe PaymentIntent (seeded by OrderPlaced, confirmed by the payment facts); RefundProcess reads it to open a pending refund and PaymentSettlementProcess to capture/release."
+      note: >
+        The order's Stripe PaymentIntent, SEEDED by OrderPlaced (the birth fact carries it — a
+        charging order is born with its authorized intent; a $0 replacement carries none) and
+        re-confirmed by PaymentCaptured. PaymentSettlementProcess reads it on fulfilment to
+        capture/release the hold, and RefundProcess reads it to open a pending refund. NOT fed by
+        PaymentAuthorized: that fact precedes the row's birth, so the OrderPlaced seed carries it.
     payment_status:
       type: text
       from:

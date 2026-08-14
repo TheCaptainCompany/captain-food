@@ -29,6 +29,17 @@
 > by design, `PaymentCaptureFailed` until its operator surface exists). At-table advance capture
 > (§1.2's third arm) and the acceptance-timeout auto-cancel (§1.3) remain unbuilt; both ride the
 > recorded arms when they land.
+> **FIX ROUND 2026-08-14 (a five-lens review of the #544 PR):** the feature above shipped INERT —
+> the settlement guard reads `OrderTracking.payment_intent_id` to know what to capture, but that
+> column was only written when `PaymentCaptured` folded, the fact capture PRODUCES; so every
+> delivered order read NULL → skipped → the hold expired at ~7 days, restaurant never paid. Fixed by
+> seeding `payment_intent_id` from `OrderPlaced` (which carries it) at the row's birth, proven RED-then-GREEN
+> by a new end-to-end DB test through the real projector AND the real saga runner. Same round:
+> corrected customer copy that falsely promised a REFUND on rejection (a released hold is not a
+> charge) + a checkout hold-disclosure; and declared a **dead-man's-switch** on the age of the oldest
+> still-authorized order (`observability.yaml#/payment-settlement`), because the paging counter only
+> fires on a failed ATTEMPT, never on a capture that is never attempted — its reconciling-sweep
+> runtime is a tracked CRITICAL follow-up.
 
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)
