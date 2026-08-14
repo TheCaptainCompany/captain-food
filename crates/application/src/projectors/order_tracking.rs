@@ -121,18 +121,16 @@ impl OrderTrackingCompute for OrderTrackingProjector {
     fn payment_status(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> String {
         match &env.event {
             DomainEvent::PaymentCaptured(_) => "CAPTURED".to_string(),
+            DomainEvent::PaymentReleased(_) => "RELEASED".to_string(),
             DomainEvent::PaymentRefunded(_) => "REFUNDED".to_string(),
             // PlaceOrderProcess emits OrderPlaced ONLY in reaction to PaymentAuthorized
             // (authorize-then-capture, ADR-20260808-195315 §1.2), and that authorization sits at
             // an EARLIER log position than the OrderPlaced that creates this row — folding it
-            // again here would find no row and be lost. The saga invariant IS the value: a
+            // again here would find no row and be lost (which is also why PaymentAuthorized is
+            // deliberately NOT in this table's fedBy). The saga invariant IS the value: a
             // charging order is born AUTHORIZED (capture arrives later, on fulfilment, through
-            // the PaymentCaptured arm above); a $0 replacement (no intent) keeps the historical
-            // CAPTURED = "nothing owed". NOTE: PaymentReleased is NOT folded here yet — the
-            // OrderTracking fedBy lives in specs/database/tables/projection_tables.yaml, owned by
-            // the #543 slice at the time of this change; a released rejection therefore shows
-            // AUTHORIZED until that follow-up lands (the RefundProcess guards are unaffected:
-            // they only act on CAPTURED).
+            // the PaymentCaptured arm above; a voided/expired hold through PaymentReleased); a
+            // $0 replacement (no intent) keeps the historical CAPTURED = "nothing owed".
             DomainEvent::OrderPlaced(e) => {
                 if e.payment_intent_id.is_some() { "AUTHORIZED" } else { "CAPTURED" }.to_string()
             }

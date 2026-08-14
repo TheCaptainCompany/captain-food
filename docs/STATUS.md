@@ -20,13 +20,15 @@
 > **and pages** (`payment_capture_failed_total`, `observability.yaml#/payment-settlement`).
 > `PaymentStatus` = `PENDING → AUTHORIZED → CAPTURED → REFUNDED`, `AUTHORIZED → RELEASED`,
 > `PENDING → FAILED`. Smoke L4 now asserts `requires_capture` at confirm and `paymentStatus ==
-> AUTHORIZED` post-placement; the capture assertion moves to the future L5 delivered leg. **Known
-> follow-up (fenced by the #543 sibling slice owning `specs/database/**`)**: OrderTracking's
-> `payment_status` fold does not yet list `PaymentAuthorized`/`PaymentReleased` in its `fedBy` —
-> the projector seeds AUTHORIZED from OrderPlaced (spec note there is one commit stale) and a
-> released rejection shows AUTHORIZED until that fold lands (+3 `event-not-projected` warnings
-> banked in the ratchet). At-table advance capture (§1.2's third arm) and the acceptance-timeout
-> auto-cancel (§1.3) remain unbuilt; both ride the recorded arms when they land.
+> AUTHORIZED` post-placement; the capture assertion moves to the future L5 delivered leg.
+> OrderTracking folds the full new surface: OrderPlaced seeds AUTHORIZED for a charging order
+> (the authorization precedes the row by the saga invariant, so `PaymentAuthorized` is
+> deliberately not in its fedBy), `PaymentCaptured`/`PaymentReleased`/`PaymentRefunded` flip it —
+> landed once the [#543](https://github.com/TheCaptainCompany/captain-food/pull/543) fence on
+> `specs/database/**` lifted mid-run (+2 `event-not-projected` in the ratchet: `PaymentAuthorized`
+> by design, `PaymentCaptureFailed` until its operator surface exists). At-table advance capture
+> (§1.2's third arm) and the acceptance-timeout auto-cancel (§1.3) remain unbuilt; both ride the
+> recorded arms when they land.
 
 > 🗄️ **2026-08-13 — THE DATABASE PLACEMENT DECLARATION SITE EXISTS** ([#494 "Storage boundaries and
 > least-privilege database users"](https://github.com/TheCaptainCompany/captain-food/issues/494)

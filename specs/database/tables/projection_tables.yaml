@@ -469,6 +469,7 @@ OrderTracking:
     - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
     - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
     - { $ref: 'events.yaml#/PaymentCaptured' }
+    - { $ref: 'events.yaml#/PaymentReleased' }
     - { $ref: 'events.yaml#/PaymentRefunded' }
     - { $ref: 'events.yaml#/OrderRated' }
     - { $ref: 'events.yaml#/RestaurantRated' }
@@ -600,17 +601,21 @@ OrderTracking:
     payment_intent_id:
       from: [{ $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' }]
       nullable: true
-      note: "The captured Stripe PaymentIntent; RefundProcess reads it to open a pending refund."
+      note: "The order's Stripe PaymentIntent (seeded by OrderPlaced, confirmed by the payment facts); RefundProcess reads it to open a pending refund and PaymentSettlementProcess to capture/release."
     payment_status:
       type: text
       from:
         - { $ref: 'events.yaml#/OrderPlaced' }
         - { $ref: 'events.yaml#/PaymentCaptured' }
+        - { $ref: 'events.yaml#/PaymentReleased' }
         - { $ref: 'events.yaml#/PaymentRefunded' }
       note: >
-        Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds CAPTURED:
-        PlaceOrderProcess emits it only in reaction to PaymentCaptured (V0 prepaid-online), and that
-        capture sits earlier in the log than the row it would fold into.
+        Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds AUTHORIZED
+        for a charging order (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess
+        emits it only in reaction to PaymentAuthorized, and that authorization sits earlier in the
+        log than the row it would fold into ($0 replacements — no intent — keep the historical
+        CAPTURED = "nothing owed"). PaymentCaptured flips it on fulfilment, PaymentReleased on a
+        voided/expired hold, PaymentRefunded on settlement of a post-capture abort.
     restaurant_stars:
       from: [{ $ref: 'events.yaml#/RestaurantRated/properties/stars' }]
       nullable: true
