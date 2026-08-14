@@ -18,7 +18,7 @@
 > recorded as a tripwire on the declaration). The §18 refusal arm ("business placement
 > is an open register row") is now a **requirement arm** that consumes the same resolution the
 > inventory emitter walks, so validation and emission cannot disagree; the ADP-1 wall runs on every
-> single-home placement. **TWO NEW OPEN ROWS, both blocking the physical split.** **STO-7**
+> single-home placement. **FOUR NEW OPEN ROWS.** **STO-7**
 > (`read_order`/`read_catalog`) — *who is the catalog's pricing-and-orderability authority?* TWO
 > paths cross that wall: the cart's read-time pricing (found at the mob checkpoint; post-split the
 > cart cannot render names/prices, the #424 class) **and the checkout WRITE path** (found by the
@@ -26,15 +26,32 @@
 > oversell guard and `place_order`'s repricing, so post-split every add-to-cart and every checkout
 > fails closed). **STO-8** (`read_common`) — *may a `captain_write` app read `read_common`?* Nine
 > handlers do, headed by `verify_phone`'s new-vs-returning read of `Customer` **on the login path**,
-> whose degraded form silently re-registers returning customers as new. **The method, not the map,
-> is what needed fixing**: the closure derived readers from `api.yaml` resolvers plus two special
-> cases and missed the whole `captain_write` class — a table's reader set is
-> `resolvers ∪ CommandDeps ∪ PM ports ∪ gateway middleware`. The 17 placements are UNCHANGED and
-> each still follows from a recorded decision; the four *"sole reader"* claims are corrected at
-> source. The `Restaurant.cuisine_category` cross-wall folds carry a recorded direction (fold-local
-> lookup per consuming projector; `Restaurant` deliberately NOT replicated). Nothing physical moved
-> — no grants, CRs or migrations (#513/#514/#509 unchanged; #513's grant emitter must derive
-> CONNECT from declared reads INCLUDING write-path apps, never from prose).
+> whose degraded form silently re-registers returning customers as new. **STO-9** (`read_order`, a
+> THIRD wall direction found by review round 2) — **the money one**: `SettlementHooks` reads
+> `OrderTracking` for `payment_intent_id` immediately before EVERY Stripe capture and release, so
+> post-split capture never runs, the authorization expires and **the food is delivered while the money
+> is never collected**; the dispatch, reclamation and guest-cart-binding PMs ride the same wall. It is
+> its own row because deciding STO-7 + STO-8 does NOT unblock `read_order` while that read
+> fail-closes. **STO-10 is different in kind — AMBER, founder-owned**: the HubRise adapter bin already
+> reads `read_common` (its own repository + a 40× projection poll), a SECOND outward grant where
+> **ADP-1 allows exactly one**, so it REOPENS a closed directive rather than asking a new question —
+> and the poll breaches the no-polling ADR as well.
+> **THE METHOD FINDING OUTRANKS THE MAP, and it is worse than "we were careless": the crossings were
+> ALREADY DECLARED IN TYPED DSL.** Thirteen `read:` steps in `specs/*/processmanager.yaml` carry
+> `model: { $ref: 'database/tables/projection_tables.yaml#/X' }` — eight of them on `OrderTracking`,
+> the settlement legs — and `process_manager/runner.rs:141` says so in a comment. Four consecutive
+> hand-sweeps rediscovered by hand what the loader can resolve, each miss found by a READER and never
+> by the sweep, and **round 4 found crossings that round 3's own written formula already covered**.
+> **Completeness is therefore WITHDRAWN as a class, with its reason**, rather than re-claimed by a
+> fifth sweep: reader sets in `projection_tables.yaml`/`databases.yaml` now carry a uniform
+> non-exhaustiveness marker, the *"sole reader"* phrasing is retired everywhere (including where it is
+> true), and `read_order`'s *"no other SUBGRAPH holds CONNECT"* — the sentence shape that excluded the
+> `pm-*`/`adapter-*` classes by construction — is rewritten to the honest form. Known limits are named,
+> including the one PM a DSL walker still misses (`ReclamationProcess`, whose read lives in a
+> `description:` string behind a hand-written seam). The 17 placements are UNCHANGED and each still
+> follows from a recorded decision. Nothing physical moved — no grants, CRs or migrations
+> (#513/#514/#509 unchanged; **#513's grant emitter must derive CONNECT MECHANICALLY from the declared
+> `read:` steps + generated composition roots, never from this prose**).
 
 > 💳 **2026-08-14 — COLLECTION ORDERS WILL CAPTURE AT READY, NOT AT PICKUP** (founder directive,
 > *"For the pickup order the payment captured must happen when the order is prepared don't you

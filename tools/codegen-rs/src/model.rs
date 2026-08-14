@@ -11,7 +11,7 @@ pub(crate) const SOURCE_FILES: &[&str] = &[
     "processmanager.yaml",
     "services.yaml",
     "database/projection_views.yaml",
-    // The database catalog (#494 slice 1): the eleven databases as declarations — name, owning
+    // The database catalog (#494 slice 1): every database as a declaration — name, owning
     // role, K8s object-name binding, recovery posture. What a table's `database:` placement `$ref`
     // resolves into; the placement rules live in validate/databases.rs.
     "database/databases.yaml",

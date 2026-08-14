@@ -178,6 +178,14 @@ pub(crate) fn resolve_placements(model: &Model) -> Vec<TablePlacement> {
                 databases: vec![WRITE_DATABASE.to_string()],
             });
         } else if DECLARED_KINDS.contains(&kind) || REPLICABLE_KINDS.contains(&kind) {
+            // PRECEDENCE WHEN A TABLE CARRIES BOTH KEYS IS INCIDENTAL, NOT DECIDED: `database:` wins
+            // if its ref resolves, and an UNRESOLVABLE ref falls through to the `replicated:` arm
+            // below. Nobody chose that tiebreak, and it is unreachable for anything committed —
+            // `database-placement-conflict` refuses both-keys outright, so the gate blocks the
+            // ambiguity from landing and the validator↔inventory invariant holds. It becomes visible
+            // only when the inventory is regenerated locally from an already-erroring tree (an
+            // arbitrary one of the two readings is emitted), and it would need a real decision only
+            // if that conflict diagnostic were ever softened.
             if let Some(db) = declared_database(node).filter(|db| declared.contains(db.as_str())) {
                 out.push(TablePlacement { table, kind, mode: PlacementMode::Declared, databases: vec![db] });
             } else if REPLICABLE_KINDS.contains(&kind)

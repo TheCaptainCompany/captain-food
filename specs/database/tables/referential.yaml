@@ -84,7 +84,7 @@ City:
 
 DeliveryChannelCatalog:
   reference: true
-  # STO-2 closure: sole port is DispatchStrategyRepository, consumed ONLY write-side
+  # STO-2 closure: the only port the derivation finds is DispatchStrategyRepository, consumed write-side
   # (DeliveryDispatchProcess PM + DeliveryOfferTimeoutWorker, captain_write apps joining PM state) —
   # no read-side port exists, so a read database would hand a write-path app a cross-wall CONNECT.
   # "Later API-writable via partner self-registration" (#61) is a recorded future decision, not solved

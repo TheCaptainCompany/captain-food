@@ -59,8 +59,8 @@ captain_write:
     `auth_sessions` (ADP-1 leg 2 (b) — encrypted, used by the actor path and the BFF login route,
     not by any adapter) and `sms_send_quota` (a cross-replica money ceiling on the OTP send path).
     And, since the STO-2 closure (DECISIONS §32), the write-side-read configuration: the dispatch
-    trio `DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` (sole port
-    `DispatchStrategyRepository`, consumed only by the dispatch PM and the offer-timeout worker)
+    trio `DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` (the only port the
+    derivation finds is `DispatchStrategyRepository`, used by the dispatch PM and the offer-timeout worker)
     and `RuntimePosture` (startup-read by every governed process; seeded/UPDATEd, never folded, so
     a replay restore would silently revert an admin-flipped posture — it must sit on the pitr path).
   owner: migrator          # PROP-20260811-093000 §6.1 — the CI-only DDL credential owns the business schemas
@@ -75,8 +75,19 @@ read_order:
     OrderConversation and CustomerCreditBalance (DECLARED — STO-2 closure, DECISIONS §32; comms and
     payments scopes serve inside the order boundary per §31/BND-1), plus the replicated
     authorization index, the replicated pricing referentials and its own `projection_checkpoint`.
-    Written by its projector role, read by its subgraph role; no other subgraph holds CONNECT — the
-    wall the split is bought for.
+    Written by its projector role and read by its subgraph role. The earlier form of this sentence
+    added *"no other SUBGRAPH holds CONNECT — the wall the split is bought for"*, and that shape is
+    the mechanism of a four-round failure: scoping the claim to subgraphs excludes BY CONSTRUCTION
+    the app classes that actually hold CONNECT (`pm-*`, `actor-*`, `adapter-*`), so every round of
+    review kept finding readers the sentence had defined away. NON-subgraph readers are part of its
+    reader set and are recorded here on purpose: the mailbox worker (a `captain_write` app) reads
+    `OrderTracking` on the FOUR settlement legs — the `payment_intent_id` read that precedes every
+    Stripe capture and every release — plus the dispatch birth leg and reclamation resolution, and
+    reads `Cart` to bind a guest's open carts at sign-in. An OPEN cross-wall dependency, register row
+    STO-9 (DECISIONS §32); the physical split of this database is BLOCKED on it, INDEPENDENTLY of
+    STO-7. Those PM reads are DECLARED in the DSL (`specs/*/processmanager.yaml` `read:` steps carry
+    `model: { $ref: 'database/tables/projection_tables.yaml#/X' }`), so #513's grant emitter must
+    derive them mechanically rather than from this paragraph.
   owner: migrator
   k8sName: read-order
   recovery: replay
@@ -100,12 +111,15 @@ read_common:
     scopes' read models: Customer, Restaurant, SlugAlias, ProspectionPipeline and the City
     referential (DECLARED — STO-2 closure, DECISIONS §32; the rider `View_*` read models follow
     their conversion), plus the replicated authorization index, the replicated pricing referentials
-    and its own `projection_checkpoint`. TWO NON-subgraph reader classes are part of its reader set
+    and its own `projection_checkpoint`. THREE NON-subgraph reader classes are part of its reader set
     and are recorded here on purpose: (1) the gateway tenant-host-router reads Restaurant + SlugAlias
     on EVERY request's hot path (c4-l3.yaml tenant-host-router); (2) the mailbox worker (a
     `captain_write` app) reads `Customer` on the LOGIN path plus `Restaurant` and
     `ProspectionPipeline` for write-side guards — an OPEN cross-wall dependency, register row STO-8
-    (DECISIONS §32). The first record of this description named only (1). Distinct from the
+    (DECISIONS §32); (3) the HubRise ADAPTER bin, which builds its own restaurant repository and polls
+    `Restaurant` for projection visibility during onboarding — a crossing ADP-1 does not admit at all,
+    register row STO-10. The first record of this description named only (1), the second only (1)+(2)
+    — read this list as a LOWER BOUND (DECISIONS §32 "the method finding"). Distinct from the
     `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
   owner: migrator
   k8sName: read-common
@@ -177,7 +191,7 @@ adapter_avelo37:
 adapter_sirene:
   description: >
     The SIRENE mirror's isolated database (655 MB once, #231). The stated naming asymmetry: no
-    `crates/adapters/sirene` crate exists — the mirror's sole reader/writer is the
+    `crates/adapters/sirene` crate exists — the mirror's declared reader/writer is the
     `worker-sirene-sync` CronJob (plus the offline `sirene_ingest` loader), and the database is
     named for the partner data, not for a crate invented to justify it. The test it passes is the
     one that matters: exactly one app connects, and it owns the mirror.

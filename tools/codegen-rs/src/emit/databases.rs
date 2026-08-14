@@ -1,5 +1,5 @@
 //! Emit `specs/generated/databases.generated.{md,json}` — THE DATABASE PLACEMENT INVENTORY
-//! (#494 slice 1): the eleven declared databases, each table's RESOLVED database set, and the
+//! (#494 slice 1): every declared database, each table's RESOLVED database set, and the
 //! recovery postures.
 //!
 //! THIS ARTIFACT IS THE INTERFACE THE NEXT SLICES BUILD AGAINST — read it, never the prose maps:

@@ -308,7 +308,7 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
                 None
             }
         }
-        // The database catalog (#494 slice 1): each top-level entry is one of the eleven databases.
+        // The database catalog (#494 slice 1): each top-level entry is one declared database.
         "database/databases.yaml" => top.then_some(Kind::Database),
         "database/tables/projection_tables.yaml" => table_kind(Kind::ProjectionTable),
         "database/tables/process_managers.yaml" => table_kind(Kind::PmStateTable),
