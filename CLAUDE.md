@@ -443,6 +443,11 @@ failure rather than a misleading sentence.
   gates are green (`make rust`), mark the PR **ready for review** and **enable auto-merge**
   **together, as one indivisible step**, and **supervise the checks until the PR is MERGED** (fix +
   push on failure; never end at "pushed, CI pending"). The merge closes the issue and ends the claim.
+  That ready+auto-merge step is the **default posture**; a dispatch marks **`HOLD: human`** for the
+  named class (stored event shapes/fold semantics/migrations, payments/funds/erasure, legal surfaces,
+  non-additive GraphQL changes, the mailbox runtime, the merge machinery itself), and those PRs stop
+  at ready-for-review for a human merge
+  ([ADR-20260815-115220](docs/adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)).
 - Autonomous loops/routines run under the **weekly time budget** (`make budgeted-loop` or the routine
   guard) — Claude Code has no native cap; see [docs/claude/loops.md](docs/claude/loops.md) / ADR-0014.
 

@@ -30,6 +30,16 @@
 > (acceptance-first: PlaceOrder rejections land post-enqueue on the operation status surface) — a
 > product call for the architect, not a Phase 4 omission.
 
+> ⚖️ **2026-08-15 — MERGE POSTURE RULED: AUTO-MERGE-ON-GREEN IS THE DEFAULT; `HOLD: human` FOR THE
+> NAMED CLASS** (stored event shapes/fold semantics/migrations, payments/funds custody/erasure,
+> legal surfaces, non-additive GraphQL changes, mailbox/lease/fencing runtime, the merge/CI
+> machinery). Founder delegation 2026-08-15 (*"you can consider that you are completely autonomous
+> on that"*), whole roster consulted per ADR-20260812-143619 (11/14 for risk-tiering, farley's
+> dissent recorded):
+> [ADR-20260815-115220](adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md).
+> `.claude/agents/executor.md` step 7 and CLAUDE.md's issue-workflow bullet aligned in the same
+> commit — the two documents no longer contradict each other.
+
 > 🧱 **2026-08-15 — THE DECISION REGISTER'S TABLES ARE NOW GATED, AND THE GATE FOUND SEVEN BROKEN
 > ROWS ON ARRIVAL**
 > ([#572 "Validator gate: the decision register's tables have no integrity check — a stray `\|` silently reshapes a row"](https://github.com/TheCaptainCompany/captain-food/issues/572)).
