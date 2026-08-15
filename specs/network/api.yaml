@@ -81,7 +81,7 @@ types:
       evaluatedAt:
         type: string
         format: date-time
-        description: "The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row."
+        description: "The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row. On a subscription it advances PER PUSHED UPDATE, not per subscribe: a long-lived stream re-evaluates at each push, so a window transition mid-stream changes the verdict."
       validUntil:
         type: string
         format: date-time

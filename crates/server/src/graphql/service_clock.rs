@@ -22,10 +22,22 @@
 pub struct RequestNow(pub chrono::DateTime<chrono::Utc>);
 
 impl RequestNow {
-    /// Read the system clock — the ONLY place the read path does, once per request.
+    /// Read the system clock for a REQUEST — one of exactly two blessed clock reads on the read
+    /// path (the other is [`evaluate_now`], the per-push read for streaming resolvers), once per
+    /// request.
     pub fn mint() -> Self {
         Self(chrono::Utc::now())
     }
+}
+
+/// The clock read for one PUSHED UPDATE of a streaming resolver — the second blessed symbol,
+/// beside [`RequestNow::mint`]. A subscription lives for hours, so "the request" there is each
+/// push, not the subscribe (api.yaml `ServiceWindow.evaluatedAt`: "per pushed update, not per
+/// subscribe") — a subscribe-time instant would serve every later push a stale serviceWindow.
+/// Named so a generated streaming resolver reads the clock through ONE reviewable symbol instead
+/// of a bare `chrono::Utc::now()` indistinguishable from a per-row leak.
+pub fn evaluate_now() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
 }
 
 /// The service-window validity horizon (`SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS`): how long a
@@ -57,7 +69,7 @@ impl Default for ServiceWindowHorizon {
 /// execution); both resolve to a single clock read HERE — one per execution, never per row. An
 /// absent horizon (schema built without deps) is the spec default.
 pub fn evaluation(ctx: &async_graphql::Context<'_>) -> (chrono::DateTime<chrono::Utc>, chrono::Duration) {
-    let now = ctx.data_opt::<RequestNow>().map(|n| n.0).unwrap_or_else(chrono::Utc::now);
+    let now = ctx.data_opt::<RequestNow>().map(|n| n.0).unwrap_or_else(evaluate_now);
     let horizon = ctx.data_opt::<ServiceWindowHorizon>().copied().unwrap_or_default().0;
     (now, horizon)
 }

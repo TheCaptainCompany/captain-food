@@ -834,7 +834,7 @@ pub struct ServiceWindow {
     /// The latest instant an order can still be placed (kitchen cutoff) — a FUTURE deadline despite the `*At` suffix. Defined as min(current slot's door-close `to`, the declared cutoff): `cutoff` is a first-class term (HubRise `cutoff_time`, which the ACL maps nowhere today), so while no cutoff source is declared the formula DEGRADES EXPLICITLY to door-close (`slot.to`) — a documented degradation, never a silent fallback — and the instant displayed here is the SAME number the checkout guard enforces. Null under OUTSIDE_HOURS and HOURS_UNDECLARED.
     #[graphql(name = "lastOrderAt")]
     pub last_order_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row.
+    /// The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row. On a subscription it advances PER PUSHED UPDATE, not per subscribe: a long-lived stream re-evaluates at each push, so a window transition mid-stream changes the verdict.
     #[graphql(name = "evaluatedAt")]
     pub evaluated_at: chrono::DateTime<chrono::Utc>,
     /// The instant after which the client must RE-EVALUATE: min(next window transition, evaluatedAt + horizon), the horizon being configuration.yaml#/SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS; under HOURS_UNDECLARED (no transition to wait for) it is evaluatedAt + horizon. NON-NULL on purpose: a nullable expiry reads to every cache as "cache forever", which would keep a blank badge warm at Friday 19:00 — the hour it matters.
