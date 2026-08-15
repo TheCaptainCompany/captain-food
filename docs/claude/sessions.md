@@ -134,6 +134,13 @@ saves a check: proposal-hygiene special-cases only the literal strings `Approved
 including `Superseded`, needs only the Status line + a header tracking link, so a Superseded
 flip is always gate-safe.
 
+**Writing or running tests inside `tools/codegen-rs` (2026-08-15):** the package is named
+`captain-food-codegen`, not the directory name — `cargo test -p codegen-rs` fails to resolve
+(use `-p captain-food-codegen`, or the `--manifest-path tools/codegen-rs/Cargo.toml` form the
+Makefile uses). And `model::Level` derives no `Debug`, so `assert_eq!` on an issue's level does
+not compile; the in-tree pattern is `assert!(x.level == Level::Error, "msg")`. Costs: one failed
+invocation and one wasted compile cycle, in one session.
+
 **`check-drift` fails on ANY dirty file, and says the wrong thing about it (2026-08-04):** it diffs
 the whole working tree, not just generated paths, so an uncommitted hand edit — a `Cargo.toml`
 tweak, a doc fix — trips it with `generated artifacts drifted -- run 'make generate' and commit the
@@ -660,7 +667,12 @@ straight to `main` and never create the branch in the first place.
 tree — uncommitted source edits read as "drift" and fail the gate by design (its own comment says
 so). And `make rust ... | tail` reports the PIPE's exit (tail's 0), so a background run can notify
 "exit 0" over a red gate (cost: one commit pushed on a believed-green gate before the output was
-re-read, 2026-08-01). Redirect to a file and echo `$?` separately, then read both.
+re-read, 2026-08-01). Redirect to a file and echo `$?` separately, then read both. The same
+`| tail` on `make test-crates` has a second failure mode even when you DO read the right exit:
+it destroys the failure ENUMERATION — the per-suite detail naming which tests failed scrolls
+away above the final summary line, so a red run tells you it failed but not where, and the only
+recovery is running the whole target again (cost: one full re-run of a failing target,
+2026-08-15). Redirect to a file and grep it; never window a test run through `tail`.
 **The output is unreadable in BOTH directions, which is why the exit code is the only verdict.**
 A GREEN `check-drift` is SILENT — it prints no success line at all (`Makefile:74-75`: the only
 output is the failure `echo`), and the `✓ wrote <artifact>` list you see scroll past comes from its
@@ -1031,6 +1043,12 @@ two rounds of local gates had called green. Derive the list instead of recalling
 git diff origin/main...HEAD --name-only -- crates/ | cut -d/ -f2 | sort -u
 ```
 
+And on a MULTI-PHASE branch, run the full `make test-crates` at every phase boundary, not only
+the suites the phase touched: on 2026-08-15 two `crates/web` tests sat red for two whole phases
+because every later run was targeted at the crates then being edited, and the red only surfaced
+at the end — where it read as a late regression instead of pointing at the phase that caused it.
+Targeted suites are for iterating inside a phase; the boundary gate is the full target.
+
 **A green `make rust` proves nothing about `crates/**` — it never ran a line of it.** `rust-test`
 (Makefile:70) is `cargo test --manifest-path tools/codegen-rs/Cargo.toml`: the codegen crate ALONE.
 Since #474 the workspace suite is `make test-crates`, and `.claude/hooks/stop-gate.sh` invokes it
@@ -1099,6 +1117,12 @@ that already existed and passed.
 for tests, `git show <commit> --stat` for what actually landed. Cost here was small; the cost of
 believing a claim you cannot reproduce is a test suite nobody can trust.
 
+Same class, opposite direction (2026-08-15): **a dispatch's call-site inventory ("N call sites")
+is a FLOOR, not a census.** RSO-1's "8 call sites" was 9 on first contact and 15 counted another
+way. The census is the compiler: delete the old symbol and let `cargo check` enumerate every
+site (ADR-20260803-234035 working as intended). Dispatches should phrase the number as "at least
+N; the compiler decides", and executors should not treat exhausting the list as done.
+
 ### A "seen red" claim must name HOW the test was made to fail
 
 Not that it failed — **how**: the clause deleted, the fallback re-planted, the stub it ran against.
@@ -1146,10 +1170,13 @@ as permanent register text.
 (`git branch --show-current && awk …`), and again immediately before committing — a branch confirmed
 in an earlier call proves nothing about the current one. **The real fix is coordinator-side: dispatch
 concurrent executors with worktree isolation** (`git worktree add`, with the disk caveats above),
-never into one shared tree. Same root cause, other direction: **a docs-only dispatch targeting `main`
-must open with an explicit `git checkout main`** — an executor dispatched for a `main` docs task
-started on a feature branch someone else had left checked out, correctly refused to write, and burned
-its entire run doing nothing before a session limit killed it.
+never into one shared tree — and as of 2026-08-15 this is a PROVEN working pattern, not a
+suggestion: a record executor ran on `main` in its own worktree while a feature executor held the
+shared checkout, with zero interference. Any second writer gets a worktree; the shared checkout
+belongs to whoever holds the feature branch. Same root cause, other direction: **a docs-only
+dispatch targeting `main` must open with an explicit `git checkout main`** — an executor dispatched
+for a `main` docs task started on a feature branch someone else had left checked out, correctly
+refused to write, and burned its entire run doing nothing before a session limit killed it.
 
 ### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
 
@@ -1184,6 +1211,17 @@ present in the environment — the variables are not the capability. So **a disp
 executor to reference an issue must carry the number AND the title verbatim**; the executor has no
 lookup path and cannot check a title it is given. Cost: an unresolvable issue link landed in
 `ee9082d` and needed a follow-up commit to repair.
+
+### A commit touching `CLAUDE.md` or `.claude/agents/*.md` needs in-conversation user approval
+
+The permission classifier blocks any `git add`/`git commit` whose pathset includes `CLAUDE.md` or
+`.claude/agents/*.md` — for subagents AND the main session alike — until the user explicitly
+approves in the conversation. Edits already sitting on disk change nothing, and an isolated
+worktree does not exempt the commit: the block is on the pathset, not the tree. So a
+coordinator planning a one-commit record that includes operating docs must either obtain the
+approval (`AskUserQuestion`) BEFORE dispatching the record executor, or split the record so the
+operating-doc paths ride their own commit. Cost (2026-08-15): one stopped record executor, one
+denied main-session retry, and a founder round-trip for a change that was already written.
 
 ### One more shell trap in commit messages
 
