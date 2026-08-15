@@ -7818,28 +7818,36 @@ mod pm_read_source {
         assert!(hit.message.contains("from_stream"), "quotes the offending key: {}", hit.message);
     }
 
-    /// SOURCE is not SHAPE, and the rules must never conflate them: `EVENT_STREAM` on a step whose
-    /// `model:` is a projection table is the NORMAL case (the fold reuses the projection's shape and
-    /// never reads the table), so it must stay clean. A future "tightening" that demanded a stream
-    /// model here would break every hand-written leg.
+    /// SOURCE is not SHAPE, and the rules must never conflate them. Both values are legal on the SAME
+    /// projection-shaped `model:`, so flipping one is clean in both directions: `EVENT_STREAM` over a
+    /// projection table is the hand-written-leg case (the fold borrows the projection's shape and
+    /// never reads the table). A future "tightening" that demanded a stream-shaped model for
+    /// `EVENT_STREAM` would break every hand-written leg, and this is the test that would stop it.
+    ///
+    /// It flips `CartBindingProcess`'s read, which is declared `PROJECTION`, precisely so the
+    /// assertion is a real change rather than a re-write of the value already there.
     #[test]
-    fn an_event_stream_source_keeps_its_projection_shaped_model() {
-        let mut m = real_model();
-        read_body(&mut m, "PlaceOrderProcess", 0, 0)
-            .insert(Value::from("source"), Value::from("EVENT_STREAM"));
-        let issues = validate(&m).issues;
-        assert!(
-            !issues.iter().any(|i| {
-                i.location.starts_with("processmanager.yaml/PlaceOrderProcess.receives[0].steps[0]")
-            }),
-            "a projection-shaped model with an EVENT_STREAM source is the hand-written-leg case: {:?}",
+    fn either_source_is_legal_on_a_projection_shaped_model() {
+        const AT: &str = "processmanager.yaml/CartBindingProcess.receives[0].steps[0]";
+        let at_step = |issues: &[Issue]| -> Vec<(&'static str, String)> {
             issues
                 .iter()
-                .filter(|i| i
-                    .location
-                    .starts_with("processmanager.yaml/PlaceOrderProcess.receives[0].steps[0]"))
-                .map(|i| (i.rule, &i.message))
-                .collect::<Vec<_>>()
+                .filter(|i| i.location.starts_with(AT))
+                .map(|i| (i.rule, i.message.clone()))
+                .collect()
+        };
+
+        // As committed: PROJECTION over the `Cart` projection table.
+        assert!(at_step(&validate(&real_model()).issues).is_empty(), "the committed step is clean");
+
+        // Flipped: EVENT_STREAM over the very same projection-shaped model.
+        let mut m = real_model();
+        read_body(&mut m, "CartBindingProcess", 0, 0)
+            .insert(Value::from("source"), Value::from("EVENT_STREAM"));
+        assert!(
+            at_step(&validate(&m).issues).is_empty(),
+            "source and shape are independent: {:?}",
+            at_step(&validate(&m).issues)
         );
     }
 
