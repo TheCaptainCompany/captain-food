@@ -2,6 +2,48 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛑 **2026-08-15 — RSO-2 CANNOT CLOSE OVERSELL, AND IT WAS ABOUT TO BE BUILT AS IF IT COULD**
+> (docs-only, straight to `main`; recorded BEFORE any code was dispatched).
+> [DECISIONS §43](proposals/DECISIONS.md) is amended and gains four rows. `young` and `vernon`,
+> asked independently, both disproved the implicit premise of the checkout stock re-check — Young's
+> words are the record: *"it narrows the window and creates the appearance of a guarantee that the
+> write model cannot deliver."* **The disproof**: `OfferStockUpdated` is emitted by `UpdateOfferStock`
+> and the inbound HubRise sync ONLY (`specs/catalog/actors.yaml:76-77,87-89`; `commands.rs:3091-3123`)
+> — **nothing decrements stock when an order is placed**, so a re-check is a race with **no writer at
+> all**: two customers each read quantity 1, both are accepted, the count never moves. Reading it
+> fresher (projection, fold or snapshot) changes nothing. **RSO-2 is narrowed, not cancelled** — it
+> still catches the single-customer staleness case (an item that left the catalog or was flipped
+> `UNAVAILABLE` between add-to-cart and pay), which today is caught by **nothing**, and it now carries
+> a wording fence so its rule text cannot claim a stock guarantee. Oversell moves to **STK-1** (AMBER):
+> closing it needs an **arbiter, not a read** — a reservation-shaped conditional
+> `UPDATE ... WHERE remaining >= qty`, whose justification is already written at
+> `specs/database/tables/reservations.yaml:1-22` — and it hits an ordering wall, since the Stripe
+> intent is created in `prepare`, **before** `pool.begin()` (`crates/actor_runtime/src/completion.rs:69,71`),
+> so the claim must be taken in `prepare` with release-on-decline/timeout becoming `PaymentProcessRow`
+> state and PM legs. **Accept-and-compensate (the restaurant calls and swaps the dish) is recorded as a
+> legitimate V0 answer and deliberately NOT pre-decided.** **RSO-1 amended twice**: the guard *computes
+> the open/paused verdict and throws it away* — `CheckoutSnapshot` (`commands.rs:2526-2541`) carries no
+> record that the restaurant was ACTIVE and open, so a restaurant disputing a 22:40 order asks a
+> question the log cannot answer; and **`isOpen` is a pure function, not state** —
+> `f(opening_hours, timezone, now)`, so the shape is a `domain-common` function with the clock injected,
+> called identically by the storefront badge and the checkout guard, never a projection column or
+> aggregate state. **Three new findings, each its own row**: **CHK-1** — `commands.rs:2392`'s
+> *"authoritative, race-free"* is **false** (the fold appends to the **Payment** stream with no
+> restaurant `expected_version` on `EventStore::append`, `ports.rs:54-60`), which reframes a decision
+> already taken: **fold-vs-projection is a latency and cost decision, not a correctness class**;
+> **CAT-1** (AMBER) — `RestaurantState` holds **no catalog id**, so `restaurantId → catalogId` is a
+> `ORDER BY created_at DESC LIMIT 1` set query (`persistence/catalog.rs:27-31`) with a **newest-wins
+> tiebreak no aggregate ever decided**, fixed by the restaurant **appointing** its live catalog;
+> **FEN-1** — `expectedTotal` is optional (`commands.rs:2460`), and *"on the money path an optional
+> fence is not a fence"*. **Framing correction landed on
+> [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md)**
+> as a dated scope note: `place_order` is a **command handler** (`commands.rs:2380`), **not** a PM leg
+> (`process_managers/place_order.rs:13` says so; the PM legs are `on_payment_authorized` /
+> `on_payment_failed`), so the restaurant fold, cart fold and catalog read on the checkout path are
+> **not governed by that ADR** — the rule is unchanged, its reach was being overstated in discussion,
+> including by the coordinator. **Every code change above is FLAGGED, not made**: no `specs/**`, no
+> `crates/**`, no gate movement.
+
 > 🧹 **2026-08-15 — the autonomous-run brief no longer tells the run that `specs/**` is
 > untouchable** (docs-only, straight to `main`). `docs/claude/autonomous-run.md`'s "rules that bind
 > the run" still carried the pre-2026-08-10 freeze — *"prepare spec diffs as proposal documents;

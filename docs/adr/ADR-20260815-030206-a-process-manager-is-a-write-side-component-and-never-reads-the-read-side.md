@@ -3,7 +3,9 @@
 **Status**: Accepted (the rule and its two carve-outs; the *enforcement grammar* and the
 *mailbox-query* reading are OPEN register rows, below) · **AMENDED the same day — see
 [Correction (2026-08-15)](#correction-2026-08-15--reading-i-is-a-different-destination-not-an-intermediate-step)
-before relying on the (i)/(ii) section** · **Date**: 2026-08-15 ·
+before relying on the (i)/(ii) section** · **SCOPE CLARIFIED the same day —
+[`place_order` is a command handler, not a PM leg](#scope-clarification-2026-08-15--place_order-is-a-command-handler-not-a-pm-leg);
+the rule is unchanged, its reach was being overstated** · **Date**: 2026-08-15 ·
 **Decider**: the founder / Tech CEO, verbatim below ·
 **Register**: [DECISIONS](../proposals/DECISIONS.md) §42 (**PMW-1**, **PMW-2**, **PMW-3**) and the
 **STO-9** annotation in §32 ·
@@ -251,6 +253,40 @@ destinations rather than stages.
 What it adds is that PMW-3's option (a) — *"do not build it"* — must be read as *choosing shared-database
 coupling permanently*, and that items 1–5 of §3 above are the recordable final-vision target whose cost is
 mostly **not** the transport.
+
+## Scope clarification (2026-08-15) — `place_order` is a COMMAND HANDLER, not a PM leg
+
+*Added the same day, before any code was dispatched against register §43. **The rule above is
+unchanged.** What is corrected is its REACH, which was being overstated in discussion — including by the
+session coordinator, and including in this ADR's own "best ARGUMENT and worst DEMONSTRATION" bullet.*
+
+`place_order` is a **command handler** — `crates/application/src/commands.rs:2380`, invoked as the
+`PlaceOrder` command leg. `crates/application/src/process_managers/place_order.rs:13` states it verbatim:
+
+> "The COMMAND leg (`commands.yaml#/PlaceOrder`) stays `commands::place_order` (pricing non-goal)."
+
+`PlaceOrderProcess`'s **actual PM legs** are `on_payment_authorized` and `on_payment_failed` — the
+reactions to Stripe facts, which is where the process-manager shape lives.
+
+**Therefore the restaurant fold, the cart fold and the catalog read on the checkout path are NOT
+governed by this ADR.** They are an aggregate command handler's own reads, which is the same category as
+the nine `read_common` and two `read_catalog` command-handler readers this ADR already places **outside**
+the rule (see *Consequences*, "Bounded, and the bound is measured"). Three consequences of the
+clarification, none of which change the decision:
+
+- The bullet above reading *"place-order is already compliant … the diff on it is empty"* is true but
+  for the wrong reason. It is not compliant-by-luck; it is **out of scope**. A future change that made
+  `place_order` read a projection would not violate **this** rule — it would need its own argument.
+- The spec↔code drift recorded at `specs/ordering/processmanager.yaml:30-43` is still real and still
+  worth fixing (the declared model shape does not match what the code reads), but it is a **spec
+  accuracy** defect, not a violation of this rule.
+- The `read_catalog` row in the STO table (`price_cart` *"inside `place_order`"*) already counted that
+  read as a command-handler read. That line was right; the prose around it drifted.
+
+**Why this is worth a dated note rather than a silent edit**: the overstatement was about to justify
+work. Register §43's RSO-1/RSO-2 were being reasoned about as if a PM doctrine governed them, which
+would have pushed the checkout guards toward an "ask the actor" shape for a component that is not a
+process manager. A rule that is cited outside its scope is as expensive as a rule nobody reads.
 
 ## Why the rule holds — three independent arguments
 
