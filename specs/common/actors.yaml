@@ -56,8 +56,10 @@ description: >
 # fourth speech act. It is declared INSIDE the actor (ADR-20260731-120825), never a catalog.
 # 1. The ref path encodes the kind: `actors.yaml#/{Actor}/answers/{op}` — no other path form
 #    resolves to a reply, so kind confusion is a resolution error, not a review comment.
-# 2. A reply ref may appear ONLY in a PM `ask:` step (and its `from_ask` uses). In `emits:`, a
-#    lifecycle transition, a projection/fold source, or a tombstone -> validator error.
+# 2. A reply ref may appear ONLY in a PM `ask:` step (and its `from_ask` uses) — refused today
+#    (`ans-ref-isolation`); the PM half reintroduces this structurally against the parsed step.
+#    In `emits:`, a lifecycle transition, a projection/fold source, or a tombstone -> validator
+#    error.
 # 3. A reply is constitutionally unpersistable: no journal, no `domain_events`, no `View_*` may
 #    name one. It exists on the wire for one Ask and nowhere else.
 # 4. A reply shape is composed of $refs into the actor's own state: (itself $ref-typed); it may

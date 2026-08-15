@@ -5220,6 +5220,23 @@ Catalog:
         );
     }
 
+    /// The belt's sibling case: a `type: process-manager` WITH a mailbox gets a client crate, so
+    /// the leftover assert alone never fires for it — yet only an AGGREGATE answers (the reply
+    /// projects its own fold; a PM has a state table). Same reachability class as the
+    /// mailbox-less case (main.rs exits on validation errors first): the emitter refuses rather
+    /// than generating a typed ask surface on a PM.
+    #[test]
+    #[should_panic(expected = "only an aggregate answers")]
+    fn answers_on_a_mailbox_pm_refuse_to_generate_an_ask_surface() {
+        let actors = "SettlementProcess:\n  type: process-manager\n  identity: { $ref: '#/SettlementProcess/state/orderId' }\n  mailbox:\n    partitions: 1\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/SettlementProcess/state/paymentIntentId' }\n";
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        let _ = emit_client_crates(&m);
+    }
+
     #[test]
     fn answers_derived_type_names_are_catalog_unique() {
         // `Order` + `paymentReference` and `OrderPayment` + `reference` both derive
