@@ -2,6 +2,13 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⚖️ **2026-08-15 — THE TEAM MERGES ITS OWN WORK; NO PR WAITS ON FOUNDER REVIEW** (founder,
+> verbatim: *"Never wait my review you are responsible of your work."*): the "human" in
+> `HOLD: human` is the TEAM's independent reviewer pass, never the founder —
+> [ADR-20260815-134655](adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md);
+> first application [PR #576 "Opening-hours guard: three-valued verdict, undeclared hours accept (#180 / RSO-1)"](https://github.com/TheCaptainCompany/captain-food/pull/576),
+> MERGED after independent review PASS + green CI (the RSO-1 banner below predates the merge).
+
 > 🔶 **2026-08-15 — RSO-1 IS CODE-COMPLETE ON THE BRANCH (PHASES 1–4):
 > [#180 "Opening hours are stored, displayed, and never enforced — a customer can order at 04:00"](https://github.com/TheCaptainCompany/captain-food/issues/180),
 > branch `180-rso1-opening-hours-guard`, draft [PR #576](https://github.com/TheCaptainCompany/captain-food/pull/576) — NOT on `main`; merge posture `HOLD: human` (ADR-20260815-115220: stored event shape + money path).**
