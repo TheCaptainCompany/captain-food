@@ -2,6 +2,27 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧹 **2026-08-15 — the autonomous-run brief no longer tells the run that `specs/**` is
+> untouchable** (docs-only, straight to `main`). `docs/claude/autonomous-run.md`'s "rules that bind
+> the run" still carried the pre-2026-08-10 freeze — *"prepare spec diffs as proposal documents;
+> only explicit customer approval applies them"* — which
+> [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)
+> **lifted, not narrowed**, by founder directive: tonight's scheduled run would have refused work
+> the founder explicitly directed. The bullet now states the live rule (CLAUDE.md's three questions
+> + the one-sentence `docs/SPEC-LOG.md` row in the SAME commit), and the same retired claim is
+> removed from the ask-the-founder list ("spec-diff approvals" → *a spec change that reverses one of
+> his own decisions*). Same pass: the **standing objective**, frozen at 2026-08-08 and naming
+> cutover issues the work has moved past, is re-pointed at the six-clause acceptance criterion
+> ([ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+> as amended 2026-08-14) with its ordered tail **read off THIS file** rather than re-pinned there —
+> the pin is what went stale. **Reported, not fixed** (merely old; no ADR contradicted): the reading
+> list still points the run at `DECISIONS.md` §22 for "what was just decided" (latest is §43); the
+> commit-trailer bullet pins a model name no commit in this repo uses; the file calls the founder
+> "the customer" throughout while its own opening quote says "founder"
+> ([ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)
+> swept the living operating docs); and its "ready + auto-merge as one step" line sits against
+> `.claude/agents/executor.md`'s PR-only default. No `specs/**`, no code, no gate movement.
+
 > 🧠 **2026-08-15 — THE ARCHITECT IS SPLIT INTO THREE NAMED DOCTRINE LENSES: `young`, `vernon`,
 > `evans`** (founder directive, *"Split the architect into Greg Vaughn and eric"*;
 > [ADR-20260815-032912](adr/ADR-20260815-032912-split-the-architect-into-three-named-doctrine-lenses.md),
