@@ -1,5 +1,47 @@
 use crate::*;
 
+/// True for a Z-NORMALIZED RFC3339 instant — `YYYY-MM-DDTHH:MM:SS[.fff]Z` (RSO-1: `when.at` in
+/// tests.yaml). Deliberately STRICTER than a full RFC3339 parser: numeric offsets are refused,
+/// because a local-offset instant in a spec test would smuggle timezone ambiguity into the one
+/// field that exists to kill it. Range checks cover month/day/hour/minute/second bounds (not
+/// month lengths — a Feb 31 still fails deterministically at the generated test's chrono parse).
+pub(crate) fn rfc3339_z_instant(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[b.len() - 1] != b'Z' {
+        return false;
+    }
+    let digit = |i: usize| b[i].is_ascii_digit();
+    let shape = (0..4).all(digit)
+        && b[4] == b'-'
+        && digit(5)
+        && digit(6)
+        && b[7] == b'-'
+        && digit(8)
+        && digit(9)
+        && b[10] == b'T'
+        && digit(11)
+        && digit(12)
+        && b[13] == b':'
+        && digit(14)
+        && digit(15)
+        && b[16] == b':'
+        && digit(17)
+        && digit(18);
+    if !shape {
+        return false;
+    }
+    let frac = &b[19..b.len() - 1];
+    let frac_ok =
+        frac.is_empty() || (frac[0] == b'.' && frac.len() > 1 && frac[1..].iter().all(|c| c.is_ascii_digit()));
+    let n2 = |i: usize| (b[i] - b'0') as u32 * 10 + (b[i + 1] - b'0') as u32;
+    frac_ok
+        && (1..=12).contains(&n2(5))
+        && (1..=31).contains(&n2(8))
+        && n2(11) <= 23
+        && n2(14) <= 59
+        && n2(17) <= 59
+}
+
 /// A resolver's pinned static `args:` (#82) — the ONLY place a screens surface names an api.yaml
 /// query ARGUMENT by hand. §1 proves the resolver's `query.$ref` RESOLVES and §1b proves it resolves
 /// to a QUERY, but neither looks inside `args:`, so a typo in a pinned key (`listKey` where the query
@@ -912,6 +954,20 @@ pub(crate) fn validate(model: &Model) -> Report {
                     }
                 };
                 check_data_shape(model, &mut issues, when_ref, when.and_then(|w| w.get("data")), &format!("{}.when", where_));
+
+                // `when.at` — the evaluation instant for clock-consuming handlers (RSO-1,
+                // DECISIONS §43): must be a Z-NORMALIZED RFC3339 instant, so the generated
+                // test's chrono parse cannot fail at runtime and no local-offset ambiguity
+                // enters the one field that exists to kill it.
+                if let Some(at) = when.and_then(|w| w.get("at")) {
+                    if !at.as_str().map(rfc3339_z_instant).unwrap_or(false) {
+                        issues.push(err(
+                            "test-when-at-not-instant",
+                            format!("{}.when.at", where_),
+                            "`when.at` must be a Z-normalized RFC3339 instant (e.g. 2026-08-14T18:00:00Z).".into(),
+                        ));
+                    }
+                }
 
                 let msg = ref_name(when_ref).unwrap_or_default();
                 let entry_idx = if !actor_name.is_empty() && !msg.is_empty() {

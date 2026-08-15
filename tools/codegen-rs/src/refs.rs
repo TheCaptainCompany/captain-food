@@ -489,6 +489,9 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("observability.yaml", "*.workflow.emits[*]",       &[Kind::Event]),
     ("observability.yaml", "*.workflow.inbound[*]",     &[Kind::Event]),
     ("observability.yaml", "*.run_identity[*].businessKey", &[Kind::Scalar, Kind::EnumScalar]),
+    // A span attribute's VALUE SET, by $ref to the domain enum scalar that declares it (RSO-1,
+    // "one name = one dedicated scalar" applied to value sets — never a hand-copied enum list).
+    ("observability.yaml", "*.spans[*].attributes[*].values", &[Kind::EnumScalar]),
 
     // Read models. `from` is event LINEAGE (a whole event for occurrence columns, a property
     // otherwise); `fk` is the read-navigation graph, so it must name a COLUMN.

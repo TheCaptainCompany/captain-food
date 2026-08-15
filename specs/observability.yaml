@@ -158,6 +158,12 @@ place-order:
       required: true
       attributes:
         - { key: "business.validation_status", type: string, required: true }
+        # RSO-1 (DECISIONS §43): the service-hours verdict this checkout was evaluated at — the
+        # accept branch's signal (shadow mode refuses nothing, so without this attribute the
+        # decision is invisible). Value set is the scalar, by $ref — never a hand-copied enum
+        # list. A refusal surfaces through the existing `business.validation_status == 'rejected'`
+        # classification; deliberately NO new metric/counter here (that is HRS-1's row).
+        - { key: "business.service_window_verdict", type: string, values: { $ref: 'scalars.yaml#/ServiceWindowVerdict' } }
     - name: "cart.read"
       kind: INTERNAL
       required: true

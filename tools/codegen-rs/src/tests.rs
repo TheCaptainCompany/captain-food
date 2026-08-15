@@ -846,6 +846,27 @@ keys:
         }
     }
 
+    /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
+    /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
+    /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
+    #[test]
+    fn when_at_accepts_only_z_normalized_instants() {
+        for ok in ["2026-08-14T18:00:00Z", "2026-01-06T12:00:00Z", "2026-08-14T02:00:00.123Z"] {
+            assert!(crate::validate::core::rfc3339_z_instant(ok), "{ok} is a legal instant");
+        }
+        for bad in [
+            "2026-08-14T18:00:00+02:00", // offset — the ambiguity the field kills
+            "2026-08-14 18:00:00Z",      // space separator
+            "2026-08-14",                // bare date
+            "2026-13-01T00:00:00Z",      // month 13
+            "2026-08-14T24:00:00Z",      // hour 24
+            "2026-08-14T18:00:00.Z",     // empty fraction
+            "2026-08-14T18:00:00",       // no Z
+        ] {
+            assert!(!crate::validate::core::rfc3339_z_instant(bad), "{bad} must be refused");
+        }
+    }
+
     /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
     ///
     /// The emitter used to substitute `0` for a defaultless `int`, so

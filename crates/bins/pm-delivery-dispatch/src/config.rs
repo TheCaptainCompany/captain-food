@@ -290,6 +290,8 @@ pub struct Config {
     pub uber_direct_scope: Option<String>,
     /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
     pub coopcycle_instances: Option<String>,
+    /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
+    pub enforce_service_hours_guard: bool,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
 }
@@ -439,6 +441,10 @@ impl Config {
         let uber_direct_token_url = raw("UBER_DIRECT_TOKEN_URL");
         let uber_direct_scope = raw("UBER_DIRECT_SCOPE");
         let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
+        let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
+            .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
+            .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
+            .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -552,6 +558,7 @@ impl Config {
                 uber_direct_token_url,
                 uber_direct_scope,
                 coopcycle_instances,
+                enforce_service_hours_guard,
                 order_retention_window_days,
             },
             problems,
@@ -628,13 +635,14 @@ impl Config {
         out.push_str(&format!("  UBER_DIRECT_TOKEN_URL      = {}\n", self.uber_direct_token_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  UBER_DIRECT_SCOPE          = {}\n", self.uber_direct_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 55;
+pub const KEY_COUNT: usize = 56;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -693,6 +701,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "UBER_DIRECT_TOKEN_URL",
     "UBER_DIRECT_SCOPE",
     "COOPCYCLE_INSTANCES",
+    "ENFORCE_SERVICE_HOURS_GUARD",
     "ORDER_RETENTION_WINDOW_DAYS",
 ];
 

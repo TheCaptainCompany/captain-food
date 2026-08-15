@@ -264,6 +264,8 @@ pub struct Config {
     pub surface_gateway_url: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
+    /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
+    pub enforce_service_hours_guard: bool,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
 }
@@ -397,6 +399,10 @@ impl Config {
         let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
         let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
+            .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
+            .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
+            .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -482,6 +488,7 @@ impl Config {
                 gateway_subgraph_urls,
                 surface_gateway_url,
                 captain_build_version,
+                enforce_service_hours_guard,
                 order_retention_window_days,
             },
             problems,
@@ -545,13 +552,14 @@ impl Config {
         out.push_str(&format!("  GATEWAY_SUBGRAPH_URLS      = {}\n", self.gateway_subgraph_urls));
         out.push_str(&format!("  SURFACE_GATEWAY_URL        = {}\n", self.surface_gateway_url));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 42;
+pub const KEY_COUNT: usize = 43;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -597,6 +605,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "GATEWAY_SUBGRAPH_URLS",
     "SURFACE_GATEWAY_URL",
     "CAPTAIN_BUILD_VERSION",
+    "ENFORCE_SERVICE_HOURS_GUARD",
     "ORDER_RETENTION_WINDOW_DAYS",
 ];
 

@@ -14,6 +14,13 @@ description: >
   Naming: a test key is `Test<Aggregate><Behaviour>` (PascalCase) so related cases regroup by actor;
   `name` is a readable sentence. Suffixes: `…IsRejected` (error), `…IsNoOp` / `…Again…` (idempotency).
 
+  DETERMINISM — `when.at` (RSO-1, DECISIONS §43): a handler that evaluates the CLOCK ("now is a
+  parameter", the sms_guard.rs precedent — a guard reading the system clock internally cannot have
+  both edges asserted) takes its evaluation instant from the optional `when.at`, a Z-normalized
+  RFC3339 instant. Absent, the emitter injects the FIXED default 2026-01-06T12:00:00Z (a Tuesday
+  noon UTC), so every test is deterministic; the emitter REFUSES `at` on a command whose call does
+  not consume the clock (silently ignoring it would be the #413 "silently invisible" defect class).
+
   Validated by the codegen (tests.yaml is a source file) — see `make validate`:
     - every `$ref` resolves (events / commands / actors / errors / local fixtures);
     - the `when` message is one the named actor RECEIVES (actors.yaml inbox);
@@ -94,6 +101,12 @@ fixtures:
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
     data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre" }
+  # RSO-1: declares service hours on resto-1 (Friday dinner service). 2026-08-14 is a Friday;
+  # Paris in August is UTC+2, so 19:00–23:00 local = 17:00Z–21:00Z — the instants the OPEN-window
+  # evidence fixture pins.
+  restaurantHoursDeclared:
+    type: { $ref: 'events.yaml#/RestaurantUpdated' }
+    data: { restaurantId: "resto-1", openingHours: [{ weekday: "FRIDAY", from: "19:00", to: "23:00" }] }
   restaurantActivated:
     type: { $ref: 'events.yaml#/RestaurantActivated' }
     data: { restaurantId: "resto-1" }
@@ -368,6 +381,11 @@ fixtures:
           restaurantPayout: { amountCents: 1960, currency: "EUR" }
           riderPayout: { amountCents: 0, currency: "EUR" }
           captainNet: { amountCents: 0, currency: "EUR" }
+        # RSO-1 evidence: restaurantRegistered declares a timezone but NO hours → HOURS_UNDECLARED,
+        # null window; evaluatedAt = the emitter's fixed default `when.at` (tests.yaml header).
+        verdict: "HOURS_UNDECLARED"
+        timezone: "Europe/Paris"
+        evaluatedAt: "2026-01-06T12:00:00Z"
   paymentIntentCreatedCollection:
     type: { $ref: 'events.yaml#/PaymentIntentCreated' }
     data:
@@ -382,6 +400,76 @@ fixtures:
         customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
+        items:
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
+        breakdown:
+          articles: { amountCents: 1960, currency: "EUR" }
+          delivery: { amountCents: 0, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
+          restaurantContribution: { amountCents: 0, currency: "EUR" }
+          restaurantPayout: { amountCents: 1960, currency: "EUR" }
+          riderPayout: { amountCents: 0, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
+        # RSO-1 evidence: same HOURS_UNDECLARED shape as paymentIntentCreated (no hours declared).
+        verdict: "HOURS_UNDECLARED"
+        timezone: "Europe/Paris"
+        evaluatedAt: "2026-01-06T12:00:00Z"
+  # RSO-1: the OPEN-verdict evidence — windowFrom/windowTo are the restaurantHoursDeclared slot as
+  # instants (FRIDAY 19:00–23:00 Europe/Paris on 2026-08-14 = 17:00Z–21:00Z), evaluatedAt the
+  # test's `when.at`. Asserting these values (not just the enum) is what makes the snapshot
+  # EVIDENCE rather than a mood.
+  paymentIntentCreatedOpenWindow:
+    type: { $ref: 'events.yaml#/PaymentIntentCreated' }
+    data:
+      paymentIntentId: "pi_123"
+      restaurantId: "resto-1"
+      customerId: "cust-1"
+      amount: { amountCents: 1960, currency: "EUR" }
+      checkout:
+        orderId: "order-1"
+        cartId: "cart-1"
+        restaurantId: "resto-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        items:
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
+        breakdown:
+          articles: { amountCents: 1960, currency: "EUR" }
+          delivery: { amountCents: 0, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
+          restaurantContribution: { amountCents: 0, currency: "EUR" }
+          restaurantPayout: { amountCents: 1960, currency: "EUR" }
+          riderPayout: { amountCents: 0, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
+        verdict: "OPEN"
+        windowFrom: "2026-08-14T17:00:00Z"
+        windowTo: "2026-08-14T21:00:00Z"
+        timezone: "Europe/Paris"
+        evaluatedAt: "2026-08-14T18:00:00Z"
+  # RSO-1 old-shape tolerance: a snapshot frozen BEFORE the verdict evidence existed (no verdict/
+  # window/timezone/evaluatedAt keys at all — the exact shape of stored pre-RSO-1
+  # PaymentIntentCreated rows). Given-seeding this and materializing the order proves the fields
+  # are optional in fact, not just in prose.
+  paymentIntentCreatedLegacyShape:
+    type: { $ref: 'events.yaml#/PaymentIntentCreated' }
+    data:
+      paymentIntentId: "pi_123"
+      restaurantId: "resto-1"
+      customerId: "cust-1"
+      amount: { amountCents: 1960, currency: "EUR" }
+      checkout:
+        orderId: "order-1"
+        cartId: "cart-1"
+        restaurantId: "resto-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "DELIVERY"
+        deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
         items:
           - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
         totalAmount: { amountCents: 1960, currency: "EUR" }
@@ -2300,6 +2388,111 @@ tests:
       - { $ref: '#/fixtures/cartStarted' }
       - { $ref: '#/fixtures/cartLineAdded' }
       - { $ref: '#/fixtures/paymentIntentCreated' }
+    when:
+      type: { $ref: 'events.yaml#/PaymentAuthorized' }
+      data: { paymentIntentId: "pi_123", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
+    then:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/cartCheckedOut' }
+
+  # ------------------------ Service-hours guard (RSO-1, DECISIONS §43) ---------------------
+  TestPlaceOrderRejectsOutsideServiceHours:
+    name: "A checkout at 04:00 against a restaurant with declared hours (Friday 19:00–23:00 Paris) is refused with the next opening slot — the restaurant is ACTIVE and not PAUSED, so the refusal can only come from the service-hours guard"
+    rules:
+      - { $ref: 'rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours' }
+      - { $ref: 'rules.yaml#/ServiceWindowVerdictDerivedAtAnInstant' }
+      - { $ref: 'rules.yaml#/OrderableExcludesServiceHours' }
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/restaurantHoursDeclared' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      # 02:00Z = 04:00 Europe/Paris (summer, UTC+2) on Friday 2026-08-14 — hours are declared and
+      # the instant is outside them: verdict OUTSIDE_HOURS, the only refusing value.
+      at: "2026-08-14T02:00:00Z"
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/OutsideServiceHours' }
+
+  TestPlaceOrderAcceptsWhenHoursUndeclared:
+    name: "A checkout against an ACTIVE restaurant with a timezone but NO declared hours (the prod-smoke L4 shape) is accepted, and the frozen snapshot records verdict HOURS_UNDECLARED with a null window — not OPEN, and not a refusal"
+    rules:
+      - { $ref: 'rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours' }
+      - { $ref: 'rules.yaml#/ServiceWindowVerdictDerivedAtAnInstant' }
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      # Explicitly the emitter's default instant (tests.yaml header): with no hours declared the
+      # verdict is HOURS_UNDECLARED at ANY instant — the assertion is the snapshot evidence.
+      at: "2026-01-06T12:00:00Z"
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    then:
+      - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
+
+  TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence:
+    name: "A checkout inside the declared window (Friday 20:00 Paris, window 19:00–23:00) is accepted and the frozen snapshot carries verdict OPEN with the window's own instants and timezone — evidence a disputed acceptance can be proved from, not just an enum"
+    rules:
+      - { $ref: 'rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours' }
+      - { $ref: 'rules.yaml#/ServiceWindowVerdictDerivedAtAnInstant' }
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/restaurantHoursDeclared' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      # 18:00Z = 20:00 Europe/Paris (summer, UTC+2) on Friday 2026-08-14 — inside 19:00–23:00.
+      at: "2026-08-14T18:00:00Z"
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    then:
+      - { $ref: '#/fixtures/paymentIntentCreatedOpenWindow' }
+
+  TestPlaceOrderPaymentAuthorizedToleratesLegacySnapshotShape:
+    name: "A payment authorization for a snapshot frozen BEFORE the verdict evidence existed (no verdict/window keys at all) still materializes the order — the evidence fields are optional in fact, so old paid checkouts can never be orphaned by the new shape"
+    rules: [{ $ref: 'rules.yaml#/OrderMaterializedOnPaymentAuthorization' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+      - { $ref: '#/fixtures/paymentIntentCreatedLegacyShape' }
     when:
       type: { $ref: 'events.yaml#/PaymentAuthorized' }
       data: { paymentIntentId: "pi_123", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }

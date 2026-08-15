@@ -200,6 +200,15 @@ pub enum OperationStatus {
     FAILED,
 }
 
+/// "Is this restaurant serving right now?" as a three-valued VERDICT derived AT AN INSTANT from the declared opening hours + timezone with the clock injected — deliberately NOT a `*Status` (that suffix means stored state; nobody stores this, everybody computes it, and no event announces it). The third value is the whole point (DECISIONS §43 blocker): `opening_hours` storage collapses "never provided", "cleared" and "unparseable" into ONE `[]`, so `[]` IS HOURS_UNDECLARED by definition — never "closed" — and a NULL timezone (or one that does not parse while hours are declared) is HOURS_UNDECLARED too, because the once-documented account-timezone fallback has no materialized source. Evaluation converts the UTC instant into the restaurant's LOCAL time (total, DST-safe), never slot times to UTC; overnight slots (`to` < `from`, e.g. Friday 19:00–01:00) are legal and cross midnight. At checkout, OUTSIDE_HOURS is the ONLY refusing verdict — OPEN and HOURS_UNDECLARED accept (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ServiceWindowVerdict {
+    OPEN,
+    OUTSIDE_HOURS,
+    HOURS_UNDECLARED,
+}
+
 /// What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]

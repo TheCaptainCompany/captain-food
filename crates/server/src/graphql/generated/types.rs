@@ -211,6 +211,21 @@ pub struct CheckoutSnapshot {
     pub breakdown: PaymentBreakdown,
     #[graphql(name = "note")]
     pub note: Option<OrderNote>,
+    /// The service-hours verdict at acceptance. Absent on snapshots frozen before RSO-1; recorded even in shadow mode (the gate changes whether OUTSIDE_HOURS refuses, never whether the verdict is recorded).
+    #[graphql(name = "verdict")]
+    pub verdict: Option<ServiceWindowVerdict>,
+    /// Evidence: start instant of the window the verdict was judged against (null under HOURS_UNDECLARED, or pre-RSO-1).
+    #[graphql(name = "windowFrom")]
+    pub window_from: Option<chrono::DateTime<chrono::Utc>>,
+    /// Evidence: end instant of that window — min(door-close, cutoff), the same number the guard enforced.
+    #[graphql(name = "windowTo")]
+    pub window_to: Option<chrono::DateTime<chrono::Utc>>,
+    /// Evidence: the timezone the evaluation ran in (null when undeclared — one input to HOURS_UNDECLARED).
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+    /// Evidence: the injected request instant the verdict was evaluated at.
+    #[graphql(name = "evaluatedAt")]
+    pub evaluated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
@@ -776,6 +791,8 @@ pub struct Restaurant {
     #[graphql(name = "openingHours")]
     #[serde(default)]
     pub opening_hours: Vec<OpeningHoursSlot>,
+    #[graphql(name = "serviceWindow")]
+    pub service_window: ServiceWindow,
     #[graphql(name = "status")]
     pub status: RestaurantStatus,
     #[graphql(name = "orderAcceptance")]
@@ -803,6 +820,26 @@ pub struct Restaurant {
     #[graphql(name = "orders", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_admin")]
     #[serde(default)]
     pub orders: Vec<Order>,
+}
+
+/// The restaurant's service-hours verdict AT AN INSTANT. `verdict` is the ONLY discriminator — clients must never read nullability patterns as semantics. Orthogonal to `ServiceType`: ONE window governs both DELIVERY and COLLECTION.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceWindow {
+    #[graphql(name = "verdict")]
+    pub verdict: ServiceWindowVerdict,
+    /// Next opening instant. Set under OUTSIDE_HOURS (the 'Ouvre à 11:30' affordance); null under OPEN (already open) and HOURS_UNDECLARED (nothing to promise).
+    #[graphql(name = "opensAt")]
+    pub opens_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The latest instant an order can still be placed (kitchen cutoff) — a FUTURE deadline despite the `*At` suffix. Defined as min(current slot's door-close `to`, the declared cutoff): `cutoff` is a first-class term (HubRise `cutoff_time`, which the ACL maps nowhere today), so while no cutoff source is declared the formula DEGRADES EXPLICITLY to door-close (`slot.to`) — a documented degradation, never a silent fallback — and the instant displayed here is the SAME number the checkout guard enforces. Null under OUTSIDE_HOURS and HOURS_UNDECLARED.
+    #[graphql(name = "lastOrderAt")]
+    pub last_order_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row.
+    #[graphql(name = "evaluatedAt")]
+    pub evaluated_at: chrono::DateTime<chrono::Utc>,
+    /// The instant after which the client must RE-EVALUATE: min(next window transition, evaluatedAt + horizon), the horizon being configuration.yaml#/SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS; under HOURS_UNDECLARED (no transition to wait for) it is evaluatedAt + horizon. NON-NULL on purpose: a nullable expiry reads to every cache as "cache forever", which would keep a blank badge warm at Friday 19:00 — the hour it matters.
+    #[graphql(name = "validUntil")]
+    pub valid_until: chrono::DateTime<chrono::Utc>,
 }
 
 /// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).

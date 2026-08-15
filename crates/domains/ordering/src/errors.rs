@@ -147,6 +147,14 @@ pub const OUTSIDE_DELIVERY_AREA: ErrorDef = ErrorDef {
     message_fr: "Cette adresse est en dehors de la zone de livraison de '{restaurantName}'.",
 };
 
+/// PlaceOrder arrived at an instant outside the restaurant's declared service hours — thrown ONLY on verdict OUTSIDE_HOURS (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours: OPEN and HOURS_UNDECLARED both accept), and only while configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD is ON (default OFF = shadow). The context carries the NEXT OPENING SLOT (the actionable half of the message — "closed, opens tomorrow 11:30" is a different product from "closed") AND the refusal EVIDENCE: the window and timezone the verdict was evaluated against plus the evaluation instant, so a disputed refusal is provable from the record. Copy note: never phrase this as a refund/no-refund statement — the perishables withdrawal exemption is not a non-performance posture.
+/// Context: `restaurantId`, `restaurantName`, `nextOpensAt`, `windowFrom`, `windowTo`, `timezone`, `evaluatedAt`.
+pub const OUTSIDE_SERVICE_HOURS: ErrorDef = ErrorDef {
+    code: "OutsideServiceHours",
+    message_en: "'{restaurantName}' is closed right now — it opens again at {nextOpensAt}.",
+    message_fr: "'{restaurantName}' est fermé pour le moment — réouverture à {nextOpensAt}.",
+};
+
 /// Stripe declined the payment synchronously at checkout (no order placed).
 pub const PAYMENT_DECLINED: ErrorDef = ErrorDef {
     code: "PaymentDeclined",
