@@ -2,6 +2,15 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧾 **2026-08-15 — THE DECISION REGISTER RENDERS AS WRITTEN AGAIN, AND §13b IS AN ERROR**
+> ([#577 "Repair the seven register-table rows §13b found, then promote the gate to ERROR"](https://github.com/TheCaptainCompany/captain-food/issues/577)):
+> the seven broken table rows (SPEC-2, LOSS-1, IDOR-1, ENF-1, CAP-READY, CAP-READY-LEGAL in
+> `docs/proposals/DECISIONS.md`; one evidence row in PROP-20260811-090000) are repaired
+> byte-identically (geometry only, zero words moved), and BOTH §13b markdown-table rules
+> (`markdown-table-row-cell-count` + `markdown-table-delimiter-cell-count`) are promoted from
+> warning to ERROR — a reshaped register row now fails `make validate` instead of riding the
+> warning ratchet (baseline entry removed, 46 → 39).
+
 > 🔶 **2026-08-15 — RSO-1 IS CODE-COMPLETE ON THE BRANCH (PHASES 1–4):
 > [#180 "Opening hours are stored, displayed, and never enforced — a customer can order at 04:00"](https://github.com/TheCaptainCompany/captain-food/issues/180),
 > branch `180-rso1-opening-hours-guard`, draft [PR #576](https://github.com/TheCaptainCompany/captain-food/pull/576) — NOT on `main`; merge posture `HOLD: human` (ADR-20260815-115220: stored event shape + money path).**

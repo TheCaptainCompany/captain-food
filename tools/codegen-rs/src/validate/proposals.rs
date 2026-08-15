@@ -301,7 +301,7 @@ pub(crate) fn validate_markdown_tables(files: &[(String, String)]) -> Vec<Issue>
                 continue;
             };
             if delim != header.len() {
-                issues.push(warn(
+                issues.push(err(
                     "markdown-table-delimiter-cell-count",
                     format!("{}:{}", path, i + 2),
                     format!(
@@ -323,7 +323,7 @@ pub(crate) fn validate_markdown_tables(files: &[(String, String)]) -> Vec<Issue>
                     break; // conservative: a pipe-less line ends the table (see the section note)
                 };
                 if cells.len() != header.len() {
-                    issues.push(warn(
+                    issues.push(err(
                         "markdown-table-row-cell-count",
                         format!("{}:{}", path, j + 1),
                         format!(

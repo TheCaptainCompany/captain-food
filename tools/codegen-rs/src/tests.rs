@@ -5614,6 +5614,11 @@ Catalog:
             .find(|i| i.location == format!("{}:{}", path, line_no + 1))
             .unwrap_or_else(|| panic!("the injected row at line {} must be reported", line_no + 1));
         assert_eq!(hit.rule, "markdown-table-row-cell-count");
+        // §13b is an ERROR since the seven known breaks were repaired (#577): the corpus is clean,
+        // so a reshaped register row must FAIL the gate, not ride the warning ratchet.
+        // (`assert!` with `==` rather than `assert_eq!` because `Level` derives no `Debug` —
+        // the corpus style, same as `approved_proposal_must_reference_a_decision_record`.)
+        assert!(hit.level == Level::Error, "a register reshape must be a gate failure (Error), got a Warning");
         assert!(hit.message.contains("5 cell(s)") && hit.message.contains("declares 4"), "{}", hit.message);
     }
 
