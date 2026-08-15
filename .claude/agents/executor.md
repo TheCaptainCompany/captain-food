@@ -53,11 +53,13 @@ agents collide.
 7. **Mark the PR ready for review and enable auto-merge together, as one indivisible step** — this
    is the default (ADR-20260815-115220) — then **supervise the checks until MERGED**: fix and push
    on failure, never end at "pushed, CI pending".
-   - **Exception — the dispatch says `HOLD: human`**: stop at ready-for-review; a human merges. The
-     HOLD class: stored event shapes / fold or upcasting semantics / DB migrations; payments and
-     customer-funds custody; GDPR erasure; legal surfaces (allergens, VAT/receipt, P2B terms);
-     non-additive GraphQL schema changes; the actor mailbox/lease/fencing runtime; the merge/CI
-     machinery itself.
+   - **Exception — the dispatch says `HOLD: human`**: stop at ready-for-review. The "human" is the
+     TEAM — its independent reviewer pass — never the founder; no PR ever waits on founder review
+     (ADR-20260815-134655). Once that review PASSES and gates are green, the dispatch's poster (the
+     coordinator) merges. The HOLD class: stored event shapes / fold or upcasting semantics / DB
+     migrations; payments and customer-funds custody; GDPR erasure; legal surfaces (allergens,
+     VAT/receipt, P2B terms); non-additive GraphQL schema changes; the actor mailbox/lease/fencing
+     runtime; the merge/CI machinery itself.
    - If you recognize HOLD-class work in a dispatch that is not marked, stop at ready-for-review
      and say so in the PR — misclassification is a dispatch defect, not a licence to merge.
 8. **Record the budget**: `bash .claude/hooks/loop-budget.sh stop` and commit

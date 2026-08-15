@@ -446,8 +446,10 @@ failure rather than a misleading sentence.
   That ready+auto-merge step is the **default posture**; a dispatch marks **`HOLD: human`** for the
   named class (stored event shapes/fold semantics/migrations, payments/funds/erasure, legal surfaces,
   non-additive GraphQL changes, the mailbox runtime, the merge machinery itself), and those PRs stop
-  at ready-for-review for a human merge
-  ([ADR-20260815-115220](docs/adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)).
+  at ready-for-review until the TEAM's independent reviewer pass — never a founder wait; after
+  review PASS + green gates the coordinator merges
+  ([ADR-20260815-115220](docs/adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md),
+  amended by [ADR-20260815-134655](docs/adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md)).
 - Autonomous loops/routines run under the **weekly time budget** (`make budgeted-loop` or the routine
   guard) — Claude Code has no native cap; see [docs/claude/loops.md](docs/claude/loops.md) / ADR-0014.
 
