@@ -5201,6 +5201,108 @@ Catalog:
         assert!(errors.is_empty(), "proposal hygiene must be 0-error on the committed corpus:\n{}", errors.join("\n"));
     }
 
+    // ─── §13b — markdown table integrity (#572) ──────────────────────────────────────────────────
+
+    fn tables(md: &str) -> Vec<Issue> {
+        validate_markdown_tables(&[("docs/proposals/DECISIONS.md".to_string(), md.to_string())])
+    }
+
+    fn table_locations(issues: &[Issue]) -> Vec<String> {
+        issues.iter().map(|i| i.location.clone()).collect()
+    }
+
+    /// The defect the issue was filed for: a row that gained a cell renders with its tail SILENTLY
+    /// DROPPED by GFM. Seen red before the rule existed — on the parent commit this input produced
+    /// zero issues, because `DECISIONS.md` was outside the corpus `load_proposal_files` globs.
+    #[test]
+    fn a_stray_pipe_reshapes_a_row_and_the_rule_fires() {
+        let broken = "| # | Decision | Status |\n|---|---|---|\n| A | fine | open |\n| B | a | stray | pipe | open |\n";
+        let issues = tables(broken);
+        assert_eq!(hygiene_rules(&issues), vec!["markdown-table-row-cell-count"]);
+        assert_eq!(table_locations(&issues), vec!["docs/proposals/DECISIONS.md:4"], "file:line of the broken row");
+        assert!(issues[0].message.contains("5 cell(s)") && issues[0].message.contains("declares 3"), "expected vs actual: {}", issues[0].message);
+        // The other direction — a row that LOST a pipe renders a blank trailing column.
+        let short = "| # | Decision | Status |\n|---|---|---|\n| B | merged status |\n";
+        let issues = tables(short);
+        assert_eq!(hygiene_rules(&issues), vec!["markdown-table-row-cell-count"]);
+        assert!(issues[0].message.contains("2 cell(s)"), "{}", issues[0].message);
+        // A well-formed table is silent.
+        assert!(tables("| # | D |\n|---|---|\n| A | b |\n| C | d |\n").is_empty());
+    }
+
+    /// "Effective" cell count, the part a naive implementation gets wrong. The escape is what makes
+    /// a pipe inert — NOT the backticks around it (GFM spec §4.10: "include a pipe in a cell's
+    /// content by escaping it, INCLUDING INSIDE OTHER INLINE SPANS", example 200). So the corpus
+    /// form `` `NORMAL \| BUSY` `` counts as one cell and a raw `` `a|b` `` genuinely does not.
+    #[test]
+    fn a_pipe_is_made_inert_by_the_escape_not_by_a_code_span() {
+        let escaped = "| # | D |\n|---|---|\n| `NORMAL \\| BUSY \\| PAUSED` | ok |\n| x \\| y | ok |\n";
+        assert!(tables(escaped).is_empty(), "an escaped pipe never opens a cell, inside backticks or not");
+        // Raw pipe inside a code span: GFM splits it, so the row really is 3 cells wide and the
+        // tail really is dropped on GitHub. Firing here is the CORRECT behaviour, not a false
+        // positive — treating code spans as pipe-neutral would blind the rule to the #572 defect.
+        let raw_in_code_span = "| # | D |\n|---|---|\n| `filter(|g| g.scope)` | ok |\n";
+        assert_eq!(hygiene_rules(&tables(raw_in_code_span)), vec!["markdown-table-row-cell-count"]);
+        // Run length decides: `\|` (one backslash, odd) is inert, `\\|` (two, even) is an escaped
+        // BACKSLASH followed by a live pipe — so this row really is 3 cells against a 2-cell header.
+        let escaped_backslash = "| # | D |\n|---|---|\n| a\\\\|b | ok |\n";
+        assert_eq!(hygiene_rules(&tables(escaped_backslash)), vec!["markdown-table-row-cell-count"]);
+    }
+
+    /// Structure: fenced code is program text, the delimiter row is checked against the header
+    /// rather than as a body row, and leading/trailing pipes are delimiters rather than cells.
+    #[test]
+    fn table_scanning_skips_fences_and_checks_the_delimiter_row() {
+        let fenced = "```rust\n| this | is | code |\n|---|---|\n| and | so | is | this |\n```\n";
+        assert!(tables(fenced).is_empty(), "a fenced block is not a table");
+        // A wider fence is not closed by a narrower one nested inside it.
+        let nested = "````md\n```\n| a | b |\n|---|---|\n| c |\n```\n````\n";
+        assert!(tables(nested).is_empty());
+        // Pipe-less rows: GFM would treat the trailing prose line as a row; we end the table there
+        // instead, deliberately (no false positive on prose glued under a table).
+        assert!(tables("| a | b |\n|---|---|\n| c | d |\nprose glued on\n").is_empty());
+        // A delimiter row that disagrees with its header means NOTHING renders as a table.
+        let mismatch = "| a | b | c |\n|---|---|\n| d | e | f |\n";
+        assert_eq!(hygiene_rules(&tables(mismatch)), vec!["markdown-table-delimiter-cell-count"]);
+        // Alignment colons are delimiter cells; a table without leading/trailing pipes still counts.
+        assert!(tables("| a | b |\n|:--|--:|\n| c | d |\n").is_empty());
+        assert!(tables("a | b\n:-: | ---\nc | d\n").is_empty());
+        // A blank line or a heading ends the table, so what follows is not measured against it.
+        assert!(tables("| a | b |\n|---|---|\n| c | d |\n\n## Next\n| e |\n").is_empty());
+    }
+
+    /// The corpus result the issue asks for explicitly: the rule must be SILENT on rows that are
+    /// merely hard to parse, so every finding it does report is a real reshape. Pinned as an exact
+    /// location list — a new finding fails here with the line, and a fixed row fails here too, so
+    /// the seven known breaks cannot be quietly re-broken or quietly dropped.
+    #[test]
+    fn the_real_corpus_has_exactly_the_known_table_breaks() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_table_files(&root);
+        assert!(files.iter().any(|(p, _)| p.ends_with("DECISIONS.md")), "the register must be in the corpus");
+        let issues = validate_markdown_tables(&files);
+        // Pre-existing breaks, reported to the architect rather than silently repaired (#572): one
+        // row whose tail GFM DROPS (a raw `|` in a code span) and six register rows that supply 3
+        // cells to a 4-column header, leaving the trailing column blank. Severity is WARNING only
+        // because these exist; the §17 ratchet still fails CI on an eighth. Promoting §13b to ERROR
+        // is a one-liner once the seven rows are repaired.
+        let expected = [
+            "docs/proposals/DECISIONS.md:860",
+            "docs/proposals/DECISIONS.md:1887",
+            "docs/proposals/DECISIONS.md:1974",
+            "docs/proposals/DECISIONS.md:2011",
+            "docs/proposals/DECISIONS.md:2046",
+            "docs/proposals/DECISIONS.md:2047",
+            "docs/proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md:78",
+        ];
+        let mut got = table_locations(&issues);
+        got.sort();
+        let mut want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(got, want, "table findings on the committed corpus");
+        assert!(issues.iter().all(|i| i.level == Level::Warning), "§13b is a warning until the known rows are repaired");
+    }
+
     #[test]
     fn actor_clients_cover_every_mailbox_actor() {
         // #284 slice 1 (PROP-20260728-152752 §2.1): the typed-client surface must span the SAME
@@ -7348,6 +7450,7 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     // errors today — the committed artifact is written from the CLI's profile, so the day §16 grows a
     // warning kind, a narrower profile here would go red against a CORRECT artifact.
     issues.extend(validate_proposal_hygiene(&load_proposal_files(&root)));
+    issues.extend(validate_markdown_tables(&load_decision_table_files(&root)));
     issues.extend(validate_writer_schema_agreement(
         &load_migration_files(&root),
         &load_writer_files(&root),
