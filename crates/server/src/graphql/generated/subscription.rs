@@ -120,6 +120,10 @@ impl SubscriptionRoot {
         // "RESTAURANT paths are trusted" gap recorded on ADR-20260720-220000. Absent scope
         // (schema executed outside a transport) => Public, i.e. no rows — fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
+        // RSO-1: the validity horizon is connection-scoped CONFIGURATION; "now" is read PER YIELD
+        // below — on a long-lived subscription each pushed update is its own request, and a
+        // subscribe-time instant would serve every later push a stale serviceWindow.
+        let service_window_horizon = ctx.data_opt::<crate::graphql::service_clock::ServiceWindowHorizon>().copied().unwrap_or_default().0;
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars as ds;
@@ -193,9 +197,10 @@ impl SubscriptionRoot {
                             | ds::OrderStatus::CANCELLED_BY_CUSTOMER
                             | ds::OrderStatus::CANCELLED_BY_RESTAURANT
                     );
-                    // The non-null `restaurant` navigation field: hydrate like the `order` query does.
+                    // The non-null `restaurant` navigation field: hydrate like the `order` query
+                    // does — with THIS push's clock (see the horizon note above).
                     match restaurants.by_id(row.restaurant_id).await {
-                        Ok(Some(restaurant)) => yield Ok(Order::from((row, restaurant))),
+                        Ok(Some(restaurant)) => yield Ok(Order::from((row, Restaurant::at(restaurant, chrono::Utc::now(), service_window_horizon)))),
                         Ok(None) => {}
                         Err(e) => yield Err(async_graphql::Error::new(e.to_string())),
                     }

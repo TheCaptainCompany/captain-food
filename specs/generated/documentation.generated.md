@@ -7516,7 +7516,7 @@ _criticality: **high**_
 | --- | --- | --- | --- | --- |
 | `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.actor`* |
 | `command.journal` | `INTERNAL` | ✅ | — | `business.message_id`*, `business.journal_status`* |
-| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`*, `business.service_window_verdict` |
+| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`*, `business.service_window_verdict`* |
 | `cart.read` | `INTERNAL` | ✅ | — | `business.aggregate_id`* |
 | `pricing.compute` | `INTERNAL` | ✅ | — | `business.service_fee`*, `business.split_ok`* |
 | `payment.intent.create` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |

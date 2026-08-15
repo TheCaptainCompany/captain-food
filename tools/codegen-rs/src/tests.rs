@@ -867,6 +867,78 @@ keys:
         }
     }
 
+    /// A minimal model whose one test carries the given `when.at` — the fixture for the two
+    /// `when.at` gates below (RSO-1). The offset-carrying variant is exactly the value a
+    /// well-meaning author writes ("04:00 Paris is +02:00"), which is why the grammar refuses it.
+    fn when_at_model(at: &str) -> Model {
+        inline_model(&[
+            ("commands.yaml", "PlaceOrder:\n  type: object\n  properties: {}\n"),
+            (
+                "actors.yaml",
+                "Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n",
+            ),
+            (
+                "tests.yaml",
+                &format!(
+                    "tests:\n  TestClockShape:\n    actor: {{ $ref: 'actors.yaml#/Order' }}\n    when:\n      type: {{ $ref: 'commands.yaml#/PlaceOrder' }}\n      at: \"{}\"\n      data: {{}}\n",
+                    at
+                ),
+            ),
+        ])
+    }
+
+    /// `when.at` through the FULL validator (RSO-1): a malformed instant is the
+    /// `test-when-at-not-instant` ERROR, located at the field — so a clock-consuming test can
+    /// never reach the emitter with a value whose chrono parse would fail at runtime.
+    #[test]
+    fn when_at_malformed_is_a_validation_error_through_validate() {
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00+02:00"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-at-not-instant")
+            .expect("malformed when.at must be reported");
+        assert!(hit.location.ends_with("TestClockShape.when.at"), "{}", hit.location);
+        // The negative control: the SAME model with a Z-normalized instant is clean of this rule
+        // (without it, a rule that fired on every `when.at` would pass the assertion above).
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00Z"));
+        assert!(
+            !issues.iter().any(|i| i.rule == "test-when-at-not-instant"),
+            "a Z-normalized instant is legal: {:?}",
+            issues.iter().filter(|i| i.rule == "test-when-at-not-instant").map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `when.at` on a command whose handler takes NO instant is an emitter PANIC, never a silent
+    /// no-op (the #413 "silently invisible" defect class): a value the generated test would drop
+    /// asserts nothing while looking like it asserts the clock.
+    #[test]
+    #[should_panic(
+        expected = "`when.at` is set but 'RegisterRestaurant' is not clock-consuming"
+    )]
+    fn behaviour_tests_emitter_refuses_when_at_on_a_non_clock_consuming_command() {
+        // `bt_event_owners` resolves EVERY `BT_AGGREGATES` entry up front, so the minimal model
+        // stubs the whole roster; only Restaurant receives the command under test.
+        let mut actors = String::new();
+        for (agg, _, _) in BT_AGGREGATES {
+            if *agg == "Restaurant" {
+                actors.push_str(
+                    "Restaurant:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      emits: []\n",
+                );
+            } else {
+                actors.push_str(&format!("{}:\n  type: aggregate\n  receives: []\n", agg));
+            }
+        }
+        let m = inline_model(&[
+            ("commands.yaml", "RegisterRestaurant:\n  type: object\n  properties: {}\n"),
+            ("actors.yaml", &actors),
+            (
+                "tests.yaml",
+                "tests:\n  TestX:\n    actor: { $ref: 'actors.yaml#/Restaurant' }\n    when:\n      type: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      at: \"2026-01-06T12:00:00Z\"\n      data: {}\n",
+            ),
+        ]);
+        let _ = emit_behaviour_tests(&m);
+    }
+
     /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
     ///
     /// The emitter used to substitute `0` for a defaultless `int`, so

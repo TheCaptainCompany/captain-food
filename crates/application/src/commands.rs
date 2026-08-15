@@ -2377,6 +2377,13 @@ pub async fn place_replacement_order(
 ///     events") → emit `OrderPlaced` on `Order-<orderId>` and `CartCheckedOut` on `Cart-<cartId>`,
 ///     from the checkout snapshot frozen on the Payment stream;
 ///   * `events.yaml#/PaymentFailed` (INBOUND) → abort: no OrderPlaced, the cart stays OPEN.
+/// Z-normalized RFC3339 (`2026-08-14T17:00:00Z`) — the ONE grammar the RSO-1 snapshot evidence
+/// uses, matching `when.at` in specs/tests.yaml (never `+00:00`, which `to_rfc3339()` emits and
+/// the fixtures would fail string-equality on).
+fn rfc3339_z(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
 pub async fn place_order(
     store: &dyn EventStore,
     catalogs: &dyn CatalogReadRepository,
@@ -2387,6 +2394,12 @@ pub async fn place_order(
     // the PM run row so an anonymous checkout can read paymentStatus after a restart (#12).
     session_id: Option<domain::generated::scalars::SessionId>,
     actor: &Actor,
+    // RSO-1 (DECISIONS §43): the EVALUATION INSTANT — read once at the delivery seam and passed
+    // as a parameter (the `sms_guard.rs` precedent: a handler reading the system clock internally
+    // cannot have both edges of the service window asserted). Phase 3 records the service-window
+    // EVIDENCE onto the frozen snapshot with it; the refusing guard itself (OUTSIDE_HOURS →
+    // errors.yaml#/OutsideServiceHours, behind its gate flag) is Phase 4 of #180.
+    when_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<PaymentRequestOutput, DomainError> {
     // The restaurant must exist, be ACTIVE and not PAUSED — folded from ITS stream (authoritative,
     // race-free; the saga may read other aggregates' streams through the same EventStore port).
@@ -2415,6 +2428,21 @@ pub async fn place_order(
     if restaurant_is_test && cmd.mode != Some(Mode::TEST) {
         return Err(reject("CannotOrderTestRestaurant", json!({ "restaurantId": cmd.restaurant_id })));
     }
+    // The service-hours evaluation AT the injected instant (RSO-1): the ONE domain function the
+    // storefront badge also renders from, over the fold's own declared hours + timezone — so the
+    // number a refusal would enforce is the number the badge displayed. Cutoff: no source is
+    // mapped today (HubRise `cutoff_time`), so `None` degrades explicitly to door-close. The
+    // horizon is irrelevant here — the frozen EVIDENCE deliberately has no validUntil (a
+    // config-derived TTL is not history), so zero makes the non-use explicit. Phase 3 RECORDS
+    // the verdict (even in shadow mode the verdict is recorded — the gate changes whether
+    // OUTSIDE_HOURS refuses, never whether it is recorded); the refusal is Phase 4.
+    let service_window = domain::service_window::serving_at(
+        &restaurant.opening_hours,
+        restaurant.timezone.as_ref(),
+        None,
+        when_at,
+        chrono::Duration::zero(),
+    );
     // The cart must exist, be OPEN, belong to this restaurant and hold at least one line.
     let (cart, _cart_version) = require_cart(store, &cmd.cart_id).await?;
     if cart.status != CartStatus::OPEN {
@@ -2539,6 +2567,14 @@ pub async fn place_order(
         total_amount: gross.clone(),
         breakdown: priced.breakdown.clone(),
         note: cmd.note.clone(),
+        // RSO-1 acceptance EVIDENCE: the verdict this checkout was evaluated at, with the
+        // window's own instants and timezone — a disputed acceptance is proved from these, not
+        // from an enum alone. Z-normalized RFC3339, matching the tests.yaml fixture grammar.
+        verdict: Some(service_window.verdict),
+        window_from: service_window.window_from.map(rfc3339_z),
+        window_to: service_window.last_order_at.map(rfc3339_z),
+        timezone: restaurant.timezone.clone(),
+        evaluated_at: Some(rfc3339_z(when_at)),
     };
     // Deliver the saga's first fact to the Payment aggregate's stream — its BIRTH (the Order stream
     // stays empty until the capture leg materializes OrderPlaced). `create` absorbs a version-0 clash:
@@ -3822,7 +3858,11 @@ mod credit_checkout_tests {
             payment_method_id: "pm_123".into(),
             expected_total: None,
         };
-        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor())
+        // The emitter's fixed default instant (tests.yaml header) — this restaurant declares no
+        // hours, so the verdict is HOURS_UNDECLARED at any instant and the checkout is accepted.
+        let when_at: chrono::DateTime<chrono::Utc> =
+            "2026-01-06T12:00:00Z".parse().expect("RFC3339 instant");
+        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor(), when_at)
             .await
             .expect("checkout accepted");
 

@@ -527,7 +527,7 @@ pub async fn dispatch_command(
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("PlaceOrder payload: {e}")))),
             };
-            Some(application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), &actor).await.map(|_| ()))
+            Some(application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), &actor, chrono::Utc::now()).await.map(|_| ()))
         }
         "AcceptOrder" => {
             let cmd: domain::generated::commands::AcceptOrder = match serde_json::from_value(payload.clone()) {

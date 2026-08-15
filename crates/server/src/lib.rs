@@ -385,6 +385,9 @@ pub fn build_graphql_di(
     mailbox_nudges: &Arc<infrastructure::persistence::mailbox_store::MailboxNudges>,
     // #516: the OTP send guards, so the identity ACL can shed a doomed request with a typed reason.
     sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>>,
+    // RSO-1: the service-window validity horizon (SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS), read
+    // from the caller's Config ONCE — a parameter, so every bin passes its own configured value.
+    service_window_horizon: graphql::service_clock::ServiceWindowHorizon,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -447,6 +450,7 @@ pub fn build_graphql_di(
         reclamations,
         customer_credit,
         mailbox_lanes,
+        service_window_horizon,
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -622,6 +626,9 @@ pub async fn router() -> Router {
                     &operation_status_bus,
                     &mailbox_nudges,
                     sms_guard.clone(),
+                    graphql::service_clock::ServiceWindowHorizon::from_seconds(
+                        config.service_window_validity_horizon_seconds,
+                    ),
                 );
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();

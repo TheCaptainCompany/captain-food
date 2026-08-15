@@ -83,6 +83,10 @@ pub(super) async fn prepare(
                 cmd,
                 message.session_id.map(domain::generated::scalars::SessionId),
                 actor,
+                // RSO-1: the evaluation instant, read ONCE here at the delivery seam (the
+                // framework boundary) — the handler takes `now` as a parameter and never reads
+                // a clock itself (the `sms_guard.rs` precedent).
+                chrono::Utc::now(),
             )
             .await
             .map(|_| ()),

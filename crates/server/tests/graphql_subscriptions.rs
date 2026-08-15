@@ -452,6 +452,8 @@ fn schema_over_with_deliveries(
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         Some(bus),
@@ -1123,6 +1125,8 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         None,

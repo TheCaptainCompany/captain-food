@@ -12,7 +12,6 @@
 //!   defect counter live HERE, the framework boundary — the pricer stays SDK-free).
 
 use application::pricing::{price_cart, CatalogSnapshot};
-use application::projections::RestaurantRow;
 use application::queries::{CartReadRepository, CartRow, CatalogReadRepository, ReadScope};
 use domain::generated::entities::CartLineItem;
 use domain::generated::scalars::{CartStatus, SessionId};
@@ -20,7 +19,7 @@ use domain::shared::errors::DomainError;
 use tracing::Instrument;
 
 use super::generated::scalars::{CurrencyCode, MoneyCents};
-use super::generated::types::{Cart, Money};
+use super::generated::types::{Cart, Money, Restaurant};
 use super::tenant::TenantScope;
 
 /// The TWO-LEG `current` resolution (ADR-20260810-120531), **within ONE tenant** (#469). Carts are
@@ -117,7 +116,11 @@ pub fn readable_by(row: &CartRow, scope: &ReadScope) -> bool {
 pub async fn priced(
     catalogs: &dyn CatalogReadRepository,
     row: CartRow,
-    restaurant: RestaurantRow,
+    // The already clock-evaluated navigation target (RSO-1): built ONCE by the resolver via
+    // `Restaurant::at` with the request clock — a `RestaurantRow` here would force this seam to
+    // invent its own instant, and the cart's embedded serviceWindow could disagree with the
+    // page's other cards.
+    restaurant: Restaurant,
     correlation_id: uuid::Uuid,
 ) -> async_graphql::Result<Cart> {
     let span = telemetry::spans::cart_price(&row.cart_id.0.to_string());
@@ -186,7 +189,7 @@ pub async fn priced(
             // owns the impure survivors; the degenerate shape ships — same as checkout).
             uber_comparison: None,
             updated_at: row.updated_at,
-            restaurant: restaurant.into(),
+            restaurant,
         })
     }
     .instrument(span.clone())
@@ -208,7 +211,7 @@ pub async fn priced(
 /// The zero-lines cart: the honest sum of nothing, not a fabricated payable. Shares one
 /// construction with nothing else on purpose — the PRICED shape is built from `price_cart`'s
 /// output and must never be reachable from a path that did not price.
-fn unpriced_empty(row: &CartRow, restaurant: RestaurantRow) -> Cart {
+fn unpriced_empty(row: &CartRow, restaurant: Restaurant) -> Cart {
     Cart {
         id: row.cart_id.into(),
         restaurant_id: row.restaurant_id.into(),
@@ -222,7 +225,7 @@ fn unpriced_empty(row: &CartRow, restaurant: RestaurantRow) -> Cart {
         breakdown: None,
         uber_comparison: None,
         updated_at: row.updated_at,
-        restaurant: restaurant.into(),
+        restaurant,
     }
 }
 
