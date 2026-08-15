@@ -2057,9 +2057,23 @@ and surfaced **one genuine option space that a test is currently foreclosing**, 
 constraints for PR2 that must not evaporate with the session (the anti-repeat discipline of §37 /
 [ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md)).
 **PR1 (the grammar + its gates) and PR2 (the derivation that consumes it) are deliberately split**:
-the declaration is provably incomplete today — two legs need code changes before they can be declared
-— so a derivation built on it now would be honest about the wrong set, and a money-path runtime
-narrowing does not belong under a doc-comment diff.
+the declaration is provably incomplete today — the carried reads below cannot be declared without
+code changes or a grammar decision — so a derivation built on it now would be honest about the wrong
+set, and a money-path runtime narrowing does not belong under a doc-comment diff.
+
+**Carried undeclared reads (a NON-EXHAUSTIVE list — PR2's independent derivation is what closes it).**
+The branch originally enumerated exactly two; the independent third-look review of PR
+[#566](https://github.com/TheCaptainCompany/captain-food/pull/566) found a third it never named:
+**(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` with no `read:` step
+(`reclamation.rs:141`, wired `runner.rs:488-490`); **(2)** `PlaceOrderProcess`/`PaymentAuthorized`
+loads `Payment-<intentId>` for the frozen `CheckoutSnapshot` (`place_order.rs:47`); **(3)**
+`DeliveryDispatchProcess`/`OrderMarkedReady`'s `build_delivery_requested`
+(`crates/application/src/process_managers/delivery_dispatch.rs:150`) folds the Order aggregate's own
+stream to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode` (the code's own
+comment). (3) is also the grammar counterexample RDR-1 below wants: `mode` exists on **no**
+projection table, so this read is *inexpressible* under the borrowed-projection-shape rule — stronger
+option-B evidence than the `balance_cents` hole. Practical grant risk today nil: the leg's Restaurant
+`EVENT_STREAM` step already grants `captain_write` — hence carried, not blocking.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
@@ -2117,6 +2131,14 @@ narrowing does not belong under a doc-comment diff.
   `git show main:specs/...` taken before PR1's notes landed). PR1's `note:` fields import call-site
   answers into the spec, and PR1 already performed one comparison — see the correction in
   `docs/STATUS.md` (architect).
+- **The `DispatchStrategyRepository` referential-table reads (`dispatch_strategy.rs:35-57`) are a
+  read class outside both the grammar and this list** — name them in PR2's sweep so the derivation
+  does not silently drop their grant (third-look review of
+  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
+- **The C4 sequence emitter is a `read.model` consumer RDR-1 must sweep**: today it still renders the
+  `CustomerCreditBalance` `EVENT_STREAM` step as a read-model SELECT, i.e. it draws the read the leg
+  never performs (third-look review of
+  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
 
 
 ---

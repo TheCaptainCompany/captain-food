@@ -32,7 +32,11 @@
 > written into the spec. What PR2 adds is that the second comparison is MECHANICAL and repeatable;
 > this one was a careful hand-read, which is the class of work that already missed four times.
 >
-> **TWO UNDER-DECLARATIONS FIXED, TWO CARRIED TO PR2.** Fixed: `PlaceOrderProcess`/`PlaceOrder` did not
+> **TWO UNDER-DECLARATIONS FIXED; THE CARRIED-TO-PR2 LIST IS NON-EXHAUSTIVE — THREE KNOWN.** (This
+> entry originally said "two carried"; the independent third-look review of PR
+> [#566](https://github.com/TheCaptainCompany/captain-food/pull/566) found a third the branch never
+> named — item (3) below — which is itself the hand-read failure class this work exists to end.)
+> Fixed: `PlaceOrderProcess`/`PlaceOrder` did not
 > declare the `Catalog` read it prices every checkout from — a derivation over the old declaration
 > would have concluded checkout needs no catalog access, which is register row **STO-7**'s exact
 > question answered wrongly in the direction that breaks every order — nor the `CustomerCreditState`
@@ -42,13 +46,20 @@
 > undercharged, on the money path, silently). Both are now guarded by
 > `the_checkout_leg_declares_every_read_it_prices_an_order_from`, which pins the money leg's whole read
 > set: before it existed, the `Catalog` fix could be reverted by ONE line deletion with `make validate`
-> still at 0 errors and every test green. Carried to PR2 because both need CODE, not a declaration:
+> still at 0 errors and every test green. Carried to PR2 because none is a pure declaration:
 > **(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` (`reclamation.rs:141`,
 > wired `runner.rs:488-490`) with no `read:` step — that leg IS generated, so a step emits a hook the
 > hand-written wrapper does not implement; **(2)** `PlaceOrderProcess`/`PaymentAuthorized` loads
 > `Payment-<intentId>` for the frozen `CheckoutSnapshot` (`place_order.rs:47`) — the read that decides
 > what the restaurant is owed, and denied it errors AFTER Stripe authorized: money held, no
-> `OrderPlaced`, nobody told. **The derivation that consumes `source:` is NOT in this change**: nothing
+> `OrderPlaced`, nobody told; **(3)** `DeliveryDispatchProcess`/`OrderMarkedReady`'s
+> `build_delivery_requested` (`delivery_dispatch.rs:150`) folds the **Order aggregate's own stream**
+> to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode` (the code's own comment) —
+> found by the third-look review, and it is the grammar counterexample RDR-1 wants: `mode` exists on
+> NO projection table, so this read is **inexpressible** under the borrowed-projection-shape rule —
+> stronger [DECISIONS §42 RDR-1](proposals/DECISIONS.md) option-B evidence than the `balance_cents`
+> hole (practical grant risk today nil: the leg's Restaurant `EVENT_STREAM` step already grants
+> `captain_write`). **The derivation that consumes `source:` is NOT in this change**: nothing
 > reads the key yet, so `make generate` moved generated doc comments only.
 >
 > Adjacent, recorded not fixed:
