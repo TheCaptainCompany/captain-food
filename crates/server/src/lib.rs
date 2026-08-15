@@ -887,6 +887,10 @@ pub async fn router() -> Router {
                                 pool.clone(),
                             ),
                         ),
+                        // RSO-1 Phase 4: the PlaceOrder service-hours enforcement gate (default
+                        // OFF = shadow), resolved from the declared configuration ONCE here at
+                        // the composition root — the handler takes it as a parameter.
+                        enforce_service_hours_guard: config.enforce_service_hours_guard,
                     };
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

@@ -5900,7 +5900,7 @@ _A translation can only be recorded for a message that was actually posted to th
 
 _"Is this restaurant serving right now?" is a three-valued VERDICT (OPEN / OUTSIDE_HOURS / HOURS_UNDECLARED) derived AT AN INSTANT from the declared opening hours + timezone with the clock injected — one shared derivation consumed by both the api serviceWindow field and the checkout guard, so badge and guard cannot disagree. Empty hours ([] — which storage makes indistinguishable from "cleared" and "unparseable") and a missing/unparseable timezone are HOURS_UNDECLARED, never "closed": a verdict must not take a live restaurant offline over missing seed data. Evaluation converts the instant to the restaurant's local time (DST-safe); overnight slots cross midnight; the effective close is min(door-close, cutoff) with the degradation to door-close explicit while no cutoff source is declared._
 
-- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
+- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`](#test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
 
 <a id="rule-orderableexcludesservicehours"></a>
 #### 📐 Rule: `OrderableExcludesServiceHours`
@@ -5998,7 +5998,7 @@ _Checkout reads the open cart's money-free lines, prices them from the live cata
 
 _PlaceOrder refuses on service hours ONLY at verdict OUTSIDE_HOURS (errors.yaml#/OutsideServiceHours, carrying the next opening slot and the evaluated window/timezone/instant as evidence); OPEN and HOURS_UNDECLARED both ACCEPT — a deliberately activated restaurant with no declared hours takes orders (DECISIONS §43 fourth amendment: refusing over missing seed data is the worse failure, and a zero-order graph is indistinguishable from "no demand"). Every accepted checkout freezes the verdict evidence onto the CheckoutSnapshot regardless of the enforcement gate (configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD, default OFF = shadow), so the log can prove what was known at acceptance; a snapshot frozen BEFORE the evidence existed still materializes its order (the fields are optional forever)._
 
-- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
+- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`](#test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
 
 <a id="rule-ordertestmodeisolation"></a>
 #### 📐 Rule: `OrderTestModeIsolation`
@@ -6906,6 +6906,16 @@ _A checkout at 04:00 against a restaurant with declared hours (Friday 19:00–23
 - **Thrown**: [⛔ `OutsideServiceHours`](#error-outsideservicehours)
 - **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant), [📐 `OrderableExcludesServiceHours`](#rule-orderableexcludesservicehours)
 
+<a id="test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict"></a>
+#### 🧪 Test: `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`
+
+_The SAME 04:00 checkout with the enforcement gate OFF (the production default) is ACCEPTED — shadow mode — and the frozen snapshot records verdict OUTSIDE_HOURS, so the log can prove what the guard would have refused before the default flips_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
 <a id="test-testplaceorderacceptswhenhoursundeclared"></a>
 #### 🧪 Test: `TestPlaceOrderAcceptsWhenHoursUndeclared`
 
@@ -7263,6 +7273,16 @@ _A checkout at 04:00 against a restaurant with declared hours (Friday 19:00–23
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `OutsideServiceHours`](#error-outsideservicehours)
 - **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant), [📐 `OrderableExcludesServiceHours`](#rule-orderableexcludesservicehours)
+
+<a id="test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict"></a>
+#### 🧪 Test: `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`
+
+_The SAME 04:00 checkout with the enforcement gate OFF (the production default) is ACCEPTED — shadow mode — and the frozen snapshot records verdict OUTSIDE_HOURS, so the log can prove what the guard would have refused before the default flips_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
 
 <a id="test-testplaceorderacceptswhenhoursundeclared"></a>
 #### 🧪 Test: `TestPlaceOrderAcceptsWhenHoursUndeclared`

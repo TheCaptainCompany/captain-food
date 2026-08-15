@@ -94,7 +94,7 @@ use domain::generated::events::{
 use domain::generated::scalars::{
     CartId, CartStatus, CatalogItemAvailability, DeliveryJobId, DeliveryStatus, Mode,
     OrderAcceptanceMode, OrderId, OrderStatus, OptionId, PaymentProcessStatus, PaymentStatus,
-    RiderId, RiderStatus, ServiceType, TipRecipient, Tipper,
+    RiderId, RiderStatus, ServiceType, ServiceWindowVerdict, TipRecipient, Tipper,
 };
 use domain::order::OrderState;
 use domain::rider::RiderState;
@@ -2397,9 +2397,13 @@ pub async fn place_order(
     // RSO-1 (DECISIONS §43): the EVALUATION INSTANT — read once at the delivery seam and passed
     // as a parameter (the `sms_guard.rs` precedent: a handler reading the system clock internally
     // cannot have both edges of the service window asserted). Phase 3 records the service-window
-    // EVIDENCE onto the frozen snapshot with it; the refusing guard itself (OUTSIDE_HOURS →
-    // errors.yaml#/OutsideServiceHours, behind its gate flag) is Phase 4 of #180.
+    // EVIDENCE onto the frozen snapshot with it; Phase 4 adds the refusing guard below.
     when_at: chrono::DateTime<chrono::Utc>,
+    // RSO-1 Phase 4: `configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD`, resolved ONCE at the
+    // delivery seam and passed as a parameter, same style as `when_at` — no global/env read
+    // inside the handler, so the in-process test suite stays order-independent and both gate
+    // edges are assertable (tests.yaml `when.gates`).
+    enforce_service_hours_guard: bool,
 ) -> Result<PaymentRequestOutput, DomainError> {
     // The restaurant must exist, be ACTIVE and not PAUSED — folded from ITS stream (authoritative,
     // race-free; the saga may read other aggregates' streams through the same EventStore port).
@@ -2443,6 +2447,36 @@ pub async fn place_order(
         when_at,
         chrono::Duration::zero(),
     );
+    // THE REFUSING GUARD (RSO-1 Phase 4, rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours):
+    // OUTSIDE_HOURS is the ONLY refusing verdict — OPEN and HOURS_UNDECLARED both accept — and
+    // only while the gate is ON (OFF = shadow: the verdict is still frozen onto the snapshot
+    // below, it just never refuses). Positioned immediately after the evaluation and BEFORE any
+    // external effect (`payments.request` creates a Stripe intent; refusing after it would
+    // strand a real intent for an order we never meant to take). Decided off the FOLDED
+    // RestaurantState evaluation in hand — never a snapshot, never a projection — so the number
+    // this refusal enforces is the number the storefront badge displayed. The context carries the
+    // next opening slot (the actionable half of the message) plus the refusal EVIDENCE:
+    // window/timezone/instant, so a disputed refusal is provable from the record. Under
+    // OUTSIDE_HOURS `serving_at` carries no window instants (they exist under OPEN only), so
+    // windowFrom/windowTo are null here by construction — the declared context is nullable for
+    // exactly this shape.
+    if enforce_service_hours_guard && service_window.verdict == ServiceWindowVerdict::OUTSIDE_HOURS
+    {
+        return Err(reject(
+            "OutsideServiceHours",
+            json!({
+                "restaurantId": cmd.restaurant_id,
+                "restaurantName": restaurant.display_name,
+                "nextOpensAt": service_window.opens_at.map(rfc3339_z),
+                "windowFrom": service_window.window_from.map(rfc3339_z),
+                "windowTo": service_window.last_order_at.map(rfc3339_z),
+                // OUTSIDE_HOURS requires a parseable timezone by construction (an unusable one
+                // degrades the verdict to HOURS_UNDECLARED), so this is always present here.
+                "timezone": restaurant.timezone,
+                "evaluatedAt": rfc3339_z(when_at),
+            }),
+        ));
+    }
     // The cart must exist, be OPEN, belong to this restaurant and hold at least one line.
     let (cart, _cart_version) = require_cart(store, &cmd.cart_id).await?;
     if cart.status != CartStatus::OPEN {
@@ -3862,7 +3896,7 @@ mod credit_checkout_tests {
         // hours, so the verdict is HOURS_UNDECLARED at any instant and the checkout is accepted.
         let when_at: chrono::DateTime<chrono::Utc> =
             "2026-01-06T12:00:00Z".parse().expect("RFC3339 instant");
-        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor(), when_at)
+        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor(), when_at, false)
             .await
             .expect("checkout accepted");
 

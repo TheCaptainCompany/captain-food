@@ -969,6 +969,58 @@ pub(crate) fn validate(model: &Model) -> Report {
                     }
                 }
 
+                // `when.gates` — the boolean configuration gates switched ON for this one dispatch
+                // (RSO-1 Phase 4): each entry is a `$ref` into `configuration.yaml#/keys/<KEY>`
+                // ("every reference is a $ref", ADR-20260811-014129 Decision 2 — a bare key name
+                // would be invisible to the refs walker, the #413 defect class), and the key must
+                // be `type: bool` — a non-boolean key is not a gate and `true` would assert
+                // nothing about it.
+                if let Some(gates) = when.and_then(|w| w.get("gates")) {
+                    let entries: Vec<&Value> =
+                        gates.as_sequence().map(|s| s.iter().collect()).unwrap_or_default();
+                    if entries.is_empty() {
+                        issues.push(err(
+                            "test-when-gate-not-config-ref",
+                            format!("{}.when.gates", where_),
+                            "`when.gates` must be a non-empty list of `{ $ref: 'configuration.yaml#/keys/<KEY>' }` entries (omit the list entirely for spec defaults).".into(),
+                        ));
+                    }
+                    for (i, entry) in entries.iter().enumerate() {
+                        let gate_key = entry
+                            .get("$ref")
+                            .and_then(|r| r.as_str())
+                            .and_then(|r| r.strip_prefix("configuration.yaml#/keys/"));
+                        let Some(gate_key) = gate_key else {
+                            issues.push(err(
+                                "test-when-gate-not-config-ref",
+                                format!("{}.when.gates[{}]", where_, i),
+                                "each `when.gates` entry must be `{ $ref: 'configuration.yaml#/keys/<KEY>' }` — a configuration gate, referenced as a $ref.".into(),
+                            ));
+                            continue;
+                        };
+                        let key_def = model
+                            .defs
+                            .get("configuration.yaml")
+                            .and_then(|c| c.get("keys"))
+                            .and_then(|k| k.get(gate_key));
+                        match key_def {
+                            None => issues.push(err(
+                                "test-when-gate-not-config-ref",
+                                format!("{}.when.gates[{}]", where_, i),
+                                format!("configuration key '{}' is not declared in any specs/{{scope}}/configuration.yaml fragment.", gate_key),
+                            )),
+                            Some(def) if def.get("type").and_then(|t| t.as_str()) != Some("bool") => {
+                                issues.push(err(
+                                    "test-when-gate-not-bool",
+                                    format!("{}.when.gates[{}]", where_, i),
+                                    format!("configuration key '{}' is not `type: bool` — only a boolean gate can be switched ON by a test.", gate_key),
+                                ))
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                }
+
                 let msg = ref_name(when_ref).unwrap_or_default();
                 let entry_idx = if !actor_name.is_empty() && !msg.is_empty() {
                     inbox.get(&actor_name).and_then(|m| m.get(&msg)).copied()

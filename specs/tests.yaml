@@ -21,6 +21,15 @@ description: >
   noon UTC), so every test is deterministic; the emitter REFUSES `at` on a command whose call does
   not consume the clock (silently ignoring it would be the #413 "silently invisible" defect class).
 
+  GATES — `when.gates` (RSO-1 Phase 4): a handler whose behaviour is switched by a boolean
+  configuration key takes that gate as a PARAMETER (no global/env read inside a handler — the
+  in-process suite must stay order-independent), and a test switches it ON for one dispatch by
+  listing the key in the optional `when.gates`: a LIST of `$ref`s into
+  `configuration.yaml#/keys/<KEY>`. Absent list (or an absent key) = the key's spec DEFAULT, so
+  the suite exercises production posture unless a test says otherwise. Each entry must resolve to
+  a `type: bool` configuration key (validator `test-when-gate-*`), and the emitter REFUSES a gate
+  on a command whose call does not consume it — the same posture as `when.at`.
+
   Validated by the codegen (tests.yaml is a source file) — see `make validate`:
     - every `$ref` resolves (events / commands / actors / errors / local fixtures);
     - the `when` message is one the named actor RECEIVES (actors.yaml inbox);
@@ -451,6 +460,40 @@ fixtures:
         windowTo: "2026-08-14T21:00:00Z"
         timezone: "Europe/Paris"
         evaluatedAt: "2026-08-14T18:00:00Z"
+  # RSO-1 shadow-mode evidence (Phase 4): verdict OUTSIDE_HOURS frozen onto an ACCEPTED checkout
+  # (enforcement gate OFF). Under OUTSIDE_HOURS the domain evaluation carries NO window instants
+  # (`serving_at` sets windowFrom/lastOrderAt only under OPEN), so the evidence is the verdict +
+  # timezone + the evaluation instant — asserted through the REAL fold-and-freeze path, never a
+  # hand-invented window.
+  paymentIntentCreatedOutsideHoursShadow:
+    type: { $ref: 'events.yaml#/PaymentIntentCreated' }
+    data:
+      paymentIntentId: "pi_123"
+      restaurantId: "resto-1"
+      customerId: "cust-1"
+      amount: { amountCents: 1960, currency: "EUR" }
+      checkout:
+        orderId: "order-1"
+        cartId: "cart-1"
+        restaurantId: "resto-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        items:
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
+        breakdown:
+          articles: { amountCents: 1960, currency: "EUR" }
+          delivery: { amountCents: 0, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
+          restaurantContribution: { amountCents: 0, currency: "EUR" }
+          restaurantPayout: { amountCents: 1960, currency: "EUR" }
+          riderPayout: { amountCents: 0, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
+        verdict: "OUTSIDE_HOURS"
+        timezone: "Europe/Paris"
+        evaluatedAt: "2026-08-14T02:00:00Z"
   # RSO-1 old-shape tolerance: a snapshot frozen BEFORE the verdict evidence existed (no verdict/
   # window/timezone/evaluatedAt keys at all — the exact shape of stored pre-RSO-1
   # PaymentIntentCreated rows). Given-seeding this and materializing the order proves the fields
@@ -2416,6 +2459,10 @@ tests:
       # 02:00Z = 04:00 Europe/Paris (summer, UTC+2) on Friday 2026-08-14 — hours are declared and
       # the instant is outside them: verdict OUTSIDE_HOURS, the only refusing value.
       at: "2026-08-14T02:00:00Z"
+      # Phase 4: the enforcement gate ON — the refusing edge. The OFF edge (shadow mode) is
+      # TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict below, on the SAME fixture.
+      gates:
+        - { $ref: 'configuration.yaml#/keys/ENFORCE_SERVICE_HOURS_GUARD' }
       data:
         orderId: "order-1"
         restaurantId: "resto-1"
@@ -2426,6 +2473,36 @@ tests:
         paymentMethodId: "pm_123"
     thrown:
       - { $ref: 'errors.yaml#/OutsideServiceHours' }
+
+  TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict:
+    name: "The SAME 04:00 checkout with the enforcement gate OFF (the production default) is ACCEPTED — shadow mode — and the frozen snapshot records verdict OUTSIDE_HOURS, so the log can prove what the guard would have refused before the default flips"
+    rules:
+      - { $ref: 'rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours' }
+      - { $ref: 'rules.yaml#/ServiceWindowVerdictDerivedAtAnInstant' }
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/restaurantHoursDeclared' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      # The refusal test's exact instant and fixtures; the ONLY difference is the gate (absent =
+      # spec default OFF), so this pair mutation-tests both edges of the guard.
+      at: "2026-08-14T02:00:00Z"
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    then:
+      - { $ref: '#/fixtures/paymentIntentCreatedOutsideHoursShadow' }
 
   TestPlaceOrderAcceptsWhenHoursUndeclared:
     name: "A checkout against an ACTIVE restaurant with a timezone but NO declared hours (the prod-smoke L4 shape) is accepted, and the frozen snapshot records verdict HOURS_UNDECLARED with a null window — not OPEN, and not a refusal"
@@ -2950,6 +3027,12 @@ tests:
             restaurantPayout: { amountCents: 1960, currency: "EUR" }
             riderPayout: { amountCents: 0, currency: "EUR" }
             captainNet: { amountCents: 0, currency: "EUR" }
+          # RSO-1 evidence, matching the shared `paymentIntentCreated` fixture the `then` asserts:
+          # the Payment records this fact VERBATIM, so a `when` payload missing the evidence keys
+          # asserts a snapshot the fixture no longer describes (the RSO-1 Phase 3 red).
+          verdict: "HOURS_UNDECLARED"
+          timezone: "Europe/Paris"
+          evaluatedAt: "2026-01-06T12:00:00Z"
     then:
       - { $ref: '#/fixtures/paymentIntentCreated' }
 

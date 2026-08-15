@@ -63,65 +63,124 @@ pub(super) async fn prepare(
     message: &InboundMessage,
     actor: &Actor,
 ) -> Result<PreparedPmCommand, sqlx::Error> {
+    use tracing::Instrument as _;
+
+    // Misroute guard FIRST (a wiring bug, not a business outcome) — outside the instrumented
+    // block so the `command.validate` span below only ever wraps a real handler run.
+    if !is_pm_command(&message.message_type) {
+        return Err(sqlx::Error::Protocol(format!(
+            "'{}' is not a PM command — prepare_pm_command misrouted (wiring bug)",
+            message.message_type
+        )));
+    }
+
     let staging = Arc::new(StagingEventStore::new(deps.store.clone()));
     let store: Arc<dyn EventStore> = staging.clone();
     let payment_staging = Arc::new(StagingPaymentProcessState::new(deps.pm_state.clone()));
     let refund_staging = Arc::new(StagingRefundProcessState::new(deps.refund_state.clone()));
 
-    let run: Result<(), DomainError> = match message.message_type.as_str() {
-        "PlaceOrder" => match serde_json::from_value::<domain::generated::commands::PlaceOrder>(
-            message.payload.clone(),
-        ) {
-            // An unparsable payload is deterministic — a terminal FAILED (generic Internal),
-            // never a retry (the GraphQL edge validates before enqueueing; defensive arm).
-            Err(e) => Err(DomainError::Invariant(format!("PlaceOrder payload: {e}"))),
-            Ok(cmd) => application::commands::place_order(
-                store.as_ref(),
-                deps.catalogs.as_ref(),
-                deps.payments.as_ref(),
-                payment_staging.as_ref() as &dyn PaymentProcessStateStore,
-                cmd,
-                message.session_id.map(domain::generated::scalars::SessionId),
-                actor,
-                // RSO-1: the evaluation instant, read ONCE here at the delivery seam (the
-                // framework boundary) — the handler takes `now` as a parameter and never reads
-                // a clock itself (the `sms_guard.rs` precedent).
-                chrono::Utc::now(),
-            )
-            .await
-            .map(|_| ()),
-        },
-        "ApproveRefund" => match serde_json::from_value::<domain::generated::commands::ApproveRefund>(
-            message.payload.clone(),
-        ) {
-            Err(e) => Err(DomainError::Invariant(format!("ApproveRefund payload: {e}"))),
-            Ok(cmd) => application::process_managers::refund::approve_refund(
-                store.as_ref(),
-                refund_staging.as_ref() as &dyn RefundProcessStateStore,
-                deps.payments.as_ref(),
-                cmd,
-                actor,
-            )
-            .await,
-        },
-        "DenyRefund" => match serde_json::from_value::<domain::generated::commands::DenyRefund>(
-            message.payload.clone(),
-        ) {
-            Err(e) => Err(DomainError::Invariant(format!("DenyRefund payload: {e}"))),
-            Ok(cmd) => application::process_managers::refund::deny_refund(
-                store.as_ref(),
-                refund_staging.as_ref() as &dyn RefundProcessStateStore,
-                cmd,
-                actor,
-            )
-            .await,
-        },
-        other => {
-            return Err(sqlx::Error::Protocol(format!(
-                "'{other}' is not a PM command — prepare_pm_command misrouted (wiring bug)"
-            )))
+    // `command.validate` (specs/observability.yaml `place-order`, required:true): constructed at
+    // THIS dispatch seam — the prepare phase IS the place-order command leg's handler boundary
+    // since #242 Runtime D — never inside the aggregate/handler (c4-l3 `command-handlers` is
+    // `instrumented: false`). `validation_status` is recorded from the actual outcome below.
+    let validate_span = telemetry::spans::command_validate();
+    let run: Result<(), DomainError> = async {
+        match message.message_type.as_str() {
+            "PlaceOrder" => match serde_json::from_value::<domain::generated::commands::PlaceOrder>(
+                message.payload.clone(),
+            ) {
+                // An unparsable payload is deterministic — a terminal FAILED (generic Internal),
+                // never a retry (the GraphQL edge validates before enqueueing; defensive arm).
+                Err(e) => Err(DomainError::Invariant(format!("PlaceOrder payload: {e}"))),
+                Ok(cmd) => application::commands::place_order(
+                    store.as_ref(),
+                    deps.catalogs.as_ref(),
+                    deps.payments.as_ref(),
+                    payment_staging.as_ref() as &dyn PaymentProcessStateStore,
+                    cmd,
+                    message.session_id.map(domain::generated::scalars::SessionId),
+                    actor,
+                    // RSO-1: the evaluation instant, read ONCE here at the delivery seam (the
+                    // framework boundary) — the handler takes `now` as a parameter and never reads
+                    // a clock itself (the `sms_guard.rs` precedent).
+                    chrono::Utc::now(),
+                    // RSO-1 Phase 4: the enforcement gate, resolved at the composition root onto
+                    // CommandDeps — a parameter for the same reason as the clock.
+                    deps.enforce_service_hours_guard,
+                )
+                .await
+                .map(|_| ()),
+            },
+            "ApproveRefund" => match serde_json::from_value::<domain::generated::commands::ApproveRefund>(
+                message.payload.clone(),
+            ) {
+                Err(e) => Err(DomainError::Invariant(format!("ApproveRefund payload: {e}"))),
+                Ok(cmd) => application::process_managers::refund::approve_refund(
+                    store.as_ref(),
+                    refund_staging.as_ref() as &dyn RefundProcessStateStore,
+                    deps.payments.as_ref(),
+                    cmd,
+                    actor,
+                )
+                .await,
+            },
+            "DenyRefund" => match serde_json::from_value::<domain::generated::commands::DenyRefund>(
+                message.payload.clone(),
+            ) {
+                Err(e) => Err(DomainError::Invariant(format!("DenyRefund payload: {e}"))),
+                Ok(cmd) => application::process_managers::refund::deny_refund(
+                    store.as_ref(),
+                    refund_staging.as_ref() as &dyn RefundProcessStateStore,
+                    cmd,
+                    actor,
+                )
+                .await,
+            },
+            // Unreachable: `is_pm_command` was asserted above.
+            other => Err(DomainError::Repository(format!("'{other}' is not a PM command"))),
         }
-    };
+    }
+    .instrument(validate_span.clone())
+    .await;
+
+    // The contract's `validation_status`: accepted | rejected, from the ACTUAL outcome. A
+    // Repository error is transient infrastructure (the delivery aborts and retries below) — it
+    // records NO verdict, because classifying a DB blip as `rejected` would count it as a
+    // business refusal.
+    match &run {
+        Ok(()) => telemetry::spans::record_validation_status(&validate_span, "accepted"),
+        Err(DomainError::Repository(_)) => {}
+        Err(_) => telemetry::spans::record_validation_status(&validate_span, "rejected"),
+    }
+    // RSO-1: `business.service_window_verdict` — the accept branch's only signal while the gate
+    // is OFF (shadow mode refuses nothing, so without this attribute the decision is invisible
+    // in traces). Read from the evidence the run itself produced — the frozen snapshot on the
+    // staged PaymentIntentCreated, or the OutsideServiceHours refusal (which is, by
+    // rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours, exactly the OUTSIDE_HOURS verdict) —
+    // never recomputed here, so span and record can never disagree. Rejections upstream of the
+    // evaluation (RestaurantNotFound, RestaurantPaused, …) never computed a verdict and record
+    // none.
+    if message.message_type == "PlaceOrder" {
+        let verdict = match &run {
+            Ok(()) => staging
+                .peek_staged()
+                .iter()
+                .flat_map(|a| a.events.iter())
+                .find_map(|e| match e {
+                    domain::generated::events::DomainEvent::PaymentIntentCreated(p) => {
+                        p.checkout.verdict.map(|v| format!("{v:?}"))
+                    }
+                    _ => None,
+                }),
+            Err(DomainError::Rejected { code, .. }) if code == "OutsideServiceHours" => {
+                Some("OUTSIDE_HOURS".to_string())
+            }
+            Err(_) => None,
+        };
+        if let Some(v) = verdict {
+            telemetry::spans::record_service_window_verdict(&validate_span, &v);
+        }
+    }
 
     let outcome = match run {
         Ok(()) => Ok(PmEffects {

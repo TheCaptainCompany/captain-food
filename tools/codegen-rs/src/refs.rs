@@ -478,6 +478,10 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("tests.yaml", "tests.*.rules[*]",  &[Kind::Rule]),
     ("tests.yaml", "tests.*.actor",     &[Kind::Aggregate, Kind::ProcessManager]),
     ("tests.yaml", "tests.*.when.type", &[Kind::Command, Kind::Event]),
+    // `when.gates` (RSO-1 Phase 4): a boolean configuration gate switched ON for one dispatch —
+    // a $ref so the walker sees it (the #413 "silently invisible" class); boolean-ness is the
+    // `test-when-gate-not-bool` rule's check.
+    ("tests.yaml", "tests.*.when.gates[*]", &[Kind::ConfigKey]),
     ("tests.yaml", "tests.*.given[*]",  &[Kind::Fixture]),
     ("tests.yaml", "tests.*.then[*]",   &[Kind::Fixture]),
     ("tests.yaml", "tests.*.thrown[*]", &[Kind::Error]),
