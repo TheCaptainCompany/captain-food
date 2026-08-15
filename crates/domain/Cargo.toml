@@ -22,6 +22,11 @@ domain-network = { path = "../domains/network" }
 domain-ordering = { path = "../domains/ordering" }
 domain-payments = { path = "../domains/payments" }
 serde = { workspace = true }
+# The service-window evaluation (RSO-1): `serving_at` converts the injected UTC instant into the
+# restaurant's LOCAL wall clock. Pure data + arithmetic — no clock read, so the dependency rule
+# (no I/O, no SDK) holds.
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
 # serde_json carries the structured rejection CONTEXT (`DomainError::Rejected`) — data, not
 # serialization logic; the errors.yaml catalog module generated into `generated/errors.rs`
 # interpolates its `{placeholder}` message templates from it.
