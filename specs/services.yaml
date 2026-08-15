@@ -25,7 +25,18 @@ description: >
                              (`/adapters/<provider>/...`) — the name-level ACL as spec. Optional
                              for external-SaaS ACLs that expose no adapter HTTP surface of ours.
 
-  V0: every service is `binding: local`, `expose: false` — one deployable, zero internal HTTP.
+  TODAY every service is `binding: local`, `expose: false` — the domain reaches every capability
+  in-process, zero internal HTTP. Read that as a PER-SERVICE topology value, not as "the system is a
+  monolith": the bin topology already exists (`crates/bins/`, ADR-20260807-183024), and a service's
+  binding says how the DOMAIN reaches a capability, not how many processes serve the product.
+  THE DESTINATION AND ITS MECHANISM, so this line is never read as an unlabelled intermediate step
+  (ADR-20260808-235113): a service moves out of process by flipping its own `binding` to `http` (and
+  `expose: true` on the deployable that owns it) — one spec key each, address supplied by
+  `SERVICE_<NAME>_URL`. Flipping it is a topology change and not a rewrite BECAUSE the generated
+  input/output types derive serde UNCONDITIONALLY, regardless of binding: the wire shape is already
+  forced while the binding is local, so a local call and a remote one are the same contract. Nothing
+  in this file changes shape when a service moves — which is the whole reason `binding` is
+  spec-owned. Each flip is still its own reviewed decision (gate-then-stabilize); none is due yet.
   Planned entries (join when their outbound call surface is defined): catalog_sync (HubRise),
   listing_enrichment (Sirene/Google).
 

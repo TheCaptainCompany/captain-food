@@ -1,7 +1,9 @@
 # ADR-20260815-030206 — A process manager is a write-side component and never reads the read side
 
 **Status**: Accepted (the rule and its two carve-outs; the *enforcement grammar* and the
-*mailbox-query* reading are OPEN register rows, below) · **Date**: 2026-08-15 ·
+*mailbox-query* reading are OPEN register rows, below) · **AMENDED the same day — see
+[Correction (2026-08-15)](#correction-2026-08-15--reading-i-is-a-different-destination-not-an-intermediate-step)
+before relying on the (i)/(ii) section** · **Date**: 2026-08-15 ·
 **Decider**: the founder / Tech CEO, verbatim below ·
 **Register**: [DECISIONS](../proposals/DECISIONS.md) §42 (**PMW-1**, **PMW-2**, **PMW-3**) and the
 **STO-9** annotation in §32 ·
@@ -82,7 +84,11 @@ fencing question — it is the same read the command handler on that aggregate p
 already how two paths work today:
 `crates/application/src/process_managers/place_order.rs:47` (folds `Payment-{intentId}` for the
 checkout snapshot) and `delivery_dispatch.rs:126` (*"The pickup address — folded from the aggregate's
-own stream, like the restaurant command handlers"*). **This reading is ADOPTED.**
+own stream, like the restaurant command handlers"*). **This reading is ADOPTED** — but **not** as the
+final shape, and **not** as a step on the way to (ii). See
+[Correction (2026-08-15)](#correction-2026-08-15--reading-i-is-a-different-destination-not-an-intermediate-step):
+it is a **different destination**, it permanently buys shared-database coupling between
+independently-deployed pods, and it does **not** deliver the founder's stated in-memory premise.
 
 **(ii) A QUERY MESSAGE to the actor through the mailbox** — the founder's *"the actors can be
 queryable"*, transported over gRPC. This is a genuinely different mechanism and it is **NOT adopted
@@ -106,6 +112,145 @@ here**, for two reasons the team raised:
 Reading (ii) is register row **PMW-3**, OPEN. Nothing in this ADR authorises building it. The founder's
 own *"I don't think we should involve inbound messages table for queries to actors"* points at the same
 problem from the other side and is recorded there.
+
+## Correction (2026-08-15) — reading (i) is a DIFFERENT DESTINATION, not an intermediate step
+
+*Added after this ADR landed, on the architect's review of it. Nothing above is deleted; this section
+overrides the (i)/(ii) reasoning where the two disagree. The rule itself — a PM never reads a projection
+to learn a fact about an aggregate it can address by identity — is **unchanged and still Accepted**.
+What was wrong is the framing of the adopted mechanism.*
+
+The section above adopts (i) on the unstated theory that **the `EventStore` port is the final vision and
+the adapter behind it is a deployment detail** — i.e. that today's in-process fold becomes tomorrow's
+actor query by swapping an adapter. **That theory is false**, and the ADR must not rest on it.
+
+### 1. `EventStore::load` is a STORAGE port, not an actor-query port
+
+`crates/application/src/ports.rs:65`:
+
+```rust
+async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError>;
+```
+
+Its signature is *"give me the rows of this stream"*. **There is no gRPC service it becomes.** Its remote
+form is not "the PM asks the Order actor" — it is **"the PM pod opens a connection to the write
+database"**. So (i) and (ii) are not the same destination reached at different times: (i) is a
+**shared-database read** and (ii) is a **service call**, and adopting (i) permanently chooses
+shared-database coupling between independently deployed pods.
+
+That may still be the right call for V0 — it costs zero infrastructure and closes STO-9. But under
+**ADR-20260808-235113 (final vision first)** the choice must be *named* rather than glossed, because a
+"temporary" mechanism that is actually a terminal one is exactly the intermediate step that directive
+forbids shipping unlabelled. **Named here: adopting (i) means `captain_write` keeps a CONNECT from every
+PM pod, indefinitely, and the read the PM performs is a database read and not an actor question.**
+
+### 2. Reading (i) does not deliver the founder's own stated premise
+
+The directive's first line is *"the actors ... are kept in memory for a small amount of time to avoid
+reloading the stream uselessly"*. `ActivationCache` (`crates/actor_runtime/src/activation.rs:1-21`)
+lives **in the owning worker's process**, is **lane-tagged**, and is **dropped on lease loss**. A PM
+running in a different pod and folding `Payment-{intentId}` cannot touch it: it re-folds from the log on
+**every** settlement leg.
+
+So on the founder's own criterion, **(i) is SLOWER than what he asked for** — it is the "reloading the
+stream uselessly" case, one settlement leg at a time. PMW-2 records the residency lift that would fix it;
+until that lands, (i) is correct and cold. This is a cost of the adopted reading, not an argument against
+the rule.
+
+### 3. The final-vision form already exists one file over, and IS recordable as the target
+
+`specs/services.yaml:16-28` declares **`binding: local | http` as a SPEC-OWNED key** — the topology is a
+spec decision, not a code decision. And the generated service types derive serde **unconditionally,
+regardless of binding** (`crates/application/src/generated/services.rs:48-60`): `PaymentRequestInput`
+carries `Serialize, Deserialize` today even though `payment` is `binding: local`. **The wire shape is
+forced whether or not the binding is remote** — which is what makes flipping one key a real option
+instead of a rewrite.
+
+**Applied to actors, the final-vision shape is therefore:**
+
+1. an **`answers:` block** on the actor DSL beside its `inbox:` — the queries an actor answers, typed
+   like everything else;
+2. a **spec-owned `binding:`** on it, exactly as `services.yaml` has;
+3. reply types **serde-derived always**, regardless of binding;
+4. a typed **`ask`** on the sealed per-actor client (`crates/clients/*`) beside the existing `send`;
+5. a **codegen round-trip test per reply type**, so the wire shape cannot silently rot while the binding
+   is local.
+
+With that in place, the founder's *"we just have to put in place the grpc transport"* is **true**: it is
+one spec key. **Today it is not true** — there is **zero `tonic`, `prost` or `.proto` anywhere in the
+tree** (verified). The gap between "one key" and "a rewrite" is items 1–5, and they are buildable
+independently of whether a transport is ever added.
+
+### 4. Two things wire-shaping does NOT fix — both stay owed
+
+- **`SettlementHooks` carries cross-call state in mutexes.**
+  `crates/application/src/process_managers/payment_settlement.rs:53-58` holds
+  `intent: Mutex<Option<PaymentIntentId>>` and `attempted: Mutex<bool>` — state threaded between hook
+  calls through interior mutability. **That has no wire form at all.** It must become an explicit value
+  passed between steps *before* any serialization question is even askable. Serde on the reply types does
+  not touch it.
+- **The fencing/ordering hazard is independent of serialization.** PMW-3's objections (i)–(iv) are about
+  *when* an answer was true and *who* was holding the lease, not about how it was encoded. The
+  compiler-first item recorded there — **a validator rule refusing an actor-sourced `read:` step in any
+  leg that also contains a `call:` step** — still stands exactly as written, and would still be needed
+  in a fully wire-shaped world.
+
+### 5. What is NOT wire-shaped today — the enumerated list
+
+Every row verified on `main` at the time of writing. "Wire-shaped" = carries `Serialize`/`Deserialize`.
+
+| Shape | Where | Why it blocks a remote binding |
+|---|---|---|
+| `HookOutcome<T>` | `crates/application/src/generated/process_managers.rs:12-15` | No serde. `Skip(String)` carries **prose** — the very defect §"HookOutcome::Skip conflates four worlds" documents, now also a wire blocker |
+| `OrderRead` / `RestaurantRead` / `OpenCartsRead` (5 structs) | `crates/application/src/generated/process_managers.rs:22, 31, 736, 866, 1045` | No serde — and these **are** the query-reply shapes. They are what an `answers:` block would type |
+| `DomainError` | `crates/domain/src/shared.rs:23-42` | No serde; two of its three arms (`Invariant`, `Repository`) carry a bare `String`. A remote rejection would arrive as prose |
+| `Actor` (the envelope) | `crates/application/src/ports.rs:13-27` | No serde. Every call needs the acting identity + correlation to cross with it |
+| `AppendedEvent` | `crates/infrastructure/src/persistence/event_bus.rs:20-31` | `tokio::broadcast`, not `Serialize` — process-local by construction |
+| `OperationUpdate` | `crates/actor_client/src/status_bus.rs:26-38` | `tokio::broadcast`, not `Serialize` — process-local by construction. This one is already shipping a user-visible consequence: register row **BUS-1** |
+
+### 6. What IS already a wire contract — so the fear is narrower than it sounds
+
+The instinct that "nothing is serializable" is wrong, and the correction should not overstate it. **Every
+command and every event already round-trips serde on every single call, today, with `binding: local`:**
+
+- `crates/infrastructure/src/persistence/event_store.rs:189-212` rebuilds the typed event from
+  `(event_type, payload)` — a real deserialize on every load;
+- the actor door takes `payload: serde_json::Value` (`crates/actor_client/src/door.rs:57-69`);
+- `dispatch_command` takes JSON (`crates/application/src/command_router.rs:39-45`).
+
+So the **write** direction is wire-shaped end to end. What is missing is the **reply** direction —
+exactly the six rows in the table above. That is a much smaller, much more tractable statement than "the
+codebase is not distributable", and it is the honest one.
+
+### 7. Versioning — which reading implies which doctrine
+
+Greg Young's upcasting doctrine governs **stored** events: a stored event is an immutable contract, so a
+schema change is an upcast on read, never a mutation in place. **It does not extend to a query reply** —
+there is nothing to upcast, because a reply is *produced fresh* by the current code every time it is
+asked for.
+
+A reply needs the **mirror rule**, and it must be recorded separately or someone will apply the wrong
+one:
+
+| | Stored event (reading via `EventStore`) | Query reply (reading via an actor `ask`) |
+|---|---|---|
+| Contract | Immutable; the past is not editable | Produced fresh on every call |
+| Change discipline | **Upcast on read**, never mutate | **Additive-only on the producer; tolerant reader on the consumer** |
+| Breaking change | A new event type + an upcaster | **A new operation name** — never a silent reshape of the existing one |
+| Who pays | Every replay, forever | Only in-flight callers, for one deploy window |
+
+**Consequence for this ADR**: adopting (i) means the PM's read is governed by **event versioning** (it
+folds stored events, so it inherits every upcasting obligation of the aggregate it reads). Adopting (ii)
+would put it under **reply versioning** instead. These are different maintenance burdens and the choice
+between them is part of the choice between the readings — which is another reason (i) and (ii) are
+destinations rather than stages.
+
+### What changes in the register
+
+**PMW-3 stays OPEN and stays not-adopted; this correction does not authorise building a transport.**
+What it adds is that PMW-3's option (a) — *"do not build it"* — must be read as *choosing shared-database
+coupling permanently*, and that items 1–5 of §3 above are the recordable final-vision target whose cost is
+mostly **not** the transport.
 
 ## Why the rule holds — three independent arguments
 
@@ -268,6 +413,10 @@ ask Payment → status* — two by-key folds on terminating streams, both inside
   **outside** this rule, so **STO-7 and STO-8 remain open exactly as they are**.
 - **Not decided here.** The DSL grammar that makes the rule spellable (**PMW-1**), the cross-aggregate
   residency lift and its fence (**PMW-2**), and actor queries as a mailbox/gRPC message (**PMW-3**).
+- **Named, per the Correction above.** The adopted mechanism is a **shared-database read**, kept
+  indefinitely, and it does **not** realise the founder's in-memory premise until PMW-2 lands. The
+  final-vision target (`answers:` + spec-owned `binding:` + always-serde replies + a typed `ask` + a
+  round-trip test per reply type) is recorded in Correction §3 and is mostly **not** transport work.
 - **No code, no `specs/**` edit lands with this ADR.** The spec↔code drift above is **recorded**, not
   fixed. An executor closing it must first check the in-flight
   [#564](https://github.com/TheCaptainCompany/captain-food/issues/564) branch, which already annotates
@@ -331,3 +480,13 @@ branch is owned by another session and is untouched by this record.
   the work **smaller**, not bigger — the carve-outs remove most of the thirteen sites from scope, and
   what remains is the money path he wanted fenced anyway. Recorded explicitly because a reversal that is
   not recorded reads as a lens that never objected.
+
+**Round 3 — post-landing review, which produced the Correction above:**
+
+- **architect**: The ADR adopts (i) as though the `EventStore` port were the final vision with the
+  adapter behind it a deployment detail. It is not — `load(stream_name) -> (Vec<DomainEvent>, i64)` is a
+  **storage** port whose remote form is a database connection, so (i) is a different destination and
+  choosing it chooses shared-database coupling permanently. It also fails the founder's own in-memory
+  premise, because `ActivationCache` is process-local and lane-tagged. The final-vision shape exists one
+  file over in `services.yaml`'s spec-owned `binding:` with unconditional serde, and the ADR should name
+  it as the target rather than let (i) read as one.

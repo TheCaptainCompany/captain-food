@@ -2,6 +2,75 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⚖️ **2026-08-15 — OPENING HOURS AND STOCK ARE CHECKED SERVER-SIDE ON PLACE ORDER; A BIG CATALOG
+> SNAPSHOTS EVERY 100 EVENTS** (founder directive;
+> [ADR-20260815-032807](adr/ADR-20260815-032807-opening-hours-and-stock-are-checked-server-side-and-a-big-catalog-snapshots-every-100-events.md),
+> [DECISIONS §43](proposals/DECISIONS.md) **RSO-1/RSO-2/SNAP-1/BUS-1**). **All three parts verified
+> against `main`; all three are REAL GAPS, none is already done.** **(a) The concept of "open right
+> now" does not exist anywhere** — `orderable` (`specs/network/api.yaml:21`) is
+> `ACTIVE_PARTNER + ACTIVE + acceptance ≠ PAUSED` with **no hours term**, and the PlaceOrder guard
+> chain (`specs/ordering/processmanager.yaml:40-49`) has **no closed-hours guard**;
+> `RestaurantMarkedClosed` is PERMANENT closure → INACTIVE, not "closed tonight". So a kitchen that
+> shut at 22:00 renders `orderable: true` at 22:40 **and the server accepts the order**. The raw
+> material (`opening_hours` + `timezone`) is already projected and already on the api type.
+> **(b) The checkout orderability re-check is a TODO that was never done** —
+> `commands.rs:2450-2452` says so verbatim; `require_orderable_line` runs on `add_cart_line` ONLY.
+> Checkout's only protection is fail-closed *pricing*, so a line still in the catalog but flipped
+> `UNAVAILABLE` or out of stock **prices fine and is accepted**. Its existing test is an **any-of over
+> three codes** that passes on `OfferNotFound` alone — `require_stock_covers` could be deleted with a
+> green suite, so it splits into three when this lands. **(c) There is NO event-sourcing snapshot
+> mechanism in the tree** (false friend: `pricing.rs:129`'s `CatalogSnapshot` is a read-side pricing
+> helper). Catalog is the right first target and PMW-2 already named it. **Policy adopted verbatim:
+> snapshot every 100 events, actor load < 5 s** — but *where a snapshot lives*, how it meets
+> **upcasting** (disposable and rebuildable, never authoritative — a version mismatch means throw it
+> away, never migrate it) and **GDPR erasure** (a snapshot is a SECOND COPY; deleting the stream and
+> leaving it erases nothing) is a genuine option space = **SNAP-1, AMBER**. **Found incidentally and
+> filed loudly — BUS-1**: `operationStatusChanged` is a declared product subscription riding a
+> **process-local `tokio::broadcast` with no serde**; post-split the subgraph bins build **fresh empty
+> buses** and the gateway **refuses the WS handshake** (`501`), so the client polls 30 × 1 s — a poll
+> that is the **PRIMARY** transport, with no declared degraded mode and no detected path back, i.e.
+> ADR-20260810-231300 violated in shipped code. The screen reference is on the **CUSTOMER checkout**
+> action, so the person eating it is the customer staring at a spinner **after paying**. **Nothing
+> built; the only `specs/**` change in this commit is the `services.yaml` header below.**
+
+> 📝 **2026-08-15 — `specs/services.yaml`'s "V0: one deployable" line now names its destination**
+> (SPEC-LOG row, Tier 0). The header said *"V0: every service is `binding: local`, `expose: false` —
+> one deployable, zero internal HTTP"* in SOURCE DSL with no "then what" — factually stale (the bin
+> topology exists in `crates/bins/`) and the sentence a reader reasonably turns into *"the product is
+> a monolith"*. It now states that a binding describes how the **domain** reaches one capability (not
+> how many processes serve the product), that a capability moves by flipping **its own key** with
+> `SERVICE_<NAME>_URL` as an address book, and that this is a topology change rather than a rewrite
+> **because the generated call types derive serde unconditionally while the binding is local**.
+> Modelled on `specs/architecture/c4-l2.yaml:98-99`, which already does this correctly.
+
+> ⚖️ **2026-08-15 — AMENDED: [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md)
+> was WRONG on its central claim and now carries a `Correction (2026-08-15)` section.** The rule
+> itself is unchanged and still Accepted; what was wrong is the framing of the adopted mechanism.
+> The ADR adopted reading (i) — the PM folds the aggregate's stream through the `EventStore` port —
+> on the unstated theory that **the port is the final vision and the adapter behind it is
+> deployment**. It is not: `load(stream_name) -> (Vec<DomainEvent>, i64)` (`ports.rs:65`) is a
+> **STORAGE** port, and its remote form is *"the PM pod talks to the write database"*, not a service
+> call. **So (i) is a DIFFERENT DESTINATION, not a step toward (ii)** — adopting it permanently
+> chooses **shared-database coupling** between independently-deployed pods, which
+> ADR-20260808-235113 requires be named rather than glossed. It also **does not deliver the founder's
+> own premise**: `ActivationCache` is process-local and lane-tagged, so a PM in another pod re-folds
+> on **every** settlement leg — (i) is *slower* than what he asked for, until PMW-2 lands. **The
+> final-vision form exists one file over**: `specs/services.yaml:16-28`'s spec-owned
+> `binding: local | http` + serde derived **unconditionally regardless of binding**
+> (`generated/services.rs:48-60`) ⇒ applied to actors, an `answers:` block with a spec-owned
+> `binding:`, always-serde replies, a typed `ask` on the sealed per-actor client, and a codegen
+> round-trip test per reply type. Then *"put in place the gRPC transport"* is one spec key; **today
+> it is not — zero `tonic`/`prost`/`.proto` in the tree**. **Two things wire-shaping does NOT fix**:
+> `SettlementHooks` threads cross-call state through `Mutex<Option<..>>` + `Mutex<bool>` (no wire
+> form at all — it must become an explicit value first), and the fencing/ordering hazard is
+> independent of serialization (PMW-3's `read:`+`call:` rule still stands). **Six reply shapes carry
+> no serde today** (`HookOutcome<T>` — whose `Skip(String)` is prose; the five PM read structs, which
+> ARE the query-reply shapes; `DomainError`, two of three arms `String`; the `Actor` envelope;
+> `AppendedEvent`; `OperationUpdate`) — **but every command and event already round-trips serde on
+> every call**, so the missing half is REPLIES, not the codebase. **Versioning differs by reading**:
+> stored events get Young's upcasting; a query reply gets the mirror rule — additive-only producer,
+> tolerant reader, and a breaking change is a **new operation name**.
+
 > ⚖️ **2026-08-15 — A PROCESS MANAGER IS A WRITE-SIDE COMPONENT AND NEVER READS THE READ SIDE**
 > (founder directive; [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md),
 > [DECISIONS §42](proposals/DECISIONS.md) **PMW-1/PMW-2/PMW-3**, plus option **(e)** annotated onto
