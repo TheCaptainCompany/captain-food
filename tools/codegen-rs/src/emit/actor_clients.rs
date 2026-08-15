@@ -99,6 +99,22 @@ fn client_actors(model: &Model) -> Vec<ClientActor> {
             answers,
         });
     }
+    // #583 hardening (item 3): an `answers:` op left unmatched here belongs to an actor that got
+    // NO client crate (no `mailbox:` — or a non-mailbox type slipping past the validator). The
+    // typed `ask` rides the sealed per-actor client, so a silent drop would make the declared
+    // surface vanish without a diagnostic — refuse loudly instead (ans-shape carries the same
+    // requirement on the validator side; this is the emitter's belt to those braces).
+    assert!(
+        all_answers.is_empty(),
+        "actors.yaml: {} — declared `answers:` but no `mailbox:` client crate exists to carry \
+         the ask surface; declare `mailbox.partitions` (ans-shape enforces this too) or the \
+         typed `ask` silently would not exist",
+        all_answers
+            .iter()
+            .map(|a| format!("{}.{}", a.actor, a.op))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
 }

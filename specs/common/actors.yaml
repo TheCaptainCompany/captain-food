@@ -66,11 +66,16 @@ description: >
 # authz and no story step — a caller wanting a product query surface reads a read model
 # (ans-ref-isolation). Shape per operation: { description (required), reply (required — each
 # property a same-actor `#/{Actor}/state/<field>` ref, incl. the implicit identity and
-# lifecycle-status fields), params (optional — kernel scalar/entity refs; ABSENT in the common
-# case: an ask is addressed BY IDENTITY, the stream key IS the argument). Deliberately absent,
-# forever-shaped keys: NO transport/binding key (absence means local; INTRODUCING one is the
-# future PMW-3 gate flip — D6) and NO deadline (the caller's ask step owns it — D5, founder-
-# decided). The served stream version rides the ENVELOPE, never the payload.
+# lifecycle-status fields) }. An ask is addressed BY IDENTITY: the stream key IS the argument,
+# and the generated Request derives that field. `params:` is REFUSED this slice
+# (ans-params-refused): the local ask is load -> fold -> project, so nothing can consume a
+# param yet — an accepted key nothing consumes is a control that renders and does nothing; the
+# key returns when a later slice gives it semantics (that reintroduction is a recorded
+# decision). An answering actor must also declare `mailbox:` (the typed `ask` rides the sealed
+# per-actor client). Deliberately absent, forever-shaped keys: NO transport/binding key (absence
+# means local; INTRODUCING one is the future PMW-3 gate flip — D6) and NO deadline (the
+# caller's ask step owns it — D5, founder-decided). The served stream version rides the
+# ENVELOPE, never the payload.
 # Naming: an answer operation is a NOUN-PHRASE VALUE — the thing served, named as a value the
 # actor holds. Good: paymentReference, settlementView, dispatchCandidates. Bad: GetSettlementState
 # (transport noise), SettlementStateProvided (a fact's grammar). FORBIDDEN in an operation or
