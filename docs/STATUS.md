@@ -2,6 +2,45 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛑 **2026-08-15 — RSO-1 CANNOT BE BUILT AS RECORDED: A BOOLEAN "IS IT OPEN?" WOULD TAKE LIVE
+> RESTAURANTS OFFLINE** (docs-only, straight to `main`; recorded BEFORE any code was dispatched).
+> `evans`, in mob briefing, found a **blocker**, **five design corrections**, a **factual error in
+> the row's own text**, and **one new row** — all in [DECISIONS §43](proposals/DECISIONS.md).
+> **The blocker**: `opening_hours` is a `Vec` updated via `replaced_vec`
+> (`crates/domain/src/restaurant.rs:83,95`, whose doc says *"an omitted array and an explicitly-empty
+> one arrive identically"*), and the read side does `unwrap_or_default()` on a JSONB parse failure
+> (`crates/server/src/graphql/generated/types.rs:1095`) — so `[]` means **three indistinguishable
+> things**: hours never declared (every Sirene/Google-seeded prospect), hours cleared, hours
+> unparseable. A boolean `f(hours, tz, now)` maps all three to **closed forever**, and `orderable`
+> reads no hours today — so RSO-1 as recorded **would ship a NEW way to take live restaurants
+> offline, as a safety fix**. Recorded fix: a **three-valued verdict** `OPEN / OUTSIDE_HOURS /
+> HOURS_UNDECLARED`, with the guard's behaviour on the third value an **explicit recorded decision,
+> never a default** (`evans`'s lean, recorded as a lean: accept — *"a restaurant nobody can order
+> from"* is the sibling failure of *"a paid order nobody is told about"*). **Two corrections dissent
+> from what the row recorded**, and are recorded as dissents: the error is **`OutsideServiceHours`**,
+> not `RestaurantClosed` (which collides with the **permanent** `RestaurantMarkedClosed`,
+> `specs/network/events.yaml:358`, and parallels the existing `OutsideDeliveryArea` guard); and hours
+> are **NOT folded into `orderable`**, because a time-varying boolean carried alongside `updatedAt`
+> (`specs/network/api.yaml:44`) reads "3 days ago" for a value that is wrong in 20 minutes — a
+> self-describing `serviceWindow { state, opensAt, closesAt, evaluatedAt }` instead. Also recorded:
+> **`crates/domains/common/` is GENERATED**, so the "pure function in `domain-common`" cannot land
+> there as written (two legal shapes, owner `vernon`/architect — the requirement is **one artifact
+> imported by both call sites**); the verdict is **already computed a second time in the renderer**
+> (`specs/screens/restaurant_frontoffice.yaml:323-325`) and must be **replaced**, not duplicated;
+> the domain term is **service hours / `cutoff_time`**, which HubRise exposes
+> (`specs/integrations/hubrise.md:21`) and the ACL **never mapped**, and the closing-margin must NOT
+> be derived from `preparationTimeMinutes` (an ETA duration, not a deadline); and the frozen
+> `CheckoutSnapshot` verdict records **the window and the inputs**, not a bare boolean, because
+> *"a stored `wasOpen: true` is unfalsifiable six months later; a stored window is evidence"*.
+> **Factual correction to an already-landed row**: §43 RSO-1 said `RestaurantState` holds `timezone`
+> *"but no opening hours"* — **false**, it holds them at `restaurant.rs:83`; the error came from a
+> previous executor's report and was relayed unverified. **New row `BSY-1`** (AMBER): `BUSY`
+> (`specs/network/scalars.yaml:156`) is a word in the ubiquitous language that **changes nothing** —
+> `orderable` ignores it, no guard reads it, no screen renders it, no rule names it, and its only
+> non-plumbing appearances are tests that assert it was *stored*. Domain answer: BUSY should mean **a
+> longer ETA**, and the ETA is the product. **Explicitly out of RSO-1's scope.** **Nothing was
+> applied**: `docs/**` only — no `specs/**`, no `crates/**`.
+
 > 🛑 **2026-08-15 — RSO-2 CANNOT CLOSE OVERSELL, AND IT WAS ABOUT TO BE BUILT AS IF IT COULD**
 > (docs-only, straight to `main`; recorded BEFORE any code was dispatched).
 > [DECISIONS §43](proposals/DECISIONS.md) is amended and gains four rows. `young` and `vernon`,
