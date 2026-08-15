@@ -1133,6 +1133,31 @@ pristine copy: `git checkout -- <path>` is idempotent, needs no bookkeeping, and
 wrong generation. Verify with `git status --short` before every gate run, not only at the end —
 a clean tree is the only evidence the plants are gone.
 
+### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
+
+Concurrent executors run in **one checkout** unless the coordinator hands them separate worktrees,
+and a checkout is global state neither agent can see the other take. A record executor confirmed
+`main`; several read-only calls later `git branch --show-current` returned `572-decisions-table-gate`
+at another executor's WIP commit. Four `tools/codegen-rs/src/main.rs` line numbers had been measured
+against that WIP tree (+4 lines), looked like dispatch errors, and were one step from being recorded
+as permanent register text.
+
+**Assert the branch in the SAME bash call as any `file:line` verification**
+(`git branch --show-current && awk …`), and again immediately before committing — a branch confirmed
+in an earlier call proves nothing about the current one. **The real fix is coordinator-side: dispatch
+concurrent executors with worktree isolation** (`git worktree add`, with the disk caveats above),
+never into one shared tree. Same root cause, other direction: **a docs-only dispatch targeting `main`
+must open with an explicit `git checkout main`** — an executor dispatched for a `main` docs task
+started on a feature branch someone else had left checked out, correctly refused to write, and burned
+its entire run doing nothing before a session limit killed it.
+
+### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
+
+When a session dies mid-change, `git add` the touched files and commit as an explicit `wip:` whose
+message states **what has not been proven** — then push. `807e472` preserved a half-built validator
+rule that had never been seen red; without that sentence the next executor would have reviewed
+unverified work as finished, which is the same defect the "seen red" rule above exists to prevent.
+
 ### Do not push a feature branch while its executor is still working
 
 A stop-hook prompt reported an unpushed commit; the coordinator pushed it, the executor then
@@ -1152,6 +1177,13 @@ rejects exactly that: a branch pointing at the same sha as `main` gets
 This container has **no `gh` on PATH**, so every session drives the API with `curl` and meets the
 hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
 names the branch, so it reads like a bad ref rather than a missing commit.
+
+**And the `curl` path is coordinator-only: an executor session cannot reach GitHub at all.** The REST
+API answers `GitHub access is not enabled for this session` even with `GH_TOKEN`/`GITHUB_TOKEN`
+present in the environment — the variables are not the capability. So **a dispatch that asks an
+executor to reference an issue must carry the number AND the title verbatim**; the executor has no
+lookup path and cannot check a title it is given. Cost: an unresolvable issue link landed in
+`ee9082d` and needed a follow-up commit to repair.
 
 ### One more shell trap in commit messages
 
