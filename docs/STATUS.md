@@ -2,8 +2,70 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-15 — RSO-1 IS NOW DISPATCHABLE: ITS THREE BLOCKING SUB-QUESTIONS ARE ANSWERED — AND
+> THREE OF THE ANSWERS SAY THE ROW'S OWN TEXT WAS WRONG** (docs-only, straight to `main`; still no
+> code). Recorded in [DECISIONS §43](proposals/DECISIONS.md) RSO-1, fourth amendment; every
+> `file:line` re-verified against `main` before writing. **(i) The guard ACCEPTS on
+> `HOURS_UNDECLARED`; `OUTSIDE_HOURS` is the only refusing verdict.** This agrees with `evans`'s lean
+> but **replaces its reasoning**: the Sirene/Google-seeded population *never reaches the guard*
+> (`RestaurantRegistered` births DRAFT, `crates/domain/src/restaurant.rs:14,197`; `place_order`
+> rejects `RestaurantNotActive` first, `crates/application/src/commands.rs:2398`), so the branch
+> governs **deliberately activated** restaurants — and **100% of those are `HOURS_UNDECLARED`, because
+> no screen can set hours** (`specs/screens/restaurant_backoffice.yaml:484` says so verbatim;
+> `specs/stories.yaml:128-140` has no hours step; every creation path writes `opening_hours: vec![]`).
+> **Production is 1 of 1**: `tools/smoke/prod-smoke.sh:310-315` registers with a timezone and no
+> `openingHours`, so **"refuse" would break the L4 smoke gate**. The decisive argument is **which
+> failure announces itself** — accept produces a complaint we can act on, refuse produces silence, and
+> a zero-order graph is indistinguishable from *"Tours has no demand"*, corrupting the exact signal V0
+> exists to measure. **Money correction**: capture is manual
+> (`crates/adapters/stripe/src/outbound.rs:245`), so at 22:40 the card is **held, not charged** — the
+> real cost is that **nothing releases the hold**, because the acceptance-timeout auto-cancel is
+> declared and unbuilt (`crates/application/src/generated/process_managers.rs:915`) and nobody is
+> notified (gap **G8** below). **Building that timeout removes most of the accept branch's cost
+> without refusing anyone — same effort, strictly more value.** **(ii) The shared function lives in
+> `crates/domain/src/` beside `restaurant.rs`**; the `crates/domains/common/` option is struck as
+> **"does not compile"** — `OpeningHoursSlot` is generated into `crates/domains/network/`, which
+> **depends on** `domain-common`, so the kernel naming it is a **cycle** no emitter rule can dissolve.
+> **(iii) `serviceWindow` is a FIELD on `Restaurant`**, with `closesAt` renamed **`lastOrderAt`** (with
+> closing at `min(slot.to, cutoff)`, "closesAt" renders as *"open until"* and is wrong by the cutoff
+> margin, on the money path) and a new **`validUntil`**, non-null in all three states. **Three
+> corrections to the row's own recorded text**: **(1)** amendment (1) placed `ServiceWindowVerdict` in
+> `specs/network/scalars.yaml` while amendment (6) puts the verdict on `CheckoutSnapshot` in
+> `specs/common/entities.yaml:167` — `scope-kernel-purity`
+> (`tools/codegen-rs/src/validate/scopes.rs:358`) makes that a **hard validator error**, so the row
+> **could not have passed `make validate`**; both scalars belong in `specs/common/scalars.yaml`.
+> **(2)** Correction 5's premise is **false** — the renderer computes nothing:
+> `crates/web/src/renderer.rs:346-349` folds `OpeningHoursRow` into the `InfoRow` arm and reads
+> `label`/`value`, which that node does not carry (`crates/web/src/generated/screens.rs:423`), so it
+> renders an **empty div**. RSO-1 **implements** the row for the first time. **(3)** Correction 4's
+> emitter claim was wrong in both directions — a hand-written file under a declared scope **survives**
+> regeneration; `src/lib.rs` and `Cargo.toml` are what get clobbered. **The generalizable lesson: in a
+> generated crate the fragile artifact is the module INDEX, not the module — regeneration erases the
+> `mod` declaration, leaves the file on disk, and produces NO compile error.** **(iv) NEW — RSO-1 is
+> an EMITTER change, not spec-only**: the read-side call site is generated
+> (`crates/server/src/graphql/generated/types.rs:1070`, `impl From<RestaurantRow> for Restaurant`) and
+> **has no clock**, so it cannot compute a time-varying field at all; the fix is two hardcoded literals
+> in `tools/codegen-rs/src/emit/server_graphql.rs:293,654`. It also forces a **net-new `chrono-tz`
+> workspace dependency** (zero hits today), which makes a **DST behaviour test mandatory** — the
+> boundary is wrong for one hour on the last Sunday of October, a Saturday night. Peak is clear: **no
+> N+1 is possible** (`Restaurant` is a `SimpleObject`, zero `#[ComplexObject]` impls, list clamped to
+> 200). **Three new rows opened, all explicitly OUT of RSO-1's scope**: **DSC-1** — **seven** declared
+> discovery filters (`tags`, `serviceType`, `openNow`, `city`, `priceRange`, `list`, `listingStatus`)
+> are emitted onto the input type and then **silently dropped** by the resolver
+> (`crates/server/src/graphql/generated/query.rs:250` builds only `search`/`orderableOnly`/`limit`/
+> `offset`), so a client filters and gets unfiltered results with no error — already public;
+> **PAN-1** — a latent `.expect` panic on the public discovery list
+> (`crates/server/src/graphql/generated/types.rs:1093`) one line above an `unwrap_or_default()`, which
+> the RSO-1 implementation must not duplicate; **HRS-1** — the **third** meaning of `[]` (hours present
+> but unparseable) is a **defect, not a state**, and nothing counts it, plus the owed
+> `service_window_verdict_total{verdict}` contract without which the accept branch is invisible and
+> RSO-1's revisit condition is **permanently unmeetable**. **Nothing was applied**: `docs/**` only — no
+> `specs/**`, no `crates/**`.
+
 > 🛑 **2026-08-15 — RSO-1 CANNOT BE BUILT AS RECORDED: A BOOLEAN "IS IT OPEN?" WOULD TAKE LIVE
-> RESTAURANTS OFFLINE** (docs-only, straight to `main`; recorded BEFORE any code was dispatched).
+> RESTAURANTS OFFLINE** (docs-only, straight to `main`; recorded BEFORE any code was dispatched)
+> — **superseded in part 2026-08-15 by the banner above**: its sub-questions are answered, its
+> `specs/network/scalars.yaml` placement and its correction 4 and 5 are corrected there.
 > `evans`, in mob briefing, found a **blocker**, **five design corrections**, a **factual error in
 > the row's own text**, and **one new row** — all in [DECISIONS §43](proposals/DECISIONS.md).
 > **The blocker**: `opening_hours` is a `Vec` updated via `replaced_vec`
