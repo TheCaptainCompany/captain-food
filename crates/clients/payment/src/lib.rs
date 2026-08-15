@@ -40,6 +40,7 @@ impl sealed::Sealed for domain::generated::events::PaymentReleased {}
 impl sealed::Sealed for domain::generated::events::RefundApproved {}
 impl sealed::Sealed for domain::generated::events::RefundDenied {}
 impl sealed::Sealed for domain::generated::events::RefundOpened {}
+impl sealed::Sealed for domain::generated::answers::PaymentSettlementViewRequest {}
 
 /// GENERATED from actors.yaml `Payment.receives`: marker for every inbound FACT (an
 /// `events.yaml#/...` ref -- an external fact that already happened) the `Payment` actor records.
@@ -123,6 +124,40 @@ impl PaymentFact for domain::generated::events::RefundOpened {
     }
 }
 
+/// GENERATED from actors.yaml `Payment.answers` (PROP-20260815-142349 s7, #582): marker for
+/// every ask this actor ANSWERS -- the declaration is the permission, so this trait (and the
+/// `ask` method) exist iff the spec declares `answers:`, and are ABSENT otherwise. SEALED like
+/// the send/record traits: the answer set is the answer set, period. `Reply` carries
+/// UNCONDITIONAL serde -- the wire shape may not rot while the ask is local -- and the reader
+/// is TOLERANT (additive-only producer / tolerant reader; a breaking reshape takes a NEW
+/// answer name).
+pub trait PaymentAnswer: sealed::Sealed {
+    /// The declared operation address -- the ref path IS the whole address (the actor is
+    /// encoded in it, never restated).
+    const QUERY_TYPE: &'static str;
+    type Reply: serde::Serialize + serde::de::DeserializeOwned + Send;
+    /// The answering instance's stream -- the identity IS the argument (PROP s3).
+    fn stream_name(&self) -> String;
+    /// Project the declared reply properties off the actor's own fold state. THE compiled
+    /// YAML-state <-> hand-fold parity proof: rename a fold field and this stops building.
+    fn project(state: &domain::payment::PaymentState) -> Self::Reply;
+}
+
+impl PaymentAnswer for domain::generated::answers::PaymentSettlementViewRequest {
+    const QUERY_TYPE: &'static str = "actors.yaml#/Payment/answers/settlementView";
+    type Reply = domain::generated::answers::PaymentSettlementViewReply;
+    fn stream_name(&self) -> String {
+        format!("Payment-{}", self.payment_intent_id.0)
+    }
+    fn project(state: &domain::payment::PaymentState) -> Self::Reply {
+        domain::generated::answers::PaymentSettlementViewReply {
+            order_id: state.order_id.clone(),
+            status: state.status.clone(),
+            capture_failed: state.capture_failed.clone(),
+        }
+    }
+}
+
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Payment` mailbox lane --
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 5 (`mailbox.partitions`). The only door to this actor.
@@ -161,6 +196,23 @@ impl PaymentClient {
                 external_id,
                 correlation_id,
             )
+            .await
+    }
+
+    /// Ask this actor for a DECLARED answer (PROP-20260815-142349 s7, #582) -- the LOCAL
+    /// adapter: load the instance's stream through the EventStore PORT, fold with the actor's
+    /// own hand fold, project the declared reply, envelope with the fold's version. `Absent`
+    /// (no birth event on the stream) and `Deadline` (the CALLER's deadline elapsed -- the
+    /// deadline lives on the call site, never on this actor, D5) are Ok-channel arms the
+    /// caller must match exhaustively; `Err` stays reserved for infrastructure failure. The
+    /// reply's authority EXPIRES AT SEND: a fold gives freshness, not atomicity (CHK-1).
+    pub async fn ask<Q: PaymentAnswer>(
+        &self,
+        q: Q,
+        store: &dyn application::ports::EventStore,
+        deadline: std::time::Duration,
+    ) -> Result<actor_client::ask::AskOutcome<Q::Reply>, DomainError> {
+        actor_client::ask::ask_local(store, &q.stream_name(), deadline, domain::payment::fold, Q::project)
             .await
     }
 }

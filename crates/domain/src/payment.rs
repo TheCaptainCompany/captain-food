@@ -281,6 +281,60 @@ mod tests {
         })
     }
 
+    /// #582 answers parity + round-trip (PROP-20260815-142349 §2/V4; the `Payment.settlementView`
+    /// reply serves `#/Payment/state/{orderId,status,captureFailed}` — `status` is the implicit
+    /// lifecycle-status field). The generated `PaymentSettlementViewReply` is built FROM a real
+    /// `fold()` result, property by property — this construction site IS the YAML-`state:` ↔
+    /// hand-fold parity proof, compiler-checked: rename a fold field and this test stops
+    /// BUILDING (mutation evidence in PR #583). The YAML block is NOT otherwise machine-verified
+    /// against the fold this slice (states.rs generation for lifecycle actors is slice 2).
+    /// Round-trips are deliberately STRUCTURE-SENSITIVE (exact JSON asserted): a reply is a wire
+    /// contract whose shape may not rot while the ask is local — that brittleness is the point.
+    #[test]
+    fn settlement_view_reply_projects_the_fold_and_round_trips() {
+        use crate::generated::answers::PaymentSettlementViewReply;
+        // The settlement guard's decisive shape: AUTHORIZED with a recorded capture failure —
+        // a realistic multi-event stream (never Default::default()).
+        let s = fold(&[intent_created(), authorized(), capture_failed()]).unwrap();
+        let reply = PaymentSettlementViewReply {
+            order_id: s.order_id.clone(),
+            status: s.status.clone(),
+            capture_failed: s.capture_failed.clone(),
+        };
+        assert_eq!(reply.order_id, order_id());
+        assert_eq!(reply.status, PaymentStatus::AUTHORIZED);
+        assert!(reply.capture_failed);
+        let json = serde_json::to_value(&reply).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "orderId": "00000000-0000-0000-0000-000000000000",
+                "status": "AUTHORIZED",
+                "captureFailed": true,
+            })
+        );
+        let back: PaymentSettlementViewReply = serde_json::from_value(json).unwrap();
+        assert_eq!(back, reply);
+        // A settled payment projects CAPTURED with the failure flag still recorded history-true.
+        let s = fold(&[intent_created(), authorized(), capture_failed(), captured()]).unwrap();
+        let reply = PaymentSettlementViewReply {
+            order_id: s.order_id.clone(),
+            status: s.status.clone(),
+            capture_failed: s.capture_failed.clone(),
+        };
+        assert_eq!(reply.status, PaymentStatus::CAPTURED);
+        assert!(reply.capture_failed);
+        // Tolerant reader: an ADDITIVE field from a future producer is ignored, never an error.
+        let widened: PaymentSettlementViewReply = serde_json::from_value(serde_json::json!({
+            "orderId": "00000000-0000-0000-0000-000000000000",
+            "status": "AUTHORIZED",
+            "captureFailed": false,
+            "settledAt": "2026-08-15",
+        }))
+        .unwrap();
+        assert_eq!(widened.status, PaymentStatus::AUTHORIZED);
+    }
+
     #[test]
     fn no_intent_created_means_no_payment() {
         assert_eq!(fold(&[]), None);

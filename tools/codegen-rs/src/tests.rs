@@ -4781,9 +4781,18 @@ Catalog:
         // Independent per-actor receives scan: ref path encodes the kind (§1b).
         let mut has_commands: HashSet<String> = HashSet::new();
         let mut has_facts: HashSet<String> = HashSet::new();
+        // #582: the ANSWERS declaration set — the spec permission for the sealed `ask` surface.
+        let mut has_answers: HashSet<String> = HashSet::new();
         if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
             for (k, def) in actors {
                 let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+                if def
+                    .get("answers")
+                    .and_then(|a| a.as_mapping())
+                    .is_some_and(|m| !m.is_empty())
+                {
+                    has_answers.insert(name.to_string());
+                }
                 let Some(receives) = def.get("receives").and_then(|r| r.as_sequence()) else {
                     continue;
                 };
@@ -4802,6 +4811,11 @@ Catalog:
             }
         }
         assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
+        assert!(
+            !has_answers.is_empty(),
+            "no actor declares answers — if the Order/Payment settlement pair left the spec, \
+             this guard needs a new positive case, not silence"
+        );
 
         // Since phase 2 (#306) each actor's surface is its OWN crate, so the per-actor unit of
         // inspection is a generated `lib.rs` rather than a block of one shared file — which makes
@@ -4828,6 +4842,13 @@ Catalog:
                 ),
                 ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
                 ("pub async fn cancel_scheduling", declaring.contains(name), "declares reminders:"),
+                // #582 (PROP-20260815-142349 §7): the typed ask surface exists IFF `answers:`.
+                ("pub async fn ask", has_answers.contains(name), "declares answers:"),
+                (
+                    &format!("pub trait {name}Answer") as &str,
+                    has_answers.contains(name),
+                    "declares answers:",
+                ),
             ];
             for (needle, justified, why) in surface {
                 assert_eq!(
@@ -4837,8 +4858,66 @@ Catalog:
                      declaration is the permission (product-owner directive, 2026-08-02)"
                 );
             }
+            // #582: the `application` dependency (the ask's EventStore port) is itself
+            // spec-gated — an unused dependency is an unheld capability (the D6 machete law).
+            assert_eq!(
+                c.manifest.contains("application = { path"),
+                has_answers.contains(name),
+                "{name}: the `application` dep must exist IFF the actor declares `answers:`"
+            );
         }
         assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
+    }
+
+    /// #582 — the emitted answers surface (PROP-20260815-142349 §§2/6/7): unconditional serde,
+    /// tolerant reader, absent-stays-absent nullables, and the three-armed `AskOutcome` envelope
+    /// with no escape hatch. V4's round-trip behaviour lives beside the hand folds (built from
+    /// real `fold()` fixtures); this pins the STRUCTURAL half the emitter owns.
+    #[test]
+    fn emitted_answers_types_are_serde_tolerant_and_the_envelope_is_closed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let answers = emit_domain_answers(&model);
+        // Every declared op derives its Request/Reply pair…
+        for ty in [
+            "pub struct OrderPaymentReferenceRequest",
+            "pub struct OrderPaymentReferenceReply",
+            "pub struct PaymentSettlementViewRequest",
+            "pub struct PaymentSettlementViewReply",
+        ] {
+            assert!(answers.contains(ty), "missing generated type: {ty}");
+        }
+        // …with serde ALWAYS (one derive line per struct — the wire shape may not rot)…
+        assert_eq!(
+            answers.matches("Serialize, Deserialize)]").count(),
+            answers.matches("pub struct ").count(),
+            "every Request/Reply must derive Serialize + Deserialize unconditionally"
+        );
+        // …a TOLERANT reader (additive-only producer / tolerant reader — V7's enforceable half)…
+        assert!(
+            !answers.contains("deny_unknown_fields"),
+            "a reply reader must tolerate additive fields — deny_unknown_fields is the exact \
+             opposite of the declared evolution contract"
+        );
+        // …and a nullable state field rides as Option + default + skip (absent round-trips as
+        // ABSENT — no key, not null).
+        assert!(
+            answers.contains("#[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub payment_intent_id: Option<PaymentIntentId>,"),
+            "the nullable paymentIntentId must be Option + serde(default, skip_serializing_if)"
+        );
+        // The hand-written envelope is CLOSED (V5): exactly the three declared arms, no
+        // `non_exhaustive` escape — the compiler then forces every caller to face
+        // Absent/Deadline; a `_` wildcard in a caller is a review defect, not a compile one,
+        // which is why the arms are few and named.
+        let ask_rs = std::fs::read_to_string(root.join("crates/actor_client/src/ask.rs")).expect("committed ask.rs");
+        for arm in ["Answered {", "Absent,", "Deadline,"] {
+            assert!(ask_rs.contains(arm), "AskOutcome must declare the `{arm}` arm");
+        }
+        assert!(
+            !ask_rs.contains("non_exhaustive"),
+            "AskOutcome must stay exhaustively matchable — non_exhaustive would let a caller \
+             compile without deciding Absent/Deadline"
+        );
     }
 
     /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.

@@ -732,6 +732,252 @@ pub(crate) fn emit_domain_states(model: &Model) -> String {
     out
 }
 
+// ─── crates/domain/src/generated/answers.rs (actor answers Request/Reply, PROP-20260815-142349) ──
+
+/// One reply/params field, resolved for emission: the Rust field, its rendered type, and the doc.
+struct AnswerField {
+    rust: String,
+    ty: String,
+    optional: bool,
+    doc: Option<String>,
+}
+
+/// One declared answer operation, resolved for emission (shared between the domain types emitter
+/// and the client-surface emitter so the two can never disagree).
+pub(crate) struct AnswerOp {
+    pub(crate) actor: String,
+    pub(crate) op: String,
+    /// `OrderPaymentReference` — the `<Actor><Op>` prefix of the generated Request/Reply pair.
+    pub(crate) pair: String,
+    /// The snake-case Rust field of the REQUEST that carries the actor's identity (the stream
+    /// key — how the local adapter addresses the stream).
+    pub(crate) identity_rust: String,
+    /// `(reply rust field, actor-state rust field)` pairs — the projection sites.
+    pub(crate) projections: Vec<(String, String)>,
+}
+
+/// Render a scalars.yaml/entities.yaml `$ref` into a Rust type name, recording the import.
+fn answer_type(
+    r: &str,
+    scalar_imports: &mut BTreeSet<String>,
+    entity_imports: &mut BTreeSet<String>,
+) -> String {
+    let name = ref_name(r).unwrap_or_else(|| panic!("answers: malformed type ref '{r}'"));
+    match ref_target_file(r, "actors.yaml").as_deref() {
+        Some("entities.yaml") => entity_imports.insert(name.clone()),
+        _ => scalar_imports.insert(name.clone()),
+    };
+    name
+}
+
+/// Every declared answer operation with its resolved fields, in catalog order. Panics (loudly, at
+/// generation) on shapes the `ans-*` validator already refuses — the two must agree.
+fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerField>, String)> {
+    let mut out = Vec::new();
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return out };
+    for (k, def) in actors {
+        let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
+        let Some(answers) = def.get("answers").and_then(|a| a.as_mapping()) else { continue };
+        let identity = actor_identity_field(def, actor).unwrap_or_else(|| {
+            panic!("actors.yaml {}: `answers:` needs a typed `identity` (the ask is addressed by it)", actor)
+        });
+        for (ok, op_def) in answers {
+            let Some(op) = ok.as_str() else { continue };
+            let description = op_def
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let mut scalar_imports = BTreeSet::new(); // rendered per-field; imports merged later
+            let mut entity_imports = BTreeSet::new();
+            // The field type of one same-actor state field (reply property / identity), via the
+            // shared validator resolution so generation cannot drift from `ans-reply-ref`.
+            let state_field_ty = |field: &str| -> (String, bool) {
+                match resolve_reply_field(def, actor, field) {
+                    Some(ReplyField::Declared { flag: true, .. }) => ("bool".into(), false),
+                    Some(ReplyField::Declared { type_ref: Some(r), nullable, .. }) => {
+                        (ref_name(&r).expect("state type ref"), nullable)
+                    }
+                    Some(ReplyField::Declared { type_ref: None, .. }) => ("bool".into(), false),
+                    Some(ReplyField::LifecycleStatus { status_ref }) => {
+                        (ref_name(&status_ref).expect("lifecycle status ref"), false)
+                    }
+                    Some(ReplyField::Identity) | None => panic!(
+                        "actors.yaml {}/answers/{}: field '{}' must be a declared `state:` entry (or the lifecycle status) so its scalar is knowable — declare it",
+                        actor, op, field
+                    ),
+                }
+            };
+            // REQUEST fields: the declared params; the identity field is added when absent
+            // (identity IS the argument — PROP §3's common case).
+            let mut request: Vec<AnswerField> = Vec::new();
+            let mut has_identity = false;
+            if let Some(params) = op_def.get("params").and_then(|p| p.as_mapping()) {
+                for (pk, pv) in params {
+                    let pname = pk.as_str().expect("param name");
+                    let r = pv.get("$ref").and_then(|x| x.as_str()).unwrap_or_else(|| {
+                        panic!("actors.yaml {}/answers/{}/params/{}: params are $refs (ans-inline-type)", actor, op, pname)
+                    });
+                    if pname == identity {
+                        has_identity = true;
+                    }
+                    request.push(AnswerField {
+                        rust: snake_field(pname),
+                        ty: answer_type(r, &mut scalar_imports, &mut entity_imports),
+                        optional: false,
+                        doc: None,
+                    });
+                }
+            }
+            if !has_identity {
+                let (ty, _) = state_field_ty(&identity);
+                request.insert(
+                    0,
+                    AnswerField {
+                        rust: snake_field(&identity),
+                        ty,
+                        optional: false,
+                        doc: Some(format!(
+                            "The answering instance — the `{}-{{id}}` stream key IS the argument (no declared param restates it).",
+                            actor
+                        )),
+                    },
+                );
+            }
+            // REPLY fields: same-actor state composition.
+            let mut reply: Vec<AnswerField> = Vec::new();
+            let mut projections: Vec<(String, String)> = Vec::new();
+            for (rk, rv) in op_def.get("reply").and_then(|r| r.as_mapping()).into_iter().flatten() {
+                let rname = rk.as_str().expect("reply property name");
+                let field = rv
+                    .get("$ref")
+                    .and_then(|x| x.as_str())
+                    .and_then(parse_ref)
+                    .filter(|pr| pr.path.len() == 3)
+                    .map(|pr| pr.path[2].clone())
+                    .unwrap_or_else(|| panic!("actors.yaml {}/answers/{}/reply/{}: reply properties are same-actor state $refs", actor, op, rname));
+                let (ty, optional) = state_field_ty(&field);
+                let doc = def
+                    .get("state")
+                    .and_then(|s| s.get(field.as_str()))
+                    .and_then(|f| f.get("note"))
+                    .and_then(|n| n.as_str())
+                    .map(str::to_string);
+                reply.push(AnswerField { rust: snake_field(rname), ty, optional, doc });
+                projections.push((snake_field(rname), snake_field(&field)));
+            }
+            // Merge the imports into the field types (rendered names only — the emitter builds
+            // one import line per file from the union below).
+            let _ = (&scalar_imports, &entity_imports);
+            out.push((
+                AnswerOp {
+                    actor: actor.to_string(),
+                    op: op.to_string(),
+                    pair: format!("{}{}", actor, pascal(op)),
+                    identity_rust: snake_field(&identity),
+                    projections,
+                },
+                request,
+                reply,
+                description,
+            ));
+        }
+    }
+    out
+}
+
+/// The declared answer operations, resolved — the client-surface emitter's view.
+pub(crate) fn answer_ops(model: &Model) -> Vec<AnswerOp> {
+    parse_answers(model).into_iter().map(|(op, _, _, _)| op).collect()
+}
+
+/// Emit `crates/domain/src/generated/answers.rs` — the `<Actor><Op>Request`/`<Actor><Op>Reply`
+/// pair for every declared answer operation (PROP-20260815-142349 §2, #582), with UNCONDITIONAL
+/// serde (the wire shape may not rot while the ask is local) and a TOLERANT reader (no
+/// `deny_unknown_fields`; nullable fields are `Option` + `serde(default)`, so an absent value
+/// round-trips as absent — additive-only producer / tolerant reader is the reply's whole
+/// evolution contract, and a breaking reshape takes a NEW answer name).
+pub(crate) fn emit_domain_answers(model: &Model) -> String {
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml `answers:` blocks\n// (PROP-20260815-142349 §2, #582) — do not edit by hand. The typed Request/Reply pair per\n// declared answer operation. A reply is a SNAPSHOT whose authority expires at send: never\n// stored, never folded, never api-exposed (`ans-ref-isolation`); the served stream version\n// rides the `AskOutcome` ENVELOPE (actor_client::ask), never a payload field. Serde is\n// UNCONDITIONAL and the reader TOLERANT (unknown fields are ignored, never refused):\n// additive-only producer / tolerant reader — a breaking reshape takes a NEW answer name\n// (review-carried V7). Round-trip tests live beside the hand folds\n// (crates/domain/src/{order,payment}.rs), built from real fold() fixtures so they cannot be\n// vacuous.\n",
+    );
+    let ops = parse_answers(model);
+    if ops.is_empty() {
+        return out;
+    }
+    // One import line over the union of every field type (bool is primitive; the rest scalars —
+    // entity-typed params would import from entities the same way).
+    let mut scalar_imports: BTreeSet<String> = BTreeSet::new();
+    let mut entity_imports: BTreeSet<String> = BTreeSet::new();
+    for (op, request, reply, _) in &ops {
+        let _ = op;
+        for f in request.iter().chain(reply.iter()) {
+            if f.ty != "bool" {
+                // Re-derive the import bucket from the model: scalars vs entities is decided by
+                // where the name is declared.
+                if model.defs.get("entities.yaml").map(|e| e.get(f.ty.as_str()).is_some()).unwrap_or(false) {
+                    entity_imports.insert(f.ty.clone());
+                } else {
+                    scalar_imports.insert(f.ty.clone());
+                }
+            }
+        }
+    }
+    out.push_str("\nuse serde::{Deserialize, Serialize};\n");
+    if !scalar_imports.is_empty() {
+        out.push_str(&format!(
+            "use crate::generated::scalars::{{{}}};\n",
+            scalar_imports.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !entity_imports.is_empty() {
+        out.push_str(&format!(
+            "use crate::generated::entities::{{{}}};\n",
+            entity_imports.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let emit_struct = |out: &mut String, name: &str, doc: &str, fields: &[AnswerField]| {
+        out.push_str(&format!("\n/// {}\n", doc));
+        out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n#[serde(rename_all = \"camelCase\")]\npub struct ");
+        out.push_str(name);
+        out.push_str(" {\n");
+        for f in fields {
+            if let Some(d) = &f.doc {
+                out.push_str(&format!("    /// {}\n", d));
+            }
+            if f.optional {
+                out.push_str("    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n");
+                out.push_str(&format!("    pub {}: Option<{}>,\n", f.rust, f.ty));
+            } else {
+                out.push_str(&format!("    pub {}: {},\n", f.rust, f.ty));
+            }
+        }
+        out.push_str("}\n");
+    };
+    for (op, request, reply, description) in &ops {
+        emit_struct(
+            &mut out,
+            &format!("{}Request", op.pair),
+            &format!(
+                "Ask `{}.{}` (actors.yaml#/{}/answers/{}): {}",
+                op.actor, op.op, op.actor, op.op, description
+            ),
+            request,
+        );
+        emit_struct(
+            &mut out,
+            &format!("{}Reply", op.pair),
+            &format!(
+                "Reply of `{}.{}` — every property composes `#/{}/state/…` (declared once, served many).",
+                op.actor, op.op, op.actor
+            ),
+            reply,
+        );
+    }
+    out
+}
+
 // ─── crates/domain/src/generated/lifecycles.rs (aggregate lifecycle tables, ADR-20260720-004419) ──
 
 /// Emit `crates/domain/src/generated/lifecycles.rs` — one module per aggregate declaring a

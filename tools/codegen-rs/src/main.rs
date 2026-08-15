@@ -471,7 +471,8 @@ fn main() {
         ("errors.rs", emit_domain_errors(&model)),
         ("lifecycles.rs", emit_domain_lifecycles(&model)),
         ("states.rs", emit_domain_states(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\npub mod lifecycles;\npub mod states;\n".to_string()),
+        ("answers.rs", emit_domain_answers(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\npub mod lifecycles;\npub mod states;\npub mod answers;\n".to_string()),
     ] {
         let path = gen_dir.join(name);
         if let Err(e) = fs::write(&path, content) {

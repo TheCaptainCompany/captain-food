@@ -47,7 +47,7 @@ uuid = { workspace = true, features = ["v5"] }
 # feature unification is ADDITIVE: any workspace build carries the full workspace tokio set
 # (rt-multi-thread, macros, net, signal, time) into this crate's graph too — the narrowing is
 # documentation of intent, not an enforced capability bound (tokio is not D3-gated).
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 
 # The out-of-crate DRIFT GUARD (tests/drift_guard.rs, #306): phase 2 moved the typed clients into
 # their own crates, so the guard that proves a typed send still builds the reference row has to
@@ -60,6 +60,10 @@ actor_client = { path = ".", features = ["test-fixtures"] }
 client-order = { path = "../clients/order" }
 client-payment = { path = "../clients/payment" }
 client-restaurant = { path = "../clients/restaurant" }
+# The ask behaviour tests (tests/ask.rs, #582) drive the CALLER-side deadline with the paused
+# clock (`start_paused` + `advance`) — deterministic, no real sleeps; `test-util` is dev-only.
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
+async-trait = { workspace = true }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is
