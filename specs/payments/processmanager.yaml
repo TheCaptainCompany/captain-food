@@ -53,7 +53,7 @@ PaymentSettlementProcess:
             source: PROJECTION
             as: order
             where: { order_id: { from: { $ref: 'events.yaml#/OrderDelivered/properties/orderId' } } }
-            note: "The fulfilled order, with its folded payment state. SELECTed from the `ordertracking` projection (payment_settlement.rs load_order -> OrderReadRepository::by_id), like all four legs of this saga -- the projected row is where `payment_status` and `payment_intent_id` are folded together, which is the pair the capture/release decision needs."
+            note: "The fulfilled order, with its folded payment state. SELECTed from the `ordertracking` projection, like all four legs of this saga -- the projected row is where `payment_status` and `payment_intent_id` are folded together, which is the pair the capture/release decision needs. PROJECTION HERE IS NOT LAG-BENIGN, and nothing in the token says so: an unprojected `payment_status` makes the guard below SKIP, the capture never happens, and the ~7-day authorization expires silently -- the restaurant is never paid (the #544 class, which shipped inert for exactly this reason). Do not read `source: PROJECTION` as `tolerates lag`; the two are independent and only prose distinguishes them."
         - guard:
             that: { order: { payment_status: { const: AUTHORIZED } } }
             skip: true
@@ -132,7 +132,7 @@ RefundProcess:
             source: PROJECTION
             as: order
             where: { order_id: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } } }
-            note: "SELECTed from the `ordertracking` projection (refund.rs load_order -> OrderReadRepository::by_id), like all four opening legs of this saga -- the captured total and the payment intent the RefundOpened fact carries come from the projected row."
+            note: "SELECTed from the `ordertracking` projection, like all four opening legs of this saga -- the captured total and the payment intent the RefundOpened fact carries come from the projected row."
         - guard:
             that: { order: { payment_status: { const: CAPTURED } } }
             skip: true

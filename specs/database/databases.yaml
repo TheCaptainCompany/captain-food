@@ -91,13 +91,14 @@ read_order:
     STO-7. Those PM reads are DECLARED in the DSL (`specs/*/processmanager.yaml` `read:` steps carry
     `model: { $ref: 'database/tables/projection_tables.yaml#/X' }`), so #513's grant emitter must
     derive them mechanically rather than from this paragraph — but NOT VERBATIM: a `read:` step
-    declares the model SHAPE a leg consumes, not the physical SOURCE. Three of the thirteen are
-    `captain_write` STREAM FOLDS that never touch the projection they name, one of them on THIS
-    database (`Cart` on the PlaceOrder leg, `specs/ordering/processmanager.yaml:31` -> `commands.rs`
-    `require_cart`, folded from the cart's own stream), so a literal derivation grants CONNECT for a
-    path no code takes. Until the grammar can distinguish projection-read from stream-fold (a
-    declared source, or an explicit exception list) the derivation must carry that distinction —
-    DECISIONS §32 limit (4).
+    declares the model SHAPE a leg consumes, not the physical SOURCE. Several steps are
+    `captain_write` STREAM FOLDS that never touch the projection they name, including one on THIS
+    database (`Cart` on the PlaceOrder leg, folded from the cart's own stream), so a literal
+    derivation grants CONNECT for a path no code takes. No count is stated here on purpose: the
+    validator's own walk is the count and cannot go stale. Since #564 the grammar CARRIES that
+    distinction (`source: PROJECTION | EVENT_STREAM`, REQUIRED on every PM `read:` step); the
+    derivation that CONSUMES it is #564 PR2, so until that lands #513's emitter must still not read
+    these steps verbatim — DECISIONS §32 limit (4), §42 RDR-1.
   owner: migrator
   k8sName: read-order
   recovery: replay
@@ -131,9 +132,10 @@ read_common:
     register row STO-10. The first record of this description named only (1), the second only (1)+(2)
     — read this list as a LOWER BOUND (DECISIONS §32 "the method finding"). And a bound in the OTHER
     direction, because this database is where a naive derivation OVER-grants: the two declared PM
-    `read:` steps on `Restaurant` (`specs/delivery/processmanager.yaml:43`,
-    `specs/ordering/processmanager.yaml:41`) are implemented as `captain_write` STREAM FOLDS, not as
-    reads of this database — a `read:` step declares the model SHAPE, not the physical SOURCE — so
+    `read:` steps on `Restaurant` (`DeliveryDispatchProcess`/`OrderMarkedReady` and
+    `PlaceOrderProcess`/`PlaceOrder`; both now carry `source: EVENT_STREAM`, #564) are implemented as
+    `captain_write` STREAM FOLDS, not as reads of this database — a `read:` step declares the model
+    SHAPE, not the physical SOURCE, which is why the SOURCE is now declared beside it — so
     #513 must NOT emit CONNECT here from them (DECISIONS §32 limit (4)). Distinct from the
     `specs/common` kernel scope: this is a shared READ store, not shared doctrine.
   owner: migrator

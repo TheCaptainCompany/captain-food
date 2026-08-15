@@ -3716,6 +3716,7 @@ sequenceDiagram
   participant RM_Cart as Cart (read model)
   participant RM_Restaurant as Restaurant (read model)
   participant RM_Catalog as Catalog (read model)
+  participant RM_CustomerCreditBalance as CustomerCreditBalance (read model)
   participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   participant AG_Order as Order (aggregate)
@@ -3734,6 +3735,7 @@ sequenceDiagram
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
   PM--xIN: throws PriceMismatch
+  PM->>RM_CustomerCreditBalance: read as customer_credit [customer_id=PlaceOrder.customerId]
   PM->>PT_payment: request
   PM--xIN: throws PaymentDeclined
   PM->>AG_Payment: deliver PaymentIntentCreated — the aggregate records it
@@ -3898,6 +3900,7 @@ sequenceDiagram
   participant RM_Cart as Cart (read model)
   participant RM_Restaurant as Restaurant (read model)
   participant RM_Catalog as Catalog (read model)
+  participant RM_CustomerCreditBalance as CustomerCreditBalance (read model)
   participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   participant AG_Order as Order (aggregate)
@@ -3916,6 +3919,7 @@ sequenceDiagram
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
   PM--xIN: throws PriceMismatch
+  PM->>RM_CustomerCreditBalance: read as customer_credit [customer_id=PlaceOrder.customerId]
   PM->>PT_payment: request
   PM--xIN: throws PaymentDeclined
   PM->>AG_Payment: deliver PaymentIntentCreated — the aggregate records it
