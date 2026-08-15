@@ -28,11 +28,36 @@ pub struct CommandDeps {
     pub pm_state: Arc<dyn application::pm_state::PaymentProcessStateStore>,
     pub refund_state: Arc<dyn application::pm_state::RefundProcessStateStore>,
     pub mailbox_requeue: Arc<dyn application::queries::MailboxRequeue>,
+    /// RSO-1 (`configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD`): the PlaceOrder service-hours
+    /// enforcement gate, resolved ONCE at the composition root -- the handler takes it as a
+    /// parameter (the `when_at` style), never reads config/env itself.
+    pub enforce_service_hours_guard: bool,
 }
 
 /// The slice of the request envelope some handler calls read (placeOrder's session scope).
 struct RouterEnv {
     session_id: Option<uuid::Uuid>,
+}
+
+/// The `command.validate` handler-boundary wrapper (specs/observability.yaml `place-order`,
+/// RSO-1): c4-l3.yaml marks `command-handlers` `instrumented: false`, so the span lives HERE at
+/// the dispatch seam, never in the aggregate -- it instruments the handler call and records
+/// `business.validation_status` from the ACTUAL outcome. A Repository error is transient
+/// infrastructure (the delivery aborts and retries), so it records NO validation verdict --
+/// classifying it `rejected` would count a DB blip as a business refusal.
+async fn validated<F>(handler: F) -> Result<(), DomainError>
+where
+    F: std::future::Future<Output = Result<(), DomainError>>,
+{
+    use tracing::Instrument as _;
+    let span = telemetry::spans::command_validate();
+    let result = handler.instrument(span.clone()).await;
+    match &result {
+        Ok(()) => telemetry::spans::record_validation_status(&span, "accepted"),
+        Err(DomainError::Repository(_)) => {}
+        Err(_) => telemetry::spans::record_validation_status(&span, "rejected"),
+    }
+    result
 }
 
 /// Route one mailbox COMMAND row to its handler. `None` = unroutable command type.
@@ -57,6 +82,7 @@ pub async fn dispatch_command(
     let pm_state = deps.pm_state.clone();
     let refund_state = deps.refund_state.clone();
     let mailbox_requeue = deps.mailbox_requeue.clone();
+    let enforce_service_hours_guard = deps.enforce_service_hours_guard;
     let env = RouterEnv { session_id };
     let actor = actor_ref.clone();
     match command_type {
@@ -65,602 +91,602 @@ pub async fn dispatch_command(
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("CreateCatalog payload: {e}")))),
             };
-            Some(application::commands::create_catalog(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::create_catalog(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfigureCatalogSlug" => {
             let cmd: domain::generated::commands::ConfigureCatalogSlug = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfigureCatalogSlug payload: {e}")))),
             };
-            Some(application::commands::configure_catalog_slug(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::configure_catalog_slug(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AddProduct" => {
             let cmd: domain::generated::commands::AddProduct = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AddProduct payload: {e}")))),
             };
-            Some(application::commands::add_product(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::add_product(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateProduct" => {
             let cmd: domain::generated::commands::UpdateProduct = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateProduct payload: {e}")))),
             };
-            Some(application::commands::update_product(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_product(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveProduct" => {
             let cmd: domain::generated::commands::RemoveProduct = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveProduct payload: {e}")))),
             };
-            Some(application::commands::remove_product(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_product(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AddCatalogCategory" => {
             let cmd: domain::generated::commands::AddCatalogCategory = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AddCatalogCategory payload: {e}")))),
             };
-            Some(application::commands::add_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::add_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateCatalogCategory" => {
             let cmd: domain::generated::commands::UpdateCatalogCategory = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateCatalogCategory payload: {e}")))),
             };
-            Some(application::commands::update_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveCatalogCategory" => {
             let cmd: domain::generated::commands::RemoveCatalogCategory = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveCatalogCategory payload: {e}")))),
             };
-            Some(application::commands::remove_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_catalog_category(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AddOptionList" => {
             let cmd: domain::generated::commands::AddOptionList = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AddOptionList payload: {e}")))),
             };
-            Some(application::commands::add_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::add_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateOptionList" => {
             let cmd: domain::generated::commands::UpdateOptionList = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateOptionList payload: {e}")))),
             };
-            Some(application::commands::update_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveOptionList" => {
             let cmd: domain::generated::commands::RemoveOptionList = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveOptionList payload: {e}")))),
             };
-            Some(application::commands::remove_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_option_list(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateOfferStock" => {
             let cmd: domain::generated::commands::UpdateOfferStock = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateOfferStock payload: {e}")))),
             };
-            Some(application::commands::update_offer_stock(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_offer_stock(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ImportCatalog" => {
             let cmd: domain::generated::commands::ImportCatalog = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ImportCatalog payload: {e}")))),
             };
-            Some(application::commands::import_catalog(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::import_catalog(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RequeueMailboxMessage" => {
             let cmd: domain::generated::commands::RequeueMailboxMessage = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RequeueMailboxMessage payload: {e}")))),
             };
-            Some(application::commands::requeue_mailbox_message(store.as_ref(), mailbox_requeue.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::requeue_mailbox_message(store.as_ref(), mailbox_requeue.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "OpenConversation" => {
             let cmd: domain::generated::commands::OpenConversation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("OpenConversation payload: {e}")))),
             };
-            Some(application::commands::open_conversation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::open_conversation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "PostMessage" => {
             let cmd: domain::generated::commands::PostMessage = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("PostMessage payload: {e}")))),
             };
-            Some(application::commands::post_message(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::post_message(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RecordMessageTranslation" => {
             let cmd: domain::generated::commands::RecordMessageTranslation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RecordMessageTranslation payload: {e}")))),
             };
-            Some(application::commands::record_message_translation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::record_message_translation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "EscalateToAdmin" => {
             let cmd: domain::generated::commands::EscalateToAdmin = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("EscalateToAdmin payload: {e}")))),
             };
-            Some(application::commands::escalate_to_admin(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::escalate_to_admin(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MuteParticipant" => {
             let cmd: domain::generated::commands::MuteParticipant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MuteParticipant payload: {e}")))),
             };
-            Some(application::commands::mute_participant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mute_participant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UnmuteParticipant" => {
             let cmd: domain::generated::commands::UnmuteParticipant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UnmuteParticipant payload: {e}")))),
             };
-            Some(application::commands::unmute_participant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::unmute_participant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RequestPhoneVerification" => {
             let cmd: domain::generated::commands::RequestPhoneVerification = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RequestPhoneVerification payload: {e}")))),
             };
-            Some(application::commands::request_phone_verification(store.as_ref(), auth.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::request_phone_verification(store.as_ref(), auth.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "VerifyPhone" => {
             let cmd: domain::generated::commands::VerifyPhone = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("VerifyPhone payload: {e}")))),
             };
-            Some(application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), sessions.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), sessions.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RequestEmailVerification" => {
             let cmd: domain::generated::commands::RequestEmailVerification = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RequestEmailVerification payload: {e}")))),
             };
-            Some(application::commands::request_email_verification(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::request_email_verification(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfirmEmailVerification" => {
             let cmd: domain::generated::commands::ConfirmEmailVerification = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfirmEmailVerification payload: {e}")))),
             };
-            Some(application::commands::confirm_email_verification(store.as_ref(), auth.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::confirm_email_verification(store.as_ref(), auth.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RequestPhoneChange" => {
             let cmd: domain::generated::commands::RequestPhoneChange = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RequestPhoneChange payload: {e}")))),
             };
-            Some(application::commands::request_phone_change(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::request_phone_change(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfirmPhoneChange" => {
             let cmd: domain::generated::commands::ConfirmPhoneChange = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfirmPhoneChange payload: {e}")))),
             };
-            Some(application::commands::confirm_phone_change(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::confirm_phone_change(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ChangeLanguage" => {
             let cmd: domain::generated::commands::ChangeLanguage = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ChangeLanguage payload: {e}")))),
             };
-            Some(application::commands::change_language(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::change_language(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MarkRestaurantAsFavorite" => {
             let cmd: domain::generated::commands::MarkRestaurantAsFavorite = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MarkRestaurantAsFavorite payload: {e}")))),
             };
-            Some(application::commands::mark_restaurant_as_favorite(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mark_restaurant_as_favorite(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UnmarkRestaurantAsFavorite" => {
             let cmd: domain::generated::commands::UnmarkRestaurantAsFavorite = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UnmarkRestaurantAsFavorite payload: {e}")))),
             };
-            Some(application::commands::unmark_restaurant_as_favorite(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::unmark_restaurant_as_favorite(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateCustomerInfo" => {
             let cmd: domain::generated::commands::UpdateCustomerInfo = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateCustomerInfo payload: {e}")))),
             };
-            Some(application::commands::update_customer_info(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_customer_info(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "SetCustomerPreferences" => {
             let cmd: domain::generated::commands::SetCustomerPreferences = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("SetCustomerPreferences payload: {e}")))),
             };
-            Some(application::commands::set_customer_preferences(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::set_customer_preferences(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "SetCustomerAddress" => {
             let cmd: domain::generated::commands::SetCustomerAddress = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("SetCustomerAddress payload: {e}")))),
             };
-            Some(application::commands::set_customer_address(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::set_customer_address(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveCustomerAddress" => {
             let cmd: domain::generated::commands::RemoveCustomerAddress = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveCustomerAddress payload: {e}")))),
             };
-            Some(application::commands::remove_customer_address(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_customer_address(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "SetCustomerPaymentMethod" => {
             let cmd: domain::generated::commands::SetCustomerPaymentMethod = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("SetCustomerPaymentMethod payload: {e}")))),
             };
-            Some(application::commands::set_customer_payment_method(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::set_customer_payment_method(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ChangeRiderStatus" => {
             let cmd: domain::generated::commands::ChangeRiderStatus = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ChangeRiderStatus payload: {e}")))),
             };
-            Some(application::commands::change_rider_status(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::change_rider_status(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AcceptDelivery" => {
             let cmd: domain::generated::commands::AcceptDelivery = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AcceptDelivery payload: {e}")))),
             };
-            Some(application::commands::accept_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::accept_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfirmPickup" => {
             let cmd: domain::generated::commands::ConfirmPickup = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfirmPickup payload: {e}")))),
             };
-            Some(application::commands::confirm_pickup(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::confirm_pickup(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "CompleteDelivery" => {
             let cmd: domain::generated::commands::CompleteDelivery = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("CompleteDelivery payload: {e}")))),
             };
-            Some(application::commands::complete_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::complete_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "CancelDelivery" => {
             let cmd: domain::generated::commands::CancelDelivery = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("CancelDelivery payload: {e}")))),
             };
-            Some(application::commands::cancel_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::cancel_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "EscalateDelivery" => {
             let cmd: domain::generated::commands::EscalateDelivery = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("EscalateDelivery payload: {e}")))),
             };
-            Some(application::commands::escalate_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::escalate_delivery(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RegisterDeliveryPartnerAvailability" => {
             let cmd: domain::generated::commands::RegisterDeliveryPartnerAvailability = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RegisterDeliveryPartnerAvailability payload: {e}")))),
             };
-            Some(application::commands::register_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::register_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ApproveDeliveryPartnerAvailability" => {
             let cmd: domain::generated::commands::ApproveDeliveryPartnerAvailability = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ApproveDeliveryPartnerAvailability payload: {e}")))),
             };
-            Some(application::commands::approve_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::approve_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RevokeDeliveryPartnerAvailability" => {
             let cmd: domain::generated::commands::RevokeDeliveryPartnerAvailability = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RevokeDeliveryPartnerAvailability payload: {e}")))),
             };
-            Some(application::commands::revoke_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::revoke_delivery_partner_availability(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RegisterRestaurantAccount" => {
             let cmd: domain::generated::commands::RegisterRestaurantAccount = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RegisterRestaurantAccount payload: {e}")))),
             };
-            Some(application::commands::register_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::register_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateRestaurantAccount" => {
             let cmd: domain::generated::commands::UpdateRestaurantAccount = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateRestaurantAccount payload: {e}")))),
             };
-            Some(application::commands::update_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "DeleteRestaurantAccount" => {
             let cmd: domain::generated::commands::DeleteRestaurantAccount = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("DeleteRestaurantAccount payload: {e}")))),
             };
-            Some(application::commands::delete_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::delete_restaurant_account(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RegisterRestaurant" => {
             let cmd: domain::generated::commands::RegisterRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RegisterRestaurant payload: {e}")))),
             };
-            Some(application::commands::register_restaurant(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::register_restaurant(store.as_ref(), restaurants.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfigureRestaurantSlug" => {
             let cmd: domain::generated::commands::ConfigureRestaurantSlug = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfigureRestaurantSlug payload: {e}")))),
             };
-            Some(application::commands::configure_restaurant_slug(store.as_ref(), slugs.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::configure_restaurant_slug(store.as_ref(), slugs.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ActivateRestaurant" => {
             let cmd: domain::generated::commands::ActivateRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ActivateRestaurant payload: {e}")))),
             };
-            Some(application::commands::activate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::activate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateRestaurant" => {
             let cmd: domain::generated::commands::UpdateRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateRestaurant payload: {e}")))),
             };
-            Some(application::commands::update_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "DeactivateRestaurant" => {
             let cmd: domain::generated::commands::DeactivateRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("DeactivateRestaurant payload: {e}")))),
             };
-            Some(application::commands::deactivate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::deactivate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveRestaurant" => {
             let cmd: domain::generated::commands::RemoveRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveRestaurant payload: {e}")))),
             };
-            Some(application::commands::remove_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ChangeOrderAcceptanceMode" => {
             let cmd: domain::generated::commands::ChangeOrderAcceptanceMode = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ChangeOrderAcceptanceMode payload: {e}")))),
             };
-            Some(application::commands::change_order_acceptance_mode(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::change_order_acceptance_mode(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "UpdateRestaurantGoogleBusinessProfile" => {
             let cmd: domain::generated::commands::UpdateRestaurantGoogleBusinessProfile = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("UpdateRestaurantGoogleBusinessProfile payload: {e}")))),
             };
-            Some(application::commands::update_restaurant_google_business_profile(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::update_restaurant_google_business_profile(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MarkRestaurantClosed" => {
             let cmd: domain::generated::commands::MarkRestaurantClosed = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MarkRestaurantClosed payload: {e}")))),
             };
-            Some(application::commands::mark_restaurant_closed(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mark_restaurant_closed(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ClaimRestaurantListing" => {
             let cmd: domain::generated::commands::ClaimRestaurantListing = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ClaimRestaurantListing payload: {e}")))),
             };
-            Some(application::commands::claim_restaurant_listing(store.as_ref(), ownership.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::claim_restaurant_listing(store.as_ref(), ownership.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "OptOutRestaurantListing" => {
             let cmd: domain::generated::commands::OptOutRestaurantListing = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("OptOutRestaurantListing payload: {e}")))),
             };
-            Some(application::commands::opt_out_restaurant_listing(store.as_ref(), ownership.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::opt_out_restaurant_listing(store.as_ref(), ownership.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ChangeRestaurantListingStatus" => {
             let cmd: domain::generated::commands::ChangeRestaurantListingStatus = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ChangeRestaurantListingStatus payload: {e}")))),
             };
-            Some(application::commands::change_restaurant_listing_status(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::change_restaurant_listing_status(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ConfigureGoogleBusinessProfileOrderLink" => {
             let cmd: domain::generated::commands::ConfigureGoogleBusinessProfileOrderLink = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ConfigureGoogleBusinessProfileOrderLink payload: {e}")))),
             };
-            Some(application::commands::configure_gbp_order_link(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::configure_gbp_order_link(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "VerifyGoogleBusinessProfileOrderLink" => {
             let cmd: domain::generated::commands::VerifyGoogleBusinessProfileOrderLink = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("VerifyGoogleBusinessProfileOrderLink payload: {e}")))),
             };
-            Some(application::commands::verify_gbp_order_link(store.as_ref(), probe.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::verify_gbp_order_link(store.as_ref(), probe.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RecordProspectContact" => {
             let cmd: domain::generated::commands::RecordProspectContact = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RecordProspectContact payload: {e}")))),
             };
-            Some(application::commands::record_prospect_contact(store.as_ref(), prospection.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::record_prospect_contact(store.as_ref(), prospection.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MarkProspectCold" => {
             let cmd: domain::generated::commands::MarkProspectCold = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MarkProspectCold payload: {e}")))),
             };
-            Some(application::commands::mark_prospect_cold(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mark_prospect_cold(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RecordProspectReply" => {
             let cmd: domain::generated::commands::RecordProspectReply = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RecordProspectReply payload: {e}")))),
             };
-            Some(application::commands::record_prospect_reply(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::record_prospect_reply(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AddCartLine" => {
             let cmd: domain::generated::commands::AddCartLine = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AddCartLine payload: {e}")))),
             };
-            Some(application::commands::add_cart_line(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::add_cart_line(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RemoveCartLine" => {
             let cmd: domain::generated::commands::RemoveCartLine = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RemoveCartLine payload: {e}")))),
             };
-            Some(application::commands::remove_cart_line(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::remove_cart_line(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ChangeCartLineQuantity" => {
             let cmd: domain::generated::commands::ChangeCartLineQuantity = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ChangeCartLineQuantity payload: {e}")))),
             };
-            Some(application::commands::change_cart_line_quantity(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::change_cart_line_quantity(store.as_ref(), catalogs.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "PlaceOrder" => {
             let cmd: domain::generated::commands::PlaceOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("PlaceOrder payload: {e}")))),
             };
-            Some(application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), &actor, chrono::Utc::now(), enforce_service_hours_guard).await.map(|_| ()) }).await)
         }
         "AcceptOrder" => {
             let cmd: domain::generated::commands::AcceptOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AcceptOrder payload: {e}")))),
             };
-            Some(application::commands::accept_order(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::accept_order(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RejectOrder" => {
             let cmd: domain::generated::commands::RejectOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RejectOrder payload: {e}")))),
             };
-            Some(application::commands::reject_order(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::reject_order(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "StartPreparation" => {
             let cmd: domain::generated::commands::StartPreparation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("StartPreparation payload: {e}")))),
             };
-            Some(application::commands::start_preparation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::start_preparation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MarkOrderReady" => {
             let cmd: domain::generated::commands::MarkOrderReady = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MarkOrderReady payload: {e}")))),
             };
-            Some(application::commands::mark_order_ready(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mark_order_ready(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "MarkOrderDelivered" => {
             let cmd: domain::generated::commands::MarkOrderDelivered = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("MarkOrderDelivered payload: {e}")))),
             };
-            Some(application::commands::mark_order_delivered(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::mark_order_delivered(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "CancelOrderByCustomer" => {
             let cmd: domain::generated::commands::CancelOrderByCustomer = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("CancelOrderByCustomer payload: {e}")))),
             };
-            Some(application::commands::cancel_order_by_customer(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::cancel_order_by_customer(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "CancelOrderByRestaurant" => {
             let cmd: domain::generated::commands::CancelOrderByRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("CancelOrderByRestaurant payload: {e}")))),
             };
-            Some(application::commands::cancel_order_by_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::cancel_order_by_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RateOrder" => {
             let cmd: domain::generated::commands::RateOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RateOrder payload: {e}")))),
             };
-            Some(application::commands::rate_order(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::rate_order(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RateRestaurant" => {
             let cmd: domain::generated::commands::RateRestaurant = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RateRestaurant payload: {e}")))),
             };
-            Some(application::commands::rate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::rate_restaurant(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RecordDeliverySatisfaction" => {
             let cmd: domain::generated::commands::RecordDeliverySatisfaction = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RecordDeliverySatisfaction payload: {e}")))),
             };
-            Some(application::commands::record_delivery_satisfaction(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::record_delivery_satisfaction(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "TipOrder" => {
             let cmd: domain::generated::commands::TipOrder = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("TipOrder payload: {e}")))),
             };
-            Some(application::commands::tip_order(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::tip_order(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RequestRefund" => {
             let cmd: domain::generated::commands::RequestRefund = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RequestRefund payload: {e}")))),
             };
-            Some(application::commands::request_refund(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::request_refund(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "OpenReclamation" => {
             let cmd: domain::generated::commands::OpenReclamation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("OpenReclamation payload: {e}")))),
             };
-            Some(application::commands::open_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::open_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ResolveReclamation" => {
             let cmd: domain::generated::commands::ResolveReclamation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ResolveReclamation payload: {e}")))),
             };
-            Some(application::commands::resolve_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::resolve_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "RejectReclamation" => {
             let cmd: domain::generated::commands::RejectReclamation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("RejectReclamation payload: {e}")))),
             };
-            Some(application::commands::reject_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::reject_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ReopenReclamation" => {
             let cmd: domain::generated::commands::ReopenReclamation = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ReopenReclamation payload: {e}")))),
             };
-            Some(application::commands::reopen_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::reopen_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "AttachReclamationEvidence" => {
             let cmd: domain::generated::commands::AttachReclamationEvidence = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("AttachReclamationEvidence payload: {e}")))),
             };
-            Some(application::commands::attach_reclamation_evidence(store.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::commands::attach_reclamation_evidence(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "ApproveRefund" => {
             let cmd: domain::generated::commands::ApproveRefund = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("ApproveRefund payload: {e}")))),
             };
-            Some(application::process_managers::refund::approve_refund(store.as_ref(), refund_state.as_ref(), payments.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::process_managers::refund::approve_refund(store.as_ref(), refund_state.as_ref(), payments.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         "DenyRefund" => {
             let cmd: domain::generated::commands::DenyRefund = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(DomainError::Repository(format!("DenyRefund payload: {e}")))),
             };
-            Some(application::process_managers::refund::deny_refund(store.as_ref(), refund_state.as_ref(), cmd, &actor).await.map(|_| ()))
+            Some(validated(async { application::process_managers::refund::deny_refund(store.as_ref(), refund_state.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
         _ => None,
     }

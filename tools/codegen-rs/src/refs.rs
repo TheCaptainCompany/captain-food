@@ -478,6 +478,10 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("tests.yaml", "tests.*.rules[*]",  &[Kind::Rule]),
     ("tests.yaml", "tests.*.actor",     &[Kind::Aggregate, Kind::ProcessManager]),
     ("tests.yaml", "tests.*.when.type", &[Kind::Command, Kind::Event]),
+    // `when.gates` (RSO-1 Phase 4): a boolean configuration gate switched ON for one dispatch —
+    // a $ref so the walker sees it (the #413 "silently invisible" class); boolean-ness is the
+    // `test-when-gate-not-bool` rule's check.
+    ("tests.yaml", "tests.*.when.gates[*]", &[Kind::ConfigKey]),
     ("tests.yaml", "tests.*.given[*]",  &[Kind::Fixture]),
     ("tests.yaml", "tests.*.then[*]",   &[Kind::Fixture]),
     ("tests.yaml", "tests.*.thrown[*]", &[Kind::Error]),
@@ -489,6 +493,9 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("observability.yaml", "*.workflow.emits[*]",       &[Kind::Event]),
     ("observability.yaml", "*.workflow.inbound[*]",     &[Kind::Event]),
     ("observability.yaml", "*.run_identity[*].businessKey", &[Kind::Scalar, Kind::EnumScalar]),
+    // A span attribute's VALUE SET, by $ref to the domain enum scalar that declares it (RSO-1,
+    // "one name = one dedicated scalar" applied to value sets — never a hand-copied enum list).
+    ("observability.yaml", "*.spans[*].attributes[*].values", &[Kind::EnumScalar]),
 
     // Read models. `from` is event LINEAGE (a whole event for occurrence columns, a property
     // otherwise); `fk` is the read-navigation graph, so it must name a COLUMN.

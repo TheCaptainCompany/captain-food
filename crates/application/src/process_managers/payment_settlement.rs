@@ -496,6 +496,12 @@ mod tests {
                     captain_net: eur(0),
                 },
                 note: None,
+                // RSO-1 evidence fields: absent — a pre-RSO-1 legacy-shape snapshot fixture.
+                verdict: None,
+                window_from: None,
+                window_to: None,
+                timezone: None,
+                evaluated_at: None,
             },
         })
     }

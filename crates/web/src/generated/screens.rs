@@ -420,7 +420,7 @@ pub mod restaurant_frontoffice {
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("restaurant.name")), ("style.size", PropValue::Text("2xl")), ("style.weight", PropValue::Text("bold"))], children: &[] },
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("restaurant.categories | join(' · ')")), ("style.size", PropValue::Text("sm")), ("style.color", PropValue::Text("text_secondary"))], children: &[] },
                 Node { kind: ComponentKind::InfoRow, props: &[("items.0.icon", PropValue::Text("star")), ("items.0.value", PropValue::Binding("restaurant.rating")), ("items.0.visible_when", PropValue::Text("restaurant.rating")), ("items.1.icon", PropValue::Text("clock")), ("items.1.value", PropValue::Text("{{ restaurant.deliveryTime }}–{{ restaurant.deliveryTime + 10 }} min")), ("items.2.icon", PropValue::Text("truck")), ("items.2.value", PropValue::Binding("restaurant.deliveryFee == 0 ? '' : restaurant.deliveryFee | format_currency")), ("items.2.empty_ref", PropValue::I18n("common.delivery.free")), ("items.3.icon", PropValue::Text("shopping_bag")), ("items.3.value", PropValue::I18n("restaurant.min_order"))], children: &[] },
-                Node { kind: ComponentKind::OpeningHoursRow, props: &[("schedule", PropValue::Binding("restaurant.openingHours")), ("labels.open", PropValue::I18n("restaurant.open")), ("labels.closed", PropValue::I18n("restaurant.closed")), ("labels.opens_at", PropValue::I18n("restaurant.opens_at"))], children: &[] }
+                Node { kind: ComponentKind::OpeningHoursRow, props: &[("window", PropValue::Binding("restaurant.serviceWindow")), ("on_undeclared", PropValue::Text("render_nothing")), ("schedule", PropValue::Binding("restaurant.openingHours")), ("labels.open", PropValue::I18n("restaurant.open")), ("labels.closed", PropValue::I18n("restaurant.closed")), ("labels.opens_at", PropValue::I18n("restaurant.opens_at"))], children: &[] }
             ] },
             Node { kind: ComponentKind::StickyCategoryNav, props: &[("id", PropValue::Text("catalog_nav")), ("items", PropValue::Binding("restaurant.catalog.categories"))], children: &[] },
             Node { kind: ComponentKind::CatalogSections, props: &[("categories", PropValue::Binding("restaurant.catalog.categories")), ("item_type", PropValue::Text("catalog_item_row")), ("item_add_action.type", PropValue::Text("open_bottom_sheet")), ("item_add_action.sheet_id", PropValue::Text("item_detail_sheet")), ("item_add_action.data.item", PropValue::Binding("item")), ("disabled_overlay", PropValue::I18n("restaurant.unavailable"))], children: &[] },
@@ -454,7 +454,7 @@ pub mod restaurant_frontoffice {
             roles: &["CUSTOMER"],
             requires_auth: true,
             sdui: false,
-            data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile, ResolverKey::PaymentStatusByOrder],
+            data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile, ResolverKey::PaymentStatusByOrder, ResolverKey::RestaurantBySlug],
             tree: &[],
         },
         Screen {

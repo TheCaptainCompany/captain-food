@@ -193,6 +193,48 @@ OutsideDeliveryArea:
     fr: "Cette adresse est en dehors de la zone de livraison de '{restaurantName}'."
 
 
+# RSO-1 (DECISIONS §43): the TEMPORAL sibling of OutsideDeliveryArea (spatial boundary → temporal
+# boundary, same `Outside*` family) — deliberately NOT `RestaurantClosed`, which would collide with
+# the PERMANENT closure vocabulary (events.yaml#/RestaurantMarkedClosed → INACTIVE).
+OutsideServiceHours:
+  description: >
+    PlaceOrder arrived at an instant outside the restaurant's declared service hours — thrown ONLY
+    on verdict OUTSIDE_HOURS (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours: OPEN and
+    HOURS_UNDECLARED both accept), and only while configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD
+    is ON (default OFF = shadow). The context carries the NEXT OPENING SLOT (the actionable half of
+    the message — "closed, opens tomorrow 11:30" is a different product from "closed") AND the
+    refusal EVIDENCE: the window and timezone the verdict was evaluated against plus the evaluation
+    instant, so a disputed refusal is provable from the record. Copy note: never phrase this as a
+    refund/no-refund statement — the perishables withdrawal exemption is not a non-performance
+    posture.
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    restaurantName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
+    nextOpensAt:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Next opening instant (null only when the declared week holds no future slot)."
+    windowFrom:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Evidence: start instant of the nearest window the instant was judged against (null when the evaluated day has none)."
+    windowTo:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Evidence: end instant of that window — min(door-close, cutoff), the same number serviceWindow.lastOrderAt displays."
+    timezone: { $ref: 'scalars.yaml#/TimeZone' }
+    evaluatedAt:
+      type: string
+      format: date-time
+      description: "Evidence: the injected request instant the verdict was evaluated at."
+  messages:
+    en: "'{restaurantName}' is closed right now — it opens again at {nextOpensAt}."
+    fr: "'{restaurantName}' est fermé pour le moment — réouverture à {nextOpensAt}."
+
+
 # =====================================================================
 # Payment
 # =====================================================================

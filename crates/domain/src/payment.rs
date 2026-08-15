@@ -196,6 +196,13 @@ mod tests {
                     captain_net: z,
                 },
                 note: None,
+                // RSO-1 evidence fields: absent — this fixture models a pre-RSO-1 snapshot (the
+                // fields are optional in fact, so old paid checkouts can never be orphaned).
+                verdict: None,
+                window_from: None,
+                window_to: None,
+                timezone: None,
+                evaluated_at: None,
             },
         })
     }

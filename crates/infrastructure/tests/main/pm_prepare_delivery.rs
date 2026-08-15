@@ -229,6 +229,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
             pool.clone(),
         )),
         mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
+        // RSO-1: the service-hours enforcement gate at its spec default (OFF = shadow).
+        enforce_service_hours_guard: false,
     }
 }
 

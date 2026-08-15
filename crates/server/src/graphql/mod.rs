@@ -13,6 +13,10 @@ pub mod schema;
 /// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the
 /// master schema restricted to its own scope's operations via the generated composition table.
 pub mod scope_slice;
+/// The request clock for service-window evaluation (RSO-1): `RequestNow` minted ONCE per
+/// request at the transport boundary (beside the correlation id) + the configured validity
+/// horizon — the pair every `Restaurant::at` call threads down.
+pub mod service_clock;
 pub mod session;
 /// The request's TENANT (#469): `Host` -> `{slug}` -> `RestaurantId`, resolved ONCE at the
 /// transport boundary and injected beside the `ReadScope`. Multi-tenancy by host reached the SSR

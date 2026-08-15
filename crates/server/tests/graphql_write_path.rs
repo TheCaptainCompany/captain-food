@@ -138,6 +138,8 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
         mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
+        // RSO-1: the service-hours enforcement gate at its spec default (OFF = shadow).
+        enforce_service_hours_guard: false,
     };
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));
@@ -222,6 +224,8 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             reclamations,
             customer_credit,
             mailbox_lanes,
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

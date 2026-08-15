@@ -258,7 +258,31 @@ pub(crate) fn bt_event_stream(
     (agg, id)
 }
 
-/// The dispatch expression for a WHEN command (a `cmd` binding is in scope).
+/// Commands whose application handler takes the EVALUATION INSTANT as a parameter (RSO-1,
+/// DECISIONS §43; "now is a parameter" — the `sms_guard.rs` precedent: a handler reading the
+/// system clock internally cannot have both edges of a time boundary asserted). A command listed
+/// here gets a `when_at` binding emitted before its call, and its `bt_command_call` arm threads
+/// it; `when.at` on any OTHER command is an emitter panic, never a silent no-op (the #413
+/// "silently invisible" defect class).
+pub(crate) const BT_CLOCK_CONSUMING: &[&str] = &["PlaceOrder"];
+
+/// The FIXED default `when.at` (a Tuesday noon, UTC): every clock-consuming test is deterministic
+/// even when it declares no instant. Documented in specs/tests.yaml's header — keep the two in
+/// step, and keep fixtures that pin `evaluatedAt` (e.g. `paymentIntentCreated`) on this value.
+pub(crate) const BT_DEFAULT_WHEN_AT: &str = "2026-01-06T12:00:00Z";
+
+/// Commands whose application handler takes a boolean CONFIGURATION GATE as a parameter (RSO-1
+/// Phase 4, `when.gates` — beck's ruling: no global/env read inside a handler, so the in-process
+/// suite stays order-independent): `(command, configuration key, the Rust binding the call arm
+/// reads)`. The binding is ALWAYS emitted for a listed command — `true` when the test's
+/// `when.gates` names the key, else the key's spec default — and a gate named on any OTHER
+/// command (or an unknown key) is an emitter panic, never a silent no-op (the #413 "silently
+/// invisible" defect class, the same posture as `when.at`).
+pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] =
+    &[("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard")];
+
+/// The dispatch expression for a WHEN command (a `cmd` binding is in scope; for
+/// [`BT_CLOCK_CONSUMING`] commands a `when_at: chrono::DateTime<chrono::Utc>` binding too).
 pub(crate) fn bt_command_call(cmd: &str) -> String {
     let snake = match cmd {
         "ConfigureGoogleBusinessProfileOrderLink" => "configure_gbp_order_link".to_string(),
@@ -266,7 +290,7 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         _ => bt_fn_name(cmd),
     };
     match cmd {
-        "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor()).await".to_string(),
+        "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await".to_string(),
         "ApproveRefund" => "crate::process_managers::refund::approve_refund(&bed.store, &bed.refund_pm, &bed.payments, cmd, &support::actor()).await".to_string(),
         "DenyRefund" => "crate::process_managers::refund::deny_refund(&bed.store, &bed.refund_pm, cmd, &support::actor()).await".to_string(),
         "RegisterRestaurant" | "CreateCatalog" | "AddProduct" | "UpdateProduct" | "MarkRestaurantAsFavorite" => {
@@ -517,6 +541,63 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
             let def = resolve_ref(model, wref, "tests.yaml").unwrap();
             let literal = bt_struct_expr(model, "commands.yaml", &format!("cmds::{}", msg), def, &wdata, &format!("{}/when", key));
             out.push_str(&format!("    let cmd = {};\n", literal));
+            // `when.at` — the evaluation instant (RSO-1, DECISIONS §43). Only meaningful on a
+            // clock-consuming command; anywhere else it would be silently ignored, so refuse.
+            let when_at = when.get("at").and_then(|v| v.as_str());
+            let clock_consuming = BT_CLOCK_CONSUMING.contains(&msg.as_str());
+            if when_at.is_some() && !clock_consuming {
+                panic!(
+                    "behaviour-tests: {}: `when.at` is set but '{}' is not clock-consuming ({:?}) — the value would assert nothing; extend BT_CLOCK_CONSUMING and its bt_command_call arm when the handler takes the instant",
+                    key, msg, BT_CLOCK_CONSUMING
+                );
+            }
+            if clock_consuming {
+                out.push_str(&format!(
+                    "    let when_at: chrono::DateTime<chrono::Utc> = \"{}\".parse().expect(\"when.at: RFC3339 instant\");\n",
+                    when_at.unwrap_or(BT_DEFAULT_WHEN_AT)
+                ));
+            }
+            // `when.gates` — boolean configuration gates switched ON for this one dispatch (RSO-1
+            // Phase 4). Only meaningful on a gate-consuming command; anywhere else the value
+            // would be silently dropped, so refuse (the `when.at` posture).
+            let gate_keys: Vec<String> = when
+                .get("gates")
+                .and_then(|g| g.as_sequence())
+                .map(|s| {
+                    s.iter()
+                        .filter_map(|e| e.get("$ref").and_then(|r| r.as_str()))
+                        .filter_map(|r| r.strip_prefix("configuration.yaml#/keys/"))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let consumed: Vec<&(&str, &str, &str)> =
+                BT_GATE_CONSUMING.iter().filter(|(c, _, _)| *c == msg).collect();
+            for gate in &gate_keys {
+                if !consumed.iter().any(|(_, gk, _)| gk == gate) {
+                    panic!(
+                        "behaviour-tests: {}: `when.gates` names '{}' but '{}' does not consume it ({:?}) — the value would assert nothing; extend BT_GATE_CONSUMING and its bt_command_call arm when the handler takes the gate",
+                        key, gate, msg, BT_GATE_CONSUMING
+                    );
+                }
+            }
+            for (_, gate_key, binding) in consumed {
+                // Absent from `when.gates` = the key's SPEC DEFAULT (tests.yaml header), so the
+                // suite exercises the production posture unless the test says otherwise.
+                let value = if gate_keys.iter().any(|g| g == gate_key) {
+                    true
+                } else {
+                    model
+                        .defs
+                        .get("configuration.yaml")
+                        .and_then(|c| c.get("keys"))
+                        .and_then(|k| k.get(*gate_key))
+                        .and_then(|d| d.get("default"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                };
+                out.push_str(&format!("    let {}: bool = {};\n", binding, value));
+            }
             let mut call = bt_command_call(&msg);
             // `when.principal` (PROP-20260728-135632 §2.2, #235): the ACTING principal for tests
             // exercising `requires` — userType + optional domainId handle. Absent = the fixed
@@ -551,6 +632,20 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
             }
             out.push_str(&format!("    let result = {};\n", call));
         } else {
+            // No event reaction consumes `when.at` today — refuse rather than silently drop it.
+            if when.get("at").is_some() {
+                panic!(
+                    "behaviour-tests: {}: `when.at` is set on event '{}' but no PM reaction consumes an instant — the value would assert nothing",
+                    key, msg
+                );
+            }
+            // Same posture for `when.gates`: no event reaction takes a configuration gate.
+            if when.get("gates").is_some() {
+                panic!(
+                    "behaviour-tests: {}: `when.gates` is set on event '{}' but no event reaction consumes a gate — the value would assert nothing",
+                    key, msg
+                );
+            }
             let def = resolve_ref(model, wref, "tests.yaml").unwrap();
             let literal = bt_struct_expr(model, "events.yaml", &format!("evs::{}", msg), def, &wdata, &format!("{}/when", key));
             out.push_str(&format!("    let ev = {};\n", literal));
