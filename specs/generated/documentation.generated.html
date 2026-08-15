@@ -153,6 +153,7 @@
   participant ST as payment_process_manager (state)
   participant RM_Cart as Cart (read model)
   participant RM_Restaurant as Restaurant (read model)
+  participant RM_Catalog as Catalog (read model)
   participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   participant AG_Order as Order (aggregate)
@@ -168,6 +169,7 @@
   PM--xIN: throws CannotOrderTestRestaurant
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
+  PM-&gt;&gt;RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
   PM--xIN: throws PriceMismatch
   PM-&gt;&gt;PT_payment: request
@@ -265,6 +267,7 @@
   participant ST as payment_process_manager (state)
   participant RM_Cart as Cart (read model)
   participant RM_Restaurant as Restaurant (read model)
+  participant RM_Catalog as Catalog (read model)
   participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   participant AG_Order as Order (aggregate)
@@ -280,6 +283,7 @@
   PM--xIN: throws CannotOrderTestRestaurant
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
+  PM-&gt;&gt;RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
   PM--xIN: throws PriceMismatch
   PM-&gt;&gt;PT_payment: request

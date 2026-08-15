@@ -2,6 +2,38 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧭 **2026-08-15 — A PM `read:` STEP NOW DECLARES ITS SOURCE: THE DISTINCTION THE MECHANICAL
+> DERIVATION WAS BLOCKED ON** ([#564 "Derive reader sets mechanically: a declared, walkable `reads:`
+> grammar that distinguishes source from shape"](https://github.com/TheCaptainCompany/captain-food/issues/564)
+> phases 1-2, PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)). The entry below
+> (2026-08-14) withdrew reader-set completeness and named its exact blocker: *"deriving is right only
+> once the declaration distinguishes source from shape"*. That declaration now exists. Every PM `read:`
+> step carries a **REQUIRED** `source:` from a closed set — `PROJECTION` (the leg SELECTs from the named
+> projection) or `EVENT_STREAM` (the leg folds the entity from `captain_write` and never touches that
+> projection) — enforced by `pm-read-source`, with `pm-read-key` closing the step's key set so the next
+> key added cannot be invisible the way a plain-string `tombstone:` was in
+> [#413](https://github.com/TheCaptainCompany/captain-food/issues/413). **Required, never
+> optional-with-default**: a default would leave the distinction alive only where someone remembered
+> it, the transience-by-omission defect [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)
+> §2 records. **The measured split is 3 `EVENT_STREAM` / 11 `PROJECTION`**, derived independently from
+> the call sites and matching the entry below's three (`Restaurant` in delivery + ordering, `Cart` on
+> PlaceOrder) — with delivery's restaurant fold now recorded as the proof that **source is per-STEP,
+> not per-leg**: that leg IS generated, and its hook chose the stream anyway.
+> **ONE UNDER-DECLARATION FIXED, TWO REPORTED.** Fixed: `PlaceOrderProcess`/`PlaceOrder` did not
+> declare the `Catalog` read it prices every checkout from (`commands.rs:2382` `catalogs:
+> &dyn CatalogReadRepository` → `pricing.rs` `price_cart`) — a derivation over the old declaration
+> would have concluded checkout needs no catalog access, which is register row **STO-7**'s exact
+> question answered wrongly in the direction that breaks every order. Reported, NOT fixed (both need a
+> decision the dispatch did not carry): **(1)** the same leg also folds `CustomerCreditState` from the
+> event store (`commands.rs:2268`, the goodwill-credit spend) and declares no step for it —
+> `CustomerCreditBalance` exists as a projection so it is declarable, as `source: EVENT_STREAM`;
+> **(2)** `ReclamationProcess`'s refund arm reads `OrderTracking` (`reclamation.rs:141`) with no
+> `read:` step at all — the entry below already names this PM as the one a DSL walker misses, and
+> adding a step there is NOT free the way the checkout one was, because that leg IS generated and a
+> new step would emit a read hook the hand-written wrapper does not implement. **Phases 3-4 (a
+> derivation that consumes `source:`, and its use) are NOT in this change**: nothing reads the key yet,
+> so `make generate` moved generated doc comments only.
+
 > 🗄️ **2026-08-14 — EVERY TABLE HAS A DECLARED HOME: STO-2 CLOSED, PLACEMENT IS NOW A VALIDATOR
 > REQUIREMENT** ([#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make
 > placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562) /

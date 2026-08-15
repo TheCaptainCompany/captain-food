@@ -48,6 +48,12 @@ PlaceOrderProcess:
         - guard: { throws: { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }, note: "A LIVE order never targets a TEST restaurant (ADR-0038)." }
         - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
         - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/Catalog' }
+            source: PROJECTION
+            as: catalog
+            where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
+            note: "The LIVE-CATALOG PRICE AUTHORITY (rules.yaml#/ServerPriceAuthority): every cart line is repriced from this row's offer/option tree, and that recomputed total IS the PaymentIntent amount. SELECTed from the `catalog` projection (commands.rs place_order takes `catalogs: &dyn CatalogReadRepository` and pricing.rs price_cart resolves each line through it -> SELECT FROM catalog). It feeds the two guards below and the call's amount, so a leg that cannot reach this table cannot price a checkout at all."
         - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }
         - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
         - call:
