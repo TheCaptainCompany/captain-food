@@ -24,6 +24,29 @@ pub(crate) fn fmt_map_nested(v: Option<&Value>, fmt_value: &dyn Fn(&Value) -> St
 
 // ─── §2b — typed-step process-manager validation (processmanager.yaml) ──────────────────────────
 
+/// The leg SELECTs from the projection table its `model:` names — the generated pipeline legs, whose
+/// hooks are backed by a `*ReadRepository` over that table. This is the source that makes the leg's
+/// host depend on the projector that maintains it.
+pub(crate) const READ_SOURCE_PROJECTION: &str = "PROJECTION";
+
+/// The leg folds the entity from the `captain_write` event stream and NEVER touches the projection
+/// its `model:` names — the hand-written command-handler legs (`commands::place_order` folds
+/// `Restaurant` and `Cart` through `Repository`) and hand-written hooks inside generated legs
+/// (`DeliveryDispatchProcess::read_restaurant`). Here `model:` is borrowed SHAPE only: the leg is
+/// race-free against projector lag, and depends on the event store rather than on a projector.
+pub(crate) const READ_SOURCE_EVENT_STREAM: &str = "EVENT_STREAM";
+
+/// The closed set of `read.source` values (ADR-20260811-014129 D2 category 3: a bare token is
+/// correct precisely because the set is closed HERE). Deliberately not a `scalars.yaml` enum — these
+/// name where the SPEC's own steps read from, a codegen-mechanics distinction with no business
+/// meaning, and a domain scalar would emit a `ReadSource` type into the domain crates that no domain
+/// value ever inhabits.
+pub(crate) const READ_SOURCES: [&str; 2] = [READ_SOURCE_PROJECTION, READ_SOURCE_EVENT_STREAM];
+
+/// The closed key set of a `read:` step body. `model` = the SHAPE consumed, `as` = the alias later
+/// steps bind to, `where` = the lookup, `source` = where it is physically read from, `note` = prose.
+pub(crate) const READ_KEYS: [&str; 5] = ["model", "as", "where", "note", "source"];
+
 /// Enum members of a scalars.yaml scalar reached via `r`, when it has an `enum`.
 pub(crate) fn scalar_enum(model: &Model, r: &str, ctx: &str) -> Option<Vec<String>> {
     resolve_ref(model, r, ctx)?
@@ -303,6 +326,66 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
                 };
                 match kind {
                     "read" => {
+                        // The key set is CLOSED, and that is what makes `source` below enforceable
+                        // rather than decorative: this arm used to accept any key silently, so a
+                        // misspelled `sourc:` would have been a no-op and the next key added here
+                        // would be invisible to every rule (#413's "silently invisible everywhere").
+                        if let Some(bm) = body.as_mapping() {
+                            for (bk, _) in bm {
+                                let key = bk.as_str().unwrap_or("?");
+                                if !READ_KEYS.contains(&key) {
+                                    issues.push(err(
+                                        "pm-read-key",
+                                        format!("{}.{}", sw, key),
+                                        format!(
+                                            "unknown key '{}' on a `read:` step — the key set is closed ({}). An \
+                                             unrecognized key is silently ignored by the loader, so it would look \
+                                             declared while changing nothing.",
+                                            key,
+                                            READ_KEYS.join(" | ")
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        // SOURCE vs SHAPE (#564). `model:` says what SHAPE the leg consumes; `source:`
+                        // says WHERE the bytes physically come from, and the two genuinely differ: a
+                        // generated pipeline leg SELECTs from the named projection, while a
+                        // hand-written leg folds the entity from the `captain_write` event stream and
+                        // never touches that projection at all. REQUIRED, never optional-with-default:
+                        // a default would make the distinction survive only where someone remembered
+                        // to write it — transience-by-omission (ADR-20260812-214500 §2), which is the
+                        // defect class rather than a convenience.
+                        match body.get("source") {
+                            None => issues.push(err(
+                                "pm-read-source",
+                                format!("{}.source", sw),
+                                format!(
+                                    "a `read:` step must declare `source: <{}>` — where the leg physically reads \
+                                     from, which `model:` (the SHAPE it consumes) does not say. {} = the leg SELECTs \
+                                     from the named projection; {} = the leg folds the entity from the \
+                                     `captain_write` event stream and never touches that projection. Omitting it \
+                                     declares neither.",
+                                    READ_SOURCES.join(" | "),
+                                    READ_SOURCE_PROJECTION,
+                                    READ_SOURCE_EVENT_STREAM
+                                ),
+                            )),
+                            Some(v) => {
+                                let got = v.as_str();
+                                if !got.map(|s| READ_SOURCES.contains(&s)).unwrap_or(false) {
+                                    issues.push(err(
+                                        "pm-read-source",
+                                        format!("{}.source", sw),
+                                        format!(
+                                            "`source: {}` is not one of the closed set ({}).",
+                                            got.map(|s| s.to_string()).unwrap_or_else(|| format!("{:?}", v)),
+                                            READ_SOURCES.join(" | ")
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
                         let model_ref = body.get("model").and_then(|x| x.get("$ref")).and_then(|x| x.as_str()).unwrap_or("");
                         let tf = ref_target_file(model_ref, CTX).unwrap_or_default();
                         if tf != "database/tables/projection_tables.yaml" && tf != "database/projection_views.yaml" {

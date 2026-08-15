@@ -33,17 +33,20 @@ DeliveryDispatchProcess:
       steps:
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+            source: PROJECTION
             as: order
             where: { order_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/orderId' } } }
+            note: "SELECTed from the `ordertracking` projection (delivery_dispatch.rs read_order -> OrderReadRepository::by_id -> SELECT FROM ordertracking). An order not yet projected SKIPS the leg rather than dispatching blind."
         - guard:
             that: { order: { service_type: { const: DELIVERY } } }
             skip: true
             note: "COLLECTION orders need no dispatch."
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+            source: EVENT_STREAM
             as: restaurant
             where: { restaurant_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/restaurantId' } } }
-            note: "The pickup address."
+            note: "The pickup address -- FOLDED from the Restaurant's own stream (delivery_dispatch.rs read_restaurant -> EventStore::load(restaurant_stream)), never SELECTed from the `restaurant` projection, even though the surrounding leg IS generated: the hook chose the stream so a courier is never sent to a stale address. SOURCE is per-STEP, not per-leg -- this step is the proof."
         - deliver:
             event: { $ref: 'events.yaml#/DeliveryRequested' }
             to: { $ref: 'actors.yaml#/DeliveryJob' }

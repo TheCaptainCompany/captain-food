@@ -7704,3 +7704,155 @@ mod read_target_ownership {
         );
     }
 }
+
+/// §2b — a process-manager `read:` step declares its SOURCE (#564).
+///
+/// `model:` says what SHAPE a leg consumes; it has never said where the bytes come from. Two legs
+/// can name the same projection table and do entirely different things: a generated pipeline leg
+/// SELECTs from it, while a hand-written leg folds the entity from the `captain_write` event stream
+/// and never touches the projection at all (`PlaceOrder` folds `Restaurant` and `Cart`;
+/// `DeliveryDispatchProcess`'s `read_restaurant` hook folds the restaurant stream even though its
+/// leg IS generated). Anything derived from these steps — a reader set, a deploy grant, a crate
+/// dependency — is wrong in one direction or the other while that distinction is unwritten.
+///
+/// Why REQUIRED rather than optional-with-default: `validate_process_managers` rejected no unknown
+/// key on a `read:` body, so an unvalidated `source:` would have been silently invisible (#413), and
+/// a default would make the distinction survive only where someone remembered to write it — the
+/// "transience by omission" defect ADR-20260812-214500 §2 records. So the key set is closed too, by
+/// its own rule: without that, the NEXT key added here is invisible again.
+///
+/// These mutate the REAL committed catalog rather than a fixture, for the reason
+/// `read_target_ownership` gives: a rule proven only against a fixture can drift away from the specs
+/// it polices.
+mod pm_read_source {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// The `read:` body of `processmanager.yaml#/<pm>.receives[leg].steps[step]`, mutable.
+    fn read_body<'a>(
+        m: &'a mut Model,
+        pm: &str,
+        leg: usize,
+        step: usize,
+    ) -> &'a mut serde_yaml::Mapping {
+        m.defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut(pm))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.get_mut(leg))
+            .and_then(|v| v.get_mut("steps"))
+            .and_then(|v| v.get_mut(step))
+            .and_then(|v| v.get_mut("read"))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| {
+                panic!("processmanager.yaml#/{}.receives[{}].steps[{}] is a read step", pm, leg, step)
+            })
+    }
+
+    /// The issue this rule raised AT THE MUTATED STEP. Scoped on purpose: a catalog-wide
+    /// `find(rule)` would answer with some other step's identical rule and quietly stop testing the
+    /// mutation.
+    fn find_at<'a>(issues: &'a [Issue], rule: &str, location: &str) -> Option<&'a Issue> {
+        issues.iter().find(|i| i.rule == rule && i.location == location)
+    }
+
+    /// Omission is the defect, so omission is the error: dropping `source:` from the checkout's cart
+    /// read must fail the gate, naming the step and the closed set.
+    #[test]
+    fn a_read_step_without_a_source_is_refused() {
+        let mut m = real_model();
+        read_body(&mut m, "PlaceOrderProcess", 0, 0).remove(Value::from("source"));
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-source",
+            "processmanager.yaml/PlaceOrderProcess.receives[0].steps[0].source",
+        )
+        .expect("a read step that declares no source must be an ERROR, never a default");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
+        assert!(hit.message.contains("PROJECTION"), "lists the closed set: {}", hit.message);
+        assert!(hit.message.contains("EVENT_STREAM"), "lists the closed set: {}", hit.message);
+    }
+
+    /// The value comes from a CLOSED set enforced in the validator (ADR-20260811-014129 D2 category
+    /// 3): an unlisted token is refused rather than carried through to whatever reads it.
+    #[test]
+    fn a_source_outside_the_closed_set_is_refused() {
+        let mut m = real_model();
+        read_body(&mut m, "PlaceOrderProcess", 0, 0)
+            .insert(Value::from("source"), Value::from("PROJECTION_TABLE"));
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-source",
+            "processmanager.yaml/PlaceOrderProcess.receives[0].steps[0].source",
+        )
+        .expect("an unlisted source token must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("PROJECTION_TABLE"), "quotes the offending value: {}", hit.message);
+    }
+
+    /// The half that makes the two rules above enforceable rather than decorative: the `read:` body's
+    /// key set is closed, so a misspelled or invented key is refused instead of ignored. Without it,
+    /// `sourc: EVENT_STREAM` would be a silent no-op and the next key added would be invisible again.
+    #[test]
+    fn an_unknown_key_on_a_read_step_is_refused() {
+        let mut m = real_model();
+        read_body(&mut m, "CartBindingProcess", 0, 0)
+            .insert(Value::from("from_stream"), Value::from(true));
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-key",
+            "processmanager.yaml/CartBindingProcess.receives[0].steps[0].from_stream",
+        )
+        .expect("an unknown key on a read step must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("from_stream"), "quotes the offending key: {}", hit.message);
+    }
+
+    /// SOURCE is not SHAPE, and the rules must never conflate them: `EVENT_STREAM` on a step whose
+    /// `model:` is a projection table is the NORMAL case (the fold reuses the projection's shape and
+    /// never reads the table), so it must stay clean. A future "tightening" that demanded a stream
+    /// model here would break every hand-written leg.
+    #[test]
+    fn an_event_stream_source_keeps_its_projection_shaped_model() {
+        let mut m = real_model();
+        read_body(&mut m, "PlaceOrderProcess", 0, 0)
+            .insert(Value::from("source"), Value::from("EVENT_STREAM"));
+        let issues = validate(&m).issues;
+        assert!(
+            !issues.iter().any(|i| {
+                i.location.starts_with("processmanager.yaml/PlaceOrderProcess.receives[0].steps[0]")
+            }),
+            "a projection-shaped model with an EVENT_STREAM source is the hand-written-leg case: {:?}",
+            issues
+                .iter()
+                .filter(|i| i
+                    .location
+                    .starts_with("processmanager.yaml/PlaceOrderProcess.receives[0].steps[0]"))
+                .map(|i| (i.rule, &i.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// The committed catalog satisfies its own gate: every `read:` step declares a legal source and
+    /// no stray key. This is the test that fails when a new PM read step forgets the key.
+    #[test]
+    fn the_committed_process_managers_all_declare_a_source() {
+        let issues = validate(&real_model()).issues;
+        let offenders: Vec<_> = issues
+            .iter()
+            .filter(|i| i.rule == "pm-read-source" || i.rule == "pm-read-key")
+            .map(|i| (i.rule, &i.location))
+            .collect();
+        assert!(offenders.is_empty(), "committed read steps must be clean: {:?}", offenders);
+    }
+}
