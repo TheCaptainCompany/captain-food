@@ -35,6 +35,10 @@
    reshaped from a PM-delivered event to a **command Payment handles** (§10, D4 — the "not clean
    enough" instinct was the correct doctrinal call), and the settlement **watchdog** (§11 — the
    "subscribe just in case").
+5. Amendment 2026-08-15 (the actors-half landing, #582/#583/#584 — a refinement, not a decision
+   change): the optional beyond-identity param key is **REFUSED this slice**
+   (`ans-params-refused`) — the local ask cannot consume one; reintroducing the key is the
+   recorded decision of whichever slice gives it semantics. §§2/3/8.4 now carry that posture.
 
 ## 1. Context — the recorded target, and what is untyped today
 
@@ -85,7 +89,7 @@ Payment:
       reply:
         orderId: { $ref: '#/Payment/state/orderId' }
         status:  { $ref: '#/Payment/state/status' }
-      # input: OPTIONAL and absent here — identity IS the argument, see §3
+      # no params key — REFUSED this slice (ans-params-refused): identity IS the argument, see §3
 ```
 
 ```yaml
@@ -113,10 +117,14 @@ wrapper is gone with them — `answers:` maps operation names directly.
 
 Never declared twice, anywhere:
 
-- **No `input:` in the common case.** An ask is addressed to an actor **by identity** — the
-  `Payment-{intentId}` stream key *is* the argument. Repeating `paymentIntentId` inside the request
-  payload would be the redundant info the founder forbade. `input:` exists as an optional key only
-  for an ask parameterized beyond identity; none of the register's near-term asks needs one.
+- **No request payload beyond identity — and no params key at all this slice.** An ask is
+  addressed to an actor **by identity** — the `Payment-{intentId}` stream key *is* the argument,
+  and the generated Request derives exactly that field. Repeating `paymentIntentId` inside the
+  request payload would be the redundant info the founder forbade. A beyond-identity parameter key
+  is **REFUSED** while the local ask is load → fold → project(state) (`ans-params-refused`, the
+  #583/#584 hardening): nothing can consume a param yet, and an accepted key nothing consumes is a
+  control that renders and does nothing. Reintroducing the key is the recorded decision of
+  whichever slice gives it semantics; none of the register's near-term asks needs one.
 - **The asker declares nothing about the answer.** The `ask:` step carries **one operation `$ref`
   and no `actor:` key** — the ref path already encodes the actor, so naming it twice is unspellable
   rather than forbidden (evans's anti-redundancy ruling; the validator derives the actor from the
@@ -397,7 +405,10 @@ the exact [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) d
 ### 8.4 Never declared twice — the grammar's six rules
 
 1. No `actor:`/`to:` key where the operation ref already encodes the actor.
-2. `params:`/`with:` keys are the declared param names — no types restated at the ask site.
+2. The only ask-site argument is the derived identity — the future `ask:` step's `params:`/`with:`
+   binds the identity `key:` only (the shipped grammar refuses beyond-identity params,
+   `ans-params-refused`, until a slice gives them semantics); no types are ever restated at the
+   ask site.
 3. Reply properties are named by `$ref` to the declared property only — no dotted strings, no
    re-spelled shapes.
 4. Enum members in `that:` are validated against the resolved scalar — never a hand-copied set.

@@ -106,9 +106,11 @@ fn client_actors(model: &Model) -> Vec<ClientActor> {
     // requirement on the validator side; this is the emitter's belt to those braces).
     assert!(
         all_answers.is_empty(),
-        "actors.yaml: {} — declared `answers:` but no `mailbox:` client crate exists to carry \
-         the ask surface; declare `mailbox.partitions` (ans-shape enforces this too) or the \
-         typed `ask` silently would not exist",
+        "actors.yaml: {} — declared `answers:` but no client crate was generated for this actor \
+         (a client needs `type: aggregate|process-manager` AND `mailbox.partitions`); the typed \
+         `ask` rides the sealed per-actor client, so without one the declared surface would \
+         silently not exist (ans-shape carries the aggregate+mailbox requirement on the \
+         validator side)",
         all_answers
             .iter()
             .map(|a| format!("{}.{}", a.actor, a.op))

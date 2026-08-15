@@ -5171,7 +5171,7 @@ Catalog:
     /// the validator without a mailbox (e.g. a future loader path), generation REFUSES loudly
     /// instead of silently dropping the ask surface.
     #[test]
-    #[should_panic(expected = "`answers:` but no `mailbox:`")]
+    #[should_panic(expected = "no client crate was generated for this actor")]
     fn answers_without_a_mailbox_refuse_to_generate_a_silently_absent_surface() {
         let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n";
         let m = inline_model(&[
