@@ -2,6 +2,15 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧾 **2026-08-15 — THE DECISION REGISTER RENDERS AS WRITTEN AGAIN, AND §13b IS AN ERROR**
+> ([#577 "Repair the seven register-table rows §13b found, then promote the gate to ERROR"](https://github.com/TheCaptainCompany/captain-food/issues/577)):
+> the seven broken table rows (SPEC-2, LOSS-1, IDOR-1, ENF-1, CAP-READY, CAP-READY-LEGAL in
+> `docs/proposals/DECISIONS.md`; one evidence row in PROP-20260811-090000) are repaired
+> byte-identically (geometry only, zero words moved), and BOTH §13b markdown-table rules
+> (`markdown-table-row-cell-count` + `markdown-table-delimiter-cell-count`) are promoted from
+> warning to ERROR — a reshaped register row now fails `make validate` instead of riding the
+> warning ratchet (baseline entry removed, 46 → 39).
+
 > ⚖️ **2026-08-15 — THE TEAM MERGES ITS OWN WORK; NO PR WAITS ON FOUNDER REVIEW** (founder,
 > verbatim: *"Never wait my review you are responsible of your work."*): the "human" in
 > `HOLD: human` is the TEAM's independent reviewer pass, never the founder —

@@ -75,7 +75,7 @@ Three defects, one cause.
 |---|---|---|
 | 1 | **50 of 57 bins** carry all 8 domain scopes in their resolved graph — by three different paths, not one | the family table below |
 | 2 | The scope assertion is decorative — the declared crate is imported as `_` to appease `cargo machete` | `crates/bins/projector-catalog/src/main.rs:16` |
-| 3 | The runtime boundary is a **string filter over a global registry**, not a link boundary | `crates/infrastructure/src/projection/worker.rs:338` (`const REGISTRY`), `:559` (`REGISTRY.iter().filter(|g| g.scope == scope)`); `crates/bin_runtime/src/lib.rs:120-143` (`lanes: &'static [&'static str]`) |
+| 3 | The runtime boundary is a **string filter over a global registry**, not a link boundary | `crates/infrastructure/src/projection/worker.rs:338` (`const REGISTRY`), `:559` (`REGISTRY.iter().filter(\|g\| g.scope == scope)`); `crates/bin_runtime/src/lib.rs:120-143` (`lanes: &'static [&'static str]`) |
 
 **Which bins, and by which path.** Measured 2026-08-11 over the resolved normal-dependency graph
 (`cargo tree -e normal`, every one of the 57 bins enumerated — not sampled):
