@@ -248,6 +248,8 @@ pub struct Config {
     pub surface_gateway_url: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
+    /// The Restaurant.serviceWindow.validUntil horizon (RSO-1, DECISIONS §43 sub-question iii): validUntil = min(next window transition, evaluatedAt + this horizon), and under HOURS_UNDECLARED — where no transition exists to wait for — it is evaluatedAt + horizon alone. Exists so no cache can treat a verdict as immortal: without it a restaurant declaring its hours at 18:50 on a Friday would keep rendering a blank badge in every warm cache at the hour it matters. Seconds; the 900 default trades staleness against re-evaluation load at Friday-peak list fan-out.
+    pub service_window_validity_horizon_seconds: i64,
     /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
     pub run_sirene_worker: bool,
     /// INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal). `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which injects the repo secret of the same name directly; the Render sync (which only carries the server service) has nothing to do with it.
@@ -377,6 +379,7 @@ impl Config {
         let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
         let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let service_window_validity_horizon_seconds = raw("SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let run_sirene_worker = raw("RUN_SIRENE_WORKER")
             .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
@@ -471,6 +474,7 @@ impl Config {
                 gateway_subgraph_urls,
                 surface_gateway_url,
                 captain_build_version,
+                service_window_validity_horizon_seconds,
                 run_sirene_worker,
                 insee_api_token,
                 insee_api_base_url,
@@ -529,6 +533,7 @@ impl Config {
         out.push_str(&format!("  GATEWAY_SUBGRAPH_URLS      = {}\n", self.gateway_subgraph_urls));
         out.push_str(&format!("  SURFACE_GATEWAY_URL        = {}\n", self.surface_gateway_url));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  INSEE_API_TOKEN            = {}\n", if self.insee_api_token.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INSEE_API_BASE_URL         = {}\n", self.insee_api_base_url.as_deref().unwrap_or("unset")));
@@ -539,7 +544,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 38;
+pub const KEY_COUNT: usize = 39;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -577,6 +582,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "GATEWAY_SUBGRAPH_URLS",
     "SURFACE_GATEWAY_URL",
     "CAPTAIN_BUILD_VERSION",
+    "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
     "RUN_SIRENE_WORKER",
     "INSEE_API_TOKEN",
     "INSEE_API_BASE_URL",

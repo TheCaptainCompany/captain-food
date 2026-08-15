@@ -288,6 +288,7 @@ PlaceOrderProcess:
         - { $ref: 'errors.yaml#/RestaurantNotFound' }
         - { $ref: 'errors.yaml#/RestaurantPaused' }
         - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+        - { $ref: 'errors.yaml#/OutsideServiceHours' }
         - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
         - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
         - { $ref: 'errors.yaml#/PriceMismatch' }

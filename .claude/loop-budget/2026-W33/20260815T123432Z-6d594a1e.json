@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 3900,
+  "recordedAt": "2026-08-15T12:34:32.619Z",
+  "branch": "180-rso1-opening-hours-guard",
+  "note": "#180 RSO-1 phases 2+3 (executor): DECISIONS fix, domain serving_at + 10 mutation-verified tests, emitter Restaurant::at + telemetry seam + when.at gates, regeneration + gates. Timer was never opened at run start (executor miss) -- billed by wall clock: ~25m recon before first commit (11:59Z) to close (~12:39Z)."
+}

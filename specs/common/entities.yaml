@@ -207,6 +207,38 @@ CheckoutSnapshot:
     note:
       $ref: 'scalars.yaml#/OrderNote'
       nullable: true
+    # --- Service-window verdict EVIDENCE (RSO-1, DECISIONS §43 amendment 6) ---
+    # The guard computes the fact; these fields stop it being thrown away: a restaurant disputing
+    # an order accepted at 22:40 asks a question the log can now answer. A stored `wasOpen: true`
+    # would be unfalsifiable six months later; a stored WINDOW is evidence. ALL FIVE ARE OPTIONAL,
+    # FOREVER: stored PaymentIntentCreated rows predate them, and a required field would make those
+    # rows undeserializable — an orphaned-payment incident. Tolerance falls out of Option + serde
+    # default; never move these into `required`. Deliberately NOT the api ServiceWindow shape: the
+    # event carries evidence, the api carries a conversation — in particular no `validUntil` here
+    # (a config-derived TTL is not history).
+    verdict:
+      $ref: 'scalars.yaml#/ServiceWindowVerdict'
+      nullable: true
+      description: "The service-hours verdict at acceptance. Absent on snapshots frozen before RSO-1; recorded even in shadow mode (the gate changes whether OUTSIDE_HOURS refuses, never whether the verdict is recorded)."
+    windowFrom:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Evidence: start instant of the window the verdict was judged against (null under HOURS_UNDECLARED, or pre-RSO-1)."
+    windowTo:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Evidence: end instant of that window — min(door-close, cutoff), the same number the guard enforced."
+    timezone:
+      $ref: 'scalars.yaml#/TimeZone'
+      nullable: true
+      description: "Evidence: the timezone the evaluation ran in (null when undeclared — one input to HOURS_UNDECLARED)."
+    evaluatedAt:
+      type: string
+      format: date-time
+      nullable: true
+      description: "Evidence: the injected request instant the verdict was evaluated at."
   required:
     - orderId
     - cartId

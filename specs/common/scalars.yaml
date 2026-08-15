@@ -323,6 +323,25 @@ OperationStatus:
     PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."
 
 
+# RSO-1 (DECISIONS §43): lives in the KERNEL because entities.yaml#/CheckoutSnapshot (common)
+# records it as acceptance evidence — a network/ placement would be a scope-kernel-purity error.
+ServiceWindowVerdict:
+  type: string
+  enum: [OPEN, OUTSIDE_HOURS, HOURS_UNDECLARED]
+  description: >
+    "Is this restaurant serving right now?" as a three-valued VERDICT derived AT AN INSTANT from the
+    declared opening hours + timezone with the clock injected — deliberately NOT a `*Status` (that
+    suffix means stored state; nobody stores this, everybody computes it, and no event announces it).
+    The third value is the whole point (DECISIONS §43 blocker): `opening_hours` storage collapses
+    "never provided", "cleared" and "unparseable" into ONE `[]`, so `[]` IS HOURS_UNDECLARED by
+    definition — never "closed" — and a NULL timezone (or one that does not parse while hours are
+    declared) is HOURS_UNDECLARED too, because the once-documented account-timezone fallback has no
+    materialized source. Evaluation converts the UTC instant into the restaurant's LOCAL time (total,
+    DST-safe), never slot times to UTC; overnight slots (`to` < `from`, e.g. Friday 19:00–01:00) are
+    legal and cross midnight. At checkout, OUTSIDE_HOURS is the ONLY refusing verdict — OPEN and
+    HOURS_UNDECLARED accept (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours).
+
+
 # --- Write-path journal lifecycles (database/tables/journals.yaml, ADR-20260731-122500) ---
 # Enum $ref columns store the enum's TEXT value verbatim (ADR-20260728, superseding the ADR-0037
 # ordinal + ref_<enum> scheme), so rows are self-describing; renaming a value is the migration event.

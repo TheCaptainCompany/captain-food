@@ -463,6 +463,8 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         None,
@@ -920,6 +922,8 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         None,

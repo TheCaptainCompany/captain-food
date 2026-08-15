@@ -2,6 +2,34 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔶 **2026-08-15 — RSO-1 IS CODE-COMPLETE ON THE BRANCH (PHASES 1–4):
+> [#180 "Opening hours are stored, displayed, and never enforced — a customer can order at 04:00"](https://github.com/TheCaptainCompany/captain-food/issues/180),
+> branch `180-rso1-opening-hours-guard`, draft [PR #576](https://github.com/TheCaptainCompany/captain-food/pull/576) — NOT on `main`; merge posture `HOLD: human` (ADR-20260815-115220: stored event shape + money path).**
+> **Phase 1 (specs)**: the whole DECISIONS §43 surface — `ServiceWindowVerdict` kernel scalar,
+> non-null `Restaurant.serviceWindow`, `OutsideServiceHours` with next-slot + evidence context, the
+> guard step in `processmanager.yaml` strictly before the payment call, five optional-forever
+> evidence fields on `CheckoutSnapshot`, gate `ENFORCE_SERVICE_HOURS_GUARD` (default OFF = shadow),
+> `SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS`, 3 rules, behaviour tests, and the tests-DSL `when.at`
+> instant. **Phase 2 (domain)**: `domain::service_window::serving_at` — ONE pure total DST-safe
+> evaluation shared by badge and guard (overnight slots, fold-back, inclusive `lastOrderAt`,
+> cutoff=min degradation). **Phase 3 (emitter+server)**: clock-taking `Restaurant::at` (a clock-less
+> Restaurant is unspellable), `service_clock` (per-request `RequestNow`, config horizon),
+> `place_order(when_at)` freezing the verdict evidence onto the snapshot even in shadow mode.
+> **Phase 4 (the finish)**: the REFUSING guard in `place_order` — OUTSIDE_HOURS only, gate ON only,
+> after `serving_at` and before any external effect, evidence-carrying rejection off the folded
+> RestaurantState; the gate threads as a PARAMETER from `CommandDeps` (composition root / env in
+> standalone), never a global read; both edges mutation-tested via the new tests.yaml `when.gates`
+> DSL (validator `test-when-gate-*` + emitter `BT_GATE_CONSUMING`, red-first); the `command.validate`
+> span is now CONSTRUCTED at both dispatch seams (pm_delivery prepare + generated router) recording
+> `validation_status` + `service_window_verdict` off the run's own evidence, and the codegen
+> cross-check now demands a PRODUCTION call site per required span — which surfaced `cart.read` and
+> `pricing.compute` as pre-existing dead constructors (held in an explicit
+> `KNOWN_UNINVOKED_REQUIRED_SPANS` exemption; follow-up owed). Subscriptions re-evaluate the window
+> PER PUSHED UPDATE through the blessed `service_clock::evaluate_now` symbol, proven by a
+> straddling-pushes behaviour test. The refusal-message toast surfacing stays deliberately unbuilt
+> (acceptance-first: PlaceOrder rejections land post-enqueue on the operation status surface) — a
+> product call for the architect, not a Phase 4 omission.
+
 > ⚖️ **2026-08-15 — MERGE POSTURE RULED: AUTO-MERGE-ON-GREEN IS THE DEFAULT; `HOLD: human` FOR THE
 > NAMED CLASS** (stored event shapes/fold semantics/migrations, payments/funds custody/erasure,
 > legal surfaces, non-additive GraphQL changes, mailbox/lease/fencing runtime, the merge/CI

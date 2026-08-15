@@ -158,6 +158,15 @@ place-order:
       required: true
       attributes:
         - { key: "business.validation_status", type: string, required: true }
+        # RSO-1 (DECISIONS §43): the service-hours verdict this checkout was evaluated at — the
+        # accept branch's signal (shadow mode refuses nothing, so without this attribute the
+        # decision is invisible). Value set is the scalar, by $ref — never a hand-copied enum
+        # list. A refusal surfaces through the existing `business.validation_status == 'rejected'`
+        # classification; deliberately NO new metric/counter here (that is HRS-1's row).
+        # `required` flipped in the SAME commit that declared the field on the span constructor +
+        # its recorder (crates/telemetry spans.rs/contract.rs) — the tests.rs cross-check demands
+        # the wiring exist first, which is why Phase 1 landed it unmarked.
+        - { key: "business.service_window_verdict", type: string, required: true, values: { $ref: 'scalars.yaml#/ServiceWindowVerdict' } }
     - name: "cart.read"
       kind: INTERNAL
       required: true

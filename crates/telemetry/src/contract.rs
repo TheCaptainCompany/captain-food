@@ -56,6 +56,9 @@ pub mod attr {
     pub const JOURNAL_STATUS: &str = "business.journal_status";
     pub const DISPATCH_OUTCOME: &str = "business.dispatch_outcome";
     pub const VALIDATION_STATUS: &str = "business.validation_status";
+    /// RSO-1 (DECISIONS §43): the service-hours verdict a checkout was evaluated at, on
+    /// `command.validate` — the accept branch's signal while the guard runs in shadow mode.
+    pub const SERVICE_WINDOW_VERDICT: &str = "business.service_window_verdict";
     pub const AGGREGATE_ID: &str = "business.aggregate_id";
     pub const SERVICE_FEE: &str = "business.service_fee";
     pub const SPLIT_OK: &str = "business.split_ok";

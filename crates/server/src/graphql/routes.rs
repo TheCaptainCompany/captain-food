@@ -156,6 +156,9 @@ async fn graphql_handler(
     // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
     // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
     let correlation = crate::graphql::session::RequestCorrelationId::mint();
+    // The ONE request clock (RSO-1): every serviceWindow this request evaluates agrees on "now"
+    // — minted here at the transport boundary, like the correlation id above, never per row.
+    let request_now = crate::graphql::service_clock::RequestNow::mint();
     // Per-instance authorization (#144/#433): resolve the verified Principal to a ReadScope ONCE
     // here — a PURE function of the token's claims (CARD-11), no lookup, no dependency that could
     // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
@@ -174,6 +177,7 @@ async fn graphql_handler(
                 .data(session)
                 .data(trace)
                 .data(correlation)
+                .data(request_now)
                 .data(scope)
                 .data(tenant),
         )
@@ -271,6 +275,10 @@ async fn graphql_get(
                 // read-path span served over it shares the id, same posture as POST.
                 let correlation = crate::graphql::session::RequestCorrelationId::mint();
                 data.insert(correlation);
+                // Deliberately NO `RequestNow` here (RSO-1): a socket lives for hours, so a
+                // connection-scoped clock would serve every later operation a stale "now". On
+                // this transport "the request" is each operation, and `service_clock::evaluation`
+                // reads the clock once per execution — the correct per-operation clock.
                 // The socket resolves its ReadScope ONCE at connection init, from the same pure
                 // claims function the POST path uses — a subscription must not widen what a query
                 // would refuse (#144/#433).

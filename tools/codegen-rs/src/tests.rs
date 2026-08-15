@@ -846,6 +846,198 @@ keys:
         }
     }
 
+    /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
+    /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
+    /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
+    #[test]
+    fn when_at_accepts_only_z_normalized_instants() {
+        for ok in ["2026-08-14T18:00:00Z", "2026-01-06T12:00:00Z", "2026-08-14T02:00:00.123Z"] {
+            assert!(crate::validate::core::rfc3339_z_instant(ok), "{ok} is a legal instant");
+        }
+        for bad in [
+            "2026-08-14T18:00:00+02:00", // offset — the ambiguity the field kills
+            "2026-08-14 18:00:00Z",      // space separator
+            "2026-08-14",                // bare date
+            "2026-13-01T00:00:00Z",      // month 13
+            "2026-08-14T24:00:00Z",      // hour 24
+            "2026-08-14T18:00:00.Z",     // empty fraction
+            "2026-08-14T18:00:00",       // no Z
+        ] {
+            assert!(!crate::validate::core::rfc3339_z_instant(bad), "{bad} must be refused");
+        }
+    }
+
+    /// A minimal model whose one test carries the given `when.at` — the fixture for the two
+    /// `when.at` gates below (RSO-1). The offset-carrying variant is exactly the value a
+    /// well-meaning author writes ("04:00 Paris is +02:00"), which is why the grammar refuses it.
+    fn when_at_model(at: &str) -> Model {
+        inline_model(&[
+            ("commands.yaml", "PlaceOrder:\n  type: object\n  properties: {}\n"),
+            (
+                "actors.yaml",
+                "Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n",
+            ),
+            (
+                "tests.yaml",
+                &format!(
+                    "tests:\n  TestClockShape:\n    actor: {{ $ref: 'actors.yaml#/Order' }}\n    when:\n      type: {{ $ref: 'commands.yaml#/PlaceOrder' }}\n      at: \"{}\"\n      data: {{}}\n",
+                    at
+                ),
+            ),
+        ])
+    }
+
+    /// `when.at` through the FULL validator (RSO-1): a malformed instant is the
+    /// `test-when-at-not-instant` ERROR, located at the field — so a clock-consuming test can
+    /// never reach the emitter with a value whose chrono parse would fail at runtime.
+    #[test]
+    fn when_at_malformed_is_a_validation_error_through_validate() {
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00+02:00"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-at-not-instant")
+            .expect("malformed when.at must be reported");
+        assert!(hit.location.ends_with("TestClockShape.when.at"), "{}", hit.location);
+        // The negative control: the SAME model with a Z-normalized instant is clean of this rule
+        // (without it, a rule that fired on every `when.at` would pass the assertion above).
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00Z"));
+        assert!(
+            !issues.iter().any(|i| i.rule == "test-when-at-not-instant"),
+            "a Z-normalized instant is legal: {:?}",
+            issues.iter().filter(|i| i.rule == "test-when-at-not-instant").map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// A minimal model whose one test carries the given `when.gates` list — the fixture for the
+    /// `when.gates` validator rules (RSO-1 Phase 4). The configuration catalog declares one
+    /// boolean gate and one int key so both rules have a target.
+    fn when_gates_model(gates_yaml: &str) -> Model {
+        inline_model(&[
+            ("commands.yaml", "PlaceOrder:\n  type: object\n  properties: {}\n"),
+            (
+                "actors.yaml",
+                "Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n",
+            ),
+            (
+                "configuration.yaml",
+                "keys:\n  SOME_GATE:\n    type: bool\n    default: false\n  NOT_A_GATE:\n    type: int\n    default: 3\n",
+            ),
+            (
+                "tests.yaml",
+                &format!(
+                    "tests:\n  TestGateShape:\n    actor: {{ $ref: 'actors.yaml#/Order' }}\n    when:\n      type: {{ $ref: 'commands.yaml#/PlaceOrder' }}\n      gates:\n{}\n      data: {{}}\n",
+                    gates_yaml
+                ),
+            ),
+        ])
+    }
+
+    /// `when.gates` through the FULL validator (RSO-1 Phase 4): an entry that is not a
+    /// `configuration.yaml#/keys/<KEY>` $ref — a bare string, a wrong-kind ref, an undeclared
+    /// key — is `test-when-gate-not-config-ref`; a resolving entry whose key is not `type: bool`
+    /// is `test-when-gate-not-bool` (a non-boolean key is not a gate, and `true` would assert
+    /// nothing about it). A resolving boolean gate is clean of both.
+    #[test]
+    fn when_gates_must_be_resolving_boolean_config_refs() {
+        // Bare string: not a $ref at all — invisible to the refs walker, the #413 class.
+        let Report { issues, .. } = validate(&when_gates_model("        - SOME_GATE"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-gate-not-config-ref")
+            .expect("a bare gate name must be reported");
+        assert!(hit.location.ends_with("TestGateShape.when.gates[0]"), "{}", hit.location);
+        // Undeclared key: the ref shape is right, the key does not exist.
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/NO_SUCH_KEY' }"));
+        assert!(
+            issues.iter().any(|i| i.rule == "test-when-gate-not-config-ref"),
+            "an undeclared configuration key must be reported"
+        );
+        // Non-boolean key: resolves, but cannot be a gate.
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/NOT_A_GATE' }"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-gate-not-bool")
+            .expect("a non-bool configuration key must be reported");
+        assert!(hit.location.ends_with("TestGateShape.when.gates[0]"), "{}", hit.location);
+        // The negative control: a resolving boolean gate is clean of BOTH rules (without this, a
+        // rule firing on every `when.gates` would pass the assertions above).
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/SOME_GATE' }"));
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.rule == "test-when-gate-not-config-ref" || i.rule == "test-when-gate-not-bool"),
+            "a resolving boolean gate is legal: {:?}",
+            issues
+                .iter()
+                .filter(|i| i.rule.starts_with("test-when-gate"))
+                .map(|i| &i.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// `when.gates` on a command whose handler takes NO gate is an emitter PANIC, never a silent
+    /// no-op — the `when.at` posture: a gate the generated test would drop looks like it asserts
+    /// the enforcement edge while asserting nothing.
+    #[test]
+    #[should_panic(
+        expected = "`when.gates` names 'ENFORCE_SERVICE_HOURS_GUARD' but 'RegisterRestaurant' does not consume it"
+    )]
+    fn behaviour_tests_emitter_refuses_when_gates_on_a_non_gate_consuming_command() {
+        let mut actors = String::new();
+        for (agg, _, _) in BT_AGGREGATES {
+            if *agg == "Restaurant" {
+                actors.push_str(
+                    "Restaurant:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      emits: []\n",
+                );
+            } else {
+                actors.push_str(&format!("{}:\n  type: aggregate\n  receives: []\n", agg));
+            }
+        }
+        let m = inline_model(&[
+            ("commands.yaml", "RegisterRestaurant:\n  type: object\n  properties: {}\n"),
+            ("actors.yaml", &actors),
+            (
+                "tests.yaml",
+                "tests:\n  TestX:\n    actor: { $ref: 'actors.yaml#/Restaurant' }\n    when:\n      type: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      gates:\n        - { $ref: 'configuration.yaml#/keys/ENFORCE_SERVICE_HOURS_GUARD' }\n      data: {}\n",
+            ),
+        ]);
+        let _ = emit_behaviour_tests(&m);
+    }
+
+    /// `when.at` on a command whose handler takes NO instant is an emitter PANIC, never a silent
+    /// no-op (the #413 "silently invisible" defect class): a value the generated test would drop
+    /// asserts nothing while looking like it asserts the clock.
+    #[test]
+    #[should_panic(
+        expected = "`when.at` is set but 'RegisterRestaurant' is not clock-consuming"
+    )]
+    fn behaviour_tests_emitter_refuses_when_at_on_a_non_clock_consuming_command() {
+        // `bt_event_owners` resolves EVERY `BT_AGGREGATES` entry up front, so the minimal model
+        // stubs the whole roster; only Restaurant receives the command under test.
+        let mut actors = String::new();
+        for (agg, _, _) in BT_AGGREGATES {
+            if *agg == "Restaurant" {
+                actors.push_str(
+                    "Restaurant:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      emits: []\n",
+                );
+            } else {
+                actors.push_str(&format!("{}:\n  type: aggregate\n  receives: []\n", agg));
+            }
+        }
+        let m = inline_model(&[
+            ("commands.yaml", "RegisterRestaurant:\n  type: object\n  properties: {}\n"),
+            ("actors.yaml", &actors),
+            (
+                "tests.yaml",
+                "tests:\n  TestX:\n    actor: { $ref: 'actors.yaml#/Restaurant' }\n    when:\n      type: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      at: \"2026-01-06T12:00:00Z\"\n      data: {}\n",
+            ),
+        ]);
+        let _ = emit_behaviour_tests(&m);
+    }
+
     /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
     ///
     /// The emitter used to substitute `0` for a defaultless `int`, so
@@ -1508,6 +1700,75 @@ keys:
              broken, not the code. Fix the parser rather than deleting the test."
         );
 
+        // The PRODUCTION sources every span constructor must be INVOKED from (RSO-1 Phase 4,
+        // #180): a constructor that exists in spans.rs but is called nowhere satisfies the
+        // "constructed" check above while the contract stays unsatisfiable by any real trace --
+        // exactly how `command.validate` sat declared-but-never-emitted through three phases.
+        // Scope: every `.rs` file under crates/ except spans.rs itself and `tests/`/`benches/`
+        // dirs, comment lines stripped (a doc sentence naming a constructor is prose, not a call
+        // site). Deliberately NOT cut at `#[cfg(test)]`: auth.rs holds production code AFTER a
+        // mid-file test module, so the naive cut loses real call sites -- and the primary
+        // false-positive risk (spans.rs's own self-test naming every constructor) is excluded by
+        // file. A `#[cfg(test)]` call site in some OTHER src file could in principle satisfy
+        // this; none exists today, and inventing one to dodge the gate would not survive review.
+        let production_sources: String = {
+            fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+                let Ok(entries) = std::fs::read_dir(dir) else { return };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if name == "target" || name == "tests" || name == "benches" {
+                            continue;
+                        }
+                        walk(&path, out);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                        out.push(path);
+                    }
+                }
+            }
+            let mut files = Vec::new();
+            walk(&root.join("crates"), &mut files);
+            assert!(
+                files.len() > 50,
+                "walked only {} .rs files under crates/ -- the walker is broken, not the code",
+                files.len()
+            );
+            let spans_path = root.join("crates/telemetry/src/spans.rs");
+            files
+                .into_iter()
+                .filter(|p| {
+                    p.canonicalize().ok() != spans_path.canonicalize().ok()
+                })
+                .filter_map(|p| std::fs::read_to_string(&p).ok())
+                .map(|s| {
+                    s.lines()
+                        .filter(|l| !l.trim_start().starts_with("//"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        // span name -> constructor fn name, the spans.rs naming law: dots become underscores.
+        // Callers are outside crates/telemetry, so every real call site path-qualifies through
+        // the module (`telemetry::spans::x(...)` / `spans::x(...)`).
+        let constructor_called =
+            |span_name: &str| -> bool {
+                production_sources.contains(&format!("spans::{}(", span_name.replace('.', "_")))
+            };
+        // Declared-required spans whose constructor is KNOWN to have no production call site yet
+        // -- the explicit, reviewable "deliberately not yet" (the UNWIRED_MUTATIONS pattern).
+        // Both predate this check and were surfaced BY it: the place-order prepare phase runs
+        // `require_cart` and `price_cart` inside the SDK-free application handler, so their spans
+        // need a framework-boundary seam that does not exist yet (follow-up owed from the #180
+        // Phase 4 report; the write path's cart/pricing steps are currently visible only through
+        // the read-side `cart.price` twin). An entry that GAINS a call site fails below until the
+        // exemption is removed -- a stale exemption is a gate failure, never a quiet allowance
+        // (the warning-ratchet discipline).
+        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] =
+            &[("place-order", "cart.read"), ("place-order", "pricing.compute")];
+
         let mut missing: Vec<String> = Vec::new();
         // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
         // (crates/server/tests/public_credential_degraded_metric.rs proves both branches), so
@@ -1532,6 +1793,26 @@ keys:
                 let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                 if !constructed.contains(name) {
                     missing.push(format!("  {feature}: span '{name}' is required but never constructed"));
+                    continue;
+                }
+                // Declared AND constructed is still not EMITTED: the constructor must be invoked
+                // from production code, or the required:true contract is unsatisfiable by any
+                // real trace (the `command.validate` state RSO-1 Phase 4 ended).
+                let exempt = KNOWN_UNINVOKED_REQUIRED_SPANS.contains(&(feature, name));
+                let called = constructor_called(name);
+                if exempt && called {
+                    missing.push(format!(
+                        "  {feature}: span '{name}' is in KNOWN_UNINVOKED_REQUIRED_SPANS but IS \
+                         invoked now -- bank the improvement: remove its exemption"
+                    ));
+                    continue;
+                }
+                if !exempt && !called {
+                    missing.push(format!(
+                        "  {feature}: span '{name}' has a constructor in spans.rs but no production \
+                         call site invokes it -- the contract marks it required, so no real run can \
+                         ever satisfy the contract"
+                    ));
                     continue;
                 }
                 for at in sp.get("attributes").and_then(|a| a.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {

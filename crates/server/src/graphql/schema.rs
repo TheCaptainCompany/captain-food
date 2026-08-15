@@ -56,6 +56,11 @@ pub struct ReadDeps {
     /// business read model. The port lives in `actor_client::supervision` (#510): its methods
     /// demand the mailbox witness, so the resolvers read through that crate's door functions.
     pub mailbox_lanes: Arc<dyn MailboxLaneRepository>,
+    /// RSO-1: the service-window validity horizon (`SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS`) —
+    /// configuration read once at the composition root, not a repository, but a READ-side
+    /// dependency all the same: every `Restaurant::at` in the generated resolvers threads it.
+    /// `ServiceWindowHorizon::default()` is the spec default (900 s) for test-built schemas.
+    pub service_window_horizon: super::service_clock::ServiceWindowHorizon,
 }
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
@@ -145,6 +150,7 @@ pub fn build_schema_for_scope(
             reclamations,
             customer_credit,
             mailbox_lanes,
+            service_window_horizon,
         } = d;
         builder = builder.data(restaurants);
         builder = builder.data(prospection);
@@ -163,6 +169,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(reclamations);
         builder = builder.data(customer_credit);
         builder = builder.data(mailbox_lanes);
+        builder = builder.data(service_window_horizon);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

@@ -474,16 +474,28 @@ mod tests {
             }})
         };
         let profile = || json!({ "me": { "customerId": "c-1", "displayName": "Camille Durand" } });
+        // RSO-1: the checkout screen now ALSO declares `restaurant.bySlug` (Phase 1 spec — the
+        // service-window evidence the shell will bind when the refusal surfacing lands), so the
+        // shell performs a 4th read. Scripted with the prod-smoke L4 shape (timezone, no hours →
+        // HOURS_UNDECLARED, which accepts in both gate positions).
+        let restaurant = || {
+            json!({ "restaurant": {
+                "displayName": "Chez Test", "slug": "chez-test", "timezone": "Europe/Paris",
+                "serviceWindow": { "verdict": "HOURS_UNDECLARED", "opensAt": null, "lastOrderAt": null,
+                                   "evaluatedAt": "2026-01-06T12:00:00Z", "validUntil": "2026-01-06T12:15:00Z" },
+            }})
+        };
 
         let fake = FakeTransport::scripted(vec![
             Ok(cart()),
             Ok(profile()),
             Ok(json!({ "paymentStatus": null })),
+            Ok(restaurant()),
         ]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
             .expect("the checkout route renders");
-        assert_eq!(fake.call_count(), 3, "one read per declared resolver");
+        assert_eq!(fake.call_count(), 4, "one read per declared resolver");
         assert!(html.contains("2 items"), "the real line count: {html}");
         assert!(html.contains("23,50 EUR"), "the real total, formatted: {html}");
         assert!(html.contains("chez-test"), "the restaurant being ordered from: {html}");
@@ -500,6 +512,7 @@ mod tests {
             Ok(json!({ "paymentStatus": {
                 "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED",
             }})),
+            Ok(restaurant()),
         ]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
@@ -533,6 +546,12 @@ mod tests {
                 }})),
                 Ok(json!({ "me": null })),
                 Ok(json!({ "paymentStatus": null })),
+                // RSO-1: the checkout screen's 4th declared read (`restaurant.bySlug`).
+                Ok(json!({ "restaurant": {
+                    "displayName": "Chez Test", "slug": "chez-test",
+                    "serviceWindow": { "verdict": "HOURS_UNDECLARED", "opensAt": null, "lastOrderAt": null,
+                                       "evaluatedAt": "2026-01-06T12:00:00Z", "validUntil": "2026-01-06T12:15:00Z" },
+                }})),
             ])
         };
 

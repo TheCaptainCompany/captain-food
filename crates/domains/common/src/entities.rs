@@ -104,4 +104,9 @@ pub struct CheckoutSnapshot {
     pub total_amount: Money,
     pub breakdown: PaymentBreakdown,
     pub note: Option<OrderNote>,
+    pub verdict: Option<ServiceWindowVerdict>,
+    pub window_from: Option<String>,
+    pub window_to: Option<String>,
+    pub timezone: Option<TimeZone>,
+    pub evaluated_at: Option<String>,
 }

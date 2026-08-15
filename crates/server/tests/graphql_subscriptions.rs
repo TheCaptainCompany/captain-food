@@ -91,6 +91,24 @@ impl RestaurantReadRepository for InMemoryRestaurants {
     }
 }
 
+/// A restaurants fake whose single row can be MUTATED mid-stream — the RSO-1 freshness fixture:
+/// the declared hours change between two pushes of one live subscription.
+#[derive(Clone)]
+struct MutableRestaurants(Arc<Mutex<RestaurantRow>>);
+
+#[async_trait]
+impl RestaurantReadRepository for MutableRestaurants {
+    async fn list(&self, _filter: RestaurantFilter) -> Result<Vec<RestaurantRow>, DomainError> {
+        Ok(vec![self.0.lock().unwrap().clone()])
+    }
+    async fn by_slug(&self, _slug: ds::Slug) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok(Some(self.0.lock().unwrap().clone()))
+    }
+    async fn by_id(&self, _id: ds::RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok(Some(self.0.lock().unwrap().clone()))
+    }
+}
+
 /// Empty stand-ins for the read models the subscription resolvers never touch.
 struct Empty;
 
@@ -421,7 +439,7 @@ fn delivery_job_row(
 fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: EventBus) -> CaptainSchema {
     schema_over_with_deliveries(
         orders,
-        restaurants,
+        Arc::new(restaurants),
         Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
         bus,
     )
@@ -429,13 +447,13 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
 
 fn schema_over_with_deliveries(
     orders: InMemoryOrders,
-    restaurants: InMemoryRestaurants,
+    restaurants: Arc<dyn RestaurantReadRepository>,
     deliveries: Arc<dyn application::queries::DeliveryReadRepository>,
     bus: EventBus,
 ) -> CaptainSchema {
     build_schema(
         Some(ReadDeps {
-            restaurants: Arc::new(restaurants),
+            restaurants,
             prospection: Arc::new(Empty),
             pricing_policy: Arc::new(Empty),
             uber_estimation_policy: Arc::new(Empty),
@@ -452,6 +470,8 @@ fn schema_over_with_deliveries(
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         Some(bus),
@@ -571,7 +591,7 @@ async fn a_status_unchanged_fold_still_reaches_the_confirmation_page() {
     let bus = EventBus::default();
     let schema = schema_over_with_deliveries(
         InMemoryOrders(store.clone()),
-        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(InMemoryRestaurants(restaurant_row(restaurant_id))),
         Arc::new(deliveries),
         bus.clone(),
     );
@@ -627,6 +647,100 @@ async fn a_status_unchanged_fold_still_reaches_the_confirmation_page() {
     );
 }
 
+/// RSO-1 Phase 4 (GraphQL checkpoint ask): `serviceWindow.evaluatedAt` is PER PUSHED UPDATE, not
+/// per subscribe — two pushes of ONE live subscription straddling a service-window transition
+/// carry DIFFERENT verdicts, each evaluated at its own push instant. A subscribe-time frozen
+/// ServiceWindow would keep the first verdict forever, which on a tracking screen left open
+/// across a door-close would display "open" all night.
+///
+/// The transition is driven by mutating the DECLARED HOURS between the pushes rather than by the
+/// wall clock crossing a window edge — the only deterministic straddle available to a test that
+/// cannot move the real clock; mechanically both are the same thing, one re-evaluation at push
+/// time over current inputs (`Restaurant::at(row, service_clock::evaluate_now(), ..)`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_subscription_re_evaluates_the_service_window_per_push_not_per_subscribe() {
+    let restaurant_id = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let correlation = uuid::Uuid::new_v4();
+    let store = Arc::new(Mutex::new(HashMap::from([(
+        order_id,
+        order_row(order_id, restaurant_id, ds::OrderStatus::PLACED),
+    )])));
+    // Push 1's schedule: an ALWAYS-OPEN week — each weekday declares 06:00–18:00 AND the
+    // overnight 18:00–06:00, so the union covers every wall instant (both closes inclusive) and
+    // the verdict is OPEN at whatever real instant the test runs, DST included.
+    let mut row = restaurant_row(restaurant_id);
+    row.timezone = Some(ds::TimeZone("Europe/Paris".into()));
+    let all_week: Vec<serde_json::Value> = [
+        "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY",
+    ]
+    .iter()
+    .flat_map(|wd| {
+        [
+            serde_json::json!({ "weekday": wd, "from": "06:00", "to": "18:00" }),
+            serde_json::json!({ "weekday": wd, "from": "18:00", "to": "06:00" }),
+        ]
+    })
+    .collect();
+    row.opening_hours = serde_json::Value::Array(all_week);
+    let restaurants = MutableRestaurants(Arc::new(Mutex::new(row)));
+    let bus = EventBus::default();
+    let schema = schema_over_with_deliveries(
+        InMemoryOrders(store.clone()),
+        Arc::new(restaurants.clone()),
+        Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
+        bus.clone(),
+    );
+
+    let query = format!(
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id restaurant {{ serviceWindow {{ verdict evaluatedAt }} }} }} }}"#
+    );
+    let mut stream = schema.execute_stream(
+        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+    );
+
+    spawn_publisher(bus.clone(), order_envelope(order_id, correlation, "OrderPlaced", 1));
+    let first = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("first push in time")
+        .expect("stream item");
+    assert!(first.errors.is_empty(), "first push errored: {:?}", first.errors);
+    let data = first.data.into_json().expect("json");
+    let sw1 = data["orderStatusChanged"]["restaurant"]["serviceWindow"].clone();
+    assert_eq!(sw1["verdict"], serde_json::json!("OPEN"), "the always-open week is OPEN at any instant");
+    let evaluated1 = sw1["evaluatedAt"].as_str().expect("evaluatedAt present on push 1").to_owned();
+
+    // THE WINDOW TRANSITION: the declared hours vanish between the pushes (and the row's own
+    // fold clock moves, so the updated_at dedupe cannot swallow the second frame).
+    restaurants.0.lock().unwrap().opening_hours = serde_json::json!([]);
+    {
+        let mut rows = store.lock().unwrap();
+        rows.get_mut(&order_id).expect("row").updated_at = chrono::Utc::now();
+    }
+    spawn_publisher(bus.clone(), order_envelope(order_id, correlation, "OrderAccepted", 2));
+    let second = tokio::time::timeout(Duration::from_secs(15), stream.next())
+        .await
+        .expect("second push in time")
+        .expect("stream item");
+    assert!(second.errors.is_empty(), "second push errored: {:?}", second.errors);
+    let data = second.data.into_json().expect("json");
+    let sw2 = data["orderStatusChanged"]["restaurant"]["serviceWindow"].clone();
+    assert_eq!(
+        sw2["verdict"],
+        serde_json::json!("HOURS_UNDECLARED"),
+        "the SECOND push re-evaluated over the changed schedule — a subscribe-time snapshot would still say OPEN"
+    );
+    let evaluated2 = sw2["evaluatedAt"].as_str().expect("evaluatedAt present on push 2");
+    // RFC3339 with a fixed offset compares lexicographically: the per-push clock never runs
+    // backwards across pushes (equality allowed — two pushes can land within one tick).
+    assert!(
+        evaluated2 >= evaluated1.as_str(),
+        "evaluatedAt must advance with the pushes: {} then {}",
+        evaluated1,
+        evaluated2
+    );
+}
+
 /// The `DeliveryJob-` half of the filter widening, ISOLATED — the one thing its sibling above
 /// cannot prove.
 ///
@@ -657,7 +771,7 @@ async fn a_delivery_job_envelope_alone_reaches_the_confirmation_page() {
     let bus = EventBus::default();
     let schema = schema_over_with_deliveries(
         InMemoryOrders(store.clone()),
-        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(InMemoryRestaurants(restaurant_row(restaurant_id))),
         Arc::new(deliveries),
         bus.clone(),
     );
@@ -715,7 +829,7 @@ async fn another_orders_delivery_job_never_reaches_this_subscriber() {
     let bus = EventBus::default();
     let schema = schema_over_with_deliveries(
         InMemoryOrders(store.clone()),
-        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        Arc::new(InMemoryRestaurants(restaurant_row(restaurant_id))),
         Arc::new(deliveries),
         bus.clone(),
     );
@@ -1123,6 +1237,8 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         None,

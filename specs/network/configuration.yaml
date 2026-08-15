@@ -7,6 +7,19 @@ description: >
 keys:
 
 
+  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS:
+    type: int
+    default: 900
+    gates: >
+      The Restaurant.serviceWindow.validUntil horizon (RSO-1, DECISIONS §43 sub-question iii):
+      validUntil = min(next window transition, evaluatedAt + this horizon), and under
+      HOURS_UNDECLARED — where no transition exists to wait for — it is evaluatedAt + horizon
+      alone. Exists so no cache can treat a verdict as immortal: without it a restaurant declaring
+      its hours at 18:50 on a Friday would keep rendering a blank badge in every warm cache at the
+      hour it matters. Seconds; the 900 default trades staleness against re-evaluation load at
+      Friday-peak list fan-out.
+
+
   RUN_SIRENE_WORKER:
     type: bool
     scalar:

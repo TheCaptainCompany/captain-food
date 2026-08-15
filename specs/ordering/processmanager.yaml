@@ -43,6 +43,18 @@ PlaceOrderProcess:
             where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
         - guard: { throws: { $ref: 'errors.yaml#/RestaurantPaused' }, note: "restaurant.order_acceptance is not PAUSED." }
         - guard: { throws: { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }, note: "A LIVE order never targets a TEST restaurant (ADR-0038)." }
+        - guard:
+            throws: { $ref: 'errors.yaml#/OutsideServiceHours' }
+            note: >
+              Service-hours guard (RSO-1, DECISIONS §43): the verdict is evaluated on the folded
+              restaurant state with the injected clock — OUTSIDE_HOURS is the ONLY refusing
+              verdict; OPEN and HOURS_UNDECLARED accept, and the verdict evidence is frozen onto
+              the CheckoutSnapshot either way. Refusal enforcement is gated by
+              configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD (default OFF = shadow). Positioned
+              with the restaurant guards, strictly BEFORE the payment call: a refusal after intent
+              creation would strand a Stripe hold. Like every guard in this chain it runs
+              POST-ENQUEUE (acceptance-first): a refusal surfaces as the operation's errorCode,
+              never as a synchronous GraphQL error.
         - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
         - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
         - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }

@@ -124,6 +124,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             reclamations: Arc::new(PgReclamationRepository::new(pool.clone())),
             customer_credit: Arc::new(PgCustomerCreditRepository::new(pool.clone())),
             mailbox_lanes: Arc::new(PgMailboxLaneRepository::new(pool.clone())),
+        // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
+        service_window_horizon: Default::default(),
         }),
         None,
         None,

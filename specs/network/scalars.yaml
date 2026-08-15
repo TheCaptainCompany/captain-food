@@ -123,7 +123,8 @@ RestaurantListingStatus:
     - ACTIVE_PARTNER    # signed partner; orderable when also RestaurantStatus ACTIVE and not PAUSED
   description: >
     Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational
-    DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
+    DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED
+    (the single statement is rules.yaml#/OrderableExcludesServiceHours — service hours are NOT a term).
 
 
 GbpLinkStatus:

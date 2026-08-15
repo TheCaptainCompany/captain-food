@@ -226,7 +226,11 @@ Restaurant:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/timezone' }
         - { $ref: 'events.yaml#/RestaurantUpdated/properties/timezone' }
       nullable: true
-      note: "Location timezone; falls back to the account's when null."
+      note: >
+        Location timezone. NULL means NO timezone — the account-level fallback this note used to
+        claim has NO materialized source (View_RestaurantAccount was deleted; corrected under RSO-1,
+        DECISIONS §43): service-window evaluation treats NULL, or a zone that does not parse while
+        hours are declared, as HOURS_UNDECLARED, never as "closed".
     preparation_time_minutes:
       from:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/preparationTimeMinutes' }
