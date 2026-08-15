@@ -65,21 +65,26 @@ pub(crate) fn resolve_reply_field(def: &Value, actor: &str, field: &str) -> Opti
 
 /// §2g rules (each red-first tested, `tools/codegen-rs/src/tests.rs`):
 ///   - `ans-shape` (error): the block's closed key set — `answers:` is a map of operation →
-///     `{ description (required), reply (required, non-empty), params (optional) }`; anything
-///     else (missing/empty description, missing reply, unknown keys, a non-aggregate actor) is
-///     refused. Answering takes a FOLD, so only aggregates may declare the block.
-///   - `ans-inline-type` (error): a params/reply value that is not exactly `{ $ref: ... }` — an
+///     `{ description (required), reply (required, non-empty) }`; anything else (missing/empty
+///     description, missing reply, unknown keys, a non-aggregate actor, a MAILBOX-LESS actor) is
+///     refused. Answering takes a FOLD, so only aggregates may declare the block — and the typed
+///     `ask` rides the sealed per-actor client, which exists only for a `mailbox:` actor.
+///   - `ans-params-refused` (error, #583 hardening): `params:` is refused THIS slice — the local
+///     ask is load → fold → project(state), so nothing can consume a param yet; an accepted key
+///     nothing consumes is a control that renders and does nothing. The key returns when a later
+///     slice gives it semantics (that reintroduction is a recorded decision).
+///   - `ans-inline-type` (error): a reply value that is not exactly `{ $ref: ... }` — an
 ///     inline `type:` here would fork the kernel ("one name = one dedicated scalar", PROP §3).
 ///   - `ans-reply-ref` (error): a reply property ref that is not `#/<SameActor>/state/<field>`,
 ///     or that names a field which is neither declared state, the implicit identity, nor the
 ///     implicit lifecycle status (V2 — refs resolve, nothing redeclared).
-///   - `ans-params-ref` (error): a params value ref outside scalars.yaml/entities.yaml.
 ///   - `ans-op-unique` (error): the derived `<Actor><Op>` PascalCase pair must be unique across
 ///     the whole catalog — it names the generated `Request`/`Reply` types.
-///   - `ans-ref-isolation` (error): NO `$ref` anywhere may target `actors.yaml#/…/answers/…`
-///     except a PM `ask:` step (the one legal consumer, PM half of #582) — a reply is
-///     constitutionally unpersistable and never an event/projection/api/screen source (kind
-///     doctrine rules 2-3, PROP §4).
+///   - `ans-ref-isolation` (error): NO `$ref` anywhere may target `actors.yaml#/…/answers/…` —
+///     a reply is constitutionally unpersistable and never an event/projection/api/screen source
+///     (kind doctrine rules 2-3, PROP §4). No grammar consumes an answer TODAY; the PM half of
+///     #582 reintroduces consumption STRUCTURALLY against the parsed `ask:` step, never as a
+///     location allowance here.
 pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
     let actors = match model.defs.get("actors.yaml") {
         Some(Value::Mapping(m)) => m,
@@ -108,10 +113,20 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
             issues.push(err(
                 "ans-shape",
                 site("/answers".into()),
-                "`answers:` must be a map of operation → { description, reply[, params] }.".into(),
+                "`answers:` must be a map of operation → { description, reply }.".into(),
             ));
             continue;
         };
+        // #583 hardening (item 3): the typed `ask` rides the sealed per-actor client, and the
+        // client crate exists only for a `mailbox:` actor — answers without a mailbox would
+        // silently generate NO surface at all (the emitter refuses too, belt and braces).
+        if def.get("mailbox").and_then(|m| m.get("partitions")).is_none() {
+            issues.push(err(
+                "ans-shape",
+                site("/answers".into()),
+                format!("`answers:` on '{}' needs a declared `mailbox:` (partitions) — the typed `ask` lives on the sealed per-actor client, which exists only for a mailbox actor; without one the ask surface would silently not exist.", name),
+            ));
+        }
         for (ok, op_def) in answers {
             let Some(op) = ok.as_str() else { continue };
             let osite = || site(format!("/answers/{}", op));
@@ -123,14 +138,15 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
                 ));
                 continue;
             };
-            // Closed key set (the loader schema): description + reply + optional params.
+            // Closed key set (the loader schema): description + reply. `params` is a RECOGNIZED
+            // key so it gets its own refusal below, not a generic unknown-key error.
             for (kk, _) in op_map {
                 if let Some(key) = kk.as_str() {
                     if !matches!(key, "description" | "reply" | "params") {
                         issues.push(err(
                             "ans-shape",
                             osite(),
-                            format!("unknown key '{}' on answer operation '{}' — the closed set is description | reply | params (no binding/transport/deadline keys: absence means local, the deadline is the caller's — PROP-20260815-142349 D5/D6).", key, op),
+                            format!("unknown key '{}' on answer operation '{}' — the closed set is description | reply (no binding/transport/deadline keys: absence means local, the deadline is the caller's — PROP-20260815-142349 D5/D6; `params` is refused this slice, ans-params-refused).", key, op),
                         ));
                     }
                 }
@@ -153,32 +169,17 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
             } else {
                 derived.insert(pair, osite());
             }
-            // params: optional map of name -> { $ref: scalars|entities }.
-            if let Some(params) = op_def.get("params") {
-                let Some(params) = params.as_mapping() else {
-                    issues.push(err("ans-shape", osite(), format!("`params` on '{}' must be a map of name → {{ $ref }}.", op)));
-                    continue;
-                };
-                for (pk, pv) in params {
-                    let pname = pk.as_str().unwrap_or("?");
-                    let psite = || site(format!("/answers/{}/params/{}", op, pname));
-                    let Some(r) = sole_ref(pv) else {
-                        issues.push(err(
-                            "ans-inline-type",
-                            psite(),
-                            format!("param '{}' must be exactly {{ $ref: 'scalars.yaml#/…' }} — no inline `type:` (a reply/param may declare NO new scalar, PROP §3).", pname),
-                        ));
-                        continue;
-                    };
-                    match ref_target_file(&r, "actors.yaml").as_deref() {
-                        Some("scalars.yaml") | Some("entities.yaml") => {}
-                        _ => issues.push(err(
-                            "ans-params-ref",
-                            psite(),
-                            format!("param '{}' $ref '{}' must name a scalar or entity (scalars.yaml / entities.yaml).", pname, r),
-                        )),
-                    }
-                }
+            // #583 hardening (item 1): `params:` is refused OUTRIGHT this slice — the local ask
+            // is load → fold → project(state), so a param cannot change the answer; an accepted
+            // key nothing consumes is a control that renders and does nothing (the CLAUDE.md
+            // class). Same posture as the dropped transport/deadline keys: reintroducing the key
+            // is a later slice's recorded decision, made when something can consume it.
+            if op_def.get("params").is_some() {
+                issues.push(err(
+                    "ans-params-refused",
+                    osite(),
+                    format!("`params` on '{}' is refused this slice: the local ask is load → fold → project(state), so nothing can consume a param yet. The key gains semantics in a later slice — reintroducing it is that slice's recorded decision; until then an ask is addressed by IDENTITY only (the stream key IS the argument).", op),
+                ));
             }
             // reply: required, non-empty, every value a same-actor state ref.
             let Some(reply) = op_def.get("reply").and_then(|r| r.as_mapping()).filter(|m| !m.is_empty()) else {
@@ -229,9 +230,10 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
         }
     }
     // Kind isolation (PROP §4 rules 2-3): a reply exists on the wire for one Ask and nowhere
-    // else. The only site that may ever $ref into `answers/` is a PM `ask:` step (its `operation`
-    // / `from_ask.property` keys — PM half); everything else (events, projections, api, screens,
-    // emits, folds, tombstones) is refused.
+    // else — and NO grammar consumes an answer today, so the rule is STRICT: every `$ref` into
+    // `answers/` is refused, whatever its file or location (#583 hardening item 2 removed the
+    // location-substring allowance that pre-authorized a grammar which did not exist). The PM
+    // half of #582 reintroduces consumption STRUCTURALLY, against the parsed `ask:` step.
     for (f, v) in &model.defs {
         let file = f.as_str();
         let mut refs = Vec::new();
@@ -242,15 +244,11 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
             if target_file != "actors.yaml" || pr.path.get(1).map(String::as_str) != Some("answers") {
                 continue;
             }
-            let is_pm_ask_site = file == "processmanager.yaml"
-                && (loc.contains(".ask.") || loc.ends_with(".ask") || loc.contains(".from_ask."));
-            if !is_pm_ask_site {
-                issues.push(err(
-                    "ans-ref-isolation",
-                    loc,
-                    format!("$ref '{}' targets an actor answer — a reply is a snapshot whose authority expires at send: only a PM `ask:` step may reference it, never an event, projection, api, screen or fold (PROP-20260815-142349 §4 rules 2-3).", r),
-                ));
-            }
+            issues.push(err(
+                "ans-ref-isolation",
+                loc,
+                format!("$ref '{}' targets an actor answer — a reply is a snapshot whose authority expires at send: nothing may reference it today (the PM `ask:` step, #582's PM half, will be the one legal consumer — carved against the parsed step, never a location match); an event, projection, api, screen or fold never (PROP-20260815-142349 §4 rules 2-3).", r),
+            ));
         }
     }
 }

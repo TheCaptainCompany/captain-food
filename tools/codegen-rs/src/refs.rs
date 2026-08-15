@@ -434,9 +434,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("actors.yaml", "*.state.*.of.*",                   &[Kind::Scalar, Kind::EnumScalar]),
     // Actor `answers:` blocks (PROP-20260815-142349 §2, #582): a reply property COMPOSES the
     // actor's own declared state (never declares — `ans-reply-ref`/`ans-inline-type` own the
-    // same-actor and no-inline-scalar proofs); an optional param is a kernel scalar or entity.
+    // same-actor and no-inline-scalar proofs). There is NO `params` row on purpose: the key is
+    // refused this slice (`ans-params-refused`, #583 hardening — nothing can consume a param on
+    // the local ask), so a ref there also fails closed as `ref-site-undeclared`; the row returns
+    // with the slice that gives params semantics.
     ("actors.yaml", "*.answers.*.reply.*",              &[Kind::StateField]),
-    ("actors.yaml", "*.answers.*.params.*",             &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
     ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
 

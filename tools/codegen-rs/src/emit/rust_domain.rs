@@ -756,20 +756,6 @@ pub(crate) struct AnswerOp {
     pub(crate) projections: Vec<(String, String)>,
 }
 
-/// Render a scalars.yaml/entities.yaml `$ref` into a Rust type name, recording the import.
-fn answer_type(
-    r: &str,
-    scalar_imports: &mut BTreeSet<String>,
-    entity_imports: &mut BTreeSet<String>,
-) -> String {
-    let name = ref_name(r).unwrap_or_else(|| panic!("answers: malformed type ref '{r}'"));
-    match ref_target_file(r, "actors.yaml").as_deref() {
-        Some("entities.yaml") => entity_imports.insert(name.clone()),
-        _ => scalar_imports.insert(name.clone()),
-    };
-    name
-}
-
 /// The scalar `$ref` typing an actor's IDENTITY field. The identity is the stream key — it exists
 /// before any fold, so it usually has NO `state:` entry of its own (see
 /// `is_implicit_identity_state_ref`): its scalar is recovered from the actor's own inbox, where
@@ -824,8 +810,6 @@ fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerFi
                 .unwrap_or("")
                 .trim()
                 .to_string();
-            let mut scalar_imports = BTreeSet::new(); // rendered per-field; imports merged later
-            let mut entity_imports = BTreeSet::new();
             // The field type of one same-actor state field (reply property / identity), via the
             // shared validator resolution so generation cannot drift from `ans-reply-ref`.
             let state_field_ty = |field: &str| -> (String, bool) {
@@ -851,42 +835,29 @@ fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerFi
                     ),
                 }
             };
-            // REQUEST fields: the declared params; the identity field is added when absent
-            // (identity IS the argument — PROP §3's common case).
-            let mut request: Vec<AnswerField> = Vec::new();
-            let mut has_identity = false;
-            if let Some(params) = op_def.get("params").and_then(|p| p.as_mapping()) {
-                for (pk, pv) in params {
-                    let pname = pk.as_str().expect("param name");
-                    let r = pv.get("$ref").and_then(|x| x.as_str()).unwrap_or_else(|| {
-                        panic!("actors.yaml {}/answers/{}/params/{}: params are $refs (ans-inline-type)", actor, op, pname)
-                    });
-                    if pname == identity {
-                        has_identity = true;
-                    }
-                    request.push(AnswerField {
-                        rust: snake_field(pname),
-                        ty: answer_type(r, &mut scalar_imports, &mut entity_imports),
-                        optional: false,
-                        doc: None,
-                    });
-                }
-            }
-            if !has_identity {
+            // REQUEST fields: exactly the derived identity — an ask is addressed BY IDENTITY
+            // (the stream key IS the argument, PROP §3). `params:` is REFUSED this slice
+            // (ans-params-refused, #583 hardening item 1): the local ask cannot consume one, so
+            // generation agrees with the validator and refuses loudly rather than emitting a
+            // field nothing reads.
+            assert!(
+                op_def.get("params").is_none(),
+                "actors.yaml {}/answers/{}: `params` is refused this slice (ans-params-refused) — the local ask is load -> fold -> project(state) and cannot consume a param",
+                actor,
+                op
+            );
+            let request: Vec<AnswerField> = vec![{
                 let (ty, _) = state_field_ty(&identity);
-                request.insert(
-                    0,
-                    AnswerField {
-                        rust: snake_field(&identity),
-                        ty,
-                        optional: false,
-                        doc: Some(format!(
-                            "The answering instance — the `{}-{{id}}` stream key IS the argument (no declared param restates it).",
-                            actor
-                        )),
-                    },
-                );
-            }
+                AnswerField {
+                    rust: snake_field(&identity),
+                    ty,
+                    optional: false,
+                    doc: Some(format!(
+                        "The answering instance — the `{}-{{id}}` stream key IS the argument (no declared param restates it).",
+                        actor
+                    )),
+                }
+            }];
             // REPLY fields: same-actor state composition.
             let mut reply: Vec<AnswerField> = Vec::new();
             let mut projections: Vec<(String, String)> = Vec::new();
@@ -909,9 +880,6 @@ fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerFi
                 reply.push(AnswerField { rust: snake_field(rname), ty, optional, doc });
                 projections.push((snake_field(rname), snake_field(&field)));
             }
-            // Merge the imports into the field types (rendered names only — the emitter builds
-            // one import line per file from the union below).
-            let _ = (&scalar_imports, &entity_imports);
             out.push((
                 AnswerOp {
                     actor: actor.to_string(),

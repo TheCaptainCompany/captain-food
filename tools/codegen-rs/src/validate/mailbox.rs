@@ -247,11 +247,22 @@ pub(crate) fn lineage_parts(r: &str) -> Option<(&str, Option<&str>)> {
 /// value object instead of lying with a sibling event's top-level copy.
 pub(crate) fn event_property_type_ref(model: &Model, event: &str, prop: &str) -> Option<String> {
     let mut node = model.defs.get("events.yaml")?.get(event)?;
+    // The resolution ctx FOLLOWS the walk (#583 hardening item 4): a hop's relative `$ref`
+    // resolves in the file of the NODE THAT CARRIES IT, and each followed absolute ref moves the
+    // ctx to its target file. Pinning ctx to "events.yaml" for every hop made a legitimate
+    // relative entity-in-entity ref dangle (loud but wrong) and let an EVENT sharing an entity's
+    // name capture the walk through the wrong type (silent).
+    let mut ctx = String::from("events.yaml");
     for seg in prop.split('/') {
         // Follow an entity/payload-object $ref before descending (nested segments only — the
         // first hop is the event's own `properties`).
         if let Some(r) = node.get("$ref").and_then(|x| x.as_str()) {
-            node = resolve_ref(model, r, "events.yaml")?;
+            node = resolve_ref(model, r, &ctx)?;
+            if let Some(pr) = parse_ref(r) {
+                if !pr.file.is_empty() {
+                    ctx = pr.file;
+                }
+            }
         }
         node = node.get("properties")?.get(seg)?;
     }

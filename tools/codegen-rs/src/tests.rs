@@ -5007,8 +5007,8 @@ Catalog:
 
     const ANS_SCALARS: &str = "OrderId: { type: string }\nPaymentIntentId: { type: string }\nPaymentStatus: { type: string, enum: [PENDING, AUTHORIZED, CAPTURED] }\n";
     const ANS_EVENTS: &str = "OrderPlaced:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n";
-    /// A well-formed answering aggregate: declared nullable state field + identity + answers op.
-    const ANS_ORDER: &str = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n";
+    /// A well-formed answering aggregate: mailbox + declared nullable state field + identity.
+    const ANS_ORDER: &str = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  mailbox:\n    partitions: 1\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n";
 
     fn ans_issues_files(files: &[(&str, &str)]) -> Vec<Issue> {
         let mut issues = Vec::new();
@@ -5027,12 +5027,11 @@ Catalog:
 
     #[test]
     fn well_formed_answers_block_is_clean() {
-        // Declared-state reply + description + a NON-identity scalar param (the params grammar's
-        // legitimate use — a real argument BEYOND the stream key; the identity itself is NEVER a
-        // param: the `Actor-{id}` stream key IS the argument, PROP §3, and the emitter derives
-        // that Request field when params are absent).
+        // Declared-state reply + description, PARAMS-FREE: an ask is addressed BY IDENTITY (the
+        // `Actor-{id}` stream key IS the argument, PROP §3) and the emitter derives that Request
+        // field; `params:` is refused this slice (ans-params-refused — nothing can consume one).
         let issues = ans_issues(
-            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      params:\n        statusFilter: { $ref: 'scalars.yaml#/PaymentStatus' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
         );
         assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
     }
@@ -5042,7 +5041,7 @@ Catalog:
         // `status` is owned by the lifecycle block (st-status-duplicated forbids redeclaring it)
         // and the identity is the stream key — both are implicitly declared, so a reply may
         // compose them without a `state:` entry (the settlementView precedent, PROP §2).
-        let actors = "Payment:\n  type: aggregate\n  identity: { $ref: '#/Payment/state/paymentIntentId' }\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial:\n      - event: { $ref: 'events.yaml#/OrderPlaced' }\n        to: PENDING\n    transitions: []\n    terminal: []\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    settlementView:\n      description: \"The settlement guard's facts.\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n        status: { $ref: '#/Payment/state/status' }\n";
+        let actors = "Payment:\n  type: aggregate\n  identity: { $ref: '#/Payment/state/paymentIntentId' }\n  mailbox:\n    partitions: 1\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial:\n      - event: { $ref: 'events.yaml#/OrderPlaced' }\n        to: PENDING\n    transitions: []\n    terminal: []\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    settlementView:\n      description: \"The settlement guard's facts.\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n        status: { $ref: '#/Payment/state/status' }\n";
         let issues = ans_issues_files(&[
             ("scalars.yaml", ANS_SCALARS),
             ("events.yaml", ANS_EVENTS),
@@ -5090,13 +5089,10 @@ Catalog:
 
     #[test]
     fn answers_reply_inline_type_is_refused() {
-        // "One name = one dedicated scalar": a reply/param may declare NO new scalar.
+        // "One name = one dedicated scalar": a reply may declare NO new scalar. (The params
+        // grammar has no inline-type case anymore — `params:` is refused wholesale this slice.)
         let issues = ans_issues(
             "    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { type: string }\n",
-        );
-        assert_eq!(rules_of(&issues), vec!["ans-inline-type"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
-        let issues = ans_issues(
-            "    paymentReference:\n      description: \"x\"\n      params:\n        orderId: { type: string }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
         );
         assert_eq!(rules_of(&issues), vec!["ans-inline-type"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
     }
@@ -5122,11 +5118,123 @@ Catalog:
     }
 
     #[test]
-    fn answers_params_ref_must_name_a_scalar_or_entity() {
+    fn answers_params_are_refused_until_given_semantics() {
+        // #583 hardening: the local ask is load → fold → project(state) — a param CANNOT change
+        // the answer this slice, so an accepted `params:` would be a control that renders and
+        // does nothing (the CLAUDE.md class). Same posture as the transport/deadline keys:
+        // refused outright; reintroducing the key is a later slice's recorded decision. The
+        // fixture keeps the params PARSER path covered (a well-formed scalar param is still
+        // refused).
         let issues = ans_issues(
-            "    paymentReference:\n      description: \"x\"\n      params:\n        orderId: { $ref: 'events.yaml#/OrderPlaced' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+            "    paymentReference:\n      description: \"x\"\n      params:\n        statusFilter: { $ref: 'scalars.yaml#/PaymentStatus' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
         );
-        assert_eq!(rules_of(&issues), vec!["ans-params-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(rules_of(&issues), vec!["ans-params-refused"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("later slice"), "the message must say when params come back: {}", issues[0].message);
+    }
+
+    #[test]
+    fn answers_ref_isolation_refuses_processmanager_sites_today() {
+        // #583 hardening: NO grammar consumes an answer today — the PM `ask:` step is the PM
+        // half of #582, and when it lands it carves its allowance STRUCTURALLY against the
+        // parsed step, never a location-substring match. Until then a processmanager.yaml ref
+        // into `answers/` is refused like every other site.
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\n",
+            ANS_ORDER
+        );
+        let pm = "SettlementProcess:\n  type: process-manager\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      steps:\n        - ask:\n            operation: { $ref: 'actors.yaml#/Order/answers/paymentReference' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+            ("processmanager.yaml", pm),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-ref-isolation"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_require_a_mailbox_so_the_ask_surface_has_a_client_to_ride() {
+        // #583 hardening: the typed `ask` lives on the sealed per-actor CLIENT, and the client
+        // crate exists only for a `mailbox:` actor — answers without a mailbox would silently
+        // generate NO surface at all (worse than refusing).
+        let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("mailbox"), "{}", issues[0].message);
+    }
+
+    /// The emitter-side belt to the same braces: if an answers-declaring actor ever slips past
+    /// the validator without a mailbox (e.g. a future loader path), generation REFUSES loudly
+    /// instead of silently dropping the ask surface.
+    #[test]
+    #[should_panic(expected = "no client crate was generated for this actor")]
+    fn answers_without_a_mailbox_refuse_to_generate_a_silently_absent_surface() {
+        let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n";
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        let _ = emit_client_crates(&m);
+    }
+
+    #[test]
+    fn nested_lineage_follows_relative_entity_refs_in_their_own_file() {
+        // #583 hardening (item 4): the nested-hop walk must carry the FILE of the node it
+        // resolved into as the ctx for the next hop — pinning ctx to "events.yaml" makes a
+        // relative entity-in-entity ref (a) dangle loudly when no event shares the entity's
+        // name, and (b) resolve SILENTLY through the wrong type when one does.
+        let entities = "CheckoutSnapshot:\n  type: object\n  properties:\n    slot: { $ref: '#/TimeSlot' }\nTimeSlot:\n  type: object\n  properties:\n    slotId: { $ref: 'scalars.yaml#/OrderId' }\n";
+        // (a) LOUD-WRONG: no colliding event — under pinned ctx the relative '#/TimeSlot' hop
+        // resolves against events.yaml and the walk dangles (None).
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", entities),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/slot/slotId").as_deref(),
+            Some("scalars.yaml#/OrderId"),
+            "a two-level entity-in-entity lineage with a relative ref must resolve"
+        );
+        assert!(is_nested_event_property_ref(
+            &m,
+            "events.yaml#/PaymentIntentCreated/properties/checkout/slot/slotId",
+            "actors.yaml"
+        ));
+        // (b) SILENT-WRONG: an EVENT also named TimeSlot with a DIFFERENTLY-typed slotId — the
+        // pinned ctx captures the walk through the wrong file and reports the wrong scalar.
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", entities),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\nTimeSlot:\n  type: object\n  properties:\n    slotId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/slot/slotId").as_deref(),
+            Some("scalars.yaml#/OrderId"),
+            "a same-named EVENT must not capture an entity-relative hop"
+        );
+    }
+
+    /// The belt's sibling case: a `type: process-manager` WITH a mailbox gets a client crate, so
+    /// the leftover assert alone never fires for it — yet only an AGGREGATE answers (the reply
+    /// projects its own fold; a PM has a state table). Same reachability class as the
+    /// mailbox-less case (main.rs exits on validation errors first): the emitter refuses rather
+    /// than generating a typed ask surface on a PM.
+    #[test]
+    #[should_panic(expected = "only an aggregate answers")]
+    fn answers_on_a_mailbox_pm_refuse_to_generate_an_ask_surface() {
+        let actors = "SettlementProcess:\n  type: process-manager\n  identity: { $ref: '#/SettlementProcess/state/orderId' }\n  mailbox:\n    partitions: 1\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/SettlementProcess/state/paymentIntentId' }\n";
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        let _ = emit_client_crates(&m);
     }
 
     #[test]
@@ -5134,7 +5242,7 @@ Catalog:
         // `Order` + `paymentReference` and `OrderPayment` + `reference` both derive
         // `OrderPaymentReference{Request,Reply}` — a code collision the YAML keys hide.
         let actors = format!(
-            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\nOrderPayment:\n  type: aggregate\n  identity: {{ $ref: '#/OrderPayment/state/orderId' }}\n  receives:\n    - message: {{ $ref: 'events.yaml#/OrderPlaced' }}\n      emits: []\n  answers:\n    reference:\n      description: \"x\"\n      reply:\n        orderId: {{ $ref: '#/OrderPayment/state/orderId' }}\n",
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\nOrderPayment:\n  type: aggregate\n  identity: {{ $ref: '#/OrderPayment/state/orderId' }}\n  mailbox:\n    partitions: 1\n  receives:\n    - message: {{ $ref: 'events.yaml#/OrderPlaced' }}\n      emits: []\n  answers:\n    reference:\n      description: \"x\"\n      reply:\n        orderId: {{ $ref: '#/OrderPayment/state/orderId' }}\n",
             ANS_ORDER
         );
         let issues = ans_issues_files(&[

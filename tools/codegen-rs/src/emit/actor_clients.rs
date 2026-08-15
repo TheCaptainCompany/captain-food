@@ -90,6 +90,19 @@ fn client_actors(model: &Model) -> Vec<ClientActor> {
         let (answers, rest): (Vec<AnswerOp>, Vec<AnswerOp>) =
             all_answers.drain(..).partition(|a| a.actor == name);
         all_answers = rest;
+        // The belt's sibling case (#584 review): a `type: process-manager` WITH a mailbox gets a
+        // client crate, so the leftover assert below never fires for it — but only an AGGREGATE
+        // answers (the reply projects its own fold; a PM has a state table, not a fold;
+        // ans-shape carries this on the validator side). Refuse rather than generate a typed
+        // ask surface on a PM.
+        assert!(
+            answers.is_empty() || def.get("type").and_then(|t| t.as_str()) == Some("aggregate"),
+            "actors.yaml: {name} declares `answers:` but is `type: {ty}` — only an aggregate \
+             answers (the reply projects the actor's own fold; a process manager has a state \
+             table, not a fold), so no typed ask surface can be generated for it",
+            name = name,
+            ty = def.get("type").and_then(|t| t.as_str()).unwrap_or("?"),
+        );
         out.push(ClientActor {
             name: name.to_string(),
             width: width as u16,
@@ -99,6 +112,24 @@ fn client_actors(model: &Model) -> Vec<ClientActor> {
             answers,
         });
     }
+    // #583 hardening (item 3): an `answers:` op left unmatched here belongs to an actor that got
+    // NO client crate (no `mailbox:` — or a non-mailbox type slipping past the validator). The
+    // typed `ask` rides the sealed per-actor client, so a silent drop would make the declared
+    // surface vanish without a diagnostic — refuse loudly instead (ans-shape carries the same
+    // requirement on the validator side; this is the emitter's belt to those braces).
+    assert!(
+        all_answers.is_empty(),
+        "actors.yaml: {} — declared `answers:` but no client crate was generated for this actor \
+         (a client needs `type: aggregate|process-manager` AND `mailbox.partitions`); the typed \
+         `ask` rides the sealed per-actor client, so without one the declared surface would \
+         silently not exist (ans-shape carries the aggregate+mailbox requirement on the \
+         validator side)",
+        all_answers
+            .iter()
+            .map(|a| format!("{}.{}", a.actor, a.op))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
 }
