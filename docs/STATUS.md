@@ -5,34 +5,56 @@
 > 🧭 **2026-08-15 — A PM `read:` STEP NOW DECLARES ITS SOURCE: THE DISTINCTION THE MECHANICAL
 > DERIVATION WAS BLOCKED ON** ([#564 "Derive reader sets mechanically: a declared, walkable `reads:`
 > grammar that distinguishes source from shape"](https://github.com/TheCaptainCompany/captain-food/issues/564)
-> phases 1-2, PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)). The entry below
-> (2026-08-14) withdrew reader-set completeness and named its exact blocker: *"deriving is right only
-> once the declaration distinguishes source from shape"*. That declaration now exists. Every PM `read:`
-> step carries a **REQUIRED** `source:` from a closed set — `PROJECTION` (the leg SELECTs from the named
-> projection) or `EVENT_STREAM` (the leg folds the entity from `captain_write` and never touches that
-> projection) — enforced by `pm-read-source`, with `pm-read-key` closing the step's key set so the next
-> key added cannot be invisible the way a plain-string `tombstone:` was in
+> phases 1-2 + hardening, PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)). The
+> entry below (2026-08-14) withdrew reader-set completeness and named its exact blocker: *"deriving is
+> right only once the declaration distinguishes source from shape"*. That declaration now exists. Every
+> PM `read:` step carries a **REQUIRED** `source:` from a closed set — `PROJECTION` (the leg SELECTs
+> from the named projection) or `EVENT_STREAM` (the leg folds the entity from `captain_write` and never
+> touches that projection) — enforced by `pm-read-source`, with `pm-read-key` closing the step's key set
+> so the next key added cannot be invisible the way a plain-string `tombstone:` was in
 > [#413](https://github.com/TheCaptainCompany/captain-food/issues/413). **Required, never
 > optional-with-default**: a default would leave the distinction alive only where someone remembered
 > it, the transience-by-omission defect [ADR-20260812-214500](adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)
-> §2 records. **The measured split is 3 `EVENT_STREAM` / 11 `PROJECTION`**, derived independently from
-> the call sites and matching the entry below's three (`Restaurant` in delivery + ordering, `Cart` on
-> PlaceOrder) — with delivery's restaurant fold now recorded as the proof that **source is per-STEP,
-> not per-leg**: that leg IS generated, and its hook chose the stream anyway.
-> **ONE UNDER-DECLARATION FIXED, TWO REPORTED.** Fixed: `PlaceOrderProcess`/`PlaceOrder` did not
-> declare the `Catalog` read it prices every checkout from (`commands.rs:2382` `catalogs:
-> &dyn CatalogReadRepository` → `pricing.rs` `price_cart`) — a derivation over the old declaration
+> §2 records. A third rule, `pm-read-projection-database`, refuses a `PROJECTION` step whose table
+> resolves to no single database (a `View_*` declares none; a `replicated:` table resolves to the read-
+> database SET) — nothing committed trips it, and it is written BEFORE a derivation consumes the key so
+> that the shape it exposes gets a decision (§42 RDR-1) rather than a third token invented in a hurry.
+> **No split count is stated here, deliberately**: `the_committed_process_managers_all_declare_a_source`
+> is the live count, and a number written in prose is the failure mode CLAUDE.md's warning-baseline
+> paragraph already records (it went stale three times).
+>
+> **THE FIRST SOURCE-VS-CALL-SITE COMPARISON HAS ALREADY HAPPENED — IT IS THIS ENTRY.** Phases 1-2
+> assigned each step's `source:` by reading `crates/**` and comparing against what the DSL declared;
+> that comparison is what found the under-declarations below. **PR2's derivation is therefore the
+> SECOND comparison, not the first, and must not claim otherwise** — and it must build its
+> "independent" list from `crates/**` alone (or from `git show main:specs/*/processmanager.yaml` taken
+> before this branch), because the `source:` values committed here ARE the first comparison's answers
+> written into the spec. What PR2 adds is that the second comparison is MECHANICAL and repeatable;
+> this one was a careful hand-read, which is the class of work that already missed four times.
+>
+> **TWO UNDER-DECLARATIONS FIXED, TWO CARRIED TO PR2.** Fixed: `PlaceOrderProcess`/`PlaceOrder` did not
+> declare the `Catalog` read it prices every checkout from — a derivation over the old declaration
 > would have concluded checkout needs no catalog access, which is register row **STO-7**'s exact
-> question answered wrongly in the direction that breaks every order. Reported, NOT fixed (both need a
-> decision the dispatch did not carry): **(1)** the same leg also folds `CustomerCreditState` from the
-> event store (`commands.rs:2268`, the goodwill-credit spend) and declares no step for it —
-> `CustomerCreditBalance` exists as a projection so it is declarable, as `source: EVENT_STREAM`;
-> **(2)** `ReclamationProcess`'s refund arm reads `OrderTracking` (`reclamation.rs:141`) with no
-> `read:` step at all — the entry below already names this PM as the one a DSL walker misses, and
-> adding a step there is NOT free the way the checkout one was, because that leg IS generated and a
-> new step would emit a read hook the hand-written wrapper does not implement. **Phases 3-4 (a
-> derivation that consumes `source:`, and its use) are NOT in this change**: nothing reads the key yet,
-> so `make generate` moved generated doc comments only.
+> question answered wrongly in the direction that breaks every order — nor the `CustomerCreditState`
+> fold that spends the customer's goodwill credit against the total (`source: EVENT_STREAM`, and that
+> token is load-bearing: the projected `CustomerCreditBalance` row is a running SUM with no per-order
+> consumption key, so a redelivered `PlaceOrder` read from it would apply the credit twice — buyer
+> undercharged, on the money path, silently). Both are now guarded by
+> `the_checkout_leg_declares_every_read_it_prices_an_order_from`, which pins the money leg's whole read
+> set: before it existed, the `Catalog` fix could be reverted by ONE line deletion with `make validate`
+> still at 0 errors and every test green. Carried to PR2 because both need CODE, not a declaration:
+> **(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` (`reclamation.rs:141`,
+> wired `runner.rs:488-490`) with no `read:` step — that leg IS generated, so a step emits a hook the
+> hand-written wrapper does not implement; **(2)** `PlaceOrderProcess`/`PaymentAuthorized` loads
+> `Payment-<intentId>` for the frozen `CheckoutSnapshot` (`place_order.rs:47`) — the read that decides
+> what the restaurant is owed, and denied it errors AFTER Stripe authorized: money held, no
+> `OrderPlaced`, nobody told. **The derivation that consumes `source:` is NOT in this change**: nothing
+> reads the key yet, so `make generate` moved generated doc comments only.
+>
+> Adjacent, recorded not fixed:
+> [ADR-20260815-015422](adr/ADR-20260815-015422-a-runtime-port-is-non-optional-and-fail-closed-is-a-declared-posture.md)
+> — `PmRuntime`'s `partner`/`payments` are `Option<Arc<dyn ..>>` with silent constructor defaults, so a
+> forgotten `payments` on `pm-payment-settlement` deploys green and declines every capture.
 
 > 🗄️ **2026-08-14 — EVERY TABLE HAS A DECLARED HOME: STO-2 CLOSED, PLACEMENT IS NOW A VALIDATOR
 > REQUIREMENT** ([#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make
