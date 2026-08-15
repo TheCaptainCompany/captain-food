@@ -2,6 +2,10 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📄 **2026-08-15 — PROPOSAL WRITTEN AT FOUNDER REQUEST, AWAITING HIS READ**:
+> [PROP-20260815-142349 "Actor `answers:` block + the PM `ask:` step — typed request/reply for actor queries; the transport stays parked"](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
+> ([#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582)).
+
 > 🧾 **2026-08-15 — THE DECISION REGISTER RENDERS AS WRITTEN AGAIN, AND §13b IS AN ERROR**
 > ([#577 "Repair the seven register-table rows §13b found, then promote the gate to ERROR"](https://github.com/TheCaptainCompany/captain-food/issues/577)):
 > the seven broken table rows (SPEC-2, LOSS-1, IDOR-1, ENF-1, CAP-READY, CAP-READY-LEGAL in
