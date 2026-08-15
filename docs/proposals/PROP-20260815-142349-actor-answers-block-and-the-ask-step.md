@@ -1,6 +1,8 @@
 # PROP-20260815-142349 — Actor `answers:` + the PM `ask:`/`branch:` decision grammar — typed request/reply, reply-driven decisions, the settlement capture as a command; the transport stays parked
 
-- **Status**: Proposed
+- **Status**: Approved (2026-08-15) — founder, verbatim: *"I'm ok for the dsl for process
+  manager"*. The approval follows the three founder-directed design rounds recorded in §0: the PM
+  decision grammar and the `answers:` block it depends on were both shaped by his directives.
 - **Date**: 2026-08-15
 - **Tracking issue**: [#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582)
 - **Realized by**: — (filled at completion)

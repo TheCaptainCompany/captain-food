@@ -2,12 +2,14 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
-> 📄 **2026-08-15 — PROPOSAL WRITTEN AT FOUNDER REQUEST, AWAITING HIS READ**:
+> ✅ **2026-08-15 — PM DECISION-GRAMMAR PROPOSAL APPROVED** (founder, verbatim: *"I'm ok for the
+> dsl for process manager"*):
 > [PROP-20260815-142349 "Actor `answers:` block + the PM `ask:` step — typed request/reply for actor queries; the transport stays parked"](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
-> ([#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582)).
-> Amended same day to its rounds-2/3 state at founder direction: full `ask:`/`branch:` decision
-> grammar, the settlement capture reshaped as a `CapturePayment` command, the `SettlementOverdue`
-> watchdog; timeout DECIDED caller-side, the transport/`binding:` key removed entirely.
+> is Approved after three founder-directed design rounds; DECISIONS §42 PMW-1 closes as (a) +
+> the additive `ask:`/`branch:` grammar, PMW-3 (the transport) stays parked. Build tracked in
+> [#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582),
+> sequenced strictly behind
+> [PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566).
 
 > 🧾 **2026-08-15 — THE DECISION REGISTER RENDERS AS WRITTEN AGAIN, AND §13b IS AN ERROR**
 > ([#577 "Repair the seven register-table rows §13b found, then promote the gate to ERROR"](https://github.com/TheCaptainCompany/captain-food/issues/577)):
