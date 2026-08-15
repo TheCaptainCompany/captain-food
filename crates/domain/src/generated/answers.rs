@@ -16,6 +16,7 @@ use crate::generated::scalars::{OrderId, PaymentIntentId, PaymentStatus};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderPaymentReferenceRequest {
+    /// The answering instance — the `Order-{id}` stream key IS the argument (no declared param restates it).
     pub order_id: OrderId,
 }
 

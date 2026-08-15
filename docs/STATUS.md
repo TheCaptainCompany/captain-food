@@ -7,8 +7,9 @@
 > [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
 > lands for the two settlement actors — declared `state:` blocks on `Order`/`Payment`
 > (declaration-only: both carry a `lifecycle:`, so states.rs generation stays deferred to the
-> states slice 2; YAML↔fold parity is compiler-carried by reply-construction tests in the hand
-> fold modules), `Order.paymentReference` + `Payment.settlementView` answers, the `ans-*`
+> states slice 2; only the reply-SERVED fields — Order 1/6, Payment 3/5 — are compiler-carried,
+> by the reply-construction tests in the hand fold modules; the rest is unverified transcription
+> until slice 2), `Order.paymentReference` + `Payment.settlementView` answers, the `ans-*`
 > validator family (red-first), the implicit lifecycle-status state ref and NESTED event-payload
 > lineage (`checkout/orderId` resolves through the entity ref), generated
 > `<Actor><Op>Request/Reply` + sealed `ask` + `AskOutcome` local adapter over the EventStore

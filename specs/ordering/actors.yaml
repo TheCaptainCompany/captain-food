@@ -69,8 +69,9 @@ Order:
   # deliberately ABSENT: the `lifecycle:` block below OWNS it (st-status-duplicated), and
   # `#/Order/state/status` resolves implicitly to it, like `orderId` resolves to the identity.
   # DECLARATION-ONLY this slice: the actor has a lifecycle, so states.rs generation is deferred to
-  # the states slice 2 (#242) — YAML↔fold parity is enforced by the reply-construction tests in
-  # order.rs, compiler-checked against these fields' types.
+  # the states slice 2 (#242). Only the reply-SERVED field (paymentIntentId) is compiler-carried,
+  # by the reply-construction tests in order.rs; the remaining entries are unverified
+  # transcription of the hand fold until slice 2 machine-checks the whole block.
   state:
     restaurantId:
       type: { $ref: 'scalars.yaml#/RestaurantId' }
@@ -107,8 +108,8 @@ Order:
   answers:
     paymentReference:
       description: "The payment intent this order was placed with — absent for a $0 replacement / partner-paid external order, so the settlement leg can stop with NO_CAPTAIN_AUTHORIZATION instead of phantom-capturing."
-      params:
-        orderId: { $ref: 'scalars.yaml#/OrderId' }
+      # No params: the `Order-{id}` stream key IS the argument (PROP §3) — the generated Request
+      # derives the identity field; a declared param restating the identity is the condemned shape.
       reply:
         paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }   # nullable in state → callers must branch on absence
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."

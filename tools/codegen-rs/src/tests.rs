@@ -5027,9 +5027,12 @@ Catalog:
 
     #[test]
     fn well_formed_answers_block_is_clean() {
-        // Declared-state reply + identity-typed param + description: the PROP §2 shape.
+        // Declared-state reply + description + a NON-identity scalar param (the params grammar's
+        // legitimate use — a real argument BEYOND the stream key; the identity itself is NEVER a
+        // param: the `Actor-{id}` stream key IS the argument, PROP §3, and the emitter derives
+        // that Request field when params are absent).
         let issues = ans_issues(
-            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      params:\n        orderId: { $ref: 'scalars.yaml#/OrderId' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      params:\n        statusFilter: { $ref: 'scalars.yaml#/PaymentStatus' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
         );
         assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
     }
@@ -5129,7 +5132,7 @@ Catalog:
     #[test]
     fn answers_derived_type_names_are_catalog_unique() {
         // `Order` + `paymentReference` and `OrderPayment` + `reference` both derive
-        // `OrderPaymentReference{Request,Reply}` — a code collision the YAML keys hide (V6).
+        // `OrderPaymentReference{Request,Reply}` — a code collision the YAML keys hide.
         let actors = format!(
             "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\nOrderPayment:\n  type: aggregate\n  identity: {{ $ref: '#/OrderPayment/state/orderId' }}\n  receives:\n    - message: {{ $ref: 'events.yaml#/OrderPlaced' }}\n      emits: []\n  answers:\n    reference:\n      description: \"x\"\n      reply:\n        orderId: {{ $ref: '#/OrderPayment/state/orderId' }}\n",
             ANS_ORDER

@@ -770,6 +770,41 @@ fn answer_type(
     name
 }
 
+/// The scalar `$ref` typing an actor's IDENTITY field. The identity is the stream key — it exists
+/// before any fold, so it usually has NO `state:` entry of its own (see
+/// `is_implicit_identity_state_ref`): its scalar is recovered from the actor's own inbox, where
+/// every received message that carries a payload property named after the identity types it —
+/// the same place command addressing reads it from. All carriers must AGREE (one name = one
+/// dedicated scalar); a conflict or an inbox that never carries the identity returns `None` and
+/// generation refuses loudly rather than guessing.
+fn identity_scalar_ref(model: &Model, def: &Value, identity: &str) -> Option<String> {
+    let mut found: Option<String> = None;
+    let receives = def.get("receives").and_then(|r| r.as_sequence())?;
+    for entry in receives {
+        let Some(mref) = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str())
+        else {
+            continue;
+        };
+        let Some((file, key)) = mref.split_once("#/") else { continue };
+        let ty = model
+            .defs
+            .get(file)
+            .and_then(|d| d.get(key))
+            .and_then(|n| n.get("properties"))
+            .and_then(|p| p.get(identity))
+            .and_then(|f| f.get("$ref"))
+            .and_then(|r| r.as_str());
+        if let Some(t) = ty {
+            match &found {
+                None => found = Some(t.to_string()),
+                Some(prev) if prev != t => return None, // conflicting carriers — refuse to guess
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
 /// Every declared answer operation with its resolved fields, in catalog order. Panics (loudly, at
 /// generation) on shapes the `ans-*` validator already refuses — the two must agree.
 fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerField>, String)> {
@@ -803,8 +838,15 @@ fn parse_answers(model: &Model) -> Vec<(AnswerOp, Vec<AnswerField>, Vec<AnswerFi
                     Some(ReplyField::LifecycleStatus { status_ref }) => {
                         (ref_name(&status_ref).expect("lifecycle status ref"), false)
                     }
-                    Some(ReplyField::Identity) | None => panic!(
-                        "actors.yaml {}/answers/{}: field '{}' must be a declared `state:` entry (or the lifecycle status) so its scalar is knowable — declare it",
+                    Some(ReplyField::Identity) => {
+                        let r = identity_scalar_ref(model, def, field).unwrap_or_else(|| panic!(
+                            "actors.yaml {}/answers/{}: the identity field '{}' has no single agreed scalar on the actor's received payloads — declare it in `state:` or fix the carriers",
+                            actor, op, field
+                        ));
+                        (ref_name(&r).expect("identity scalar ref"), false)
+                    }
+                    None => panic!(
+                        "actors.yaml {}/answers/{}: field '{}' must be a declared `state:` entry (or the lifecycle status / identity) so its scalar is knowable — declare it",
                         actor, op, field
                     ),
                 }

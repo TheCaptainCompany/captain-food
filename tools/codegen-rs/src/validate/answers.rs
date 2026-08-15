@@ -75,7 +75,7 @@ pub(crate) fn resolve_reply_field(def: &Value, actor: &str, field: &str) -> Opti
 ///     implicit lifecycle status (V2 — refs resolve, nothing redeclared).
 ///   - `ans-params-ref` (error): a params value ref outside scalars.yaml/entities.yaml.
 ///   - `ans-op-unique` (error): the derived `<Actor><Op>` PascalCase pair must be unique across
-///     the whole catalog — it names the generated `Request`/`Reply` types (V6).
+///     the whole catalog — it names the generated `Request`/`Reply` types.
 ///   - `ans-ref-isolation` (error): NO `$ref` anywhere may target `actors.yaml#/…/answers/…`
 ///     except a PM `ask:` step (the one legal consumer, PM half of #582) — a reply is
 ///     constitutionally unpersistable and never an event/projection/api/screen source (kind
@@ -142,7 +142,7 @@ pub(crate) fn validate_actor_answers(model: &Model, issues: &mut Vec<Issue>) {
                     format!("answer operation '{}' needs a non-empty `description` (catalog convention — prose stays prose).", op),
                 ));
             }
-            // Derived-name uniqueness (V6).
+            // Derived-name uniqueness.
             let pair = format!("{}{}", name, pascal(op));
             if let Some(first) = derived.get(&pair) {
                 issues.push(err(
