@@ -167,10 +167,16 @@ pub(crate) fn validate(model: &Model) -> Report {
                     issues.push(err("ref-format", loc, format!("Malformed $ref '{}'.", r)));
                 } else if resolve_ref(model, &r, f).is_none()
                     && !is_implicit_identity_state_ref(model, &r, f)
+                    && !is_implicit_lifecycle_status_ref(model, &r, f)
+                    && !is_nested_event_property_ref(model, &r, f)
                 {
-                    // The identity state field is implicitly declared by the actor's own typed
-                    // `identity` ref (the stream key needs no fold entry) — see
-                    // `is_implicit_identity_state_ref`; §2d proves the declaration's shape.
+                    // Three implicit-declaration families are exempt from §1's naive walk:
+                    // the identity state field (declared by the actor's own typed `identity`
+                    // ref — the stream key needs no fold entry; §2d proves the shape), the
+                    // lifecycle-status state field (declared by the `lifecycle:` block, which
+                    // OWNS `status` — #582 answers replies serve it without redeclaring), and
+                    // a NESTED event-payload lineage whose leaf provably resolves through the
+                    // intermediate entity $refs (`…/properties/checkout/orderId`, #582).
                     issues.push(err("ref-dangling", loc, format!("$ref '{}' does not resolve.", r)));
                 }
             }
@@ -247,6 +253,8 @@ pub(crate) fn validate(model: &Model) -> Report {
     validate_lifecycles(model, &mut issues);
     validate_mailbox_addressing(model, &mut issues);
     validate_actor_state(model, &mut issues);
+    // --- 2g. Actor `answers:` blocks (PROP-20260815-142349, #582 actors half) -------------------
+    validate_actor_answers(model, &mut issues);
     // --- 2f. Reminders + declarative deletion (ADR-20260731-214500) ------------------------------
     validate_reminders_and_deletion(model, &mut issues);
     {

@@ -44,6 +44,7 @@ impl sealed::Sealed for domain::generated::commands::RequestRefund {}
 impl sealed::Sealed for domain::generated::commands::StartPreparation {}
 impl sealed::Sealed for domain::generated::commands::TipOrder {}
 impl sealed::Sealed for domain::generated::events::OrderPlaced {}
+impl sealed::Sealed for domain::generated::answers::OrderPaymentReferenceRequest {}
 
 /// GENERATED from actors.yaml `Order.receives`: marker for every COMMAND the `Order` actor
 /// receives. SEALED (private supertrait) so no impl can exist outside this generated crate --
@@ -121,6 +122,38 @@ impl OrderFact for domain::generated::events::OrderPlaced {
     const EVENT_TYPE: &'static str = "OrderPlaced";
     fn into_domain_event(self) -> domain::generated::events::DomainEvent {
         domain::generated::events::DomainEvent::OrderPlaced(self)
+    }
+}
+
+/// GENERATED from actors.yaml `Order.answers` (PROP-20260815-142349 s7, #582): marker for
+/// every ask this actor ANSWERS -- the declaration is the permission, so this trait (and the
+/// `ask` method) exist iff the spec declares `answers:`, and are ABSENT otherwise. SEALED like
+/// the send/record traits: the answer set is the answer set, period. `Reply` carries
+/// UNCONDITIONAL serde -- the wire shape may not rot while the ask is local -- and the reader
+/// is TOLERANT (additive-only producer / tolerant reader; a breaking reshape takes a NEW
+/// answer name).
+pub trait OrderAnswer: sealed::Sealed {
+    /// The declared operation address -- the ref path IS the whole address (the actor is
+    /// encoded in it, never restated).
+    const QUERY_TYPE: &'static str;
+    type Reply: serde::Serialize + serde::de::DeserializeOwned + Send;
+    /// The answering instance's stream -- the identity IS the argument (PROP s3).
+    fn stream_name(&self) -> String;
+    /// Project the declared reply properties off the actor's own fold state. THE compiled
+    /// YAML-state <-> hand-fold parity proof: rename a fold field and this stops building.
+    fn project(state: &domain::order::OrderState) -> Self::Reply;
+}
+
+impl OrderAnswer for domain::generated::answers::OrderPaymentReferenceRequest {
+    const QUERY_TYPE: &'static str = "actors.yaml#/Order/answers/paymentReference";
+    type Reply = domain::generated::answers::OrderPaymentReferenceReply;
+    fn stream_name(&self) -> String {
+        format!("Order-{}", self.order_id.0)
+    }
+    fn project(state: &domain::order::OrderState) -> Self::Reply {
+        domain::generated::answers::OrderPaymentReferenceReply {
+            payment_intent_id: state.payment_intent_id.clone(),
+        }
     }
 }
 
@@ -206,5 +239,22 @@ impl OrderClient {
     /// the capability (decided over lane-scoping, #308).
     pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.door.cancel_scheduling(message_id).await
+    }
+
+    /// Ask this actor for a DECLARED answer (PROP-20260815-142349 s7, #582) -- the LOCAL
+    /// adapter: load the instance's stream through the EventStore PORT, fold with the actor's
+    /// own hand fold, project the declared reply, envelope with the fold's version. `Absent`
+    /// (no birth event on the stream) and `Deadline` (the CALLER's deadline elapsed -- the
+    /// deadline lives on the call site, never on this actor, D5) are Ok-channel arms the
+    /// caller must match exhaustively; `Err` stays reserved for infrastructure failure. The
+    /// reply's authority EXPIRES AT SEND: a fold gives freshness, not atomicity (CHK-1).
+    pub async fn ask<Q: OrderAnswer>(
+        &self,
+        q: Q,
+        store: &dyn application::ports::EventStore,
+        deadline: std::time::Duration,
+    ) -> Result<actor_client::ask::AskOutcome<Q::Reply>, DomainError> {
+        actor_client::ask::ask_local(store, &q.stream_name(), deadline, domain::order::fold, Q::project)
+            .await
     }
 }

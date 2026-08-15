@@ -32,6 +32,7 @@
 //! the adapters depend on this crate. `actor_client` holds NO sqlx/reqwest — the D3 capability
 //! allowlist (tools/codegen-rs `capability_dependencies_are_allowlisted`) keeps it that way.
 
+pub mod ask;
 pub mod client;
 pub mod door;
 mod enqueue;

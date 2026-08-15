@@ -31,6 +31,11 @@ pub(crate) enum Kind {
     Reminder,
     /// A declared aggregate state field — `actors.yaml#/<Actor>/state/<field>` (PROP-20260728-135632 §2.1).
     StateField,
+    /// An actor answer operation — `actors.yaml#/<Actor>/answers/<op>` (PROP-20260815-142349 §2).
+    /// Referenced ONLY by a PM `ask:` step; every other site is refused (`ans-ref-isolation`).
+    Answer,
+    /// One declared reply property — `actors.yaml#/<Actor>/answers/<op>/reply/<prop>`.
+    AnswerProperty,
     /// A `configuration.yaml#/keys/<KEY>` runtime-configuration key (PROP-20260729-004500).
     ConfigKey,
     /// A `processmanager.yaml` state-table orchestrator.
@@ -93,6 +98,8 @@ impl Kind {
             Kind::Aggregate => "aggregate",
             Kind::Reminder => "actor reminder",
             Kind::StateField => "actor state field",
+            Kind::Answer => "actor answer operation",
+            Kind::AnswerProperty => "actor answer reply property",
             Kind::ConfigKey => "configuration key",
             Kind::ProcessManager => "process manager",
             Kind::Service => "service",
@@ -196,6 +203,10 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::Aggregate
         | Kind::Reminder
         | Kind::StateField
+        // An answer is a VALUE served on Ask — constitutionally unpersistable (PROP-20260815-142349
+        // §4 rule 3): no journal, no `domain_events`, no View_* may name one, so it is not a store.
+        | Kind::Answer
+        | Kind::AnswerProperty
         | Kind::ConfigKey
         | Kind::ProcessManager
         | Kind::Service
@@ -269,6 +280,10 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
             (true, _, _) => (path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
             (false, Some("reminders"), 3) => Some(Kind::Reminder),
             (false, Some("state"), 3) => Some(Kind::StateField),
+            // `<Actor>/answers/<op>` names an ANSWER operation, `…/reply/<prop>` one declared
+            // reply property (#582) — resolvable, versionable, checkable (PROP §4 rule 1).
+            (false, Some("answers"), 3) => Some(Kind::Answer),
+            (false, Some("answers"), 5) if seg(3) == Some("reply") => Some(Kind::AnswerProperty),
             _ => None,
         },
         // Runtime configuration (PROP-20260729-004500): `keys/<KEY>` is what a `deletion.after` /
@@ -417,6 +432,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("actors.yaml", "*.state.*.removedBy[*]",           &[Kind::MessageProperty, Kind::Event]),
     ("actors.yaml", "*.state.*.of",                     &[Kind::Scalar, Kind::EnumScalar]),
     ("actors.yaml", "*.state.*.of.*",                   &[Kind::Scalar, Kind::EnumScalar]),
+    // Actor `answers:` blocks (PROP-20260815-142349 §2, #582): a reply property COMPOSES the
+    // actor's own declared state (never declares — `ans-reply-ref`/`ans-inline-type` own the
+    // same-actor and no-inline-scalar proofs); an optional param is a kernel scalar or entity.
+    ("actors.yaml", "*.answers.*.reply.*",              &[Kind::StateField]),
+    ("actors.yaml", "*.answers.*.params.*",             &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
     ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
 

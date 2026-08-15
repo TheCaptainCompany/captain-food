@@ -1087,6 +1087,7 @@ name = "client-order"
 version = "0.1.0"
 dependencies = [
  "actor_client",
+ "application",
  "chrono",
  "domain",
  "serde",
@@ -1099,6 +1100,7 @@ name = "client-payment"
 version = "0.1.0"
 dependencies = [
  "actor_client",
+ "application",
  "domain",
  "serde",
  "serde_json",

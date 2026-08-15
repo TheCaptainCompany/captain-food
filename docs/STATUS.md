@@ -2,6 +2,21 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
+> the `answers:` DSL from
+> [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
+> lands for the two settlement actors — declared `state:` blocks on `Order`/`Payment`
+> (declaration-only: both carry a `lifecycle:`, so states.rs generation stays deferred to the
+> states slice 2; only the reply-SERVED fields — Order 1/6, Payment 3/5 — are compiler-carried,
+> by the reply-construction tests in the hand fold modules; the rest is unverified transcription
+> until slice 2), `Order.paymentReference` + `Payment.settlementView` answers, the `ans-*`
+> validator family (red-first), the implicit lifecycle-status state ref and NESTED event-payload
+> lineage (`checkout/orderId` resolves through the entity ref), generated
+> `<Actor><Op>Request/Reply` + sealed `ask` + `AskOutcome` local adapter over the EventStore
+> port. The PM half (`ask:`/`branch:`/`from_ask` steps, `CapturePayment` leg, the reminder
+> watchdog) is fenced behind
+> [PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566).
+
 > ✅ **2026-08-15 — PM DECISION-GRAMMAR PROPOSAL APPROVED** (founder, verbatim: *"I'm ok for the
 > dsl for process manager"*):
 > [PROP-20260815-142349 "Actor `answers:` block + the PM `ask:` step — typed request/reply for actor queries; the transport stays parked"](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)

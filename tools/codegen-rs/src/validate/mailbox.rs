@@ -241,9 +241,56 @@ pub(crate) fn lineage_parts(r: &str) -> Option<(&str, Option<&str>)> {
 }
 
 /// The `$ref` string of an event property's type, or None (inline primitive like `type: boolean`).
+/// `prop` may be a NESTED path (`checkout/orderId`, #582): each intermediate segment is resolved
+/// THROUGH its entity `$ref` (`PaymentIntentCreated.checkout` → `entities.yaml#/CheckoutSnapshot`
+/// → `properties.orderId`), so a lineage may truthfully record a value carried inside a payload
+/// value object instead of lying with a sibling event's top-level copy.
 pub(crate) fn event_property_type_ref(model: &Model, event: &str, prop: &str) -> Option<String> {
-    let node = model.defs.get("events.yaml")?.get(event)?.get("properties")?.get(prop)?;
+    let mut node = model.defs.get("events.yaml")?.get(event)?;
+    for seg in prop.split('/') {
+        // Follow an entity/payload-object $ref before descending (nested segments only — the
+        // first hop is the event's own `properties`).
+        if let Some(r) = node.get("$ref").and_then(|x| x.as_str()) {
+            node = resolve_ref(model, r, "events.yaml")?;
+        }
+        node = node.get("properties")?.get(seg)?;
+    }
     node.get("$ref").and_then(|r| r.as_str()).map(str::to_string)
+}
+
+/// True when `r` is a NESTED event-payload lineage ref —
+/// `events.yaml#/<Event>/properties/<a>/<b>[...]` — whose path resolves by following the
+/// intermediate entity `$ref`s (see [`event_property_type_ref`]). The naive path walk in
+/// `resolve_ref` cannot cross an entity boundary (`properties.checkout` is a `$ref` node, not a
+/// map with an `orderId` child), so §1 exempts these refs from `ref-dangling` exactly when the
+/// ref-following walk proves the leaf exists.
+pub(crate) fn is_nested_event_property_ref(model: &Model, r: &str, ctx: &str) -> bool {
+    let Some(pr) = parse_ref(r) else { return false };
+    let file = if pr.file.is_empty() { ctx } else { pr.file.as_str() };
+    if file != "events.yaml" || pr.path.len() < 4 || pr.path[1] != "properties" {
+        return false;
+    }
+    event_property_type_ref(model, &pr.path[0], &pr.path[2..].join("/")).is_some()
+}
+
+/// True when `r` points at an actor's IMPLICIT lifecycle-status state field:
+/// `#/<Actor>/state/status` where the actor declares a `lifecycle:` block. The `lifecycle:` block
+/// OWNS the status (`st-status-duplicated` forbids a `state:` entry of the name), so — like the
+/// identity stream key — the field is declared by the block itself, not by a fold entry. This is
+/// what lets an `answers:` reply serve the lifecycle status without redeclaring it (#582,
+/// PROP-20260815-142349 §2's `settlementView.status`).
+pub(crate) fn is_implicit_lifecycle_status_ref(model: &Model, r: &str, ctx: &str) -> bool {
+    let Some(pr) = parse_ref(r) else { return false };
+    let file = if pr.file.is_empty() { ctx } else { pr.file.as_str() };
+    if file != "actors.yaml" || pr.path.len() != 3 || pr.path[1] != "state" || pr.path[2] != "status" {
+        return false;
+    }
+    model
+        .defs
+        .get("actors.yaml")
+        .and_then(|m| m.get(pr.path[0].as_str()))
+        .and_then(|def| def.get("lifecycle"))
+        .is_some()
 }
 
 /// §2e — declared aggregate STATE + write-side `requires` (ADR-20260730-231500,

@@ -4781,9 +4781,18 @@ Catalog:
         // Independent per-actor receives scan: ref path encodes the kind (§1b).
         let mut has_commands: HashSet<String> = HashSet::new();
         let mut has_facts: HashSet<String> = HashSet::new();
+        // #582: the ANSWERS declaration set — the spec permission for the sealed `ask` surface.
+        let mut has_answers: HashSet<String> = HashSet::new();
         if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
             for (k, def) in actors {
                 let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+                if def
+                    .get("answers")
+                    .and_then(|a| a.as_mapping())
+                    .is_some_and(|m| !m.is_empty())
+                {
+                    has_answers.insert(name.to_string());
+                }
                 let Some(receives) = def.get("receives").and_then(|r| r.as_sequence()) else {
                     continue;
                 };
@@ -4802,6 +4811,11 @@ Catalog:
             }
         }
         assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
+        assert!(
+            !has_answers.is_empty(),
+            "no actor declares answers — if the Order/Payment settlement pair left the spec, \
+             this guard needs a new positive case, not silence"
+        );
 
         // Since phase 2 (#306) each actor's surface is its OWN crate, so the per-actor unit of
         // inspection is a generated `lib.rs` rather than a block of one shared file — which makes
@@ -4828,6 +4842,13 @@ Catalog:
                 ),
                 ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
                 ("pub async fn cancel_scheduling", declaring.contains(name), "declares reminders:"),
+                // #582 (PROP-20260815-142349 §7): the typed ask surface exists IFF `answers:`.
+                ("pub async fn ask", has_answers.contains(name), "declares answers:"),
+                (
+                    &format!("pub trait {name}Answer") as &str,
+                    has_answers.contains(name),
+                    "declares answers:",
+                ),
             ];
             for (needle, justified, why) in surface {
                 assert_eq!(
@@ -4837,8 +4858,66 @@ Catalog:
                      declaration is the permission (product-owner directive, 2026-08-02)"
                 );
             }
+            // #582: the `application` dependency (the ask's EventStore port) is itself
+            // spec-gated — an unused dependency is an unheld capability (the D6 machete law).
+            assert_eq!(
+                c.manifest.contains("application = { path"),
+                has_answers.contains(name),
+                "{name}: the `application` dep must exist IFF the actor declares `answers:`"
+            );
         }
         assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
+    }
+
+    /// #582 — the emitted answers surface (PROP-20260815-142349 §§2/6/7): unconditional serde,
+    /// tolerant reader, absent-stays-absent nullables, and the three-armed `AskOutcome` envelope
+    /// with no escape hatch. V4's round-trip behaviour lives beside the hand folds (built from
+    /// real `fold()` fixtures); this pins the STRUCTURAL half the emitter owns.
+    #[test]
+    fn emitted_answers_types_are_serde_tolerant_and_the_envelope_is_closed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let answers = emit_domain_answers(&model);
+        // Every declared op derives its Request/Reply pair…
+        for ty in [
+            "pub struct OrderPaymentReferenceRequest",
+            "pub struct OrderPaymentReferenceReply",
+            "pub struct PaymentSettlementViewRequest",
+            "pub struct PaymentSettlementViewReply",
+        ] {
+            assert!(answers.contains(ty), "missing generated type: {ty}");
+        }
+        // …with serde ALWAYS (one derive line per struct — the wire shape may not rot)…
+        assert_eq!(
+            answers.matches("Serialize, Deserialize)]").count(),
+            answers.matches("pub struct ").count(),
+            "every Request/Reply must derive Serialize + Deserialize unconditionally"
+        );
+        // …a TOLERANT reader (additive-only producer / tolerant reader — V7's enforceable half)…
+        assert!(
+            !answers.contains("deny_unknown_fields"),
+            "a reply reader must tolerate additive fields — deny_unknown_fields is the exact \
+             opposite of the declared evolution contract"
+        );
+        // …and a nullable state field rides as Option + default + skip (absent round-trips as
+        // ABSENT — no key, not null).
+        assert!(
+            answers.contains("#[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub payment_intent_id: Option<PaymentIntentId>,"),
+            "the nullable paymentIntentId must be Option + serde(default, skip_serializing_if)"
+        );
+        // The hand-written envelope is CLOSED (V5): exactly the three declared arms, no
+        // `non_exhaustive` escape — the compiler then forces every caller to face
+        // Absent/Deadline; a `_` wildcard in a caller is a review defect, not a compile one,
+        // which is why the arms are few and named.
+        let ask_rs = std::fs::read_to_string(root.join("crates/actor_client/src/ask.rs")).expect("committed ask.rs");
+        for arm in ["Answered {", "Absent,", "Deadline,"] {
+            assert!(ask_rs.contains(arm), "AskOutcome must declare the `{arm}` arm");
+        }
+        assert!(
+            !ask_rs.contains("non_exhaustive"),
+            "AskOutcome must stay exhaustively matchable — non_exhaustive would let a caller \
+             compile without deciding Absent/Deadline"
+        );
     }
 
     /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
@@ -4918,6 +4997,234 @@ Catalog:
         assert_eq!(cmd_warns.len(), 1, "{:?}", cmd_warns.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
         assert_eq!(cmd_warns[0].location, "actors.yaml/Customer");
         assert!(cmd_warns[0].message.contains("RequestPhoneVerification"), "{}", cmd_warns[0].message);
+    }
+
+    // ── §2g — actor `answers:` blocks (PROP-20260815-142349, #582 actors half) ──────────────────
+    // Each rule red-first: one fixture violating ONLY that rule, asserting the exact rule id.
+    // V7 (breaking reshape = new answer name) deliberately has NO fixture — it is review-carried
+    // doctrine per the PROP; a fixture would be a fake gate. V1 (pairing) is deferred to the PM
+    // half: the consuming `ask:` step does not exist yet, so declared answers may be unconsumed.
+
+    const ANS_SCALARS: &str = "OrderId: { type: string }\nPaymentIntentId: { type: string }\nPaymentStatus: { type: string, enum: [PENDING, AUTHORIZED, CAPTURED] }\n";
+    const ANS_EVENTS: &str = "OrderPlaced:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n";
+    /// A well-formed answering aggregate: declared nullable state field + identity + answers op.
+    const ANS_ORDER: &str = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n";
+
+    fn ans_issues_files(files: &[(&str, &str)]) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_actor_answers(&inline_model(files), &mut issues);
+        issues
+    }
+
+    fn ans_issues(answers: &str) -> Vec<Issue> {
+        let actors = format!("{}  answers:\n{}", ANS_ORDER, answers);
+        ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+        ])
+    }
+
+    #[test]
+    fn well_formed_answers_block_is_clean() {
+        // Declared-state reply + description + a NON-identity scalar param (the params grammar's
+        // legitimate use — a real argument BEYOND the stream key; the identity itself is NEVER a
+        // param: the `Actor-{id}` stream key IS the argument, PROP §3, and the emitter derives
+        // that Request field when params are absent).
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      params:\n        statusFilter: { $ref: 'scalars.yaml#/PaymentStatus' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_may_serve_the_implicit_lifecycle_status_and_identity() {
+        // `status` is owned by the lifecycle block (st-status-duplicated forbids redeclaring it)
+        // and the identity is the stream key — both are implicitly declared, so a reply may
+        // compose them without a `state:` entry (the settlementView precedent, PROP §2).
+        let actors = "Payment:\n  type: aggregate\n  identity: { $ref: '#/Payment/state/paymentIntentId' }\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial:\n      - event: { $ref: 'events.yaml#/OrderPlaced' }\n        to: PENDING\n    transitions: []\n    terminal: []\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    settlementView:\n      description: \"The settlement guard's facts.\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n        status: { $ref: '#/Payment/state/status' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_missing_description_is_refused() {
+        let issues = ans_issues(
+            "    paymentReference:\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_transport_or_deadline_key_is_unspellable() {
+        // D5/D6: no binding/transport/deadline key exists on the actor — absence means local and
+        // the deadline is the CALLER's. Introducing the key is the future PMW-3 gate flip.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      binding: local\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("binding"), "{}", issues[0].message);
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      deadline_ms: 250\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_missing_reply_is_refused() {
+        let issues = ans_issues("    paymentReference:\n      description: \"x\"\n");
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_on_a_process_manager_is_refused() {
+        // Answering takes a fold; a PM has a state table. Only aggregates declare the block.
+        let actors = "RefundProcess:\n  type: process-manager\n  answers:\n    refundView:\n      description: \"x\"\n      reply:\n        orderId: { $ref: '#/RefundProcess/state/orderId' }\n";
+        let issues = ans_issues_files(&[("actors.yaml", actors)]);
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_inline_type_is_refused() {
+        // "One name = one dedicated scalar": a reply/param may declare NO new scalar.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { type: string }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-inline-type"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      params:\n        orderId: { type: string }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-inline-type"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_ref_must_be_a_same_actor_known_state_field() {
+        // A foreign actor's state is not this actor's answer…
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // …and an unknown field (not declared state, not identity, not lifecycle status) is a
+        // missing STATE declaration, reported as such.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        ghost: { $ref: '#/Order/state/ghost' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // `status` without a lifecycle block is NOT implicitly declared.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        status: { $ref: '#/Order/state/status' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_params_ref_must_name_a_scalar_or_entity() {
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      params:\n        orderId: { $ref: 'events.yaml#/OrderPlaced' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-params-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_derived_type_names_are_catalog_unique() {
+        // `Order` + `paymentReference` and `OrderPayment` + `reference` both derive
+        // `OrderPaymentReference{Request,Reply}` — a code collision the YAML keys hide.
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\nOrderPayment:\n  type: aggregate\n  identity: {{ $ref: '#/OrderPayment/state/orderId' }}\n  receives:\n    - message: {{ $ref: 'events.yaml#/OrderPlaced' }}\n      emits: []\n  answers:\n    reference:\n      description: \"x\"\n      reply:\n        orderId: {{ $ref: '#/OrderPayment/state/orderId' }}\n",
+            ANS_ORDER
+        );
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-op-unique"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_are_isolated_from_every_non_ask_ref_site() {
+        // Kind isolation (PROP §4 rules 2-3): a reply is constitutionally unpersistable — no
+        // api/screen/event/projection site may $ref into `answers/`. The only legal consumer is
+        // the PM `ask:` step (PM half of #582).
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\n",
+            ANS_ORDER
+        );
+        let api = "queries:\n  paymentReference:\n    output: { $ref: 'actors.yaml#/Order/answers/paymentReference' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+            ("api.yaml", api),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-ref-isolation"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn implicit_lifecycle_status_ref_is_exempt_from_ref_dangling() {
+        // Mirror of `implicit_identity_state_ref_is_exempt_from_ref_dangling`: the lifecycle
+        // block OWNS `status`, so `#/<Actor>/state/status` is declared by the block itself.
+        let m = inline_model(&[(
+            "actors.yaml",
+            "Payment:\n  type: aggregate\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial: []\n    transitions: []\n    terminal: []\n  receives: []\nOrder:\n  type: aggregate\n  receives: []\n",
+        )]);
+        assert!(is_implicit_lifecycle_status_ref(&m, "#/Payment/state/status", "actors.yaml"));
+        assert!(is_implicit_lifecycle_status_ref(&m, "actors.yaml#/Payment/state/status", "processmanager.yaml"));
+        // No lifecycle → not implicit; another field name is never the status.
+        assert!(!is_implicit_lifecycle_status_ref(&m, "#/Order/state/status", "actors.yaml"));
+        assert!(!is_implicit_lifecycle_status_ref(&m, "#/Payment/state/orderId", "actors.yaml"));
+    }
+
+    #[test]
+    fn nested_event_payload_lineage_resolves_through_entity_refs() {
+        // #582: `PaymentIntentCreated.checkout` is an entity `$ref`; the true lineage of the
+        // Payment state's `orderId` is `…/properties/checkout/orderId`. The naive walk cannot
+        // cross the entity boundary, so the nested resolver follows the refs — and the leaf's
+        // scalar feeds st-type-mismatch end-to-end.
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", "CheckoutSnapshot:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n"),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/orderId").as_deref(),
+            Some("scalars.yaml#/OrderId")
+        );
+        assert!(is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/checkout/orderId", "actors.yaml"));
+        // A ghost leaf or a non-nested path stays dangling/ordinary.
+        assert!(!is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/checkout/ghost", "actors.yaml"));
+        assert!(!is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/paymentIntentId", "actors.yaml"));
+    }
+
+    #[test]
+    fn nested_lineage_feeds_st_type_mismatch() {
+        // The end-to-end typing claim: a state field whose declared type disagrees with the
+        // NESTED lineage leaf's scalar is refused, exactly like a top-level lineage.
+        let base = |ty: &str| {
+            format!(
+                "Payment:\n  type: aggregate\n  identity: {{ $ref: '#/Payment/state/paymentIntentId' }}\n  state:\n    orderId:\n      type: {{ $ref: 'scalars.yaml#/{}' }}\n      from: [{{ $ref: 'events.yaml#/PaymentIntentCreated/properties/checkout/orderId' }}]\n  receives:\n    - message: {{ $ref: 'events.yaml#/PaymentIntentCreated' }}\n      emits: [{{ $ref: 'events.yaml#/PaymentIntentCreated' }}]\n",
+                ty
+            )
+        };
+        let run = |actors: &str| {
+            let m = inline_model(&[
+                ("scalars.yaml", ANS_SCALARS),
+                ("entities.yaml", "CheckoutSnapshot:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n"),
+                ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+                ("actors.yaml", actors),
+            ]);
+            let mut issues = Vec::new();
+            validate_actor_state(&m, &mut issues);
+            issues
+        };
+        let ok = run(&base("OrderId"));
+        assert!(ok.is_empty(), "{:?}", ok.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+        let bad = run(&base("PaymentIntentId"));
+        assert_eq!(rules_of(&bad), vec!["st-type-mismatch"], "{:?}", bad.iter().map(|i| &i.message).collect::<Vec<_>>());
     }
 
     #[test]

@@ -10,6 +10,49 @@ Payment:
   identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
   mailbox:
     partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  # Declared write-side state (PROP-20260728-135632 §2.1 grammar; #582 PROP-20260815-142349 §19) —
+  # transcribed from the hand-written fold `crates/domain/src/payment.rs::PaymentState`. `status`
+  # is deliberately ABSENT (the `lifecycle:` block owns it; `#/Payment/state/status` resolves
+  # implicitly). `orderId`'s lineage is NESTED — the true source is the frozen checkout snapshot
+  # (`checkout.orderId`), resolved through the entity ref end-to-end. Three hand-fold fields are
+  # NOT yet declarable and wait on the states slice 2 grammar (#242): `amount` (entity-typed
+  # Money), `refundDecision` (no domain scalar yet), `refundId` (nullable non-birth assignment).
+  # DECLARATION-ONLY this slice: lifecycle actor ⇒ states.rs generation deferred; YAML↔fold
+  # parity is enforced by the reply-construction tests in payment.rs, compiler-checked.
+  state:
+    paymentIntentId:
+      type: { $ref: 'scalars.yaml#/PaymentIntentId' }
+      from: [{ $ref: 'events.yaml#/PaymentIntentCreated/properties/paymentIntentId' }]
+      note: "The Stripe PaymentIntent id — the stream key."
+    orderId:
+      type: { $ref: 'scalars.yaml#/OrderId' }
+      from: [{ $ref: 'events.yaml#/PaymentIntentCreated/properties/checkout/orderId' }]
+      note: "The order this payment settles, frozen in the checkout snapshot at intent creation (nested lineage through entities.yaml#/CheckoutSnapshot)."
+    restaurantId:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/PaymentIntentCreated/properties/restaurantId' }]
+    captureFailed:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/PaymentCaptureFailed' }]
+      note: "A capture failure was recorded WITHOUT moving the status (funds still held — retry or expiry decides)."
+    refundOpened:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/RefundOpened' }]
+      note: "RefundProcess opened a refund for decision (View_PendingRefunds folds the queue)."
+  # The queries this actor answers on Ask (PROP-20260815-142349 §2, Approved; doctrine header:
+  # specs/common/actors.yaml). No `params:` — the ask is addressed BY IDENTITY: the
+  # Payment-{intentId} stream key IS the argument, and repeating it in the payload would be the
+  # redundant info the founder forbade (§3). No transport key (absence means local, D6); the
+  # deadline is the CALLER's (D5).
+  answers:
+    settlementView:
+      description: "The settlement guard's facts: is this payment capturable/refundable right now — lifecycle status, the order it settles, and whether a capture already failed."
+      reply:
+        orderId: { $ref: '#/Payment/state/orderId' }
+        status: { $ref: '#/Payment/state/status' }            # the implicit lifecycle-status field (PaymentStatus)
+        captureFailed: { $ref: '#/Payment/state/captureFailed' }
   description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), authorized at checkout confirmation, captured on fulfilment (ADR-20260808-195315 §1.2) or released on abort."
   # The refund decision facts (RefundOpened/Approved/Denied) do not move the payment status —
   # only the settled Stripe fact (PaymentRefunded) does. PaymentCaptureFailed does not move it
