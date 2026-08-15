@@ -28,7 +28,12 @@ would bring, and it is not derivable from the code:
 For a full critical audit — findings, triaged issues, proposals, and what to do next — use the
 **`architect` agent** (`.claude/agents/architect.md`), which carries this lens plus the review
 procedure in `.claude/skills/architecture-review/`. The open-decision queue it feeds is
-[docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md).
+[docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md). **CQRS/ES/DDD doctrine is a separate
+voice from that operations role** (ADR-20260815-032912): consult `young` (read/write separation,
+projections and snapshots as disposable folds, event versioning, set-based validation), `vernon`
+(aggregate boundaries, one aggregate per transaction, process managers, the actor model — Ask vs
+Tell) and `evans` (ubiquitous language, bounded contexts and context maps, ACLs, core-vs-generic
+distillation) — and cite which lens carried a finding.
 
 ## Specifications — read before any task
 

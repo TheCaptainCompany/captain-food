@@ -2,6 +2,27 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧠 **2026-08-15 — THE ARCHITECT IS SPLIT INTO THREE NAMED DOCTRINE LENSES: `young`, `vernon`,
+> `evans`** (founder directive, *"Split the architect into Greg Vaughn and eric"*;
+> [ADR-20260815-032912](adr/ADR-20260815-032912-split-the-architect-into-three-named-doctrine-lenses.md),
+> amending [ADR-20260808-154005](adr/ADR-20260808-154005-agents-channel-named-experts-published-work.md)).
+> `.claude/agents/architect.md` already *declared* it channelled Young, Vernon and Evans, but under a
+> footnote heading beneath an audit/file/propose/dispatch charter — so its output read as generic
+> architecture opinion until a coordinator re-briefed it. **`architect` survives unchanged as the
+> OPERATIONS role** (audit, issue filing, proposals, backlog ranking under ADR-20260810-215503, and
+> **naming the next chunk** — the autonomous loop, CLAUDE.md and the `architecture-review` skill all
+> depend on it); its "Channels" section becomes a routing table into three new **read-only** lenses
+> that advise and are cited: **`young`** (which side of the read/write wall, CQRS ≠ eventual
+> consistency, read models and snapshots as disposable rebuildable folds, upcasting for STORED events
+> vs additive-only + tolerant reader for live replies, set-based validation), **`vernon`** (aggregate
+> size, by-identity references, one aggregate per transaction, PM process state, the actor model and
+> **Ask vs Tell** — PMW-3 is his row) and **`evans`** (ubiquitous language as a modelling defect not a
+> naming nit — `processmanager.yaml:30-43` vs the code is the live instance — context maps and their
+> patterns, ACLs, core-vs-generic distillation). The three never edit `specs/**`, never claim work and
+> **never rank the backlog**; they report disagreement AS disagreement rather than blending. Every
+> other channelled lens (Kleppmann, Byron, Majors, Norman/Patton/Ive, Meyer/Scholz, Beck, Holub,
+> Farley) is untouched. Docs/config only — no `specs/**`, no code, no gate movement.
+
 > ⚖️ **2026-08-15 — OPENING HOURS AND STOCK ARE CHECKED SERVER-SIDE ON PLACE ORDER; A BIG CATALOG
 > SNAPSHOTS EVERY 100 EVENTS** (founder directive;
 > [ADR-20260815-032807](adr/ADR-20260815-032807-opening-hours-and-stock-are-checked-server-side-and-a-big-catalog-snapshots-every-100-events.md),

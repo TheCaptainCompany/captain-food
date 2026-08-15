@@ -32,7 +32,9 @@ then the farley distance-to-production audit feeding the demo epic (#410).
 
 ## The team
 
-Agents in `.claude/agents/`: `architect` (audit, next, dispatch definition) · `executor` (ONE
+Agents in `.claude/agents/`: `architect` (audit, next, dispatch definition — OPERATIONS, not
+doctrine) · `young` / `vernon` / `evans` (the CQRS-ES / aggregate-and-actor / strategic-DDD
+doctrine lenses, split out of `architect` 2026-08-15 by ADR-20260815-032912) · `executor` (ONE
 dispatch end-to-end, no GitHub tools) · `beck` (testing lens — names the failing test AT THE
 BRIEFING, holds "a gate never seen red is an unverified claim") · `reviewer` (independent pass over
 a FINISHED diff) · `generator` · `ux-designer` · `dba` · `graphql-architect` ·
@@ -42,9 +44,12 @@ does ALL GitHub ceremony; every executor dispatch pastes the exact issue titles 
 cannot look them up).
 
 **Naming rule** (ADR-20260809-021500): one anchoring expert → the person's name (`beck`, `holub`,
-`farley`); several anchors → a role name (`architect` = Young+Vernon+Evans, `ux-designer` =
-Norman+Patton, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
-person's name — that demotes the others.
+`farley`, and now `young` / `vernon` / `evans`); several anchors → a role name (`ux-designer` =
+Norman+Patton+Ive, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
+person's name — that demotes the others. The 2026-08-15 architect split is the inverse move and the
+only sanctioned one: when a multi-anchor lens's output reads as generic, **split it into one agent
+per thinker** rather than renaming it after the loudest (ADR-20260815-032912). `architect` survived
+the split because it also holds a non-doctrinal operations role the loop depends on.
 
 ### Every dispatch is a MOB (founder directive, 2026-08-09, ADR-20260809-013142)
 
