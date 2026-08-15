@@ -1,6 +1,7 @@
 //! Validator sections, one module per rule family (#277 split); the run order lives in
 //! validate() (validate::core).
 
+pub(crate) mod answers; // §2g actor `answers:` blocks (PROP-20260815-142349, #582)
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod core; // §1 validate() orchestrator + resolver-args checks
 pub(crate) mod databases; // §18 database catalog + per-kind placement (#494 slice 1)
@@ -17,6 +18,7 @@ pub(crate) mod shape; // api-shape helpers (roles, inline types, data shapes)
 pub(crate) mod translations; // §10 translation hygiene
 pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warning-baseline.json)
 
+pub(crate) use answers::*;
 pub(crate) use bins::*;
 pub(crate) use core::*;
 pub(crate) use databases::*;

@@ -462,6 +462,18 @@ pub(crate) fn emit_domain_states(model: &Model) -> String {
             _ => continue,
         };
         let Some(Value::Mapping(state)) = def.get("state") else { continue };
+        // #582 (PROP-20260815-142349 §19): an actor with a `lifecycle:` block keeps its
+        // HAND-WRITTEN fold — the declared-state grammar cannot yet express the
+        // lifecycle-owned `status` (`st-status-duplicated` forbids redeclaring it), nested
+        // payload lineage (`checkout/orderId`) or entity-typed fields, so a generated fold
+        // here would be a second, partial state type for the same actor. Its `state:` block
+        // is DECLARATION-ONLY this slice: it types the actor's `answers:` replies, and
+        // YAML↔fold parity is enforced by the reply-construction tests colocated in the hand
+        // fold modules (compiler-checked), not by this emitter. Fold generation composes with
+        // the lifecycle table in the states-generation slice 2 (#242).
+        if def.get("lifecycle").is_some() {
+            continue;
+        }
 
         // Parse the fields in declaration order.
         struct Field {
