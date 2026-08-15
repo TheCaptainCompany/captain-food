@@ -2,6 +2,43 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⚖️ **2026-08-15 — A PROCESS MANAGER IS A WRITE-SIDE COMPONENT AND NEVER READS THE READ SIDE**
+> (founder directive; [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md),
+> [DECISIONS §42](proposals/DECISIONS.md) **PMW-1/PMW-2/PMW-3**, plus option **(e)** annotated onto
+> **STO-9** in §32). **Rule DECIDED, nothing built, no `specs/**` edit** — this is a record-only
+> change. The enforceable form is narrower than the sentence and the narrowing is the point: *a PM
+> never reads a projection to learn a fact about an aggregate it can address by identity*. **Two
+> carve-outs**: operator-authored referentials (`DispatchStrategyRepository`'s three tables) are
+> configuration, not folds; and set-shaped reads have no actor to ask (`open_by_session` — there is
+> **no `Session` aggregate**; `price_cart` walks a catalog tree). **Only ONE reading of "ask the
+> actor" is adopted** — folding the aggregate's own stream in-process, already how
+> `place_order.rs:47` and `delivery_dispatch.rs:126` work. A **query message over a transport** is
+> NOT adopted (PMW-3): a query carries no `message_id`/`position`, so there is nowhere to put the
+> lease fence; head-of-line puts a Stripe capture behind whatever the actor is doing; and lanes are
+> claimed by a **lease race**, so there is no actor directory to route to. **The accounting is one
+> read database of three, not a collapse**: `read_order`'s `captain_write` readers are ALL PM legs,
+> so **STO-9 closes**; `read_common`'s nine and `read_catalog`'s two are **aggregate command
+> handlers**, so **STO-7 and STO-8 are untouched**. **"Ask the Order actor" cannot answer the
+> settlement guard alone** — neither `payment_intent_id` nor `payment_status` is on `OrderState`;
+> `PaymentState` is the authority, and the cheapest closure is folding `payment_intent_id` onto
+> `OrderState` from the `OrderPlaced` the aggregate already owns (**no event migration, one fold
+> field**). **Two things it does NOT do, said out loud**: it does not make settlement transactional
+> (`Payment-{intent}` is a different stream on no ordering relation to `Order-{id}` — the window
+> shrinks from projector-lane seconds to microseconds; Stripe idempotency + the AUTHORIZED guard
+> stay the protection), and *"the code will be simpler"* is **false on the money PMs' production
+> lines** (1 read → 2 folds, +1 error arm) — it is true on the dependency graph, on the test bed
+> (−4 fakes, ≈−375 lines, incl. a **divergent second `payment_status` projector** in
+> `behaviour_support.rs` that deletes) and on the system. **RECORDED DRIFT, deliberately unfixed**:
+> `specs/ordering/processmanager.yaml:30-43` declares `PlaceOrderProcess` reading the Cart and
+> Restaurant **projections** while `commands.rs:2391-2394,2419` folds their streams — the spec is
+> wrong at the head of the checkout path, and its correction is sequenced behind
+> [#564](https://github.com/TheCaptainCompany/captain-food/issues/564)'s PR1, which already carries
+> `source: EVENT_STREAM` on those two lines. **Owed regardless**: activation hit-ratio/bytes/eviction
+> counters — `specs/observability.yaml` declares NONE, so residency's Catalog-eviction storm
+> (`put_locked` inserts then evicts LRU, so one large import evicts every resident Order/Cart/Payment)
+> is currently invisible, and Payment activations never engage at all (`surrogate_actor_id`'s UUIDv5
+> lane key never matches the `Payment-pi_xxx` stream).
+
 > 🗄️ **2026-08-14 — EVERY TABLE HAS A DECLARED HOME: STO-2 CLOSED, PLACEMENT IS NOW A VALIDATOR
 > REQUIREMENT** ([#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make
 > placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562) /
