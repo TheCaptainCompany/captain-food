@@ -5271,36 +5271,110 @@ Catalog:
         assert!(tables("| a | b |\n|---|---|\n| c | d |\n\n## Next\n| e |\n").is_empty());
     }
 
-    /// The corpus result the issue asks for explicitly: the rule must be SILENT on rows that are
-    /// merely hard to parse, so every finding it does report is a real reshape. Pinned as an exact
-    /// location list — a new finding fails here with the line, and a fixed row fails here too, so
-    /// the seven known breaks cannot be quietly re-broken or quietly dropped.
+    /// The corpus result the issue asks for explicitly: the rule must be SILENT on every row that is
+    /// merely hard to parse, so each finding it does report is a real reshape.
+    ///
+    /// Pinned by ROW IDENTITY, never by line number. `DECISIONS.md` gains rows daily, and an absolute
+    /// `file:line` list would go red on any unrelated insertion ABOVE a known break — a test that
+    /// fails for a reason that has nothing to do with what it checks, which is how a gate teaches
+    /// people to ignore it. The register's own key (`SPEC-2`, `CAP-READY`, …) survives insertion,
+    /// reflow and reordering, and it names the row the way a human would in review.
+    ///
+    /// This is deliberately NARROWER than the §17 warning ratchet rather than a duplicate of it: the
+    /// ratchet compares COUNTS, so repairing one row while breaking another nets to zero and passes.
+    /// Identities catch that swap.
     #[test]
     fn the_real_corpus_has_exactly_the_known_table_breaks() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let files = load_decision_table_files(&root);
         assert!(files.iter().any(|(p, _)| p.ends_with("DECISIONS.md")), "the register must be in the corpus");
         let issues = validate_markdown_tables(&files);
-        // Pre-existing breaks, reported to the architect rather than silently repaired (#572): one
-        // row whose tail GFM DROPS (a raw `|` in a code span) and six register rows that supply 3
-        // cells to a 4-column header, leaving the trailing column blank. Severity is WARNING only
-        // because these exist; the §17 ratchet still fails CI on an eighth. Promoting §13b to ERROR
-        // is a one-liner once the seven rows are repaired.
+        // Pre-existing breaks, REPORTED to the architect rather than silently repaired (#572): six
+        // register rows that supply 3 cells to a 4-column header (GFM pads the trailing
+        // `Recommendation / status` column blank), plus one proposal row whose tail GFM DROPS
+        // outright — a raw `|` in `filter(|g| g.scope == scope)` opens two extra cells. Repairing
+        // them needs their AUTHORS: which column the missing cell belongs to is a content judgement,
+        // not a mechanical fix. Severity is WARNING only because they exist; the §17 ratchet still
+        // fails CI on an eighth. Promoting §13b to ERROR is a one-liner once these are repaired.
         let expected = [
-            "docs/proposals/DECISIONS.md:860",
-            "docs/proposals/DECISIONS.md:1887",
-            "docs/proposals/DECISIONS.md:1974",
-            "docs/proposals/DECISIONS.md:2011",
-            "docs/proposals/DECISIONS.md:2046",
-            "docs/proposals/DECISIONS.md:2047",
-            "docs/proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md:78",
+            ("docs/proposals/DECISIONS.md", "SPEC-2"),
+            ("docs/proposals/DECISIONS.md", "LOSS-1"),
+            ("docs/proposals/DECISIONS.md", "IDOR-1"),
+            ("docs/proposals/DECISIONS.md", "ENF-1"),
+            ("docs/proposals/DECISIONS.md", "CAP-READY"),
+            ("docs/proposals/DECISIONS.md", "CAP-READY-LEGAL"),
+            ("docs/proposals/PROP-20260811-090000-scope-isolation-runtime-decomposition.md", "3"),
         ];
-        let mut got = table_locations(&issues);
+        let mut got = corpus_break_identities(&files, &issues);
         got.sort();
-        let mut want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        let mut want: Vec<String> =
+            expected.iter().map(|(f, id)| format!("{} {}", f, id)).collect();
         want.sort();
         assert_eq!(got, want, "table findings on the committed corpus");
         assert!(issues.iter().all(|i| i.level == Level::Warning), "§13b is a warning until the known rows are repaired");
+    }
+
+    /// The gate's whole purpose, exercised against the REAL register rather than a fixture: a stray
+    /// `|` added to a currently-correct row must be caught. Injected in memory (the committed file is
+    /// never touched) so the proof is permanent and repeatable instead of a one-off manual
+    /// experiment. Without this, "the rule works" rests on synthetic 2-column tables — and the row
+    /// this injects is a genuine 4-column register row, 800+ characters of links, bold and code
+    /// spans, which is where a naive splitter actually breaks.
+    #[test]
+    fn an_eighth_break_in_the_real_register_is_caught() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_table_files(&root);
+        let (path, register) = files
+            .iter()
+            .find(|(p, _)| p.ends_with("DECISIONS.md"))
+            .expect("the register must be in the corpus");
+
+        // Pick a row the rule currently accepts, and give it one extra cell.
+        let clean_rows: Vec<(usize, &str)> = register
+            .lines()
+            .enumerate()
+            .filter(|(n, l)| {
+                l.starts_with("| **")
+                    && split_table_row(l).map(|c| c.len()) == Some(4)
+                    && !validate_markdown_tables(&[(path.clone(), register.clone())])
+                        .iter()
+                        .any(|i| i.location == format!("{}:{}", path, n + 1))
+            })
+            .collect();
+        let (line_no, row) = *clean_rows.first().expect("the register must contain at least one clean 4-cell row");
+
+        let injected: String = register
+            .lines()
+            .map(|l| if l == row { row.replacen(" | ", " | stray | ", 1) } else { l.to_string() })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let before = validate_markdown_tables(&[(path.clone(), register.clone())]).len();
+        let after = validate_markdown_tables(&[(path.clone(), injected)]);
+
+        assert_eq!(after.len(), before + 1, "one stray pipe must add exactly one finding");
+        let hit = after
+            .iter()
+            .find(|i| i.location == format!("{}:{}", path, line_no + 1))
+            .unwrap_or_else(|| panic!("the injected row at line {} must be reported", line_no + 1));
+        assert_eq!(hit.rule, "markdown-table-row-cell-count");
+        assert!(hit.message.contains("5 cell(s)") && hit.message.contains("declares 4"), "{}", hit.message);
+    }
+
+    /// Resolve each finding's `file:line` back to `"<file> <row key>"` — the first cell's leading
+    /// token, stripped of the `**` the register wraps its keys in.
+    fn corpus_break_identities(files: &[(String, String)], issues: &[Issue]) -> Vec<String> {
+        issues
+            .iter()
+            .map(|i| {
+                let (path, line) = i.location.rsplit_once(':').expect("location is file:line");
+                let line: usize = line.parse().expect("location line is numeric");
+                let content = &files.iter().find(|(p, _)| p == path).expect("finding names a corpus file").1;
+                let row = content.lines().nth(line - 1).expect("finding names a real line");
+                let first = split_table_row(row).expect("a flagged row splits").into_iter().next().unwrap_or_default();
+                let key = first.trim_matches('*').split_whitespace().next().unwrap_or("").trim_matches('*');
+                format!("{} {}", path, key)
+            })
+            .collect()
     }
 
     #[test]

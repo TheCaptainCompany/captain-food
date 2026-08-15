@@ -2,6 +2,27 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧱 **2026-08-15 — THE DECISION REGISTER'S TABLES ARE NOW GATED, AND THE GATE FOUND SEVEN BROKEN
+> ROWS ON ARRIVAL**
+> ([#572 "Validator gate: the decision register's tables have no integrity check — a stray `\|` silently reshapes a row"](https://github.com/TheCaptainCompany/captain-food/issues/572)).
+> Validator **§13b** (`markdown-table-row-cell-count`) checks every markdown table row in
+> `docs/proposals/DECISIONS.md` **and** `PROP-*.md` against its header's cell count. The register was
+> the one artifact the whole decision process reads and the only one `load_proposal_files` never
+> globbed. **Cell counting follows GFM exactly, and the counter-intuitive half is load-bearing: a
+> pipe inside a code span DOES open a cell** — only a backslash escape (`\|`) makes it inert, and it
+> works *inside* backticks. Verified against two independent renderers rather than assumed; modelling
+> code spans as pipe-neutral is the intuitive choice and it makes the rule blind to the exact defect
+> the issue was filed for. **On arrival the rule found 7 real breaks** — six register rows supplying 3
+> cells to a 4-column header (the trailing `Recommendation / status` column renders blank: `SPEC-2`,
+> `LOSS-1`, `IDOR-1`, `ENF-1`, `CAP-READY`, `CAP-READY-LEGAL`) and one proposal row whose tail GFM
+> **drops outright** (a raw `|` in `filter(|g| g.scope == scope)`). They are **reported, not repaired**:
+> which column the missing cell belongs to is a content judgement for the row's author. So §13b ships
+> at **WARNING**, which the §17 ratchet already makes blocking — an eighth break fails CI — and
+> promotion to ERROR is a one-liner once the seven are fixed. **Known breaks are pinned by ROW
+> IDENTITY (`SPEC-2`, `CAP-READY`, …), never by line number**: the register gains rows daily, and an
+> absolute `file:line` list would go red on any unrelated insertion above a known break — a gate that
+> fails for reasons unrelated to what it checks is a gate people learn to ignore.
+
 > ✅ **2026-08-15 — RSO-1 IS NOW DISPATCHABLE: ITS THREE BLOCKING SUB-QUESTIONS ARE ANSWERED — AND
 > THREE OF THE ANSWERS SAY THE ROW'S OWN TEXT WAS WRONG** (docs-only, straight to `main`; still no
 > code). Recorded in [DECISIONS §43](proposals/DECISIONS.md) RSO-1, fourth amendment; every
