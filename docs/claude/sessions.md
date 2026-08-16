@@ -1296,12 +1296,26 @@ This container has **no `gh` on PATH**, so every session drives the API with `cu
 hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
 names the branch, so it reads like a bad ref rather than a missing commit.
 
-**And the `curl` path is coordinator-only: an executor session cannot reach GitHub at all.** The REST
-API answers `GitHub access is not enabled for this session` even with `GH_TOKEN`/`GITHUB_TOKEN`
-present in the environment — the variables are not the capability. So **a dispatch that asks an
-executor to reference an issue must carry the number AND the title verbatim**; the executor has no
-lookup path and cannot check a title it is given. Cost: an unresolvable issue link landed in
-`ee9082d` and needed a follow-up commit to repair.
+**The `curl` path is NOT coordinator-only — an executor does its own claim mechanics** (corrected
+2026-08-16 on #597, replacing the earlier "an executor session cannot reach GitHub at all"). Two
+different capabilities, and only one of them is missing:
+
+- the **`mcp__github__*` tools are unavailable to an executor** — every call answers `No such tool
+  available`, even though the server's instructions are injected into the prompt, so the tool list
+  reads as if they existed;
+- **`curl` against `api.github.com` with `$GITHUB_TOKEN` works, for READ and WRITE.** Proven in one
+  executor run: issue read, `status/in-progress` label add, claim comment, draft PR create, PR body
+  PATCH, check-runs read.
+
+So an executor **performs its own claim, draft PR and PR-body updates** and only reports a GitHub
+failure it actually met. Handing the mechanics back on the assumption of no access costs a
+coordinator round-trip per chunk. If a session genuinely has none, the REST API says so in the body
+(`GitHub access is not enabled for this session`) — read the response before concluding.
+
+Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
+with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
+survives a session that has no lookup path; the cost of skipping it was an unresolvable issue link
+in `ee9082d` and a follow-up commit to repair.
 
 ### A commit touching `CLAUDE.md` or `.claude/agents/*.md` needs in-conversation user approval
 

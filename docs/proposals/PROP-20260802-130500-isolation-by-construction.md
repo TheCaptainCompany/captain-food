@@ -121,6 +121,28 @@ spent seven review rounds hardening a level-3 scanner over a boundary level 4 al
 writing a gate, ask whether the type system can make the mistake unspellable; write the gate only
 where it cannot.
 
+**Level 4 is not one guarantee — say WHICH callers it excludes, because Rust privacy is
+hierarchical** (2026-08-16, #597). The repo's stock privacy recipe is D5's: `pub` item in a private
+module, `allow(unreachable_pub)`, and the crate-root re-export cfg-gated behind `test-fixtures`
+(`crates/actor_client/src/enqueue.rs`, `enqueue_inbound_fact`). What it buys is precise and
+limited — **the item is unreachable from OUTSIDE the crate** — and what it does not buy is the part
+that reads like it should: a `pub` item in a private module is nameable by every DESCENDANT of that
+module's parent, so every sibling module keeps a path to it (`super::the_private_mod::the_item`).
+
+So match the recipe to the sentence you are trying to make true:
+
+| the constraint | the shape that carries it |
+|---|---|
+| "no OTHER CRATE may call it" | D5's recipe — `pub` + `allow(unreachable_pub)` + cfg-gated re-export |
+| "no SIBLING MODULE may call it" (a delivery route, a new handler in the same subtree) | a plain **private `fn`** in the module that owns the decision; a cross-crate spy reaches it through a **cfg-gated delegating seam**, never through a `pub` on the item itself |
+| "only a caller HOLDING X may call it" | a capability witness (`MailboxAccess`) — and if the inner crate cannot NAME X, say so in the constructor's doc instead of implying proof |
+
+#597 nearly shipped the first shape for a second-shape requirement: `record_order_placements` had to
+be uncallable by `pm_delivery.rs`, a sibling of the module it moved into, and the recipe would have
+left that call compiling. **The tell is cheap and mandatory: write the violation, compile it, keep
+the rustc error as the evidence.** A privacy change that compiles when violated has done nothing,
+and "I applied the repo's pattern" is not a substitute for `error[E0603]`.
+
 ## 2. Current state, measured (2026-08-03)
 
 | boundary | today | level |

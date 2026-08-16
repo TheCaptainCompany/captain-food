@@ -4228,7 +4228,13 @@ keys:
              ship the sealed type's test constructors:\n{}\n\nFix: move the grant to that \
              crate's [dev-dependencies] (tests get it; the shipped lib/bin never does). If the \
              line is `default = [\"test-fixtures\"]` in a declaring crate, delete it — a default \
-             feature is a grant to every dependent at once.",
+             feature is a grant to every dependent at once.\n\nIf the flagged line is \
+             `test-fixtures = []` under [features] — i.e. a crate DECLARING the feature for the \
+             first time, which is the correct thing to do — you are not the offender this message \
+             describes: add that manifest path to the `declaring` list in this guard (and an \
+             existence assertion above it, like the three already there), so the declaration is \
+             sanctioned while every non-dev GRANT in that same manifest stays refused. #597 was \
+             the third such crate.",
             offenders.join("\n")
         );
     }

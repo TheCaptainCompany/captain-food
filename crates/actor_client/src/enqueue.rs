@@ -196,6 +196,18 @@ pub fn inbound_message_id(source: &str, external_id: &str) -> uuid::Uuid {
 /// Declared `pub` with the RE-EXPORT cfg-gated (rather than a cfg-duplicated `pub`/`pub(crate)`
 /// pair) so there is exactly one definition: outside `test-fixtures` it is unreachable from the
 /// crate root and stays crate-internal in practice, which is what the allow below records.
+///
+/// **What this shape buys, exactly — read before copying it (#597).** It makes the item unreachable
+/// from OUTSIDE the crate. It does NOT make it unreachable from inside: Rust privacy is
+/// hierarchical, so a `pub` item in a private module is nameable by every descendant of that
+/// module's parent — every sibling module keeps the path `super::enqueue::enqueue_inbound_fact`.
+/// That is correct HERE, because the constraint is "no other crate may build a mailbox row" and the
+/// siblings that can reach it are the door itself. It is the WRONG shape when the constraint names
+/// a caller in this crate ("no delivery route may decide when a placement counts"): there the item
+/// must be a plain private `fn` in the module that owns it, with a cfg-gated delegating seam for a
+/// cross-crate spy (`infrastructure::mailbox::flush` is the worked example). Either way, prove it:
+/// write the violating call, compile it, keep the rustc error — a privacy change that compiles when
+/// violated has done nothing (PROP-20260802-130500 §1).
 #[cfg_attr(not(any(test, feature = "test-fixtures")), allow(unreachable_pub))]
 pub async fn enqueue_inbound_fact(
     mailbox: &dyn Mailbox,
