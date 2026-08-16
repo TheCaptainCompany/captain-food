@@ -176,20 +176,24 @@ pub async fn flush_lane_enqueues_in_tx(
     enqueues: &[application::lanes::LaneEnqueue],
 ) -> Result<(), DomainError> {
     for enqueue in enqueues {
-        // The lane keyspace WIDTH is the actor's seeded registry row count — the same source the
-        // workers seeded from, so a routed deliver can never address a partition no worker drains.
-        let width: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
-                .bind(enqueue.actor_type)
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(|e| DomainError::Repository(e.to_string()))?;
-        if width == 0 {
+        // The lane keyspace WIDTH comes from the DECLARED contract (`actors.yaml`
+        // `mailbox.partitions`, generated into `ACTOR_MAILBOXES`), not from the seeded
+        // `mailbox_partitions` row count the PM chain reads. Deliberate, and it is the money-path
+        // difference: the seeded count is a runtime artifact, so reading it would make a checkout
+        // saga FAIL because a worker had not started yet — a paid order with no birth, the worst
+        // failure mode this product has. The declared width is the frozen routing contract, so the
+        // row is always addressed correctly and simply WAITS on its lane until a worker claims it.
+        let Some((_, width)) = crate::generated::command_router::ACTOR_MAILBOXES
+            .iter()
+            .find(|(a, _)| *a == enqueue.actor_type)
+        else {
+            // Unreachable through the emitter (the `pm-deliver-lane` validator rule proves the
+            // target declares a mailbox); a wiring bug, never a business outcome.
             return Err(DomainError::Repository(format!(
-                "routed deliver of '{}' but '{}' has no seeded lanes — start its worker first",
+                "routed deliver of '{}' but '{}' declares no mailbox — wiring bug",
                 enqueue.event_type, enqueue.actor_type
             )));
-        }
+        };
         let message_id = actor_client::inbound_message_id(&enqueue.source, &enqueue.external_id);
         sqlx::query(
             "WITH ins AS ( \
@@ -206,7 +210,7 @@ pub async fn flush_lane_enqueues_in_tx(
         .bind(message_id)
         .bind(enqueue.actor_type)
         .bind(enqueue.actor_id)
-        .bind(actor_client::stable_partition(&enqueue.actor_id, width as u16))
+        .bind(actor_client::stable_partition(&enqueue.actor_id, *width))
         .bind(enqueue.event_type)
         .bind(&enqueue.payload)
         .bind(application::journal::payload_hash(&enqueue.payload))
