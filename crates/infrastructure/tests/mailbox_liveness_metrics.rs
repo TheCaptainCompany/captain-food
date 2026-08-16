@@ -30,6 +30,18 @@
 //!   test's own timing, not the watcher's contract, the thing under test.
 //! - The backlog is asserted EMPTY before the empty tick, so a zero point means "the watcher
 //!   seeded it" and not "there happened to be nothing to count".
+//! - **TWO ticks over the UNCHANGED empty backlog, asserting the SAME point set both times**
+//!   (#598, beck on phase 1's blind spot). Delta temporality plus a draining read makes a watcher
+//!   that seeds ONCE AT STARTUP drain identically to a correct one on the first tick — and *every
+//!   tick* is the entire dead-man's-switch claim. The second drain is the only assertion that can
+//!   tell them apart: a once-only emitter yields an empty set there and nowhere else.
+//!
+//! **The Order-lane switch (#598) rides this binary** for the same one-provider-per-process
+//! reason, and adds the two shapes its own contract needs: a MONOTONIC counter must show a fresh
+//! increment on the second drain, and the lane set the watcher reports on is pinned to the
+//! GENERATED `ROUTED_LANES` **by equality in both directions** — a `contains` pin leaves an ADDED
+//! lane green, which is the direction that matters when someone declares a new routed `deliver:`
+//! and never widens the watch.
 //!
 //! **Why its own binary, with exactly ONE `#[tokio::test]`**: `telemetry::meters` binds the global
 //! meter once per process (`OnceLock`), so the spy provider must be installed before the FIRST
@@ -56,6 +68,10 @@ use telemetry::contract::metric;
 /// with the watcher by construction. [`declared_lanes_are_still_the_ones_asserted`] keeps the
 /// literal honest and tells a future lane-adder exactly what to update.
 const LANES: &[(&str, &str)] = &[("Order", "OrderAcceptanceTimedOut"), ("Order", "OrderExpired")];
+
+/// The ROUTED-BIRTH lanes the Order-lane watch must report on (#598) — same literal-not-derived
+/// discipline as [`LANES`], pinned by [`routed_lanes_are_still_the_ones_asserted`].
+const ROUTED: &[&str] = &["Order"];
 
 /// One expected attribute set.
 fn attrs<const N: usize>(kvs: [(&str, &str); N]) -> BTreeMap<String, String> {
@@ -97,6 +113,91 @@ fn declared_lanes_are_still_the_ones_asserted() {
         "a reminder lane was added or removed in specs/**: add it to LANES here, so the emptiness \
          assertions below keep covering EVERY declared lane (that coverage is the contract)"
     );
+}
+
+/// The point set the Order-lane watch owes for a backlog where only `pending` lanes carry rows.
+/// Every declared routed lane present, the drained ones at zero — the heartbeat's point set is the
+/// same shape with a fixed value of 1 (one increment per lane per tick).
+fn expected_lane_points(
+    lanes: &[&str],
+    pending: &[(&str, f64)],
+) -> Vec<(BTreeMap<String, String>, f64)> {
+    let mut out: Vec<_> = lanes
+        .iter()
+        .map(|lane| {
+            let age = pending.iter().find(|(l, _)| l == lane).map(|(_, a)| *a).unwrap_or(0.0);
+            (attrs([("lane", lane)]), age)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
+    out
+}
+
+/// The literal [`ROUTED`] against the GENERATED declaration, by EQUALITY IN BOTH DIRECTIONS.
+///
+/// Both directions is the whole point and `contains` would be useless here: a missing lane is
+/// caught by the point-set assertions below anyway, but an ADDED lane — someone declares a second
+/// routed `deliver:` and nobody widens the watch — is exactly the case where a one-way pin stays
+/// green while a production lane goes unwatched.
+#[test]
+fn routed_lanes_are_still_the_ones_asserted() {
+    let mut declared: Vec<&str> = application::generated::process_managers::ROUTED_LANES
+        .iter()
+        .map(|l| l.actor_type)
+        .collect();
+    declared.sort_unstable();
+    declared.dedup();
+    assert_eq!(
+        declared,
+        ROUTED.to_vec(),
+        "a routed `deliver:` lane was added or removed in specs/** (see \
+         tools/codegen-rs PM_LANE_ROUTED_DELIVERS): add it to ROUTED here, so the liveness \
+         assertions below keep covering EVERY declared lane — that coverage IS the contract, and \
+         a lane nobody widened the watch to is a lane whose silence means nothing"
+    );
+    assert_eq!(
+        declared,
+        infrastructure::mailbox::declared_lanes(),
+        "the watcher's own lane set must be the declared one, not a second hand-kept list"
+    );
+}
+
+/// The equality assertion is SENSITIVE TO LANE MEMBERSHIP, not merely to non-emptiness.
+///
+/// Without this, "assert the full point set" is a claim about the harness that nobody has checked:
+/// a comparison satisfied by any vector of the right length would pass every assertion below while
+/// a lane silently stopped reporting. Offline — it tests the expectation builder, not the database.
+#[test]
+fn a_lane_missing_from_the_emission_fails_the_equality() {
+    let full = expected_lane_points(ROUTED, &[]);
+    let short = expected_lane_points(&ROUTED[..ROUTED.len() - 1], &[]);
+    assert_ne!(
+        full, short,
+        "dropping a lane from the emitted set must NOT compare equal to the full set -- if it \
+         does, every point-set assertion in this binary is vacuous"
+    );
+}
+
+/// One message sitting UNDELIVERED on the Order lane, received 90 s ago: the gauge's positive
+/// control. Without it, a watcher hard-coding `0` forever satisfies every emptiness assertion —
+/// a monitor that lies while looking alive, which is worse than one that says nothing.
+async fn park_one_pending_order_lane_message(pool: &sqlx::PgPool) {
+    let order_id = uuid::Uuid::from_u128(0x0B17);
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+            payload_hash, channel, user_type, correlation_id, received_at, status) \
+         VALUES ($1, 'EVENT', 'Order', $1, 0, 'OrderPlaced', $2, 'h-birth', 'WORKER', \
+                 'EXTERNAL', $1, now() - interval '90 seconds', 'RECEIVED')",
+    )
+    .bind(order_id)
+    .bind(serde_json::json!({
+        "eventType": "OrderPlaced",
+        "payload": { "orderId": order_id },
+    }))
+    .execute(pool)
+    .await
+    .expect("park one undelivered Order-lane birth");
 }
 
 /// Schedule one DUE acceptance-timeout reminder: the positive control's single row.
@@ -163,6 +264,28 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
          records twice (or not at all) breaks the heartbeat's arithmetic"
     );
 
+    // EVERY TICK, not once (beck, on phase 1's blind spot). Delta temporality plus a draining
+    // read makes a watcher that seeds at STARTUP indistinguishable from one that seeds per tick
+    // on the first drain — and "every tick" IS the dead-man's-switch claim. A second tick over
+    // the UNCHANGED empty backlog must produce the SAME point set; a once-only emitter produces
+    // an empty one here and nowhere else.
+    infrastructure::mailbox::promotion_watch_tick(&pool)
+        .await
+        .expect("a SECOND watch tick over the same empty backlog");
+    let empty_again = spy.drain();
+    assert_eq!(
+        empty_again.points(metric::MAILBOX_SCHEDULED_DEPTH),
+        expected_depth(&[]),
+        "the second tick over an unchanged backlog must re-report every lane -- a watcher that \
+         seeds once at startup passes the first drain and is dead from then on"
+    );
+    assert_eq!(
+        empty_again.points(metric::REMINDER_PROMOTION_DUE_LAG_MS),
+        vec![(attrs([("actor_type", "Order")]), 0.0)],
+        "the dead-man's switch must RE-ASSERT on every tick: a signal emitted once proves only \
+         that the process started"
+    );
+
     // Positive control — without it every assertion above is satisfied by a watcher that emits a
     // hard-coded zero forever, i.e. by a monitor that lies while looking alive.
     schedule_one_due_reminder(&pool).await;
@@ -189,5 +312,91 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
          a watcher that always reports 0 is indistinguishable from a promotion pass that is \
          keeping up, which is exactly the failure it is meant to catch",
         lag[0].1
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // #598 — the ROUTED-BIRTH lane dead-man's switch, in the same binary because the process's
+    // meter provider can only be bound once (see the head comment).
+    //
+    // The contract being proved, in the observability lens's words: exact name, exact attribute
+    // set, exact point COUNT and value per declared lane on an empty backlog, plus a
+    // missing-lane-fails assertion — return-value assertions do not count. And the flag is OFF
+    // throughout: these series must be alive BEFORE the flip, or they are proved by the flip.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM inbound_messages WHERE status = 'RECEIVED' AND actor_type = 'Order'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the Order lane's undelivered backlog");
+    assert_eq!(pending, 0, "the drained-lane tick must run against an actually drained lane");
+
+    infrastructure::mailbox::order_lane_watch_tick(&pool)
+        .await
+        .expect("one order-lane watch tick over a drained lane");
+    let drained = spy.drain();
+
+    assert_eq!(
+        drained.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
+        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        "every DECLARED routed lane heartbeats on every tick, drained or not -- this counter is \
+         the only thing that tells 'nobody ordered' from 'the Order lane worker is dead', and \
+         order_birth_lag_ms is silent by design while ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF"
+    );
+    assert_eq!(
+        drained.points(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS),
+        expected_lane_points(ROUTED, &[]),
+        "a drained lane reports age 0, it does not go absent -- and it must NOT be seeded into \
+         order_birth_lag_ms, whose p95 the flip is judged on"
+    );
+    assert_eq!(
+        drained.records(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
+        vec![(attrs([("lane", "Order")]), 1)],
+        "exactly ONE heartbeat point per lane per tick: the alarm is the ABSENCE of an increment, \
+         so a tick that emits twice inflates the very rate the alarm reads"
+    );
+
+    // EVERY TICK, again: the counter must show a fresh increment and the gauge must re-report
+    // over an unchanged, still-drained lane. Under delta temporality a once-at-startup emitter
+    // yields EMPTY here while satisfying every assertion above.
+    infrastructure::mailbox::order_lane_watch_tick(&pool)
+        .await
+        .expect("a SECOND order-lane watch tick over the same drained lane");
+    let drained_again = spy.drain();
+    assert_eq!(
+        drained_again.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
+        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        "the heartbeat must INCREMENT on the second tick -- a monotonic counter that never \
+         increments is a dead watcher wearing a live series"
+    );
+    assert_eq!(
+        drained_again.points(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS),
+        expected_lane_points(ROUTED, &[]),
+        "the gauge must RE-REPORT on the second tick -- a gauge that reports once says only that \
+         the process started"
+    );
+
+    // Positive control for the gauge: a birth parked 90 s on the Order lane. Without it a
+    // watcher hard-coding 0 satisfies everything above and reports a wedged lane as healthy —
+    // the head-of-line case this series exists to catch at peak.
+    park_one_pending_order_lane_message(&pool).await;
+    infrastructure::mailbox::order_lane_watch_tick(&pool)
+        .await
+        .expect("one order-lane watch tick over a lane with an undelivered birth");
+    let backlogged = spy.drain();
+
+    let ages = backlogged.points(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS);
+    assert_eq!(ages.len(), ROUTED.len(), "one age point per declared lane, always: {ages:?}");
+    assert_eq!(ages[0].0, attrs([("lane", "Order")]), "the age is keyed by lane alone");
+    assert!(
+        ages[0].1 >= 60_000.0,
+        "a birth parked 90s on the lane must show as ~90000ms, not {}ms -- the VALUE is the \
+         alarm, and a watcher that always reports 0 reads exactly like a lane that is keeping up",
+        ages[0].1
+    );
+    assert_eq!(
+        backlogged.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
+        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        "the heartbeat is independent of the backlog: it ticks whether or not anything is waiting"
     );
 }
