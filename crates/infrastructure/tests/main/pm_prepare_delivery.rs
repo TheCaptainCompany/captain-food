@@ -257,7 +257,10 @@ async fn enqueue_pm(
     .bind(id)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_client::stable_partition(&actor_id, 5))
+    .bind(
+        actor_client::declared_lane(actor_type, &actor_id)
+            .unwrap_or_else(|| panic!("{actor_type} declares a mailbox")),
+    )
     .bind(message_type)
     .bind(&payload)
     .bind(format!("h{n}"))
@@ -560,7 +563,10 @@ async fn payment_authorized_chains_to_the_pm_lane_and_materializes_the_order() {
     )
     .bind(fact_id)
     .bind(payment_actor)
-    .bind(actor_client::stable_partition(&payment_actor, 5))
+    .bind(
+        actor_client::declared_lane("Payment", &payment_actor)
+            .expect("Payment declares a mailbox"),
+    )
     .bind(&authorized)
     .execute(&pool)
     .await
@@ -758,7 +764,10 @@ async fn checkout_through_authorization(
     )
     .bind(fact_id)
     .bind(payment_actor)
-    .bind(actor_client::stable_partition(&payment_actor, 5))
+    .bind(
+        actor_client::declared_lane("Payment", &payment_actor)
+            .expect("Payment declares a mailbox"),
+    )
     .bind(&authorized)
     .bind(stripe_event)
     .execute(pool)
@@ -1293,7 +1302,10 @@ async fn enqueue_authorization_fact(pool: &PgPool, n: u128, external_id: &str) -
     )
     .bind(fact_id)
     .bind(payment_actor)
-    .bind(actor_client::stable_partition(&payment_actor, 5))
+    .bind(
+        actor_client::declared_lane("Payment", &payment_actor)
+            .expect("Payment declares a mailbox"),
+    )
     .bind(&authorized)
     .bind(external_id)
     .execute(pool)
@@ -1399,7 +1411,8 @@ async fn chained_fact_is_enqueued_with_no_seeded_lanes_and_drains_once_the_worke
     assert_eq!(chained.get::<Option<uuid::Uuid>, _>("cause_id"), Some(fact_id), "cause-chained");
     assert_eq!(
         chained.get::<i16, _>("partition"),
-        actor_client::stable_partition(&uid(ORDER), 5),
+        actor_client::declared_lane("PlaceOrderProcess", &uid(ORDER))
+            .expect("PlaceOrderProcess declares a mailbox"),
         "addressed by the DECLARED width (ACTOR_MAILBOXES), never by a registry with no rows"
     );
     assert_eq!(
@@ -1440,14 +1453,24 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
     let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
     let pool = db.pool();
 
-    // GUARD THE DATA FIRST. With the two widths agreeing on this actor id the assertion below
-    // would be vacuous -- which is exactly how the existing suite (every seed 5, every declared
-    // width 5) stayed green over the defect for as long as it did.
-    let declared = actor_client::stable_partition(&uid(ORDER), 5);
-    let seeded_two = actor_client::stable_partition(&uid(ORDER), 2);
-    assert_ne!(
-        declared, seeded_two,
-        "test data must distinguish the declared width from the seeded one, or it proves nothing"
+    // GUARD THE DATA FIRST. If the declared lane fell INSIDE the lanes left seeded below, a
+    // narrowed producer could stamp it too and the assertion further down would be vacuous --
+    // which is exactly how the existing suite (every seed 5, every declared width 5) stayed green
+    // over the defect for as long as it did.
+    //
+    // Stated as `declared >= SEEDED_LANES` rather than against a second, hand-computed lane
+    // (#609): a producer that thinks the keyspace is SEEDED_LANES wide can only ever stamp
+    // `0..SEEDED_LANES`, so a declared lane at or above it is unreachable under the narrowed
+    // keyspace -- for EVERY id, not just this one. Stronger than comparing two widths for one id,
+    // and it needs no second opinion about the width in test code at all. This test asserts the
+    // ABSENCE of a misroute; it never stamps one, so it never needs to be able to compute one.
+    const SEEDED_LANES: i16 = 2;
+    let declared = actor_client::declared_lane("PlaceOrderProcess", &uid(ORDER))
+        .expect("PlaceOrderProcess declares a mailbox");
+    assert!(
+        declared >= SEEDED_LANES,
+        "test data must place the declared lane ({declared}) OUTSIDE the {SEEDED_LANES} lanes left \
+         seeded, or it proves nothing"
     );
 
     seed_checkout_world(&pool, true).await;
@@ -1458,13 +1481,15 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
     // half-applied width change, a partial seed failure, or an older binary seeding a narrower
     // width -- `seed_partitions` is `ON CONFLICT DO NOTHING`, so it never deletes and the registry
     // can lag the declaration in either direction.
-    let removed =
-        sqlx::query("DELETE FROM mailbox_partitions WHERE actor_type = 'PlaceOrderProcess' AND partition >= 2")
-            .execute(&pool)
-            .await
-            .expect("partially unseed")
-            .rows_affected();
-    assert_eq!(removed, 3, "2 of the declared 5 lanes remain");
+    let removed = sqlx::query(
+        "DELETE FROM mailbox_partitions WHERE actor_type = 'PlaceOrderProcess' AND partition >= $1",
+    )
+    .bind(SEEDED_LANES)
+    .execute(&pool)
+    .await
+    .expect("partially unseed")
+    .rows_affected();
+    assert_eq!(removed, 3, "{SEEDED_LANES} of the declared lanes remain");
 
     let _ = enqueue_authorization_fact(&pool, 0xFAC9, "evt_596_partial").await;
     let pay = payment_worker(&pool, gateway.clone()).await;
@@ -1479,9 +1504,9 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
     .expect("the chained PM copy exists");
     assert_eq!(
         partition, declared,
-        "the hop must land on the DECLARED lane ({declared}), not on the one the seeded row count \
-         happens to describe ({seeded_two}) -- two widths for one aggregate is two leases for one \
-         writer"
+        "the hop must land on the DECLARED lane ({declared}), not on one of the {SEEDED_LANES} \
+         lanes the seeded row count happens to describe -- two widths for one aggregate is two \
+         leases for one writer"
     );
 
     // And the STARTUP DRIFT CHECK refuses to paper over the partial registry: a worker brought up
@@ -1591,7 +1616,8 @@ async fn backfill_enqueues_to_the_declared_partition_with_the_target_unseeded() 
     .expect("the backfilled copy exists");
     assert_eq!(
         partition,
-        actor_client::stable_partition(&uid(ORDER), 5),
+        actor_client::declared_lane("PlaceOrderProcess", &uid(ORDER))
+            .expect("PlaceOrderProcess declares a mailbox"),
         "stamped with the DECLARED width, so the worker that eventually starts drains it"
     );
 

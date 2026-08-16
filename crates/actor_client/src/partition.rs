@@ -8,7 +8,11 @@
 /// FNV-1a 64-bit over the uuid's 16 big-endian bytes, reduced mod `width`. The result feeds a
 /// SMALLINT column, so `width` is clamped to `1..=i16::MAX` — an unclamped `width > 32767` would
 /// silently wrap negative in the cast and strand the row on a partition no lane maps to.
-pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
+///
+/// **PRIVATE to this module since #609**, and that is the whole point: [`declared_lane`] is the
+/// only way to obtain a lane, so no caller anywhere — production or test — can supply a `width`
+/// and hold a second opinion about the keyspace. Not a convention, not a gate: there is no path.
+fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x00000100000001b3;
     let mut hash = OFFSET;
@@ -28,11 +32,13 @@ pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
 /// review that is true of every routing site — the typed door, the entry constructors, the
 /// reminder scheduler and the generated clients all lost their `width` argument.
 ///
-/// **Precisely**: the PARAMETER is gone, not the possibility. [`stable_partition`] stays `pub` for
-/// tests (which legitimately compute an expected lane) and for its golden-value freeze, so the
-/// two-step `stable_partition(id, some_width)` remains SPELLABLE — it is simply not spelled
-/// anywhere outside this function and test code. Claiming more than that was itself a review
-/// finding on #596, so the claim is kept at its true size here.
+/// **Since #609 the possibility is gone too, not only the parameter.** `stable_partition` is
+/// private to this module, so `stable_partition(id, some_width)` is not spellable anywhere outside
+/// it — no `pub`, no feature gate, no export, and therefore nothing to enforce. #596's review
+/// caught the earlier version of this doc over-claiming exactly that, which is why the claim is
+/// stated flatly only now that the compiler carries it: the tests that used to compute an expected
+/// lane from a hand-copied width call [`declared_lane`] instead, so a fixture and a producer cannot
+/// disagree about the keyspace even in test code.
 ///
 /// The wrong source was a real, shipped, money-path defect:
 /// `chain_pm_copy_in_tx` derived the keyspace from `SELECT count(*) FROM mailbox_partitions`, a
@@ -82,6 +88,39 @@ mod tests {
         assert_eq!(stable_partition(&a, 100), 10);
         assert_eq!(stable_partition(&b, 100), 63);
         assert_eq!(stable_partition(&nil, 1), 0);
+    }
+
+    /// **A declared width is a MIGRATION, not a setting** — ADR-20260802-220402 had to remap every
+    /// non-terminal in-flight row when the width went 100 -> 5, and only because 5 divides 100.
+    /// Narrowing or widening one re-lanes every live aggregate of that actor.
+    ///
+    /// Until #609 that contract was pinned only INCIDENTALLY, by four integration assertions that
+    /// compared a production stamp against a hand-copied literal 5 (`graphql_typed_send` for Cart,
+    /// `drift_guard` for Order, two in `pm_prepare_delivery`). Converting those to
+    /// [`declared_lane`] makes both sides read the declaration, so they can no longer notice the
+    /// declaration moving — and three of the four only ran with a Postgres attached. The pin moves
+    /// HERE, where it is deliberate, names the reason, and fires on every `cargo test`.
+    ///
+    /// It pins the SHAPE, not the roster: a new actor taking the standard width adds nothing to
+    /// maintain, while changing an existing width — or introducing a second exception — stops the
+    /// build and asks for the migration story.
+    #[test]
+    fn every_declared_width_is_the_standard_one_because_changing_one_is_a_migration() {
+        for (actor_type, width) in crate::generated::addresses::ACTOR_MAILBOXES {
+            let expected: u16 = match *actor_type {
+                // Operator actions are rare and human-paced (specs/common/actors.yaml), and this is
+                // the ONLY non-5 width in the repository — the single thing that can distinguish
+                // "reads the declaration" from "happens to say 5".
+                "MailboxSupervision" => 1,
+                _ => 5,
+            };
+            assert_eq!(
+                *width, expected,
+                "'{actor_type}' declares width {width}, not {expected}: changing a declared width \
+                 re-lanes every in-flight row of that actor, so it needs a migration \
+                 (ADR-20260802-220402) — not just an edit to actors.yaml and this line"
+            );
+        }
     }
 
     #[test]

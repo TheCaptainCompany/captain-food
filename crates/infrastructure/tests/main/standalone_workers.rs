@@ -20,7 +20,8 @@ async fn standalone_fleet_delivers_without_a_monolith() {
     let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x57A1);
-    let partition = actor_client::stable_partition(&order, 5);
+    let partition = actor_client::declared_lane("Conversation", &order)
+        .expect("Conversation declares a mailbox");
     let message_id = uuid::Uuid::from_u128(0x57A2);
     sqlx::query(
         "INSERT INTO inbound_messages \

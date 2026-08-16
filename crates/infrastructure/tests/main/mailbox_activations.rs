@@ -160,7 +160,8 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
     let order = uuid::Uuid::from_u128(0xAC71);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 5);
+    let partition = actor_client::declared_lane("Conversation", &order)
+        .expect("Conversation declares a mailbox");
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(true);
@@ -279,7 +280,8 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
     let order = uuid::Uuid::from_u128(0xAC73);
     let restaurant = uuid::Uuid::from_u128(0x0E59);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 5);
+    let partition = actor_client::declared_lane("Conversation", &order)
+        .expect("Conversation declares a mailbox");
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(true);
@@ -376,7 +378,8 @@ async fn per_actor_opt_out_caches_nothing() {
     let order = uuid::Uuid::from_u128(0xAC72);
     let restaurant = uuid::Uuid::from_u128(0x0E58);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 5);
+    let partition = actor_client::declared_lane("Conversation", &order)
+        .expect("Conversation declares a mailbox");
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(false); // Conversation opted out (mailbox.activations: false)
