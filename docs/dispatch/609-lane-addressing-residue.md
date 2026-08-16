@@ -119,6 +119,33 @@ _(Lenses and the executor append here. Empty is not the same as unread — a len
 
 _(Card defect, minor: the amendment left the `## Findings` heading duplicated — the empty second copy is removed here.)_
 
+### Checkpoint verification (holub's condition) — **MISS**, one, narrow and attributable
+
+Banked honestly rather than conveniently, because a MISS is the outcome that carries information.
+
+**Did the narrow three-lens set miss anything the whole roster would have caught? Yes — one thing.**
+The four assertion sites were **incidentally pinning their actors' declared widths**, and Option B
+removes that pin. A declared width is a contract over **stored rows** — changing it re-lanes every
+non-terminal `inbound_messages` row, which is why ADR-20260802-220402 needed a migration and only
+worked because 5 divides 100. "This change quietly stops something from noticing a stored-shape
+contract move" is `young`'s lens (stored shapes, versioning, what a fold or a projection would have
+to replay), and `young` was **not at the briefing** — the roster was sized to three by the
+REVERSIBLE INTERNAL class. Had it gone unnoticed, Option B would have weakened a gate to get green
+while every gate reported green, which is precisely the class of thing the mob exists to stop.
+
+**Everything else that was wrong was missed by lenses that WERE invited, on their own home turf**:
+`beck` asserted the misroute site must hold a second opinion (it never stamps one), and both
+`vernon` and `beck` counted the call sites and got both numbers wrong. That is a depth failure of
+invited lenses, not evidence that the class needs more of them — inviting `young` would not have
+fixed `beck`'s count.
+
+So the honest reading is: **the class boundary leaked once, on the one axis where "internal
+refactor" and "stored-shape contract" touch.** Recommendation for the coordinator, offered rather
+than taken: the cheap fix is not reverting REVERSIBLE INTERNAL to the whole roster, but a standing
+question for any chunk that converts a hand-written expectation into a read of a declaration —
+**what was the hand-written expectation pinning, and what pins it now?** That is one line in a card
+template and it generalises past this area, where a fourth lens is a per-chunk cost forever.
+
 ### Executor findings — the card was wrong a third time, in three more places
 
 The card's own standing caution asked for this, so it is reported rather than absorbed. All three
