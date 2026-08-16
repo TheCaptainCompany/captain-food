@@ -219,6 +219,15 @@ pub enum InboundMessageKind {
     MESSAGE,
 }
 
+/// How a supervision lane relates to the DECLARED routing contract (#596). The lane monitor is driven by the declaration (actors.yaml `mailbox.partitions`), not by the `mailbox_partitions` registry, so it renders three genuinely different situations that were previously indistinguishable — a registry row is absent in two of them, and both rendered as `ownershipVersion 0` + `claimedBy null` + `checkpoint 0`, byte for byte. SEEDED = declared AND registered: a worker has started for it at some point, so the lease, fencing counter and checkpoint mean what they say. DECLARED_UNSEEDED = declared but NEVER registered: no worker has ever started for this lane in this database. Nothing owns it and nothing will drain it. With `pending > 0` this is the state that holds a paid order waiting on a worker that never started — the one an operator must be able to find, and the reason this field exists. UNDECLARED_ORPHAN = carrying work OUTSIDE the declared keyspace: rows stranded by a past width DECREASE, addressed to a partition the declaration no longer has. Nothing else in the system mentions them. `seed_partitions` now refuses the start that would create this state, so it can only be historical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum MailboxLaneRegistration {
+    SEEDED,
+    DECLARED_UNSEEDED,
+    UNDECLARED_ORPHAN,
+}
+
 /// Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]

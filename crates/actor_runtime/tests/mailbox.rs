@@ -703,3 +703,77 @@ async fn failed_prepare_aborts_delivery_and_row_stays_received() {
         .get("status");
     assert_eq!(status, "RECEIVED", "the row awaits redelivery — retry is the recovery");
 }
+
+/// **The startup DRIFT CHECK (#596)**, both directions, in the crate that owns the registry.
+///
+/// A width change is a STORED-SHAPE migration, not a configuration edit:
+/// `inbound_messages.partition` is stamped at INSERT, and both the lease and the completion fence
+/// are keyed by lane — so serving a new width over rows addressed with the old one puts a single
+/// aggregate in two lanes, each claimable by a different worker, each passing its own fence. The
+/// only safe answer at startup is to refuse.
+///
+/// The other direction is the one that must NOT be treated as drift: an EMPTY registry is a first
+/// boot. Refusing there would turn every fresh environment — and, after the #358 per-bin cutover,
+/// every newly deployed bin — into a crash loop, which is a worse outage than the defect the check
+/// exists to prevent.
+#[tokio::test]
+async fn seed_partitions_refuses_a_width_change_but_never_a_first_boot() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    // First boot: nothing seeded, so seed and proceed.
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("a first boot seeds");
+    let seeded: Vec<i16> = sqlx::query_scalar(
+        "SELECT partition FROM mailbox_partitions WHERE actor_type = 'Conversation' ORDER BY partition",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read the registry");
+    assert_eq!(seeded, vec![0, 1, 2, 3]);
+
+    // Re-running the SAME width is the idempotent restart, and must stay silent.
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("a restart re-seeds");
+
+    // A WIDENING is drift: rows already stamped for a 4-lane keyspace would be addressed against 8.
+    let widened = actor_runtime::seed_partitions(&pool, "Conversation", 8)
+        .await
+        .expect_err("widening an existing keyspace must refuse the start");
+    let widened = widened.to_string();
+    assert!(widened.contains("DRIFT for 'Conversation'"), "{widened}");
+    assert!(widened.contains("8 lane(s)") && widened.contains("4 lane(s)"), "{widened}");
+
+    // A NARROWING is drift too, and it is the direction that strands rows on lanes no worker maps
+    // to the actor anymore.
+    let narrowed = actor_runtime::seed_partitions(&pool, "Conversation", 2)
+        .await
+        .expect_err("narrowing an existing keyspace must refuse the start");
+    assert!(narrowed.to_string().contains("DRIFT for 'Conversation'"), "{narrowed}");
+
+    // The message must tell an operator which case they are in and how to get out, because the
+    // remedy for drift (clear the registry) is catastrophic if applied to a first boot's cause.
+    assert!(
+        narrowed.to_string().contains("NOT the 'not seeded yet' case"),
+        "{narrowed}"
+    );
+    assert!(narrowed.to_string().contains("drain"), "the cutover procedure: {narrowed}");
+
+    // A PARTIAL registry — the state a half-applied seed or an older narrower binary leaves — is
+    // drift as well, even though its row count is neither zero nor the declared width.
+    sqlx::query("DELETE FROM mailbox_partitions WHERE actor_type = 'Conversation' AND partition >= 2")
+        .execute(&pool)
+        .await
+        .expect("partially unseed");
+    let partial = actor_runtime::seed_partitions(&pool, "Conversation", 4)
+        .await
+        .expect_err("a partial registry must refuse the start");
+    assert!(partial.to_string().contains("DRIFT for 'Conversation'"), "{partial}");
+
+    // And clearing it entirely returns to the first-boot case: the documented way out.
+    sqlx::query("DELETE FROM mailbox_partitions WHERE actor_type = 'Conversation'")
+        .execute(&pool)
+        .await
+        .expect("clear the registry");
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("cleared => first boot");
+}

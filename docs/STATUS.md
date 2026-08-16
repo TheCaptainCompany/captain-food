@@ -2,6 +2,56 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛟 **2026-08-16 — A LANE IS ADDRESSED FROM THE DECLARATION, AND AN UNSEEDED LANE NOW WAITS INSTEAD OF
+> POISONING A PAID ORDER'S AUTHORIZATION**
+> ([#596 "chain_pm_copy_in_tx reads lane width from a seeded registry and errors at zero — an unseeded worker fails a paid order's saga"](https://github.com/TheCaptainCompany/captain-food/issues/596),
+> branch `596-chain-lane-width-declared`, [PR #607](https://github.com/TheCaptainCompany/captain-food/pull/607)
+> — merge posture **`HOLD: human`**, mailbox runtime. Card:
+> `docs/dispatch/596-chain-lane-width-declared.md`;
+> [ADR-20260816-165714](adr/ADR-20260816-165714-lane-addressing-is-declared-not-observed-and-an-unseeded-lane-must-wait.md).)
+>
+> **Reclassified by three lenses at the briefing: a ONE-WRITER violation, not a queueing nuisance.**
+> The lease is keyed by LANE (`actor_runtime/src/lease.rs`) and `completion.rs` fences on the lane's
+> checkpoint, so `stable_partition(actor_id, width)` is the only thing mapping an aggregate to
+> exactly one lane. Two producers with different widths put the same `Order-{id}` in two lanes, each
+> with a live lease, each passing its own fence — serialisation breaks at the addressing function,
+> upstream of any fence. Expected-version demotes it to a version conflict, but `prepare` runs before
+> `pool.begin()`, so **the Stripe intent already exists when the loser rejects**.
+>
+> **And it was worse than the issue title** (found while proving the red tests): the old zero-width
+> `Protocol` error took the POISON path — head-of-line on the Payment lane below the attempt cap, and
+> AT the cap it flipped **the authorization row itself** to terminal `FAILED`. "A worker has not
+> started" became **a paid customer whose order can never be born, even after the worker comes up**.
+> That residue is precisely what [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
+> says nothing detects.
+>
+> **Landed**: ONE accessor `actor_client::declared_lane(actor_type, actor_id)` over `ACTOR_MAILBOXES`,
+> and **no routing site takes a `width` any more**. That took the review to reach: the first draft
+> ASSERTED it while the typed door, the entry constructors, the reminder scheduler and a hand-copied
+> literal `5` in all 17 generated client crates still passed one, and used the assertion to drop the
+> planned grep gate. All of those lost the argument, emitter included; `stable_partition` stays `pub`
+> for tests and its golden freeze, so the two-step is still spellable and the records now say that
+> rather than rounding it up. The grep gate stays unwritten because the parameter is genuinely gone;
+> the residue is [#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609). **THREE sites, not the card's
+> two**: record-time chaining, the **flip-time backfill** (same `count(*)`, same zero-width error,
+> found independently by `dba` and `beck` — and worse there, a cold-start rescue pass that refused to
+> run when the system was cold), and the already-correct sibling converted so they cannot drift apart
+> again. Plus **a startup DRIFT CHECK** in `seed_partitions` (a non-empty registry describing a
+> different keyspace refuses the start; an EMPTY registry is a first boot and seeds — getting that
+> backwards would crash-loop every fresh bin after #358) carrying `vernon`'s drain-first cutover
+> procedure, and **the ADMIN lane monitor re-sourced from the declaration** so the fix does not trade
+> a loud wrong failure for a silent right one — a declared-but-unseeded lane holding an order is now
+> visible, as is the orphan a width decrease strands. **No flag** (`farley`): one valid path, and the
+> OFF state IS the paid-order-fails branch; rollback is `git revert` + one image.
+>
+> **After the #358 per-bin cutover the exposure window goes from seconds to INDEFINITE** — a Payment
+> bin can run while the target actor's bin is not deployed at all — so this is a precondition of that
+> cutover, not a tidy-up. **Past occurrences: none.** Production has no real customer orders (1 of 1
+> restaurants, registered by the smoke script; the only money-path traffic is prod-smoke L4 in Stripe
+> TEST mode), which discharges #608's ask on THIS chunk and says nothing about #608 itself.
+> Gates: `make rust` 0 errors / warnings unchanged, `make test-crates` on real Postgres **1250 passed,
+> 0 failed, 189 suites, no DB-skip receipt**; three mutants red over the two new tests + the accessor.
+
 > 🧑‍🤝‍🧑 **2026-08-16 — THE MOB'S CHECKPOINT IS NOW THE CONCERN-DECLARED SUBSET, AND REVIEW IS PRICED BY
 > REVERSIBILITY** (founder ruling on [DECISIONS §44 MOB-COST-1](proposals/DECISIONS.md), verbatim
 > *"Go for the Recommendation: (b)+(c), with holub's verification condition."*, recorded in

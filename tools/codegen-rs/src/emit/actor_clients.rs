@@ -228,7 +228,6 @@ unreachable_pub = "deny"
 /// and the client that enqueues through the door.
 fn client_lib(a: &ClientActor) -> String {
     let actor = &a.name;
-    let width = a.width;
     let mut out = String::new();
 
     out.push_str(&HEADER.replace("{ACTOR}", actor));
@@ -319,15 +318,15 @@ fn client_lib(a: &ClientActor) -> String {
         }
     }
 
-    out.push_str(&CLIENT_STRUCT.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
+    out.push_str(&CLIENT_STRUCT.replace("{ACTOR}", actor));
     if !a.commands.is_empty() {
-        out.push_str(&SEND.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
+        out.push_str(&SEND.replace("{ACTOR}", actor));
     }
     if !a.facts.is_empty() {
         out.push_str(&RECORD.replace("{ACTOR}", actor));
     }
     if a.reminders {
-        out.push_str(&SCHEDULE.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
+        out.push_str(&SCHEDULE.replace("{ACTOR}", actor));
     }
     if !a.answers.is_empty() {
         out.push_str(&ASK.replace("{ACTOR}", actor).replace("{MODULE}", &snake_type(actor)));
@@ -438,8 +437,13 @@ pub trait {ACTOR}Fact: sealed::Sealed + serde::Serialize + Send {
 
 const CLIENT_STRUCT: &str = r#"
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `{ACTOR}` mailbox lane --
-/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width {WIDTH} (`mailbox.partitions`). The only door to this actor.
+/// `actor_id` is the addressed instance and the partition is derived by `declared_lane` from the
+/// DECLARED `mailbox.partitions` width. The only door to this actor.
+///
+/// This client does NOT carry the width (#596). It used to be emitted as a literal into every
+/// send/schedule call, which made each generated client an independent copy of a routing constant
+/// that only ever has one correct value -- and disagreeing copies of that constant are how one
+/// aggregate ends up in two lanes, each with a live lease.
 pub struct {ACTOR}Client {
     door: ActorDoor,
     actor_id: uuid::Uuid,
@@ -465,7 +469,7 @@ const SEND: &str = r#"
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.door.assert_addressed("{ACTOR}Client", self.actor_id, M::MESSAGE_TYPE, &payload)?;
         self.door
-            .send_command("{ACTOR}", {WIDTH}, self.actor_id, M::MESSAGE_TYPE, payload, env)
+            .send_command("{ACTOR}", self.actor_id, M::MESSAGE_TYPE, payload, env)
             .await
     }
 "#;
@@ -513,7 +517,7 @@ const SCHEDULE: &str = r#"
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.door.assert_addressed("{ACTOR}Client", self.actor_id, M::MESSAGE_TYPE, &payload)?;
         self.door
-            .schedule_command("{ACTOR}", {WIDTH}, self.actor_id, M::MESSAGE_TYPE, payload, env, at)
+            .schedule_command("{ACTOR}", self.actor_id, M::MESSAGE_TYPE, payload, env, at)
             .await
     }
 

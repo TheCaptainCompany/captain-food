@@ -159,8 +159,13 @@ impl PaymentAnswer for domain::generated::answers::PaymentSettlementViewRequest 
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Payment` mailbox lane --
-/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 5 (`mailbox.partitions`). The only door to this actor.
+/// `actor_id` is the addressed instance and the partition is derived by `declared_lane` from the
+/// DECLARED `mailbox.partitions` width. The only door to this actor.
+///
+/// This client does NOT carry the width (#596). It used to be emitted as a literal into every
+/// send/schedule call, which made each generated client an independent copy of a routing constant
+/// that only ever has one correct value -- and disagreeing copies of that constant are how one
+/// aggregate ends up in two lanes, each with a live lease.
 pub struct PaymentClient {
     door: ActorDoor,
     actor_id: uuid::Uuid,

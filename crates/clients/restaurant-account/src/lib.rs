@@ -55,8 +55,13 @@ impl RestaurantAccountCommand for domain::generated::commands::UpdateRestaurantA
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RestaurantAccount` mailbox lane --
-/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 5 (`mailbox.partitions`). The only door to this actor.
+/// `actor_id` is the addressed instance and the partition is derived by `declared_lane` from the
+/// DECLARED `mailbox.partitions` width. The only door to this actor.
+///
+/// This client does NOT carry the width (#596). It used to be emitted as a literal into every
+/// send/schedule call, which made each generated client an independent copy of a routing constant
+/// that only ever has one correct value -- and disagreeing copies of that constant are how one
+/// aggregate ends up in two lanes, each with a live lease.
 pub struct RestaurantAccountClient {
     door: ActorDoor,
     actor_id: uuid::Uuid,
@@ -80,7 +85,7 @@ impl RestaurantAccountClient {
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.door.assert_addressed("RestaurantAccountClient", self.actor_id, M::MESSAGE_TYPE, &payload)?;
         self.door
-            .send_command("RestaurantAccount", 5, self.actor_id, M::MESSAGE_TYPE, payload, env)
+            .send_command("RestaurantAccount", self.actor_id, M::MESSAGE_TYPE, payload, env)
             .await
     }
 }

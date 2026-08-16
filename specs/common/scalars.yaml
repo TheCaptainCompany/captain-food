@@ -362,6 +362,26 @@ InboundMessageKind:
     (§3.4) — neither rejectable nor a business fact.
 
 
+MailboxLaneRegistration:
+  type: string
+  enum: [SEEDED, DECLARED_UNSEEDED, UNDECLARED_ORPHAN]
+  description: >
+    How a supervision lane relates to the DECLARED routing contract (#596). The lane monitor is
+    driven by the declaration (actors.yaml `mailbox.partitions`), not by the `mailbox_partitions`
+    registry, so it renders three genuinely different situations that were previously
+    indistinguishable — a registry row is absent in two of them, and both rendered as
+    `ownershipVersion 0` + `claimedBy null` + `checkpoint 0`, byte for byte.
+    SEEDED = declared AND registered: a worker has started for it at some point, so the lease,
+    fencing counter and checkpoint mean what they say.
+    DECLARED_UNSEEDED = declared but NEVER registered: no worker has ever started for this lane in
+    this database. Nothing owns it and nothing will drain it. With `pending > 0` this is the state
+    that holds a paid order waiting on a worker that never started — the one an operator must be
+    able to find, and the reason this field exists.
+    UNDECLARED_ORPHAN = carrying work OUTSIDE the declared keyspace: rows stranded by a past width
+    DECREASE, addressed to a partition the declaration no longer has. Nothing else in the system
+    mentions them. `seed_partitions` now refuses the start that would create this state, so it can
+    only be historical.
+
 InboundMessageStatus:
   type: string
   enum: [SCHEDULED, CANCELLED, RECEIVED, SUCCEEDED, REJECTED, FAILED, IGNORED, DUPLICATE]

@@ -83,6 +83,22 @@ mailbox_partitions:
     transaction: a stale owner's commit matches 0 rows and rolls back whole, event append
     included). The doubling of checkpoint table and lease table is deliberate — one row is the
     single authority on a partition. Also the ops surface: the mailbox lane monitor reads it.
+
+    NOT THE ROUTING SOURCE (#596). This table answers "who owns this lane, and how far has it
+    got" — lease, ownership_version, checkpoint, and the ops monitor. It never answers "which
+    lane does this aggregate belong to": that is `stable_partition(actorId, width)` where width
+    is the DECLARED actors.yaml `mailbox.partitions`, read through the one accessor
+    `actor_client::declared_lane`. The rows here are a RUNTIME artifact — nothing seeds them but
+    a worker starting up, migrations never touch them — so they can legitimately be absent,
+    partial or stale, and a routing function that consulted them addressed a keyspace no other
+    producer shared. Because the lease and the completion fence are both keyed by LANE, two
+    producers disagreeing on the width put one aggregate in two lanes, each with a live lease,
+    each passing its own fence: one-writer breaks at the addressing function, upstream of any
+    fence. A CHANGE to a declared width is therefore a stored-shape MIGRATION, not a config
+    edit — `inbound_messages.partition` is stamped at INSERT — and its cutover requires the
+    affected actor's inbound_messages backlog drained (or exactly one worker running) before the
+    new width serves. `seed_partitions` refuses to start on a non-empty registry that describes a
+    different keyspace; an EMPTY registry is a first boot, not drift.
   columns:
     actor_type:        { type: text, pk: true, note: "actors.yaml actor." }
     partition:         { type: smallint, pk: true, note: "0 .. mailbox.partitions-1." }

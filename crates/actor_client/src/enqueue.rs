@@ -79,7 +79,9 @@ pub async fn enqueue_worker_command(
     payload: serde_json::Value,
     actor: &Actor,
 ) -> Result<EnqueueOutcome, DomainError> {
-    let Some((actor_type, _, width)) = mailbox_address(command_type) else {
+    // The width element of `mailbox_address`'s tuple is deliberately ignored (#596): addressing
+    // reads the declaration through `command_entry`, and nothing may pass a width in.
+    let Some((actor_type, _, _)) = mailbox_address(command_type) else {
         return Err(DomainError::Repository(format!(
             "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
         )));
@@ -87,7 +89,6 @@ pub async fn enqueue_worker_command(
     let actor_id = declared_identity(command_type, &payload)?.unwrap_or_else(uuid::Uuid::now_v7);
     let entry = command_entry(
         actor_type,
-        width,
         actor_id,
         command_type,
         payload,
@@ -101,7 +102,7 @@ pub async fn enqueue_worker_command(
             user_type: actor.user_type.clone(),
             channel: "WORKER".into(),
         },
-    );
+    )?;
     let payload_hash = entry.payload_hash.clone();
     insert_mapped(mailbox, entry, &payload_hash).await
 }
@@ -112,19 +113,28 @@ pub async fn enqueue_worker_command(
 /// or envelope columns — the clients only assemble typed inputs and delegate here.
 pub(crate) fn command_entry(
     actor_type: &str,
-    width: u16,
     actor_id: uuid::Uuid,
     command_type: &str,
     payload: serde_json::Value,
     env: Envelope,
-) -> MailboxEntry {
+) -> Result<MailboxEntry, DomainError> {
+    // #596: the lane comes from `declared_lane`, and this constructor no longer TAKES a width.
+    // It used to receive one from each caller — the typed door passed a literal the emitter had
+    // written into every generated client, so the routing constant existed in as many copies as
+    // there are actors. A parameter is a decision point, and the whole finding of #596 is that
+    // deciding where a width comes from is what broke one-writer.
+    let Some(partition) = crate::partition::declared_lane(actor_type, &actor_id) else {
+        return Err(DomainError::Repository(format!(
+            "'{actor_type}' is not a mailbox actor — command '{command_type}' has no lane"
+        )));
+    };
     let payload_hash = application::journal::payload_hash(&payload);
-    MailboxEntry {
+    Ok(MailboxEntry {
         message_id: env.message_id,
         kind: "COMMAND".into(),
         actor_type: actor_type.into(),
         actor_id,
-        partition: crate::partition::stable_partition(&actor_id, width),
+        partition,
         message_type: command_type.into(),
         payload,
         payload_hash,
@@ -137,7 +147,7 @@ pub(crate) fn command_entry(
         trace_id: env.trace_id,
         source: None,
         external_id: None,
-    }
+    })
 }
 
 /// One adapted inbound BUSINESS fact, ready for the mailbox (kind EVENT). The producer names the
@@ -231,7 +241,7 @@ pub async fn enqueue_inbound_fact(
 /// undeclared (actor, event) pair is refused at the door — the interim containment while the D8
 /// typed-batch API stays deferred.
 pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
-    let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == fact.actor_type) else {
+    let Some(partition) = crate::partition::declared_lane(&fact.actor_type, &fact.actor_id) else {
         return Err(DomainError::Repository(format!(
             "'{}' is not a mailbox actor — inbound fact '{}' has no lane",
             fact.actor_type, fact.event_type
@@ -268,7 +278,7 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
         kind: "EVENT".into(),
         actor_type: fact.actor_type.clone(),
         actor_id: fact.actor_id,
-        partition: crate::partition::stable_partition(&fact.actor_id, *width),
+        partition,
         message_type: fact.event_type,
         payload: fact.payload,
         payload_hash: payload_hash.clone(),
@@ -376,7 +386,7 @@ pub async fn schedule_reminder(
     policy: crate::mailbox::ReschedulePolicy,
     correlation_id: uuid::Uuid,
 ) -> Result<ScheduleOutcome, DomainError> {
-    let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {
+    let Some(partition) = crate::partition::declared_lane(actor_type, &actor_id) else {
         return Err(DomainError::Repository(format!(
             "'{actor_type}' is not a mailbox actor — reminder '{reminder_name}' has no lane"
         )));
@@ -397,7 +407,7 @@ pub async fn schedule_reminder(
         kind: "MESSAGE".into(),
         actor_type: actor_type.to_owned(),
         actor_id,
-        partition: crate::partition::stable_partition(&actor_id, *width),
+        partition,
         message_type: event_type,
         payload: payload_event_tagged,
         payload_hash: payload_hash.clone(),
