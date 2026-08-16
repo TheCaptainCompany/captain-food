@@ -8,6 +8,7 @@ pub(crate) mod core; // §1 validate() orchestrator + resolver-args checks
 pub(crate) mod databases; // §18 database catalog + per-kind placement (#494 slice 1)
 pub(crate) mod lifecycles; // §2c aggregate lifecycles (parse + validate)
 pub(crate) mod mailbox; // §2d actor-mailbox addressing + §2e declared state/requires
+pub(crate) mod metric_emitters; // §20 declared-but-silent metrics (observability.yaml vs crates/**, #608)
 pub(crate) mod process_managers; // §2b typed-step process managers
 pub(crate) mod proposals; // §13 docs/proposals hygiene
 pub(crate) mod read_targets; // §5c-bis read-target ownership (reads/readsInfrastructure, ADR-20260812-214500)
@@ -26,6 +27,7 @@ pub(crate) use core::*;
 pub(crate) use databases::*;
 pub(crate) use lifecycles::*;
 pub(crate) use mailbox::*;
+pub(crate) use metric_emitters::*;
 pub(crate) use process_managers::*;
 pub(crate) use proposals::*;
 pub(crate) use read_targets::*;

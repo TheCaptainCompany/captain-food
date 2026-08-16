@@ -303,6 +303,102 @@ place-order:
     # series during exactly the rolling deploy this is meant to watch. `bin` stays, because one
     # deploy runs several DIFFERENT binaries and their disagreement is the hazard.
     - { name: "runtime_flag_state", type: gauge, attributes: ["flag", "value", "bin"] }
+    # ================================================================================================
+    # THE BIRTH-GAP DEAD-MAN'S SWITCH (#608) — "money is held and no order exists", made a signal
+    # the system EMITS rather than a fact someone eventually notices.
+    #
+    # THE QUESTION IT ANSWERS: *is there a customer whose card is authorized right now with no
+    # order behind it, and for how long has that been true?* That is the product's worst failure
+    # mode (CLAUDE.md domain lens) with the money already moved.
+    #
+    # WHY IT IS NOT `payment_authorized_unsettled_age_seconds` (payment-settlement): that gauge is
+    # computed over the OrderTracking read model, and an order that was NEVER BORN has no
+    # OrderTracking row. It is structurally blind to exactly this case. Its header has been
+    # corrected; the two gauges are complementary and are emitted by the SAME sweep.
+    #
+    # THE SOURCE IS THE SAGA'S OWN RUN STATE, NOT AN ANTI-JOIN OF TWO AGGREGATES (vernon,
+    # ADR-20260816-213000). The deciding fact: the `payment_process_manager` row is created at
+    # CHECKOUT (the PlaceOrder handler opens the run at AWAITING_PAYMENT_RESULT before any Stripe
+    # outcome exists), not at PM processing time — the PM legs only `expect` an existing row. So an
+    # authorization the saga never processed STILL HAS A RUN ROW, and the population is
+    # single-owner, single-write-path, with no cross-aggregate simultaneity to reason about.
+    #
+    # THREE REASONS, ONE BOUNDED LABEL SET — one gauge, never three:
+    #   retry_pending      — the PaymentAuthorized hop is on the PlaceOrderProcess lane and still
+    #                        DELIVERABLE (RECEIVED/SCHEDULED) while the run is AWAITING_PAYMENT_RESULT.
+    #                        Time may still fix this, so it gets the lane-derived threshold below.
+    #   delivery_exhausted — the hop reached a TERMINAL status (FAILED at the attempts cap,
+    #                        REJECTED, IGNORED, ...) and the run is STILL AWAITING_PAYMENT_RESULT.
+    #                        Nothing will ever redeliver it, so waiting is pointless and the
+    #                        threshold is ZERO.
+    #   no_run             — a PaymentAuthorized fact in `domain_events` whose intent has NO
+    #                        `payment_process_manager` row at all. The residue the run-state source
+    #                        cannot cover: `PlaceOrder` performs TWO sequential unfenced durable
+    #                        writes (the Stripe intent-create, then the run-row upsert), and a crash
+    #                        between them leaves funds held with no run. The webhook leg then finds
+    #                        nothing by intent and skips, while the Payment aggregate still records
+    #                        PaymentAuthorized — visible ONLY in the log. Threshold ZERO.
+    #
+    # ZEROS ARE THE CONTRACT. Every member of the label set is emitted on EVERY sweep, 0 included,
+    # and `payment_birth_gap_sweep_heartbeat_total` increments after a COMPLETE sweep. An absent
+    # series must never be readable as "nothing stranded": that is ADR-20260810-231300's defect
+    # class — a monitor that can only fire when a signal ARRIVES goes quiet exactly when it should
+    # scream. An early return on an empty population is the specific bug to design against.
+    #
+    # THE FOLD IS OVER OPENNESS, NEVER AGE (young). Nothing materialises `ageSeconds` or
+    # `isOrphaned`: the sweep reads the OPEN set and its stored timestamps and subtracts `now()` at
+    # QUERY time. A stored age would be rewritten by rebuild-time `now` — truncate, replay, diff:
+    # the open set and its timestamps must come back identical.
+    #
+    # OPERATIONAL, NOT BAM (ADR-20260811-014129): this is a dead-man's switch on the money path. It
+    # must work when the business read models are broken, so it stays on OTLP and is NOT a `bam`
+    # fold. It reads Postgres because the durable record IS Postgres; when Postgres is down the
+    # series stops, which is itself the alarm.
+    #
+    # RUNBOOK — the named response, without which an alert is a control that renders and does
+    # nothing (business): docs/runbooks/authorized-payment-no-order-birth.md.
+    # KNOWN GAP, recorded rather than invented: there is no alert-ROUTE wiring anywhere in this
+    # repo, so no human or rota is named by any artifact. Same gap as the
+    # `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` flip's "the rollback trigger has no
+    # observer" obligation, which is founder-gated. Naming the route is not this contract's to do.
+    - name: "payment_authorized_no_order_birth_age_seconds"
+      type: gauge
+      attributes: ["reason"]
+      # The BOUNDED population of the grouping key, DECLARED (ADR-20260811-014129: a grouping key
+      # needs a declared bounded population). This list is a DECLARATION, so the members are bare
+      # names; every other reference to them is a `$ref`. The emitter iterates exactly this set,
+      # which is what makes "0 for every member, every tick" expressible at all.
+      attribute_values:
+        reason: [retry_pending, delivery_exhausted, no_run]
+      # PAGE ON THE FIRST ONE (business): at V0 the base rate is ~0/day and no rate of "a customer's
+      # money is held with nothing behind it" is tolerable, so noise is not an argument against
+      # alerting immediately. `retry_pending` is the only member with a non-zero threshold, and it
+      # is LANE-DERIVED rather than a wall-clock guess (vernon): the honest bound on a hop that the
+      # mailbox may still redeliver is the whole exponential retry schedule.
+      thresholds:
+        # base * (2^cap - 1) = 10 * (2^5 - 1) = 310 s to terminal, from the DECLARED keys below:
+        # `retry_spacing_seconds` is bound to MAILBOX_HEARTBEAT_SECONDS by every composition root,
+        # and MAILBOX_MAX_DELIVERY_ATTEMPTS's own `gates` prose spells the same schedule out
+        # (10 -> 20 -> 40 -> 80 -> 160, "~5 min to terminal at cap 5"). NOTE the backoff is
+        # EXPONENTIAL, not linear: a `cap * base` reading gives 50 s and would page on every
+        # healthy retry. 600 s = 310 s plus roughly one schedule of slack for claim/lease/drain.
+        - reason: retry_pending
+          max_age_seconds: 600
+          derived_from:
+            - { $ref: 'configuration.yaml#/keys/MAILBOX_MAX_DELIVERY_ATTEMPTS' }
+            - { $ref: 'configuration.yaml#/keys/MAILBOX_HEARTBEAT_SECONDS' }
+        # No further delivery will ever happen: time cannot help, so any age is already too much.
+        - reason: delivery_exhausted
+          max_age_seconds: 0
+        # Funds held with no run at all: nothing in the system is even trying.
+        - reason: no_run
+          max_age_seconds: 0
+    # The sweep's own LIVENESS (#608). Monotonic, incremented once per COMPLETED sweep — after all
+    # three reason series and the payment-settlement gauge have been emitted, never before, so it
+    # cannot certify a half-run pass. ALERT ON THE ABSENCE OF AN INCREMENT, never on a threshold:
+    # the gauges above are 0 on a healthy system, and 0 is indistinguishable from "the sweep died"
+    # without this counter. Same shape and same reason as `order_lane_watch_heartbeat_total`.
+    - { name: "payment_birth_gap_sweep_heartbeat_total", type: counter, attributes: [] }
   business_metrics:
     - { name: "orders_placed_total", type: counter, attributes: ["status"] }
     - { name: "checkout_payment_failures_total", type: counter, attributes: ["reason"] }
@@ -509,9 +605,18 @@ refund:
 # is the liveness proof: the AGE of the OLDEST order still `payment_status = AUTHORIZED`, computed by
 # a timer-driven reconciling sweep over the OrderTracking read model (the "sleep until the next due
 # row" time-triggered pattern — NOT a fixed-interval poll of a push path). It PAGES above a threshold
-# set well under the 7-day expiry and above the delivery-SLA + webhook-lag envelope (~2h). The sweep
-# RUNTIME that emits this gauge is a tracked CRITICAL follow-up (a new reconciling worker/bin) — this
-# contract declares the signal so the runtime cannot land it silently or omit it.
+# set well under the 7-day expiry and above the delivery-SLA + webhook-lag envelope (~2h).
+#
+# WHAT IT DOES **NOT** COVER (#608 — this header previously claimed coverage it does not have).
+# The gauge is computed over the OrderTracking read model, so its population is orders that WERE
+# BORN and were never captured. An authorization whose order was **never born** has no
+# OrderTracking row and is structurally invisible here — and that is the case where the money is
+# held with nothing at all behind it. That population has its own contract and its own gauge,
+# `place-order` / `payment_authorized_no_order_birth_age_seconds{reason}`, sourced from the
+# PlaceOrderProcess run state plus the log residue. The two are complementary and are emitted by
+# the SAME sweep (`infrastructure::mailbox::birth_gap_watch_tick`, #608) — this gauge had ZERO
+# emit sites in `crates/**` until then, and a declared-but-silent contract is the failure the
+# `obs-metric-no-emitter` validator rule now ratchets against.
 # =====================================================================
 payment-settlement:
   feature: payment-settlement
@@ -560,10 +665,12 @@ payment-settlement:
     - { name: "payment_capture_failed_total", type: counter, attributes: ["reason"] }
     # Warn-level: a failed void self-heals via the ~7-day authorization expiry.
     - { name: "payment_release_failed_total", type: counter, attributes: ["reason"] }
-    # DEAD-MAN'S-SWITCH (see header): the age of the oldest still-AUTHORIZED order, emitted by the
-    # timer-driven reconciling sweep. PAGES above the delivery-SLA + webhook-lag envelope and well
-    # under the ~7-day hold expiry — catches the never-attempted capture that the counter above
-    # cannot. Emitter runtime is a tracked CRITICAL follow-up; the signal is declared here first.
+    # DEAD-MAN'S-SWITCH (see header): the age of the oldest OrderTracking row still
+    # `payment_status = AUTHORIZED`, from its immutable `placed_at`. PAGES above the
+    # delivery-SLA + webhook-lag envelope and well under the ~7-day hold expiry — catches the
+    # never-attempted CAPTURE that the counter above cannot. Emitted since #608 by
+    # `infrastructure::mailbox::birth_gap_watch_tick`, the same sweep that carries the birth-gap
+    # gauge; it covers born-but-never-captured ONLY, never the never-born case (see header).
     - { name: "payment_authorized_unsettled_age_seconds", type: gauge, attributes: [] }
 
   status_rules:

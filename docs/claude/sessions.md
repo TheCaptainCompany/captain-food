@@ -293,12 +293,33 @@ with a single `pg_ctl start` **once space is free** — no `initdb`, no data los
 and do not re-init in a panic. Free disk before a workspace build whenever a cluster is up. Cost here:
 one lost compile plus a recovery round, on top of the build that caused it.
 
-**After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
-`make rust` check-drift ran a STALE `generate` binary right after the deps sweep and mass-pruned
-the five freshly generated `crates/bins/adapter-*` crates (a diff of 4 775 deletions that looked
-exactly like an emitter bug); the immediate rerun rebuilt and passed with zero drift. Cost: ~30
-min of debugging a phantom. If check-drift fails with an implausible mass-deletion right after a
-`target/debug` cleanup, rerun it before touching the emitter.
+**ANY disturbance of `target/` can leave cargo serving a STALE artifact it believes is fresh — and
+the quiet failure is worse than the loud one** (2026-08-08 + 2026-08-16 #609, one rule; the two
+occurrences differ only in which artifact went stale). Cargo trusts its fingerprints, and a
+hand-deletion or an interrupted compile desynchronises them from what is actually on disk. Both
+directions have now cost a session:
+
+- **LOUD, and therefore cheap.** One `make rust` check-drift ran a STALE `generate` binary right
+  after the deps sweep and mass-pruned the five freshly generated `crates/bins/adapter-*` crates —
+  4 775 deletions that looked exactly like an emitter bug. The immediate rerun rebuilt and passed
+  with zero drift. Cost ~30 min of debugging a phantom. **If check-drift fails with an implausible
+  mass-deletion right after a `target/debug` cleanup, rerun it before touching the emitter.**
+- **QUIET, and nearly fatal to a run's evidence.** After hand-deleting top-level link products,
+  `cargo test --workspace` re-linked `actor_client`'s unit binary from cached objects instead of
+  recompiling the changed source: **a test added ten minutes earlier was NOT IN THE BINARY**
+  (`running 11 tests` where the same source under `cargo test -p actor_client` gave 12). The suite
+  reported **1251 passed, 0 failed, exit 0** and the brand-new gate had never executed. Nothing goes
+  red, so **no gate can catch this** — it is the one failure mode that survives a green board.
+
+Three defences, all cheap:
+
+1. **`cargo clean -p <crate>` every package you edited**, before believing a green run, after *any*
+   manual deletion inside `target/` — and after any build that died mid-compile, ENOSPC included,
+   where the packages that were compiling at the moment it died are the suspects.
+2. **Verify a newly added test BY NAME in the run log** (`grep -a '^test .*<name> \.\.\. ok'`), never
+   by the total. `1252 → 1251, still green` reads as noise, and that is exactly what it looks like.
+3. **Distrust the FIRST post-cleanup result** of anything, and rerun before drawing a conclusion
+   from it.
 
 **A NEW workspace crate fails the determinator gate until it is COMMITTED (2026-08-10):**
 `closure::tests::hashes_are_total_and_deterministic` panics with `closure dir 'crates/<new>' has no
@@ -1087,29 +1108,15 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   them took the allowance from 2.3G to 6.9G. Same class as the dead worktree above and same price —
   free — but easier to miss, because nothing in `git status` mentions the scratchpad. Check it before
   every `target/debug` lever in §2, all of which cost a rebuild.
-- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING, and it can make
-  cargo SERVE A STALE TEST BINARY** (2026-08-16, #609 — the second half is the expensive part).
-  Cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
-  zero bytes. It looks like the biggest lever on the list and is not a lever at all. **Worse: after
-  that hand-deletion, `cargo test --workspace` re-linked `actor_client`'s unit binary from cached
-  objects instead of recompiling the changed source, and a test added ten minutes earlier was NOT
-  IN THE BINARY** — `running 11 tests` where the same source built with `cargo test -p actor_client`
-  gave 12. The suite reported **1251 passed, 0 failed, exit 0**, and the brand-new gate had never
-  executed. `cargo clean -p actor_client` restored it immediately.
-
-  **The tell is a test COUNT, not a failure** — nothing goes red, so no gate can catch it. Two
-  defences, both cheap:
-  - **After any manual deletion inside `target/`, `cargo clean -p <crate>` every package you edited
-    before believing a green run.** Reclaiming disk by hand desynchronises cargo's fingerprints from
-    what is actually on disk; cargo trusts the fingerprints.
-  - **Verify by NAME that a newly added test appears in the run** (`grep -a '^test .*<name> \.\.\. ok'`
-    over the log), never by the total. A count that drops by one while everything passes is exactly
-    what this looks like, and "1252 → 1251, still green" is easy to read as noise.
-
-  The real disk levers are above — dead worktrees, the scratchpad sweep, then `incremental`, and
-  `cargo clean -p` on a few big packages (2.7 GB here) which is honest and cheap. Symptom that sent
-  this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit` while
-  `df` still reported 2.3G free, which is §2's "writes fail while the numbers still look fine".
+- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING** (2026-08-16, #609):
+  cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
+  zero bytes. It looks like the biggest lever on this list and is not a lever at all. **It is also
+  not free** — that hand-deletion is what desynchronised the fingerprints in §2's stale-artifact
+  rule, which cost a run its evidence; read that rule before reaching in here by hand. The honest
+  levers are above (dead worktrees, the scratchpad sweep, then `incremental`) plus `cargo clean -p`
+  on a few big packages, which was 2.7 GB here and leaves cargo's bookkeeping intact. Symptom that
+  sent this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit`
+  while `df` still reported 2.3G free — §2's "writes fail while the numbers still look fine".
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
   allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
   checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses
@@ -1275,6 +1282,44 @@ to see a split fleet was the one monitor with zero reds. Two consequences, both 
   composition root, drive the composition root — it is `pub`, it resolves real values, and asserting
   against the values it RESOLVED (never a literal) is what separates the test from the tautology.
 
+**A monitor whose HEALTHY value is ZERO needs five assertions, not one** (2026-08-16, #608 —
+the general form of the two rules above, and of #598's second-drain lesson). "The gauge reads 0" is
+satisfied by a dead emitter, an absent series, a hard-coded constant, an emitter that fired once at
+startup, and a correct monitor — five different worlds, one observation. Three signals nearly
+shipped unverified in one session on exactly that. The suite:
+
+1. **presence** — with nothing wrong, a data point EXISTS for every declared label value, at 0,
+   asserted **by equality over the full point set**. `contains` cannot see the member that stopped
+   reporting, which is the failure the zero contract exists to prevent.
+2. **a VALUE-DERIVED positive control** — not "it went above zero": two subjects at DISTINCT
+   magnitudes must yield the right one, and a **second scenario at a different magnitude must yield
+   a different number**. Without the second, a latched constant passes everything.
+   **A SIXTH world hides here, and it shipped**: the query's population may be EMPTY IN THE TEST
+   BINARY. #608's second gauge read `ordertracking` while nothing in that binary projected — 0 rows
+   for the whole suite against 3 `OrderPlaced` in `domain_events` — so mis-spelling its predicate
+   (`'AUTHORIZED'` → `'AUTHORISED'`) left the suite GREEN, and the metric was claimed "no longer
+   silent" in an ADR, SPEC-LOG and STATUS on the strength of a runtime nobody had seen work. **Every
+   table a monitor reads needs a row that arrived the way production makes it** (here: run the real
+   `ProjectionWorker`) — a gauge over a permanently-empty population is not distinguishable on a
+   dashboard from the declared-but-silent state it replaced. Corollary for `obs-metric-no-emitter`
+   (validator §20) and any rule like it: it proves a name can be SPELLED at a call site, never that
+   the call site is reached with a value.
+3. **a SAME-SWEEP negative control** — a subject that must NOT be counted, present in the same
+   state on the same tick. Without it, "count everything" passes. **Age the excluded subject too**:
+   #608's negative control was vacuous at its own assertion point because the born order's hop was
+   fresh, so `max(age)` over the wrongly-included row was 0 and the drop-the-exclusion mutant passed
+   there, dying three assertions later. A control whose subject reads the healthy value anyway
+   discriminates nothing where it claims to.
+4. **repetition** — a second tick over unchanged state must re-emit. Under delta temporality a
+   once-at-startup emitter drains identically to a correct one on tick 1, and *every tick* is the
+   whole dead-man's-switch claim.
+5. **recovery** — fix the condition and the next tick must return to 0. A gauge nobody can close an
+   incident on is not a gauge.
+
+Plus one guard the harness itself needs: assert the exporter is non-empty overall and fail with
+*"spy provider not installed before first meter call"* — the `OnceLock` meter binding makes a silent
+no-op provider the default failure, and it looks exactly like "nothing was emitted".
+
 **A visibility seal must be measured with `cargo build`, and `cargo test` is not the same
 question** (2026-08-16, #609, measured both ways). A `#[cfg(any(test, feature = "test-fixtures"))]`
 re-export looks like a seal and is one *for release artifacts only*. With a caller planted in a
@@ -1369,6 +1414,16 @@ belongs to whoever holds the feature branch. Same root cause, other direction: *
 dispatch targeting `main` must open with an explicit `git checkout main`** — an executor dispatched
 for a `main` docs task started on a feature branch someone else had left checked out, correctly
 refused to write, and burned its entire run doing nothing before a session limit killed it.
+
+**The COORDINATOR is a writer too, and that is the case that actually fires** (2026-08-16, #608).
+The rule above was worded for reviewers and executors, so it read as satisfied while the coordinator
+kept using the shared checkout for its own work: mid-review of #608 that checkout was switched off
+the branch, a #609 dispatch card was committed onto it and cherry-picked to `main`. It cost nothing
+this time — branch refs came through intact (`local == origin == 5354d31`), PR content unaffected,
+and the reviewer had already moved to its own linked worktree — but only because the reviewer had
+independently isolated itself. **Nobody writes in the shared checkout while a dispatch is live in
+it, the coordinator included**; claim commits and docs commits are writes, and `git worktree add` is
+200 ms. The reviewer's isolation is a second belt, never the reason this was safe.
 
 ### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
 
