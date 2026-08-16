@@ -15,9 +15,18 @@
 //! mis-described it, because it fired on a PRESENT call, which privacy handles exactly.
 //!
 //! So the emit decision is now **private to this module**: [`record_order_placements`] is
-//! unspellable from any delivery route, in this crate or any other, and the only caller it can
-//! ever have is [`flush_staged_in_tx`] below. The scan is deleted — deleting a gate the compiler
-//! subsumes is the correct outcome (ADR-20260803-234035, compiler first, a check is the fallback).
+//! unspellable from any delivery route, in this crate or any other, in every build configuration —
+//! and the only caller it can ever have is [`flush_staged_in_tx`] below. The scan is deleted —
+//! deleting a gate the compiler subsumes is the correct outcome (ADR-20260803-234035, compiler
+//! first, a check is the fallback).
+//!
+//! **No test seam, deliberately** (#597 review). The first cut of this exposed a cfg-gated
+//! `record_order_placements_spy` for the out-of-crate #456 proof — which was itself a `pub` in a
+//! private module, so under `test-fixtures` every sibling route could name it again: the very hole
+//! this module exists to close, merely narrowed to one build configuration. There was no need:
+//! [`flush_staged_in_tx`] is already `pub` and the emit is already the last thing it does, so the
+//! proof drives the flush against real Postgres and is STRONGER for it — it fires from the only
+//! path a staged event takes to `domain_events`, not from an alias that can drift.
 
 use application::ports::{version_conflict, Actor};
 use application::staging::StagedAppend;
@@ -47,26 +56,13 @@ fn staged_contains_order_placed(staged: &[StagedAppend]) -> bool {
 ///
 /// **PRIVATE, and that is the whole point (#597)**: WHEN this fires is not a route's business, and
 /// a route can no longer make it its business. The only call site the compiler permits is
-/// [`flush_staged_in_tx`] below. See the module docs for the zeroing this shape prevents.
+/// [`flush_staged_in_tx`] below — there is no test exception either, because the #456 proof drives
+/// the flush instead (`tests/orders_placed_metric.rs`). See the module docs for the zeroing this
+/// shape prevents.
 fn record_order_placements(staged: &[StagedAppend]) {
     if staged_contains_order_placed(staged) {
         telemetry::meters::place_order::placed("PLACED");
     }
-}
-
-/// The #456 spy seam, and the ONLY reason anything outside this module can reach the emit
-/// decision: `tests/orders_placed_metric.rs` proves the counter FIRES, and it must run in its own
-/// process (the meter provider binds once per process), so it links this crate as an integration
-/// test binary and cannot see `cfg(test)`.
-///
-/// A cfg-gated delegating seam rather than a `pub` on [`record_order_placements`] itself, because
-/// a `pub` in a private module is still spellable by every sibling route module in this crate —
-/// which is precisely the hole #597 closed. This exists only under `test-fixtures`, a feature the
-/// `test_fixtures_feature_never_reaches_a_release_artifact` guard keeps out of every release
-/// graph, so in a shipped build there is no path to the emit decision at all.
-#[cfg(any(test, feature = "test-fixtures"))]
-pub fn record_order_placements_spy(staged: &[StagedAppend]) {
-    record_order_placements(staged);
 }
 
 /// Record `order_birth_lag_ms{routed}` — the HANDOVER a routed birth introduces (#588,

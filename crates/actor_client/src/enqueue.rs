@@ -204,10 +204,13 @@ pub fn inbound_message_id(source: &str, external_id: &str) -> uuid::Uuid {
 /// That is correct HERE, because the constraint is "no other crate may build a mailbox row" and the
 /// siblings that can reach it are the door itself. It is the WRONG shape when the constraint names
 /// a caller in this crate ("no delivery route may decide when a placement counts"): there the item
-/// must be a plain private `fn` in the module that owns it, with a cfg-gated delegating seam for a
-/// cross-crate spy (`infrastructure::mailbox::flush` is the worked example). Either way, prove it:
-/// write the violating call, compile it, keep the rustc error — a privacy change that compiles when
-/// violated has done nothing (PROP-20260802-130500 §1).
+/// must be a plain private `fn` in the module that owns it, and the out-of-crate test must drive a
+/// PUBLIC function that already calls it rather than get a seam of its own — a cfg-gated
+/// `*_spy` seam is another `pub` in a private module and reopens the same door in the build where
+/// it exists (`infrastructure::mailbox::flush` is the worked example: no seam, the #456 proof
+/// drives `flush_staged_in_tx`). Either way, prove it: write the violating call, compile it, keep
+/// the rustc error, in every configuration you claim — a privacy change that compiles when violated
+/// has done nothing (PROP-20260802-130500 §1).
 #[cfg_attr(not(any(test, feature = "test-fixtures")), allow(unreachable_pub))]
 pub async fn enqueue_inbound_fact(
     mailbox: &dyn Mailbox,

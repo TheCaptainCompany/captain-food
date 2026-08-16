@@ -1037,20 +1037,27 @@ async fn redelivered_authorization_dedups_the_birth_at_the_door() {
     assert_eq!(pending, 1, "one pending occurrence per (actor, purpose)");
 }
 
-/// **#588 mutation kill — the FAILED delivery leaves nothing behind.** The gateway refuses the
-/// checkout, so the `PlaceOrder` leg throws and the delivery transaction rolls back. Expect no
-/// `payment_process_manager` run row and no Order-lane birth message: both or neither, asserted
-/// about the rejection path rather than the happy one.
+/// **A refused checkout leaves nothing behind — ONE load-bearing half, one negative control, and
+/// they are not the same thing.** The gateway refuses the checkout, so the `PlaceOrder` leg throws
+/// and the delivery transaction rolls back.
+///
+/// - `runs == 0` is the **mutation kill**: the leg reached `payment_process_manager` staging before
+///   it threw, so a flush that did not roll back with the verdict shows up here. Both or neither.
+/// - `births == 0` is a **negative control**, and stays one in both flag states: this leg carries no
+///   routed `deliver:` at all, so no code path could have written a birth row to begin with. Kept
+///   because a future leg that DID enqueue here would be caught, not because it proves something
+///   today.
 ///
 /// **It does NOT fence "the enqueue is never in `prepare`"** (ADR-20260816-040239 constraint 1),
 /// and the claim that it did was deleted with #597. It could never have: the refusal fails the
 /// *`PlaceOrder`* leg, so `on_payment_authorized` — the only leg carrying the routed `deliver:` —
-/// never runs, in either flag state. That constraint is now carried by the COMPILER:
-/// `TriggerEnvelope::lanes` is private, so a sink can only be attached by naming
-/// `TriggerEnvelope::laned`, and `prepare` has no transaction to honour that constructor's claim
-/// with (ADR-20260803-234035 — compiler first, a check is the fallback). A test cannot be repaired
-/// into a fence the type system already holds; what stays here is the atomicity assertion above,
-/// which is true and load-bearing on its own.
+/// never runs, in either flag state. That constraint is carried elsewhere, in two pieces: the
+/// COMPILER refuses an anonymous `lanes: Some(..)` field write (`TriggerEnvelope` is private-field
+/// and alone in its own module), and the GUARD
+/// `trigger_envelope_laned_has_exactly_one_call_site` holds the remaining hole — `prepare` calling
+/// `TriggerEnvelope::laned(..)` compiles, because `application` cannot name a transaction to demand
+/// as proof (ADR-20260803-234035: compiler first, a check where types cannot reach). Neither piece
+/// is a thing a delivery test could have provided.
 #[tokio::test]
 async fn a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row() {
     let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };

@@ -585,12 +585,12 @@ of the ADR-20260813-132540 lesson above). With the cap lifted (`capIsAStopSign=f
 still prints `⛔ weekly loop budget exhausted: … / 1440.0m used` on stderr, in the vocabulary of a
 refusal, and then **exits 0**. It is a REPORT. The three codes are the whole contract: `0` proceed,
 `2` genuinely exhausted (only possible with the cap armed), `3` INTEGRITY — a timer already open or
-stale, which is a concurrency event to resolve with `stop`/`stop --elapsed`/`reset` and must never
+stale, which is a concurrency event to resolve with `stop`/`stop --elapsed-seconds`/`reset` and must never
 be reported as budget. Cost of reading the banner instead: a whole dispatch stood down against an
 open gate, twice now.
 
 **`loop-budget.sh stop` takes a FLAG, not a positional** — `stop --note "what ran"` (and
-`stop --elapsed <seconds>` when the timer was never opened or went stale). A bare
+`stop --elapsed-seconds <n>` when the timer was never opened or went stale). A bare
 `stop "what ran"` silently loses the note, so the ledger segment lands with no attribution and the
 week's usage becomes a set of anonymous durations. Cost: one un-attributable segment per occurrence,
 unrecoverable after the fact. The ledger itself is `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json`,

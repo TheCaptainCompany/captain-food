@@ -22,9 +22,6 @@ mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
 pub use flush::{flush_staged_in_tx, record_order_birth_lag};
-/// The #456 spy seam — test builds only (see `flush::record_order_placements_spy`).
-#[cfg(any(test, feature = "test-fixtures"))]
-pub use flush::record_order_placements_spy;
 pub use promotion_watch::{promotion_watch_tick, spawn_promotion_watch};
 pub use standalone::{
     shutdown_signal, spawn_standalone_workers,

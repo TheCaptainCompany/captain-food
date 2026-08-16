@@ -58,30 +58,42 @@
 > `place-order` observability contract is amended in the realizing PR. **`HOLD: human`.**
 >
 
-> 🔒 **2026-08-16 — THE LANE CONSTRAINT IS COMPILER-CARRIED, AND THE GATE IT SUBSUMES IS DELETED**
+> 🔒 **2026-08-16 — THE PLACEMENT COUNTER IS COMPILER-CARRIED; THE LANE CONSTRAINT IS HALF-CARRIED
+> AND HALF-GUARDED, AND THE DIFFERENCE IS THE POINT**
 > ([#597 "Make the lane constraint compiler-carried: TriggerEnvelope.lanes is public, so 'only a transaction-owning route may carry a sink' is a convention"](https://github.com/TheCaptainCompany/captain-food/issues/597),
 > branch `597-lane-constraint-compiler-carried`, [PR #599](https://github.com/TheCaptainCompany/captain-food/pull/599)
 > — merge posture **`HOLD: human`**, mailbox runtime). A **flip-blocker for
-> `ROUTE_ORDER_BIRTH_THROUGH_LANE`**, from the third-look review of #594; both halves are the same
-> class — a constraint stated in prose and guarded by nothing. **(1)** `TriggerEnvelope.lanes` was a
-> `pub` field, so ADR-20260816-040239's constraint 1 (*the enqueue is never in `prepare`*, which
-> `actor_runtime::completion` re-runs with NO transaction open) held by structural reading alone:
-> any construction site could write `lanes: Some(...)` and strand a birth message outside the
-> delivery's commit. The field is **private**; `TriggerEnvelope::laned` / `::unlaned` are the only
-> constructors, and a field write from `prepare` is now `error[E0451]`. **(2)** `record_order_placements`
-> is **private to a new `mailbox::flush` submodule** — a delivery route calling it is `error[E0603]`,
-> in every build mode and every crate — so the #588 source scan
-> `no_delivery_route_decides_when_to_count_a_placement` (which read `handler.rs` only, while the
-> function was `pub`) is **DELETED**: deleting a gate the compiler subsumes is the correct outcome
-> (ADR-20260803-234035). The #456 spy binary reaches the emit through a `test-fixtures`-gated
-> delegating seam, so the feature guard now covers a third declaring crate. **Both privacy changes
-> carry their rustc error as evidence** — a privacy change that compiles when violated has done
-> nothing. Honest residue: `laned` cannot DEMAND proof of a transaction (`application` cannot name a
-> Postgres transaction without inverting the dependency rule), so it turns an anonymous field write
-> into one named, greppable, documented seam; the claim lives in its doc. Also de-claimed the
-> docstring of `a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row`, which advertised a
-> `prepare` fence it never provided (it fails the `PlaceOrder` leg, so the routed leg never runs, in
-> BOTH flag states).
+> `ROUTE_ORDER_BIRTH_THROUGH_LANE`**, from the third-look review of #594.
+>
+> **(1) `record_order_placements` is fully compiler-carried.** It is a private `fn` in a private
+> `mailbox::flush` module: a delivery route calling it is `error[E0603]`, from `server`
+> `error[E0432]`, **in every build configuration**, with **no test exception** — the #456 spy
+> binary drives `flush_staged_in_tx` against real Postgres instead, which is the stronger proof
+> anyway (the counter fires from the only path a staged event takes to `domain_events`, not from an
+> alias that can drift). So the #588 source scan `no_delivery_route_decides_when_to_count_a_placement`
+> — which read `handler.rs` only, while the function was `pub` — is **DELETED**: deleting a gate the
+> compiler subsumes is the correct outcome (ADR-20260803-234035).
+>
+> **(2) The lane constraint is carried in ONE HALF and guarded in the other, deliberately stated.**
+> ADR-20260816-040239's constraint 1 (*the enqueue is never in `prepare`*, which
+> `actor_runtime::completion` re-runs with NO transaction open) now holds against an **anonymous
+> field write** — `TriggerEnvelope.lanes` is private and the type lives alone in a private
+> `envelope` submodule, so `lanes: Some(..)` is `error[E0451]` from anywhere, including inside
+> `process_managers/**`. It does **NOT** hold against the CONSTRUCTOR: `prepare` calling
+> `TriggerEnvelope::laned(..)` **compiles**, and no signature can stop it — `laned` cannot demand
+> proof of a transaction, because `application` cannot name a `sqlx::Transaction` without inverting
+> the dependency rule. That residual is therefore held by a **guard, not a type**:
+> `trigger_envelope_laned_has_exactly_one_call_site` fails the build on a second caller, with a
+> message saying a second call site is a design event rather than a lint. The level-3 fallback is
+> what ADR-20260803-234035 sanctions where types cannot reach; calling it level 4 would have been
+> the same defect this issue exists to fix, one layer up.
+>
+> Both privacy claims carry their rustc error as evidence, re-planted in an isolated worktree — a
+> privacy change that compiles when violated has done nothing. Also de-claimed the docstring of
+> `a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row`, which advertised a `prepare` fence it
+> never provided (it fails the `PlaceOrder` leg, so the routed leg never runs, in BOTH flag states):
+> its `runs == 0` half is load-bearing, its `births == 0` half is a negative control, and the
+> docstring now says which is which.
 >
 > 🛬 **2026-08-16 — AND IT IS BUILT: THE ORDER BIRTH RIDES THE ORDER LANE, BEHIND A FLAG**
 > (phases 2–3 of [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),

@@ -3,32 +3,41 @@
 //! the constant in `contract.rs`. Before this chunk there were ZERO emission sites, so the
 //! un-told-order alarm could never fire.
 //!
-//! The seam is `mailbox::flush::record_order_placements`, the LAST thing `flush_staged_in_tx` does
-//! once the staged appends are in the completion transaction — the single place the counter's WHEN
-//! is decided, for every delivery route there is or ever will be (#588). Since #597 it is PRIVATE
-//! to that module, so this binary drives it through `record_order_placements_spy`, a delegating
-//! seam compiled only under `test-fixtures`: the test keeps its proof, and no delivery route can
-//! reach the decision.
+//! **What drives the proof: `flush_staged_in_tx` itself, against real Postgres.** The emit
+//! (`mailbox::flush::record_order_placements`) is PRIVATE to its module since #597 — no delivery
+//! route can name it — and this binary does not get an exception, because it does not need one:
+//! the emit is the LAST thing the flush does once the staged appends are in the transaction, so
+//! driving the flush drives the emit. That is strictly the stronger proof (#597 review): it fires
+//! from the real, only path a staged event takes to `domain_events`, not from a test-only alias
+//! that could silently drift from it.
 //!
 //! Its OWN test binary on purpose: `telemetry::meters` binds `opentelemetry::global::meter` once
 //! per process (`OnceLock`), so the spy provider must be installed before the process's FIRST
 //! metric call. The crate's `main` integration binary shares one process across ~30 suites, any of
 //! which may touch a meter first and bind it to the no-op provider — so the proof would flake with
-//! test order. One process, one provider, one test fn (multiple `#[test]`s in this binary would
-//! race the shared cumulative counter across threads). Same standalone-binary reason as
-//! `crates/server/tests/checkout_degraded_metric.rs`.
+//! test order. One process, one provider, one metric test fn (a second one would race the shared
+//! cumulative counter across threads). Same standalone-binary reason as
+//! `crates/server/tests/checkout_degraded_metric.rs`. Using the flush changed none of that: the
+//! database is per-test state, the meter binding is per-PROCESS state, and only the second one
+//! forces a binary of its own.
 //!
-//! No database: the emit is a PURE decision over the delivery's staged set (the transitive output
-//! of the place-order guard — a replay stages no `OrderPlaced`), so the seam is exercised directly
-//! over hand-built `StagedAppend`s. The guard's own staging behaviour on replay is proved against
-//! real Postgres by `tests/main/pm_prepare_delivery.rs`.
+//! The pool comes from the same `TestDb` witness the `main` binary uses (included by `#[path]`, not
+//! copied — a second hand-rolled migration chain is exactly what ADR-20260808-224500 item 5
+//! deleted). Each shape gets its own stream so the four flushes cannot collide on
+//! `UNIQUE (stream_name, version)`.
+
+// The TestDb witness, shared with the `main` binary by path rather than duplicated. It carries one
+// extra offline test (the migration-manifest check) which runs here too; it touches no meter, so
+// it cannot perturb the cumulative counter this binary asserts on.
+#[path = "main/common.rs"]
+mod common;
 
 use application::ports::Actor;
 use application::staging::StagedAppend;
 use domain::generated::entities as ent;
 use domain::generated::events::{self as evs, DomainEvent};
 use domain::generated::scalars as sc;
-use infrastructure::mailbox::record_order_placements_spy as record_order_placements;
+use infrastructure::mailbox::flush_staged_in_tx;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
@@ -117,13 +126,25 @@ fn cart_started() -> DomainEvent {
     })
 }
 
-fn staged(events: Vec<DomainEvent>) -> Vec<StagedAppend> {
+/// One staged append on its OWN stream — each shape below flushes for real, so two shapes sharing
+/// a stream name would collide on `UNIQUE (stream_name, version)` and turn a metric assertion into
+/// a confusing version conflict.
+fn staged(stream: &str, events: Vec<DomainEvent>) -> Vec<StagedAppend> {
     vec![StagedAppend {
-        stream_name: "Order-0000".into(),
+        stream_name: stream.into(),
         expected_version: 0,
         events,
         actor: actor(),
     }]
+}
+
+/// Drive the REAL seam: open a transaction, flush the staged set through the one function that
+/// puts events in `domain_events`, commit. The emit is the last thing `flush_staged_in_tx` does,
+/// so a shape that must not count is a shape this returns from having counted nothing.
+async fn flush(pool: &sqlx::PgPool, staged: &[StagedAppend]) {
+    let mut tx = pool.begin().await.expect("begin the delivery transaction");
+    flush_staged_in_tx(&mut tx, staged).await.expect("the flush succeeds");
+    tx.commit().await.expect("commit the delivery transaction");
 }
 
 /// The seam and its GATE, exercised over the four delivery shapes the emit must discriminate. One
@@ -131,25 +152,29 @@ fn staged(events: Vec<DomainEvent>) -> Vec<StagedAppend> {
 /// count — from the single real append. T2a/T2b/T4 each drive a shape a replay or a non-placement
 /// delivery produces and must NOT advance the counter (the naive `Outcome::Completed` keying would
 /// count T2a and T2b too — a monotonic BAM counter that lies).
-#[test]
-fn orders_placed_total_fires_once_per_real_placement_and_never_on_a_replay() {
-    // The spy provider FIRST — before any code path can bind the process-wide meter.
+#[tokio::test]
+async fn orders_placed_total_fires_once_per_real_placement_and_never_on_a_replay() {
+    // The spy provider FIRST — before any code path can bind the process-wide meter, and before
+    // touching the database, since `TestDb::acquire` runs the migration chain.
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
     opentelemetry::global::set_meter_provider(provider.clone());
 
+    let Some(db) = common::TestDb::acquire("orders_placed_metric").await else { return };
+    let pool = db.pool();
+
     // T1 — a real placement: the staged set carries OrderPlaced → the one legitimate increment.
-    record_order_placements(&staged(vec![order_placed()]));
+    flush(&pool, &staged("Order-0001", vec![order_placed()])).await;
 
     // T2a — the load-bearing guard shape: a re-delivery / partial-reaction replay finds the guard
     // (order fold is Some) false and stages a NON-OrderPlaced set. Must NOT advance.
-    record_order_placements(&staged(vec![cart_started()]));
+    flush(&pool, &staged("Cart-0002", vec![cart_started()])).await;
 
     // T2b — a full re-delivery the runtime skipped: nothing staged at all. Must NOT advance.
-    record_order_placements(&[]);
+    flush(&pool, &[]).await;
 
     // T4 — the PaymentFailed leg: no OrderPlaced ever reaches staging. Must NOT advance.
-    record_order_placements(&staged(vec![cart_started()]));
+    flush(&pool, &staged("Cart-0003", vec![cart_started()])).await;
 
     provider.force_flush().expect("flush the spy reader");
     assert_eq!(
@@ -158,4 +183,12 @@ fn orders_placed_total_fires_once_per_real_placement_and_never_on_a_replay() {
         "exactly ONE PLACED count — the single real OrderPlaced append; replays and non-placements \
          leave the monotonic counter untouched"
     );
+
+    // The counter counted what the log records: one OrderPlaced row, from the flush that emitted.
+    let appended: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM domain_events WHERE event_type = 'OrderPlaced'")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(appended, 1, "one append, one count — the emit rides the real flush");
 }

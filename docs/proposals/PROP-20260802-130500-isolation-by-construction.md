@@ -134,14 +134,26 @@ So match the recipe to the sentence you are trying to make true:
 | the constraint | the shape that carries it |
 |---|---|
 | "no OTHER CRATE may call it" | D5's recipe — `pub` + `allow(unreachable_pub)` + cfg-gated re-export |
-| "no SIBLING MODULE may call it" (a delivery route, a new handler in the same subtree) | a plain **private `fn`** in the module that owns the decision; a cross-crate spy reaches it through a **cfg-gated delegating seam**, never through a `pub` on the item itself |
-| "only a caller HOLDING X may call it" | a capability witness (`MailboxAccess`) — and if the inner crate cannot NAME X, say so in the constructor's doc instead of implying proof |
+| "no SIBLING MODULE may call it" (a delivery route, a new handler in the same subtree) | a plain **private `fn`** in the module that owns the decision — and **no test seam at all**: drive it through the public function that already calls it (`infrastructure::mailbox::flush`, where the #456 proof drives `flush_staged_in_tx`) |
+| "only a caller HOLDING X may call it" | a capability witness (`MailboxAccess`) — and if the inner crate cannot NAME X, no constructor signature can demand it: say so in the doc, and add a **call-site guard** (level 3, sanctioned by ADR-20260803-234035 where types cannot reach) rather than calling the seam "greppable" and gripping nothing |
+
+**A cfg-gated delegating seam is NOT the answer to row 2, and this table said it was for one day**
+(#597 review). The obvious escape — keep the item private, expose a `pub fn thing_spy` under
+`test-fixtures` for the out-of-crate test — reproduces row 1's hole exactly: the seam is itself a
+`pub` in a private module, so in the configuration where it exists, every sibling module can name
+it again. Nothing defective can ship (the feature never reaches a release graph), but the door the
+row promises to close is open in the build where the promise is being tested. **Prefer no seam.**
+Ask what PUBLIC function already calls the private one and drive that — it is usually available,
+and it is strictly the better test, because it proves the behaviour through the real path instead
+of through an alias that can drift from it.
 
 #597 nearly shipped the first shape for a second-shape requirement: `record_order_placements` had to
 be uncallable by `pm_delivery.rs`, a sibling of the module it moved into, and the recipe would have
-left that call compiling. **The tell is cheap and mandatory: write the violation, compile it, keep
-the rustc error as the evidence.** A privacy change that compiles when violated has done nothing,
-and "I applied the repo's pattern" is not a substitute for `error[E0603]`.
+left that call compiling. It then nearly shipped the seam above for the same requirement. **The tell
+is cheap and mandatory: write the violation, compile it, keep the rustc error as the evidence — in
+EVERY configuration you claim, including the test build.** A privacy change that compiles when
+violated has done nothing, and "I applied the repo's pattern" is not a substitute for
+`error[E0603]`.
 
 ## 2. Current state, measured (2026-08-03)
 
