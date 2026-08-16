@@ -1421,6 +1421,26 @@ failure it actually met. Handing the mechanics back on the assumption of no acce
 coordinator round-trip per chunk. If a session genuinely has none, the REST API says so in the body
 (`GitHub access is not enabled for this session`) — read the response before concluding.
 
+**But READY-FOR-REVIEW and AUTO-MERGE are GraphQL-only, and GraphQL is BLOCKED** (2026-08-16, #609
+— this narrows the entry above, which said "READ and WRITE" without qualification and is true only
+of REST). Every GraphQL call, down to `query { viewer { login } }`, answers:
+
+> `This GraphQL query is not enabled for this session — only the pinned set of PR-review operations
+> is served. Use REST via 'gh api repos/{owner}/{repo}/...' instead.`
+
+and `gh` is not on PATH either. There is **no REST equivalent** for either operation:
+`markPullRequestReadyForReview` and `enablePullRequestAutoMerge` exist only in GraphQL, and
+`PATCH /pulls/{n}` with `{"draft": false}` returns **200 with `draft` still `true`** — it silently
+ignores the field, which is the trap: it looks like it worked. So the ADR-20260815-115220 closing
+step ("mark ready and enable auto-merge together, as one indivisible step, then supervise to
+MERGED") is **not executable by an executor session** as things stand.
+
+What the executor CAN and therefore MUST still do, so the hand-back is one action and not a
+re-investigation: push the final head, get the PR body complete, and **supervise CI to green over
+REST** (`GET /commits/{sha}/check-runs`, poll until every run is `completed`, then read
+`conclusion`). Hand back naming the two GraphQL operations and the PR node id. Budget zero minutes
+for finding a workaround — there is not one.
+
 Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
 with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
 survives a session that has no lookup path; the cost of skipping it was an unresolvable issue link
