@@ -1516,3 +1516,94 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
     .expect("count");
     assert_eq!(placed, 1, "the authorized order got told about");
 }
+
+/// **The BACKFILL with the target unseeded** — review blocker B3.
+///
+/// `flip_backfill_enqueues_unreacted_stripe_facts_idempotently` above proves the backfill works,
+/// but it runs with the PM lanes already seeded (its own comment says so), so it carries exactly
+/// the coincidence this branch indicts: reverting the backfill to the seeded `count(*)` read left
+/// all 84 infrastructure tests green. That made the site with the LOUDEST justification in the ADR
+/// — "a rescue pass for facts nobody reacted to, running at startup, that refused to run when the
+/// system was cold" — the one site with no negative verification at all.
+///
+/// This is the cold case, and it is the realistic one: the backfill runs AT STARTUP, which is
+/// precisely when another actor's worker has not seeded yet. Under the old code it returned
+/// `Err("has no seeded lanes — seed before backfilling")` and the rescue never happened.
+#[tokio::test]
+async fn backfill_enqueues_to_the_declared_partition_with_the_target_unseeded() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+    seed_checkout_world(&pool, true).await;
+    let gateway = Arc::new(StubGateway::default());
+
+    // A checkout ran and Stripe's authorization was RECORDED, but the runner never reacted to it.
+    checkout_leg(&pool, gateway.clone(), 0xB2).await;
+    let store = PgEventStore::new(pool.clone());
+    let actor = Actor {
+        user_id: uid(0xE0),
+        user_type: "EXTERNAL".into(),
+        domain_id: None,
+        correlation_id: uid(0xC1),
+        cause_id: None,
+    };
+    store
+        .append(
+            "Payment-pi_prepare_test",
+            1,
+            &[DomainEvent::PaymentAuthorized(domain::generated::events::PaymentAuthorized {
+                payment_intent_id: PaymentIntentId("pi_prepare_test".into()),
+                order_id: Some(OrderId(uid(ORDER))),
+                restaurant_id: RestaurantId(uid(RESTAURANT)),
+                amount: eur(1960),
+            })],
+            &actor,
+        )
+        .await
+        .expect("record the authorization pre-flip");
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS projection_checkpoint (\n\
+           projector TEXT PRIMARY KEY, position BIGINT NOT NULL, updated_at TIMESTAMPTZ NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .expect("checkpoint table");
+
+    // THE STATE UNDER TEST, and the difference from the test above: the target actor has NO
+    // registry rows when the rescue pass runs.
+    assert_eq!(unseed(&pool, "PlaceOrderProcess").await, 5, "the target is now cold");
+
+    let pm_state = infrastructure::persistence::PgPaymentProcessState::new(pool.clone());
+    let enqueued = infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(&pool, &pm_state)
+        .await
+        .expect(
+            "the backfill must RESCUE the un-reacted authorization with the target lane unseeded \
+             -- refusing here is the rescue pass declining to run at exactly the moment it exists \
+             for, leaving a paid order with nobody told about it",
+        );
+    assert_eq!(enqueued, 1, "exactly the un-reacted authorization");
+
+    let partition: i16 = sqlx::query_scalar(
+        "SELECT partition FROM inbound_messages WHERE actor_type = 'PlaceOrderProcess' \
+         AND kind = 'EVENT' AND message_type = 'PaymentAuthorized'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the backfilled copy exists");
+    assert_eq!(
+        partition,
+        actor_client::stable_partition(&uid(ORDER), 5),
+        "stamped with the DECLARED width, so the worker that eventually starts drains it"
+    );
+
+    // And it delivers once a worker comes up -- the rescue completes.
+    let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway)).await;
+    assert_eq!(drain_all(&pm_worker).await, 1, "the rescued hop delivers");
+    let placed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(placed, 1, "the authorized order got told about");
+}
