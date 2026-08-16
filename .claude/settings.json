@@ -1,6 +1,31 @@
 {
   "model": "claude-fable-5",
+  "disabledMcpjsonServers": ["honeycomb"],
   "permissions": {
+    "_comment_deny": "Deny what no verdict is ever derived from (ADR-20260816-020752, farley): build output and object stores are re-derivable from source, so reading them costs tokens and can never change a gate result. Mirrors .claudeignore -- keep the two in step. DELIBERATELY NOT DENIED: specs/generated/** (the drift gate's evidence; denying it makes check-drift unauditable), Cargo.lock (a lock diff is a supply-chain review), tools/codegen-rs/warning-baseline.json (the warning ratchet). Also here: honeycomb is DISABLED above, not deleted -- unauthenticated its tools cannot run and no runtime emits spans yet; RE-AUTH IS THE EVENT THAT RE-ENABLES IT (delete the entry). The .mcp.json definition stays so the eu1 EU-host pin (a GDPR constraint) is not lost with the server config.",
+    "deny": [
+      "Read(./target/**)",
+      "Read(./**/target/**)",
+      "Read(./tools/codegen-rs/out/**)",
+      "Read(./**/node_modules/**)",
+      "Read(./.git/objects/**)",
+      "Read(./.structurizr/**)",
+      "Read(./.claude/worktrees/**)",
+      "Read(./**/*.wasm)",
+      "Read(./**/*.rlib)",
+      "Read(./**/*.rmeta)",
+      "Read(./**/*.so)",
+      "Read(./**/*.dylib)",
+      "Read(./**/*.dll)",
+      "Read(./**/*.pdf)",
+      "Read(./**/*.png)",
+      "Read(./**/*.jpg)",
+      "Read(./**/*.jpeg)",
+      "Read(./**/*.gif)",
+      "Read(./**/*.ico)",
+      "Read(./**/*.woff)",
+      "Read(./**/*.woff2)"
+    ],
     "allow": [
       "Bash(gh issue view:*)",
       "Bash(gh issue list:*)",

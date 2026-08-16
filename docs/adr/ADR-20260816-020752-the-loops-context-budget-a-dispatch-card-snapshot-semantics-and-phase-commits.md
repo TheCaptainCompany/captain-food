@@ -106,6 +106,91 @@ when the writer dies. This is the
 [ADR-20260810-231300](ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)
 defect class — *a monitoring path that can only fire when a signal arrives* — applied to ourselves.
 
+## Amendment, same day — the three landed mechanisms (founder: *"Apply these recommendations"*)
+
+Decisions 1–7 above are technique. These three are the **artifacts** that carry them, landed
+together in one docs/config change; they extend, and do not modify, anything above.
+
+### 8. `make test-quiet` / `make rust-quiet` — filtering that may drop PROGRESS, never VERDICTS
+
+(**farley**.) Makefile TARGETS, not a hook: **a hook is invisible to CI and cannot be diffed**. Each
+wrapper runs the real gate, keeps the full output in `target/quiet-gate.log`, prints the **verdict
+lines first (grep) and the tail second**, and echoes the gate's exit status before re-raising it.
+
+**The rule, stated in the recipe comment: filtering may drop PROGRESS, never VERDICTS** — a verdict
+is anything that could turn green into red: the DB-skip receipt
+([#230](https://github.com/TheCaptainCompany/captain-food/issues/230), *"a skip that reports ok is
+not evidence"*), the first panic, every `test result:` summary, the validator's error lines, the
+warning-baseline diff. Grep-**first** is load-bearing: a tail-only filter loses an early panic, which
+is the case that matters. Proven red before landing — a 122-line run whose panic is on line 1 keeps
+that panic while the 50-line tail cannot reach it, and `exit=101` propagates.
+
+Two constraints the next editor must not "simplify" away: the gate is **not piped** (its status is
+captured directly, which is stronger than `set -o pipefail` **and** portable — make runs recipes
+under `/bin/sh`, which is dash on Debian/Ubuntu, and dash answers `set -o pipefail` with *"Illegal
+option"*, failing the recipe before the gate runs); and `QUIET_KEEP` must stay **pure ASCII**,
+because it is expanded INTO a recipe line, so a byte > 127 there breaks Cygwin make at runtime even
+though `makefile_recipe_lines_are_ascii` reads the recipe text as ASCII.
+
+### 9. `.claudeignore` + `permissions.deny` — deny what no verdict is ever derived from
+
+(**farley**.) Build output, object stores and vendored trees are re-derivable from source, so reading
+them can only cost tokens — never change a gate result. The list lives in `.claudeignore` **and** is
+mirrored in `.claude/settings.json` `permissions.deny`, so a proactive read is stopped even by a
+client that never loads the ignore file.
+
+**Three paths are deliberately NOT denied**, and each carries that note in both files:
+`specs/generated/**` (the codegen drift gate's **evidence** — denying it makes `check-drift`
+unauditable by the very agent that must fix it), `Cargo.lock` (a lock diff **is** a supply-chain
+review), `tools/codegen-rs/warning-baseline.json` (the ratchet).
+
+### 10. CLAUDE.md compressed to an index — and young's residency test
+
+The resident file keeps **every rule** and loses the incident narratives (the stale-warning-count
+history, the seven-review-rounds story, the two-wrong-key-sets story, the four-agents-a-day cost),
+which already live in the ADRs that earned them; verbatim founder quotes survive as the operative
+clause plus a pointer to the ADR holding the full text, never as a hand-written paraphrase
+(**evans**: a gloss competes with the original). DSL/`$ref` mechanics, screens/translations detail,
+C4, Honeycomb query discipline and HubRise mapping are now a pointer index into
+[docs/claude/](../claude/). **No `.claude/rules/` directory was created** (**evans**: two homes with
+near-identical names are confused within a week — extend `docs/claude/` instead). Makefile-ASCII and
+the warning ratchet are **already gates**, so their prose is one imperative line each pointing at the
+gate (**architect**: a rule whose trigger path differs from the path being edited can never load in
+time, so it must be a gate, not lazily-loaded prose).
+
+**The residency test, verbatim (young)**: *"if forgetting the rule produces state a rebuild cannot
+undo, it must be always-resident."* A lazily-loaded rule is a **read model** — legitimate exactly
+when it is **rebuildable**, because the decision it governs happens after the load, so a late fetch
+changes nothing. The exception is the class where **touching the path IS the mistake**: appending a
+stored event shape, a migration, a decision reversal, GDPR erasure — write-side, irreversible,
+history cannot be replayed away. That test is stated at the top of CLAUDE.md, together with the rule
+that the compressed file is a **snapshot plus its topic file, never the snapshot alone**, and that
+removing a rule from it is a decision reversal needing a register row rather than an edit.
+
+Measured with the crude `wc -w` × 1.35 proxy (a proxy, not a token count): **~7,570 → ~4,610**. The
+~2,500 target was **not** reached, and deliberately so: the remaining text is ~24 rules plus the
+domain lens, and closing the gap would mean dropping rules, which is a decision reversal, not
+compression.
+
+### 11. Idle MCP servers are disabled — and the disablement is recorded where the next session looks
+
+(**observability**.) The honeycomb MCP server is **disabled** via `disabledMcpjsonServers` in
+`.claude/settings.json`. Its reasoning, quoted: it is **"not a blinded instrument, it is a broken
+one"** — unauthenticated, its tools cannot run, and no `apps/` runtime emits spans yet, so nothing is
+lost that re-auth would not have to restore anyway. **Re-auth is the event that re-enables it**
+(delete the array entry).
+
+The condition attached, and it is the load-bearing half: **record the disablement where the next
+session sees it, otherwise "no Honeycomb server" reads as "no telemetry concern" — silence must not
+be ambiguous** (the same defect class as
+[ADR-20260810-231300](ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)'s
+monitoring clause). Hence: the server DEFINITION stays in `.mcp.json` rather than being deleted — so
+the **`eu1` EU-host pin, a GDPR constraint, is not lost with the server config** — CLAUDE.md's
+telemetry paragraph carries one line saying the server is deliberately disabled pending re-auth, and
+[docs/claude/observability.md](../claude/observability.md) keeps the EU-host warning intact. A Gmail
+server appears nowhere in this repo's `.mcp.json` or docs, so there was nothing to disable; `github`,
+`claude-code-remote` and `supabase` are untouched.
+
 ## What this ADR does NOT decide
 
 **How the mob's fan-out is priced.** Narrowing the roster at the checkpoint amends a founder directive
@@ -141,6 +226,18 @@ a question about **detection policy**, not about the bill.
 - **observability**: the `tokens`/`agent` fields on the existing ledger, and the dead-man's-switch
   framing that keeps the alarm honest when the writer dies.
 - **business**: price review by **reversibility**, not by chunk — §44 option (c).
+- **architect** (amendment): the resident list — everything that fires before the first file is
+  read; and path-mismatched rules become gates, never lazily-loaded prose.
+- **evans** (amendment): the domain lens and conventions ARE the ubiquitous language and stay
+  resident; no `.claude/rules/`; a paraphrase of a founder quote competes with the original.
+- **holub** (amendment): the cut test — does this paragraph change what an agent does on a turn
+  where it is not already obviously in scope? The incident narratives are the fat.
+- **farley** (amendment): `make test-quiet` as a diffable Makefile target rather than a hook, and
+  the deny/keep split — deny what no verdict is ever derived from.
+- **observability** (amendment): disable honeycomb ("not a blinded instrument, it is a broken one"),
+  but record the disablement, because silence about telemetry is ambiguous.
+- **young** (amendment): a lazily-loaded rule is a read model, legitimate when rebuildable —
+  *"if forgetting the rule produces state a rebuild cannot undo, it must be always-resident."*
 - **Remaining roster lenses (ux, legal, dba, vernon, evans, security)**: not asked on this message —
   stated rather than elided. Nothing here touches a customer-visible surface, a legal artifact, the
   schema, an aggregate boundary or the ubiquitous language; if §44 is answered in a way that narrows

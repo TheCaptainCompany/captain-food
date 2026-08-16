@@ -26,7 +26,7 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates smoke-prod
+.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
@@ -35,6 +35,8 @@ help:
 	@echo "         suites REQUIRED. 'make rust' is the spec gate and runs NO crates/** test."
 	@echo "         c4-render (Structurizr Lite + docs/ADRs) | c4-export (validate/export DSL)"
 	@echo "         (validate-schema test-behaviour test-observability c4-validate -> all fold into 'validate')"
+	@echo "         test-quiet / rust-quiet = the same gates, output filtered to VERDICTS only"
+	@echo "         (progress dropped, verdicts never; full log in target/quiet-gate.log)"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
 
@@ -111,6 +113,53 @@ test-crates:
 	    echo "test-crates: re-run with DATABASE_URL set to exercise them (see docs/claude/sessions.md)."; \
 	  fi; \
 	  exit $$status
+
+# --- Quiet gate wrappers (ADR-20260816-020752, farley): filtered output for token-bound sessions. ---
+#
+# THE RULE, and it is the whole design: FILTERING MAY DROP PROGRESS, NEVER VERDICTS. A verdict is
+# any line that could turn green into red -- the DB-skip receipt (#230, "a skip that reports ok is
+# not evidence"), the first panic, every `test result:` summary, the validator's error lines, and
+# the warning-baseline diff. So the filter is grep-FIRST (every verdict line, wherever in the run it
+# occurred) and tail-SECOND (the last lines, for context). A tail-only filter would lose an early
+# panic -- exactly the case that matters. Nothing is discarded: the full output is always in
+# $(QUIET_LOG), and the wrapper prints where.
+#
+# These are Makefile TARGETS, not a hook, on purpose: a hook is invisible to CI and cannot be diffed.
+#
+# The gate is NOT piped, and that is deliberate. Its exit status is captured directly and re-raised,
+# which is stronger than `set -o pipefail` AND portable: make runs recipes under /bin/sh, which is
+# dash on Debian/Ubuntu, and dash answers `set -o pipefail` with "Illegal option" -- the recipe would
+# fail before ever running the gate.
+#
+# Override QUIET_TEST_CMD / QUIET_RUST_CMD to point a wrapper at any command. That is also how the
+# wrapper's own RED is proven: a command that exits non-zero must make the target exit non-zero.
+QUIET_LOG ?= target/quiet-gate.log
+QUIET_TAIL ?= 50
+QUIET_TEST_CMD ?= $(MAKE) --no-print-directory test-crates
+QUIET_RUST_CMD ?= $(MAKE) --no-print-directory rust
+# Verdict lines, as one ERE. Anchored forms first, then unanchored ones for output that indents its
+# verdicts (the validator prints "  [error] rule  location"; cargo prints "error[E0433]"). Keep this
+# pattern PURE ASCII: it is expanded INTO a recipe line, so a byte > 127 here breaks Cygwin make at
+# runtime even though the recipe text itself reads as ASCII to the guard test.
+QUIET_KEEP ?= ^(error|warning|panic|thread .* panicked|SKIP|skipped|test result:|FAILED|failures:)|\[error\]|\[warn |error\[E|error:|warning:|panicked at|error\(s\)|FAILED|failures:|SKIPPED|DB-GATED|drifted|baseline|test result:
+
+# $(1) = label, $(2) = the command to run.
+define run-quiet
+	@mkdir -p $(dir $(QUIET_LOG))
+	@$(2) > $(QUIET_LOG) 2>&1; status=$$?; \
+	  echo "---- $(1): verdict lines (grep-first; progress dropped, verdicts never) ----"; \
+	  grep -E -- '$(QUIET_KEEP)' $(QUIET_LOG) || echo "(no verdict line matched)"; \
+	  echo "---- $(1): last $(QUIET_TAIL) lines ----"; \
+	  tail -n $(QUIET_TAIL) $(QUIET_LOG); \
+	  echo "---- $(1): exit=$$status -- full unfiltered output: $(QUIET_LOG) ----"; \
+	  exit $$status
+endef
+
+test-quiet:
+	$(call run-quiet,test-quiet,$(QUIET_TEST_CMD))
+
+rust-quiet:
+	$(call run-quiet,rust-quiet,$(QUIET_RUST_CMD))
 
 # Compile-check the wasm32 hydrate build of crates/web (split 4/4 of #21). The real bundle
 # (wasm-bindgen output) is produced in the Docker image build; this is the fast CI/local gate that

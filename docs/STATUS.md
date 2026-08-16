@@ -22,6 +22,19 @@
 > concern-declared checkpoint + business's price-by-reversibility, with a verification condition on
 > the next chunk).
 >
+> ✂️ **2026-08-16 — THE TOKEN DIET IS LANDED** (same ADR, amendment §8-§11, from the founder's
+> *"Apply these recommendations"*): `make test-quiet` / `make rust-quiet` filter a gate's output to
+> VERDICTS (grep-first, tail-second, full log in `target/quiet-gate.log`) under the rule *filtering
+> may drop progress, never verdicts* -- proven red, an early panic survives a 50-line tail and
+> `exit=101` propagates; `.claudeignore` + `permissions.deny` deny build output and object stores
+> while **keeping `specs/generated/**`, `Cargo.lock` and the warning baseline readable** (they are
+> gate evidence); CLAUDE.md is compressed to a resident INDEX (~7.6k -> ~4.6k tokens by a crude
+> `wc -w` proxy) with **no rule dropped** -- the ~2.5k target was deliberately not reached, since
+> closing the gap would mean dropping rules, which is a decision reversal; and the **honeycomb MCP
+> server is deliberately DISABLED** pending re-auth, recorded in CLAUDE.md and
+> `.claude/settings.json` so its absence never reads as "no telemetry concern" (the `eu1` EU-host
+> pin stays in `.mcp.json`).
+>
 > 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
 > the `answers:` DSL from
 > [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)

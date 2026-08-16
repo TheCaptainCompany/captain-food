@@ -1,0 +1,62 @@
+# Paths an agent session must never read (ADR-20260816-020752, farley).
+#
+# THE TEST for a line here: DENY WHAT NO VERDICT IS EVER DERIVED FROM. Build output, object stores
+# and vendored trees are re-derivable from source, so reading them can only cost tokens -- never
+# change a gate result.
+#
+# DELIBERATELY ABSENT, and they must stay readable:
+#   specs/generated/**                        -- the codegen drift gate's EVIDENCE; denying it makes
+#                                                `check-drift` unauditable by the agent that must fix it
+#   Cargo.lock                                -- reproducible CI; a lock diff IS a supply-chain review
+#   tools/codegen-rs/warning-baseline.json    -- the warning ratchet; a diff here is the record of
+#                                                what a change did to the warning surface
+#
+# The hard blocks below are MIRRORED in .claude/settings.json `permissions.deny`, so a proactive read
+# is stopped even by a client that never loads this file. Keep the two lists in step.
+
+# Rust build output (target/, and the codegen's own target/).
+target/
+**/target/
+tools/codegen-rs/out/
+
+# Vendored / installed dependency trees.
+**/node_modules/
+**/vendor/
+
+# Git internals -- an object store is bytes, never a verdict.
+.git/objects/
+.git/lfs/
+
+# Compiled and binary artifacts. WASM bundles are build output of crates/web; the source is Rust.
+**/*.wasm
+**/*.rlib
+**/*.rmeta
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.a
+**/*.o
+**/*.bin
+**/*.zip
+**/*.gz
+**/*.tar
+
+# Binary documents and images: no verdict is derived from them, and PDFs cannot be read in this
+# container at all (docs/claude/sessions.md) -- a read attempt is a pure loss.
+**/*.pdf
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.ico
+**/*.woff
+**/*.woff2
+
+# Structurizr Lite staging (built by `make c4-render`) and agent worktrees.
+.structurizr/
+.claude/worktrees/
+wt*/
+
+# Filtered-gate logs (`make test-quiet` / `make rust-quiet`) -- read the wrapper's summary, and open
+# this file deliberately with an offset when a verdict needs its surrounding context.
+target/quiet-gate.log
