@@ -183,8 +183,16 @@ re-enables it**. Auth, keys, query discipline:
   (1) the brief goes to the WHOLE roster in parallel **before any code**, each lens naming what it
   will catch (*"nothing in my lens"* is a complete answer); (2) the executor stops at declared
   **checkpoints** and the mob reads the actual diff — any lens may stop the work; (3) the independent
-  full-diff review stays, as the THIRD look. The roster is invited by default and a lens excuses
-  itself; coordinator-chosen subsets are over.
+  full-diff review stays, as the THIRD look. **At the BRIEFING the roster is invited by default and a
+  lens excuses itself — coordinator-chosen subsets are over there**; the **CHECKPOINT** goes only to
+  lenses that DECLARED a concern at briefing (any lens may opt back in), and the chunk's
+  **reversibility class** sizes the briefing roster — full mob for money movement, stored event
+  shapes, legal surfaces and anything Tours-facing (the `HOLD: human` axis, which wins when the two
+  disagree), 2–3 lenses for reversible refactors, generated artifacts and doc sweeps (founder ruling
+  2026-08-16,
+  [ADR-20260816-134352](docs/adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)).
+  Every dispatch card states its class and BANKS at the checkpoint whether the narrow set missed
+  anything — a MISS reverts that class to the whole roster.
 - **He is the FOUNDER / Tech CEO, and every founder message goes to the whole team before any
   answer** (founder directives 2026-08-12, verbatim in
   [ADR-20260812-143619](docs/adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)):

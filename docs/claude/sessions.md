@@ -622,6 +622,19 @@ EMPTY `## Findings` heading**, present from the first write (2026-08-16, #588): 
 handover that has to invent the heading also invents its shape, so verdicts land in different
 formats — or in the PR body instead of the repo, which GitHub-is-never-the-record forbids. An empty
 section is an instruction to append; an absent one is an invitation to improvise.
+**Every card MUST also state its `Reversibility class:`** — IRREVERSIBLE (money movement, stored
+event shapes, legal surfaces, anything Tours-facing; the `HOLD: human` axis, which wins when the two
+disagree) or REVERSIBLE (internal refactors, generated artifacts, doc sweeps) — **and the briefing
+roster derived from it** (full mob vs 2–3 lenses), because the class is the input to the fan-out and
+an unstated class is coordinator taste returning by the back door. **At the checkpoint the card
+carries a `Checkpoint verification:` line**: did the narrowed checkpoint (only the lenses that
+declared a concern at briefing) miss anything the full roster would have caught? It is banked EITHER
+WAY — the card line plus one sentence in the change's record — a MISS reverting that class to the
+whole roster, a clean run turning n=1 into n=2; the architect's run report surfaces it, and an
+unanswered line is a reportable defect of the run (founder ruling 2026-08-16,
+[ADR-20260816-134352](../adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)).
+The two cards written before that ruling (`docs/dispatch/588-*.md`, `docs/dispatch/598-*.md`) are
+historical and are **not** retrofitted.
 
 **Coordinator/executor split** (founder directive, 2026-08-07): a session that has planned a
 multi-step program NEVER executes the steps itself — it DISPATCHES each step to a fresh session

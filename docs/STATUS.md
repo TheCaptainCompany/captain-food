@@ -2,6 +2,17 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧑‍🤝‍🧑 **2026-08-16 — THE MOB'S CHECKPOINT IS NOW THE CONCERN-DECLARED SUBSET, AND REVIEW IS PRICED BY
+> REVERSIBILITY** (founder ruling on [DECISIONS §44 MOB-COST-1](proposals/DECISIONS.md), verbatim
+> *"Go for the Recommendation: (b)+(c), with holub's verification condition."*, recorded in
+> [ADR-20260816-134352](adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)
+> amending [ADR-20260809-013142](adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)):
+> the **briefing is untouched** (whole roster, before any code), the **checkpoint** goes only to
+> lenses that declared a concern there, and the chunk's **reversibility class** sizes the briefing
+> roster — full mob for money, stored event shapes, legal surfaces and anything Tours-facing. Every
+> dispatch card now states its class and banks a `Checkpoint verification:` line either way; a MISS
+> reverts that class to the whole roster (open sub-obligation **MOB-COST-1a**).
+
 > 📡 **2026-08-16 — THE ORDER LANE HAS A HEARTBEAT, AND THE CHECKOUT SUCCESS RULE STOPS LYING**
 > ([#598 "Before the birth-lane flip: the place-order latency budget still measures the old workflow, and a flat order_birth_lag_ms cannot be told from a dead lane"](https://github.com/TheCaptainCompany/captain-food/issues/598)
 > + [#589](https://github.com/TheCaptainCompany/captain-food/issues/589), branch

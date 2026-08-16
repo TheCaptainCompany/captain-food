@@ -5,6 +5,14 @@ session, as a standing principle. Composes with — and materially sharpens — 
 decision model (ADR-20260808-144738/155656) and the lens-involvement failure the focus-coach audit
 recorded the same night.
 
+> **Amended 2026-08-16 by [ADR-20260816-134352 "The mob's checkpoint goes to declared concerns, and review is priced by reversibility"](ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)**
+> — a founder directive amending a founder directive, closing the *"Open tuning question"* below.
+> **The briefing half of this ADR is untouched**: whole roster, before any code, cheap silence, no
+> excusal by coordinator taste. What changes: the **checkpoint** (§2) goes only to lenses that
+> DECLARED a concern at the briefing, and the chunk's **reversibility class** sizes the briefing
+> roster. A verification condition rides on it — the narrowed checkpoint's misses are banked either
+> way, and a miss reverts that class to the whole roster.
+
 ## The directive (verbatim)
 
 > "Principle: Mob programming or ensemble programming means everyone is involved in the dev so

@@ -36,6 +36,12 @@ the out-of-scope fences. Every lens in the mob briefing reads **that file**, not
 block **IS the mob evidence the PR body cites** — so the findings are written once, in the place they
 are consumed, instead of being re-summarised into a PR body afterwards. (**architect**.)
 
+**Amended 2026-08-16 by [ADR-20260816-134352](ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)**
+(founder ruling on §44): every card additionally states its **`Reversibility class:`** and the
+**briefing roster** derived from it, and carries a **`Checkpoint verification:`** line in the
+Findings block at the checkpoint. Cards written before that ruling are historical and are not
+retrofitted.
+
 ### 3. Snapshot semantics for the card — it is a cached fold, never a second source of truth
 
 The doctrinal ruling, because a card is exactly the shape our own read side has (**young**):
@@ -191,7 +197,7 @@ telemetry paragraph carries one line saying the server is deliberately disabled 
 server appears nowhere in this repo's `.mcp.json` or docs, so there was nothing to disable; `github`,
 `claude-code-remote` and `supabase` are untouched.
 
-## What this ADR does NOT decide
+## What this ADR does NOT decide (**decided 2026-08-16 — see below**)
 
 **How the mob's fan-out is priced.** Narrowing the roster at the checkpoint amends a founder directive
 ([ADR-20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md): *"the roster
@@ -199,6 +205,14 @@ is invited by default and a lens excuses itself"*), so it is a **decision revers
 change** — it is [DECISIONS](../proposals/DECISIONS.md) **§44 / MOB-COST-1**, 🟡 FOUNDER-OWNED.
 Note the ordering: **decision 2 above cuts the per-lens cost ~10× whichever way §44 goes**, so §44 is
 a question about **detection policy**, not about the bill.
+
+**Resolved the same day** by the founder, verbatim: *"Go for the Recommendation: (b)+(c), with
+holub's verification condition."* — recorded in
+[ADR-20260816-134352](ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md),
+which amends [ADR-20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md).
+The briefing half is untouched; the checkpoint goes to lenses that declared a concern, and the
+chunk's reversibility class sizes the briefing roster. The measured basis for the ~10× claim above:
+lenses reading the repo on #167 ran **50–85k each**; card-based lenses on #588 ran **26–44k each**.
 
 ## Consequences
 
