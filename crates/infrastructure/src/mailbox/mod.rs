@@ -158,8 +158,8 @@ pub async fn apply_schedules_in_tx(
             }
             // LOAD-BEARING for the #167 acceptance clock: the birth reminder is applied through
             // THIS module (the worker's post-delivery `schedules:` pass), not through
-            // `persistence::mailbox_store`. Guarded by `birth_redelivery_keeps_the_first_acceptance_deadline`
-            // (crates/infrastructure/tests/main/mailbox_acceptance_timeout.rs) — mutating the
+            // `persistence::mailbox_store`. Guarded by `redelivered_authorization_dedups_the_birth_at_the_door`
+            // (crates/infrastructure/tests/main/pm_prepare_delivery.rs, #588) — mutating the
             // DO NOTHING below to DO UPDATE reds it, because a redelivered birth would push the
             // first deadline out.
             ReschedulePolicy::Keep => {
