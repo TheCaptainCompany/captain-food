@@ -276,7 +276,12 @@ async fn typed_schedule_parks_a_command_row_and_cancel_withdraws_it_once() {
     assert_eq!(row.actor_type(), "Order");
     assert_eq!(row.actor_id(), order_id);
     assert_eq!(row.message_type(), "MarkOrderDelivered");
-    assert_eq!(row.partition(), actor_client::stable_partition(&order_id, 5));
+    assert_eq!(
+        row.partition(),
+        actor_client::declared_lane("Order", &order_id).expect("Order declares a mailbox"),
+        "the lane is derived from the actor type and the identity property asserted above, \
+         over the DECLARED Order width — never a width this test carries"
+    );
     assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
 
     assert!(client.cancel_scheduling(message_id).await.expect("cancel"), "a SCHEDULED row cancels");

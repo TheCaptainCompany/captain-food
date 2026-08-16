@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use actor_client::stable_partition;
+use actor_client::declared_lane;
 use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
 use application::reminders::reminder_message_id;
@@ -209,7 +209,7 @@ async fn shadow_would_cancel_lands_ignored_and_never_arms_the_gdpr_clock() {
     let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x51AD0);
-    let partition = stable_partition(&order, 5);
+    let partition = declared_lane("Order", &order).expect("Order declares a mailbox");
     seed_placed_order(&pool, order, uuid::Uuid::from_u128(0x0E57)).await;
     let reminder = schedule_due_timeout(&pool, order, partition).await;
 
@@ -246,7 +246,7 @@ async fn enforced_timeout_cancels_a_placed_order_and_starts_the_gdpr_clock() {
     let pool = db.pool();
 
     let order = uuid::Uuid::from_u128(0x51AD1);
-    let partition = stable_partition(&order, 5);
+    let partition = declared_lane("Order", &order).expect("Order declares a mailbox");
     let stream = format!("Order-{order}");
     seed_placed_order(&pool, order, uuid::Uuid::from_u128(0x0E57)).await;
     let reminder = schedule_due_timeout(&pool, order, partition).await;
@@ -301,7 +301,7 @@ async fn enforced_timeout_cancels_a_placed_order_and_starts_the_gdpr_clock() {
     // The race that matters: acceptance won before the deadline fired — Ignored, no append,
     // and NO GDPR clock from this arm either (an ACCEPTED order is not terminal).
     let racer = uuid::Uuid::from_u128(0x51AD3);
-    let racer_partition = stable_partition(&racer, 5);
+    let racer_partition = declared_lane("Order", &racer).expect("Order declares a mailbox");
     let racer_stream = format!("Order-{racer}");
     seed_placed_order(&pool, racer, uuid::Uuid::from_u128(0x0E57)).await;
     append_event(
@@ -345,7 +345,8 @@ async fn promotion_watch_tick_reads_the_real_scheduled_backlog() {
     let pool = db.pool();
 
     let due = uuid::Uuid::from_u128(0x0900);
-    schedule_due_timeout(&pool, due, stable_partition(&due, 5)).await;
+    schedule_due_timeout(&pool, due, declared_lane("Order", &due).expect("Order declares a mailbox"))
+        .await;
     // An undue OrderExpired reminder beside it (different purpose, same lane).
     sqlx::query(
         "INSERT INTO inbound_messages \
@@ -356,7 +357,7 @@ async fn promotion_watch_tick_reads_the_real_scheduled_backlog() {
     )
     .bind(reminder_message_id(due, "OrderExpired"))
     .bind(due)
-    .bind(stable_partition(&due, 5))
+    .bind(declared_lane("Order", &due).expect("Order declares a mailbox"))
     .bind(serde_json::json!({ "eventType": "OrderExpired", "payload": { "orderId": due } }))
     .execute(&pool)
     .await

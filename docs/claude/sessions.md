@@ -84,6 +84,12 @@ mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA"   # do it as the postgre
 chmod 700 "$PGDATA"
 su postgres -c "/usr/lib/postgresql/16/bin/initdb -D $PGDATA -A trust -U postgres"
 su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -l $PGDATA/server.log start"
+# Keep -l INSIDE $PGDATA. Point it at a root-owned scratchpad and pg_ctl reports "stopped waiting
+# / could not start server / Examine the log output" with NO log to examine -- it could not create
+# the file (2026-08-16, #609: one wasted start cycle diagnosing a permission error as a startup
+# failure). The infrastructure suite replays migrations itself from `include_str!`, so for
+# `crates/**` tests you need only initdb + `createdb cf<NN>` -- the psql migration dance below is
+# for a database you are inspecting by hand.
 
 # sqlx-cli is NOT installed (CI gets it prebuilt from taiki-e/install-action, and building it
 # here costs minutes). psql applies the migrations, but needs a per-file fallback: some
@@ -287,12 +293,33 @@ with a single `pg_ctl start` **once space is free** — no `initdb`, no data los
 and do not re-init in a panic. Free disk before a workspace build whenever a cluster is up. Cost here:
 one lost compile plus a recovery round, on top of the build that caused it.
 
-**After this cleanup, distrust the FIRST post-cleanup `cargo run` result (2026-08-08):** one
-`make rust` check-drift ran a STALE `generate` binary right after the deps sweep and mass-pruned
-the five freshly generated `crates/bins/adapter-*` crates (a diff of 4 775 deletions that looked
-exactly like an emitter bug); the immediate rerun rebuilt and passed with zero drift. Cost: ~30
-min of debugging a phantom. If check-drift fails with an implausible mass-deletion right after a
-`target/debug` cleanup, rerun it before touching the emitter.
+**ANY disturbance of `target/` can leave cargo serving a STALE artifact it believes is fresh — and
+the quiet failure is worse than the loud one** (2026-08-08 + 2026-08-16 #609, one rule; the two
+occurrences differ only in which artifact went stale). Cargo trusts its fingerprints, and a
+hand-deletion or an interrupted compile desynchronises them from what is actually on disk. Both
+directions have now cost a session:
+
+- **LOUD, and therefore cheap.** One `make rust` check-drift ran a STALE `generate` binary right
+  after the deps sweep and mass-pruned the five freshly generated `crates/bins/adapter-*` crates —
+  4 775 deletions that looked exactly like an emitter bug. The immediate rerun rebuilt and passed
+  with zero drift. Cost ~30 min of debugging a phantom. **If check-drift fails with an implausible
+  mass-deletion right after a `target/debug` cleanup, rerun it before touching the emitter.**
+- **QUIET, and nearly fatal to a run's evidence.** After hand-deleting top-level link products,
+  `cargo test --workspace` re-linked `actor_client`'s unit binary from cached objects instead of
+  recompiling the changed source: **a test added ten minutes earlier was NOT IN THE BINARY**
+  (`running 11 tests` where the same source under `cargo test -p actor_client` gave 12). The suite
+  reported **1251 passed, 0 failed, exit 0** and the brand-new gate had never executed. Nothing goes
+  red, so **no gate can catch this** — it is the one failure mode that survives a green board.
+
+Three defences, all cheap:
+
+1. **`cargo clean -p <crate>` every package you edited**, before believing a green run, after *any*
+   manual deletion inside `target/` — and after any build that died mid-compile, ENOSPC included,
+   where the packages that were compiling at the moment it died are the suspects.
+2. **Verify a newly added test BY NAME in the run log** (`grep -a '^test .*<name> \.\.\. ok'`), never
+   by the total. `1252 → 1251, still green` reads as noise, and that is exactly what it looks like.
+3. **Distrust the FIRST post-cleanup result** of anything, and rerun before drawing a conclusion
+   from it.
 
 **A NEW workspace crate fails the determinator gate until it is COMMITTED (2026-08-10):**
 `closure::tests::hashes_are_total_and_deterministic` panics with `closure dir 'crates/<new>' has no
@@ -1081,6 +1108,15 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   them took the allowance from 2.3G to 6.9G. Same class as the dead worktree above and same price —
   free — but easier to miss, because nothing in `git status` mentions the scratchpad. Check it before
   every `target/debug` lever in §2, all of which cost a rebuild.
+- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING** (2026-08-16, #609):
+  cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
+  zero bytes. It looks like the biggest lever on this list and is not a lever at all. **It is also
+  not free** — that hand-deletion is what desynchronised the fingerprints in §2's stale-artifact
+  rule, which cost a run its evidence; read that rule before reaching in here by hand. The honest
+  levers are above (dead worktrees, the scratchpad sweep, then `incremental`) plus `cargo clean -p`
+  on a few big packages, which was 2.7 GB here and leaves cargo's bookkeeping intact. Symptom that
+  sent this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit`
+  while `df` still reported 2.3G free — §2's "writes fail while the numbers still look fine".
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
   allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
   checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses
@@ -1284,6 +1320,60 @@ Plus one guard the harness itself needs: assert the exporter is non-empty overal
 *"spy provider not installed before first meter call"* — the `OnceLock` meter binding makes a silent
 no-op provider the default failure, and it looks exactly like "nothing was emitted".
 
+**A visibility seal must be measured with `cargo build`, and `cargo test` is not the same
+question** (2026-08-16, #609, measured both ways). A `#[cfg(any(test, feature = "test-fixtures"))]`
+re-export looks like a seal and is one *for release artifacts only*. With a caller planted in a
+PRODUCTION source file of `infrastructure`, `cargo build -p infrastructure` failed with
+`error[E0425]: cannot find function ...` while `cargo test -p infrastructure` on the identical tree
+**compiled and linked**: resolver v2 (`Cargo.toml:8`) unifies a dev-dependency's feature grant into
+the single unit the lib links against during a test build, so the lib itself is compiled with the
+test-only export lit. Consequences, both of which cost real time here:
+
+- **Anyone verifying such a seal with `cargo test` gets a false negative** and will report
+  "unspellable" for something that is spellable in half the builds. The honest claim is
+  *"unspellable in any release artifact; still spellable from the lib of a crate whose
+  dev-dependencies light the feature, under `cargo test`"* — level 4 for the shipped binary,
+  level 3 elsewhere. Do not round it up.
+- **Prefer making the item private over gating its export**, when the call sites allow it: the
+  qualifier disappears, and so does the assertion you would otherwise need to stop one unreviewed
+  line from deleting the `cfg`.
+
+**A candidate seam that needs `allow(<lint>)` to compile is the COMPILER VOTING FOR THE OTHER
+OPTION** (`beck`, 2026-08-16, #609 — the generalisation, and it is the cheap one). `crates/actor_client`
+sets `unreachable_pub = "deny"` in its `[lints]`, so gating only the *re-export* leaves `pub fn` in a
+private module unreachable in a release build: `error: unreachable pub item`. The gated-export design
+therefore has to open with `#[cfg_attr(not(...), allow(unreachable_pub))]` — suppressing the exact
+lint that exists to catch "a `pub` item nobody outside uses". **Read the suppression as a verdict,
+not an obstacle**: the alternative it was arguing for (make the item private) is the one to take.
+Read `[lints]` in the target crate's `Cargo.toml` *at briefing*, before pricing a `cfg`-gated export
+at "five lines" — here the option died after a counterfactual build instead of in one line.
+
+**A chunk that removes a spelling has a SEMANTIC conflict with every branch open beside it, and
+`git merge` cannot see it** (2026-08-16, #609 — measured, not predicted). #609 made
+`actor_client::stable_partition` private; #610 merged to `main` first and brought a **new** test file
+that called it. Different files, so the textual merge was CLEAN — one conflict, in an unrelated
+records section — and the merged tree **did not compile**:
+`error[E0425]: cannot find function 'stable_partition' in crate 'actor_client'`. Two things follow:
+
+- **The compiler is the merge gate here, so run the BUILD after any merge into a
+  removal chunk**, before believing a clean `git merge`. A conflict-free merge of a removal is
+  evidence of nothing; this one had zero conflicts in the affected language.
+- **It is also the proof the seal works.** A parallel branch reintroduced exactly the hand-copied
+  `stable_partition(&id, 5)` the chunk exists to prevent, within hours, written by someone who had
+  no reason to know — and it could not land. Before the chunk it would have compiled and stamped a
+  fixture onto a lane derived from a literal. That is the whole argument for level 4 over a review
+  habit, and it arrived unprompted.
+
+**When a chunk's method is "make X unspellable", every existing spelling of X is a candidate
+INCIDENTAL PIN — enumerate what each one was holding before deleting it** (`vernon`, 2026-08-16,
+#609; this is the rule that would have caught that chunk's checkpoint MISS). Four test assertions
+spelled `stable_partition(&cart_id, 5)`. Converting them to read the declaration was the whole point
+and also silently removed the only thing in the repository pinning Cart's and Order's declared
+widths — a contract over STORED rows, where a change is a migration (ADR-20260802-220402), so the
+"cleanup" was a gate weakening that every gate would have reported green. A spelling being redundant
+with the declaration is exactly what makes it a pin; the redundancy is the point, not the defect. Ask
+of each site: *what would notice if this expectation and the thing it duplicates stopped agreeing?*
+
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
 introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was
@@ -1373,6 +1463,9 @@ ADR-20260720-233000 mandates the draft PR **before any code**, and `POST /repos/
 rejects exactly that: a branch pointing at the same sha as `main` gets
 `422 Unprocessable Entity — No commits between main and <branch>`. There is no flag for it. Push a
 `git commit --allow-empty -m "chore(NN): claim -- <title>"` first and open the PR against that.
+**Better than empty when something real is already in hand** (2026-08-16, #609): the claim commit is
+the natural home for the card/dispatch correction the executor makes while verifying it — same one
+commit, same 422 avoided, and the branch opens with a diff that says what the run already learned.
 
 This container has **no `gh` on PATH**, so every session drives the API with `curl` and meets the
 hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
@@ -1385,14 +1478,39 @@ different capabilities, and only one of them is missing:
 - the **`mcp__github__*` tools are unavailable to an executor** — every call answers `No such tool
   available`, even though the server's instructions are injected into the prompt, so the tool list
   reads as if they existed;
-- **`curl` against `api.github.com` with `$GITHUB_TOKEN` works, for READ and WRITE.** Proven in one
-  executor run: issue read, `status/in-progress` label add, claim comment, draft PR create, PR body
-  PATCH, check-runs read.
+- **`curl` against `api.github.com` works, for READ and WRITE.** Proven in one executor run: issue
+  read, `status/in-progress` label add, claim comment, draft PR create, PR body PATCH, check-runs
+  read. **You do not have to supply a token** (re-confirmed 2026-08-16, #609): the agent proxy
+  injects the credential, so a bare `curl https://api.github.com/…` already authenticates —
+  `GET /user` returned the account. Same reason `git ls-remote` and `git push` succeed with **no**
+  credential helper and no `extraheader` configured. Do not go hunting the environment for a token
+  when a call 401s; check the response body first. (The classifier blocks `env | grep -i token`
+  anyway, and correctly.)
 
 So an executor **performs its own claim, draft PR and PR-body updates** and only reports a GitHub
 failure it actually met. Handing the mechanics back on the assumption of no access costs a
 coordinator round-trip per chunk. If a session genuinely has none, the REST API says so in the body
 (`GitHub access is not enabled for this session`) — read the response before concluding.
+
+**But READY-FOR-REVIEW and AUTO-MERGE are GraphQL-only, and GraphQL is BLOCKED** (2026-08-16, #609
+— this narrows the entry above, which said "READ and WRITE" without qualification and is true only
+of REST). Every GraphQL call, down to `query { viewer { login } }`, answers:
+
+> `This GraphQL query is not enabled for this session — only the pinned set of PR-review operations
+> is served. Use REST via 'gh api repos/{owner}/{repo}/...' instead.`
+
+and `gh` is not on PATH either. There is **no REST equivalent** for either operation:
+`markPullRequestReadyForReview` and `enablePullRequestAutoMerge` exist only in GraphQL, and
+`PATCH /pulls/{n}` with `{"draft": false}` returns **200 with `draft` still `true`** — it silently
+ignores the field, which is the trap: it looks like it worked. So the ADR-20260815-115220 closing
+step ("mark ready and enable auto-merge together, as one indivisible step, then supervise to
+MERGED") is **not executable by an executor session** as things stand.
+
+What the executor CAN and therefore MUST still do, so the hand-back is one action and not a
+re-investigation: push the final head, get the PR body complete, and **supervise CI to green over
+REST** (`GET /commits/{sha}/check-runs`, poll until every run is `completed`, then read
+`conclusion`). Hand back naming the two GraphQL operations and the PR node id. Budget zero minutes
+for finding a workaround — there is not one.
 
 Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
 with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
@@ -1416,6 +1534,14 @@ denied main-session retry, and a founder round-trip for a change that was alread
 containing `` `system` `` silently lost the word and committed the gap. The existing ASCII rule
 covers Makefile recipes; this is the same class one layer over. Write any commit message with
 backticks, `$`, or `!` to a file and use `git commit -F <file>`.
+
+**It is not just commit messages — it is every double-quoted payload, and GitHub comment bodies are
+the one that gets seen** (2026-08-16, #609). `python3 -c "…"` inside double quotes has exactly the
+same hole: a PR comment built that way posted as *"Final head  — CI green.       all `success`"*,
+with the head sha and six check names eaten, and bash helpfully logged `276af29: command not found`
+next to an `HTTP=201`. **A 201 is not evidence the body is right.** Same fix, one level up: build any
+body with a **quoted** heredoc (`<<'PYEOF'`), never `-c "…"`, and for a comment that already went out
+wrong, `PATCH /repos/{o}/{r}/issues/comments/{id}` repairs it in place.
 
 ## 18. A CI-workflow change: does it fit the job's timeout, and does it regress the rollback path?
 

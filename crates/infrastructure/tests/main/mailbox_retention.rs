@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use actor_client::stable_partition;
+use actor_client::declared_lane;
 use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
 use application::reminders::reminder_message_id;
@@ -120,7 +120,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
 
     let order = uuid::Uuid::from_u128(0x0AD1);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
-    let partition = stable_partition(&order, 5);
+    let partition = declared_lane("Order", &order).expect("Order declares a mailbox");
     let stream = format!("Order-{order}");
 
     // The order's life up to READY (camelCase payloads matching domain::generated::events).
@@ -303,7 +303,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
 
     // An expiry for a stream that does not exist (already erased): IGNORED, never Rejected.
     let ghost = uuid::Uuid::from_u128(0xDEAD);
-    let ghost_partition = stable_partition(&ghost, 5);
+    let ghost_partition = declared_lane("Order", &ghost).expect("Order declares a mailbox");
     let ghost_msg = enqueue_message(
         &pool,
         0x33,

@@ -96,7 +96,8 @@ async fn requeue_recovers_a_poisoned_row_end_to_end() {
     .await;
     let unknown_target = uuid::Uuid::from_u128(0xDEAD);
     let sup_poisoned = uuid::Uuid::from_u128(0xB0151);
-    let partition = actor_client::stable_partition(&unknown_target, 1);
+    let partition = actor_client::declared_lane("MailboxSupervision", &unknown_target)
+        .expect("MailboxSupervision declares a mailbox");
     seed_poisoned(
         &pool,
         sup_poisoned,
@@ -132,7 +133,10 @@ async fn requeue_recovers_a_poisoned_row_end_to_end() {
     )
     .bind(requeue_cmd)
     .bind(sup_poisoned)
-    .bind(actor_client::stable_partition(&sup_poisoned, 1))
+    .bind(
+        actor_client::declared_lane("MailboxSupervision", &sup_poisoned)
+            .expect("MailboxSupervision declares a mailbox"),
+    )
     .bind(serde_json::json!({ "targetMessageId": sup_poisoned }))
     .execute(&pool)
     .await

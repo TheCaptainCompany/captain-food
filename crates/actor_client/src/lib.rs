@@ -24,9 +24,10 @@
 //!   surface is `ActorClient::watch` (`subscribe` is crate-internal).
 //! - [`reminders`] — the reminder-row constructor (`scheduled_entry`) the in-transaction
 //!   `schedules:` upsert binds from, and the pool-backed `declare`.
-//! - [`stable_partition`] — the FROZEN partition routing hash (re-homed from `actor_runtime`,
-//!   which never computes partitions itself: producers stamp them, and every producer lives
-//!   behind this crate).
+//! - [`declared_lane`] — the ONE lane accessor (#596), over a FROZEN partition routing hash
+//!   re-homed from `actor_runtime`, which never computes partitions itself: producers stamp them,
+//!   and every producer lives behind this crate. The hash itself is private to its module since
+//!   #609, so no caller can supply a `width` and hold a second opinion about the keyspace.
 //!
 //! Dependency direction: `actor_client -> application -> domain`; `infrastructure`, `server` and
 //! the adapters depend on this crate. `actor_client` holds NO sqlx/reqwest — the D3 capability
@@ -68,7 +69,10 @@ pub use mailbox::{
     Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
     MailboxStatusRow, ReschedulePolicy,
 };
-pub use partition::{declared_lane, stable_partition};
+// Only the ACCESSOR crosses the crate line (#609). The frozen hash behind it is module-private, so
+// `stable_partition(id, some_width)` is unspellable outside `partition.rs` — production and test
+// alike. That is the whole seal: no `pub`, no feature, no cfg, and nothing left for a gate to say.
+pub use partition::declared_lane;
 pub use status_bus::{OperationStatusBus, OperationUpdate};
 
 // The drift-guard REFERENCE implementations (test-only, PROP-20260802-130500 D5): visible to
