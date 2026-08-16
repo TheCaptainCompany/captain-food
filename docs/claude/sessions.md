@@ -1217,6 +1217,22 @@ fallbacks"), `crates/infrastructure/tests/main/scope_membership.rs` ("Seen RED b
 EXISTS clause from `PgOrderRepository::list`") — and neither names a commit, correctly, because the
 mutation was made by hand and never committed.
 
+**The same burden falls on "this cannot be tested", and it is the direction that actually ships
+holes** (2026-08-16, #598). A written-out reason why a test would be a tautology reads like rigour
+and gets waved through, where a bare "it is tested" would not. #598 recorded that its fleet-parity
+gauge "has no spy test and cannot honestly have one" — its driver is a composition root, and a test
+calling the emitter then finding it is a tautology. Both halves were true and the conclusion was
+false: **driving the composition root is not calling the emitter.** The review disproved it by
+writing the ~15-line test, and the cost was already banked — deleting the gauge REGISTRATION (the
+declaration still recorded, the observable gauge never built) was GREEN, so the only monitor able
+to see a split fleet was the one monitor with zero reds. Two consequences, both cheap:
+
+- **Attempt the test before recording that it is impossible.** "I could not find a way" is a
+  different, honest sentence, and it invites the next reader to try.
+- **A monitor with no red is not covered, whatever the prose beside it says.** If the driver is a
+  composition root, drive the composition root — it is `pub`, it resolves real values, and asserting
+  against the values it RESOLVED (never a literal) is what separates the test from the tautology.
+
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
 introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was

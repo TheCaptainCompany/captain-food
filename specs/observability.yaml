@@ -252,13 +252,21 @@ place-order:
     # the acceptance clock is arming late — a paid order the restaurant learns about a beat later.
     #
     # #598 — the handover carries its OWN budget, and that is the condition on keeping the
-    # contract's 800 ms unchanged (see `latency_budget` at the foot of this contract). Both
-    # numbers are DERIVED from declared configuration, never from a distribution nobody has
-    # measured: p95 1000 ms says the PUSH path must be the one carrying the handover (the lane
-    # wake rides the enqueue's own commit — a p95 above a second means push is not carrying it);
-    # p99 12000 ms is one `configuration.yaml#/MAILBOX_HEARTBEAT_SECONDS` fallback pass (10 s)
-    # plus drain slack, i.e. the DECLARED degraded bound — above that, neither push nor the
-    # fallback is carrying it and the restaurant is learning about a paid order late.
+    # contract's 800 ms unchanged (see `latency_budget` below). NEITHER number is measured (no
+    # distribution exists yet), and they are two DIFFERENT kinds of number — stated separately
+    # because "derived" is a provenance claim a reader will not re-check:
+    #
+    #   p95 1000 ms is a CHOSEN DISCRIMINATION THRESHOLD, not a derivation. It has no declared
+    #   antecedent: the lane wake rides the enqueue's own commit (an in-transaction pg_notify with
+    #   no declared latency) and the only declared cadences are 10 s and 60 s. A p95 above a
+    #   second means the PUSH path is not carrying the handover and the fallback is — that is the
+    #   discrimination it is picked to make, and the reason it is round.
+    #
+    #   p99 12000 ms is substantially DERIVED: one
+    #   `configuration.yaml#/MAILBOX_HEARTBEAT_SECONDS` fallback pass (10 s, declared) plus
+    #   2000 ms of drain slack for claiming the lease, reading the row and committing — that
+    #   slack is an allowance, declared nowhere. Above this bound neither push nor the fallback is
+    #   carrying it and the restaurant is learning about a paid order late.
     - name: "order_birth_lag_ms"
       type: histogram
       attributes: ["routed"]
@@ -314,6 +322,16 @@ place-order:
       # legal means. OFF => `event.store.append`; ON => `order.lane.enqueue`. Same verdict in
       # both flag states, no gate inside the rule, and a run that did NEITHER — the paid order
       # nobody is told about — is no longer a success.
+      #
+      # KNOWN GAP, stated here rather than discovered from a false verdict (#598 review, F1):
+      # the OFF branch is not emitted on EVERY live birth route. The mailbox PM lane
+      # (`handler.rs`, live and unconditional since #242) births through `flush_staged_in_tx`,
+      # which constructs no span at all — so a birth taken through that route today satisfies
+      # NEITHER alternative. `event.publish` below has the identical gap and is still
+      # `required: true`, which predates this change. The reason no gate caught it: the
+      # emitted-contract test proves a span constructor runs SOMEWHERE in the workspace, never
+      # that it runs on THIS workflow's path. Tracked as issue #602; the alternation is correct
+      # as written and closing the gap is instrumentation, not a rule change.
       required_spans:
         - "command.receive"
         - "command.journal"

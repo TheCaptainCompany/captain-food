@@ -23,24 +23,38 @@
 > enqueue and not on the lane-side append.
 >
 > **(2) The 800 ms budget is UNCHANGED, DECIDED, and dated.** Re-baselining now would invent a
-> percentile from a distribution that does not exist. `order_birth_lag_ms` gains its own budget
-> (1000/12000, both derived from the declared push wake and one `MAILBOX_HEARTBEAT_SECONDS`
-> fallback pass) so "paid order → restaurant told" stays covered end to end, and the re-baseline
-> trigger is written into the spec as a date: **the first Fri/Sat 19:00-21:30 after the flip**.
+> percentile from a distribution that does not exist. `order_birth_lag_ms` gains its own budget so
+> "paid order → restaurant told" stays covered end to end, and the re-baseline trigger is written
+> into the spec as a date: **the first Fri/Sat 19:00-21:30 after the flip**. Its two numbers are
+> **not the same kind of number**, and an earlier draft of this entry wrongly called both derived:
+> p99 12000 ms is one declared `MAILBOX_HEARTBEAT_SECONDS` fallback pass plus 2 s of undeclared
+> drain slack, while **p95 1000 ms has no declared antecedent at all** — the push wake is an
+> in-transaction `pg_notify` and the only declared cadences are 10 s and 60 s, so it is a threshold
+> CHOSEN to discriminate "push is carrying the handover" from "the fallback is". Good reason,
+> not a derivation; both are corrected at the line.
 >
 > **(3) Two liveness series, running NOW with the flag OFF.**
 > `order_lane_watch_heartbeat_total{lane}` (monotonic) and `order_lane_oldest_pending_age_ms{lane}`
 > (gauge), every tick, every declared routed lane — deliberately **not** a zero-seeding of
 > `order_birth_lag_ms`, whose p95 the flip is judged on. Alert on the ABSENCE of an increment. The
 > lane population is now GENERATED (`ROUTED_LANES`) and pinned in both directions, so a new routed
-> `deliver:` cannot leave a lane unwatched. Seven mutants red, each on a different assertion —
-> including the one the phase-1 harness could not see: under delta temporality a watcher that seeds
-> ONCE AT STARTUP drains identically to a correct one on the first tick, so **every tick**, the
-> whole dead-man's-switch claim, was unasserted until both watchers got a second tick over an
-> unchanged backlog.
+> `deliver:` cannot leave a lane unwatched. **Eight mutants red over five distinct assertions** —
+> an earlier draft claimed "seven, each on a different assertion" and that was false: at
+> `|ROUTED| = 1` silencing the counter, emitting only for backlogged lanes and dropping the
+> declared lane all red on the SAME assertion with the same `left: []`, because with one routed
+> lane there is no lane to drop and keep reporting. The ones that genuinely discriminate are the
+> value control, the two second-drain assertions and the parity gauge's registration. The
+> second-drain pair is what the phase-1 harness could not see: under delta temporality a watcher
+> that seeds ONCE AT STARTUP drains identically to a correct one on the first tick, so **every
+> tick**, the whole dead-man's-switch claim, was unasserted until both watchers got a second tick
+> over an unchanged backlog.
 >
-> **(4) Fleet parity is EVIDENCE now.** `runtime_flag_state{flag,value,bin}` (observable gauge) at
-> both composition roots: `count(distinct value) by (flag) > 1` blocks a flip. And vernon's
+> **(4) Fleet parity is EVIDENCE now, and the evidence is itself proved.**
+> `runtime_flag_state{flag,value,bin}` (observable gauge) at both composition roots:
+> `count(distinct value) by (flag) > 1` blocks a flip. It is spy-tested by driving the
+> `standalone_deps` composition root — the first cut claimed that "cannot honestly" be done and was
+> wrong, and the cost of being wrong was concrete: forgetting to REGISTER the gauge in
+> `declare_flag` shipped green, silencing the only monitor able to see a split fleet. And vernon's
 > correction is applied — the code comment claiming a split fleet "would birth some orders twice"
 > was WRONG (four absorbers make double-birth unreachable); the real hazard is **SPLIT-CLOCK**: one
 > birth, and a coin-flip on the acceptance deadline, per order, invisibly. **The flip ADR's

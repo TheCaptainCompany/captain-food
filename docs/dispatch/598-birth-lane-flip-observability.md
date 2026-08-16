@@ -318,20 +318,57 @@ with a different trace, so `order.lane.enqueue` (PRODUCER) was added and instrum
 `flush_lane_enqueues_in_tx` — the infrastructure glue, the framework boundary that owns the write.
 
 **§4a — UNCHANGED at 800/1500, with both conditions and the trigger AT THE LINE.**
-`order_birth_lag_ms` carries its own `latency_budget` (1000/12000, both DERIVED from declared
-configuration — the push wake and one `MAILBOX_HEARTBEAT_SECONDS` fallback pass — never guessed),
-and the re-baseline trigger is written into the spec as a date: **the first Fri/Sat 19:00-21:30
-after the flip**.
+`order_birth_lag_ms` carries its own `latency_budget`, and the re-baseline trigger is written into
+the spec as a date: **the first Fri/Sat 19:00-21:30 after the flip**.
+
+**The two numbers are NOT both derivations, and this section first said they were.** The review was
+right to split them, because "derived" is a claim about provenance that a reader will not re-check:
+
+- **p99 = 12000 ms is substantially derived**: one `configuration.yaml#/MAILBOX_HEARTBEAT_SECONDS`
+  fallback pass (10 s) plus 2000 ms of drain slack. The 10 s is declared; the **slack is not** — it
+  is a round allowance for claiming the lease, reading the row and committing, and nothing in the
+  specs states it.
+- **p95 = 1000 ms is a CHOSEN discrimination threshold, not a derivation.** It has no declared
+  antecedent at all: the push wake is an in-transaction `pg_notify` with no declared latency, and
+  the only declared cadences are 10 s and 60 s. The reason is good and stands — above a second
+  means the push path is not carrying the handover and the fallback is — but that is a threshold
+  picked to discriminate between two modes, not a number computed from configuration.
+
+Neither is measured, which was the actual point (there is no distribution yet); "chosen to
+discriminate" is the honest word for p95 and it is now the word at the line.
 
 **§4c — two series, never a zero-seed.** `order_lane_watch_heartbeat_total{lane}` (monotonic) and
 `order_lane_oldest_pending_age_ms{lane}` (gauge), emitted every tick for every declared routed lane
-including while the flag is OFF. Seven mutants red, each on a different assertion (A silence the
-counter · B silence the gauge · C emit only for lanes with a backlog · D hard-code the age to 0 ·
-E emit once per process · F the same for the promotion watch · G drop a declared lane). E and F are
-the coordinator's addendum and it was a REAL hole: delta temporality plus a draining read makes a
-seed-at-startup watcher drain identically to a correct one on the first tick, so "every tick" — the
-whole dead-man's-switch claim — was unasserted until both watchers got a second tick over an
-unchanged backlog.
+including while the flag is OFF.
+
+**Seven mutants red — but NOT, as this section first claimed, "each on a different assertion".**
+That claim was false and the review caught it: at `|ROUTED| = 1` the lane-level mutants collapse
+onto two assertions, because with one routed lane there is no lane to drop *and* keep reporting.
+The reds are real; the DISCRIMINATION is not, and it is worth naming precisely, because it is the
+same degeneracy [#604 "The missing-lane anti-vacuity control is degenerate at one routed lane: it
+asserts non-emptiness, not membership"](https://github.com/TheCaptainCompany/captain-food/issues/604)
+files. Each mutant below is a SEMANTIC EDIT with the message it produces
+(never a line range — the sharpened `sessions.md` rule this chunk itself wrote):
+
+| Mutant (semantic edit) | Reds on | Observed |
+|---|---|---|
+| **A** `order_lane_watch_tick` no longer `add`s to the heartbeat counter | heartbeat point set, drained lane | *"every DECLARED routed lane heartbeats on every tick, drained or not"* — `left: []` vs `right: [({"lane":"Order"}, 1.0)]` |
+| **C** it emits only for lanes that HAVE a backlog | **the same assertion, the same left/right** | ditto — indistinguishable from A at `|ROUTED| = 1` |
+| **G** it drops a declared lane from its own set | **the same assertion**, plus `routed_lanes_are_still_the_ones_asserted` | *"the watcher's own lane set must be the declared one, not a second hand-kept list"* |
+| **B** it no longer records the oldest-pending gauge | age point set, drained lane | *"a drained lane reports age 0, it does not go absent"* — `left: []` vs `right: [({"lane":"Order"}, 0.0)]` |
+| **D** the age is hard-coded to `0` (it emits, and lies) | the gauge's positive control | *"a birth parked 90s on the lane must show as ~90000ms, not 0ms -- the VALUE is the alarm"* |
+| **E** the pair is emitted ONCE per process instead of per tick | the SECOND drain, heartbeat | *"the heartbeat must INCREMENT on the second tick -- a monotonic counter that never increments is a dead watcher wearing a live series"* |
+| **F** the PROMOTION watch seeds once at startup | its second drain | *"the dead-man's switch must RE-ASSERT on every tick: a signal emitted once proves only that the process started"* |
+| **H** `declare_flag` records the declaration but never registers the observable gauge | the parity gauge's point set | *"a composition root must publish EVERY flag whose split across a fleet has a consequence"* — `left: []` vs the three resolved flags |
+
+So the honest count is **eight mutants over five distinct assertions**. A/C/G share one and B shares
+its shape with them; the assertions that genuinely discriminate are D (value, not presence), E and F
+(the second drain) and H (registration).
+
+E and F are the coordinator's addendum and it was a REAL hole: delta temporality plus a draining
+read makes a seed-at-startup watcher drain identically to a correct one on the first tick, so
+"every tick" — the whole dead-man's-switch claim — was unasserted until both watchers got a second
+tick over an unchanged backlog.
 
 **The declared lane population is now GENERATED.** `PM_LANE_ROUTED_DELIVERS` lived only in the
 codegen, so nothing at runtime could name "the lanes a routed birth lands on" and the watcher's set
@@ -342,10 +379,20 @@ directions (a `contains` pin leaves an ADDED lane green, which is the direction 
 **farley's parity evidence FIT.** `runtime_flag_state{flag,value,bin}`, an OBSERVABLE gauge declared
 at both composition roots. `version` is deliberately not a label — `service.version` is already a
 resource attribute, and a label would multiply the series during exactly the rolling deploy it
-watches. **It has no spy test and cannot honestly have one**: its driver is a composition root, and
-a test that called `declare_flag` itself and then found it would be the tautology #588's deleted
-`enqueue_birth` crutch was. Its proof is a deployed smoke assertion — an obligation below, not a
-gap being waved past.
+watches.
+
+**It IS spy-tested, and the earlier claim here that it "cannot honestly have one" was wrong.** The
+review disproved it by execution, and the disproof is the important part: the tautology objection
+defeats a test that calls `declare_flag` and then finds it, and says nothing about driving
+`standalone_deps`, which is a real composition root that resolves the values from the environment
+exactly as a deployed worker fleet does. Meanwhile **mutant H shipped GREEN** on the first cut —
+delete `let _ = flag_state_gauge();` from `declare_flag` and the declaration is still recorded while
+the observable gauge is never registered, so the series simply does not exist. That left the only
+monitor able to see a split fleet, and the only evidence for obligation 1(iv) below, as the one
+monitor in this chunk with zero reds. `mailbox_liveness_metrics.rs` now drives the root and asserts
+the full point set — resolved values, not literals — re-asserted on a second drain, because an
+observable gauge's whole reason for being is that it re-fires every export cycle. The deployed smoke
+remains an obligation; it is no longer the ONLY proof.
 
 **vernon's correction applied.** `standalone.rs` no longer says a split fleet "would birth some
 orders twice"; it names the four absorbers, and states the SPLIT-CLOCK hazard that is real.
@@ -356,6 +403,35 @@ card assumed — `ROUTED_LANES.source` puts the literal `pm:PlaceOrderProcess:Or
 committed generated file, so a PM rename lands in the diff — but a codegen test asserting the
 literal is still owed, and check-drift is not that test. **LOW-2** (§4e) stands deferred per its
 escape clause; `runtime_flag_state` now makes its hazard observable, which was the actual worry.
+
+### Follow-ups filed by the third look (not fixed in this PR)
+
+Four, all found by the independent review of the full branch diff. None is in the P2/P3 scope list,
+and each is filed rather than fixed because a review that fixes what it finds stops being a review.
+
+- [#602 "Instrument the OFF birth route: `flush_staged_in_tx` emits neither alternation branch nor
+  `event.publish`"](https://github.com/TheCaptainCompany/captain-food/issues/602) — **the sharpest,
+  and it is about the thing this chunk shipped.** The alternation's OFF branch is not emitted on
+  every live birth route: the mailbox PM lane births through `flush_staged_in_tx`, which constructs
+  no span, so with the flag OFF a birth taken through that route satisfies NEITHER branch. Stated at
+  the line in `specs/observability.yaml`. `event.publish` has the identical gap and is still
+  `required: true` (pre-existing). Nothing caught it because `constructor_called` is a
+  workspace-wide substring scan proving a constructor runs *somewhere*, never on *this workflow's*
+  path — the guard #598 widened, widened correctly, and could not have made path-aware.
+- [#603 "`order_lane_watch_heartbeat_total` is keyed `{lane}` only, so it cannot see a dead process
+  in a multi-process fleet"](https://github.com/TheCaptainCompany/captain-food/issues/603) — with N
+  watchers and no `service.instance.id`, the counter increments until the LAST one dies while the
+  contract claims per-PROCESS death. Either take a `bin` dimension like `runtime_flag_state` has, or
+  stop claiming it.
+- [#604 "The missing-lane anti-vacuity control is degenerate at one routed lane: it asserts
+  non-emptiness, not membership"](https://github.com/TheCaptainCompany/captain-food/issues/604) —
+  `&ROUTED[..len-1]` is the empty slice at `|ROUTED| = 1`. Needs a synthetic two-lane input; it
+  self-heals the day a second routed `deliver:` is declared, which is the day nobody will look.
+- [#605 "Render per-metric `latency_budget` in the generated docs
+  surfaces"](https://github.com/TheCaptainCompany/captain-food/issues/605) — the budget added in
+  this very change is invisible at `emit/docs.rs:577` and `:1226`, which render name + type only.
+  Verbatim the argument this branch used to justify extending the loader for `required_span_term`,
+  applied to the alternation and not to the budget beside it.
 
 ## 9. Flip-ADR obligations (written here so they cannot evaporate)
 

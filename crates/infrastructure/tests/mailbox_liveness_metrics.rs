@@ -43,6 +43,12 @@
 //! lane green, which is the direction that matters when someone declares a new routed `deliver:`
 //! and never widens the watch.
 //!
+//! **The fleet-parity gauge (#598) rides it too**, driven from the `standalone_deps` COMPOSITION
+//! ROOT. Driving a composition root is not the tautology the bullet above rules out: the root
+//! resolves the flag values from the environment the way a deployed worker fleet does, and nothing
+//! here calls `telemetry::meters::*`. Without it, failing to REGISTER the observable gauge in
+//! `declare_flag` was a green mutation that silenced the only monitor able to see a split fleet.
+//!
 //! **Why its own binary, with exactly ONE `#[tokio::test]`**: `telemetry::meters` binds the global
 //! meter once per process (`OnceLock`), so the spy provider must be installed before the FIRST
 //! metric call in the process — unachievable in the ~30-suite `main` binary, and unstable with a
@@ -176,6 +182,26 @@ fn a_lane_missing_from_the_emission_fails_the_equality() {
         "dropping a lane from the emitted set must NOT compare equal to the full set -- if it \
          does, every point-set assertion in this binary is vacuous"
     );
+}
+
+/// The point set `runtime_flag_state` owes for one process: every declared flag present, each
+/// labelled with the value THIS process resolved, all observing `1` (the value is a label, not the
+/// measurement — see `telemetry::meters::runtime`).
+///
+/// `bin` comes from [`telemetry::meters::runtime::current_bin`] rather than a literal because the
+/// test binary's own file name carries a build hash; the flag VALUES, which are the thing under
+/// test, come from the resolved `CommandDeps` and never from a literal `false` — a hard-coded
+/// expectation would both red spuriously under a set env var and pass a gauge that reports a
+/// constant instead of the decision.
+fn expected_flag_points(bin: &str, flags: &[(&str, bool)]) -> Vec<(BTreeMap<String, String>, f64)> {
+    let mut out: Vec<_> = flags
+        .iter()
+        .map(|(flag, value)| {
+            (attrs([("flag", *flag), ("value", &value.to_string()), ("bin", bin)]), 1.0_f64)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
+    out
 }
 
 /// One message sitting UNDELIVERED on the Order lane, received 90 s ago: the gauge's positive
@@ -398,5 +424,57 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
         backlogged.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
         expected_lane_points(ROUTED, &[("Order", 1.0)]),
         "the heartbeat is independent of the backlog: it ticks whether or not anything is waiting"
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // #598 — the FLEET-PARITY gauge, driven from the COMPOSITION ROOT.
+    //
+    // The first cut of this branch claimed `runtime_flag_state` "has no spy test and cannot
+    // honestly have one". That was wrong, and the review disproved it by execution. The tautology
+    // objection defeats a test that calls `declare_flag` and then finds it; it says nothing about
+    // driving `standalone_deps`, which is a REAL composition root, resolves the values from the
+    // environment the way a deployed worker fleet does, and is the same discipline the rest of
+    // this binary already keeps (nothing here calls `telemetry::meters::*`).
+    //
+    // What it buys: forgetting `let _ = flag_state_gauge();` in `declare_flag` — i.e. recording
+    // the declaration but never registering the observable gauge — shipped GREEN before this
+    // block existed. That mutation silences the ONLY monitor that can see a split fleet, and the
+    // only evidence for flip-ADR obligation 1(iv). A monitor whose silencing mutation is green is
+    // not a monitor.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    let deps = infrastructure::mailbox::standalone_deps(
+        &pool,
+        std::sync::Arc::new(infrastructure::FailClosedPaymentGateway),
+    );
+    let expected_flags = expected_flag_points(
+        &telemetry::meters::runtime::current_bin(),
+        &[
+            ("ENFORCE_ACCEPTANCE_TIMEOUT", deps.enforce_acceptance_timeout),
+            ("ENFORCE_SERVICE_HOURS_GUARD", deps.enforce_service_hours_guard),
+            ("ROUTE_ORDER_BIRTH_THROUGH_LANE", deps.route_order_birth_through_lane),
+        ],
+    );
+
+    let declared = spy.drain();
+    assert_eq!(
+        declared.points(metric::RUNTIME_FLAG_STATE),
+        expected_flags,
+        "a composition root must publish EVERY flag whose split across a fleet has a consequence, \
+         labelled with the value it actually resolved -- this series is the sole input to \
+         `count(distinct value) by (flag) > 1`, the query a flip is blocked on, so a flag that \
+         goes unpublished is a flag whose fleet-wide disagreement is invisible"
+    );
+
+    // EVERY EXPORT CYCLE, the same property E and F pin for the two watchers, and the entire
+    // reason this is an OBSERVABLE gauge rather than a value written once at boot: a process that
+    // dies must stop contributing its value with no timer of ours. A callback that fires once
+    // yields the full set on the first drain and an empty one here.
+    let declared_again = spy.drain();
+    assert_eq!(
+        declared_again.points(metric::RUNTIME_FLAG_STATE),
+        expected_flags,
+        "the parity gauge must RE-ASSERT on every export cycle -- a value published once says \
+         only that this process once started, and the fleet it is meant to describe changes \
+         precisely during the rolling deploy that this series exists to watch"
     );
 }
