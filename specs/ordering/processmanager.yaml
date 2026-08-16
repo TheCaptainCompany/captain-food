@@ -29,9 +29,10 @@ PlaceOrderProcess:
       steps:
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+            source: EVENT_STREAM
             as: cart
             where: { cart_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/cartId' } } }
-            note: "The cart to check out, with its projection-priced lines."
+            note: "The cart to check out. FOLDED from the cart's own stream, never SELECTed from the `cart` projection: checkout must be race-free against projector lag, and the lines it prices are the aggregate's, not the projection's. The model is borrowed SHAPE only."
         - guard: { throws: { $ref: 'errors.yaml#/CartNotFound' }, note: "The cart exists." }
         - guard:
             that: { cart: { status: { const: OPEN } } }
@@ -39,8 +40,10 @@ PlaceOrderProcess:
         - guard: { throws: { $ref: 'errors.yaml#/CartEmpty' }, note: "The cart has at least one line." }
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+            source: EVENT_STREAM
             as: restaurant
             where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
+            note: "FOLDED from the restaurant's own stream, never SELECTed from the `restaurant` projection: the ACTIVE/PAUSED and TEST-mode checks below must be authoritative and race-free -- a lagging projector must not let an order through to a restaurant that has just paused. The model is borrowed SHAPE only."
         - guard: { throws: { $ref: 'errors.yaml#/RestaurantPaused' }, note: "restaurant.order_acceptance is not PAUSED." }
         - guard: { throws: { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }, note: "A LIVE order never targets a TEST restaurant (ADR-0038)." }
         - guard:
@@ -57,8 +60,20 @@ PlaceOrderProcess:
               never as a synchronous GraphQL error.
         - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
         - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/Catalog' }
+            source: PROJECTION
+            as: catalog
+            where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
+            note: "The LIVE-CATALOG PRICE AUTHORITY (rules.yaml#/ServerPriceAuthority): every cart line is repriced from this row's offer/option tree, and that recomputed total IS the PaymentIntent amount -- a leg that cannot reach this table cannot price a checkout at all. SELECTed from the `catalog` projection, and that is DELIBERATE and customer-visible, not an asymmetry to clean up: the cart screen prices from this same projection at read time (specs/screens/restaurant_frontoffice.yaml `cart` resolver), so what is DISPLAYED and what is CHARGED cannot disagree. Folding the catalog stream here would make them disagree under projector lag and surface PriceMismatch AFTER the customer has decided and is looking at the Stripe element."
         - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }
         - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
+        - read:
+            model: { $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }
+            source: EVENT_STREAM
+            as: customer_credit
+            where: { customer_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/customerId' } } }
+            note: "The goodwill store credit SPENT at checkout (#158): the applied amount reduces the CASH the buyer pays, so this read moves money. FOLDED from the customer's credit ledger stream, and EVENT_STREAM here is load-bearing rather than descriptive -- the projected `CustomerCreditBalance` row carries a running SUM and NO per-order consumption key, so the retry-stability question (has THIS order already consumed credit?) is INEXPRESSIBLE from it. Under projector lag a redelivered PlaceOrder would apply the credit twice: buyer undercharged, on the money path, no error raised and nothing in telemetry distinguishing it from a cheaper order. At-least-once delivery meeting a non-idempotent read -- the fold is what makes it idempotent. The model is borrowed SHAPE only."
         - call:
             port: payment
             operation: request
@@ -146,10 +161,12 @@ CartBindingProcess:
       steps:
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+            source: PROJECTION
             as: open_carts
             where:
               session_id: { from: { $ref: 'events.yaml#/CustomerIdentified/properties/sessionId' } }
               status: { const: OPEN }
+            note: "SELECTed from the `cart` projection: the leg needs to ENUMERATE a session's carts, which no single aggregate stream can answer. Projector lag is benign here -- a cart missed on this pass binds on the next identification, and the Cart's one-time bind absorbs a duplicate."
         - send:
             command: { $ref: 'commands.yaml#/BindCartToCustomer' }
             to: { $ref: 'actors.yaml#/Cart' }
