@@ -82,7 +82,16 @@ impl ActorDoor {
     ) -> Result<ScheduleOutcome, DomainError> {
         let entry = command_entry(actor_type, width, actor_id, message_type, payload, env);
         let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
+        // A scheduled COMMAND keeps the historical in-place semantics — `keep` exists for
+        // reminder deadlines (#167), and no command door declares a policy today.
+        schedule_mapped(
+            self.mailbox.as_ref(),
+            entry,
+            at,
+            crate::mailbox::ReschedulePolicy::InPlace,
+            &payload_hash,
+        )
+        .await
     }
 
     /// Withdraw one SCHEDULED row — the delegate behind `{Actor}Client::cancel_scheduling`. This

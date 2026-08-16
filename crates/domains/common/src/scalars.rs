@@ -163,6 +163,7 @@ pub enum OrderStatus {
     DELIVERED,
     CANCELLED_BY_CUSTOMER,
     CANCELLED_BY_RESTAURANT,
+    CANCELLED_BY_TIMEOUT,
 }
 
 /// Status of one delivery, reported by the partner (inbound) or driven by an independent rider's commands.

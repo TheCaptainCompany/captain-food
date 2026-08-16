@@ -247,6 +247,73 @@ async fn order_events_fold_into_the_read_model() {
             .await
             .expect("Order checkpoint after payment facts");
     assert_eq!(checkpoint, 5);
+
+    // 5) #167 (PR #586 Phase 3): a SECOND order times out — OrderAcceptanceTimedOut must fold to
+    //    CANCELLED_BY_TIMEOUT (and move status_changed_at), or the customer's screen says PLACED
+    //    forever after the money-adjacent cancellation recorded. This arm clears the banked
+    //    +1 `event-not-projected` ratchet debt from Phases 0-1.
+    let timed_out_order = uuid::Uuid::new_v4();
+    let timeout_stream = format!("Order-{timed_out_order}");
+    append_event(
+        &pool,
+        &timeout_stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": timed_out_order,
+            "restaurantId": restaurant_id,
+            "customerId": customer_id,
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "COLLECTION",
+            "items": [{
+                "offerId": uuid::Uuid::new_v4(),
+                "name": "Margherita",
+                "quantity": 1,
+                "unitPrice": money(980),
+                "lineTotal": money(980)
+            }],
+            "totalAmount": money(980),
+            "breakdown": {
+                "articles": money(980),
+                "delivery": money(0),
+                "serviceFee": money(0),
+                "total": money(980),
+                "restaurantContribution": money(0),
+                "restaurantPayout": money(980),
+                "riderPayout": money(0),
+                "captainNet": money(0)
+            }
+        }),
+    )
+    .await;
+    append_event(
+        &pool,
+        &timeout_stream,
+        2,
+        "OrderAcceptanceTimedOut",
+        serde_json::json!({ "orderId": timed_out_order }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (timed out)");
+
+    let (status, changed_after_placed): (String, bool) = sqlx::query_as(
+        "SELECT status, status_changed_at >= placed_at FROM ordertracking WHERE order_id = $1",
+    )
+    .bind(timed_out_order)
+    .fetch_one(&pool)
+    .await
+    .expect("timed-out order row");
+    assert_eq!(status, "CANCELLED_BY_TIMEOUT", "the timeout folds — never PLACED forever");
+    assert!(changed_after_placed, "status_changed_at moved with the terminal fact");
+    let timed_out_list = repo
+        .list(OrderFilter {
+            restaurant_id: Some(RestaurantId(restaurant_id)),
+            status: Some(OrderStatus::CANCELLED_BY_TIMEOUT),
+            ..Default::default()
+        }, &ReadScope::System)
+        .await
+        .expect("list CANCELLED_BY_TIMEOUT");
+    assert_eq!(timed_out_list.len(), 1, "the back-office expired filter can find it");
 }
 
 /// The customer-anxiety quick win (#424, PROP-20260808-233000 §2): on the independent-rider path

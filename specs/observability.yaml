@@ -1249,3 +1249,75 @@ read-authorization:
   # deliberately tight: if it drifts, something has started joining or scanning.
   latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
   error_budget: { max_error_rate_pct: 0.1 }
+
+# =====================================================================
+# acceptance-timeout — the #167 auto-cancel clock (ADR-20260808-195315 §1.3), gated OFF
+# birth (`schedules:`) -> SCHEDULED row -> promotion pass -> kind-MESSAGE delivery ->
+#   gate ON: OrderAcceptanceTimedOut appended (PLACED -> CANCELLED_BY_TIMEOUT) + GDPR clock
+#   gate OFF (DEFAULT, shadow): identical still-PLACED guard, append inert, verdict Ignored.
+# THE FLIP EVIDENCE lives here: the `reminder.promote` span's shadow/would_cancel split is the
+# data set the ENFORCE_ACCEPTANCE_TIMEOUT flip ADR reads (the service_window_verdict precedent),
+# and the fire-delay attribute is the honest measurement of the "due + promotion slop" precision
+# the config key promises. Emitted at the MAILBOX layer (handler.rs), never in the pure record
+# handler — business code stays SDK-free.
+# =====================================================================
+acceptance-timeout:
+  feature: acceptance-timeout
+  criticality: high
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/Order' }
+    emits:
+      - { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+
+  run_identity:
+    - { name: correlation_id, source: "message.correlation_id", required: true }   # the reminder row's correlation (cause-chained to the delivery that declared it)
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: order_id, source: "payload.orderId", required: true }
+
+  spans:
+    # One promoted reminder's DELIVERY. `business.shadow` is the gate position read AT DELIVERY
+    # (never scheduling); `business.would_cancel` is the still-PLACED guard's decision on the
+    # IDENTICAL fold+predicate code path in both positions — the outcome label split
+    # (would_cancel vs noop) that turns shadow traffic into flip evidence. due_at/fire_delay_ms
+    # measure real promotion slop against the row's declared scheduled_at (absent only on a
+    # redelivery under a fresh, unscheduled identity).
+    - name: "reminder.promote"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.reminder_type", type: string, required: true }
+        - { key: "business.shadow", type: string, required: true }         # true = gate OFF (append inert) | false = enforcing
+        - { key: "business.would_cancel", type: string, required: true }   # true = still PLACED (cancelled, or would be) | false = benign no-op
+        - { key: "business.due_at", type: string, required: false }
+        - { key: "business.fire_delay_ms", type: string, required: false }
+        - { key: "business.order_id", type: string, required: true }
+    # The append, on the enforcing arm only (shadow appends nothing by design).
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: false
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.stream_id", type: string, required: true }
+
+  metrics:
+    # THE DEAD-MAN'S SWITCH (ADR-20260810-231300): emitted on EVERY watch tick per actor type,
+    # 0 included, by a sampler OUTSIDE the worker (promotion_watch.rs) — a monitor that can only
+    # fire when a reminder arrives goes quiet exactly when it should scream. Alert twice: on a
+    # GROWING value (promotion dead, deadlines piling up) and on the series STOPPING (the watcher
+    # or its process died). Never alert on a threshold alone.
+    - { name: "reminder_promotion_due_lag_ms", type: histogram, attributes: ["actor_type"] }
+    # The dba cardinality watch: SCHEDULED depth per (actor_type, purpose). V0 expectation is
+    # single digits; a runaway is a scheduling leak, not load. Same every-tick emission.
+    - { name: "mailbox_scheduled_depth", type: gauge, attributes: ["actor_type", "purpose"] }
+
+  status_rules:
+    success:
+      required_spans: ["reminder.promote"]   # Ignored/Duplicate ARE successes — record semantics, never Rejected
+    technical_error:
+      any_span_errors: true
+
+  # The delivery leg only (fold + verdict, no external calls). The end-to-end precision promise —
+  # due + <=60 s promotion slop + head-of-line drain — is the config key's documented contract and
+  # is watched via business.fire_delay_ms, not this budget.
+  latency_budget: { max_p95_ms: 500, max_p99_ms: 2000 }
+  error_budget: { max_error_rate_pct: 1.0 }

@@ -129,7 +129,10 @@ Order:
       - { from: [PLACED], event: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }, to: REJECTED }
       - { from: [PLACED], event: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, to: CANCELLED_BY_CUSTOMER }
       - { from: [ACCEPTED, PREPARING, READY], event: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }, to: CANCELLED_BY_RESTAURANT }
-    terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT]
+      # #167: the acceptance deadline elapsed while still PLACED — auto-cancel by timeout
+      # (ADR-20260808-195315 §1.3; release-not-refund downstream).
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }, to: CANCELLED_BY_TIMEOUT }
+    terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT, CANCELLED_BY_TIMEOUT]
   # GDPR retention pilot (ADR-20260731-153000/-160000/-214500, #272): every terminal receive
   # `schedules:` the OrderExpired reminder (reschedule in place — the LAST terminal fact wins the
   # clock); the promotion pass delivers it when due and the delivery RECORDS the fact (record
@@ -142,6 +145,14 @@ Order:
       payload: { $ref: 'events.yaml#/OrderExpired' }
       after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
       reschedule: in-place        # ADR-20260731-150500: re-declaring postpones the SAME row
+    # #167: the acceptance deadline — scheduled at BOTH births (OrderPlaced and the $0
+    # replacement), delivered by the promotion pass when due. `keep` ON PURPOSE (never
+    # in-place): a redelivered, duplicate-absorbed birth fact re-applies its `schedules:`,
+    # and the deadline must not move — the FIRST scheduled_at wins.
+    OrderAcceptanceTimedOut:
+      payload: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_ACCEPTANCE_TIMEOUT_SECONDS' }
+      reschedule: keep
   deletion:
     triggers:
       - on: [{ $ref: 'events.yaml#/OrderExpired' }]
@@ -152,7 +163,9 @@ Order:
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
-      effect: "Birth: PlaceOrderProcess delivers OrderPlaced; the Order records it (idempotent)."
+      effect: "Birth: PlaceOrderProcess delivers OrderPlaced; the Order records it (idempotent). Starts the acceptance clock (#167)."
+      schedules:
+        - { $ref: '#/Order/reminders/OrderAcceptanceTimedOut' }
     # No-charge replacement birth (ReclamationProcess REPLACEMENT arm, ADR-20260726-171736 / #159): remakes
     # the original order (read by originalOrderId) as a NEW Order with the SAME items, $0 buyer total and no
     # paymentIntentId, linked via OrderPlaced.replacementOf. Idempotent per reclamationId (deterministic
@@ -161,7 +174,9 @@ Order:
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
-      effect: "Remake the original order as a linked no-charge replacement (OrderPlaced replacementOf, buyer total 0)."
+      effect: "Remake the original order as a linked no-charge replacement (OrderPlaced replacementOf, buyer total 0). Starts the acceptance clock too (#167) — apply_schedules_in_tx keys on the DELIVERED message type, so each birth needs its own entry."
+      schedules:
+        - { $ref: '#/Order/reminders/OrderAcceptanceTimedOut' }
     - message: { $ref: 'commands.yaml#/AcceptOrder' }
       emits: [{ $ref: 'events.yaml#/OrderAcceptedByRestaurant' }]
       throws:
@@ -241,6 +256,28 @@ Order:
         semantics — Recorded, or Ignored (stream already gone) / Duplicate (already expired) —
         NEVER Rejected (ADR-20260731-153000 §1a: the deadline's passage cannot be refused). The
         erasure ACTION on this recording is the deletion engine's journey (deletion: block above).
+    # #167 acceptance timeout — absorb-only this half: cancel_scheduled is race-safe by LOSING
+    # (promotion flips SCHEDULED→RECEIVED first, so a cancel matches zero rows and the reminder
+    # delivers anyway), which makes the still-PLACED guard here mandatory AND complete on its own.
+    - message: { $ref: '#/Order/reminders/OrderAcceptanceTimedOut' }
+      emits: [{ $ref: 'events.yaml#/OrderAcceptanceTimedOut' }]
+      effect: >
+        The promotion pass delivered the acceptance deadline: record the timeout with record
+        semantics iff the order is STILL PLACED — Recorded (append, PLACED→CANCELLED_BY_TIMEOUT),
+        or Ignored (acceptance/rejection/cancellation won the race, or the stream is gone) /
+        Duplicate (already timed out) — NEVER Rejected. The ENFORCE_ACCEPTANCE_TIMEOUT gate is
+        read at DELIVERY time, never at scheduling: while OFF the FULL still-PLACED guard is
+        evaluated on the identical fold+predicate code path and the append alone is inert (the
+        fired-while-OFF occurrence lands Ignored, spent forever — flipping ON is prospective
+        only), with the shadow decision exported as OTLP evidence at the mailbox layer
+        (specs/observability.yaml#/acceptance-timeout, business.shadow/would_cancel). THE FENCE
+        (young+vernon, PR #586 checkpoint — binding): the `schedules:` below applies on the
+        RECORDED/Cancelled arm ONLY — Recording the cancellation also starts the OrderExpired
+        retention reminder like every other terminal (a timed-out order must still get its GDPR
+        clock), but a shadow WouldCancel→Ignored delivery must NEVER arm the GDPR deletion clock
+        on a still-PLACED order, and neither may any other no-append arm.
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
 
 
 Reclamation:

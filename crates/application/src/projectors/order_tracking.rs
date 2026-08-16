@@ -37,6 +37,9 @@ impl OrderTrackingCompute for OrderTrackingProjector {
             DomainEvent::OrderRejectedByRestaurant(_) => OrderStatus::REJECTED,
             DomainEvent::OrderCancelledByCustomer(_) => OrderStatus::CANCELLED_BY_CUSTOMER,
             DomainEvent::OrderCancelledByRestaurant(_) => OrderStatus::CANCELLED_BY_RESTAURANT,
+            // #167: the acceptance deadline's terminal — without this arm the customer's
+            // tracking screen stays PLACED forever after the timeout records.
+            DomainEvent::OrderAcceptanceTimedOut(_) => OrderStatus::CANCELLED_BY_TIMEOUT,
             _ => prev.map(|r| r.status.clone()).unwrap_or(OrderStatus::PLACED),
         }
     }

@@ -25,6 +25,11 @@ pub(crate) const SOURCE_FILES: &[&str] = &[
     // crates so a stale entry (matching no code) is itself caught.
     "translations.code_refs.yaml",
     "observability.yaml",
+    // The BUSINESS-METRIC catalog (ADR-20260811-014129: a business metric IS a projection —
+    // `projections:` declare folds over domain_events for the `bam` projector, `metrics:` the
+    // reads over them, every reference a `$ref`). Optional-when-absent like databases.yaml so
+    // fixture models need no boilerplate; the #167 time-to-accept fold is its first row.
+    "business_metrics.yaml",
     // Runtime configuration (PROP-20260729-004500, issue #246): every env-fulfilled setting the app
     // needs, with its type, per-profile required-ness and — printed in the fail-fast report — what it
     // gates. Emits the typed reader; a drift test pins every env::var call site to a declared key.
@@ -141,8 +146,9 @@ pub(crate) fn load_model(specs: &PathBuf) -> Result<Model, String> {
         }
         // The database catalog starts empty when absent (fixture/degenerate models) — §18 then
         // requires it the moment any covered-kind table exists, so the REAL tree cannot lose it
-        // silently while a minimal test model needs no boilerplate.
-        if f == "database/databases.yaml" && !p.exists() {
+        // silently while a minimal test model needs no boilerplate. Same posture for the
+        // business-metric catalog (ADR-20260811-014129).
+        if (f == "database/databases.yaml" || f == "business_metrics.yaml") && !p.exists() {
             defs.insert(f.to_string(), Value::Mapping(serde_yaml::Mapping::new()));
             continue;
         }

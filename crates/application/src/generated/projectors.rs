@@ -334,6 +334,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         DomainEvent::OrderRejectedByRestaurant(_) => { let mut row = state?; row.status_changed_at = env.occurred_at; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderCancelledByCustomer(_) => { let mut row = state?; row.status_changed_at = env.occurred_at; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderCancelledByRestaurant(_) => { let mut row = state?; row.status_changed_at = env.occurred_at; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderAcceptanceTimedOut(_) => { let mut row = state?; row.status_changed_at = env.occurred_at; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::PaymentCaptured(e) => { let mut row = state?; row.payment_intent_id = Some(e.payment_intent_id.clone()); let v = c.payment_status(Some(&row), env); row.payment_status = v; Some(row) },
         DomainEvent::PaymentReleased(_) => { let mut row = state?; let v = c.payment_status(Some(&row), env); row.payment_status = v; Some(row) },
         DomainEvent::PaymentRefunded(_) => { let mut row = state?; let v = c.payment_status(Some(&row), env); row.payment_status = v; Some(row) },

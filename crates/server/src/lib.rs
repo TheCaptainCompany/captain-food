@@ -891,6 +891,10 @@ pub async fn router() -> Router {
                         // OFF = shadow), resolved from the declared configuration ONCE here at
                         // the composition root — the handler takes it as a parameter.
                         enforce_service_hours_guard: config.enforce_service_hours_guard,
+                        // #167: the acceptance-timeout ACTION gate (default OFF = shadow), read
+                        // at DELIVERY time by the OrderAcceptanceTimedOut route — same
+                        // composition-root resolution.
+                        enforce_acceptance_timeout: config.enforce_acceptance_timeout,
                     };
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a
@@ -1087,6 +1091,14 @@ pub async fn router() -> Router {
                     tracing::info!(
                         workers = infrastructure::generated::command_router::ACTOR_MAILBOXES.len(),
                         "mailbox: per-actor-type workers running in-process"
+                    );
+                    // #167: the reminder-promotion dead-man's switch + SCHEDULED-depth gauge —
+                    // a monitor OUTSIDE the workers it watches (ADR-20260810-231300 monitoring
+                    // carve-out), emitting on every tick so a dead promotion pass reads as a
+                    // GROWING lag, never as silence.
+                    infrastructure::mailbox::spawn_promotion_watch(
+                        pool.clone(),
+                        std::time::Duration::from_secs(30),
                     );
 
                     // (The startup Stripe-fact backfill runs INLINE before the saga runner

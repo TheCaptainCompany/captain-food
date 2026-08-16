@@ -178,6 +178,7 @@ async fn fenced_out_completion_rolls_back_whole_and_thief_redelivers() {
         cause_id: None,
         session_id: None,
         received_at: chrono::Utc::now(),
+        scheduled_at: None,
     };
     let out = complete_fenced(&pool, &a_lane, "w-A", &msg, &ProbeHandler).await;
     assert!(matches!(out, Err(CompletionError::FencedOut)), "stale authority must not commit: {out:?}");
@@ -258,6 +259,7 @@ async fn head_of_line_order_survives_takeover() {
             cause_id: row.get("cause_id"),
             session_id: row.get("session_id"),
             received_at: row.get("received_at"),
+            scheduled_at: None,
         };
         complete_fenced(&pool, &lane_a, "w-A", &msg, handler.as_ref()).await.expect("A delivers");
         assert_eq!(msg.position, *pos);
@@ -319,6 +321,7 @@ async fn completed_rows_are_never_redelivered() {
         cause_id: None,
         session_id: None,
         received_at: chrono::Utc::now(),
+        scheduled_at: None,
     };
     let out = complete_fenced(&pool, &lane, "w-A", &msg, handler.as_ref()).await;
     assert!(matches!(out, Err(CompletionError::AlreadyCompleted)), "{out:?}");
@@ -569,6 +572,7 @@ fn decode_for_test(row: &sqlx::postgres::PgRow) -> InboundMessage {
         cause_id: row.get("cause_id"),
         session_id: row.get("session_id"),
         received_at: row.get("received_at"),
+        scheduled_at: None,
     }
 }
 

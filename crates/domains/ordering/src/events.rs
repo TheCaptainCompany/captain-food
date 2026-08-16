@@ -139,6 +139,13 @@ pub struct OrderCancelledByRestaurant {
     pub reason: String,
 }
 
+/// The acceptance deadline elapsed while the order was still PLACED — at this moment the order IS cancelled by timeout: a FACT, never a command (ADR-20260731-153000 §1a — the deadline's passage cannot be refused). Scheduled by the Order actor's OrderAcceptanceTimedOut reminder on BOTH birth receives (reschedule keep: the first deadline wins, #167), delivered by the promotion pass when due, and recorded with record semantics iff the order is still PLACED — Ignored when acceptance won the race, Duplicate on redelivery, NEVER Rejected. Downstream the payment leg RELEASES the authorization (capture-on-fulfilment, ADR-20260808-195315 §1.2/§1.3): the customer was never charged, so there is no refund on this path. Payload = orderId only, mirroring OrderExpired: the TTL value is policy (configuration), not fact, and is derivable from the envelope timestamps.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderAcceptanceTimedOut {
+    pub order_id: OrderId,
+}
+
 /// The customer rated the delivery of a completed order (rider thumbs up/down).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

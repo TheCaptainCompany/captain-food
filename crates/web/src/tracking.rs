@@ -151,8 +151,9 @@ pub struct StatusHero {
     pub body_key: &'static str,
 }
 
-/// `status_config` as data. Both CANCELLED_* statuses render the spec's single `CANCELLED` entry —
-/// who cancelled changes the copy server-side (the pushed order carries it), not the hero shape.
+/// `status_config` as data. CANCELLED_BY_CUSTOMER/CANCELLED_BY_RESTAURANT share the spec's
+/// `cancelled` copy; CANCELLED_BY_TIMEOUT (#167) carries its own "didn't respond in time" entry.
+/// The spec map keys the FULL OrderStatus enum (validator: screen-status-config-incomplete).
 pub fn status_hero(status: &str) -> Option<StatusHero> {
     let hero = |icon, key: &'static str| StatusHero {
         icon,
@@ -165,6 +166,7 @@ pub fn status_hero(status: &str) -> Option<StatusHero> {
             "order.status.ready.title" => "order.status.ready.body",
             "order.status.out_for_delivery.title" => "order.status.out_for_delivery.body",
             "order.status.delivered.title" => "order.status.delivered.body",
+            "order.status.acceptance_timed_out.title" => "order.status.acceptance_timed_out.body",
             _ => "order.status.cancelled.body",
         },
     };
@@ -179,6 +181,9 @@ pub fn status_hero(status: &str) -> Option<StatusHero> {
         "CANCELLED_BY_CUSTOMER" | "CANCELLED_BY_RESTAURANT" => {
             Some(hero("x_circle", "order.status.cancelled.title"))
         }
+        // #167: the restaurant did not respond in time — dedicated copy (release-not-refund
+        // register), never the generic cancelled body.
+        "CANCELLED_BY_TIMEOUT" => Some(hero("clock_x", "order.status.acceptance_timed_out.title")),
         _ => None,
     }
 }
@@ -331,6 +336,19 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
                 None if unresolved => view! {
                     <section data-c="order_status_hero" data-status="PENDING"></section>
                 }.into_any(),
+                // The order WAS read and exists — the bundle just has no words for its status
+                // (graphql F3, PR #586 checkpoint: a STALE WASM bundle served next to a newer
+                // server can push a status this build's `status_hero` does not know — e.g.
+                // CANCELLED_BY_TIMEOUT before the #167 deploy reaches the client). Saying
+                // "order not found" over a PAID order would be a lie; silence-with-the-raw-token
+                // is honest and styleable.
+                //
+                // GAP(copy): the right content is a neutral "your order is being updated" line;
+                // customer copy is founder-approved verbatim, so it is recorded as a `gaps:`
+                // entry on the order_tracking screen rather than invented here.
+                None if matches!(state.order, OrderRead::Present(_)) => view! {
+                    <section data-c="order_status_hero" data-status=status.clone().unwrap_or_default()></section>
+                }.into_any(),
                 None => view! {
                     <section data-c="order_status_hero" data-status="UNKNOWN">
                         <h1 data-i18n="order.not_found">{not_found}</h1>
@@ -411,9 +429,14 @@ mod tests {
 
     #[test]
     fn every_order_status_has_a_hero_and_unknown_has_none() {
+        // The FULL scalars.yaml#/OrderStatus enum, by hand ON PURPOSE (graphql F1, PR #586
+        // checkpoint): the spec-side completeness lives in `screen-status-config-incomplete`,
+        // and THIS list is what makes deleting a hero arm in `status_hero` fail a test —
+        // before CANCELLED_BY_TIMEOUT joined it, deleting the #167 arm failed nothing.
         for status in [
             "PLACED", "ACCEPTED", "REJECTED", "PREPARING", "READY", "OUT_FOR_DELIVERY",
             "DELIVERED", "CANCELLED_BY_CUSTOMER", "CANCELLED_BY_RESTAURANT",
+            "CANCELLED_BY_TIMEOUT",
         ] {
             assert!(status_hero(status).is_some(), "no hero for {status}");
         }
@@ -424,6 +447,12 @@ mod tests {
             status_hero("CANCELLED_BY_CUSTOMER").unwrap(),
             status_hero("CANCELLED_BY_RESTAURANT").unwrap()
         );
+        // #167: the timeout carries its OWN copy (release-not-refund register), never the
+        // generic cancelled entry, and the dedicated clock_x icon.
+        let timeout = status_hero("CANCELLED_BY_TIMEOUT").unwrap();
+        assert_eq!(timeout.icon, "clock_x");
+        assert_eq!(timeout.title_key, "order.status.acceptance_timed_out.title");
+        assert_ne!(timeout, status_hero("CANCELLED_BY_CUSTOMER").unwrap());
     }
 
     #[tokio::test]
@@ -480,6 +509,24 @@ mod tests {
         // on a genuine null, so the two are distinguishable exactly here.
         assert_eq!(TrackingState::from_resolved(id, &Map::new()).order, OrderRead::Unresolved);
         assert_eq!(TrackingState::from_resolved(id, &Map::new()).order_id, id);
+    }
+
+    /// graphql F3 (#167 / PR #586 checkpoint): a status this BUILD cannot render — the stale-WASM
+    /// window where the server speaks a newer OrderStatus — must never tell a paid customer their
+    /// order was not found. The order was READ and is Present; the page stays silent with the raw
+    /// token stamped, exactly like the unresolved state, until the bundle catches up.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn an_unknown_status_on_a_present_order_never_renders_not_found() {
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(order("SOME_FUTURE_STATUS", "2026-08-16T12:00:00Z")));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains(r#"data-status="SOME_FUTURE_STATUS""#), "{html}");
+        assert!(
+            !html.contains("Commande introuvable"),
+            "a PRESENT order with an unrenderable status must not read as missing: {html}"
+        );
+        assert!(!html.contains(r#"data-status="UNKNOWN""#), "{html}");
     }
 
     /// #427: the two no-order states render DIFFERENTLY, because only one of them is a claim the

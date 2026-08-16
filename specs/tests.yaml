@@ -343,6 +343,9 @@ fixtures:
   orderExpired:
     type: { $ref: 'events.yaml#/OrderExpired' }
     data: { orderId: "order-1" }
+  orderAcceptanceTimedOut:
+    type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+    data: { orderId: "order-1" }
   orderRated:
     type: { $ref: 'events.yaml#/OrderRated' }
     data: { orderId: "order-1", restaurantId: "resto-1", customerId: "cust-1", riderThumb: "UP" }
@@ -2094,6 +2097,82 @@ tests:
       data: { orderId: "order-1" }
     then:
       - { $ref: '#/fixtures/orderExpired' }
+
+  # --------- Acceptance timeout (#167, ADR-20260808-195315 §1.3) ---------
+  # State-based decision — deliberately NO when.at on any of these (the handler reads the fold,
+  # never a clock; the emitter refuses `at` on event dispatches). Gate edges ride the SAME
+  # fixture via when.gates: ON → append, absent (spec default OFF) → shadow, then:[].
+  TestOrderAcceptanceTimedOutCancelsPlacedOrder:
+    name: "A due acceptance deadline on a still-PLACED order records the timeout (gate ON): PLACED → CANCELLED_BY_TIMEOUT"
+    rules:
+      - { $ref: 'rules.yaml#/UnacceptedOrderIsCancelledByTimeoutAndNeverCharged' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+    when:
+      type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/ENFORCE_ACCEPTANCE_TIMEOUT' }
+      data: { orderId: "order-1" }
+    then:
+      - { $ref: '#/fixtures/orderAcceptanceTimedOut' }
+
+  TestOrderAcceptanceTimeoutShadowModeAppendsNothing:
+    name: "Gate OFF (the default) is shadow mode: the full still-PLACED guard runs, the append is inert"
+    rules:
+      - { $ref: 'rules.yaml#/UnacceptedOrderIsCancelledByTimeoutAndNeverCharged' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+    when:
+      type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      data: { orderId: "order-1" }
+    then: []
+
+  TestOrderAcceptanceTimeoutAbsorbedWhenAccepted:
+    name: "Acceptance won the race: the due deadline on an ACCEPTED order is a benign no-op"
+    rules:
+      - { $ref: 'rules.yaml#/AcceptanceTimeoutOnlyCancelsAStillPlacedOrder' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderAcceptedByRestaurant' }
+    when:
+      type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/ENFORCE_ACCEPTANCE_TIMEOUT' }
+      data: { orderId: "order-1" }
+    then: []
+
+  TestOrderAcceptanceTimeoutAbsorbedWhenTerminal:
+    name: "A terminal order absorbs the deadline: no double-cancel on a customer-cancelled order"
+    rules:
+      - { $ref: 'rules.yaml#/AcceptanceTimeoutOnlyCancelsAStillPlacedOrder' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderCancelledByCustomer' }
+    when:
+      type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/ENFORCE_ACCEPTANCE_TIMEOUT' }
+      data: { orderId: "order-1" }
+    then: []
+
+  TestOrderAcceptanceTimeoutRedeliveryIsNoOp:
+    name: "A redelivered acceptance deadline is a benign no-op — the order already timed out"
+    rules:
+      - { $ref: 'rules.yaml#/AcceptanceTimeoutOnlyCancelsAStillPlacedOrder' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderAcceptanceTimedOut' }
+    when:
+      type: { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/ENFORCE_ACCEPTANCE_TIMEOUT' }
+      data: { orderId: "order-1" }
+    then: []
 
   TestOrderExpiredRedeliveryIsNoOp:
     name: "A redelivered expiry reminder is a benign no-op — the order is already expired"

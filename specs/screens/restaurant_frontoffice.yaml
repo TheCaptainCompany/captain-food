@@ -141,7 +141,7 @@ component_registry:
   catalog: [sticky_category_nav, catalog_sections, catalog_item_row, item_thumbnail, add_button, item_header, option_groups, quantity_selector]
   cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, minimum_order_warning, cart_summary_mini]
   checkout: [checkout_section, address_selector, form, text_input, phone_input, email_input, text_area, stripe_express_checkout_element]
-  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies
+  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, order_card_status, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies; order_card_status (#167, renamed from order_card_state on the evans STOP — `state:` must keep one meaning per surface): a per-card STATUS treatment rendered only for bound orders actually holding the declared status (the backoffice "expired — no response" surfacing)
   account: [account_header, menu_section, sign_out_button]
   inputs: [button, text_button, icon_button, avatar_button, logo, location_pill, search_input, phone_field, otp_input, inline_error, countdown, star_rating, chip_multi_select, tip_amount_selector]
 
@@ -494,6 +494,7 @@ screens:
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
       - "`reorder` action has no backing op — the client re-adds past lines via add_to_cart."
+      - "Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code."
     components:
       - type: order_status_hero
         status: "{{ order.status }}"
@@ -505,7 +506,14 @@ screens:
           READY:            { icon: bag_check,    title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.title' },    body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.body' } }
           OUT_FOR_DELIVERY: { icon: truck,        title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.body' } }
           DELIVERED:        { icon: home,         title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.body' } }
-          CANCELLED:        { icon: x_circle,     title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          # Keys are scalars.yaml#/OrderStatus MEMBERS, exactly (validator: screen-status-config-incomplete).
+          # The bare `CANCELLED` key that sat here matched NO enum value — a cancelled order fell
+          # through to the renderer's fallback (#167 fixed the drift; the rule keeps it fixed).
+          CANCELLED_BY_CUSTOMER:   { icon: x_circle, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          CANCELLED_BY_RESTAURANT: { icon: x_circle, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          # #167: the restaurant did not respond in time — release-not-refund register: the hold
+          # is released, the customer was never charged; no promised bank date.
+          CANCELLED_BY_TIMEOUT:    { icon: clock_x,  title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.body' } }
       - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
       - { type: order_timeline, events: "{{ order.timeline }}" }
       - { type: restaurant_contact_row, name: "{{ order.restaurant.name }}", phone: "{{ order.restaurant.phone }}", action: { type: phone_call, number: "{{ order.restaurant.phone }}" } }
@@ -515,7 +523,7 @@ screens:
         id: post_order_actions
         content:
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.rate' }, variant: outline, icon: star, visible_when: "order.status == 'DELIVERED'", action: { type: open_bottom_sheet, sheet_id: rating_sheet, data: { orderId: "{{ order.id }}" } } }
-          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED_BY_CUSTOMER','CANCELLED_BY_RESTAURANT','CANCELLED_BY_TIMEOUT']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
 
   # SCREEN 5 — Order history

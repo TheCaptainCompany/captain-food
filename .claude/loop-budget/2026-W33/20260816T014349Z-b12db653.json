@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 3480,
+  "recordedAt": "2026-08-16T01:43:49.530Z",
+  "branch": "167-acceptance-timeout-auto-cancel",
+  "note": "#167 relaunch executor: pre-timer segment of the same run (timer opened mid-session; wall clock 00:28-01:26 UTC reconstructed from commit stamps)"
+}

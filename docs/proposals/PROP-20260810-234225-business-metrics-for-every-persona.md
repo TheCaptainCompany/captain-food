@@ -227,8 +227,11 @@ the same grammar, not a separate concept.
 **Three categories, and the rule that separates them** (ADR-20260811-014129 Decision 2, from the
 product owner's *"heavily strongly typed the spec, no string in it"*):
 
-1. a **DECLARATION** introduces a name — `projections: { OrderOutcomes: … }`,
-   `measures: [{ name: orders }]`. A bare name is correct here and only here.
+1. a **DECLARATION** introduces a name — `projections: { OrderOutcomes: … }`, and a measure name
+   is a **MAP KEY** (`measures: { orders: { type: counter } }`). A bare name is correct here and
+   only here — and it is a key rather than a list entry precisely so that
+   `#/projections/OrderOutcomes/measures/orders` resolves: the resolver walks mapping keys, so a
+   list index would make every measure reference invisible to the refs walker (the #413 class).
 2. a **REFERENCE** to something declared elsewhere is a **`$ref` the loader resolves**, including
    inside the same file — the repo already does this (`{ $ref: '#/Order/state/orderId' }`,
    `specs/ordering/actors.yaml:102`).
@@ -252,12 +255,13 @@ projections:                       # LAYER 1 -- the fold. Maintained by the bam 
       # `as:` is an OPTIONAL alias, legal only where derivation is ambiguous or the
       # source is an envelope bucket -- and `key-alias-redundant` refuses it otherwise.
       - from: { $ref: 'events.yaml#/OrderPlaced/properties/orderId' }
-    measures:                      # DECLARATIONS -- `name:` is legitimate here.
-      - { name: restaurantId, type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
-      - { name: serviceType,  type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/serviceType'  } }
-      - { name: day,          type: set, of: { envelope: occurredAt, bucket: DAY } }
-      - { name: status,       type: set, of: { $ref: 'scalars.yaml#/OrderStatus' } }
-      - { name: grossCents,   type: sum }
+    measures:                      # A MAP keyed by measure name -- the KEY is the declaration,
+                                   # which is what makes `.../measures/<name>` resolvable.
+      restaurantId: { type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
+      serviceType:  { type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/serviceType'  } }
+      day:          { type: set, of: { envelope: occurredAt, bucket: DAY } }
+      status:       { type: set, of: { $ref: 'scalars.yaml#/OrderStatus' } }
+      grossCents:   { type: sum }
     fold:                          # the INCREMENT/DECREMENT per event.
       - on: { $ref: 'events.yaml#/OrderPlaced' }
         set: { $ref: '#/projections/OrderFacts/measures/status' }        # <- REFERENCE, so a $ref
@@ -630,9 +634,9 @@ refusal, and the coverage report the product owner works from.
 |       - from: { $ref: '.../OrderPlaced/properties/orderId' }             |
 |            ^ column name DERIVED from the ref -- no second place to      |
 |              disagree. `as:` only for an envelope bucket (R12).          |
-|     measures:                                                            |
-|       - { name: status,     type: set, of: { $ref: '.../OrderStatus' } } |
-|       - { name: grossCents, type: sum }                                  |
+|     measures:                              <-- a MAP: the KEY declares,  |
+|       status:     { type: set, of: { $ref: '.../OrderStatus' } }         |       so `measures/status`
+|       grossCents: { type: sum }                                          |       resolves (#413)
 |     fold:                                                                |
 |       - on:  { $ref: '.../OrderPlaced' }                                 |
 |         set: { $ref: '#/projections/OrderFacts/measures/status' }        |   <-- REFERENCE => $ref

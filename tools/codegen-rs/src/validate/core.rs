@@ -145,6 +145,75 @@ fn collect_screen_actions(node: &Value, out: &mut Vec<(String, BTreeSet<String>)
     }
 }
 
+/// Every `status_config:` map found under a screen's components, with the component's `type`
+/// (#167): `(component_type, keys)`. Recursive like [`collect_screen_actions`].
+/// #167 F2 (PR #586 checkpoint) — every OrderStatus TOKEN a screen hand-writes, so the
+/// completeness rule's sibling can refuse a token outside the enum: (a) a component's literal
+/// `status:` prop (`order_card_status`'s per-card treatment key — a binding `{{ … }}` is data,
+/// not a token, and is skipped); (b) every `'…'`-quoted token of a `visible_when` expression
+/// whose subject is `order.status` (the hand-copied cancel lists). Other `.status` subjects
+/// (`conversation.status`, `reclamation.status`) are DIFFERENT enums and are not collected.
+fn collect_status_tokens(node: &Value, out: &mut Vec<(String, String)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_status_tokens(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            let ty = map
+                .get(Value::String("type".to_string()))
+                .and_then(|t| t.as_str())
+                .unwrap_or("?")
+                .to_string();
+            if let Some(status) = map.get(Value::String("status".to_string())).and_then(|s| s.as_str()) {
+                if !status.contains("{{") {
+                    out.push((format!("{ty}.status"), status.to_string()));
+                }
+            }
+            if let Some(vw) = map.get(Value::String("visible_when".to_string())).and_then(|s| s.as_str()) {
+                if vw.trim_start().starts_with("order.status") {
+                    let mut rest = vw;
+                    while let Some(open) = rest.find('\'') {
+                        let tail = &rest[open + 1..];
+                        let Some(close) = tail.find('\'') else { break };
+                        out.push((format!("{ty}.visible_when"), tail[..close].to_string()));
+                        rest = &tail[close + 1..];
+                    }
+                }
+            }
+            for (_, v) in map {
+                collect_status_tokens(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_status_configs(node: &Value, out: &mut Vec<(String, Vec<String>)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_status_configs(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let Some(sc) = map.get(Value::String("status_config".to_string())).and_then(|x| x.as_mapping()) {
+                let ty = map
+                    .get(Value::String("type".to_string()))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                out.push((ty, sc.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()));
+            }
+            for (_, v) in map {
+                collect_status_configs(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The full validator — a faithful port of validate.ts §1–§11. Returns issues + coverage.
 pub(crate) fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
@@ -269,6 +338,9 @@ pub(crate) fn validate(model: &Model) -> Report {
 
     // --- §18. Database catalog + per-kind placement (#494 slice 1, STO-1(a)/STO-2(a)/ADP-1) ------
     validate_databases(model, &mut issues);
+
+    // --- §19. Business-metric catalog (business_metrics.yaml, ADR-20260811-014129) --------------
+    validate_business_metrics(model, &mut issues);
 
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();
@@ -1599,6 +1671,82 @@ pub(crate) fn validate(model: &Model) -> Report {
                                     "screen-unknown-resolver",
                                     format!("{}/screens/{}", sfkey, sid),
                                     format!("data_requirement '{}' is not a declared resolver.", name),
+                                ));
+                            }
+                        }
+                    }
+                    // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
+                    // ADR-0032-style bidirectional completeness). The defect class this kills
+                    // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so
+                    // a cancelled order silently fell through to the renderer's fallback —
+                    // invisible until a human stared at the screen. A key outside the enum is
+                    // dead copy; an enum member outside the map is a status with no story.
+                    {
+                        let order_statuses: BTreeSet<String> = model
+                            .defs
+                            .get("scalars.yaml")
+                            .and_then(|sc| sc.get("OrderStatus"))
+                            .and_then(|os| os.get("enum"))
+                            .and_then(|e| e.as_sequence())
+                            .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                            .unwrap_or_default();
+                        let mut found: Vec<(String, Vec<String>)> = Vec::new();
+                        if let Some(cs) = s.get("components") {
+                            collect_status_configs(cs, &mut found);
+                        }
+                        // The sibling rule (#167 F2): a status-typed FIELD — a literal `status:`
+                        // prop or an `order.status` visible_when list — hand-writes enum tokens
+                        // the map rule above cannot see. A token outside the enum is a treatment
+                        // that can never render / a control that can never show, silently
+                        // (the `CANCELLED` drift class on a different key).
+                        if !order_statuses.is_empty() {
+                            let mut tokens: Vec<(String, String)> = Vec::new();
+                            if let Some(cs) = s.get("components") {
+                                collect_status_tokens(cs, &mut tokens);
+                            }
+                            for (site, token) in tokens {
+                                if !order_statuses.contains(&token) {
+                                    issues.push(err(
+                                        "screen-status-token-unknown",
+                                        format!("{}/screens/{}/{}", sfkey, sid, site),
+                                        format!(
+                                            "status token '{}' is not a scalars.yaml#/OrderStatus member — a status-typed field bound to it can never match an order.",
+                                            token
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        for (cty, keys) in found {
+                            if order_statuses.is_empty() {
+                                continue;
+                            }
+                            let keys: BTreeSet<String> = keys.into_iter().collect();
+                            let missing: Vec<&String> =
+                                order_statuses.iter().filter(|m| !keys.contains(*m)).collect();
+                            let unknown: Vec<&String> =
+                                keys.iter().filter(|k| !order_statuses.contains(*k)).collect();
+                            if !missing.is_empty() || !unknown.is_empty() {
+                                let mut parts = Vec::new();
+                                if !missing.is_empty() {
+                                    parts.push(format!(
+                                        "missing OrderStatus member(s) {:?} (a status with no declared story)",
+                                        missing
+                                    ));
+                                }
+                                if !unknown.is_empty() {
+                                    parts.push(format!(
+                                        "key(s) {:?} are not OrderStatus members (dead copy that can never render)",
+                                        unknown
+                                    ));
+                                }
+                                issues.push(err(
+                                    "screen-status-config-incomplete",
+                                    format!("{}/screens/{}/{}", sfkey, sid, cty),
+                                    format!(
+                                        "status_config must key exactly the scalars.yaml#/OrderStatus enum: {}.",
+                                        parts.join("; ")
+                                    ),
                                 ));
                             }
                         }

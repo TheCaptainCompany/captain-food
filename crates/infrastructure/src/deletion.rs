@@ -511,7 +511,7 @@ fn receipt_payload(
         application::generated::reminders::REMINDER_SCHEDULES
             .iter()
             .find(|s| s.actor_type == policy.actor_type && trigger_events.contains(&s.payload_event))
-            .map(|s| s.after_days_key.to_string())
+            .map(|s| s.after_key.to_string())
             .or_else(|| {
                 policy
                     .triggers

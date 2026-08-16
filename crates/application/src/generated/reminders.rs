@@ -2,8 +2,20 @@
 // declarations (ADR-20260731-214500 §2) — do not edit by hand. One row per (actor, received
 // message, reminder): a SUCCESSFUL delivery of `on_message` (re)declares the reminder — the
 // handler's third observable effect, applied by the mailbox delivery glue inside the completion
-// transaction and asserted by the generated behaviour tests (schedule + reschedule-in-place,
-// ADR-20260731-150500).
+// transaction and asserted by the generated behaviour tests (schedule + the declared reschedule
+// policy, ADR-20260731-150500 / #167).
+
+/// Re-declaration semantics for one reminder (#167 Phase 0): what a second `schedules:` of the
+/// SAME (actor, purpose) identity does while the row is still SCHEDULED.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReschedulePolicy {
+    /// `reschedule: in-place` (ADR-20260731-150500): the pending occurrence moves — the LAST
+    /// declaration wins the clock (the retention-window shape: a later terminal fact postpones).
+    InPlace,
+    /// `reschedule: keep` (#167): the FIRST scheduled_at wins — re-declaring never extends a
+    /// deadline (the acceptance-timeout shape: a redelivered birth fact must not push it out).
+    Keep,
+}
 
 /// One declared scheduling effect.
 ///
@@ -23,17 +35,25 @@ pub struct ReminderSchedule {
     pub payload_event: &'static str,
     /// The actor's identity property — the single payload field of the reminder fact.
     pub identity_prop: &'static str,
-    /// configuration.yaml key naming the window, in DAYS (`_DAYS` suffix enforced at generation).
-    pub after_days_key: &'static str,
-    /// The key's spec default — what the behaviour tests schedule with; production reads Config.
-    pub after_default_days: i64,
+    /// configuration.yaml key naming the window. The duration unit is the KEY's typed `unit:`
+    /// field, already applied to `after_default` below and to `Config::reminder_windows()` —
+    /// never parsed from this name (#167; the SCREAMING suffix is for humans).
+    pub after_key: &'static str,
+    /// The key's spec default as a typed Duration — what the behaviour tests schedule with;
+    /// production reads Config (`reminder_windows()`), which is Duration-typed too.
+    pub after_default: std::time::Duration,
+    /// The declared re-declaration semantics (`reschedule:`, default `in-place`).
+    pub reschedule: ReschedulePolicy,
 }
 
 pub const REMINDER_SCHEDULES: &[ReminderSchedule] = &[
-    ReminderSchedule { actor_type: "Order", on_message: "MarkOrderDelivered", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_days_key: "ORDER_RETENTION_WINDOW_DAYS", after_default_days: 3650 },
-    ReminderSchedule { actor_type: "Order", on_message: "RejectOrder", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_days_key: "ORDER_RETENTION_WINDOW_DAYS", after_default_days: 3650 },
-    ReminderSchedule { actor_type: "Order", on_message: "CancelOrderByCustomer", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_days_key: "ORDER_RETENTION_WINDOW_DAYS", after_default_days: 3650 },
-    ReminderSchedule { actor_type: "Order", on_message: "CancelOrderByRestaurant", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_days_key: "ORDER_RETENTION_WINDOW_DAYS", after_default_days: 3650 },
+    ReminderSchedule { actor_type: "Order", on_message: "OrderPlaced", reminder: "OrderAcceptanceTimedOut", payload_event: "OrderAcceptanceTimedOut", identity_prop: "orderId", after_key: "ORDER_ACCEPTANCE_TIMEOUT_SECONDS", after_default: std::time::Duration::from_secs(300), reschedule: ReschedulePolicy::Keep },
+    ReminderSchedule { actor_type: "Order", on_message: "PlaceReplacementOrder", reminder: "OrderAcceptanceTimedOut", payload_event: "OrderAcceptanceTimedOut", identity_prop: "orderId", after_key: "ORDER_ACCEPTANCE_TIMEOUT_SECONDS", after_default: std::time::Duration::from_secs(300), reschedule: ReschedulePolicy::Keep },
+    ReminderSchedule { actor_type: "Order", on_message: "MarkOrderDelivered", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },
+    ReminderSchedule { actor_type: "Order", on_message: "RejectOrder", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },
+    ReminderSchedule { actor_type: "Order", on_message: "CancelOrderByCustomer", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },
+    ReminderSchedule { actor_type: "Order", on_message: "CancelOrderByRestaurant", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },
+    ReminderSchedule { actor_type: "Order", on_message: "OrderAcceptanceTimedOut", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },
 ];
 
 /// The reminders a successful delivery of `on_message` to `actor_type` (re)declares.

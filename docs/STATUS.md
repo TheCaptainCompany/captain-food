@@ -35,6 +35,38 @@
 > `.claude/settings.json` so its absence never reads as "no telemetry concern" (the `eu1` EU-host
 > pin stays in `.mcp.json`).
 >
+
+> ⏱️ **2026-08-16 — #167 ACCEPTANCE TIMEOUT IS CODE-COMPLETE ON THE BRANCH (PHASES 0–3 + the mob
+> conditions): [#167 "No order-acceptance timeout: a paid, unaccepted order sits forever with no alert, cancel or refund"](https://github.com/TheCaptainCompany/captain-food/issues/167),
+> branch `167-acceptance-timeout-auto-cancel`, draft [PR #586](https://github.com/TheCaptainCompany/captain-food/pull/586)
+> — NOT on `main`; merge posture `HOLD: human` (stored event shape + lifecycle + money-adjacent).**
+> **Phases 0–1** (typed reminder durations, `OrderAcceptanceTimedOut` + `CANCELLED_BY_TIMEOUT`
+> spec surface, gate `ENFORCE_ACCEPTANCE_TIMEOUT` default OFF) landed earlier on the branch;
+> **checkpoint fixes**: the backoffice treatment is a REAL per-card `order_card_status` renderer
+> arm (absent without a timed-out order), release copy states in-progress. **Phase 2**: the
+> kind-MESSAGE delivery route with THE FENCE — `schedules:` on the Recorded/Cancelled arm ONLY,
+> a shadow WouldCancel can never arm the GDPR clock (pg-proved, mutation-red) — plus the
+> spec-declared OrderPlaced birth route (a redelivered birth re-applies `schedules:`; `keep`
+> makes the first deadline win, pg-proved through the worker), the `reminder.promote` OTLP
+> shadow span, and the promotion dead-man's switch (`reminder_promotion_due_lag_ms` +
+> `mailbox_scheduled_depth`, emitted every tick from OUTSIDE the worker). **Phase 3**:
+> OrderTracking folds the timeout (ratchet banked back down, 40→39), the
+> `acceptance-timeout` observability contract, `specs/business_metrics.yaml` — the FIRST row of
+> the ADR-20260811-014129 catalog (the `time_to_accept_ms` fold, p50/p90/p99 by daypart AND
+> restaurantId; validated refs + fold-key totality, emitters remain [#484](https://github.com/TheCaptainCompany/captain-food/issues/484)'s
+> machinery) — now the FOURTH flip precondition in the gate text, and
+> `screen-status-token-unknown` (status-typed screen fields must be enum members). The flip
+> stays a separate recorded decision; nothing enforces until then.
+> **What this does NOT ship — the acceptance clock is armed for NO real order today.** No
+> production path enqueues an `Order`-lane birth message: the PlaceOrderProcess `deliver:` step
+> appends `OrderPlaced` straight to the event store (`crates/application/src/generated/process_managers.rs:663-667`)
+> and the reclamation PM calls `place_replacement_order` in-process
+> (`crates/application/src/process_managers/reclamation.rs:104`), so the birth route this PR adds
+> is reachable from tests only. Consequences, both of them real: a paid order still sits PLACED
+> forever in production, and **zero shadow evidence accumulates**, which makes flip precondition
+> (3) unreachable by the mechanism shipped here. The producer is tracked as
+> [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),
+> and it is now the FIFTH named precondition in the gate text.
 > 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
 > the `answers:` DSL from
 > [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)

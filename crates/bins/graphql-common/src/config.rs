@@ -485,9 +485,10 @@ impl Config {
     }
 
     /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its
-    /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling
-    /// reads configuration, never a constant (ADR-20260731-214500).
-    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {
+    /// resolved runtime value as a TYPED Duration (the key's declared `unit:` is applied HERE,
+    /// #167) — handed to the mailbox delivery glue so scheduling reads configuration, never a
+    /// constant (ADR-20260731-214500).
+    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
         ]
         .into_iter()

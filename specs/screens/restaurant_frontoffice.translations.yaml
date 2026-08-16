@@ -147,6 +147,10 @@ order.status.delivered.title: { messages: { en: "Delivered!", fr: "Livré !" } }
 order.status.delivered.body:  { messages: { en: "Enjoy your meal. 🎉", fr: "Bon appétit. 🎉" } }
 order.status.cancelled.title: { messages: { en: "Order cancelled", fr: "Commande annulée" } }
 order.status.cancelled.body:  { messages: { en: "If your card was already charged, a refund is on its way; otherwise the authorization is released and you were never charged.", fr: "Si votre carte a déjà été débitée, un remboursement est en cours ; sinon l'autorisation est annulée et vous n'avez jamais été débité." } }
+# #167 acceptance timeout — release-not-refund register: the hold is released, the customer was
+# never charged. Never the word "refund", never a promised bank-clearance date.
+order.status.acceptance_timed_out.title: { messages: { en: "The restaurant didn't respond in time", fr: "Le restaurant n'a pas répondu à temps" } }
+order.status.acceptance_timed_out.body:  { messages: { en: "Your order was cancelled automatically and the hold on your card is being released — you were never charged.", fr: "Votre commande a été annulée automatiquement et l'empreinte sur votre carte est en cours de libération — vous n'avez jamais été débité." } }
 order.eta:        { messages: { en: "Estimated arrival", fr: "Arrivée estimée" } }
 order.id_label:   { messages: { en: "Order ID", fr: "N° de commande" } }
 order.rate:       { messages: { en: "Rate your order", fr: "Évaluer la commande" } }

@@ -12,7 +12,7 @@
 //! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
 //! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
 
-use actor_client::{cancel_reminder, reminder_message_id, schedule_reminder, ScheduleOutcome};
+use actor_client::{cancel_reminder, reminder_message_id, schedule_reminder, ReschedulePolicy, ScheduleOutcome};
 use domain::generated::scalars::InboundMessageStatus;
 use infrastructure::persistence::mailbox_store::PgMailbox;
 use sqlx::{PgPool, Row};
@@ -47,7 +47,7 @@ async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
 
     let order = uuid::Uuid::from_u128(0x0AD1);
     let t1 = chrono::Utc::now() + chrono::Duration::days(365);
-    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), t1, order)
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), t1, ReschedulePolicy::InPlace, order)
         .await
         .expect("schedule");
     assert_eq!(out, ScheduleOutcome::Scheduled);
@@ -74,7 +74,7 @@ async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
     // Re-declare with a LATER time and a newer payload: Rescheduled — same identity, one row,
     // scheduled_at and payload moved (ADR-150500 §1: the row "always carries the latest time").
     let t2 = t1 + chrono::Duration::days(365);
-    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), t2, order)
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), t2, ReschedulePolicy::InPlace, order)
         .await
         .expect("reschedule");
     assert_eq!(out, ScheduleOutcome::Rescheduled);
@@ -102,6 +102,41 @@ async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
     );
 }
 
+/// #167 `reschedule: keep` against the real DDL: the FIRST scheduled_at wins — a re-declaration
+/// with a later time is absorbed as `Kept`, and neither the time nor the payload moves.
+#[tokio::test]
+async fn keep_policy_never_extends_the_first_scheduled_at() {
+    let Some(db) = crate::common::TestDb::acquire("mailbox_schedule_pg").await else { return };
+    let pool = db.pool();
+    let mailbox = PgMailbox::new(pool.clone());
+
+    let order = uuid::Uuid::from_u128(0x0AD4);
+    let t1 = chrono::Utc::now() + chrono::Duration::minutes(5);
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), t1, ReschedulePolicy::Keep, order)
+        .await
+        .expect("schedule");
+    assert_eq!(out, ScheduleOutcome::Scheduled);
+
+    let t2 = t1 + chrono::Duration::minutes(5);
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), t2, ReschedulePolicy::Keep, order)
+        .await
+        .expect("re-declare under keep");
+    assert_eq!(out, ScheduleOutcome::Kept, "the deadline must not move");
+
+    let r = row(&pool, reminder_message_id(order, "expire")).await;
+    assert_eq!(r.get::<String, _>("status"), "SCHEDULED");
+    assert_eq!(
+        r.get::<chrono::DateTime<chrono::Utc>, _>("scheduled_at").timestamp_micros(),
+        t1.timestamp_micros(),
+        "keep: the first scheduled_at wins"
+    );
+    assert_eq!(
+        r.get::<serde_json::Value, _>("payload").pointer("/payload/window"),
+        Some(&serde_json::json!("P1Y")),
+        "keep: the first payload stays too"
+    );
+}
+
 /// §2: once the promotion pass has stamped a position the occurrence is SPENT — a
 /// re-declaration is a Duplicate (same payload) or a PayloadConflict (different payload), and
 /// the row is untouched either way.
@@ -113,19 +148,19 @@ async fn redeclaring_a_promoted_reminder_is_a_duplicate_untouched() {
 
     let order = uuid::Uuid::from_u128(0x0AD2);
     let due = chrono::Utc::now() - chrono::Duration::seconds(1);
-    schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, order)
+    schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, ReschedulePolicy::InPlace, order)
         .await
         .expect("schedule");
     assert_eq!(actor_runtime::promote_due(&pool, "Order").await.expect("promote"), 1);
 
     // Same payload → the idempotent redelivery case, carrying the row's live status.
     let later = chrono::Utc::now() + chrono::Duration::days(30);
-    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), later, order)
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), later, ReschedulePolicy::InPlace, order)
         .await
         .expect("re-declare");
     assert_eq!(out, ScheduleOutcome::Deduplicated(InboundMessageStatus::RECEIVED));
     // Different payload → the conflict case. Untouched all the same.
-    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), later, order)
+    let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), later, ReschedulePolicy::InPlace, order)
         .await
         .expect("re-declare, conflicting");
     assert_eq!(out, ScheduleOutcome::PayloadConflict(InboundMessageStatus::RECEIVED));
@@ -155,7 +190,7 @@ async fn cancelled_reminder_is_never_promoted() {
     let order = uuid::Uuid::from_u128(0x0AD3);
     // Already due — so a promotion pass WOULD take it if cancellation did not win first.
     let due = chrono::Utc::now() - chrono::Duration::seconds(1);
-    schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, order)
+    schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, ReschedulePolicy::InPlace, order)
         .await
         .expect("schedule");
 

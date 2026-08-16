@@ -79,8 +79,16 @@ pub(crate) enum Kind {
     TableColumn,
     Screen,
     Persona,
+    /// A `stories.yaml#/<persona>/activities/<Activity>` persona activity — the unit a business
+    /// metric binds (ADR-20260810-234225 Decision 1 / ADR-20260811-014129).
+    Activity,
     /// An `observability.yaml` workflow contract.
     ObservabilityWorkflow,
+    /// A `business_metrics.yaml#/projections/<Name>` declared BAM fold (ADR-20260811-014129).
+    BamProjection,
+    /// One declared measure of a BAM projection —
+    /// `business_metrics.yaml#/projections/<Name>/measures/<measure>`.
+    BamMeasure,
 }
 
 impl Kind {
@@ -125,7 +133,10 @@ impl Kind {
             Kind::TableColumn => "table column",
             Kind::Screen => "screen",
             Kind::Persona => "persona",
+            Kind::Activity => "persona activity",
             Kind::ObservabilityWorkflow => "observability workflow",
+            Kind::BamProjection => "business-metric projection",
+            Kind::BamMeasure => "business-metric measure",
         }
     }
 }
@@ -225,7 +236,13 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::TableColumn
         | Kind::Screen
         | Kind::Persona
-        | Kind::ObservabilityWorkflow => None,
+        | Kind::Activity
+        | Kind::ObservabilityWorkflow
+        // A BAM projection is read through its generated tenant-scoped query (ADR-20260811-014129
+        // D9), never bound by an api.yaml `reads:` until that generation exists — refusing it here
+        // keeps the door closed rather than open-by-default.
+        | Kind::BamProjection
+        | Kind::BamMeasure => None,
     }
 }
 
@@ -307,13 +324,25 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
             (Some("inputs"), 2) => Some(Kind::ApiInput),
             _ => None,
         },
-        "stories.yaml" => top.then_some(Kind::Persona),
+        "stories.yaml" => match (top, seg(1), path.len()) {
+            (true, _, _) => Some(Kind::Persona),
+            // `<persona>/activities/<Activity>` — what a business metric's `activity:` binds.
+            (false, Some("activities"), 3) => Some(Kind::Activity),
+            _ => None,
+        },
         "tests.yaml" => match (seg(0), path.len()) {
             (Some("fixtures"), 2) => Some(Kind::Fixture),
             (Some("tests"), 2) => Some(Kind::Test),
             _ => None,
         },
         "observability.yaml" => top.then_some(Kind::ObservabilityWorkflow),
+        // The business-metric catalog (ADR-20260811-014129 D8): a projection is a declaration,
+        // a measure a same-file declaration a fold/groupBy/value row references by `$ref`.
+        "business_metrics.yaml" => match (seg(0), seg(2), path.len()) {
+            (Some("projections"), _, 2) => Some(Kind::BamProjection),
+            (Some("projections"), Some("measures"), 4) => Some(Kind::BamMeasure),
+            _ => None,
+        },
         "database/projection_views.yaml" => {
             if top {
                 Some(Kind::ProjectionView)
@@ -495,6 +524,22 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // Story map: every step is an API operation the persona performs.
     ("stories.yaml", "*.activities.*.steps.*", &[Kind::Query, Kind::Mutation, Kind::Subscription]),
 
+    // Business metrics (ADR-20260811-014129 D8: two layers, every field reference a `$ref`).
+    // A projection key/fold source is a specific EVENT property (provably on that event —
+    // `bam-fold-key-not-on-every-event`); a measure's element type may also be a domain scalar;
+    // fold `on` is the event; `set`/`add` name the projection's OWN declared measure; a metric
+    // binds a persona ACTIVITY, reads `over` ONE projection, and groups/values by its measures.
+    ("business_metrics.yaml", "projections.*.key[*].from",   &[Kind::MessageProperty]),
+    ("business_metrics.yaml", "projections.*.measures.*.of", &[Kind::MessageProperty, Kind::Scalar, Kind::EnumScalar]),
+    ("business_metrics.yaml", "projections.*.fold[*].on",    &[Kind::Event]),
+    ("business_metrics.yaml", "projections.*.fold[*].set",   &[Kind::BamMeasure]),
+    ("business_metrics.yaml", "projections.*.fold[*].add",   &[Kind::BamMeasure]),
+    ("business_metrics.yaml", "projections.*.fold[*].from",  &[Kind::MessageProperty]),
+    ("business_metrics.yaml", "metrics.*.activity",          &[Kind::Activity]),
+    ("business_metrics.yaml", "metrics.*.over",              &[Kind::BamProjection]),
+    ("business_metrics.yaml", "metrics.*.groupBy[*]",        &[Kind::BamMeasure]),
+    ("business_metrics.yaml", "metrics.*.value.**",          &[Kind::BamMeasure]),
+
     // Behaviour tests (ADR-0032).
     ("tests.yaml", "fixtures.*.type",   &[Kind::Event]),
     ("tests.yaml", "tests.*.rules[*]",  &[Kind::Rule]),
@@ -567,6 +612,8 @@ pub(crate) const STRUCTURAL_SEGMENTS: &[&str] = &[
     "acting", "claims", "identity", "lifecycle", "mailbox", "match", "message", "messages", "model",
     "mutations", "of", "on", "operations", "params", "payload", "ports", "principals", "receipt",
     "reminders", "removedBy", "requires",
+    "projections", "measures", "fold", "groupBy", "over", "activity", "value", "key",
+    "ofDurationMs", "start", "end",
     "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules",
     "schedules", "screens", "send", "set", "state", "state_table", "status", "steps",
     "subscriptions", "tests", "then", "throws", "thrown", "to", "transitions", "triggers", "type",

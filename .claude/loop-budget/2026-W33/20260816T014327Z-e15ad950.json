@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 1034,
+  "recordedAt": "2026-08-16T01:43:27.390Z",
+  "branch": "167-acceptance-timeout-auto-cancel",
+  "note": "#167 relaunch executor: Phases 2-3 + mob-checkpoint conditions (PR #586)"
+}

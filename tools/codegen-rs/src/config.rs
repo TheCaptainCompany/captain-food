@@ -19,6 +19,10 @@ pub(crate) struct ConfigKey {
     /// "present" is not "usable" (a live key in the test slot, a 31-byte session key, a pasted newline).
     pub(crate) scalar: Option<String>,
     pub(crate) pattern: Option<String>,
+    /// Duration unit of a window key (`days` | `seconds`, closed set) — a TYPED field, required on
+    /// any key an actors.yaml `after:` names (#167; rule `reminder-window-unit`). The emitters
+    /// branch on it; the SCREAMING name suffix is for humans and is never parsed.
+    pub(crate) unit: Option<String>,
     /// Non-secret per-profile values, BAKED into the binary (PROP-20260729-014500 D5): profile -> value.
     pub(crate) deploy: BTreeMap<String, String>,
     /// Secret sources, SYNCED by CI from GitHub repo secrets: profile -> repo-secret name. Never baked
@@ -68,6 +72,7 @@ pub(crate) fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
             secret: node.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
             gates: str_at("gates").unwrap_or_default(),
             mode_of: str_at("mode_of"),
+            unit: str_at("unit"),
             consumer: str_at("consumer").unwrap_or_else(|| "server".to_string()),
             deploy: node
                 .get("deploy")
@@ -644,19 +649,41 @@ pub(crate) fn emit_config_module(model: &Model, keys: &[ConfigKey], is_server: b
         }
         out.push_str(
             "    /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its\n\
-             \x20   /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling\n\
-             \x20   /// reads configuration, never a constant (ADR-20260731-214500).\n\
-             \x20   pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {\n\
+             \x20   /// resolved runtime value as a TYPED Duration (the key's declared `unit:` is applied HERE,\n\
+             \x20   /// #167) — handed to the mailbox delivery glue so scheduling reads configuration, never a\n\
+             \x20   /// constant (ADR-20260731-214500).\n\
+             \x20   pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {\n\
              \x20       [\n",
         );
         for k in &window_keys {
-            let declared = keys.iter().any(|c| &c.name == k);
-            if strict_windows {
-                assert!(declared, "config: window key {} named by actors.yaml is not a server-consumed configuration key", k);
-            } else if !declared {
+            let Some(decl) = keys.iter().find(|c| &c.name == k) else {
+                if strict_windows {
+                    panic!("config: window key {} named by actors.yaml is not a server-consumed configuration key", k);
+                }
                 continue;
-            }
-            out.push_str(&format!("            (\"{}\", self.{}),\n", k, field(k)));
+            };
+            // The unit is a TYPED field of the key (rule `reminder-window-unit` reports the spec
+            // hole first; this panic keeps generation honest if it is ever bypassed).
+            let secs_expr = match decl.unit.as_deref() {
+                Some("days") => format!(
+                    "u64::try_from(self.{}).expect(\"{} must be non-negative\") * 86_400",
+                    field(k),
+                    k
+                ),
+                Some("seconds") => format!(
+                    "u64::try_from(self.{}).expect(\"{} must be non-negative\")",
+                    field(k),
+                    k
+                ),
+                other => panic!(
+                    "config: window key {} declares unit {:?} — the closed set is days|seconds (#167, rule reminder-window-unit)",
+                    k, other
+                ),
+            };
+            out.push_str(&format!(
+                "            (\"{}\", std::time::Duration::from_secs({})),\n",
+                k, secs_expr
+            ));
         }
         out.push_str("        ]\n        .into_iter()\n        .collect()\n    }\n\n");
     }

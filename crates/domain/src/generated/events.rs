@@ -108,6 +108,7 @@ pub enum DomainEvent {
     OrderDelivered(OrderDelivered),
     OrderCancelledByCustomer(OrderCancelledByCustomer),
     OrderCancelledByRestaurant(OrderCancelledByRestaurant),
+    OrderAcceptanceTimedOut(OrderAcceptanceTimedOut),
     OrderRated(OrderRated),
     RestaurantRated(RestaurantRated),
     DeliverySatisfactionRecorded(DeliverySatisfactionRecorded),

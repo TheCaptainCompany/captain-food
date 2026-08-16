@@ -122,7 +122,7 @@ pub fn spawn_actor_fleet(
     bin: &'static str,
     lanes: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
-    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    reminder_windows: std::collections::HashMap<&'static str, std::time::Duration>,
     mailbox: MailboxSettings,
 ) {
     let nudges = {

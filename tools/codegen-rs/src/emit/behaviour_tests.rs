@@ -281,6 +281,14 @@ pub(crate) const BT_DEFAULT_WHEN_AT: &str = "2026-01-06T12:00:00Z";
 pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] =
     &[("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard")];
 
+/// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
+/// (#167 — the acceptance-timeout ACTION gate, read at delivery time): same contract as
+/// [`BT_GATE_CONSUMING`] — the binding is ALWAYS emitted for a listed event (`true` when the
+/// test's `when.gates` names the key, else the key's spec default), and a gate named on any
+/// other event is an emitter panic, never a silent no-op (the #413 defect class).
+pub(crate) const BT_GATE_CONSUMING_EVENTS: &[(&str, &str, &str)] =
+    &[("OrderAcceptanceTimedOut", "ENFORCE_ACCEPTANCE_TIMEOUT", "enforce_acceptance_timeout")];
+
 /// The dispatch expression for a WHEN command (a `cmd` binding is in scope; for
 /// [`BT_CLOCK_CONSUMING`] commands a `when_at: chrono::DateTime<chrono::Utc>` binding too).
 pub(crate) fn bt_command_call(cmd: &str) -> String {
@@ -368,7 +376,16 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
     let owners = bt_event_owners(model);
     // (actor, inbox message) → reminder names its receive `schedules:` (ADR-20260731-214500 §2):
     // every curated test whose WHEN hits such a receive also asserts the scheduling effect —
-    // schedule at +window, then reschedule IN PLACE (ADR-20260731-150500) — as generated code.
+    // schedule at +window, then re-declare under the reminder's DECLARED policy (`in-place`
+    // postpones the row, ADR-20260731-150500; `keep` leaves the first scheduled_at, #167) — as
+    // generated code.
+    let reminder_policy: BTreeMap<(String, String), String> = parse_reminders(model)
+        .into_iter()
+        .map(|r| {
+            let policy = r.reschedule.clone().unwrap_or_else(|| "in-place".to_string());
+            ((r.actor, r.name), policy)
+        })
+        .collect();
     let mut schedules_of: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     for a in &parse_actors(model) {
         for e in &a.receives {
@@ -639,12 +656,51 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                     key, msg
                 );
             }
-            // Same posture for `when.gates`: no event reaction takes a configuration gate.
-            if when.get("gates").is_some() {
-                panic!(
-                    "behaviour-tests: {}: `when.gates` is set on event '{}' but no event reaction consumes a gate — the value would assert nothing",
-                    key, msg
-                );
+            // `when.gates` on an EVENT dispatch (#167): only the [`BT_GATE_CONSUMING_EVENTS`]
+            // recorders take a configuration gate — anywhere else the value would be silently
+            // dropped, so refuse (the `when.at` posture, the #413 defect class).
+            let gate_keys: Vec<String> = when
+                .get("gates")
+                .and_then(|g| g.as_sequence())
+                .map(|s| {
+                    s.iter()
+                        .filter_map(|e| e.get("$ref").and_then(|r| r.as_str()))
+                        .filter_map(|r| r.strip_prefix("configuration.yaml#/keys/"))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let consumed: Vec<&(&str, &str, &str)> =
+                BT_GATE_CONSUMING_EVENTS.iter().filter(|(e, _, _)| *e == msg).collect();
+            for gate in &gate_keys {
+                if !consumed.iter().any(|(_, gk, _)| gk == gate) {
+                    panic!(
+                        "behaviour-tests: {}: `when.gates` names '{}' but event '{}' does not consume it ({:?}) — the value would assert nothing; extend BT_GATE_CONSUMING_EVENTS and its dispatch arm when the recorder takes the gate",
+                        key, gate, msg, BT_GATE_CONSUMING_EVENTS
+                    );
+                }
+            }
+            for (_, gate_key, binding) in consumed {
+                // Absent from `when.gates` = the key's SPEC DEFAULT (tests.yaml header), so the
+                // suite exercises the production posture unless the test says otherwise.
+                let value = if gate_keys.iter().any(|g| g == gate_key) {
+                    true
+                } else {
+                    model
+                        .defs
+                        .get("configuration.yaml")
+                        .and_then(|c| c.get("keys"))
+                        .and_then(|k| k.get(*gate_key))
+                        .and_then(|d| d.get("default"))
+                        .and_then(|d| d.as_bool())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "behaviour-tests: {}: gate key {} has no boolean spec default",
+                                key, gate_key
+                            )
+                        })
+                };
+                out.push_str(&format!("    let {}: bool = {};\n", binding, value));
             }
             let def = resolve_ref(model, wref, "tests.yaml").unwrap();
             let literal = bt_struct_expr(model, "events.yaml", &format!("evs::{}", msg), def, &wdata, &format!("{}/when", key));
@@ -659,6 +715,13 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                         "    let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::{}(ev), &support::actor()).await;\n",
                         msg
                     ));
+                } else if msg == "OrderAcceptanceTimedOut" {
+                    // #167: the acceptance-deadline recorder — record semantics iff still
+                    // PLACED, with the ENFORCE_ACCEPTANCE_TIMEOUT gate read at the append (its
+                    // binding was emitted above; the guard runs identically in shadow).
+                    out.push_str(
+                        "    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;\n",
+                    );
                 } else if msg == "RestaurantRegistered" {
                     // The registry (SIRENE) inbound path (ADR-20260728-011344 D4). Unlike every other
                     // inbound fact, this one is NOT recorded verbatim: the aggregate folds its own stream
@@ -742,14 +805,30 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                         panic!("behaviour-tests: {}: when.data lacks '{}' — the scheduling assertion needs the instance id", key, id_prop)
                     });
                 for rname in names {
+                    let policy = reminder_policy
+                        .get(&(actor.clone(), rname.clone()))
+                        .map(String::as_str)
+                        .unwrap_or("in-place");
+                    // Shared preamble: declare once, assert the fresh SCHEDULED row at +window.
                     out.push_str(&format!(
-                        "    // schedules: {rname} — the third observable effect (ADR-20260731-214500 §2)\n    {{\n        use actor_client::MailboxScheduleOutcome;\n        let mailbox = actor_client::mailbox::mem::MemMailbox::default();\n        let actor_id = support::uid(\"{id}\");\n        let spec = actor_client::reminders::reminder_schedules_for(\"{actor}\", \"{msg}\")\n            .find(|s| s.reminder == \"{rname}\")\n            .expect(\"{key}: schedule declared in actors.yaml\");\n        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);\n        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: declare\");\n        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), \"{key}: expected a fresh SCHEDULED row, got {{first:?}}\");\n        let row = actor_client::reminder_message_id(actor_id, spec.reminder);\n        assert_eq!(mailbox.scheduled_at(row), Some(t1), \"{key}: due at +window\");\n        let t2 = t1 + chrono::Duration::days(1);\n        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: redeclare\");\n        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), \"{key}: re-declaring must postpone the SAME row (ADR-20260731-150500), got {{again:?}}\");\n        assert_eq!(mailbox.scheduled_at(row), Some(t2), \"{key}: the pending occurrence moved in place\");\n        assert_eq!(mailbox.entries().len(), 1, \"{key}: one pending occurrence per (actor, purpose)\");\n    }}\n",
+                        "    // schedules: {rname} — the third observable effect (ADR-20260731-214500 §2; reschedule: {policy})\n    {{\n        use actor_client::MailboxScheduleOutcome;\n        let mailbox = actor_client::mailbox::mem::MemMailbox::default();\n        let actor_id = support::uid(\"{id}\");\n        let spec = actor_client::reminders::reminder_schedules_for(\"{actor}\", \"{msg}\")\n            .find(|s| s.reminder == \"{rname}\")\n            .expect(\"{key}: schedule declared in actors.yaml\");\n        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect(\"{key}: window fits chrono\");\n        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: declare\");\n        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), \"{key}: expected a fresh SCHEDULED row, got {{first:?}}\");\n        let row = actor_client::reminder_message_id(actor_id, spec.reminder);\n        assert_eq!(mailbox.scheduled_at(row), Some(t1), \"{key}: due at +window\");\n        let t2 = t1 + chrono::Duration::days(1);\n        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: redeclare\");\n",
                         rname = rname,
+                        policy = policy,
                         id = id,
                         actor = actor,
                         msg = msg,
                         key = key,
                     ));
+                    match policy {
+                        "keep" => out.push_str(&format!(
+                            "        assert!(matches!(again, MailboxScheduleOutcome::Kept), \"{key}: re-declaring must KEEP the first occurrence (reschedule: keep, #167), got {{again:?}}\");\n        assert_eq!(mailbox.scheduled_at(row), Some(t1), \"{key}: the first scheduled_at wins — a re-declaration never extends the deadline\");\n        assert_eq!(mailbox.entries().len(), 1, \"{key}: one pending occurrence per (actor, purpose)\");\n    }}\n",
+                            key = key,
+                        )),
+                        _ => out.push_str(&format!(
+                            "        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), \"{key}: re-declaring must postpone the SAME row (ADR-20260731-150500), got {{again:?}}\");\n        assert_eq!(mailbox.scheduled_at(row), Some(t2), \"{key}: the pending occurrence moved in place\");\n        assert_eq!(mailbox.entries().len(), 1, \"{key}: one pending occurrence per (actor, purpose)\");\n    }}\n",
+                            key = key,
+                        )),
+                    }
                 }
             }
         }

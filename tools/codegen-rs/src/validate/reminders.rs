@@ -15,7 +15,10 @@ pub(crate) struct ReminderDef {
     pub(crate) identity_declared: bool,
     /// Optional default window: `after.$ref` into configuration.yaml keys.
     pub(crate) after_ref: Option<String>,
-    /// Reschedule semantics — only `in-place` exists (ADR-20260731-150500).
+    /// Reschedule semantics — `in-place` (ADR-20260731-150500: re-declaring postpones the ONE
+    /// pending row) or `keep` (#167: the FIRST scheduled_at wins; re-declaring never extends a
+    /// deadline — the shape an acceptance timeout needs, where in-place would let a redelivered
+    /// birth fact push the deadline out again).
     pub(crate) reschedule: Option<String>,
 }
 
@@ -167,8 +170,13 @@ pub(crate) fn parse_deletions(model: &Model) -> Vec<DeletionDef> {
 ///     record semantics only, never a command (ADR-20260731-153000 §1a);
 ///   - `reminder-after-unresolved` (error): a reminder window that is not a resolving
 ///     `configuration.yaml#/keys/<KEY>` ref (never a bare string);
-///   - `reminder-reschedule-unknown` (error): a `reschedule` value other than `in-place` — the only
-///     semantics that exist (ADR-20260731-150500);
+///   - `reminder-window-unit` (error): a window configuration key (a reminder's or a deletion
+///     trigger's `after`) whose declaration carries no `unit: days|seconds` — the unit is a TYPED
+///     field of the key, never a name-suffix parse (#167 Phase 0; the closed set is category 3 of
+///     ADR-20260811-014129). The SCREAMING `_DAYS`/`_SECONDS` suffix stays for humans only;
+///   - `reminder-reschedule-unknown` (error): a `reschedule` value other than `in-place` or `keep`
+///     — the only semantics that exist (ADR-20260731-150500; `keep` = first scheduled_at wins,
+///     re-declaring never extends, #167);
 ///   - `reminder-identity-declared` (error): a reminder declaring `identity:` — it is DERIVED
 ///     (`UUIDv5(actor_id, reminder name)`, the runtime's `reminder_message_id`), never declared
 ///     (ADR-20260731-214500 consequences);
@@ -222,11 +230,11 @@ pub(crate) fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Is
             }
         }
         if let Some(rs) = &r.reschedule {
-            if rs != "in-place" {
+            if rs != "in-place" && rs != "keep" {
                 issues.push(err(
                     "reminder-reschedule-unknown",
                     at.clone(),
-                    format!("reschedule '{}' — only `in-place` exists (ADR-20260731-150500).", rs),
+                    format!("reschedule '{}' — only `in-place` and `keep` exist (ADR-20260731-150500; #167).", rs),
                 ));
             }
         }
@@ -236,6 +244,56 @@ pub(crate) fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Is
                 at.clone(),
                 "reminder `identity` is DERIVED — UUIDv5(actor_id, reminder name), computed by the runtime's reminder_message_id — never declared; remove the field (ADR-20260731-214500 consequences).".into(),
             ));
+        }
+    }
+
+    // ---- window keys: the duration unit is a TYPED field of the configuration key (#167) ----
+    // Every key an `after:` names (reminders AND deletion triggers) flows into the generated
+    // `Config::reminder_windows()` map and the ReminderSchedule table; the emitters branch on the
+    // declared `unit`, never on a name-suffix parse (the deleted `ends_with("_DAYS")` shape).
+    {
+        let mut check_window_unit = |after_ref: &str, at: String| {
+            let Some(key) = config_key_ref_name(after_ref) else { return }; // -unresolved owns it
+            let Some(key_node) = model
+                .defs
+                .get("configuration.yaml")
+                .and_then(|c| c.get("keys"))
+                .and_then(|k| k.get(key.as_str()))
+            else {
+                return; // an unresolved key is `-after-unresolved` / `deletion-ref-unresolved`'s report
+            };
+            let unit = key_node.get("unit").and_then(|u| u.as_str());
+            match unit {
+                Some("days") | Some("seconds") => {}
+                Some(other) => issues.push(err(
+                    "reminder-window-unit",
+                    at,
+                    format!(
+                        "window key {} declares unit '{}' — the closed set is days|seconds (extend the loader schema AND the emitters together when a new unit lands, #167).",
+                        key, other
+                    ),
+                )),
+                None => issues.push(err(
+                    "reminder-window-unit",
+                    at,
+                    format!(
+                        "window key {} declares no `unit:` — a key named by an `after:` must type its duration unit (days|seconds); the name suffix is for humans, never parsed (#167).",
+                        key
+                    ),
+                )),
+            }
+        };
+        for r in &reminders {
+            if let Some(a) = &r.after_ref {
+                check_window_unit(a, format!("actors.yaml/{}/reminders/{}", r.actor, r.name));
+            }
+        }
+        for d in &deletions {
+            for (i, t) in d.triggers.iter().enumerate() {
+                if let Some(a) = &t.after_ref {
+                    check_window_unit(a, format!("actors.yaml/{}/deletion.triggers[{}]", d.actor, i));
+                }
+            }
         }
     }
 

@@ -66,7 +66,7 @@ pub use enqueue::enqueue_inbound_facts;
 pub use enqueue::InboundFact;
 pub use mailbox::{
     Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
-    MailboxStatusRow,
+    MailboxStatusRow, ReschedulePolicy,
 };
 pub use partition::stable_partition;
 pub use status_bus::{OperationStatusBus, OperationUpdate};

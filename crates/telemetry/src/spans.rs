@@ -249,6 +249,41 @@ pub fn record_order_id(span: &Span, order_id: &str) {
     span.record(attr::ORDER_ID, order_id);
 }
 
+/// `reminder.promote` (INTERNAL) — one promoted reminder's DELIVERY at the mailbox layer
+/// (`acceptance-timeout` contract, #167): the shadow-evidence span the flip ADR reads. Lives at
+/// the infrastructure delivery seam, NEVER in the pure record handler (`record_order_acceptance_timeout`
+/// only DECIDES; business code stays SDK-free — the `service_window_verdict` precedent).
+///
+/// `due_at`/`fire_delay_ms` measure the honest promotion slop against the row's declared
+/// `scheduled_at` (absent on a redelivery under a fresh identity, hence late-bound). `shadow` is
+/// the ENFORCE_ACCEPTANCE_TIMEOUT gate position read at DELIVERY time; `would_cancel` is the
+/// still-PLACED guard's decision — the outcome label split (`would_cancel` vs `noop`) that turns
+/// shadow traffic into flip evidence.
+pub fn reminder_promote(reminder_type: &str, shadow: bool) -> Span {
+    tracing::info_span!(
+        "reminder.promote",
+        otel.kind = "internal",
+        business.reminder_type = reminder_type,
+        business.shadow = shadow,
+        business.due_at = Empty,
+        business.fire_delay_ms = Empty,
+        business.would_cancel = Empty,
+        business.order_id = Empty,
+    )
+}
+
+/// Record the promoted row's due time + measured fire delay on `reminder.promote`.
+pub fn record_reminder_due(span: &Span, due_at: &str, fire_delay_ms: i64) {
+    span.record(attr::DUE_AT, due_at);
+    span.record(attr::FIRE_DELAY_MS, fire_delay_ms);
+}
+
+/// Record the guard's decision on `reminder.promote` — `true` iff the identical fold+predicate
+/// decided the order would be cancelled (appended when enforcing, inert in shadow).
+pub fn record_would_cancel(span: &Span, would_cancel: bool) {
+    span.record(attr::WOULD_CANCEL, would_cancel);
+}
+
 /// `auth.read_scope` (INTERNAL) — the sub -> domain-id bridge, ONE per request (#144). If this span
 /// appears N times for a single request, the once-per-request caching contract of
 /// PROP-20260725-185140 §3.3 has regressed.
@@ -384,6 +419,22 @@ mod tests {
              SILENTLY into nothing, and the place-order contract marks it required"
         );
 
+        let promote = reminder_promote("OrderAcceptanceTimedOut", true);
+        record_reminder_due(&promote, "2026-08-16T00:00:00Z", 1234);
+        record_would_cancel(&promote, true);
+        record_order_id(&promote, "o-1");
+        let pf = promote.metadata().unwrap().fields();
+        assert!(pf.field(attr::REMINDER_TYPE).is_some());
+        assert!(pf.field(attr::SHADOW).is_some());
+        assert!(pf.field(attr::DUE_AT).is_some(), "due_at is late-bound but declared");
+        assert!(pf.field(attr::FIRE_DELAY_MS).is_some(), "fire_delay_ms is late-bound but declared");
+        assert!(
+            pf.field(attr::WOULD_CANCEL).is_some(),
+            "would_cancel is late-bound but declared -- an undeclared field records SILENTLY \
+             into nothing, and it is the flip ADR's whole evidence set"
+        );
+        assert!(pf.field(attr::ORDER_ID).is_some());
+
         let bridge = auth_read_scope("CUSTOMER");
         record_bridge_resolved(&bridge, false);
         let bf = bridge.metadata().unwrap().fields();
@@ -442,6 +493,7 @@ mod tests {
             auth_read_scope("CUSTOMER"),
             auth_scope_membership("ORDER", "CUSTOMER"),
             claims_stamp(),
+            reminder_promote("OrderAcceptanceTimedOut", true),
         ];
         for s in spans {
             let meta = s.metadata().expect("span has metadata");

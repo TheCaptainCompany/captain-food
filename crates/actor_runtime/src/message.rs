@@ -27,6 +27,11 @@ pub struct InboundMessage {
     pub cause_id: Option<uuid::Uuid>,
     pub session_id: Option<uuid::Uuid>,
     pub received_at: chrono::DateTime<chrono::Utc>,
+    /// The DUE time of a promoted reminder (`SCHEDULED` rows carry it; promotion never clears
+    /// it), `None` for ordinary immediate rows. What lets a delivery observe its own fire delay
+    /// (`now - scheduled_at`) — the #167 shadow span's `business.due_at`/`business.fire_delay_ms`
+    /// evidence — without a second query.
+    pub scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl InboundMessage {
@@ -48,6 +53,7 @@ impl InboundMessage {
             cause_id: row.try_get("cause_id")?,
             session_id: row.try_get("session_id")?,
             received_at: row.try_get("received_at")?,
+            scheduled_at: row.try_get("scheduled_at")?,
         })
     }
 }
