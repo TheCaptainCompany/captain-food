@@ -91,3 +91,14 @@ If the series is **absent** rather than zero, the sweep is not running — that 
 `payment_birth_gap_sweep_heartbeat_total` is for. Alert on the absence of an increment there, never
 on a threshold: on a healthy system every gauge here reads 0, and 0 is indistinguishable from a
 dead sweep without the heartbeat.
+
+**Expect DUPLICATE series on a split fleet, and do not read them as an anomaly.** The two spawn
+sites differ on purpose: the monolith `server` starts the sweep unconditionally
+(`crates/server/src/lib.rs`), while a standalone mailbox process starts it only when it hosts a
+money lane (`crates/infrastructure/src/mailbox/standalone.rs`, `is_money_lane`). The sweep reads
+database-wide state, so N such processes emit N identical gauge series and N heartbeat streams
+against one database. That is harmless for the alert this page describes — the gauge is a `max` over
+the same rows, and the heartbeat alert is on the ABSENCE of an increment, which more emitters can
+only make safer. It matters in exactly two places: a heartbeat RATE looks like a multiple of the
+schedule, and a per-instance dimension is the only way to tell "one sweeper died" from "the sweep
+died". If a rota ever needs the former, that is the change to make — not silencing the duplicates.

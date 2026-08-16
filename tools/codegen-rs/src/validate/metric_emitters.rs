@@ -21,14 +21,19 @@
 //! that is a behaviour question, and the answer is a test that looks at the emitted series
 //! (`crates/infrastructure/tests/authorized_no_birth_metric.rs`), never a text scan.
 //!
-//! **WARNING, not error, and the ratchet is the point.** 37 declared metrics fail this today
-//! (webhook ingestion, prospection, refunds, SIRENE, delivery dispatch — whole contracts written
-//! before their runtimes). Turning that into 37 errors would make `make validate` red on `main`
-//! and the only fast way out would be to weaken the rule. As a WARNING it joins the §17 per-rule
-//! ratchet, which is exact in both directions: the 37 are frozen, a 38th is a hard gate failure,
-//! and every one that gains an emitter tightens the baseline. That is the whole behaviour beck
-//! asked for — "shipping a second declared-but-silent contract" becomes impossible — without a
-//! flag day.
+//! **WARNING, not error, and the ratchet is the point.** A large existing population fails this
+//! today (webhook ingestion, prospection, refunds, SIRENE, delivery dispatch — whole contracts
+//! written before their runtimes). Turning those into errors would make `make validate` red on
+//! `main` and the only fast way out would be to weaken the rule. As a WARNING it joins the §17
+//! per-rule ratchet, which is exact in both directions: the current population is frozen, ONE MORE
+//! is a hard gate failure, and every one that gains an emitter tightens the baseline. That is the
+//! whole behaviour beck asked for — "shipping a second declared-but-silent contract" becomes
+//! impossible — without a flag day.
+//!
+//! **The count is deliberately not written here.** It lives in
+//! `tools/codegen-rs/warning-baseline.json`, which the gate maintains; a number in prose is a
+//! second, unmaintained copy that goes stale the first time the surface moves — and this is the
+//! module doc of the rule whose entire subject is "a declared number must be true". Run the gate.
 
 use std::path::Path;
 

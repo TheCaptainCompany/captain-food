@@ -93,6 +93,18 @@ header's claim to be THE switch for the never-born case was false. The claim is 
 is kept, and #608 is the first thing that ever emitted it — shipping a second declared-but-silent
 money-path contract is the failure this chunk exists to stop.
 
+**8bis. "Emitted" is not "no longer silent" — the corollary this chunk learned on itself.** The
+first cut of §8 shipped the gauge emitted but UNPROVEN: no projector ran in its test binary, so
+`ordertracking` was empty for the whole suite and the gauge's single `== 0.0` assertion was
+satisfied by a query that could not return anything else. Mis-spelling its predicate
+(`'AUTHORIZED'` → `'AUTHORISED'`) left the suite green. **A gauge wired to a permanently-empty
+population is not distinguishable on a dashboard from the declared-but-silent state it replaces**,
+so the §20 rule reporting it clean would have been asserting a runtime nobody had seen work. The
+claim in §8 is true only with the positive control that now stands beside it (two distinct
+projected ages ⇒ the older; a second value ⇒ a different number), and the mis-spelling mutant is
+red. Generally: `obs-metric-no-emitter` proves a name can be SPELLED at a call site, never that the
+call site is reached with a value — that half is always a test that looks at the series.
+
 **9. Response routing is IN scope; remediation automation is NOT.** An alert with no named response
 is a control that renders and does nothing, so
 [`docs/runbooks/authorized-payment-no-order-birth.md`](../runbooks/authorized-payment-no-order-birth.md)
@@ -104,6 +116,15 @@ separate decision.
 
 - A `PaymentAuthorized` hop that is delivered but whose leg `Skip`s without resolving the run reads
   as `delivery_exhausted`, which is the honest classification: no further delivery will occur.
+- **`delivery_exhausted` is reachable in the current runtime without any infrastructure fault**, and
+  the branch's earlier claim to the contrary is retracted (see the dispatch card's `## Findings`).
+  The route is the injected `EventStore` port failing the PM leg's Order-stream read plus a poison
+  cap of 1; it is exercised as a positive control, and it answers
+  [#611](https://github.com/TheCaptainCompany/captain-food/issues/611)'s reachability question.
+- **The checkpoint MISS this chunk produced** — the ~50 s threshold derived from a linear reading of
+  an exponential backoff, in the dispatch card itself — is the FIRST answer to
+  [DECISIONS §44 MOB-COST-1a](../proposals/DECISIONS.md), and it **reverts the HIGH-CONSEQUENCE
+  reversibility class to the whole roster at briefing AND checkpoint** (ADR-20260816-134352).
 - The gauge reports an AGE, never an identity — a payment intent id is not a metric label. The
   runbook carries the queries that recover the identities.
 - **Known gap, recorded, not invented**: there is **no alert-route wiring anywhere in this repo**,

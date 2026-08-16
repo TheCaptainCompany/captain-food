@@ -11,7 +11,16 @@
 > lenses that declared a concern there, and the chunk's **reversibility class** sizes the briefing
 > roster — full mob for money, stored event shapes, legal surfaces and anything Tours-facing. Every
 > dispatch card now states its class and banks a `Checkpoint verification:` line either way; a MISS
-> reverts that class to the whole roster (open sub-obligation **MOB-COST-1a**).
+> reverts that class to the whole roster (sub-obligation **MOB-COST-1a**).
+>
+> ⛔ **The first answer, 2026-08-16, is a MISS — HIGH-CONSEQUENCE is REVERTED to the whole roster at
+> BRIEFING AND CHECKPOINT.** Banked on [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
+> (see below): a money-path threshold derived in the dispatch card as `attempts × spacing` ≈ 50 s
+> when the mailbox backoff is exponential (310 s; landed 600 s). `dba` was named at briefing for
+> that surface and was not returned to at the checkpoint; the error was the coordinator's, in the
+> card, and the executor caught it while implementing rather than the checkpoint catching it.
+> (b)+(c) stand unchanged for the reversible classes, whose first data point is still to come.
+> Evidence in [DECISIONS §44 MOB-COST-1a](proposals/DECISIONS.md).
 
 > 💸 **2026-08-16 — "MONEY HELD, NO ORDER" IS NOW A SIGNAL THE SYSTEM EMITS**
 > ([#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608),
@@ -46,11 +55,15 @@
 > `*.metrics[*].thresholds[*].derived_from[*]` → `ConfigKey`, so a renamed key reds the validator
 > instead of leaving a stale bound.
 >
-> **(4) The existing gauge is AMENDED, and now actually emitted.**
+> **(4) The existing gauge is AMENDED, emitted, and PROVEN.**
 > `payment_authorized_unsettled_age_seconds` is correct for born-but-never-CAPTURED; only its
 > header's claim to cover the never-born case was false. It had **zero emit sites in `crates/**`**
 > and rides the same sweep now — shipping a second declared-but-silent money-path contract was the
-> failure this chunk existed to stop.
+> failure this chunk existed to stop. **Its first cut nearly repeated that failure in a subtler
+> form**: no projector ran in the test binary, so `ordertracking` held **0 rows for the whole
+> suite** and the gauge's `== 0.0` assertion was satisfied by a query that could not return anything
+> else — a mis-spelled predicate (`'AUTHORISED'`) left the suite green. It is now driven off rows
+> folded by the real `ProjectionWorker` to two DIFFERENT positive values, and that mutant is red.
 >
 > **(5) New gate: `obs-metric-no-emitter` (validator §20).** Every metric declared in
 > `specs/observability.yaml` must have a name constant in `crates/telemetry/src/contract.rs` AND an
@@ -75,11 +88,21 @@
 > `extract(epoch)::bigint` truncates and a value-derived control needs distinct ages. beck's
 > zero-healthy suite in full: presence by EQUALITY, a value-derived positive control (two stranded
 > at distinct ages ⇒ the older; then a different age ⇒ a different value, which kills a latched
-> constant), a same-sweep negative control (an order born in the same database on the same tick),
-> a second tick, and recovery to zero. **Known gap stated rather than faked**: `delivery_exhausted`
-> is asserted present-at-zero and mutant-covered but not driven positive — every honest route to
-> "terminal hop, run still AWAITING" in today's runtime is an induced infrastructure fault, and
-> manufacturing it would mean inserting the row the detector reads.
+> constant), a same-sweep negative control (an order born in the same database on the same tick,
+> itself AGED so the exclusion has something to exclude), a second tick, and recovery. **All three
+> reasons are now driven POSITIVE**, including `delivery_exhausted` — the member with threshold 0.
+> **Ten mutants, applied-check and revert-check.**
+>
+> **(8) The third look FAILED this branch, and the discharge is part of it.** Three blockers:
+> the born-but-uncaptured gauge shipped emitted-but-unproven (item 4); the MOB-COST-1a MISS was
+> banked in the card but never reached the register (top of this file); and the card's second banked
+> claim — *"every honest route to a terminal hop while the run stays `AWAITING_PAYMENT_RESULT` is an
+> induced infrastructure fault rather than a seam"* — was **verifiably false and is retracted, not
+> softened**. The seam is built from ports the test file already substitutes: a decorator on the
+> injected `EventStore` failing the PM leg's Order-stream `load` with `DomainError::Repository`, plus
+> `max_delivery_attempts: 1`, takes the hop terminal through the worker's own poison path while the
+> completion transaction rolls the run back at `AWAITING_PAYMENT_RESULT`. That control has landed,
+> which also answers [#611](https://github.com/TheCaptainCompany/captain-food/issues/611).
 
 > 📡 **2026-08-16 — THE ORDER LANE HAS A HEARTBEAT, AND THE CHECKOUT SUCCESS RULE STOPS LYING**
 > ([#598 "Before the birth-lane flip: the place-order latency budget still measures the old workflow, and a flat order_birth_lag_ms cannot be told from a dead lane"](https://github.com/TheCaptainCompany/captain-food/issues/598)

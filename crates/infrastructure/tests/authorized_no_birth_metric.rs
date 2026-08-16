@@ -6,8 +6,8 @@
 //! declared switch was structurally blind to exactly the case it was cited for. Both it and the new
 //! gauge had ZERO emit sites in `crates/**`.
 //!
-//! **The state is manufactured honestly, never inserted.** The two stranded authorizations below
-//! are produced by driving the real seams end to end:
+//! **The state is manufactured honestly, never inserted.** The stranded authorizations below are
+//! produced by driving the real seams end to end:
 //!
 //! 1. a real `PlaceOrder` delivered on the real `PlaceOrderProcess` COMMAND lane — which is what
 //!    creates the `payment_process_manager` run row at CHECKOUT time (`commands.rs`, the fact the
@@ -20,11 +20,22 @@
 //!    window between two durable hops — a shape that survives #590/#595/#601 and widens after the
 //!    `ROUTE_ORDER_BIRTH_THROUGH_LANE` flip, because the flip adds a third hop.
 //!
-//! No test here inserts a `payment_process_manager` row, an `inbound_messages` hop, or a
-//! `domain_events` row by hand. The one thing moved by hand is the CLOCK: `received_at` /
-//! `occurred_at` are backdated after the real write, because `extract(epoch ...)::bigint` truncates
-//! and two rows created milliseconds apart both read 0 — a value-derived assertion is inexpressible
-//! without ageing. Ageing an existing real row is not manufacturing one.
+//! For the `delivery_exhausted` reason the hop must instead reach a TERMINAL status while its run
+//! stays `AWAITING_PAYMENT_RESULT`, and that too is a seam rather than an induced fault: the
+//! injected `CommandDeps.store` port is decorated so ONE delivery's Order-stream read returns
+//! `DomainError::Repository` ([`GatedOrderReads`]), and `max_delivery_attempts: 1` takes the row
+//! terminal through the worker's own poison path. Nothing is killed and nothing is inserted.
+//!
+//! For the born-but-never-captured gauge, the `ordertracking` rows come from the production
+//! [`ProjectionWorker`] folding the real `OrderPlaced` events this test births — `payment_status`
+//! is FOLDED, never hand-set.
+//!
+//! No test here inserts a `payment_process_manager` row, an `inbound_messages` hop, an
+//! `ordertracking` row, or a `domain_events` row by hand. The one thing moved by hand is the CLOCK:
+//! `received_at` / `occurred_at` / `placed_at` are backdated after the real write, because
+//! `extract(epoch ...)::bigint` truncates and two rows created milliseconds apart both read 0 — a
+//! value-derived assertion is inexpressible without ageing. Ageing an existing real row is not
+//! manufacturing one.
 //!
 //! **What is asserted, and why in this shape (beck's zero-healthy suite).** A monitor whose HEALTHY
 //! value is zero cannot be verified by "the number is 0":
@@ -39,6 +50,8 @@
 //!   alive.
 //! - **a SAME-SWEEP negative control** — an authorization WHOSE ORDER WAS BORN, present in the same
 //!   database on the same tick, must not be counted. Without it, "count every authorization" passes.
+//!   The excluded subject must be AGED TOO: a negative control whose subject reads 0 anyway is
+//!   satisfied by counting it, and discriminates nothing at its own assertion point.
 //! - **repetition** — a second tick over the unchanged state must re-emit. Delta temporality plus a
 //!   draining read makes a once-at-startup emitter indistinguishable from a correct one on tick 1.
 //! - **recovery** — birth the orders and the next sweep must return to 0. A gauge that only ever
@@ -50,9 +63,9 @@
 //! racing the same binding. Same constraint and same shape as `tests/mailbox_liveness_metrics.rs`
 //! and `tests/orders_placed_metric.rs`.
 //!
-//! **SEEN RED — seven mutants, each a SEMANTIC edit of `mailbox/birth_gap_watch.rs` applied to the
+//! **SEEN RED — ten mutants, each a SEMANTIC edit of `mailbox/birth_gap_watch.rs` applied to the
 //! committed phase, with an applied-check AND a revert-check** (never a line range: a range rots at
-//! the next commit). All seven red on apply, all seven green on `git checkout --`:
+//! the next commit). All ten red on apply, the file `git checkout --`-clean after each:
 //!
 //! | Mutant | The edit | Where it dies |
 //! |---|---|---|
@@ -60,17 +73,20 @@
 //! | invert the predicate | `process_status <> 'AWAITING_PAYMENT_RESULT'` | positive control, `retry_pending` 0 vs 3600 |
 //! | return 0 | emit `0` whatever the query found | positive control, every reason 0 |
 //! | latch the value | memoize the first non-zero reading and re-emit it forever | the SECOND value control, 3600 vs 7200 |
-//! | emit once | a `OnceLock` around the emit — the once-at-startup seeder | the re-emission assertion, `left: []` |
-//! | re-point at OrderTracking | source the population from the read model — TODAY'S BLINDNESS | positive control, `retry_pending` 0 (a never-born order has no row) |
-//! | drop the no-birth exclusion | count every hop, born or not | the negative control, `delivery_exhausted` 7200 vs 0 |
+//! | emit once | a `OnceLock` around the emit — the once-at-startup seeder | positive control, `left: []` (the presence tick spent the lock) |
+//! | re-point at OrderTracking | source the hop population from the read model — TODAY'S BLINDNESS | positive control, `retry_pending` 0 (a never-born order has no row) and `delivery_exhausted` 9000 (C's, whose order WAS born) |
+//! | drop the no-birth exclusion | `process_status IS NOT NULL` — count every hop, born or not | positive control, `delivery_exhausted` 9000 vs 1200 (C's born hop leaks in) |
+//! | misclassify a terminal hop | `DELIVERABLE` gains `FAILED` — "did it fail" instead of "will anything try again" | positive control, `delivery_exhausted` 0 vs 1200 |
+//! | delete the unsettled emit | drop `authorized_unsettled_age` — the OTHER gauge's pre-#608 world | presence, `left: []` |
+//! | mis-spell the settlement predicate | `payment_status = 'AUTHORISED'` | positive control, unsettled 0 vs 1800 |
+//! | the unsettled gauge reads the NEWEST | `max(…placed_at)` → `min(…)` | recovery, unsettled 0 vs 5400 |
 //!
-//! **Known coverage gap, stated rather than faked**: `delivery_exhausted` is asserted PRESENT AT
-//! ZERO on every tick and is covered by the predicate mutants, but is not driven to a positive
-//! value here. Producing it honestly needs a PM hop that reaches a terminal status while its run
-//! row stays `AWAITING_PAYMENT_RESULT`, and every route to that state in the current runtime is
-//! either an induced infrastructure fault (not a seam) or resolves the run. Manufacturing it by
-//! hand would be inserting the row the detector queries, which is the one thing this binary does
-//! not do.
+//! The last three exist because the `payment_authorized_unsettled_age_seconds` mis-spelling
+//! **survived the first cut of this suite**: nothing in this binary projected, `ordertracking` held
+//! **0 rows for the entire test**, and the gauge's single `== 0.0` assertion was satisfied by a
+//! query that could not return anything else. A gauge wired to a permanently-empty population is
+//! not distinguishable on a dashboard from the declared-but-silent state this chunk exists to
+//! replace, so it is now driven to two DIFFERENT positive values off real projected rows.
 //!
 //! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
 //! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
@@ -83,6 +99,7 @@ mod common;
 mod spy_meter;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use actor_runtime::{MailboxWorker, WorkerConfig};
@@ -104,7 +121,7 @@ use infrastructure::mailbox::{birth_gap_watch_tick, MailboxCommandHandler};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, PgCustomerRepository,
     PgEventStore, PgProspectionRepository, PgRestaurantRepository, PgSlugReservationRepository,
-    UnverifiedGbpOrderLinkProbe,
+    ProjectionWorker, UnverifiedGbpOrderLinkProbe,
 };
 use sqlx::PgPool;
 use telemetry::contract::metric;
@@ -212,9 +229,56 @@ impl PaymentService for SerialGateway {
     }
 }
 
-fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
+/// The seam that drives a chained PM hop TERMINAL while its run row stays
+/// `AWAITING_PAYMENT_RESULT` — i.e. the `delivery_exhausted` reason, the member whose threshold is
+/// **0** because nothing will ever redeliver it.
+///
+/// It is a decorator over the injected [`EventStore`] port, not an induced infrastructure fault:
+/// `CommandDeps.store` is `Arc<dyn EventStore>` and this binary already substitutes it, so closing
+/// it is the same kind of act as [`StubCatalog`] or [`SerialGateway`] — a declared port returning
+/// its declared error. Nothing is killed and nothing is inserted.
+///
+/// **`load`, not `append`, and that is load-bearing.** The PM leg's appends never reach this store:
+/// `handle_pm_fact` wraps it in `application::staging::StagingEventStore`, which BUFFERS every
+/// append for the fenced flush and only delegates `load`. The Order-stream read at
+/// `generated/process_managers.rs` (`store.load(&format!("Order-{…}"))`, the read that feeds the
+/// `should_deliver_order_placed` idempotency predicate) is therefore the reachable failure point,
+/// and it sits BEFORE the run-row upsert — so the leg returns `DomainError::Repository`, the
+/// completion transaction rolls back with the run still `AWAITING_PAYMENT_RESULT`, and the worker's
+/// poison path flips the row terminal at `max_delivery_attempts`.
+struct GatedOrderReads {
+    inner: Arc<dyn EventStore>,
+    closed: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl EventStore for GatedOrderReads {
+    async fn append(
+        &self,
+        stream_name: &str,
+        expected_version: i64,
+        events: &[DomainEvent],
+        actor: &Actor,
+    ) -> Result<i64, DomainError> {
+        self.inner.append(stream_name, expected_version, events, actor).await
+    }
+
+    async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError> {
+        if self.closed.load(Ordering::SeqCst) && stream_name.starts_with("Order-") {
+            return Err(DomainError::Repository(format!(
+                "birth-gap control: the order stream {stream_name} is unreadable"
+            )));
+        }
+        self.inner.load(stream_name).await
+    }
+}
+
+fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<AtomicBool>) -> CommandDeps {
     CommandDeps {
-        store: Arc::new(PgEventStore::new(pool.clone())),
+        store: Arc::new(GatedOrderReads {
+            inner: Arc::new(PgEventStore::new(pool.clone())),
+            closed,
+        }),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
         ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
@@ -354,12 +418,17 @@ async fn enqueue(
     .expect("enqueue");
 }
 
+/// `max_delivery_attempts: 1` — the production cap is 5 on an EXPONENTIAL schedule (~5 min to
+/// terminal), which no test can wait out. One attempt reaches the same terminal state by the same
+/// code path (`worker.rs` `poison_raw`), so the `delivery_exhausted` control below observes the
+/// real poison flip rather than a hand-written status. Every other delivery here succeeds, so the
+/// tighter cap changes nothing else: a lane that fails at all now fails LOUDLY instead of retrying.
 async fn worker(pool: &PgPool, actor_type: &str, deps: CommandDeps) -> MailboxWorker {
     let w = MailboxWorker::new(
         pool.clone(),
         &format!("w-{actor_type}"),
         actor_type,
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        WorkerConfig { lease_seconds: 300, max_delivery_attempts: 1, ..WorkerConfig::default() },
         Arc::new(MailboxCommandHandler::new(deps)),
     );
     w.seed(5).await.expect("seed");
@@ -410,6 +479,44 @@ async fn age_fact(pool: &PgPool, intent: &str, seconds: i64) {
     assert_eq!(n, 1, "exactly one real PaymentAuthorized fact for {intent}");
 }
 
+/// Same clock move, for the BORN-but-uncaptured population `payment_authorized_unsettled_age_seconds`
+/// reads. The row is folded by the real [`ProjectionWorker`] from a real `OrderPlaced`; only
+/// `placed_at` is moved, for the same truncation reason as the two helpers above.
+async fn age_order(pool: &PgPool, order: u128, seconds: i64) {
+    let n = sqlx::query(
+        "UPDATE ordertracking SET placed_at = now() - make_interval(secs => $2) WHERE order_id = $1",
+    )
+    .bind(uid(order))
+    .bind(seconds as f64)
+    .execute(pool)
+    .await
+    .expect("age the projected order")
+    .rows_affected();
+    assert_eq!(n, 1, "exactly one PROJECTED ordertracking row for {order:#x} -- ageing nothing tests nothing");
+}
+
+/// Project everything appended so far through the REAL projector. Without this the `ordertracking`
+/// table is EMPTY for the whole binary, and `payment_authorized_unsettled_age_seconds` reads 0 from
+/// a query that can never return anything else — a gauge whose healthy-looking value is
+/// unreachable-by-construction, which is the exact defect this chunk exists to remove.
+/// `payment_status = 'AUTHORIZED'` is FOLDED here (an `OrderPlaced` carrying a `paymentIntentId` is
+/// born AUTHORIZED — `application::projectors::order_tracking`), never hand-set.
+/// The intent the real gateway minted for one checkout, read back from the saga's OWN run row.
+/// [`SerialGateway`] numbers intents in DRAIN order, which is LANE order over a hash partition —
+/// not the order the carts were enqueued in. A literal `pi_608_3` for the third cart was a
+/// coincidence that a fourth checkout is entitled to break.
+async fn intent_of(pool: &PgPool, order: u128) -> String {
+    sqlx::query_scalar("SELECT payment_intent_id FROM payment_process_manager WHERE order_id = $1")
+        .bind(uid(order))
+        .fetch_one(pool)
+        .await
+        .expect("the run row records the intent the gateway minted")
+}
+
+async fn project(pool: &PgPool) {
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("project the born orders");
+}
+
 fn authorized(intent: &str) -> serde_json::Value {
     serde_json::to_value(DomainEvent::PaymentAuthorized(PaymentAuthorized {
         payment_intent_id: PaymentIntentId(intent.into()),
@@ -445,14 +552,25 @@ async fn stranded_authorization_ages_and_clears() {
     const CART_A: u128 = 0xCA71;
     const CART_B: u128 = 0xCA72;
     const CART_C: u128 = 0xCA73;
+    const CART_D: u128 = 0xCA74;
     const ORDER_A: u128 = 0x0A71;
     const ORDER_B: u128 = 0x0A72;
     const ORDER_C: u128 = 0x0A73;
-    seed_world(&pool, &[CART_A, CART_B, CART_C]).await;
+    const ORDER_D: u128 = 0x0A74;
+    seed_world(&pool, &[CART_A, CART_B, CART_C, CART_D]).await;
 
+    // OPEN for every leg but D's, whose hop must reach a terminal status (see [`GatedOrderReads`]).
+    let order_reads_closed = Arc::new(AtomicBool::new(false));
     let gateway = Arc::new(SerialGateway::default());
-    let pm = worker(&pool, "PlaceOrderProcess", deps_over(&pool, gateway.clone())).await;
-    let payment = worker(&pool, "Payment", deps_over(&pool, gateway.clone())).await;
+    let pm = worker(
+        &pool,
+        "PlaceOrderProcess",
+        deps_over(&pool, gateway.clone(), order_reads_closed.clone()),
+    )
+    .await;
+    let payment =
+        worker(&pool, "Payment", deps_over(&pool, gateway.clone(), order_reads_closed.clone()))
+            .await;
 
     // ── (a) PRESENCE ────────────────────────────────────────────────────────────────────────────
     // Nothing stranded, nothing authorized, nothing even ordered: every declared reason must still
@@ -486,7 +604,9 @@ async fn stranded_authorization_ages_and_clears() {
     // The `PlaceOrder` handler is what opens the run row, at CHECKOUT, at AWAITING_PAYMENT_RESULT —
     // the fact the detector's source resolution rests on.
     for (i, (cart, order)) in
-        [(CART_A, ORDER_A), (CART_B, ORDER_B), (CART_C, ORDER_C)].iter().enumerate()
+        [(CART_A, ORDER_A), (CART_B, ORDER_B), (CART_C, ORDER_C), (CART_D, ORDER_D)]
+            .iter()
+            .enumerate()
     {
         enqueue(
             &pool,
@@ -507,19 +627,26 @@ async fn stranded_authorization_ages_and_clears() {
         )
         .await;
     }
-    assert_eq!(drain_all(&pm).await, 3, "three checkouts accepted");
+    assert_eq!(drain_all(&pm).await, 4, "four checkouts accepted");
     let runs: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM payment_process_manager WHERE process_status = 'AWAITING_PAYMENT_RESULT'",
     )
     .fetch_one(&pool)
     .await
     .expect("count");
-    assert_eq!(runs, 3, "three run rows, opened by the real PlaceOrder handler");
+    assert_eq!(runs, 4, "four run rows, opened by the real PlaceOrder handler");
+
+    let (intent_a, intent_b, intent_c, intent_d) = (
+        intent_of(&pool, ORDER_A).await,
+        intent_of(&pool, ORDER_B).await,
+        intent_of(&pool, ORDER_C).await,
+        intent_of(&pool, ORDER_D).await,
+    );
 
     // ── (c) the SAME-SWEEP NEGATIVE CONTROL, born for real ──────────────────────────────────────
     // C's authorization is delivered AND its PM hop is drained, so C's order is born. It sits in
     // the same database on the same tick as A and B and must not be counted.
-    enqueue(&pool, "EVENT", "Payment", uid(0xE003), 0x203, "PaymentAuthorized", authorized("pi_608_3"))
+    enqueue(&pool, "EVENT", "Payment", uid(0xE003), 0x203, "PaymentAuthorized", authorized(&intent_c))
         .await;
     assert_eq!(drain_all(&payment).await, 1, "C's authorization recorded and chained");
     assert_eq!(drain_all(&pm).await, 1, "C's chained hop delivered -- the order is BORN");
@@ -530,12 +657,73 @@ async fn stranded_authorization_ages_and_clears() {
             .expect("count");
     assert_eq!(born, 1, "exactly one order born -- C's");
 
+    // C's hop is DELIVERED and terminal, and its run resolved, so the exclusion must drop it. Age
+    // it: without this the negative control is vacuous at its own assertion point — a sweep that
+    // counted born orders too would still read max(age) = 0 over C's freshly-delivered hop and
+    // pass, dying only three assertions later at the recovery tick.
+    age_hop(&pool, &intent_c, 9000).await;
+
+    // ── (c2) the BORN-BUT-UNCAPTURED population, projected for real ──────────────────────────────
+    // `payment_authorized_unsettled_age_seconds` is the OTHER gauge this sweep carries, and it
+    // reads `ordertracking`. Nothing in this binary projects, so until this call the table was
+    // EMPTY for the whole test and that gauge's 0 was produced by a query that could not return
+    // anything else. C's row is folded by the production projector from C's real `OrderPlaced`.
+    project(&pool).await;
+    let authorized_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ordertracking WHERE payment_status = 'AUTHORIZED'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(
+        authorized_rows, 1,
+        "C's born order is AUTHORIZED in the read model -- FOLDED from OrderPlaced, not hand-set"
+    );
+    age_order(&pool, ORDER_C, 1800).await;
+
+    // ── (c3) `delivery_exhausted`: a TERMINAL hop whose run never resolved ───────────────────────
+    // D authorizes exactly like C, but the Order-stream read is closed for that one delivery, so
+    // the leg fails with `DomainError::Repository` BEFORE the run-row upsert. The completion
+    // transaction rolls back (run still AWAITING_PAYMENT_RESULT) and the worker's poison path
+    // flips the row terminal at `max_delivery_attempts`. Nothing is inserted and nothing is killed
+    // — a declared port returned its declared error.
+    enqueue(&pool, "EVENT", "Payment", uid(0xE004), 0x204, "PaymentAuthorized", authorized(&intent_d))
+        .await;
+    assert_eq!(drain_all(&payment).await, 1, "D's authorization recorded and chained");
+    order_reads_closed.store(true, Ordering::SeqCst);
+    assert_eq!(drain_all(&pm).await, 0, "D's hop was NOT delivered -- it exhausted its attempts");
+    order_reads_closed.store(false, Ordering::SeqCst);
+    let (hop_status, run_status): (String, String) = sqlx::query_as(
+        "SELECT m.status, p.process_status::text \
+         FROM inbound_messages m \
+         JOIN payment_process_manager p ON p.payment_intent_id = m.payload->'payload'->>'paymentIntentId' \
+         WHERE m.actor_type = 'PlaceOrderProcess' AND m.message_type = 'PaymentAuthorized' \
+           AND m.payload->'payload'->>'paymentIntentId' = $1",
+    )
+    .bind(&intent_d)
+    .fetch_one(&pool)
+    .await
+    .expect("D's hop and its run row");
+    assert_eq!(
+        (hop_status.as_str(), run_status.as_str()),
+        ("FAILED", "AWAITING_PAYMENT_RESULT"),
+        "the state `delivery_exhausted` names: a hop nothing will redeliver, and a run still \
+         waiting for the payment result -- money held, no order, and no clock that fixes it"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM domain_events WHERE event_type = 'OrderPlaced'")
+            .fetch_one(&pool).await.expect("count"),
+        1,
+        "D's order was NOT born"
+    );
+    age_hop(&pool, &intent_d, 1200).await;
+
     // ── A and B: authorized, and then NOTHING ───────────────────────────────────────────────────
     // The Payment lane records both facts and chains both hops; the PlaceOrderProcess lane is not
     // drained again. That IS the crash window between two durable hops.
-    enqueue(&pool, "EVENT", "Payment", uid(0xE001), 0x201, "PaymentAuthorized", authorized("pi_608_1"))
+    enqueue(&pool, "EVENT", "Payment", uid(0xE001), 0x201, "PaymentAuthorized", authorized(&intent_a))
         .await;
-    enqueue(&pool, "EVENT", "Payment", uid(0xE002), 0x202, "PaymentAuthorized", authorized("pi_608_2"))
+    enqueue(&pool, "EVENT", "Payment", uid(0xE002), 0x202, "PaymentAuthorized", authorized(&intent_b))
         .await;
     assert_eq!(drain_all(&payment).await, 2, "A and B authorized -- funds held");
 
@@ -555,18 +743,29 @@ async fn stranded_authorization_ages_and_clears() {
     .await
     .expect("the real seam records an orphaned authorization -- facts are never dropped");
 
-    age_hop(&pool, "pi_608_1", 3600).await;
-    age_hop(&pool, "pi_608_2", 60).await;
+    age_hop(&pool, &intent_a, 3600).await;
+    age_hop(&pool, &intent_b, 60).await;
     age_fact(&pool, "pi_608_orphan", 120).await;
 
     // ── (b) the VALUE-DERIVED POSITIVE CONTROL ──────────────────────────────────────────────────
-    birth_gap_watch_tick(&pool).await.expect("a tick with two stranded authorizations");
+    birth_gap_watch_tick(&pool).await.expect("a tick with three stranded authorizations");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
-        all_reasons(&[("retry_pending", 3600.0), ("no_run", 120.0)]),
+        all_reasons(&[
+            ("retry_pending", 3600.0),
+            ("delivery_exhausted", 1200.0),
+            ("no_run", 120.0),
+        ]),
         "the gauge reads the OLDEST of each class -- 3600s (A, not B's 60s) for the stranded saga \
-         hops, 120s for the log residue, and delivery_exhausted still reports its zero"
+         hops, 1200s for D's terminal hop, 120s for the log residue. C's hop is 9000s old and is \
+         absent from EVERY class: its order was born"
+    );
+    assert_eq!(
+        s.points(metric::PAYMENT_AUTHORIZED_UNSETTLED_AGE_SECONDS),
+        vec![(BTreeMap::new(), 1800.0)],
+        "the born-but-never-captured gauge reads C's projected placed_at -- a VALUE, not the 0 an \
+         empty read model returns whatever the predicate says"
     );
 
     // ── (d) SECOND TICK over UNCHANGED state ────────────────────────────────────────────────────
@@ -576,8 +775,17 @@ async fn stranded_authorization_ages_and_clears() {
     let s = spy.drain();
     assert_eq!(
         s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
-        all_reasons(&[("retry_pending", 3600.0), ("no_run", 120.0)]),
+        all_reasons(&[
+            ("retry_pending", 3600.0),
+            ("delivery_exhausted", 1200.0),
+            ("no_run", 120.0),
+        ]),
         "EVERY tick re-emits -- a series that reports once is a dead-man's switch that fires once"
+    );
+    assert_eq!(
+        s.points(metric::PAYMENT_AUTHORIZED_UNSETTLED_AGE_SECONDS),
+        vec![(BTreeMap::new(), 1800.0)],
+        "and so does the born-but-never-captured gauge, on the same sweep"
     );
     assert_eq!(
         s.points(metric::PAYMENT_BIRTH_GAP_SWEEP_HEARTBEAT_TOTAL),
@@ -587,29 +795,49 @@ async fn stranded_authorization_ages_and_clears() {
 
     // ── (b') a DIFFERENT age gives a DIFFERENT value ────────────────────────────────────────────
     // Without this, a watcher emitting a latched constant passes everything above.
-    age_hop(&pool, "pi_608_1", 7200).await;
+    age_hop(&pool, &intent_a, 7200).await;
     birth_gap_watch_tick(&pool).await.expect("a tick after the oldest aged further");
     assert_eq!(
         spy.drain().points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
-        all_reasons(&[("retry_pending", 7200.0), ("no_run", 120.0)]),
+        all_reasons(&[
+            ("retry_pending", 7200.0),
+            ("delivery_exhausted", 1200.0),
+            ("no_run", 120.0),
+        ]),
         "the value is DERIVED from the data, not latched -- a constant emitter dies here"
     );
 
     // ── (e) RECOVERY ────────────────────────────────────────────────────────────────────────────
-    // Deliver the two stranded hops for real. The runs resolve, the orders are born, and the next
-    // sweep must return to zero — a gauge nobody can close an incident on is not a gauge.
+    // Deliver the two stranded hops for real. Their runs resolve, their orders are born, and the
+    // next sweep must drop them — a gauge nobody can close an incident on is not a gauge.
     assert_eq!(drain_all(&pm).await, 2, "A and B's hops delivered -- both orders born");
     let born: i64 =
         sqlx::query_scalar("SELECT count(*) FROM domain_events WHERE event_type = 'OrderPlaced'")
             .fetch_one(&pool)
             .await
             .expect("count");
-    assert_eq!(born, 3, "all three orders exist now");
+    assert_eq!(born, 3, "A, B and C exist now -- D still does not, and never will on its own");
+
+    // A and B join the born-but-uncaptured population, through the same real projector. Ageing A's
+    // row past C's is the SECOND value for that gauge: two rows at distinct ages must give the
+    // OLDER, and 5400 != the 1800 asserted twice above, so a latched constant dies here too.
+    project(&pool).await;
+    age_order(&pool, ORDER_A, 5400).await;
+
     birth_gap_watch_tick(&pool).await.expect("a tick after recovery");
+    let s = spy.drain();
     assert_eq!(
-        spy.drain().points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
-        all_reasons(&[("no_run", 120.0)]),
-        "the saga hops cleared; the log residue is a DIFFERENT anomaly and correctly still reads \
-         120s -- birthing an order does not retroactively give the orphan a run"
+        s.points(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS),
+        all_reasons(&[("delivery_exhausted", 1200.0), ("no_run", 120.0)]),
+        "retry_pending fell 7200 -> 0: the two hops time COULD fix were fixed. The other two are \
+         unchanged BY DESIGN -- nothing redelivers D's terminal hop and birthing an order does not \
+         retroactively give the orphan a run, which is exactly why both thresholds are 0 and the \
+         runbook's remedy for them is a human"
+    );
+    assert_eq!(
+        s.points(metric::PAYMENT_AUTHORIZED_UNSETTLED_AGE_SECONDS),
+        vec![(BTreeMap::new(), 5400.0)],
+        "three AUTHORIZED rows now, at 5400s / 1800s / ~0s -- the gauge reads the OLDEST, and it is \
+         a DIFFERENT number from the 1800 it read before"
     );
 }

@@ -159,12 +159,40 @@ But the arithmetic in the resolved dispatch is **wrong**: it states the saga's b
 5"* (`crates/actor_runtime/src/worker.rs` `poison_raw`). A 50 s threshold pages on **every healthy
 retry** on a lane that is working exactly as designed — the precise "threshold that lies" class the
 chunk exists to remove. Landed as **600 s** (310 s + one schedule of slack), with both antecedent
-keys named by `$ref`. **Per ADR-20260816-134352 this MISS reverts the HIGH-CONSEQUENCE class to the
-whole roster for subsequent chunks** (sub-obligation MOB-COST-1a).
+keys named by `$ref`. **The wrong arithmetic originated in THIS CARD**, i.e. in the coordinator's
+dispatch, and rode unchallenged past a checkpoint that no longer invited the lens whose brief named
+it — precisely the failure mode MOB-COST-1a was opened to detect. **Per ADR-20260816-134352 this
+MISS reverts the HIGH-CONSEQUENCE class to the whole roster for subsequent chunks**; recorded in the
+register at [DECISIONS §44 MOB-COST-1a](../proposals/DECISIONS.md), which this card's first pass
+left `OPEN` while banking the evidence that closes it — the third look caught that too.
 
 Second, smaller, banked rather than silently absorbed: `delivery_exhausted` is asserted
-present-at-zero and mutant-covered but is **not driven to a positive value** by the test. Every
-honest route to "terminal hop while the run stays `AWAITING_PAYMENT_RESULT`" in today's runtime is
-an induced infrastructure fault rather than a seam, and manufacturing it would mean inserting the
-row the detector queries — beck's one prohibition. Stated in the test's module docs, not papered
-over.
+present-at-zero and mutant-covered but is **not driven to a positive value** by the test.
+
+> **RETRACTED at the third look (2026-08-16) — the justification was false, and it is withdrawn
+> rather than softened.** The banked sentence read: *"Every honest route to 'terminal hop while the
+> run stays `AWAITING_PAYMENT_RESULT`' in today's runtime is an induced infrastructure fault rather
+> than a seam, and manufacturing it would mean inserting the row the detector queries."* **There is
+> a seam, built from ports this very test file already substitutes three times.**
+> `CommandDeps.store` is an injectable `Arc<dyn application::ports::EventStore>` and
+> `WorkerConfig.max_delivery_attempts` is settable; a store decorator that fails the PM leg's
+> **Order-stream `load`** with `DomainError::Repository`, plus `max_delivery_attempts: 1`, takes the
+> chained hop terminal through the worker's own poison path while the completion transaction rolls
+> the run back at `AWAITING_PAYMENT_RESULT`. (`load`, not `append`: `handle_pm_fact` wraps the store
+> in `StagingEventStore`, which buffers appends for the fenced flush and only delegates reads — so
+> the reachable failure point is the `Order-…` read that feeds `should_deliver_order_placed`, which
+> sits before the run-row upsert.) A false record is exactly what the MOB-COST machinery exists to
+> prevent, and `delivery_exhausted` is the member with threshold **0** — the one that pages on its
+> first non-zero reading, so its reachability was the least safe thing to assert without proof.
+> **The control has since LANDED** (scenario D in `crates/infrastructure/tests/authorized_no_birth_metric.rs`:
+> hop `FAILED`, run `AWAITING_PAYMENT_RESULT`, gauge 1200 s), which also answers the reachability
+> question [#611](https://github.com/TheCaptainCompany/captain-food/issues/611) was filed for.
+
+**Third look (2026-08-16) — FAIL, discharged.** Three merge-blockers, all landed on this branch:
+**(1)** `payment_authorized_unsettled_age_seconds` shipped emitted-but-UNPROVEN — no projector ran
+in the test binary, so `ordertracking` held 0 rows for the whole suite and the mis-spelling mutant
+`'AUTHORIZED'` → `'AUTHORISED'` left the suite GREEN. It now has a value-derived positive control
+off real projected rows (1800 s, then 5400 s) and that mutant is red. **(2)** The MOB-COST-1a MISS
+below never reached the register; it does now. **(3)** the retraction above. Plus: the same-sweep
+negative control was vacuous at its own assertion point (the excluded subject read 0 anyway) and now
+ages to 9000 s so the exclusion mutant dies where the docs claim it does.
