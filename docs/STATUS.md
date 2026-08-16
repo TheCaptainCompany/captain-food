@@ -31,7 +31,8 @@
 > literal `5` in all 17 generated client crates still passed one, and used the assertion to drop the
 > planned grep gate. All of those lost the argument, emitter included; `stable_partition` stays `pub`
 > for tests and its golden freeze, so the two-step is still spellable and the records now say that
-> rather than rounding it up. The grep gate stays unwritten because the parameter is genuinely gone. **THREE sites, not the card's
+> rather than rounding it up. The grep gate stays unwritten because the parameter is genuinely gone;
+> the residue is [#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609). **THREE sites, not the card's
 > two**: record-time chaining, the **flip-time backfill** (same `count(*)`, same zero-width error,
 > found independently by `dba` and `beck` — and worse there, a cold-start rescue pass that refused to
 > run when the system was cold), and the already-correct sibling converted so they cannot drift apart

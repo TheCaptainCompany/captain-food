@@ -9,6 +9,7 @@ money path), executor-authored ·
 [ADR-20260730-234918 "actor_runtime is extraction-ready; the routing function is a frozen contract"](ADR-20260730-234918-actor-runtime-extraction-ready.md) ·
 [ADR-20260810-231300 "No polling, only pushing"](ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) (the monitoring carve-out this leans on) ·
 [#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608) ·
+[#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609) ·
 **Session**: https://claude.ai/code/session_01SDJjYQsfwaa4DVyNfFepbA
 
 ## Lead with the worst of it: this produced a permanently-failed authorization
@@ -78,7 +79,10 @@ independent copy of the routing constant, replicated once per actor crate.
 re-exported, because tests legitimately compute an expected lane with it and the golden-value
 freeze lives on it. So the wrong two-step is still *spellable*; after B1 it is simply not *spelled*
 anywhere outside `declared_lane` itself and test code. That is level 4 for the parameter and
-nothing stronger for the function, and this ADR now says so rather than rounding it up.
+nothing stronger for the function, and this ADR now says so rather than rounding it up. The residue
+— that, plus `mailbox_address`'s vestigial width element, which nothing reads any more — is filed
+as [#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609)
+rather than left as an unstated boundary.
 
 Because the parameter is gone, the text-grep check the dispatch card proposed (§3) is not written:
 decision 3 below subsumes the runtime half, and a gate the compiler subsumes should not exist. That
