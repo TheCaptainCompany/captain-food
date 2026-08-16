@@ -580,6 +580,15 @@ the budget-cap lift (founder antecedent 2026-08-12) was relayed ~10:00Z, nothing
 `loop-budget.sh start`'s guaranteed exit 2 — one full dispatch round for zero output, standing down
 against an already-lifted gate (ADR-20260813-132540).
 
+**Read `loop-budget.sh start`'s EXIT CODE, never its banner** (2026-08-16, #588 — the other half
+of the ADR-20260813-132540 lesson above). With the cap lifted (`capIsAStopSign=false`) the guard
+still prints `⛔ weekly loop budget exhausted: … / 1440.0m used` on stderr, in the vocabulary of a
+refusal, and then **exits 0**. It is a REPORT. The three codes are the whole contract: `0` proceed,
+`2` genuinely exhausted (only possible with the cap armed), `3` INTEGRITY — a timer already open or
+stale, which is a concurrency event to resolve with `stop`/`stop --elapsed`/`reset` and must never
+be reported as budget. Cost of reading the banner instead: a whole dispatch stood down against an
+open gate, twice now.
+
 **`loop-budget.sh stop` takes a FLAG, not a positional** — `stop --note "what ran"` (and
 `stop --elapsed <seconds>` when the timer was never opened or went stale). A bare
 `stop "what ran"` silently loses the note, so the ledger segment lands with no attribution and the
@@ -608,7 +617,11 @@ Findings block, which is then the mob evidence the PR body cites. 12x50k becomes
 written twice. The card is a **cached fold — disposable, never authoritative**: a checkpoint loads
 card@SHA + `git diff <SHA>..HEAD`, a version mismatch is DISCARDED rather than patched, and every lens
 keeps the right to fall through to the tree. Falsification test before trusting a card: delete it,
-re-run one briefing, and no verdict may change (same ADR, decisions 2-3).
+re-run one briefing, and no verdict may change (same ADR, decisions 2-3). **The card ships with an
+EMPTY `## Findings` heading**, present from the first write (2026-08-16, #588): a lens or a phase
+handover that has to invent the heading also invents its shape, so verdicts land in different
+formats — or in the PR body instead of the repo, which GitHub-is-never-the-record forbids. An empty
+section is an instruction to append; an absent one is an invitation to improvise.
 
 **Coordinator/executor split** (founder directive, 2026-08-07): a session that has planned a
 multi-step program NEVER executes the steps itself — it DISPATCHES each step to a fresh session
@@ -647,6 +660,25 @@ And read the WHOLE output before reacting: **"could not start server" immediatel
 SUCCESSFUL `ALTER ROLE`/`psql` means it was already running** — the start failed because the cluster
 was up, not because it is broken. Cost of not reading to the end: a needless teardown attempt on a
 healthy cluster.
+
+Two more things that cost a full 120 s tool timeout each (2026-08-16, #588). **Start it in the
+BACKGROUND**: a foreground `pg_ctl start` here never returns even though the server is accepting
+connections in ~3 s, so the call is killed by the timeout and reads as a failure — background the
+start, then prove it with `pg_isready` (~1 s). And **the test database does not pre-exist**:
+`captainfood_test` must be created, over TCP as the `postgres` role, because peer auth rejects
+`root` and there is no `root` role:
+
+```sh
+(pg_ctl -D /var/lib/postgresql/data -l /tmp/pg.log start >/dev/null 2>&1 &) ; sleep 1
+pg_isready
+PGPASSWORD=postgres createdb -h localhost -U postgres captainfood_test   # already exists = fine
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/captainfood_test
+export DB_TESTS_REQUIRED=1
+```
+
+No `ALTER USER` is needed on this image. `DB_TESTS_REQUIRED=1` must be in the transcript of any run
+whose evidence you intend to claim: a skipped DB suite reports `ok`, so "tests pass" without it
+proves nothing.
 
 ## 11. Installing a dev tool: crates.io works, GitHub release downloads do not
 

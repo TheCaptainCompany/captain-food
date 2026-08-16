@@ -189,7 +189,9 @@ runner's polling tick, and therefore **cannot use the staged-intent seam** (the 
 delivery transaction to stage into).
 
 Consequence: after #588 lands, the replacement-order birth remains an unlaned foreign-stream append
-and its acceptance clock stays unarmed. A follow-up issue tracks moving the reclamation route onto
+and its acceptance clock stays unarmed. [#595 "The reclamation replacement birth writes Order-{id} with no
+transaction and no lane — a second unlaned birth site, reachable
+today"](https://github.com/TheCaptainCompany/captain-food/issues/595) tracks moving that route onto
 the mailbox; it is explicitly out of #588's scope. **A replacement order that no restaurant is told
 about is the domain lens's worst failure mode**, so this is a known, recorded gap and not an
 accepted end state.
