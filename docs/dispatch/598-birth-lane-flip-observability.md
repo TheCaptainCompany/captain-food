@@ -194,3 +194,98 @@ Any narrowing is the coordinator's to state openly, not the card's to assume.
 
 <!-- Executor and lenses append here. Empty at dispatch by design (ADR-20260816-020752; the first
      card lacked this heading and the executor had to invent it — sessions.md records the lesson). -->
+
+### Lens verdicts (pre-code mob, ADR-20260809-013142) — all PASS, several CORRECT this card
+
+**beck — the harness and the reds.** The card named ONE mutant; there are **three**, and one of them
+is the anti-vacuity control without which a watcher that emits garbage passes:
+
+1. delete `promotion_watch.rs:44-47` (the lag zero-seeding) — silences `reminder_promotion_due_lag_ms` only;
+2. delete `promotion_watch.rs:62-66` (the zero-depth loop for declared-but-unseen lanes) — a SEPARATE
+   seeding, which the card's §6 mutant (i) does not touch, so `mailbox_scheduled_depth` was unguarded;
+3. hard-code the emitted lag to `0.0` at line 68 — the watcher still emits, and lies. Only a POSITIVE
+   control (one due row ⇒ lag > 0, depth 1) reds it.
+
+Shape rulings, all applied: ONE new binary, **ONE `#[tokio::test]` fn** (the precedent's constraint is
+one test fn per PROVIDER, not per signal — two race the process-global meter binding); the drain lives
+in `tests/main/spy_meter.rs` and is `#[path]`-INCLUDED, never copied; assert the **full sorted point
+set of one tick by EQUALITY**, never `contains`; the test calls only `promotion_watch_tick`, never
+`telemetry::meters::*` (that would be #588's deleted `enqueue_birth` crutch in a new costume); assert
+the SCHEDULED backlog is empty BEFORE the empty tick, or "zero" means coincidence rather than seeding;
+call ticks directly, never `spawn_*` + sleep. Do NOT retrofit `orders_placed_metric.rs` onto the new
+harness in this chunk (Tidy First — structural change, separate commit). **Phase-order fix for §5
+phase 3**: "watch it fail because no watcher exists" is a COMPILE error, not a red — land the new
+watcher as an empty-bodied fn first, red the assertion, then fill it.
+
+**observability — the contract.** §4a lands as **(B) UNCHANGED at 800**, but not as a bare comment:
+re-baselining now would invent a percentile from a distribution that does not exist. Two conditions:
+add a `latency_budget` on the handover (`order_birth_lag_ms`) so "paid order → restaurant told" stays
+covered end to end, AND write the **re-baseline trigger** into the record — the first Fri/Sat
+19:00–21:30 after the flip. **Liveness: NEVER zero-seed `order_birth_lag_ms`** — injected zeros poison
+the p95 the flip is judged on. Two separate series instead: monotonic
+`order_lane_watch_heartbeat_total{lane}` and gauge `order_lane_oldest_pending_age_ms{lane}`, emitted
+every tick for every declared lane **including while the flag is OFF** (`routed="false"`); alert on
+absence of increment, never a threshold. The bar for "verified": exact name, exact attribute set,
+exact point count and value per declared lane on an empty backlog, plus a **missing-lane-fails**
+assertion — return-value assertions do not count.
+
+**farley — and this supersedes observability's §4b shape.** The `required_spans` hole is **not a flag
+predicate — make it an ALTERNATION**: require `event.store.append` OR the lane-append span, same
+verdict in both flag states, no gate inside the rule. *A success rule that passes when the money-path
+append vanished is a gate that lies.* Verified at HEAD: `required_spans` is a flat list validated only
+as ⊆ declared spans and `conditions` is free-form and structurally unvalidated — so if the loader
+cannot express the alternation, land it and file the enforcement, but do NOT silence. Add **deploy-time
+parity evidence** if cheap: each process emits its resolved flag state at startup
+(`runtime_flag_state{flag,value,bin,version}`) — review-time parity is an assertion, this is evidence,
+and it is what lets the flip be blocked while distinct values > 1. **For the flip ADR (§7), not this
+chunk**: the ADR must cite smoke assertions executed **against the deployed monolith with the flag ON
+in a non-production profile** (green CI proves the code path, not the deployed one), and the rollback
+trigger currently **has no observer** — the ADR must name the human or the alert route, or the trigger
+is decorative.
+
+**vernon — double-birth is NOT reachable, and the real hazard is a different one.** Four absorbers:
+both routes converge on `Order-{id}` with an expected-version precondition at 0 (OFF gates on
+`should_deliver_order_placed` then saves at the loaded version; ON stages a door row and
+`record_inbound_order_placed` returns `AlreadyRecorded` if any `OrderPlaced` is on the stream), the
+door PK dedups, and the trigger skips on redelivery. **So §4e's last sentence and §7.2's line 169 are
+WRONG, as is the code comment at `crates/infrastructure/src/mailbox/standalone.rs:139-141`: the word
+is SPLIT-CLOCK, not "double-births".** The real split-fleet hazard, which nobody had named: under OFF,
+`apply_schedules_in_tx` (`handler.rs:805`) carries the *PlaceOrderProcess* message, so the Order's
+`OrderPlaced` receive schedules never apply; ON arms them (`handler.rs:446`). A split fleet therefore
+gives **one birth and a coin-flip on the acceptance deadline, per order, invisibly** — invisible
+because the lag histogram only emits on the routed path. Bounded by the rolling-deploy window, so the
+§4e deferral stands, but the flip ADR must say THIS.
+
+### Executor — phase 1 (#589), delivered
+
+`crates/infrastructure/tests/main/spy_meter.rs` (the drain) + `crates/infrastructure/tests/
+mailbox_liveness_metrics.rs` (one binary, one `#[tokio::test]`). All three mutants RED, each on a
+DIFFERENT assertion — the discrimination beck asked for:
+
+| Mutant | Assertion that reds | Message |
+|---|---|---|
+| (i) lag zero-seeding removed | `points(REMINDER_PROMOTION_DUE_LAG_MS)` on the empty tick | `left: []` vs `right: [({"actor_type": "Order"}, 0.0)]` |
+| (ii) zero-depth loop deleted | `points(MAILBOX_SCHEDULED_DEPTH)` on the empty tick | `left: []` vs `right: [(…OrderAcceptanceTimedOut, 0.0), (…OrderExpired, 0.0)]` |
+| (iii) lag hard-coded `0.0` | the positive control | `a reminder 90s overdue must show as ~90000ms of lag, not 0ms` |
+
+Three refinements the rulings did not anticipate, each recorded because it costs the next executor
+time:
+
+- **Mutant (i) as literally written does not compile.** Lines 44-47 ARE the `let mut lag_by_actor`
+  binding, so deleting them removes the declaration the loop below uses — a build error is not a red.
+  The semantic mutant is `= BTreeMap::new()` (no seeding, same code shape). A named mutant must be
+  stated as a SEMANTIC edit, never a line range, for exactly this reason.
+- **Delta temporality is what makes "by EQUALITY" expressible.** Under the SDK default (cumulative)
+  every flush re-reports every point ever recorded, so "the point set of ONE tick" cannot be written
+  and the assertion silently degrades into `contains` — the very weakening beck forbade. The drain
+  therefore installs `Temporality::Delta` and `drain()` TAKES (flush + read + reset), so no caller can
+  read a vacuous empty set as a pass by forgetting a `force_flush`.
+- **The expected lane set is a LITERAL, not derived from `REMINDER_SCHEDULES`.** An expectation
+  computed from the same generated table the watcher reads agrees with the watcher by construction.
+  A separate offline test pins the literal against the declaration, so adding a reminder lane in
+  `specs/**` reds with an instruction instead of as an unexplained point-count mismatch.
+
+Still owed to phases 2-4, none started this run: the §4a/§4b decisions (with farley's alternation),
+the `routed`/heartbeat series, LOW-1's frozen-door golden, LOW-2 — and the **split-clock** rewording
+of `standalone.rs:139-141` plus the acceptance-deadline coin-flip paragraph, which belong in the flip
+ADR's fleet-parity section.
