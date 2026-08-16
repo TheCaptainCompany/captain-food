@@ -1348,6 +1348,22 @@ not an obstacle**: the alternative it was arguing for (make the item private) is
 Read `[lints]` in the target crate's `Cargo.toml` *at briefing*, before pricing a `cfg`-gated export
 at "five lines" — here the option died after a counterfactual build instead of in one line.
 
+**A chunk that removes a spelling has a SEMANTIC conflict with every branch open beside it, and
+`git merge` cannot see it** (2026-08-16, #609 — measured, not predicted). #609 made
+`actor_client::stable_partition` private; #610 merged to `main` first and brought a **new** test file
+that called it. Different files, so the textual merge was CLEAN — one conflict, in an unrelated
+records section — and the merged tree **did not compile**:
+`error[E0425]: cannot find function 'stable_partition' in crate 'actor_client'`. Two things follow:
+
+- **The compiler is the merge gate here, so run the BUILD after any merge into a
+  removal chunk**, before believing a clean `git merge`. A conflict-free merge of a removal is
+  evidence of nothing; this one had zero conflicts in the affected language.
+- **It is also the proof the seal works.** A parallel branch reintroduced exactly the hand-copied
+  `stable_partition(&id, 5)` the chunk exists to prevent, within hours, written by someone who had
+  no reason to know — and it could not land. Before the chunk it would have compiled and stamped a
+  fixture onto a lane derived from a literal. That is the whole argument for level 4 over a review
+  habit, and it arrived unprompted.
+
 **When a chunk's method is "make X unspellable", every existing spelling of X is a candidate
 INCIDENTAL PIN — enumerate what each one was holding before deleting it** (`vernon`, 2026-08-16,
 #609; this is the rule that would have caught that chunk's checkpoint MISS). Four test assertions

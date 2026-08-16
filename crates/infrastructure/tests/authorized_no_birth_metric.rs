@@ -386,9 +386,10 @@ async fn seed_world(pool: &PgPool, carts: &[u128]) {
     }
 }
 
-/// Enqueue one row onto a lane, exactly as the production enqueue does (deterministic partition
-/// over the width-5 keyspace). This is the DOOR, not the state the detector reads: a `PlaceOrder`
-/// command and an inbound Stripe fact are both things the outside world genuinely posts.
+/// Enqueue one row onto a lane, exactly as the production enqueue does — the lane comes from the
+/// DECLARATION for this actor type (#609), never from a width this test carries. This is the DOOR,
+/// not the state the detector reads: a `PlaceOrder` command and an inbound Stripe fact are both
+/// things the outside world genuinely posts.
 async fn enqueue(
     pool: &PgPool,
     kind: &str,
@@ -408,7 +409,10 @@ async fn enqueue(
     .bind(kind)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_client::stable_partition(&actor_id, 5))
+    .bind(
+        actor_client::declared_lane(actor_type, &actor_id)
+            .unwrap_or_else(|| panic!("{actor_type} declares a mailbox")),
+    )
     .bind(message_type)
     .bind(&payload)
     .bind(format!("h{n}"))
