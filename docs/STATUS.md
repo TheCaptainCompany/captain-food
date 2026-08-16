@@ -2,6 +2,51 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📡 **2026-08-16 — THE ORDER LANE HAS A HEARTBEAT, AND THE CHECKOUT SUCCESS RULE STOPS LYING**
+> ([#598 "Before the birth-lane flip: the place-order latency budget still measures the old workflow, and a flat order_birth_lag_ms cannot be told from a dead lane"](https://github.com/TheCaptainCompany/captain-food/issues/598)
+> + [#589](https://github.com/TheCaptainCompany/captain-food/issues/589), branch
+> `598-birth-lane-flip-observability`, [PR #600](https://github.com/TheCaptainCompany/captain-food/pull/600)
+> — merge posture **`HOLD: human`**, money-path observability contract). **The LAST flip-blocker for
+> `ROUTE_ORDER_BIRTH_THROUGH_LANE`.** Card: `docs/dispatch/598-birth-lane-flip-observability.md`.
+>
+> **(1) The success rule is an ALTERNATION, not a flag predicate.** #594 dropped
+> `event.store.append` from `place-order`'s `required_spans` with no predicate, which loosened the
+> rule in the state we are in TODAY: the flag is OFF, the birth still appends inline, so a checkout
+> whose append never happened scored `success` — *a success rule that passes when the money-path
+> append vanished is a gate that lies* (farley). It now requires
+> `{ any_of: [event.store.append, order.lane.enqueue] }`: same verdict in both flag states, no gate
+> inside the rule, and a run that did NEITHER is a failure. The loader was **extended rather than
+> annotated** — four spec-data mutants red — and a SECOND hole closed on the way: the
+> emitted-contract guard only checked `required: true` spans, so an alternation branch could have
+> named a span nothing constructs. `order.lane.enqueue` (PRODUCER) is new and instrumented at the
+> infrastructure glue; it lives in the SAGA's trace, which is why the rule alternates on the
+> enqueue and not on the lane-side append.
+>
+> **(2) The 800 ms budget is UNCHANGED, DECIDED, and dated.** Re-baselining now would invent a
+> percentile from a distribution that does not exist. `order_birth_lag_ms` gains its own budget
+> (1000/12000, both derived from the declared push wake and one `MAILBOX_HEARTBEAT_SECONDS`
+> fallback pass) so "paid order → restaurant told" stays covered end to end, and the re-baseline
+> trigger is written into the spec as a date: **the first Fri/Sat 19:00-21:30 after the flip**.
+>
+> **(3) Two liveness series, running NOW with the flag OFF.**
+> `order_lane_watch_heartbeat_total{lane}` (monotonic) and `order_lane_oldest_pending_age_ms{lane}`
+> (gauge), every tick, every declared routed lane — deliberately **not** a zero-seeding of
+> `order_birth_lag_ms`, whose p95 the flip is judged on. Alert on the ABSENCE of an increment. The
+> lane population is now GENERATED (`ROUTED_LANES`) and pinned in both directions, so a new routed
+> `deliver:` cannot leave a lane unwatched. Seven mutants red, each on a different assertion —
+> including the one the phase-1 harness could not see: under delta temporality a watcher that seeds
+> ONCE AT STARTUP drains identically to a correct one on the first tick, so **every tick**, the
+> whole dead-man's-switch claim, was unasserted until both watchers got a second tick over an
+> unchanged backlog.
+>
+> **(4) Fleet parity is EVIDENCE now.** `runtime_flag_state{flag,value,bin}` (observable gauge) at
+> both composition roots: `count(distinct value) by (flag) > 1` blocks a flip. And vernon's
+> correction is applied — the code comment claiming a split fleet "would birth some orders twice"
+> was WRONG (four absorbers make double-birth unreachable); the real hazard is **SPLIT-CLOCK**: one
+> birth, and a coin-flip on the acceptance deadline, per order, invisibly. **The flip ADR's
+> obligations are written onto the card (§9)**, including that the rollback trigger currently has
+> **no observer** and the ADR must name one.
+>
 > 💸 **2026-08-16 — THE LOOP'S CONTEXT BUDGET IS NOW A RECORD, AND ONE HALF OF IT IS THE FOUNDER'S**
 > ([ADR-20260816-020752](adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md),
 > from the founder question *"Do you have recommendations to optimise tokens consumption?"*). Six

@@ -289,3 +289,97 @@ Still owed to phases 2-4, none started this run: the §4a/§4b decisions (with f
 the `routed`/heartbeat series, LOW-1's frozen-door golden, LOW-2 — and the **split-clock** rewording
 of `standalone.rs:139-141` plus the acceptance-deadline coin-flip paragraph, which belong in the flip
 ADR's fleet-parity section.
+
+### Executor — phases 2-3, delivered
+
+**§4b — the alternation LANDED, and the loader ENFORCES it.** `required_spans` is now a conjunction
+whose terms are a span name **or** `{ any_of: [...] }`; `place-order` requires
+`{ any_of: ["event.store.append", "order.lane.enqueue"] }`. Same verdict in both flag states, no
+gate inside the rule. farley's escape clause ("land the shape and file the enforcement") was **not
+needed** — the loader was extended instead, with four spec-data mutants red and no recompile:
+
+| Mutant (semantic edit) | Rule that fires |
+|---|---|
+| an alternative names an undeclared span | `obs-required-span-undeclared` |
+| a ONE-branch `any_of` | `obs-required-span-alternation` |
+| `one_of:` instead of `any_of:` | `obs-required-span-shape` |
+| a metric `latency_budget` with p95 > p99 | `obs-metric-budget` |
+
+**A second hole was found and closed while landing it.** `the_required_observability_contracts_are_
+actually_emitted` only ever checked `required: true` spans, so an alternation branch could name a
+span nothing constructs and every `place-order` run would be scored by an unsatisfiable branch —
+the same class of lie, one layer down. It now checks the UNION of required-true and
+success-rule-named spans (mutant: drop the `.instrument(...)` at the enqueue seam ⇒ *"span
+'order.lane.enqueue' has a constructor in spans.rs but no production call site invokes it"*).
+
+**The ON branch had to be BUILT, not just named.** No span existed for the handover: the alternation
+needs a span that lives in the SAGA's trace, and the lane delivery's append is a different delivery
+with a different trace, so `order.lane.enqueue` (PRODUCER) was added and instrumented at
+`flush_lane_enqueues_in_tx` — the infrastructure glue, the framework boundary that owns the write.
+
+**§4a — UNCHANGED at 800/1500, with both conditions and the trigger AT THE LINE.**
+`order_birth_lag_ms` carries its own `latency_budget` (1000/12000, both DERIVED from declared
+configuration — the push wake and one `MAILBOX_HEARTBEAT_SECONDS` fallback pass — never guessed),
+and the re-baseline trigger is written into the spec as a date: **the first Fri/Sat 19:00-21:30
+after the flip**.
+
+**§4c — two series, never a zero-seed.** `order_lane_watch_heartbeat_total{lane}` (monotonic) and
+`order_lane_oldest_pending_age_ms{lane}` (gauge), emitted every tick for every declared routed lane
+including while the flag is OFF. Seven mutants red, each on a different assertion (A silence the
+counter · B silence the gauge · C emit only for lanes with a backlog · D hard-code the age to 0 ·
+E emit once per process · F the same for the promotion watch · G drop a declared lane). E and F are
+the coordinator's addendum and it was a REAL hole: delta temporality plus a draining read makes a
+seed-at-startup watcher drain identically to a correct one on the first tick, so "every tick" — the
+whole dead-man's-switch claim — was unasserted until both watchers got a second tick over an
+unchanged backlog.
+
+**The declared lane population is now GENERATED.** `PM_LANE_ROUTED_DELIVERS` lived only in the
+codegen, so nothing at runtime could name "the lanes a routed birth lands on" and the watcher's set
+would have been a hand-kept literal — one forgotten edit from an unwatched lane. It emits
+`ROUTED_LANES` into `application::generated::process_managers`, pinned by equality in BOTH
+directions (a `contains` pin leaves an ADDED lane green, which is the direction that matters).
+
+**farley's parity evidence FIT.** `runtime_flag_state{flag,value,bin}`, an OBSERVABLE gauge declared
+at both composition roots. `version` is deliberately not a label — `service.version` is already a
+resource attribute, and a label would multiply the series during exactly the rolling deploy it
+watches. **It has no spy test and cannot honestly have one**: its driver is a composition root, and
+a test that called `declare_flag` itself and then found it would be the tautology #588's deleted
+`enqueue_birth` crutch was. Its proof is a deployed smoke assertion — an obligation below, not a
+gap being waved past.
+
+**vernon's correction applied.** `standalone.rs` no longer says a split fleet "would birth some
+orders twice"; it names the four absorbers, and states the SPLIT-CLOCK hazard that is real.
+
+**Two things this chunk did NOT do**, neither dropped silently: **LOW-1** (§4d, the FROZEN door
+identity's pinned golden) is not in the P2/P3 dispatch's scope list. It is now *cheaper* than the
+card assumed — `ROUTED_LANES.source` puts the literal `pm:PlaceOrderProcess:OrderPlaced` in a
+committed generated file, so a PM rename lands in the diff — but a codegen test asserting the
+literal is still owed, and check-drift is not that test. **LOW-2** (§4e) stands deferred per its
+escape clause; `runtime_flag_state` now makes its hazard observable, which was the actual worry.
+
+## 9. Flip-ADR obligations (written here so they cannot evaporate)
+
+The flip is a separate one-line ADR (§7). These are the things it must carry, recorded now while
+the evidence for them is fresh:
+
+1. **A DEPLOYED smoke, not a green CI run.** Green CI proves the code path; it does not prove the
+   deployed one. With the flag ON in a NON-PRODUCTION profile, against the deployed monolith:
+   (i) `OrderPlaced` lands exactly once, (ii) `order_birth_lag_ms{routed="true"}` has ≥1 point,
+   (iii) the acceptance-deadline row exists, and (iv) `runtime_flag_state` reports **exactly one
+   distinct `value` per `flag`** across every reporting `bin` — (iv) is the only assertion that can
+   see a split fleet, and it is also the only proof the parity gauge itself works.
+2. **The rollback trigger has NO OBSERVER, and the ADR must give it one.** "Flag back OFF" is the
+   recorded rollback path, but nothing today watches for the condition that would call for it. The
+   ADR names the human or the alert route — otherwise the trigger is decorative, which is worse
+   than absent because it reads as covered.
+3. **The SPLIT-CLOCK evidence, in vernon's words, not §4e's.** Double-birth is unreachable (four
+   absorbers: both routes converge on `Order-{id}` with an expected-version precondition at 0, the
+   door row's PK dedups, the trigger skips on redelivery). What a split fleet DOES produce is **one
+   birth and a coin-flip on the acceptance deadline, per order, invisibly** — invisible because
+   `order_birth_lag_ms` records only on the routed path. Bounded by the rolling-deploy window, and
+   now observable through `runtime_flag_state`.
+4. **The re-baseline trigger**: the first Fri/Sat 19:00-21:30 service after the flip. Until then
+   `place-order`'s 800 ms reads LOOSE by decision, and that is recorded at the line rather than
+   left to be rediscovered.
+5. **The liveness series must be non-silent BEFORE the flip is armed** — they run today with the
+   flag OFF precisely so this is checkable rather than assumed.

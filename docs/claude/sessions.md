@@ -1206,6 +1206,11 @@ N; the compiler decides", and executors should not treat exhausting the list as 
 ### A "seen red" claim must name HOW the test was made to fail
 
 Not that it failed — **how**: the clause deleted, the fallback re-planted, the stub it ran against.
+**Name a mutant as the SEMANTIC EDIT and its expected failure message, never as a line range**
+(2026-08-16, #598): a range rots at the next commit, and #598's dispatch named "delete
+`promotion_watch.rs:44-47`", which deletes the `let mut lag_by_actor` binding the loop below uses —
+a build error, and a build error is not a red. Cost: one wasted mutation run, plus the executor
+having to re-derive what the mutant was *for*.
 A claim a reader cannot re-run is not evidence, and the repo already contains both kinds. The good
 ones say what was mutated — `crates/server/src/auth.rs` ("Seen RED by re-planting #430's
 fallbacks"), `crates/infrastructure/tests/main/scope_membership.rs` ("Seen RED by deleting the
