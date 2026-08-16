@@ -647,6 +647,9 @@ OrderTracking:
     - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
     - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
     - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+    # #167: the acceptance deadline's terminal — folded so the customer's screen leaves PLACED
+    # the moment the timeout records (without this fold the tracking page said PLACED forever).
+    - { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
     - { $ref: 'events.yaml#/PaymentCaptured' }
     - { $ref: 'events.yaml#/PaymentReleased' }
     - { $ref: 'events.yaml#/PaymentRefunded' }
@@ -694,6 +697,7 @@ OrderTracking:
         - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
         - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
         - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+        - { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
       note: "Derived from the lifecycle event type."
     service_type:
       from: [{ $ref: 'events.yaml#/OrderPlaced/properties/serviceType' }]
@@ -776,6 +780,7 @@ OrderTracking:
         - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
         - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
         - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+        - { $ref: 'events.yaml#/OrderAcceptanceTimedOut' }
       note: "Occurrence time of the latest status-changing event."
     payment_intent_id:
       from:

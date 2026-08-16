@@ -5569,6 +5569,152 @@ Catalog:
     }
 
     #[test]
+    fn status_typed_screen_fields_refuse_tokens_outside_the_order_status_enum() {
+        // #167 F2 (PR #586 checkpoint) — `screen-status-token-unknown`, the sibling of the
+        // status_config completeness rule: `order_card_status.status:` and the hand-copied
+        // `order.status` visible_when lists hand-write enum tokens the map rule cannot see.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-status-token-unknown")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        // GREEN — every hand-written token in the real catalog is an enum member.
+        assert!(hits(&model).is_empty(), "{:?}", hits(&model));
+
+        // RED 1 — the backoffice treatment's `status:` prop drifts (e.g. a rename that misses
+        // this literal): the treatment silently never renders on any order.
+        let set_status = |m: &mut Model, token: &str| {
+            m.defs
+                .get_mut("screens/restaurant_backoffice.yaml")
+                .and_then(|v| v.get_mut("screens"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|ss| ss.iter_mut().find(|s| s.get("id").and_then(|x| x.as_str()) == Some("orders_queue")))
+                .and_then(|s| s.get_mut("components"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|cs| cs.iter_mut().find(|c| c.get("type").and_then(|t| t.as_str()) == Some("order_card_status")))
+                .and_then(|c| c.as_mapping_mut())
+                .expect("the order_card_status node exists")
+                .insert(Value::from("status"), Value::from(token));
+        };
+        set_status(&mut model, "CANCELLED_BY_TIMEOUTT");
+        {
+            let hits = hits(&model);
+            assert_eq!(hits.len(), 1, "{:?}", hits);
+            assert!(hits[0].contains("CANCELLED_BY_TIMEOUTT"), "{}", hits[0]);
+            assert!(hits[0].contains("order_card_status.status"), "{}", hits[0]);
+        }
+        set_status(&mut model, "CANCELLED_BY_TIMEOUT");
+        assert!(hits(&model).is_empty(), "restored: {:?}", hits(&model));
+
+        // RED 2 — a visible_when cancel list carries a token no order can ever hold (the exact
+        // bare-`CANCELLED` drift class, on the expression nobody's map rule reads).
+        {
+            let button = model
+                .defs
+                .get_mut("screens/restaurant_frontoffice.yaml")
+                .and_then(|v| v.get_mut("screens"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|ss| ss.iter_mut().find(|s| s.get("id").and_then(|x| x.as_str()) == Some("order_tracking")))
+                .and_then(|s| s.get_mut("components"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|cs| {
+                    cs.iter_mut().find(|c| c.get("id").and_then(|t| t.as_str()) == Some("post_order_actions"))
+                })
+                .and_then(|c| c.get_mut("content"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|bs| {
+                    bs.iter_mut().find(|b| {
+                        b.get("visible_when").and_then(|v| v.as_str()).map(|v| v.contains("in [")).unwrap_or(false)
+                    })
+                })
+                .and_then(|b| b.as_mapping_mut())
+                .expect("the reorder button's visible_when list exists");
+            button.insert(
+                Value::from("visible_when"),
+                Value::from("order.status in ['DELIVERED','CANCELLED']"),
+            );
+            let hits = hits(&model);
+            assert_eq!(hits.len(), 1, "{:?}", hits);
+            assert!(hits[0].contains("'CANCELLED'"), "{}", hits[0]);
+            assert!(hits[0].contains("visible_when"), "{}", hits[0]);
+        }
+    }
+
+    #[test]
+    fn bam_folds_are_total_and_metrics_read_their_own_projection() {
+        // ADR-20260811-014129 / #167 Phase 3: the business-metric catalog's semantic rules.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let bam = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule.starts_with("bam-"))
+                .map(|i| format!("{} {}: {}", i.rule, i.location, i.message))
+                .collect()
+        };
+        // GREEN — the time-to-accept fold is total (every folded event carries orderId) and its
+        // metric reads its own projection.
+        assert!(bam(&model).is_empty(), "{:?}", bam(&model));
+
+        // RED 1 — `bam-fold-key-not-on-every-event` (the rule PROP-20260810-234225 names): fold
+        // an event that does NOT carry the key property and the fold can no longer address its
+        // row — usually a grain error, always a silently wrong metric without this rule.
+        fn fold_of(m: &mut Model) -> &mut serde_yaml::Sequence {
+            m.defs
+                .get_mut("business_metrics.yaml")
+                .and_then(|v| v.get_mut("projections"))
+                .and_then(|p| p.get_mut("OrderAcceptanceLatency"))
+                .and_then(|p| p.get_mut("fold"))
+                .and_then(|f| f.as_sequence_mut())
+                .expect("the fold exists")
+        }
+        let bad: Value = serde_yaml::from_str(
+            "on: { $ref: 'events.yaml#/CartStarted' }\nset: { $ref: '#/projections/OrderAcceptanceLatency/measures/placedAt' }\nfrom: { envelope: occurredAt }",
+        )
+        .expect("bad row parses");
+        fold_of(&mut model).push(bad);
+        {
+            let hits = bam(&model);
+            assert_eq!(hits.len(), 1, "{:?}", hits);
+            assert!(hits[0].contains("bam-fold-key-not-on-every-event"), "{}", hits[0]);
+            assert!(hits[0].contains("CartStarted"), "{}", hits[0]);
+            assert!(hits[0].contains("orderId"), "names the missing key: {}", hits[0]);
+        }
+        fold_of(&mut model).pop();
+        assert!(bam(&model).is_empty(), "restored: {:?}", bam(&model));
+
+        // RED 2 — `bam-measure-foreign`: a groupBy pointing at a measure the metric's `over`
+        // projection does not declare is a resolvable-looking, silently wrong grouping.
+        {
+            let gb = model
+                .defs
+                .get_mut("business_metrics.yaml")
+                .and_then(|v| v.get_mut("metrics"))
+                .and_then(|m| m.get_mut("time_to_accept_ms"))
+                .and_then(|m| m.get_mut("groupBy"))
+                .and_then(|g| g.as_sequence_mut())
+                .expect("groupBy exists");
+            let bad: Value = serde_yaml::from_str(
+                "$ref: '#/projections/OrderAcceptanceLatency/measures/serviceType'",
+            )
+            .expect("bad ref parses");
+            gb.push(bad);
+            let hits = bam(&model);
+            assert!(
+                hits.iter().any(|h| h.contains("bam-measure-foreign") && h.contains("serviceType")),
+                "{:?}",
+                hits
+            );
+        }
+    }
+
+    #[test]
     fn status_config_must_cover_the_order_status_enum_both_ways() {
         // #167 — `screen-status-config-incomplete`: a status hero's map keys exactly the
         // scalars.yaml#/OrderStatus enum, both ways. The live drift that earned it: the map keyed

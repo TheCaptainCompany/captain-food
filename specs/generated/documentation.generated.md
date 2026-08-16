@@ -4185,7 +4185,7 @@ sequenceDiagram
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
 - **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -4193,7 +4193,7 @@ sequenceDiagram
 | `ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `OrderPlaced`.`ref`](#event-orderplaced--ref) | — |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid) | — |  |
 | `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid) | index, nullable |  |
-| `status` | [🔤 `OrderStatus`](#scalar-orderstatus) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Derived from the lifecycle event type. |
+| `status` | [🔤 `OrderStatus`](#scalar-orderstatus) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout) | — | Derived from the lifecycle event type. |
 | `service_type` | [🔤 `ServiceType`](#scalar-servicetype) _(derived)_ | [⚡ `OrderPlaced`.`serviceType`](#event-orderplaced--servicetype) | — |  |
 | `items` | `jsonb` _(derived)_ | [⚡ `OrderPlaced`.`items`](#event-orderplaced--items) | — |  |
 | `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`totalAmount`](#event-orderplaced--totalamount) | — | amountCents of OrderPlaced.totalAmount (Money). |
@@ -4212,7 +4212,7 @@ sequenceDiagram
 | `delivery_address` | `jsonb` _(derived)_ | [⚡ `OrderPlaced`.`deliveryAddress`](#event-orderplaced--deliveryaddress) | nullable |  |
 | `estimated_ready_at` | `timestamptz` _(derived)_ | [⚡ `OrderAcceptedByRestaurant`.`estimatedReadyAt`](#event-orderacceptedbyrestaurant--estimatedreadyat) | nullable |  |
 | `placed_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced) | — | OrderPlaced occurrence time. |
-| `status_changed_at` | `timestamptz` | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Occurrence time of the latest status-changing event. |
+| `status_changed_at` | `timestamptz` | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout) | — | Occurrence time of the latest status-changing event. |
 | `payment_intent_id` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) _(derived)_ | [⚡ `OrderPlaced`.`paymentIntentId`](#event-orderplaced--paymentintentid), [⚡ `PaymentCaptured`.`paymentIntentId`](#event-paymentcaptured--paymentintentid) | nullable | The order's Stripe PaymentIntent, SEEDED by OrderPlaced (the birth fact carries it — a charging order is born with its authorized intent; a $0 replacement carries none) and re-confirmed by PaymentCaptured. PaymentSettlementProcess reads it on fulfilment to capture/release the hold, and RefundProcess reads it to open a pending refund. NOT fed by PaymentAuthorized: that fact precedes the row's birth, so the OrderPlaced seed carries it.  |
 | `payment_status` | `text` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded) | — | Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds AUTHORIZED for a charging order (authorize-then-capture, ADR-20260808-195315 §1.2): PlaceOrderProcess emits it only in reaction to PaymentAuthorized, and that authorization sits earlier in the log than the row it would fold into ($0 replacements — no intent — keep the historical CAPTURED = "nothing owed"). PaymentCaptured flips it on fulfilment, PaymentReleased on a voided/expired hold, PaymentRefunded on settlement of a post-capture abort.  |
 | `restaurant_stars` | [🔤 `StarRating`](#scalar-starrating) _(derived)_ | [⚡ `RestaurantRated`.`stars`](#event-restaurantrated--stars) | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
@@ -5150,7 +5150,7 @@ The acceptance deadline elapsed while the order was still PLACED — at this mom
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10870,7 +10870,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(8)_
+### 📡 Observability _(9)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -11109,6 +11109,33 @@ _criticality: **high**_
 - **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `public_credential_degraded_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
 - **Status rules**: success ⇐ spans [`auth.read_scope`, `auth.scope_membership`]
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
+
+<a id="obs-acceptance-timeout"></a>
+#### 📡 Contract: `acceptance-timeout`
+
+_criticality: **high**_
+
+- **Workflow**: 
+- **Emits**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout) · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `message.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `order_id` | `payload.orderId` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `reminder.promote` | `INTERNAL` | ✅ | — | `business.reminder_type`*, `business.shadow`*, `business.would_cancel`*, `business.due_at`, `business.fire_delay_ms`, `business.order_id`* |
+| `event.store.append` | `INTERNAL` | ⬜ | — | `business.event_type`*, `business.stream_id`* |
+
+- **Metrics**: `reminder_promotion_due_lag_ms` _(histogram)_, `mailbox_scheduled_depth` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`reminder.promote`]
+- **SLOs**: p95 ≤ 500ms · p99 ≤ 2000ms · error rate ≤ 1%
 
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)

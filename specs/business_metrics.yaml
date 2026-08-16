@@ -1,0 +1,94 @@
+version: 1
+description: >
+  BUSINESS METRICS — the persona-outcome catalog (ADR-20260810-234225 clauses 1-3 +
+  ADR-20260811-014129: a business metric IS A PROJECTION). Two layers, per
+  PROP-20260810-234225 D8: `projections:` declare FOLDS over `domain_events` — maintained by the
+  `bam` projector into the `bam` schema the C4 already declares — and `metrics:` declare the
+  READS over them (question + persona activity + grouping + value), served through tenant-scoped
+  GraphQL queries. A fold REPLAYS (adding a metric later reproduces full history from the first
+  event ever appended), which is the property the whole reversal chose projections for; ratios
+  and percentiles are ordinary reads here and inexpressible as counters. Operational telemetry
+  (latency, error budgets, dead-man's switches) does NOT live here — it stays on OTLP/Honeycomb
+  (specs/observability.yaml), because it must work when Postgres is down.
+
+  Typing rule (ADR-20260811-014129 Decision 2), binding on every row: a DECLARATION introduces a
+  name (a projection key, a `measures:` map key); every REFERENCE is a `$ref` the loader resolves
+  — including same-file (`#/projections/<P>/measures/<m>`); a VALUE from a closed set stays a
+  bare token (grain ENTITY|AGGREGATE; measure type counter|sum|gauge|set; bucket
+  HOUR|DAY|WEEK|MONTH|DAYPART; value ops sum|countRows|ratio|percentiles), closed in the
+  validator so a typo is red, never a silently wrong metric. NOTE one deliberate refinement of
+  the PROP's sketch: `measures:` is a MAP keyed by measure name, not a list — the resolver walks
+  mapping keys, so `#/projections/P/measures/m` is resolvable exactly because the declaration IS
+  the key (a list index would be the #413 invisible-reference class wearing a different coat).
+
+  GENERATION STATUS: this catalog is validated (refs, fold-key totality, closed sets —
+  tools/codegen-rs validate/business_metrics.rs) but the `bam` projector + tenant-scoped query
+  EMITTERS are [#484]'s tracked machinery and do not exist yet; `exposedAs:` therefore stays
+  ABSENT until the query it would name can be generated. The first row below is a RECORD with a
+  deadline attached: the ENFORCE_ACCEPTANCE_TIMEOUT flip (specs/ordering/configuration.yaml)
+  names this fold's percentiles as its fourth precondition, so the machinery must exist before
+  the flip ADR can be written.
+
+projections:
+  # #167: one row per order, keyed at the ENTITY grain (D8a — every Order* event carries
+  # orderId, so the fold is total over the lifecycle with no event change). placedAt/acceptedAt
+  # come from the ENVELOPE (`occurredAt` is infrastructure metadata, exactly why the TTL value is
+  # not payload), so the latency needs no new event fields and replays over the whole log.
+  OrderAcceptanceLatency:
+    description: >
+      One row per order: when it was born, when (and whether) its restaurant accepted it, and
+      the bounded grouping keys the time-to-accept read needs. An order with placedAt and no
+      acceptedAt IS the platform's worst failure mode in progress — the read side of the #167
+      acceptance clock.
+    grain: ENTITY
+    key:
+      - from: { $ref: 'events.yaml#/OrderPlaced/properties/orderId' }
+    measures:
+      restaurantId: { type: set, of: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' } }
+      placedAt:     { type: set, of: { envelope: occurredAt } }
+      acceptedAt:   { type: set, of: { envelope: occurredAt } }
+      # Bounded population (ADR-20260811-014129 D6, relaxed form): DAYPART buckets the
+      # envelope hour, Europe/Paris, into the service's five dayparts — BREAKFAST (06-11),
+      # LUNCH (11-14), AFTERNOON (14-18), DINNER (18-22, the Friday/Saturday 19:00-21:30 peak
+      # lives here), LATE_NIGHT (22-06). A closed loader token, not a domain scalar: it is
+      # read-side bucketing vocabulary, and putting it in the kernel would push codegen
+      # vocabulary into the domain (the D8 "closed sets stay bare tokens" clause).
+      daypart:      { type: set, of: { envelope: occurredAt, bucket: DAYPART } }
+    fold:
+      - on: { $ref: 'events.yaml#/OrderPlaced' }
+        set: { $ref: '#/projections/OrderAcceptanceLatency/measures/restaurantId' }
+        from: { $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' }
+      - on: { $ref: 'events.yaml#/OrderPlaced' }
+        set: { $ref: '#/projections/OrderAcceptanceLatency/measures/placedAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/OrderPlaced' }
+        set: { $ref: '#/projections/OrderAcceptanceLatency/measures/daypart' }
+        from: { envelope: occurredAt, bucket: DAYPART }
+      - on: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
+        set: { $ref: '#/projections/OrderAcceptanceLatency/measures/acceptedAt' }
+        from: { envelope: occurredAt }
+
+metrics:
+  # THE FLIP'S DATA SET (#167, PR #586 checkpoint — business lens, binding): the
+  # ENFORCE_ACCEPTANCE_TIMEOUT TTL must be chosen FROM this distribution, per restaurant and per
+  # daypart, not guessed — a 300 s deadline that cancels a quarter of Friday-dinner orders at a
+  # slow-but-honest kitchen is a product decision made blind. Declared NOW, independent of the
+  # gate: it needs no new events, and history replays from the first OrderPlaced ever appended.
+  time_to_accept_ms:
+    question: >
+      How long does a restaurant take to accept a paid order — p50/p90/p99, by restaurant and by
+      daypart? (The number the acceptance-timeout TTL is chosen from, and the ManageOrders
+      outcome a restaurant is judged on.)
+    activity: { $ref: 'stories.yaml#/restaurant_manager/activities/ManageOrders' }
+    over: { $ref: '#/projections/OrderAcceptanceLatency' }
+    groupBy:
+      - { $ref: '#/projections/OrderAcceptanceLatency/measures/daypart' }
+      - { $ref: '#/projections/OrderAcceptanceLatency/measures/restaurantId' }
+    value:
+      percentiles:
+        levels: [50, 90, 99]
+        # Rows with no acceptedAt are EXCLUDED from the duration (never accepted ≠ accepted
+        # slowly) — they are the numerator of a separate unaccepted-rate read, not noise here.
+        ofDurationMs:
+          start: { $ref: '#/projections/OrderAcceptanceLatency/measures/placedAt' }
+          end:   { $ref: '#/projections/OrderAcceptanceLatency/measures/acceptedAt' }
