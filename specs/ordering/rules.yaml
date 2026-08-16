@@ -67,6 +67,19 @@ ServerPriceAuthority:
 CheckoutPricesCartCreatesPaymentIntent:
   description: "Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
 
+CheckoutRefusesOnlyOutsideServiceHours:
+  description: >
+    PlaceOrder refuses on service hours ONLY at verdict OUTSIDE_HOURS
+    (errors.yaml#/OutsideServiceHours, carrying the next opening slot and the evaluated
+    window/timezone/instant as evidence); OPEN and HOURS_UNDECLARED both ACCEPT — a deliberately
+    activated restaurant with no declared hours takes orders (DECISIONS §43 fourth amendment:
+    refusing over missing seed data is the worse failure, and a zero-order graph is
+    indistinguishable from "no demand"). Every accepted checkout freezes the verdict evidence onto
+    the CheckoutSnapshot regardless of the enforcement gate
+    (configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD, default OFF = shadow), so the log can prove
+    what was known at acceptance; a snapshot frozen BEFORE the evidence existed still materializes
+    its order (the fields are optional forever).
+
 OrderTestModeIsolation:
   description: "Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics."
 

@@ -211,6 +211,21 @@ pub struct CheckoutSnapshot {
     pub breakdown: PaymentBreakdown,
     #[graphql(name = "note")]
     pub note: Option<OrderNote>,
+    /// The service-hours verdict at acceptance. Absent on snapshots frozen before RSO-1; recorded even in shadow mode (the gate changes whether OUTSIDE_HOURS refuses, never whether the verdict is recorded).
+    #[graphql(name = "verdict")]
+    pub verdict: Option<ServiceWindowVerdict>,
+    /// Evidence: start instant of the window the verdict was judged against (null under HOURS_UNDECLARED, or pre-RSO-1).
+    #[graphql(name = "windowFrom")]
+    pub window_from: Option<chrono::DateTime<chrono::Utc>>,
+    /// Evidence: end instant of that window — min(door-close, cutoff), the same number the guard enforced.
+    #[graphql(name = "windowTo")]
+    pub window_to: Option<chrono::DateTime<chrono::Utc>>,
+    /// Evidence: the timezone the evaluation ran in (null when undeclared — one input to HOURS_UNDECLARED).
+    #[graphql(name = "timezone")]
+    pub timezone: Option<TimeZone>,
+    /// Evidence: the injected request instant the verdict was evaluated at.
+    #[graphql(name = "evaluatedAt")]
+    pub evaluated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
@@ -776,6 +791,8 @@ pub struct Restaurant {
     #[graphql(name = "openingHours")]
     #[serde(default)]
     pub opening_hours: Vec<OpeningHoursSlot>,
+    #[graphql(name = "serviceWindow")]
+    pub service_window: ServiceWindow,
     #[graphql(name = "status")]
     pub status: RestaurantStatus,
     #[graphql(name = "orderAcceptance")]
@@ -803,6 +820,26 @@ pub struct Restaurant {
     #[graphql(name = "orders", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_admin")]
     #[serde(default)]
     pub orders: Vec<Order>,
+}
+
+/// The restaurant's service-hours verdict AT AN INSTANT. `verdict` is the ONLY discriminator — clients must never read nullability patterns as semantics. Orthogonal to `ServiceType`: ONE window governs both DELIVERY and COLLECTION.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceWindow {
+    #[graphql(name = "verdict")]
+    pub verdict: ServiceWindowVerdict,
+    /// Next opening instant. Set under OUTSIDE_HOURS (the 'Ouvre à 11:30' affordance); null under OPEN (already open) and HOURS_UNDECLARED (nothing to promise).
+    #[graphql(name = "opensAt")]
+    pub opens_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The latest instant an order can still be placed (kitchen cutoff) — a FUTURE deadline despite the `*At` suffix. Defined as min(current slot's door-close `to`, the declared cutoff): `cutoff` is a first-class term (HubRise `cutoff_time`, which the ACL maps nowhere today), so while no cutoff source is declared the formula DEGRADES EXPLICITLY to door-close (`slot.to`) — a documented degradation, never a silent fallback — and the instant displayed here is the SAME number the checkout guard enforces. Null under OUTSIDE_HOURS and HOURS_UNDECLARED.
+    #[graphql(name = "lastOrderAt")]
+    pub last_order_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row. On a subscription it advances PER PUSHED UPDATE, not per subscribe: a long-lived stream re-evaluates at each push, so a window transition mid-stream changes the verdict.
+    #[graphql(name = "evaluatedAt")]
+    pub evaluated_at: chrono::DateTime<chrono::Utc>,
+    /// The instant after which the client must RE-EVALUATE: min(next window transition, evaluatedAt + horizon), the horizon being configuration.yaml#/SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS; under HOURS_UNDECLARED (no transition to wait for) it is evaluatedAt + horizon. NON-NULL on purpose: a nullable expiry reads to every cache as "cache forever", which would keep a blank badge warm at Friday 19:00 — the hour it matters.
+    #[graphql(name = "validUntil")]
+    pub valid_until: chrono::DateTime<chrono::Utc>,
 }
 
 /// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
@@ -1064,11 +1101,24 @@ pub struct UberSplitPolicy {
     pub effective_from: chrono::DateTime<chrono::Utc>,
 }
 
-/// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed
-/// structs; `orderable` = ACTIVE_PARTNER + status ACTIVE + acceptance != PAUSED (api.yaml); navigation
-/// fields resolve empty until the read resolvers land.
-impl From<RestaurantRow> for Restaurant {
-    fn from(row: RestaurantRow) -> Self {
+/// Read-model row + the REQUEST CLOCK → API type (RSO-1, DECISIONS §43). Deliberately NOT a
+/// `From`: `serviceWindow` is a verdict AT AN INSTANT, so a clock-less `Restaurant` is unspellable —
+/// deleting the old `From<RestaurantRow>` makes the compiler enumerate every call site
+/// (ADR-20260803-234035; the Cart non-impl below is the precedent). `now`/`horizon` are read ONCE
+/// per request at the transport seam (`graphql::service_clock`) and threaded down, so every row of
+/// one request agrees on "now" and DeliveryJob's two embedded verdicts cannot disagree. jsonb
+/// columns deserialize into the typed structs; `orderable` = ACTIVE_PARTNER + status ACTIVE +
+/// acceptance != PAUSED (api.yaml); navigation fields resolve empty until the read resolvers land.
+impl Restaurant {
+    pub fn at(row: RestaurantRow, now: chrono::DateTime<chrono::Utc>, horizon: chrono::Duration) -> Self {
+        // The verdict reads the SAME stored jsonb the `openingHours` field exposes, through the ONE
+        // domain function the checkout guard also calls (`domain::service_window::serving_at`) — the
+        // only construction in which badge and guard cannot disagree. Malformed jsonb parses to []
+        // = HOURS_UNDECLARED, never a panic (PAN-1 is the anti-pattern); the cutoff has no mapped
+        // source today (HubRise `cutoff_time`), so `None` degrades explicitly to door-close.
+        let declared_hours: Vec<domain::generated::entities::OpeningHoursSlot> =
+            serde_json::from_value(row.opening_hours.clone()).unwrap_or_default();
+        let window = domain::service_window::serving_at(&declared_hours, row.timezone.as_ref(), None, now, horizon);
         Self {
             id: row.restaurant_id.into(),
             account_id: row.restaurant_account_id.map(Into::into),
@@ -1093,6 +1143,13 @@ impl From<RestaurantRow> for Restaurant {
             address: serde_json::from_value(row.address).expect("Restaurant.address: invalid jsonb"),
             location: row.location.and_then(|v| serde_json::from_value(v).ok()),
             opening_hours: serde_json::from_value(row.opening_hours).unwrap_or_default(),
+            service_window: ServiceWindow {
+                verdict: window.verdict.into(),
+                opens_at: window.opens_at,
+                last_order_at: window.last_order_at,
+                evaluated_at: window.evaluated_at,
+                valid_until: window.valid_until,
+            },
             status: row.status.into(),
             order_acceptance: row.order_acceptance.into(),
             default_currency: row.default_currency.into(),
@@ -1108,11 +1165,11 @@ impl From<RestaurantRow> for Restaurant {
     }
 }
 
-/// Read-model rows → API type: the ProspectionPipeline row plus the joined Restaurant row (the
-/// FK-derived `restaurant` navigation field is non-null, so the resolver hydrates it from the
-/// Restaurant read model).
-impl From<(ProspectionPipelineRow, RestaurantRow)> for Prospect {
-    fn from((row, restaurant): (ProspectionPipelineRow, RestaurantRow)) -> Self {
+/// Read-model rows → API type: the ProspectionPipeline row plus the joined `Restaurant` (built
+/// once by the resolver via `Restaurant::at` — the FK-derived `restaurant` navigation field is
+/// non-null, so the resolver hydrates it from the Restaurant read model with the request clock).
+impl From<(ProspectionPipelineRow, Restaurant)> for Prospect {
+    fn from((row, restaurant): (ProspectionPipelineRow, Restaurant)) -> Self {
         Self {
             restaurant_id: row.restaurant_id.into(),
             score: row.score.into(),
@@ -1120,7 +1177,7 @@ impl From<(ProspectionPipelineRow, RestaurantRow)> for Prospect {
             contacts_count: row.contacts_count,
             last_contacted_at: row.last_contacted_at,
             replied_at: row.replied_at,
-            restaurant: restaurant.into(),
+            restaurant,
         }
     }
 }
@@ -1132,11 +1189,11 @@ pub(crate) fn catalog_tree_section<T: serde::de::DeserializeOwned>(tree: &serde_
     tree.get(key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
-/// Read-model rows → API type: the Catalog row plus the joined Restaurant row (the FK-derived
-/// `restaurant` navigation field is non-null, so the resolver hydrates it from the Restaurant read
-/// model). categories/products/optionLists deserialize out of the projected `tree` jsonb.
-impl From<(CatalogRow, RestaurantRow)> for Catalog {
-    fn from((row, restaurant): (CatalogRow, RestaurantRow)) -> Self {
+/// Read-model rows → API type: the Catalog row plus the joined `Restaurant` (built once by the
+/// resolver via `Restaurant::at` — non-null `restaurant` navigation field, hydrated with the
+/// request clock). categories/products/optionLists deserialize out of the projected `tree` jsonb.
+impl From<(CatalogRow, Restaurant)> for Catalog {
+    fn from((row, restaurant): (CatalogRow, Restaurant)) -> Self {
         Self {
             id: row.catalog_id.into(),
             restaurant_id: row.restaurant_id.into(),
@@ -1146,7 +1203,7 @@ impl From<(CatalogRow, RestaurantRow)> for Catalog {
             products: catalog_tree_section(&row.tree, "products"),
             option_lists: catalog_tree_section(&row.tree, "optionLists"),
             updated_at: row.updated_at,
-            restaurant: restaurant.into(),
+            restaurant,
         }
     }
 }
@@ -1156,14 +1213,14 @@ fn order_money(cents: ds::MoneyCents, currency: &ds::CurrencyCode) -> Money {
     Money { amount_cents: cents.into(), currency: currency.clone().into() }
 }
 
-/// Read-model rows → API type: the OrderTracking row plus the joined Restaurant row (non-null
-/// `restaurant` navigation field). The breakdown's `restaurantContribution` is re-derived as
+/// Read-model rows → API type: the OrderTracking row plus the joined `Restaurant` (built once by
+/// the resolver via `Restaurant::at` — non-null `restaurant` navigation field, request clock). The breakdown's `restaurantContribution` is re-derived as
 /// articles − restaurantPayout (the projection stores the split's leaves); the Uber comparison is
 /// rebuilt only when every `uber_*` column is present; `paymentStatus` is folded as TEXT by the
 /// projector and parsed leniently (unknown → PENDING); nav `deliveryJobs` resolve empty until that
 /// read model lands.
-impl From<(OrderTrackingRow, RestaurantRow)> for Order {
-    fn from((row, restaurant): (OrderTrackingRow, RestaurantRow)) -> Self {
+impl From<(OrderTrackingRow, Restaurant)> for Order {
+    fn from((row, restaurant): (OrderTrackingRow, Restaurant)) -> Self {
         let currency = row.currency.clone();
         let breakdown = PaymentBreakdown {
             articles: order_money(row.articles_cents.clone(), &currency),
@@ -1229,7 +1286,7 @@ impl From<(OrderTrackingRow, RestaurantRow)> for Order {
             estimated_dropoff_at: row.estimated_dropoff_at,
             rated_at: row.rated_at,
             delivery_jobs: Vec::new(),
-            restaurant: restaurant.into(),
+            restaurant,
         }
     }
 }
@@ -1268,11 +1325,12 @@ impl From<OrderConversationRow> for ConversationInternalNotes {
 }
 
 /// Read-model rows → API type: the `View_DeliveryJob` row (ADR-0031/0039) plus the joined
-/// OrderTracking + Restaurant rows (the FK-derived `order`/`restaurant` navigation fields are
-/// non-null, so the resolver hydrates them — all three are projections of the same domain log).
-/// Addresses and the courier deserialize out of the view's jsonb columns.
-impl From<(DeliveryJobRow, OrderTrackingRow, RestaurantRow)> for DeliveryJob {
-    fn from((row, order, restaurant): (DeliveryJobRow, OrderTrackingRow, RestaurantRow)) -> Self {
+/// OrderTracking row and `Restaurant` (built once by the resolver via `Restaurant::at`, then
+/// CLONED into the embedded Order — one evaluation, so the job's two embedded serviceWindow
+/// verdicts agree by construction, RSO-1). Addresses and the courier deserialize out of the
+/// view's jsonb columns.
+impl From<(DeliveryJobRow, OrderTrackingRow, Restaurant)> for DeliveryJob {
+    fn from((row, order, restaurant): (DeliveryJobRow, OrderTrackingRow, Restaurant)) -> Self {
         Self {
             id: row.delivery_job_id.into(),
             order_id: row.order_id.into(),
@@ -1290,7 +1348,7 @@ impl From<(DeliveryJobRow, OrderTrackingRow, RestaurantRow)> for DeliveryJob {
             picked_up_at: row.picked_up_at,
             delivered_at: row.delivered_at,
             order: (order, restaurant.clone()).into(),
-            restaurant: restaurant.into(),
+            restaurant,
         }
     }
 }

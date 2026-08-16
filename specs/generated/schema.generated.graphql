@@ -164,6 +164,12 @@ enum OperationStatus {
   FAILED
 }
 
+enum ServiceWindowVerdict {
+  OPEN
+  OUTSIDE_HOURS
+  HOURS_UNDECLARED
+}
+
 enum InboundMessageKind {
   COMMAND
   EVENT
@@ -519,6 +525,11 @@ type CheckoutSnapshot {
   totalAmount: Money!
   breakdown: PaymentBreakdown!
   note: OrderNote
+  verdict: ServiceWindowVerdict
+  windowFrom: DateTime
+  windowTo: DateTime
+  timezone: TimeZone
+  evaluatedAt: DateTime
 }
 
 type ConversationMessage {
@@ -789,6 +800,7 @@ type Restaurant {
   address: Address!
   location: GeoPoint
   openingHours: [OpeningHoursSlot!]!
+  serviceWindow: ServiceWindow!
   status: RestaurantStatus!
   orderAcceptance: OrderAcceptanceMode!
   defaultCurrency: CurrencyCode!
@@ -800,6 +812,14 @@ type Restaurant {
   catalogs: [Catalog!]!
   carts: [Cart!]! @auth(requires: [ADMIN])
   orders: [Order!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
+}
+
+type ServiceWindow {
+  verdict: ServiceWindowVerdict!
+  opensAt: DateTime
+  lastOrderAt: DateTime
+  evaluatedAt: DateTime!
+  validUntil: DateTime!
 }
 
 type Prospect {

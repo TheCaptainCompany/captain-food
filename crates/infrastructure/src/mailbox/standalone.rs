@@ -123,6 +123,13 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         mailbox_requeue: Arc::new(crate::persistence::mailbox_lanes::PgMailboxRequeue::new(
             pool.clone(),
         )),
+        // RSO-1 Phase 4: the PlaceOrder service-hours enforcement gate — same ENV-GATED posture
+        // as the rest of this fn (this crate cannot read the generated Config; the bins' baked
+        // profiles surface the key as an env var), same parse as the generated reader's booleans,
+        // same default (OFF = shadow) as the spec.
+        enforce_service_hours_guard: std::env::var("ENFORCE_SERVICE_HOURS_GUARD")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+            .unwrap_or(false),
     }
 }
 

@@ -7,6 +7,23 @@ description: >
 keys:
 
 
+  ENFORCE_SERVICE_HOURS_GUARD:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated
+      OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT
+      (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via
+      UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without
+      any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the
+      CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH
+      positions. The default flips by its own one-line ADR after the shadow form is smoked (the
+      RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated —
+      it is additive and nothing binds acceptance to it.
+
+
   ORDER_RETENTION_WINDOW_DAYS:
     type: int
     default: 3650

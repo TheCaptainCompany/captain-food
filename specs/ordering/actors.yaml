@@ -64,6 +64,54 @@ Order:
   identity: { $ref: '#/Order/state/orderId' }
   mailbox:
     partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  # Declared write-side state (PROP-20260728-135632 §2.1 grammar; #582 PROP-20260815-142349 §19) —
+  # transcribed from the hand-written fold `crates/domain/src/order.rs::OrderState`. `status` is
+  # deliberately ABSENT: the `lifecycle:` block below OWNS it (st-status-duplicated), and
+  # `#/Order/state/status` resolves implicitly to it, like `orderId` resolves to the identity.
+  # DECLARATION-ONLY this slice: the actor has a lifecycle, so states.rs generation is deferred to
+  # the states slice 2 (#242). Only the reply-SERVED field (paymentIntentId) is compiler-carried,
+  # by the reply-construction tests in order.rs; the remaining entries are unverified
+  # transcription of the hand fold until slice 2 machine-checks the whole block.
+  state:
+    restaurantId:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/restaurantId' }]
+      note: "The restaurant the order was placed against; commands carrying another restaurantId scope out as OrderNotFound."
+    customerId:
+      type: { $ref: 'scalars.yaml#/CustomerId' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/customerId' }]
+      note: "The owning customer — REQUIRED on OrderPlaced as of #144."
+    paymentIntentId:
+      type: { $ref: 'scalars.yaml#/PaymentIntentId' }
+      nullable: true
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]
+      note: "The AUTHORIZED Stripe PaymentIntent this order was placed with — ABSENT for a $0 replacement (replacementOf set) / partner-paid external order. Backs answers.paymentReference; callers must branch on absence."
+    deliveryRated:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/OrderRated' }]
+      note: "OrderAlreadyRated (rate-once)."
+    restaurantRated:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/RestaurantRated' }]
+      note: "RestaurantAlreadyRated (rate-once)."
+    deliverySatisfactionRecorded:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded' }]
+      note: "DeliverySatisfactionAlreadyRecorded (record-once, #62)."
+  # The queries this actor answers on Ask (PROP-20260815-142349 §2, Approved; doctrine header:
+  # specs/common/actors.yaml). The declaration IS the permission: the typed `ask` exists on the
+  # sealed client iff this block does. Served by the LOCAL in-process fold — no transport key,
+  # absence means local (D6); the deadline is the CALLER's (D5).
+  answers:
+    paymentReference:
+      description: "The payment intent this order was placed with — absent for a $0 replacement / partner-paid external order, so the settlement leg can stop with NO_CAPTAIN_AUTHORIZATION instead of phantom-capturing."
+      # No params: the `Order-{id}` stream key IS the argument (PROP §3) — the generated Request
+      # derives the identity field; a declared param restating the identity is the condemned shape.
+      reply:
+        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }   # nullable in state → callers must branch on absence
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
   # OUT_FOR_DELIVERY is deliberately absent: no Order event enters it — it is a read-side
   # presentation status derived by the OrderTracking projection from delivery facts (ADR-20260720-004419).
@@ -288,6 +336,7 @@ PlaceOrderProcess:
         - { $ref: 'errors.yaml#/RestaurantNotFound' }
         - { $ref: 'errors.yaml#/RestaurantPaused' }
         - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+        - { $ref: 'errors.yaml#/OutsideServiceHours' }
         - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
         - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
         - { $ref: 'errors.yaml#/PriceMismatch' }

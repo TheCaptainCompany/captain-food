@@ -76,11 +76,18 @@ pub fn command_dispatch(message_id: &str, outcome: &str) -> Span {
 /// dispatch wrapper, never by the aggregate: `c4-l3.yaml` marks `command-handlers`
 /// `instrumented: false`, and an aggregate that imports a telemetry SDK stops being testable without a
 /// subscriber.
+///
+/// `business.service_window_verdict` (RSO-1, DECISIONS §43) is late-bound: the place-order
+/// contract requires the service-hours verdict the checkout was evaluated at — the ACCEPT
+/// branch's signal (shadow mode refuses nothing, so without this attribute the decision is
+/// invisible in traces). Recorded by the dispatch wrapper via [`record_service_window_verdict`],
+/// never by the domain function (`serving_at` stays SDK-free).
 pub fn command_validate() -> Span {
     tracing::info_span!(
         "command.validate",
         otel.kind = "internal",
         business.validation_status = Empty,
+        business.service_window_verdict = Empty,
     )
 }
 
@@ -216,6 +223,13 @@ pub fn record_envelope(span: &Span, message_id: &str, correlation_id: &str) {
 /// Record `business.validation_status` (`accepted` | `rejected`).
 pub fn record_validation_status(span: &Span, status: &str) {
     span.record(attr::VALIDATION_STATUS, status);
+}
+
+/// Record `business.service_window_verdict` on `command.validate` (RSO-1): the value set is
+/// `scalars.yaml#/ServiceWindowVerdict` (`OPEN` | `OUTSIDE_HOURS` | `HOURS_UNDECLARED`), by
+/// contract — never a hand-invented string.
+pub fn record_service_window_verdict(span: &Span, verdict: &str) {
+    span.record(attr::SERVICE_WINDOW_VERDICT, verdict);
 }
 
 /// Record `business.result` on `payment.intent.create` (`captured` is what the contract's success
@@ -361,7 +375,14 @@ mod tests {
 
         let validate = command_validate();
         record_validation_status(&validate, "accepted");
-        assert!(validate.metadata().unwrap().fields().field(attr::VALIDATION_STATUS).is_some());
+        record_service_window_verdict(&validate, "OPEN");
+        let vf = validate.metadata().unwrap().fields();
+        assert!(vf.field(attr::VALIDATION_STATUS).is_some());
+        assert!(
+            vf.field(attr::SERVICE_WINDOW_VERDICT).is_some(),
+            "service_window_verdict is late-bound but declared -- an undeclared field records \
+             SILENTLY into nothing, and the place-order contract marks it required"
+        );
 
         let bridge = auth_read_scope("CUSTOMER");
         record_bridge_resolved(&bridge, false);

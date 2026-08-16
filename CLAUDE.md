@@ -28,7 +28,12 @@ would bring, and it is not derivable from the code:
 For a full critical audit — findings, triaged issues, proposals, and what to do next — use the
 **`architect` agent** (`.claude/agents/architect.md`), which carries this lens plus the review
 procedure in `.claude/skills/architecture-review/`. The open-decision queue it feeds is
-[docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md).
+[docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md). **CQRS/ES/DDD doctrine is a separate
+voice from that operations role** (ADR-20260815-032912): consult `young` (read/write separation,
+projections and snapshots as disposable folds, event versioning, set-based validation), `vernon`
+(aggregate boundaries, one aggregate per transaction, process managers, the actor model — Ask vs
+Tell) and `evans` (ubiquitous language, bounded contexts and context maps, ACLs, core-vs-generic
+distillation) — and cite which lens carried a finding.
 
 ## Specifications — read before any task
 
@@ -438,6 +443,13 @@ failure rather than a misleading sentence.
   gates are green (`make rust`), mark the PR **ready for review** and **enable auto-merge**
   **together, as one indivisible step**, and **supervise the checks until the PR is MERGED** (fix +
   push on failure; never end at "pushed, CI pending"). The merge closes the issue and ends the claim.
+  That ready+auto-merge step is the **default posture**; a dispatch marks **`HOLD: human`** for the
+  named class (stored event shapes/fold semantics/migrations, payments/funds/erasure, legal surfaces,
+  non-additive GraphQL changes, the mailbox runtime, the merge machinery itself), and those PRs stop
+  at ready-for-review until the TEAM's independent reviewer pass — never a founder wait; after
+  review PASS + green gates the coordinator merges
+  ([ADR-20260815-115220](docs/adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md),
+  amended by [ADR-20260815-134655](docs/adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md)).
 - Autonomous loops/routines run under the **weekly time budget** (`make budgeted-loop` or the routine
   guard) — Claude Code has no native cap; see [docs/claude/loops.md](docs/claude/loops.md) / ADR-0014.
 

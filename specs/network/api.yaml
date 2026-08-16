@@ -18,7 +18,7 @@ types:
       id: { $ref: 'scalars.yaml#/RestaurantId' }
       accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', nullable: true }   # null for a non-partner listing
       listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
-      orderable: { type: boolean }   # derived: ACTIVE_PARTNER + status ACTIVE + acceptance ≠ PAUSED
+      orderable: { type: boolean }   # derived: ACTIVE_PARTNER + status ACTIVE + acceptance ≠ PAUSED — and NOTHING else: service hours are excluded by design (rules.yaml#/OrderableExcludesServiceHours)
       externalIdentifiers: { $ref: 'entities.yaml#/ExternalIdentifier', array: true }
       # NULL for a listing with no storefront yet (ADR-20260728-011344): an open-data prospect has no
       # {slug}.captain.food host, and a claimed restaurant only gets one once the owner chooses it
@@ -36,12 +36,61 @@ types:
       address: { $ref: 'entities.yaml#/Address' }
       location: { $ref: 'entities.yaml#/GeoPoint', nullable: true }
       openingHours: { $ref: 'entities.yaml#/OpeningHoursSlot', array: true }
+      # RSO-1 (DECISIONS §43): the service-hours verdict is a FIELD here, never folded into
+      # `orderable` (rules.yaml#/OrderableExcludesServiceHours) — a time-varying bit has no
+      # meaningful `updatedAt` and would poison every cache keyed on it. NON-NULL: the evaluation
+      # is TOTAL (HOURS_UNDECLARED is a value, not an absence).
+      serviceWindow: { $ref: '#/types/ServiceWindow' }
       status: { $ref: 'scalars.yaml#/RestaurantStatus' }
       orderAcceptance: { $ref: 'scalars.yaml#/OrderAcceptanceMode' }
       defaultCurrency: { $ref: 'scalars.yaml#/CurrencyCode' }
       timezone: { $ref: 'scalars.yaml#/TimeZone', nullable: true }
       preparationTimeMinutes: { type: integer, nullable: true }
       updatedAt: { type: string, format: date-time }
+
+  # RSO-1 (DECISIONS §43 sub-question iii): the service-hours verdict at the request instant — a
+  # DERIVED evaluation, not a projection and not aggregate state. Computed once per request (every
+  # card in a list agrees on "now") by the shared domain function the checkout guard also calls —
+  # the only construction in which badge and guard cannot disagree. This is a CONVERSATION shape;
+  # the acceptance EVIDENCE frozen onto entities.yaml#/CheckoutSnapshot is deliberately different
+  # (no validUntil there — a config-derived TTL is not history).
+  ServiceWindow:
+    description: >
+      The restaurant's service-hours verdict AT AN INSTANT. `verdict` is the ONLY discriminator —
+      clients must never read nullability patterns as semantics. Orthogonal to `ServiceType`: ONE
+      window governs both DELIVERY and COLLECTION.
+    properties:
+      verdict: { $ref: 'scalars.yaml#/ServiceWindowVerdict' }   # NON-NULL: the evaluation is total
+      opensAt:
+        type: string
+        format: date-time
+        nullable: true
+        description: "Next opening instant. Set under OUTSIDE_HOURS (the 'Ouvre à 11:30' affordance); null under OPEN (already open) and HOURS_UNDECLARED (nothing to promise)."
+      lastOrderAt:
+        type: string
+        format: date-time
+        nullable: true
+        description: >
+          The latest instant an order can still be placed (kitchen cutoff) — a FUTURE deadline
+          despite the `*At` suffix. Defined as min(current slot's door-close `to`, the declared
+          cutoff): `cutoff` is a first-class term (HubRise `cutoff_time`, which the ACL maps
+          nowhere today), so while no cutoff source is declared the formula DEGRADES EXPLICITLY to
+          door-close (`slot.to`) — a documented degradation, never a silent fallback — and the
+          instant displayed here is the SAME number the checkout guard enforces. Null under
+          OUTSIDE_HOURS and HOURS_UNDECLARED.
+      evaluatedAt:
+        type: string
+        format: date-time
+        description: "The instant the verdict was evaluated at — the request clock, read ONCE per request, never per row. On a subscription it advances PER PUSHED UPDATE, not per subscribe: a long-lived stream re-evaluates at each push, so a window transition mid-stream changes the verdict."
+      validUntil:
+        type: string
+        format: date-time
+        description: >
+          The instant after which the client must RE-EVALUATE: min(next window transition,
+          evaluatedAt + horizon), the horizon being configuration.yaml#/SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS;
+          under HOURS_UNDECLARED (no transition to wait for) it is evaluatedAt + horizon. NON-NULL
+          on purpose: a nullable expiry reads to every cache as "cache forever", which would keep a
+          blank badge warm at Friday 19:00 — the hour it matters.
 
   Prospect:
     description: "A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline)."

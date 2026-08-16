@@ -16,7 +16,7 @@
 
 use crate::generated::events::DomainEvent;
 pub use crate::generated::lifecycles::order as lifecycle;
-use crate::generated::scalars::{CustomerId, OrderStatus, RestaurantId};
+use crate::generated::scalars::{CustomerId, OrderStatus, PaymentIntentId, RestaurantId};
 
 /// What the Order command handlers need to know about the aggregate to accept or reject a command.
 /// `None` (from [`fold`]) means the order does not exist → `OrderNotFound`.
@@ -40,6 +40,12 @@ pub struct OrderState {
     /// Whether the delivery-delay satisfaction survey was already answered (#62) —
     /// `DeliverySatisfactionAlreadyRecorded` (record-once).
     pub delivery_satisfaction_recorded: bool,
+    /// The AUTHORIZED Stripe PaymentIntent this order was placed with (#582,
+    /// `specs/ordering/actors.yaml#/Order/state/paymentIntentId`) — `None` for a $0 replacement
+    /// (`replacementOf` set) / partner-paid external order, so the settlement leg's
+    /// `answers.paymentReference` reply forces every caller to branch on absence instead of
+    /// phantom-capturing.
+    pub payment_intent_id: Option<PaymentIntentId>,
 }
 
 impl OrderState {
@@ -72,6 +78,7 @@ fn apply(state: Option<OrderState>, event: &DomainEvent) -> Option<OrderState> {
                 delivery_rated: false,
                 restaurant_rated: false,
                 delivery_satisfaction_recorded: false,
+                payment_intent_id: e.payment_intent_id.clone(),
             });
         }
     }
@@ -196,6 +203,57 @@ mod tests {
             }
         }
         assert!(!lifecycle::is_terminal(PLACED));
+    }
+
+    /// A $0 no-charge replacement (ADR-20260726-171736): same shape as [`placed`] but NO
+    /// paymentIntentId — the absence the settlement leg must branch on.
+    fn replacement_placed() -> DomainEvent {
+        match placed() {
+            DomainEvent::OrderPlaced(mut e) => {
+                e.payment_intent_id = None;
+                e.replacement_of = Some(oid());
+                DomainEvent::OrderPlaced(e)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// #582 answers parity + round-trip (PROP-20260815-142349 §2/V4;
+    /// rules-adjacent: the `Order.paymentReference` reply serves `#/Order/state/paymentIntentId`).
+    /// The generated `OrderPaymentReferenceReply` is built FROM a real `fold()` result, property
+    /// by property — this construction site IS the YAML-`state:` ↔ hand-fold parity proof,
+    /// compiler-checked: rename a fold field and this test stops BUILDING (mutation evidence in
+    /// PR #583). The YAML block is NOT otherwise machine-verified against the fold this slice
+    /// (states.rs generation for lifecycle actors is slice 2). Round-trips are deliberately
+    /// STRUCTURE-SENSITIVE (exact JSON asserted): a reply is a wire contract whose shape may not
+    /// rot while the ask is local — brittleness against accidental reshapes is the point.
+    #[test]
+    fn payment_reference_reply_projects_the_fold_and_round_trips() {
+        use crate::generated::answers::OrderPaymentReferenceReply;
+        // PRESENT: an ordinary paid order, realistic multi-event stream (never a struct literal).
+        let s = fold(&[placed(), accepted(), preparing(), ready(), delivered()]).unwrap();
+        let reply = OrderPaymentReferenceReply { payment_intent_id: s.payment_intent_id.clone() };
+        assert_eq!(reply.payment_intent_id, Some(PaymentIntentId("pi_test_1".into())));
+        let json = serde_json::to_value(&reply).unwrap();
+        assert_eq!(json, serde_json::json!({ "paymentIntentId": "pi_test_1" }));
+        let back: OrderPaymentReferenceReply = serde_json::from_value(json).unwrap();
+        assert_eq!(back, reply);
+        // ABSENT: a $0 replacement — the absent case must round-trip AS ABSENT (no key at all,
+        // not null), and deserialize back to None (tolerant reader's `default`).
+        let s = fold(&[replacement_placed(), accepted(), ready(), delivered()]).unwrap();
+        let reply = OrderPaymentReferenceReply { payment_intent_id: s.payment_intent_id.clone() };
+        assert_eq!(reply.payment_intent_id, None);
+        let json = serde_json::to_value(&reply).unwrap();
+        assert_eq!(json, serde_json::json!({}));
+        let back: OrderPaymentReferenceReply = serde_json::from_value(json).unwrap();
+        assert_eq!(back.payment_intent_id, None);
+        // Tolerant reader: an ADDITIVE field from a future producer is ignored, never an error
+        // (additive-only producer / tolerant reader — the reply's whole evolution contract).
+        let widened: OrderPaymentReferenceReply = serde_json::from_value(
+            serde_json::json!({ "paymentIntentId": "pi_test_1", "sentAt": "2026-08-15" }),
+        )
+        .unwrap();
+        assert_eq!(widened.payment_intent_id, Some(PaymentIntentId("pi_test_1".into())));
     }
 
     /// The fold births via `initial` and applies recorded facts via `target` — the appended fact

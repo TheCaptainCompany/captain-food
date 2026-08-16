@@ -483,6 +483,7 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | <a id="type-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |
 | <a id="type-restaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |
 | <a id="type-restaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ✅ |
+| <a id="type-restaurant--servicewindow"></a>`serviceWindow` | [🧩 `ServiceWindow`](#type-servicewindow) | ✅ |
 | <a id="type-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |
 | <a id="type-restaurant--orderacceptance"></a>`orderAcceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |
 | <a id="type-restaurant--defaultcurrency"></a>`defaultCurrency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ✅ |
@@ -605,7 +606,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed) | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) _(derived)_ | [⚡ `RestaurantAcceptanceModeChanged`.`mode`](#event-restaurantacceptancemodechanged--mode) | — |  |
 | `default_currency` | [🔤 `CurrencyCode`](#scalar-currencycode) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`defaultCurrency`](#event-restaurantaccountregistered--defaultcurrency) | — |  |
-| `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantRegistered`.`timezone`](#event-restaurantregistered--timezone), [⚡ `RestaurantUpdated`.`timezone`](#event-restaurantupdated--timezone) | nullable | Location timezone; falls back to the account's when null. |
+| `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantRegistered`.`timezone`](#event-restaurantregistered--timezone), [⚡ `RestaurantUpdated`.`timezone`](#event-restaurantupdated--timezone) | nullable | Location timezone. NULL means NO timezone — the account-level fallback this note used to claim has NO materialized source (View_RestaurantAccount was deleted; corrected under RSO-1, DECISIONS §43): service-window evaluation treats NULL, or a zone that does not parse while hours are declared, as HOURS_UNDECLARED, never as "closed".  |
 | `preparation_time_minutes` | `integer` _(derived)_ | [⚡ `RestaurantRegistered`.`preparationTimeMinutes`](#event-restaurantregistered--preparationtimeminutes), [⚡ `RestaurantUpdated`.`preparationTimeMinutes`](#event-restaurantupdated--preparationtimeminutes) | nullable |  |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
@@ -1434,7 +1435,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
 | <a id="scalar-timeofday"></a>🔤 `TimeOfDay` | string `^([01][0-9]|2[0-3]):[0-5][0-9]$` | Local time of day, HH:mm (HubRise opening_hours format). |
 | <a id="scalar-restaurantstatus"></a>🔤 `RestaurantStatus` | enum (DRAFT \| ACTIVE \| INACTIVE) |  |
-| <a id="scalar-restaurantlistingstatus"></a>🔤 `RestaurantListingStatus` | enum (NON_PARTNER \| PASSIVE_PARTNER \| ACTIVE_PARTNER) | Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.  |
+| <a id="scalar-restaurantlistingstatus"></a>🔤 `RestaurantListingStatus` | enum (NON_PARTNER \| PASSIVE_PARTNER \| ACTIVE_PARTNER) | Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED (the single statement is rules.yaml#/OrderableExcludesServiceHours — service hours are NOT a term).  |
 | <a id="scalar-gbplinkstatus"></a>🔤 `GbpLinkStatus` | enum (UNSET \| CONFIGURED \| VERIFIED \| BROKEN) | State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1). |
 | <a id="scalar-prospectionscore"></a>🔤 `ProspectionScore` | integer | B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event. |
 | <a id="scalar-prospectpipelinestatus"></a>🔤 `ProspectPipelineStatus` | enum (NEW \| CONTACTED \| COLD \| REPLIED \| CONVERTED) | Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER. |
@@ -3701,7 +3702,7 @@ _⚙️ process manager_ — The checkout saga (ADR-0004, acceptance-first ADR-2
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
 | [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry._ | — |
 
@@ -3730,6 +3731,7 @@ sequenceDiagram
   PM->>RM_Restaurant: read as restaurant [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws RestaurantPaused
   PM--xIN: throws CannotOrderTestRestaurant
+  PM--xIN: throws OutsideServiceHours
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
@@ -3885,7 +3887,7 @@ _⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN ca
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
 | [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 
@@ -3914,6 +3916,7 @@ sequenceDiagram
   PM->>RM_Restaurant: read as restaurant [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws RestaurantPaused
   PM--xIN: throws CannotOrderTestRestaurant
+  PM--xIN: throws OutsideServiceHours
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
@@ -4439,7 +4442,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 
 - **Dispatched by**: [✏️ `placeOrder`](#mutation-placeorder) · **handled by** [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5564,6 +5567,11 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-checkoutsnapshot--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="entity-checkoutsnapshot--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ |  |
 | <a id="entity-checkoutsnapshot--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--verdict"></a>`verdict` | [🔤 `ServiceWindowVerdict`](#scalar-servicewindowverdict) | ⬜ | The service-hours verdict at acceptance. Absent on snapshots frozen before RSO-1; recorded even in shadow mode (the gate changes whether OUTSIDE_HOURS refuses, never whether the verdict is recorded). |
+| <a id="entity-checkoutsnapshot--windowfrom"></a>`windowFrom` | `string` _date-time_ | ⬜ | Evidence: start instant of the window the verdict was judged against (null under HOURS_UNDECLARED, or pre-RSO-1). |
+| <a id="entity-checkoutsnapshot--windowto"></a>`windowTo` | `string` _date-time_ | ⬜ | Evidence: end instant of that window — min(door-close, cutoff), the same number the guard enforced. |
+| <a id="entity-checkoutsnapshot--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Evidence: the timezone the evaluation ran in (null when undeclared — one input to HOURS_UNDECLARED). |
+| <a id="entity-checkoutsnapshot--evaluatedat"></a>`evaluatedAt` | `string` _date-time_ | ⬜ | Evidence: the injected request instant the verdict was evaluated at. |
 
 <a id="entity-conversationmessage"></a>
 #### 📦 Entity: `ConversationMessage`
@@ -5685,7 +5693,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(37)_
+### 🔤 Scalars _(38)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5696,6 +5704,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-ordernote"></a>🔤 `OrderNote` | string |  |
 | <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| AUTHORIZED \| CAPTURED \| FAILED \| REFUNDED \| RELEASED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/ Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection, cancellation or expiry — "no need to refund because no capture").  |
+| <a id="scalar-servicewindowverdict"></a>🔤 `ServiceWindowVerdict` | enum (OPEN \| OUTSIDE_HOURS \| HOURS_UNDECLARED) | "Is this restaurant serving right now?" as a three-valued VERDICT derived AT AN INSTANT from the declared opening hours + timezone with the clock injected — deliberately NOT a `*Status` (that suffix means stored state; nobody stores this, everybody computes it, and no event announces it). The third value is the whole point (DECISIONS §43 blocker): `opening_hours` storage collapses "never provided", "cleared" and "unparseable" into ONE `[]`, so `[]` IS HOURS_UNDECLARED by definition — never "closed" — and a NULL timezone (or one that does not parse while hours are declared) is HOURS_UNDECLARED too, because the once-documented account-timezone fallback has no materialized source. Evaluation converts the UTC instant into the restaurant's LOCAL time (total, DST-safe), never slot times to UTC; overnight slots (`to` < `from`, e.g. Friday 19:00–01:00) are legal and cross midnight. At checkout, OUTSIDE_HOURS is the ONLY refusing verdict — OPEN and HOURS_UNDECLARED accept (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours).  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 | <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
@@ -5727,7 +5736,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 | <a id="scalar-capturefailurereason"></a>🔤 `CaptureFailureReason` | enum (CARD_DECLINED \| AUTHORIZATION_EXPIRED \| GATEWAY_REFUSED \| GATEWAY_UNAVAILABLE) | Why capturing a confirmed authorization failed AFTER fulfilment (PaymentCaptureFailed — the food is cooked and the money did not move, ADR-20260808-195315 §1.2 team note): CARD_DECLINED = the issuer refused the capture; AUTHORIZATION_EXPIRED = the ~7-day hold lapsed before capture; GATEWAY_REFUSED = Stripe refused the request deterministically (already captured/canceled, keying bug); GATEWAY_UNAVAILABLE = transport/5xx — the capture MAY have succeeded provider-side (the settled PaymentCaptured webhook supersedes this fact when it did).  |
 
-### ⛔ Errors _(40)_
+### ⛔ Errors _(41)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -5759,6 +5768,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="error-invalidtiprecipient"></a>⛔ `InvalidTipRecipient` | The tipper cannot tip this recipient (e.g. a restaurant tipping itself). | 🇬🇧 You can't send a tip to this recipient. | 🇫🇷 Vous ne pouvez pas envoyer de pourboire à ce destinataire. | [📩 `TipOrder`](#command-tiporder) |
 | <a id="error-deliveryaddressrequired"></a>⛔ `DeliveryAddressRequired` | serviceType is DELIVERY but no delivery address was provided. | 🇬🇧 A delivery address is required for delivery. | 🇫🇷 Une adresse de livraison est requise pour la livraison. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-outsidedeliveryarea"></a>⛔ `OutsideDeliveryArea` | Delivery address is outside the restaurant's delivery area. | 🇬🇧 This address is outside the delivery area of '{restaurantName}'. | 🇫🇷 Cette adresse est en dehors de la zone de livraison de '{restaurantName}'. | [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-outsideservicehours"></a>⛔ `OutsideServiceHours` | PlaceOrder arrived at an instant outside the restaurant's declared service hours — thrown ONLY on verdict OUTSIDE_HOURS (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours: OPEN and HOURS_UNDECLARED both accept), and only while configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD is ON (default OFF = shadow). The context carries the NEXT OPENING SLOT (the actionable half of the message — "closed, opens tomorrow 11:30" is a different product from "closed") AND the refusal EVIDENCE: the window and timezone the verdict was evaluated against plus the evaluation instant, so a disputed refusal is provable from the record. Copy note: never phrase this as a refund/no-refund statement — the perishables withdrawal exemption is not a non-performance posture.  | 🇬🇧 '{restaurantName}' is closed right now — it opens again at {nextOpensAt}. | 🇫🇷 '{restaurantName}' est fermé pour le moment — réouverture à {nextOpensAt}. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-paymentdeclined"></a>⛔ `PaymentDeclined` | Stripe declined the payment synchronously at checkout (no order placed). | 🇬🇧 Payment was declined. | 🇫🇷 Le paiement a été refusé. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-pricemismatch"></a>⛔ `PriceMismatch` | The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.  | 🇬🇧 Prices have changed since you loaded the menu. Please review your cart and try again. | 🇫🇷 Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-priceunresolvable"></a>⛔ `PriceUnresolvable` | A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.  | 🇬🇧 An item in your cart is no longer available at a known price. Please review your cart. | 🇫🇷 Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier. | [📩 `PlaceOrder`](#command-placeorder) |
@@ -5772,7 +5782,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 
-### 📐 Business rules _(51)_
+### 📐 Business rules _(54)_
 
 <a id="rule-checkoutsnapshotfrozenatintent"></a>
 #### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
@@ -5786,7 +5796,7 @@ _When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced ch
 
 _On payment AUTHORIZATION (funds held on the card, not captured — ADR-20260808-195315 §1.2) the order is materialized and the cart is closed; the money moves only at capture, on fulfilment._
 
-- **Verified by**: [🧪 `TestPlaceOrderPaymentAuthorizedPlacesOrder`](#test-testplaceorderpaymentauthorizedplacesorder), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentAuthorizedRecorded`](#test-testpaymentauthorizedrecorded)
+- **Verified by**: [🧪 `TestPlaceOrderPaymentAuthorizedPlacesOrder`](#test-testplaceorderpaymentauthorizedplacesorder), [🧪 `TestPlaceOrderPaymentAuthorizedToleratesLegacySnapshotShape`](#test-testplaceorderpaymentauthorizedtolerateslegacysnapshotshape), [🧪 `TestCartCheckedOutRecorded`](#test-testcartcheckedoutrecorded), [🧪 `TestOrderPlacedBirthRecorded`](#test-testorderplacedbirthrecorded), [🧪 `TestPaymentAuthorizedRecorded`](#test-testpaymentauthorizedrecorded)
 
 <a id="rule-paymentcapturedonfulfilment"></a>
 #### 📐 Rule: `PaymentCapturedOnFulfilment`
@@ -5893,6 +5903,20 @@ _A translation can only be recorded for a message that was actually posted to th
 
 - **Verified by**: [🧪 `TestTranslateUnknownMessageRejected`](#test-testtranslateunknownmessagerejected)
 
+<a id="rule-servicewindowverdictderivedataninstant"></a>
+#### 📐 Rule: `ServiceWindowVerdictDerivedAtAnInstant`
+
+_"Is this restaurant serving right now?" is a three-valued VERDICT (OPEN / OUTSIDE_HOURS / HOURS_UNDECLARED) derived AT AN INSTANT from the declared opening hours + timezone with the clock injected — one shared derivation consumed by both the api serviceWindow field and the checkout guard, so badge and guard cannot disagree. Empty hours ([] — which storage makes indistinguishable from "cleared" and "unparseable") and a missing/unparseable timezone are HOURS_UNDECLARED, never "closed": a verdict must not take a live restaurant offline over missing seed data. Evaluation converts the instant to the restaurant's local time (DST-safe); overnight slots cross midnight; the effective close is min(door-close, cutoff) with the degradation to door-close explicit while no cutoff source is declared._
+
+- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`](#test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
+
+<a id="rule-orderableexcludesservicehours"></a>
+#### 📐 Rule: `OrderableExcludesServiceHours`
+
+_THE single statement of the orderable formula (api.yaml Restaurant.orderable and scalars.yaml#/RestaurantListingStatus cite it): orderable ⇔ listingStatus ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED — and service hours are NOT a term of it: an OUTSIDE_HOURS restaurant still reads orderable: true, and the time-varying answer lives ONLY on serviceWindow. The formula is an event fold carried alongside updatedAt; a clock-varying bit folded into it would have no meaningful updatedAt and would serve stale answers from every cache keyed on it. Folding hours into orderable would silently reverse DECISIONS §43 correction 3 — this rule exists so that reversal cannot be silent._
+
+- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours)
+
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
 
@@ -5976,6 +6000,13 @@ _The server is the only price authority on the write path: order line totals, th
 _Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
+
+<a id="rule-checkoutrefusesonlyoutsideservicehours"></a>
+#### 📐 Rule: `CheckoutRefusesOnlyOutsideServiceHours`
+
+_PlaceOrder refuses on service hours ONLY at verdict OUTSIDE_HOURS (errors.yaml#/OutsideServiceHours, carrying the next opening slot and the evaluated window/timezone/instant as evidence); OPEN and HOURS_UNDECLARED both ACCEPT — a deliberately activated restaurant with no declared hours takes orders (DECISIONS §43 fourth amendment: refusing over missing seed data is the worse failure, and a zero-order graph is indistinguishable from "no demand"). Every accepted checkout freezes the verdict evidence onto the CheckoutSnapshot regardless of the enforcement gate (configuration.yaml#/ENFORCE_SERVICE_HOURS_GUARD, default OFF = shadow), so the log can prove what was known at acceptance; a snapshot frozen BEFORE the evidence existed still materializes its order (the fields are optional forever)._
+
+- **Verified by**: [🧪 `TestPlaceOrderRejectsOutsideServiceHours`](#test-testplaceorderrejectsoutsideservicehours), [🧪 `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`](#test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict), [🧪 `TestPlaceOrderAcceptsWhenHoursUndeclared`](#test-testplaceorderacceptswhenhoursundeclared), [🧪 `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`](#test-testplaceorderacceptsinsideservicewindowfreezesevidence)
 
 <a id="rule-ordertestmodeisolation"></a>
 #### 📐 Rule: `OrderTestModeIsolation`
@@ -6873,6 +6904,56 @@ _On payment authorization (funds held, not captured) the saga materializes the o
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
+<a id="test-testplaceorderrejectsoutsideservicehours"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsOutsideServiceHours`
+
+_A checkout at 04:00 against a restaurant with declared hours (Friday 19:00–23:00 Paris) is refused with the next opening slot — the restaurant is ACTIVE and not PAUSED, so the refusal can only come from the service-hours guard_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `OutsideServiceHours`](#error-outsideservicehours)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant), [📐 `OrderableExcludesServiceHours`](#rule-orderableexcludesservicehours)
+
+<a id="test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict"></a>
+#### 🧪 Test: `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`
+
+_The SAME 04:00 checkout with the enforcement gate OFF (the production default) is ACCEPTED — shadow mode — and the frozen snapshot records verdict OUTSIDE_HOURS, so the log can prove what the guard would have refused before the default flips_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderacceptswhenhoursundeclared"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsWhenHoursUndeclared`
+
+_A checkout against an ACTIVE restaurant with a timezone but NO declared hours (the prod-smoke L4 shape) is accepted, and the frozen snapshot records verdict HOURS_UNDECLARED with a null window — not OPEN, and not a refusal_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderacceptsinsideservicewindowfreezesevidence"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`
+
+_A checkout inside the declared window (Friday 20:00 Paris, window 19:00–23:00) is accepted and the frozen snapshot carries verdict OPEN with the window's own instants and timezone — evidence a disputed acceptance can be proved from, not just an enum_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderpaymentauthorizedtolerateslegacysnapshotshape"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentAuthorizedToleratesLegacySnapshotShape`
+
+_A payment authorization for a snapshot frozen BEFORE the verdict evidence existed (no verdict/window keys at all) still materializes the order — the evidence fields are optional in fact, so old paid checkouts can never be orphaned by the new shape_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
+
 <a id="test-testplaceorderpaymentfailedplacesnothing"></a>
 #### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
 
@@ -7191,6 +7272,56 @@ _On payment authorization (funds held, not captured) the saga materializes the o
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
+<a id="test-testplaceorderrejectsoutsideservicehours"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsOutsideServiceHours`
+
+_A checkout at 04:00 against a restaurant with declared hours (Friday 19:00–23:00 Paris) is refused with the next opening slot — the restaurant is ACTIVE and not PAUSED, so the refusal can only come from the service-hours guard_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `OutsideServiceHours`](#error-outsideservicehours)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant), [📐 `OrderableExcludesServiceHours`](#rule-orderableexcludesservicehours)
+
+<a id="test-testplaceordershadowmodeacceptsoutsidehoursandrecordstheverdict"></a>
+#### 🧪 Test: `TestPlaceOrderShadowModeAcceptsOutsideHoursAndRecordsTheVerdict`
+
+_The SAME 04:00 checkout with the enforcement gate OFF (the production default) is ACCEPTED — shadow mode — and the frozen snapshot records verdict OUTSIDE_HOURS, so the log can prove what the guard would have refused before the default flips_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderacceptswhenhoursundeclared"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsWhenHoursUndeclared`
+
+_A checkout against an ACTIVE restaurant with a timezone but NO declared hours (the prod-smoke L4 shape) is accepted, and the frozen snapshot records verdict HOURS_UNDECLARED with a null window — not OPEN, and not a refusal_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderacceptsinsideservicewindowfreezesevidence"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsInsideServiceWindowFreezesEvidence`
+
+_A checkout inside the declared window (Friday 20:00 Paris, window 19:00–23:00) is accepted and the frozen snapshot carries verdict OPEN with the window's own instants and timezone — evidence a disputed acceptance can be proved from, not just an enum_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutRefusesOnlyOutsideServiceHours`](#rule-checkoutrefusesonlyoutsideservicehours), [📐 `ServiceWindowVerdictDerivedAtAnInstant`](#rule-servicewindowverdictderivedataninstant)
+
+<a id="test-testplaceorderpaymentauthorizedtolerateslegacysnapshotshape"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentAuthorizedToleratesLegacySnapshotShape`
+
+_A payment authorization for a snapshot frozen BEFORE the verdict evidence existed (no verdict/window keys at all) still materializes the order — the evidence fields are optional in fact, so old paid checkouts can never be orphaned by the new shape_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
+
 <a id="test-testplaceorderpaymentfailedplacesnothing"></a>
 #### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
 
@@ -7413,7 +7544,7 @@ _criticality: **high**_
 | --- | --- | --- | --- | --- |
 | `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.actor`* |
 | `command.journal` | `INTERNAL` | ✅ | — | `business.message_id`*, `business.journal_status`* |
-| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`* |
+| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`*, `business.service_window_verdict`* |
 | `cart.read` | `INTERNAL` | ✅ | — | `business.aggregate_id`* |
 | `pricing.compute` | `INTERNAL` | ✅ | — | `business.service_fee`*, `business.split_ok`* |
 | `payment.intent.create` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
@@ -10318,7 +10449,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(12)_
+### 🧩 Output types _(13)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -10464,6 +10595,22 @@ Live status of a journaled command (ADR-20260720-015300), keyed by its `messageI
 | <a id="type-operation--errorcode"></a>`errorCode` | `string` | ⬜ |
 | <a id="type-operation--message"></a>`message` | `string` | ⬜ |
 | <a id="type-operation--occurredat"></a>`occurredAt` | `string` _date-time_ | ✅ |
+
+<a id="type-servicewindow"></a>
+#### 🧩 Type: `ServiceWindow`
+
+The restaurant's service-hours verdict AT AN INSTANT. `verdict` is the ONLY discriminator — clients must never read nullability patterns as semantics. Orthogonal to `ServiceType`: ONE window governs both DELIVERY and COLLECTION.
+
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-servicewindow--verdict"></a>`verdict` | [🔤 `ServiceWindowVerdict`](#scalar-servicewindowverdict) | ✅ |
+| <a id="type-servicewindow--opensat"></a>`opensAt` | `string` _date-time_ | ⬜ |
+| <a id="type-servicewindow--lastorderat"></a>`lastOrderAt` | `string` _date-time_ | ⬜ |
+| <a id="type-servicewindow--evaluatedat"></a>`evaluatedAt` | `string` _date-time_ | ✅ |
+| <a id="type-servicewindow--validuntil"></a>`validUntil` | `string` _date-time_ | ✅ |
 
 <a id="type-paymentintent"></a>
 #### 🧩 Type: `PaymentIntent`
@@ -11224,7 +11371,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | write | `toggle_favorite` | [✏️ `markRestaurantAsFavorite`](#mutation-markrestaurantasfavorite) |
 
 **Gaps**
-- ⚠️ Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges, isOpen) are not on the domain Restaurant/api type yet.
+- ⚠️ Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges) are not on the domain Restaurant/api type yet.
 
 <a id="screen-cart"></a>
 ### 📱 `cart` · `/cart` · 📱 SDUI
@@ -11278,6 +11425,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | read | `cart.current` | [🔎 `current`](#query-current) |
 | read | `me.profile` | [🔎 `me`](#query-me) |
 | read | `paymentStatus.byOrder` | [🔎 `paymentStatus`](#query-paymentstatus) |
+| read | `restaurant.bySlug` | [🔎 `restaurant`](#query-restaurant) |
 | write | `place_order` | [✏️ `placeOrder`](#mutation-placeorder) |
 | write | `set_delivery_address_saved` | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
 

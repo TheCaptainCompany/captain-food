@@ -1,5 +1,47 @@
 use crate::*;
 
+/// True for a Z-NORMALIZED RFC3339 instant — `YYYY-MM-DDTHH:MM:SS[.fff]Z` (RSO-1: `when.at` in
+/// tests.yaml). Deliberately STRICTER than a full RFC3339 parser: numeric offsets are refused,
+/// because a local-offset instant in a spec test would smuggle timezone ambiguity into the one
+/// field that exists to kill it. Range checks cover month/day/hour/minute/second bounds (not
+/// month lengths — a Feb 31 still fails deterministically at the generated test's chrono parse).
+pub(crate) fn rfc3339_z_instant(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[b.len() - 1] != b'Z' {
+        return false;
+    }
+    let digit = |i: usize| b[i].is_ascii_digit();
+    let shape = (0..4).all(digit)
+        && b[4] == b'-'
+        && digit(5)
+        && digit(6)
+        && b[7] == b'-'
+        && digit(8)
+        && digit(9)
+        && b[10] == b'T'
+        && digit(11)
+        && digit(12)
+        && b[13] == b':'
+        && digit(14)
+        && digit(15)
+        && b[16] == b':'
+        && digit(17)
+        && digit(18);
+    if !shape {
+        return false;
+    }
+    let frac = &b[19..b.len() - 1];
+    let frac_ok =
+        frac.is_empty() || (frac[0] == b'.' && frac.len() > 1 && frac[1..].iter().all(|c| c.is_ascii_digit()));
+    let n2 = |i: usize| (b[i] - b'0') as u32 * 10 + (b[i + 1] - b'0') as u32;
+    frac_ok
+        && (1..=12).contains(&n2(5))
+        && (1..=31).contains(&n2(8))
+        && n2(11) <= 23
+        && n2(14) <= 59
+        && n2(17) <= 59
+}
+
 /// A resolver's pinned static `args:` (#82) — the ONLY place a screens surface names an api.yaml
 /// query ARGUMENT by hand. §1 proves the resolver's `query.$ref` RESOLVES and §1b proves it resolves
 /// to a QUERY, but neither looks inside `args:`, so a typo in a pinned key (`listKey` where the query
@@ -125,10 +167,16 @@ pub(crate) fn validate(model: &Model) -> Report {
                     issues.push(err("ref-format", loc, format!("Malformed $ref '{}'.", r)));
                 } else if resolve_ref(model, &r, f).is_none()
                     && !is_implicit_identity_state_ref(model, &r, f)
+                    && !is_implicit_lifecycle_status_ref(model, &r, f)
+                    && !is_nested_event_property_ref(model, &r, f)
                 {
-                    // The identity state field is implicitly declared by the actor's own typed
-                    // `identity` ref (the stream key needs no fold entry) — see
-                    // `is_implicit_identity_state_ref`; §2d proves the declaration's shape.
+                    // Three implicit-declaration families are exempt from §1's naive walk:
+                    // the identity state field (declared by the actor's own typed `identity`
+                    // ref — the stream key needs no fold entry; §2d proves the shape), the
+                    // lifecycle-status state field (declared by the `lifecycle:` block, which
+                    // OWNS `status` — #582 answers replies serve it without redeclaring), and
+                    // a NESTED event-payload lineage whose leaf provably resolves through the
+                    // intermediate entity $refs (`…/properties/checkout/orderId`, #582).
                     issues.push(err("ref-dangling", loc, format!("$ref '{}' does not resolve.", r)));
                 }
             }
@@ -205,6 +253,8 @@ pub(crate) fn validate(model: &Model) -> Report {
     validate_lifecycles(model, &mut issues);
     validate_mailbox_addressing(model, &mut issues);
     validate_actor_state(model, &mut issues);
+    // --- 2g. Actor `answers:` blocks (PROP-20260815-142349, #582 actors half) -------------------
+    validate_actor_answers(model, &mut issues);
     // --- 2f. Reminders + declarative deletion (ADR-20260731-214500) ------------------------------
     validate_reminders_and_deletion(model, &mut issues);
     {
@@ -912,6 +962,72 @@ pub(crate) fn validate(model: &Model) -> Report {
                     }
                 };
                 check_data_shape(model, &mut issues, when_ref, when.and_then(|w| w.get("data")), &format!("{}.when", where_));
+
+                // `when.at` — the evaluation instant for clock-consuming handlers (RSO-1,
+                // DECISIONS §43): must be a Z-NORMALIZED RFC3339 instant, so the generated
+                // test's chrono parse cannot fail at runtime and no local-offset ambiguity
+                // enters the one field that exists to kill it.
+                if let Some(at) = when.and_then(|w| w.get("at")) {
+                    if !at.as_str().map(rfc3339_z_instant).unwrap_or(false) {
+                        issues.push(err(
+                            "test-when-at-not-instant",
+                            format!("{}.when.at", where_),
+                            "`when.at` must be a Z-normalized RFC3339 instant (e.g. 2026-08-14T18:00:00Z).".into(),
+                        ));
+                    }
+                }
+
+                // `when.gates` — the boolean configuration gates switched ON for this one dispatch
+                // (RSO-1 Phase 4): each entry is a `$ref` into `configuration.yaml#/keys/<KEY>`
+                // ("every reference is a $ref", ADR-20260811-014129 Decision 2 — a bare key name
+                // would be invisible to the refs walker, the #413 defect class), and the key must
+                // be `type: bool` — a non-boolean key is not a gate and `true` would assert
+                // nothing about it.
+                if let Some(gates) = when.and_then(|w| w.get("gates")) {
+                    let entries: Vec<&Value> =
+                        gates.as_sequence().map(|s| s.iter().collect()).unwrap_or_default();
+                    if entries.is_empty() {
+                        issues.push(err(
+                            "test-when-gate-not-config-ref",
+                            format!("{}.when.gates", where_),
+                            "`when.gates` must be a non-empty list of `{ $ref: 'configuration.yaml#/keys/<KEY>' }` entries (omit the list entirely for spec defaults).".into(),
+                        ));
+                    }
+                    for (i, entry) in entries.iter().enumerate() {
+                        let gate_key = entry
+                            .get("$ref")
+                            .and_then(|r| r.as_str())
+                            .and_then(|r| r.strip_prefix("configuration.yaml#/keys/"));
+                        let Some(gate_key) = gate_key else {
+                            issues.push(err(
+                                "test-when-gate-not-config-ref",
+                                format!("{}.when.gates[{}]", where_, i),
+                                "each `when.gates` entry must be `{ $ref: 'configuration.yaml#/keys/<KEY>' }` — a configuration gate, referenced as a $ref.".into(),
+                            ));
+                            continue;
+                        };
+                        let key_def = model
+                            .defs
+                            .get("configuration.yaml")
+                            .and_then(|c| c.get("keys"))
+                            .and_then(|k| k.get(gate_key));
+                        match key_def {
+                            None => issues.push(err(
+                                "test-when-gate-not-config-ref",
+                                format!("{}.when.gates[{}]", where_, i),
+                                format!("configuration key '{}' is not declared in any specs/{{scope}}/configuration.yaml fragment.", gate_key),
+                            )),
+                            Some(def) if def.get("type").and_then(|t| t.as_str()) != Some("bool") => {
+                                issues.push(err(
+                                    "test-when-gate-not-bool",
+                                    format!("{}.when.gates[{}]", where_, i),
+                                    format!("configuration key '{}' is not `type: bool` — only a boolean gate can be switched ON by a test.", gate_key),
+                                ))
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                }
 
                 let msg = ref_name(when_ref).unwrap_or_default();
                 let entry_idx = if !actor_name.is_empty() && !msg.is_empty() {

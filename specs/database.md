@@ -256,7 +256,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `status` | `RestaurantStatus` | `TEXT` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | `OrderAcceptanceMode` | `TEXT` | — |  |
 | `default_currency` | `CurrencyCode` | `TEXT` | — |  |
-| `timezone` | `TimeZone` | `TEXT` | nullable | Location timezone; falls back to the account's when null. |
+| `timezone` | `TimeZone` | `TEXT` | nullable | Location timezone. NULL means NO timezone — the account-level fallback this note used to claim has NO materialized source (View_RestaurantAccount was deleted; corrected under RSO-1, DECISIONS §43): service-window evaluation treats NULL, or a zone that does not parse while hours are declared, as HOURS_UNDECLARED, never as "closed".
+ |
 | `preparation_time_minutes` | `integer` | `INTEGER` | nullable |  |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |

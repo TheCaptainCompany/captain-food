@@ -54,7 +54,16 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
     // wall stays the `/auth/sms-hook` route, which the monolith still hosts.
     let (config, _) = crate::generated::config::Config::resolve();
     let sms_guard = Some(crate::sms_send_guard(&pool, &config));
-    let di = crate::build_graphql_di(&pool, &event_bus, &status_bus, &nudges, sms_guard);
+    let di = crate::build_graphql_di(
+        &pool,
+        &event_bus,
+        &status_bus,
+        &nudges,
+        sms_guard,
+        crate::graphql::service_clock::ServiceWindowHorizon::from_seconds(
+            config.service_window_validity_horizon_seconds,
+        ),
+    );
     let schema = crate::graphql_schema::build_schema_for_scope(
         Some(di.read),
         Some(di.write),

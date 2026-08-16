@@ -305,8 +305,12 @@ pub struct Config {
     pub uber_direct_scope: Option<String>,
     /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
     pub coopcycle_instances: Option<String>,
+    /// The Restaurant.serviceWindow.validUntil horizon (RSO-1, DECISIONS §43 sub-question iii): validUntil = min(next window transition, evaluatedAt + this horizon), and under HOURS_UNDECLARED — where no transition exists to wait for — it is evaluatedAt + horizon alone. Exists so no cache can treat a verdict as immortal: without it a restaurant declaring its hours at 18:50 on a Friday would keep rendering a blank badge in every warm cache at the hour it matters. Seconds; the 900 default trades staleness against re-evaluation load at Friday-peak list fan-out.
+    pub service_window_validity_horizon_seconds: i64,
     /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
     pub run_sirene_worker: bool,
+    /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
+    pub enforce_service_hours_guard: bool,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
     /// Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so "is production actually live?" is answerable.
@@ -474,9 +478,14 @@ impl Config {
         let uber_direct_token_url = raw("UBER_DIRECT_TOKEN_URL");
         let uber_direct_scope = raw("UBER_DIRECT_SCOPE");
         let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
+        let service_window_validity_horizon_seconds = raw("SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let run_sirene_worker = raw("RUN_SIRENE_WORKER")
             .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
+            .unwrap_or(false);
+        let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
+            .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
+            .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
             .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         let stripe_secret_key = raw("STRIPE_SECRET_KEY");
@@ -637,7 +646,9 @@ impl Config {
                 uber_direct_token_url,
                 uber_direct_scope,
                 coopcycle_instances,
+                service_window_validity_horizon_seconds,
                 run_sirene_worker,
+                enforce_service_hours_guard,
                 order_retention_window_days,
                 stripe_secret_key,
                 stripe_webhook_secret,
@@ -727,7 +738,9 @@ impl Config {
         out.push_str(&format!("  UBER_DIRECT_TOKEN_URL      = {}\n", self.uber_direct_token_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  UBER_DIRECT_SCOPE          = {}\n", self.uber_direct_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
+        out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
         out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
@@ -737,7 +750,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 69;
+pub const KEY_COUNT: usize = 71;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -806,7 +819,9 @@ pub const DECLARED_KEYS: &[&str] = &[
     "UBER_DIRECT_TOKEN_URL",
     "UBER_DIRECT_SCOPE",
     "COOPCYCLE_INSTANCES",
+    "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
     "RUN_SIRENE_WORKER",
+    "ENFORCE_SERVICE_HOURS_GUARD",
     "ORDER_RETENTION_WINDOW_DAYS",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",

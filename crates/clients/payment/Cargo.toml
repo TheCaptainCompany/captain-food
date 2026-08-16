@@ -23,6 +23,11 @@ domain = { path = "../../domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+# Only an `answers:` actor gets `ask` (PROP-20260815-142349 s7, #582): its LOCAL adapter
+# reads the instance's stream through the application EventStore PORT (outer -> inner is the
+# legal direction; actor_client already sits above application in the graph). No transport --
+# the actor declares no topology key, and its absence MEANS local (D6).
+application = { path = "../../application" }
 
 # D6 lint floor (PROP-20260802-130500, #302). A client crate is a BOUNDARY crate -- it exists to
 # be the door -- so it restates the workspace baseline and additionally denies `unreachable_pub`.

@@ -76,6 +76,10 @@ fn main() {
     // (derived from `--specs`) because proposals are markdown, not part of the YAML model.
     let proposals = load_proposal_files(&repo_root(&specs));
     issues.extend(validate_proposal_hygiene(&proposals));
+    // ─── §13b — markdown table integrity (#572): the decision REGISTER joins the corpus here, on
+    // the same gate. GFM pads a short row and drops the excess of a long one without a murmur, so
+    // one stray `|` silently reshapes a register row.
+    issues.extend(validate_markdown_tables(&load_decision_table_files(&repo_root(&specs))));
     // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
     // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
     // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads
@@ -467,7 +471,8 @@ fn main() {
         ("errors.rs", emit_domain_errors(&model)),
         ("lifecycles.rs", emit_domain_lifecycles(&model)),
         ("states.rs", emit_domain_states(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\npub mod lifecycles;\npub mod states;\n".to_string()),
+        ("answers.rs", emit_domain_answers(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\npub mod lifecycles;\npub mod states;\npub mod answers;\n".to_string()),
     ] {
         let path = gen_dir.join(name);
         if let Err(e) = fs::write(&path, content) {

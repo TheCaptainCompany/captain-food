@@ -2,6 +2,395 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
+> the `answers:` DSL from
+> [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
+> lands for the two settlement actors — declared `state:` blocks on `Order`/`Payment`
+> (declaration-only: both carry a `lifecycle:`, so states.rs generation stays deferred to the
+> states slice 2; only the reply-SERVED fields — Order 1/6, Payment 3/5 — are compiler-carried,
+> by the reply-construction tests in the hand fold modules; the rest is unverified transcription
+> until slice 2), `Order.paymentReference` + `Payment.settlementView` answers, the `ans-*`
+> validator family (red-first), the implicit lifecycle-status state ref and NESTED event-payload
+> lineage (`checkout/orderId` resolves through the entity ref), generated
+> `<Actor><Op>Request/Reply` + sealed `ask` + `AskOutcome` local adapter over the EventStore
+> port. The PM half (`ask:`/`branch:`/`from_ask` steps, `CapturePayment` leg, the reminder
+> watchdog) is fenced behind
+> [PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566).
+
+> ✅ **2026-08-15 — PM DECISION-GRAMMAR PROPOSAL APPROVED** (founder, verbatim: *"I'm ok for the
+> dsl for process manager"*):
+> [PROP-20260815-142349 "Actor `answers:` block + the PM `ask:` step — typed request/reply for actor queries; the transport stays parked"](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
+> is Approved after three founder-directed design rounds; DECISIONS §42 PMW-1 closes as (a) +
+> the additive `ask:`/`branch:` grammar, PMW-3 (the transport) stays parked. Build tracked in
+> [#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582),
+> sequenced strictly behind
+> [PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566).
+
+> 🧾 **2026-08-15 — THE DECISION REGISTER RENDERS AS WRITTEN AGAIN, AND §13b IS AN ERROR**
+> ([#577 "Repair the seven register-table rows §13b found, then promote the gate to ERROR"](https://github.com/TheCaptainCompany/captain-food/issues/577)):
+> the seven broken table rows (SPEC-2, LOSS-1, IDOR-1, ENF-1, CAP-READY, CAP-READY-LEGAL in
+> `docs/proposals/DECISIONS.md`; one evidence row in PROP-20260811-090000) are repaired
+> byte-identically (geometry only, zero words moved), and BOTH §13b markdown-table rules
+> (`markdown-table-row-cell-count` + `markdown-table-delimiter-cell-count`) are promoted from
+> warning to ERROR — a reshaped register row now fails `make validate` instead of riding the
+> warning ratchet (baseline entry removed, 46 → 39).
+
+> ⚖️ **2026-08-15 — THE TEAM MERGES ITS OWN WORK; NO PR WAITS ON FOUNDER REVIEW** (founder,
+> verbatim: *"Never wait my review you are responsible of your work."*): the "human" in
+> `HOLD: human` is the TEAM's independent reviewer pass, never the founder —
+> [ADR-20260815-134655](adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md);
+> first application [PR #576 "Opening-hours guard: three-valued verdict, undeclared hours accept (#180 / RSO-1)"](https://github.com/TheCaptainCompany/captain-food/pull/576),
+> MERGED after independent review PASS + green CI (the RSO-1 banner below predates the merge).
+
+> 🔶 **2026-08-15 — RSO-1 IS CODE-COMPLETE ON THE BRANCH (PHASES 1–4):
+> [#180 "Opening hours are stored, displayed, and never enforced — a customer can order at 04:00"](https://github.com/TheCaptainCompany/captain-food/issues/180),
+> branch `180-rso1-opening-hours-guard`, draft [PR #576](https://github.com/TheCaptainCompany/captain-food/pull/576) — NOT on `main`; merge posture `HOLD: human` (ADR-20260815-115220: stored event shape + money path).**
+> **Phase 1 (specs)**: the whole DECISIONS §43 surface — `ServiceWindowVerdict` kernel scalar,
+> non-null `Restaurant.serviceWindow`, `OutsideServiceHours` with next-slot + evidence context, the
+> guard step in `processmanager.yaml` strictly before the payment call, five optional-forever
+> evidence fields on `CheckoutSnapshot`, gate `ENFORCE_SERVICE_HOURS_GUARD` (default OFF = shadow),
+> `SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS`, 3 rules, behaviour tests, and the tests-DSL `when.at`
+> instant. **Phase 2 (domain)**: `domain::service_window::serving_at` — ONE pure total DST-safe
+> evaluation shared by badge and guard (overnight slots, fold-back, inclusive `lastOrderAt`,
+> cutoff=min degradation). **Phase 3 (emitter+server)**: clock-taking `Restaurant::at` (a clock-less
+> Restaurant is unspellable), `service_clock` (per-request `RequestNow`, config horizon),
+> `place_order(when_at)` freezing the verdict evidence onto the snapshot even in shadow mode.
+> **Phase 4 (the finish)**: the REFUSING guard in `place_order` — OUTSIDE_HOURS only, gate ON only,
+> after `serving_at` and before any external effect, evidence-carrying rejection off the folded
+> RestaurantState; the gate threads as a PARAMETER from `CommandDeps` (composition root / env in
+> standalone), never a global read; both edges mutation-tested via the new tests.yaml `when.gates`
+> DSL (validator `test-when-gate-*` + emitter `BT_GATE_CONSUMING`, red-first); the `command.validate`
+> span is now CONSTRUCTED at both dispatch seams (pm_delivery prepare + generated router) recording
+> `validation_status` + `service_window_verdict` off the run's own evidence, and the codegen
+> cross-check now demands a PRODUCTION call site per required span — which surfaced `cart.read` and
+> `pricing.compute` as pre-existing dead constructors (held in an explicit
+> `KNOWN_UNINVOKED_REQUIRED_SPANS` exemption; follow-up owed). Subscriptions re-evaluate the window
+> PER PUSHED UPDATE through the blessed `service_clock::evaluate_now` symbol, proven by a
+> straddling-pushes behaviour test. The refusal-message toast surfacing stays deliberately unbuilt
+> (acceptance-first: PlaceOrder rejections land post-enqueue on the operation status surface) — a
+> product call for the architect, not a Phase 4 omission.
+
+> ⚖️ **2026-08-15 — MERGE POSTURE RULED: AUTO-MERGE-ON-GREEN IS THE DEFAULT; `HOLD: human` FOR THE
+> NAMED CLASS** (stored event shapes/fold semantics/migrations, payments/funds custody/erasure,
+> legal surfaces, non-additive GraphQL changes, mailbox/lease/fencing runtime, the merge/CI
+> machinery). Founder delegation 2026-08-15 (*"you can consider that you are completely autonomous
+> on that"*), whole roster consulted per ADR-20260812-143619 (11/14 for risk-tiering, farley's
+> dissent recorded):
+> [ADR-20260815-115220](adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md).
+> `.claude/agents/executor.md` step 7 and CLAUDE.md's issue-workflow bullet aligned in the same
+> commit — the two documents no longer contradict each other.
+
+> 🧱 **2026-08-15 — THE DECISION REGISTER'S TABLES ARE NOW GATED, AND THE GATE FOUND SEVEN BROKEN
+> ROWS ON ARRIVAL**
+> ([#572 "Validator gate: the decision register's tables have no integrity check — a stray `\|` silently reshapes a row"](https://github.com/TheCaptainCompany/captain-food/issues/572)).
+> Validator **§13b** (`markdown-table-row-cell-count`) checks every markdown table row in
+> `docs/proposals/DECISIONS.md` **and** `PROP-*.md` against its header's cell count. The register was
+> the one artifact the whole decision process reads and the only one `load_proposal_files` never
+> globbed. **Cell counting follows GFM exactly, and the counter-intuitive half is load-bearing: a
+> pipe inside a code span DOES open a cell** — only a backslash escape (`\|`) makes it inert, and it
+> works *inside* backticks. Verified against two independent renderers rather than assumed; modelling
+> code spans as pipe-neutral is the intuitive choice and it makes the rule blind to the exact defect
+> the issue was filed for. **On arrival the rule found 7 real breaks** — six register rows supplying 3
+> cells to a 4-column header (the trailing `Recommendation / status` column renders blank: `SPEC-2`,
+> `LOSS-1`, `IDOR-1`, `ENF-1`, `CAP-READY`, `CAP-READY-LEGAL`) and one proposal row whose tail GFM
+> **drops outright** (a raw `|` in `filter(|g| g.scope == scope)`). They are **reported, not repaired**:
+> which column the missing cell belongs to is a content judgement for the row's author. So §13b ships
+> at **WARNING**, which the §17 ratchet already makes blocking — an eighth break fails CI — and
+> promotion to ERROR is a one-liner once the seven are fixed. **Known breaks are pinned by ROW
+> IDENTITY (`SPEC-2`, `CAP-READY`, …), never by line number**: the register gains rows daily, and an
+> absolute `file:line` list would go red on any unrelated insertion above a known break — a gate that
+> fails for reasons unrelated to what it checks is a gate people learn to ignore.
+
+> ✅ **2026-08-15 — RSO-1 IS NOW DISPATCHABLE: ITS THREE BLOCKING SUB-QUESTIONS ARE ANSWERED — AND
+> THREE OF THE ANSWERS SAY THE ROW'S OWN TEXT WAS WRONG** (docs-only, straight to `main`; still no
+> code). Recorded in [DECISIONS §43](proposals/DECISIONS.md) RSO-1, fourth amendment; every
+> `file:line` re-verified against `main` before writing. **(i) The guard ACCEPTS on
+> `HOURS_UNDECLARED`; `OUTSIDE_HOURS` is the only refusing verdict.** This agrees with `evans`'s lean
+> but **replaces its reasoning**: the Sirene/Google-seeded population *never reaches the guard*
+> (`RestaurantRegistered` births DRAFT, `crates/domain/src/restaurant.rs:14,197`; `place_order`
+> rejects `RestaurantNotActive` first, `crates/application/src/commands.rs:2398`), so the branch
+> governs **deliberately activated** restaurants — and **100% of those are `HOURS_UNDECLARED`, because
+> no screen can set hours** (`specs/screens/restaurant_backoffice.yaml:484` says so verbatim;
+> `specs/stories.yaml:128-140` has no hours step; every creation path writes `opening_hours: vec![]`).
+> **Production is 1 of 1**: `tools/smoke/prod-smoke.sh:310-315` registers with a timezone and no
+> `openingHours`, so **"refuse" would break the L4 smoke gate**. The decisive argument is **which
+> failure announces itself** — accept produces a complaint we can act on, refuse produces silence, and
+> a zero-order graph is indistinguishable from *"Tours has no demand"*, corrupting the exact signal V0
+> exists to measure. **Money correction**: capture is manual
+> (`crates/adapters/stripe/src/outbound.rs:245`), so at 22:40 the card is **held, not charged** — the
+> real cost is that **nothing releases the hold**, because the acceptance-timeout auto-cancel is
+> declared and unbuilt (`crates/application/src/generated/process_managers.rs:915`) and nobody is
+> notified (gap **G8** below). **Building that timeout removes most of the accept branch's cost
+> without refusing anyone — same effort, strictly more value.** **(ii) The shared function lives in
+> `crates/domain/src/` beside `restaurant.rs`**; the `crates/domains/common/` option is struck as
+> **"does not compile"** — `OpeningHoursSlot` is generated into `crates/domains/network/`, which
+> **depends on** `domain-common`, so the kernel naming it is a **cycle** no emitter rule can dissolve.
+> **(iii) `serviceWindow` is a FIELD on `Restaurant`**, with `closesAt` renamed **`lastOrderAt`** (with
+> closing at `min(slot.to, cutoff)`, "closesAt" renders as *"open until"* and is wrong by the cutoff
+> margin, on the money path) and a new **`validUntil`**, non-null in all three states. **Three
+> corrections to the row's own recorded text**: **(1)** amendment (1) placed `ServiceWindowVerdict` in
+> `specs/network/scalars.yaml` while amendment (6) puts the verdict on `CheckoutSnapshot` in
+> `specs/common/entities.yaml:167` — `scope-kernel-purity`
+> (`tools/codegen-rs/src/validate/scopes.rs:358`) makes that a **hard validator error**, so the row
+> **could not have passed `make validate`**; both scalars belong in `specs/common/scalars.yaml`.
+> **(2)** Correction 5's premise is **false** — the renderer computes nothing:
+> `crates/web/src/renderer.rs:346-349` folds `OpeningHoursRow` into the `InfoRow` arm and reads
+> `label`/`value`, which that node does not carry (`crates/web/src/generated/screens.rs:423`), so it
+> renders an **empty div**. RSO-1 **implements** the row for the first time. **(3)** Correction 4's
+> emitter claim was wrong in both directions — a hand-written file under a declared scope **survives**
+> regeneration; `src/lib.rs` and `Cargo.toml` are what get clobbered. **The generalizable lesson: in a
+> generated crate the fragile artifact is the module INDEX, not the module — regeneration erases the
+> `mod` declaration, leaves the file on disk, and produces NO compile error.** **(iv) NEW — RSO-1 is
+> an EMITTER change, not spec-only**: the read-side call site is generated
+> (`crates/server/src/graphql/generated/types.rs:1070`, `impl From<RestaurantRow> for Restaurant`) and
+> **has no clock**, so it cannot compute a time-varying field at all; the fix is two hardcoded literals
+> in `tools/codegen-rs/src/emit/server_graphql.rs:293,654`. It also forces a **net-new `chrono-tz`
+> workspace dependency** (zero hits today), which makes a **DST behaviour test mandatory** — the
+> boundary is wrong for one hour on the last Sunday of October, a Saturday night. Peak is clear: **no
+> N+1 is possible** (`Restaurant` is a `SimpleObject`, zero `#[ComplexObject]` impls, list clamped to
+> 200). **Three new rows opened, all explicitly OUT of RSO-1's scope**: **DSC-1** — **seven** declared
+> discovery filters (`tags`, `serviceType`, `openNow`, `city`, `priceRange`, `list`, `listingStatus`)
+> are emitted onto the input type and then **silently dropped** by the resolver
+> (`crates/server/src/graphql/generated/query.rs:250` builds only `search`/`orderableOnly`/`limit`/
+> `offset`), so a client filters and gets unfiltered results with no error — already public;
+> **PAN-1** — a latent `.expect` panic on the public discovery list
+> (`crates/server/src/graphql/generated/types.rs:1093`) one line above an `unwrap_or_default()`, which
+> the RSO-1 implementation must not duplicate; **HRS-1** — the **third** meaning of `[]` (hours present
+> but unparseable) is a **defect, not a state**, and nothing counts it, plus the owed
+> `service_window_verdict_total{verdict}` contract without which the accept branch is invisible and
+> RSO-1's revisit condition is **permanently unmeetable**. **Nothing was applied**: `docs/**` only — no
+> `specs/**`, no `crates/**`.
+
+> 🛑 **2026-08-15 — RSO-1 CANNOT BE BUILT AS RECORDED: A BOOLEAN "IS IT OPEN?" WOULD TAKE LIVE
+> RESTAURANTS OFFLINE** (docs-only, straight to `main`; recorded BEFORE any code was dispatched)
+> — **superseded in part 2026-08-15 by the banner above**: its sub-questions are answered, its
+> `specs/network/scalars.yaml` placement and its correction 4 and 5 are corrected there.
+> `evans`, in mob briefing, found a **blocker**, **five design corrections**, a **factual error in
+> the row's own text**, and **one new row** — all in [DECISIONS §43](proposals/DECISIONS.md).
+> **The blocker**: `opening_hours` is a `Vec` updated via `replaced_vec`
+> (`crates/domain/src/restaurant.rs:83,95`, whose doc says *"an omitted array and an explicitly-empty
+> one arrive identically"*), and the read side does `unwrap_or_default()` on a JSONB parse failure
+> (`crates/server/src/graphql/generated/types.rs:1095`) — so `[]` means **three indistinguishable
+> things**: hours never declared (every Sirene/Google-seeded prospect), hours cleared, hours
+> unparseable. A boolean `f(hours, tz, now)` maps all three to **closed forever**, and `orderable`
+> reads no hours today — so RSO-1 as recorded **would ship a NEW way to take live restaurants
+> offline, as a safety fix**. Recorded fix: a **three-valued verdict** `OPEN / OUTSIDE_HOURS /
+> HOURS_UNDECLARED`, with the guard's behaviour on the third value an **explicit recorded decision,
+> never a default** (`evans`'s lean, recorded as a lean: accept — *"a restaurant nobody can order
+> from"* is the sibling failure of *"a paid order nobody is told about"*). **Two corrections dissent
+> from what the row recorded**, and are recorded as dissents: the error is **`OutsideServiceHours`**,
+> not `RestaurantClosed` (which collides with the **permanent** `RestaurantMarkedClosed`,
+> `specs/network/events.yaml:358`, and parallels the existing `OutsideDeliveryArea` guard); and hours
+> are **NOT folded into `orderable`**, because a time-varying boolean carried alongside `updatedAt`
+> (`specs/network/api.yaml:44`) reads "3 days ago" for a value that is wrong in 20 minutes — a
+> self-describing `serviceWindow { state, opensAt, closesAt, evaluatedAt }` instead. Also recorded:
+> **`crates/domains/common/` is GENERATED**, so the "pure function in `domain-common`" cannot land
+> there as written (two legal shapes, owner `vernon`/architect — the requirement is **one artifact
+> imported by both call sites**); the verdict is **already computed a second time in the renderer**
+> (`specs/screens/restaurant_frontoffice.yaml:323-325`) and must be **replaced**, not duplicated;
+> the domain term is **service hours / `cutoff_time`**, which HubRise exposes
+> (`specs/integrations/hubrise.md:21`) and the ACL **never mapped**, and the closing-margin must NOT
+> be derived from `preparationTimeMinutes` (an ETA duration, not a deadline); and the frozen
+> `CheckoutSnapshot` verdict records **the window and the inputs**, not a bare boolean, because
+> *"a stored `wasOpen: true` is unfalsifiable six months later; a stored window is evidence"*.
+> **Factual correction to an already-landed row**: §43 RSO-1 said `RestaurantState` holds `timezone`
+> *"but no opening hours"* — **false**, it holds them at `restaurant.rs:83`; the error came from a
+> previous executor's report and was relayed unverified. **New row `BSY-1`** (AMBER): `BUSY`
+> (`specs/network/scalars.yaml:156`) is a word in the ubiquitous language that **changes nothing** —
+> `orderable` ignores it, no guard reads it, no screen renders it, no rule names it, and its only
+> non-plumbing appearances are tests that assert it was *stored*. Domain answer: BUSY should mean **a
+> longer ETA**, and the ETA is the product. **Explicitly out of RSO-1's scope.** **Nothing was
+> applied**: `docs/**` only — no `specs/**`, no `crates/**`.
+
+> 🛑 **2026-08-15 — RSO-2 CANNOT CLOSE OVERSELL, AND IT WAS ABOUT TO BE BUILT AS IF IT COULD**
+> (docs-only, straight to `main`; recorded BEFORE any code was dispatched).
+> [DECISIONS §43](proposals/DECISIONS.md) is amended and gains four rows. `young` and `vernon`,
+> asked independently, both disproved the implicit premise of the checkout stock re-check — Young's
+> words are the record: *"it narrows the window and creates the appearance of a guarantee that the
+> write model cannot deliver."* **The disproof**: `OfferStockUpdated` is emitted by `UpdateOfferStock`
+> and the inbound HubRise sync ONLY (`specs/catalog/actors.yaml:76-77,87-89`; `commands.rs:3091-3123`)
+> — **nothing decrements stock when an order is placed**, so a re-check is a race with **no writer at
+> all**: two customers each read quantity 1, both are accepted, the count never moves. Reading it
+> fresher (projection, fold or snapshot) changes nothing. **RSO-2 is narrowed, not cancelled** — it
+> still catches the single-customer staleness case (an item that left the catalog or was flipped
+> `UNAVAILABLE` between add-to-cart and pay), which today is caught by **nothing**, and it now carries
+> a wording fence so its rule text cannot claim a stock guarantee. Oversell moves to **STK-1** (AMBER):
+> closing it needs an **arbiter, not a read** — a reservation-shaped conditional
+> `UPDATE ... WHERE remaining >= qty`, whose justification is already written at
+> `specs/database/tables/reservations.yaml:1-22` — and it hits an ordering wall, since the Stripe
+> intent is created in `prepare`, **before** `pool.begin()` (`crates/actor_runtime/src/completion.rs:69,71`),
+> so the claim must be taken in `prepare` with release-on-decline/timeout becoming `PaymentProcessRow`
+> state and PM legs. **Accept-and-compensate (the restaurant calls and swaps the dish) is recorded as a
+> legitimate V0 answer and deliberately NOT pre-decided.** **RSO-1 amended twice**: the guard *computes
+> the open/paused verdict and throws it away* — `CheckoutSnapshot` (`commands.rs:2526-2541`) carries no
+> record that the restaurant was ACTIVE and open, so a restaurant disputing a 22:40 order asks a
+> question the log cannot answer; and **`isOpen` is a pure function, not state** —
+> `f(opening_hours, timezone, now)`, so the shape is a `domain-common` function with the clock injected,
+> called identically by the storefront badge and the checkout guard, never a projection column or
+> aggregate state. **Three new findings, each its own row**: **CHK-1** — `commands.rs:2392`'s
+> *"authoritative, race-free"* is **false** (the fold appends to the **Payment** stream with no
+> restaurant `expected_version` on `EventStore::append`, `ports.rs:54-60`), which reframes a decision
+> already taken: **fold-vs-projection is a latency and cost decision, not a correctness class**;
+> **CAT-1** (AMBER) — `RestaurantState` holds **no catalog id**, so `restaurantId → catalogId` is a
+> `ORDER BY created_at DESC LIMIT 1` set query (`persistence/catalog.rs:27-31`) with a **newest-wins
+> tiebreak no aggregate ever decided**, fixed by the restaurant **appointing** its live catalog;
+> **FEN-1** — `expectedTotal` is optional (`commands.rs:2460`), and *"on the money path an optional
+> fence is not a fence"*. **Framing correction landed on
+> [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md)**
+> as a dated scope note: `place_order` is a **command handler** (`commands.rs:2380`), **not** a PM leg
+> (`process_managers/place_order.rs:13` says so; the PM legs are `on_payment_authorized` /
+> `on_payment_failed`), so the restaurant fold, cart fold and catalog read on the checkout path are
+> **not governed by that ADR** — the rule is unchanged, its reach was being overstated in discussion,
+> including by the coordinator. **Every code change above is FLAGGED, not made**: no `specs/**`, no
+> `crates/**`, no gate movement.
+
+> 🧹 **2026-08-15 — the autonomous-run brief no longer tells the run that `specs/**` is
+> untouchable** (docs-only, straight to `main`). `docs/claude/autonomous-run.md`'s "rules that bind
+> the run" still carried the pre-2026-08-10 freeze — *"prepare spec diffs as proposal documents;
+> only explicit customer approval applies them"* — which
+> [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)
+> **lifted, not narrowed**, by founder directive: tonight's scheduled run would have refused work
+> the founder explicitly directed. The bullet now states the live rule (CLAUDE.md's three questions
+> + the one-sentence `docs/SPEC-LOG.md` row in the SAME commit), and the same retired claim is
+> removed from the ask-the-founder list ("spec-diff approvals" → *a spec change that reverses one of
+> his own decisions*). Same pass: the **standing objective**, frozen at 2026-08-08 and naming
+> cutover issues the work has moved past, is re-pointed at the six-clause acceptance criterion
+> ([ADR-20260813-191111](adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+> as amended 2026-08-14) with its ordered tail **read off THIS file** rather than re-pinned there —
+> the pin is what went stale. **Reported, not fixed** (merely old; no ADR contradicted): the reading
+> list still points the run at `DECISIONS.md` §22 for "what was just decided" (latest is §43); the
+> commit-trailer bullet pins a model name no commit in this repo uses; the file calls the founder
+> "the customer" throughout while its own opening quote says "founder"
+> ([ADR-20260812-143619](adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)
+> swept the living operating docs); and its "ready + auto-merge as one step" line sits against
+> `.claude/agents/executor.md`'s PR-only default. No `specs/**`, no code, no gate movement.
+
+> 🧠 **2026-08-15 — THE ARCHITECT IS SPLIT INTO THREE NAMED DOCTRINE LENSES: `young`, `vernon`,
+> `evans`** (founder directive, *"Split the architect into Greg Vaughn and eric"*;
+> [ADR-20260815-032912](adr/ADR-20260815-032912-split-the-architect-into-three-named-doctrine-lenses.md),
+> amending [ADR-20260808-154005](adr/ADR-20260808-154005-agents-channel-named-experts-published-work.md)).
+> `.claude/agents/architect.md` already *declared* it channelled Young, Vernon and Evans, but under a
+> footnote heading beneath an audit/file/propose/dispatch charter — so its output read as generic
+> architecture opinion until a coordinator re-briefed it. **`architect` survives unchanged as the
+> OPERATIONS role** (audit, issue filing, proposals, backlog ranking under ADR-20260810-215503, and
+> **naming the next chunk** — the autonomous loop, CLAUDE.md and the `architecture-review` skill all
+> depend on it); its "Channels" section becomes a routing table into three new **read-only** lenses
+> that advise and are cited: **`young`** (which side of the read/write wall, CQRS ≠ eventual
+> consistency, read models and snapshots as disposable rebuildable folds, upcasting for STORED events
+> vs additive-only + tolerant reader for live replies, set-based validation), **`vernon`** (aggregate
+> size, by-identity references, one aggregate per transaction, PM process state, the actor model and
+> **Ask vs Tell** — PMW-3 is his row) and **`evans`** (ubiquitous language as a modelling defect not a
+> naming nit — `processmanager.yaml:30-43` vs the code is the live instance — context maps and their
+> patterns, ACLs, core-vs-generic distillation). The three never edit `specs/**`, never claim work and
+> **never rank the backlog**; they report disagreement AS disagreement rather than blending. Every
+> other channelled lens (Kleppmann, Byron, Majors, Norman/Patton/Ive, Meyer/Scholz, Beck, Holub,
+> Farley) is untouched. Docs/config only — no `specs/**`, no code, no gate movement.
+
+> ⚖️ **2026-08-15 — OPENING HOURS AND STOCK ARE CHECKED SERVER-SIDE ON PLACE ORDER; A BIG CATALOG
+> SNAPSHOTS EVERY 100 EVENTS** (founder directive;
+> [ADR-20260815-032807](adr/ADR-20260815-032807-opening-hours-and-stock-are-checked-server-side-and-a-big-catalog-snapshots-every-100-events.md),
+> [DECISIONS §43](proposals/DECISIONS.md) **RSO-1/RSO-2/SNAP-1/BUS-1**). **All three parts verified
+> against `main`; all three are REAL GAPS, none is already done.** **(a) The concept of "open right
+> now" does not exist anywhere** — `orderable` (`specs/network/api.yaml:21`) is
+> `ACTIVE_PARTNER + ACTIVE + acceptance ≠ PAUSED` with **no hours term**, and the PlaceOrder guard
+> chain (`specs/ordering/processmanager.yaml:40-49`) has **no closed-hours guard**;
+> `RestaurantMarkedClosed` is PERMANENT closure → INACTIVE, not "closed tonight". So a kitchen that
+> shut at 22:00 renders `orderable: true` at 22:40 **and the server accepts the order**. The raw
+> material (`opening_hours` + `timezone`) is already projected and already on the api type.
+> **(b) The checkout orderability re-check is a TODO that was never done** —
+> `commands.rs:2450-2452` says so verbatim; `require_orderable_line` runs on `add_cart_line` ONLY.
+> Checkout's only protection is fail-closed *pricing*, so a line still in the catalog but flipped
+> `UNAVAILABLE` or out of stock **prices fine and is accepted**. Its existing test is an **any-of over
+> three codes** that passes on `OfferNotFound` alone — `require_stock_covers` could be deleted with a
+> green suite, so it splits into three when this lands. **(c) There is NO event-sourcing snapshot
+> mechanism in the tree** (false friend: `pricing.rs:129`'s `CatalogSnapshot` is a read-side pricing
+> helper). Catalog is the right first target and PMW-2 already named it. **Policy adopted verbatim:
+> snapshot every 100 events, actor load < 5 s** — but *where a snapshot lives*, how it meets
+> **upcasting** (disposable and rebuildable, never authoritative — a version mismatch means throw it
+> away, never migrate it) and **GDPR erasure** (a snapshot is a SECOND COPY; deleting the stream and
+> leaving it erases nothing) is a genuine option space = **SNAP-1, AMBER**. **Found incidentally and
+> filed loudly — BUS-1**: `operationStatusChanged` is a declared product subscription riding a
+> **process-local `tokio::broadcast` with no serde**; post-split the subgraph bins build **fresh empty
+> buses** and the gateway **refuses the WS handshake** (`501`), so the client polls 30 × 1 s — a poll
+> that is the **PRIMARY** transport, with no declared degraded mode and no detected path back, i.e.
+> ADR-20260810-231300 violated in shipped code. The screen reference is on the **CUSTOMER checkout**
+> action, so the person eating it is the customer staring at a spinner **after paying**. **Nothing
+> built; the only `specs/**` change in this commit is the `services.yaml` header below.**
+
+> 📝 **2026-08-15 — `specs/services.yaml`'s "V0: one deployable" line now names its destination**
+> (SPEC-LOG row, Tier 0). The header said *"V0: every service is `binding: local`, `expose: false` —
+> one deployable, zero internal HTTP"* in SOURCE DSL with no "then what" — factually stale (the bin
+> topology exists in `crates/bins/`) and the sentence a reader reasonably turns into *"the product is
+> a monolith"*. It now states that a binding describes how the **domain** reaches one capability (not
+> how many processes serve the product), that a capability moves by flipping **its own key** with
+> `SERVICE_<NAME>_URL` as an address book, and that this is a topology change rather than a rewrite
+> **because the generated call types derive serde unconditionally while the binding is local**.
+> Modelled on `specs/architecture/c4-l2.yaml:98-99`, which already does this correctly.
+
+> ⚖️ **2026-08-15 — AMENDED: [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md)
+> was WRONG on its central claim and now carries a `Correction (2026-08-15)` section.** The rule
+> itself is unchanged and still Accepted; what was wrong is the framing of the adopted mechanism.
+> The ADR adopted reading (i) — the PM folds the aggregate's stream through the `EventStore` port —
+> on the unstated theory that **the port is the final vision and the adapter behind it is
+> deployment**. It is not: `load(stream_name) -> (Vec<DomainEvent>, i64)` (`ports.rs:65`) is a
+> **STORAGE** port, and its remote form is *"the PM pod talks to the write database"*, not a service
+> call. **So (i) is a DIFFERENT DESTINATION, not a step toward (ii)** — adopting it permanently
+> chooses **shared-database coupling** between independently-deployed pods, which
+> ADR-20260808-235113 requires be named rather than glossed. It also **does not deliver the founder's
+> own premise**: `ActivationCache` is process-local and lane-tagged, so a PM in another pod re-folds
+> on **every** settlement leg — (i) is *slower* than what he asked for, until PMW-2 lands. **The
+> final-vision form exists one file over**: `specs/services.yaml:16-28`'s spec-owned
+> `binding: local | http` + serde derived **unconditionally regardless of binding**
+> (`generated/services.rs:48-60`) ⇒ applied to actors, an `answers:` block with a spec-owned
+> `binding:`, always-serde replies, a typed `ask` on the sealed per-actor client, and a codegen
+> round-trip test per reply type. Then *"put in place the gRPC transport"* is one spec key; **today
+> it is not — zero `tonic`/`prost`/`.proto` in the tree**. **Two things wire-shaping does NOT fix**:
+> `SettlementHooks` threads cross-call state through `Mutex<Option<..>>` + `Mutex<bool>` (no wire
+> form at all — it must become an explicit value first), and the fencing/ordering hazard is
+> independent of serialization (PMW-3's `read:`+`call:` rule still stands). **Six reply shapes carry
+> no serde today** (`HookOutcome<T>` — whose `Skip(String)` is prose; the five PM read structs, which
+> ARE the query-reply shapes; `DomainError`, two of three arms `String`; the `Actor` envelope;
+> `AppendedEvent`; `OperationUpdate`) — **but every command and event already round-trips serde on
+> every call**, so the missing half is REPLIES, not the codebase. **Versioning differs by reading**:
+> stored events get Young's upcasting; a query reply gets the mirror rule — additive-only producer,
+> tolerant reader, and a breaking change is a **new operation name**.
+
+> ⚖️ **2026-08-15 — A PROCESS MANAGER IS A WRITE-SIDE COMPONENT AND NEVER READS THE READ SIDE**
+> (founder directive; [ADR-20260815-030206](adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md),
+> [DECISIONS §42](proposals/DECISIONS.md) **PMW-1/PMW-2/PMW-3**, plus option **(e)** annotated onto
+> **STO-9** in §32). **Rule DECIDED, nothing built, no `specs/**` edit** — this is a record-only
+> change. The enforceable form is narrower than the sentence and the narrowing is the point: *a PM
+> never reads a projection to learn a fact about an aggregate it can address by identity*. **Two
+> carve-outs**: operator-authored referentials (`DispatchStrategyRepository`'s three tables) are
+> configuration, not folds; and set-shaped reads have no actor to ask (`open_by_session` — there is
+> **no `Session` aggregate**; `price_cart` walks a catalog tree). **Only ONE reading of "ask the
+> actor" is adopted** — folding the aggregate's own stream in-process, already how
+> `place_order.rs:47` and `delivery_dispatch.rs:126` work. A **query message over a transport** is
+> NOT adopted (PMW-3): a query carries no `message_id`/`position`, so there is nowhere to put the
+> lease fence; head-of-line puts a Stripe capture behind whatever the actor is doing; and lanes are
+> claimed by a **lease race**, so there is no actor directory to route to. **The accounting is one
+> read database of three, not a collapse**: `read_order`'s `captain_write` readers are ALL PM legs,
+> so **STO-9 closes**; `read_common`'s nine and `read_catalog`'s two are **aggregate command
+> handlers**, so **STO-7 and STO-8 are untouched**. **"Ask the Order actor" cannot answer the
+> settlement guard alone** — neither `payment_intent_id` nor `payment_status` is on `OrderState`;
+> `PaymentState` is the authority, and the cheapest closure is folding `payment_intent_id` onto
+> `OrderState` from the `OrderPlaced` the aggregate already owns (**no event migration, one fold
+> field**). **Two things it does NOT do, said out loud**: it does not make settlement transactional
+> (`Payment-{intent}` is a different stream on no ordering relation to `Order-{id}` — the window
+> shrinks from projector-lane seconds to microseconds; Stripe idempotency + the AUTHORIZED guard
+> stay the protection), and *"the code will be simpler"* is **false on the money PMs' production
+> lines** (1 read → 2 folds, +1 error arm) — it is true on the dependency graph, on the test bed
+> (−4 fakes, ≈−375 lines, incl. a **divergent second `payment_status` projector** in
+> `behaviour_support.rs` that deletes) and on the system. **RECORDED DRIFT, deliberately unfixed**:
+> `specs/ordering/processmanager.yaml:30-43` declares `PlaceOrderProcess` reading the Cart and
+> Restaurant **projections** while `commands.rs:2391-2394,2419` folds their streams — the spec is
+> wrong at the head of the checkout path, and its correction is sequenced behind
+> [#564](https://github.com/TheCaptainCompany/captain-food/issues/564)'s PR1, which already carries
+> `source: EVENT_STREAM` on those two lines. **Owed regardless**: activation hit-ratio/bytes/eviction
+> counters — `specs/observability.yaml` declares NONE, so residency's Catalog-eviction storm
+> (`put_locked` inserts then evicts LRU, so one large import evicts every resident Order/Cart/Payment)
+> is currently invisible, and Payment activations never engage at all (`surrogate_actor_id`'s UUIDv5
+> lane key never matches the `Payment-pi_xxx` stream).
 > 🧭 **2026-08-15 — A PM `read:` STEP NOW DECLARES ITS SOURCE: THE DISTINCTION THE MECHANICAL
 > DERIVATION WAS BLOCKED ON** ([#564 "Derive reader sets mechanically: a declared, walkable `reads:`
 > grammar that distinguishes source from shape"](https://github.com/TheCaptainCompany/captain-food/issues/564)

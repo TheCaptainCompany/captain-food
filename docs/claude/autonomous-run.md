@@ -20,19 +20,23 @@ Then derive the work plan: the prioritised backlog (GitHub Project "Prioritized 
 the top, informed by the latest architect NEXT-list in the register/STATUS. Do not re-derive
 decisions already recorded — execute them.
 
-**Current standing objective (2026-08-08, until STATUS says otherwise)**: *"Does one real order
-flow checkout → accepted → delivered on the new MKS stack, and can a stranger watch it happen?"*
-Priority order: unflake the `ci` gate (#388 "[watchdog] Flaky SIGSEGV in `infrastructure`
-lib-test binary reddens the `ci` build gate on `main`", jointly with #335's link-product
-hypothesis) · land #399 "Validator gap: a tombstone event absent from the view's fedBy silently
-never dispatches" (before any other validator work) · supervise the cutover chain (#385/#360/#358)
-to merged · PREPARE (never apply) the #348 slices 1–2 spec-diff proposal for customer approval —
-the rename window closes when production events exist; flag it in every status until approved ·
-then the farley distance-to-production audit feeding the demo epic (#410).
+**Current standing objective (until STATUS says otherwise)**: the **six-clause acceptance
+criterion** — ONE walk through the LOCALLY deployed stack proving customer created → payment
+authorised → order created → accepted → delivered → payment captured
+([ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
+amended 2026-08-14: full enforcement and the full physical database split are IN scope, so the
+harness targets the split stack rather than a single-DB intermediate). Its ordered tail — the
+physical split band, the cross-tenant write-auth fix, hardening the `inbound_messages` write path,
+the local acceptance harness on the SPLIT stack, smoke L5, browser walls, then the walk — is
+maintained in **`docs/STATUS.md`** (2026-08-14 entry); read the tail there, do not re-pin it here.
+The previous objective was pinned in this file and within a week was naming issues the cutover had
+already passed.
 
 ## The team
 
-Agents in `.claude/agents/`: `architect` (audit, next, dispatch definition) · `executor` (ONE
+Agents in `.claude/agents/`: `architect` (audit, next, dispatch definition — OPERATIONS, not
+doctrine) · `young` / `vernon` / `evans` (the CQRS-ES / aggregate-and-actor / strategic-DDD
+doctrine lenses, split out of `architect` 2026-08-15 by ADR-20260815-032912) · `executor` (ONE
 dispatch end-to-end, no GitHub tools) · `beck` (testing lens — names the failing test AT THE
 BRIEFING, holds "a gate never seen red is an unverified claim") · `reviewer` (independent pass over
 a FINISHED diff) · `generator` · `ux-designer` · `dba` · `graphql-architect` ·
@@ -42,9 +46,12 @@ does ALL GitHub ceremony; every executor dispatch pastes the exact issue titles 
 cannot look them up).
 
 **Naming rule** (ADR-20260809-021500): one anchoring expert → the person's name (`beck`, `holub`,
-`farley`); several anchors → a role name (`architect` = Young+Vernon+Evans, `ux-designer` =
-Norman+Patton, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
-person's name — that demotes the others.
+`farley`, and now `young` / `vernon` / `evans`); several anchors → a role name (`ux-designer` =
+Norman+Patton+Ive, `business-specialist` = Meyer+Scholz). Do not "tidy" a multi-anchor lens into one
+person's name — that demotes the others. The 2026-08-15 architect split is the inverse move and the
+only sanctioned one: when a multi-anchor lens's output reads as generic, **split it into one agent
+per thinker** rather than renaming it after the loudest (ADR-20260815-032912). `architect` survived
+the split because it also holds a non-doctrinal operations role the loop depends on.
 
 ### Every dispatch is a MOB (founder directive, 2026-08-09, ADR-20260809-013142)
 
@@ -65,8 +72,12 @@ FEWER, BIGGER dispatches — never a quietly smaller mob.
 
 ## Rules that bind the run (repeated because breaking them is expensive)
 
-- **specs/** is untouchable** in autonomous mode — prepare spec diffs as proposal documents;
-  only explicit customer approval applies them.
+- **specs/** is the team's work** — the freeze is LIFTED, not narrowed
+  ([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)):
+  amend DSL content AND structure under the ordinary gates, after CLAUDE.md's three questions
+  (does it contradict or create a recorded decision? is the shape already emitted, stored or
+  promised? otherwise it is yours) — and write the one-sentence `docs/SPEC-LOG.md` row in the
+  SAME commit. That report is the obligation that replaced the freeze.
 - **Claim ⇒ draft PR ⇒ gates green ⇒ ready+auto-merge as one step ⇒ supervise to MERGED.**
   Never end a turn at "pushed, CI pending" without an armed wake-up.
 - **Independent review before ready-for-review**, by eyes that did not write the diff.
@@ -87,10 +98,10 @@ FEWER, BIGGER dispatches — never a quietly smaller mob.
 - **Team-decidable** (reversible + evidence-settled + gated): decide by ensemble consent
   (ADR-20260808-144738/155656), record it (register + ADR if cross-cutting), proceed — the
   customer's veto window stays open.
-- **The customer's** (money-path, legal, values, reversals of their own decisions, spec-diff
-  approvals, console/DNS/external steps): use `AskUserQuestion` with enough context to answer
-  cold, and BATCH questions — the customer checks in periodically; one visit should clear the
-  whole queue. For a batch of 3+ decisions, use the interactive decision form
+- **The customer's** (money-path, legal, values, reversals of their own decisions — including a
+  spec change that reverses one — console/DNS/external steps): use `AskUserQuestion` with enough
+  context to answer cold, and BATCH questions — the customer checks in periodically; one visit
+  should clear the whole queue. For a batch of 3+ decisions, use the interactive decision form
   (DECISIONS.md "How to decide" way #4; recipe in sessions.md).
 - **Status discipline** (customer directive, 2026-08-09: *"Every hour don't need more often"* —
   ADR-20260809-020859, superseding the 5-minute cadence of 2026-08-08): post a status at

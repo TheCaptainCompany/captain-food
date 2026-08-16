@@ -50,6 +50,12 @@ impl SsrExec {
         SchemaTransport {
             schema: self.schema.clone(),
             correlation_id: RequestCorrelationId::mint(),
+            // The render's ONE service-window clock (RSO-1), minted with the correlation id for
+            // the same reason: every binding of this render agrees on "now". NOTE: a
+            // `serviceWindow` baked into SSR HTML goes STALE at its `validUntil` — any future
+            // HTML caching in `hosts.rs` must bound its TTL by min(validUntil) of the verdicts
+            // it embeds, or a "Ferme à 23:00" badge outlives the kitchen.
+            request_now: crate::graphql::service_clock::RequestNow::mint(),
         }
     }
 }
@@ -59,6 +65,7 @@ impl SsrExec {
 pub struct SchemaTransport {
     schema: CaptainSchema,
     correlation_id: RequestCorrelationId,
+    request_now: crate::graphql::service_clock::RequestNow,
 }
 
 #[async_trait]
@@ -73,7 +80,8 @@ impl Transport for SchemaTransport {
             // The RENDER's id, minted once in `transport()` and shared by every binding this render
             // resolves — see the note there. Says nothing about identity: the transport stays
             // PUBLIC, anonymous and sessionless per the module contract above.
-            .data(self.correlation_id);
+            .data(self.correlation_id)
+            .data(self.request_now);
         let response = self.schema.execute(request).await;
         if !response.errors.is_empty() {
             // Same envelope rule as the HTTP transport: anything in `errors` fails the whole read

@@ -17,6 +17,9 @@ impl QueryRoot {
     /// A restaurant's full catalog (categories → products → offers + option lists).
     #[graphql(name = "catalog")]
     async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let Some(row) = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
@@ -29,7 +32,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("catalog references an unknown restaurant"))?;
-        Ok(Some(Catalog::from((row, restaurant))))
+        Ok(Some(Catalog::from((row, Restaurant::at(restaurant, now, horizon)))))
     }
     /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
     #[graphql(name = "categories")]
@@ -108,6 +111,9 @@ impl QueryRoot {
     /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
     #[graphql(name = "delivery", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn delivery(&self, ctx: &async_graphql::Context<'_>, input: DeliveryQueryInput) -> async_graphql::Result<Option<DeliveryJob>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
@@ -130,11 +136,14 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown restaurant"))?;
-        Ok(Some(DeliveryJob::from((job, order, restaurant))))
+        Ok(Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon)))))
     }
     /// The independent rider's assigned/available delivery jobs (rider app).
     #[graphql(name = "myDeliveries", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
     async fn my_deliveries(&self, ctx: &async_graphql::Context<'_>, input: Option<MyDeliveriesQueryInput>) -> async_graphql::Result<Vec<DeliveryJob>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         // The rider's identity is the verified session principal (ADR-0047): the rider app acts
         // under its Supabase subject, which serves as the RiderId until a dedicated rider identity
         // read model lands. No principal (schema executed outside a request) or an anonymous one →
@@ -165,13 +174,16 @@ impl QueryRoot {
         for job in rows {
             let Some(order) = orders.by_id(job.order_id, &application::queries::ReadScope::System).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
             let Some(restaurant) = restaurants.by_id(job.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
-            out.push(DeliveryJob::from((job, order, restaurant)));
+            out.push(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon))));
         }
         Ok(out)
     }
     /// A restaurant's active delivery jobs (delivery board; ownership enforced server-side).
     #[graphql(name = "restaurantDeliveries", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
     async fn restaurant_deliveries(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliveriesQueryInput) -> async_graphql::Result<Vec<DeliveryJob>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
@@ -189,6 +201,8 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown restaurant"))?;
+        // ONE board = ONE restaurant = ONE service-window evaluation, cloned per job (RSO-1).
+        let restaurant = Restaurant::at(restaurant, now, horizon);
                 // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let mut out = Vec::new();
@@ -218,6 +232,9 @@ impl QueryRoot {
     /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
     #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
     async fn favorite_restaurants(&self, ctx: &async_graphql::Context<'_>, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let Some(row) = customers.by_id(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
@@ -237,7 +254,7 @@ impl QueryRoot {
                 .await
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?;
             if let Some(r) = found {
-                out.push(Restaurant::from(r));
+                out.push(Restaurant::at(r, now, horizon));
             }
         }
         Ok(out)
@@ -245,30 +262,42 @@ impl QueryRoot {
     /// Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
     #[graphql(name = "restaurants")]
     async fn restaurants(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantsQueryInput>) -> async_graphql::Result<Vec<Restaurant>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let filter = input
             .map(|i| application::queries::RestaurantFilter { search: i.search, orderable_only: i.orderable_only, limit: i.limit.map(|v| v.0), offset: i.offset.map(|v| v.0) })
             .unwrap_or_default();
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Restaurant::from).collect())
+        Ok(rows.into_iter().map(|r| Restaurant::at(r, now, horizon)).collect())
     }
     /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
     #[graphql(name = "restaurant")]
     async fn restaurant(&self, ctx: &async_graphql::Context<'_>, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let row = repo.by_slug(input.slug.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(row.map(Restaurant::from))
+        Ok(row.map(|r| Restaurant::at(r, now, horizon)))
     }
     /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let rows = repo.by_account(input.account_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        Ok(rows.into_iter().map(Restaurant::from).collect())
+        Ok(rows.into_iter().map(|r| Restaurant::at(r, now, horizon)).collect())
     }
     /// B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status.
     #[graphql(name = "prospectionPipeline", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn prospection_pipeline(&self, ctx: &async_graphql::Context<'_>, input: Option<ProspectionPipelineQueryInput>) -> async_graphql::Result<Vec<Prospect>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::ProspectionReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let filter = input
@@ -289,12 +318,15 @@ impl QueryRoot {
             .collect();
         Ok(rows
             .into_iter()
-            .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, r))))
+            .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, Restaurant::at(r, now, horizon)))))
             .collect())
     }
     /// A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity (resolved once per request from the verified principal); only ADMIN reads another customer's carts. An unresolvable caller identity yields an empty list, never a fall-through to the client-supplied filter.
     #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
     async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
@@ -332,13 +364,16 @@ impl QueryRoot {
         let mut out = Vec::new();
         for c in rows {
             let Some(r) = by_id.get(&c.restaurant_id.0).cloned() else { continue };
-            out.push(crate::graphql::cart_read::priced(&**catalogs, c, r, correlation_id).await?);
+            out.push(crate::graphql::cart_read::priced(&**catalogs, c, Restaurant::at(r, now, horizon), correlation_id).await?);
         }
         Ok(out)
     }
     /// A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id. The GUEST path is not this query and not a gap: anonymous carts are session-keyed and read through `current`'s session leg (ADR-20260810-120531 — CartBindingProcess associates them to the customer on identification).
     #[graphql(name = "cart", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
     async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
@@ -364,11 +399,14 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// The caller's CURRENT cart AT THIS STOREFRONT — the cart/mini-cart read, TWO-LEG resolution WITHIN ONE TENANT (#451/#469, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. The TENANT comes from the request Host ({slug}.captain.food -> RestaurantId, resolved once at the edge), NEVER from an argument — an argument would let a client assert whose cart to serve, and an OPTIONAL one would mean "unbounded when omitted". BOTH legs are bounded by it, in SQL. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart AT THIS RESTAURANT (ReadScope::Customer, the `myReclamations` pattern; PUBLIC is the anonymous PATH, not "no identity" — the open path reads the caller's credential and degrades to anonymous, so a signed-in customer on a storefront IS resolved here). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart at this restaurant WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. A host that names NO restaurant (the marketplace, an unknown slug) resolves NULL, never "the newest cart anywhere" — the customer's carts at other restaurants are a different query (`carts`). OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart here" — the client renders the empty state, never a fabricated 0,00 EUR payable.
     #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
     async fn current(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<Cart>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
@@ -398,11 +436,14 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
-        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, restaurant, correlation_id).await?))
+        Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
@@ -426,12 +467,15 @@ impl QueryRoot {
             .collect();
         Ok(rows
             .into_iter()
-            .filter_map(|o| by_id.get(&o.restaurant_id.0).cloned().map(|r| Order::from((o, r))))
+            .filter_map(|o| by_id.get(&o.restaurant_id.0).cloned().map(|r| Order::from((o, Restaurant::at(r, now, horizon)))))
             .collect())
     }
     /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
     #[graphql(name = "order", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
@@ -444,7 +488,7 @@ impl QueryRoot {
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("order references an unknown restaurant"))?;
-        Ok(Some(Order::from((row, restaurant))))
+        Ok(Some(Order::from((row, Restaurant::at(restaurant, now, horizon)))))
     }
     /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
     #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]

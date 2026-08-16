@@ -5,6 +5,14 @@
 Accepted (customer decision, 2026-08-08, session
 https://claude.ai/code/session_01AKgDqRbCcCxtUePWPRfxtp)
 
+**AMENDED 2026-08-15 by
+[ADR-20260815-032912](ADR-20260815-032912-split-the-architect-into-three-named-doctrine-lenses.md)**
+— the `architect` roster row below is superseded in ONE respect: Greg Young, Vaughn Vernon and
+Eric Evans are now three separate agents (`young`, `vernon`, `evans`) and `architect` keeps the
+operations half (audit, issue filing, proposals, backlog ranking, naming the next chunk) while
+consulting and citing them. Every other roster row, and the whole of the decision below, stands
+unchanged. This section is the historical record and keeps its vocabulary.
+
 ## Context
 
 The agent bench's review ensemble is one model wearing different prompts — "eyes that did not

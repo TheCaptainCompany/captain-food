@@ -846,6 +846,198 @@ keys:
         }
     }
 
+    /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
+    /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
+    /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
+    #[test]
+    fn when_at_accepts_only_z_normalized_instants() {
+        for ok in ["2026-08-14T18:00:00Z", "2026-01-06T12:00:00Z", "2026-08-14T02:00:00.123Z"] {
+            assert!(crate::validate::core::rfc3339_z_instant(ok), "{ok} is a legal instant");
+        }
+        for bad in [
+            "2026-08-14T18:00:00+02:00", // offset — the ambiguity the field kills
+            "2026-08-14 18:00:00Z",      // space separator
+            "2026-08-14",                // bare date
+            "2026-13-01T00:00:00Z",      // month 13
+            "2026-08-14T24:00:00Z",      // hour 24
+            "2026-08-14T18:00:00.Z",     // empty fraction
+            "2026-08-14T18:00:00",       // no Z
+        ] {
+            assert!(!crate::validate::core::rfc3339_z_instant(bad), "{bad} must be refused");
+        }
+    }
+
+    /// A minimal model whose one test carries the given `when.at` — the fixture for the two
+    /// `when.at` gates below (RSO-1). The offset-carrying variant is exactly the value a
+    /// well-meaning author writes ("04:00 Paris is +02:00"), which is why the grammar refuses it.
+    fn when_at_model(at: &str) -> Model {
+        inline_model(&[
+            ("commands.yaml", "PlaceOrder:\n  type: object\n  properties: {}\n"),
+            (
+                "actors.yaml",
+                "Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n",
+            ),
+            (
+                "tests.yaml",
+                &format!(
+                    "tests:\n  TestClockShape:\n    actor: {{ $ref: 'actors.yaml#/Order' }}\n    when:\n      type: {{ $ref: 'commands.yaml#/PlaceOrder' }}\n      at: \"{}\"\n      data: {{}}\n",
+                    at
+                ),
+            ),
+        ])
+    }
+
+    /// `when.at` through the FULL validator (RSO-1): a malformed instant is the
+    /// `test-when-at-not-instant` ERROR, located at the field — so a clock-consuming test can
+    /// never reach the emitter with a value whose chrono parse would fail at runtime.
+    #[test]
+    fn when_at_malformed_is_a_validation_error_through_validate() {
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00+02:00"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-at-not-instant")
+            .expect("malformed when.at must be reported");
+        assert!(hit.location.ends_with("TestClockShape.when.at"), "{}", hit.location);
+        // The negative control: the SAME model with a Z-normalized instant is clean of this rule
+        // (without it, a rule that fired on every `when.at` would pass the assertion above).
+        let Report { issues, .. } = validate(&when_at_model("2026-08-14T18:00:00Z"));
+        assert!(
+            !issues.iter().any(|i| i.rule == "test-when-at-not-instant"),
+            "a Z-normalized instant is legal: {:?}",
+            issues.iter().filter(|i| i.rule == "test-when-at-not-instant").map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// A minimal model whose one test carries the given `when.gates` list — the fixture for the
+    /// `when.gates` validator rules (RSO-1 Phase 4). The configuration catalog declares one
+    /// boolean gate and one int key so both rules have a target.
+    fn when_gates_model(gates_yaml: &str) -> Model {
+        inline_model(&[
+            ("commands.yaml", "PlaceOrder:\n  type: object\n  properties: {}\n"),
+            (
+                "actors.yaml",
+                "Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n",
+            ),
+            (
+                "configuration.yaml",
+                "keys:\n  SOME_GATE:\n    type: bool\n    default: false\n  NOT_A_GATE:\n    type: int\n    default: 3\n",
+            ),
+            (
+                "tests.yaml",
+                &format!(
+                    "tests:\n  TestGateShape:\n    actor: {{ $ref: 'actors.yaml#/Order' }}\n    when:\n      type: {{ $ref: 'commands.yaml#/PlaceOrder' }}\n      gates:\n{}\n      data: {{}}\n",
+                    gates_yaml
+                ),
+            ),
+        ])
+    }
+
+    /// `when.gates` through the FULL validator (RSO-1 Phase 4): an entry that is not a
+    /// `configuration.yaml#/keys/<KEY>` $ref — a bare string, a wrong-kind ref, an undeclared
+    /// key — is `test-when-gate-not-config-ref`; a resolving entry whose key is not `type: bool`
+    /// is `test-when-gate-not-bool` (a non-boolean key is not a gate, and `true` would assert
+    /// nothing about it). A resolving boolean gate is clean of both.
+    #[test]
+    fn when_gates_must_be_resolving_boolean_config_refs() {
+        // Bare string: not a $ref at all — invisible to the refs walker, the #413 class.
+        let Report { issues, .. } = validate(&when_gates_model("        - SOME_GATE"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-gate-not-config-ref")
+            .expect("a bare gate name must be reported");
+        assert!(hit.location.ends_with("TestGateShape.when.gates[0]"), "{}", hit.location);
+        // Undeclared key: the ref shape is right, the key does not exist.
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/NO_SUCH_KEY' }"));
+        assert!(
+            issues.iter().any(|i| i.rule == "test-when-gate-not-config-ref"),
+            "an undeclared configuration key must be reported"
+        );
+        // Non-boolean key: resolves, but cannot be a gate.
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/NOT_A_GATE' }"));
+        let hit = issues
+            .iter()
+            .find(|i| i.rule == "test-when-gate-not-bool")
+            .expect("a non-bool configuration key must be reported");
+        assert!(hit.location.ends_with("TestGateShape.when.gates[0]"), "{}", hit.location);
+        // The negative control: a resolving boolean gate is clean of BOTH rules (without this, a
+        // rule firing on every `when.gates` would pass the assertions above).
+        let Report { issues, .. } =
+            validate(&when_gates_model("        - { $ref: 'configuration.yaml#/keys/SOME_GATE' }"));
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.rule == "test-when-gate-not-config-ref" || i.rule == "test-when-gate-not-bool"),
+            "a resolving boolean gate is legal: {:?}",
+            issues
+                .iter()
+                .filter(|i| i.rule.starts_with("test-when-gate"))
+                .map(|i| &i.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// `when.gates` on a command whose handler takes NO gate is an emitter PANIC, never a silent
+    /// no-op — the `when.at` posture: a gate the generated test would drop looks like it asserts
+    /// the enforcement edge while asserting nothing.
+    #[test]
+    #[should_panic(
+        expected = "`when.gates` names 'ENFORCE_SERVICE_HOURS_GUARD' but 'RegisterRestaurant' does not consume it"
+    )]
+    fn behaviour_tests_emitter_refuses_when_gates_on_a_non_gate_consuming_command() {
+        let mut actors = String::new();
+        for (agg, _, _) in BT_AGGREGATES {
+            if *agg == "Restaurant" {
+                actors.push_str(
+                    "Restaurant:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      emits: []\n",
+                );
+            } else {
+                actors.push_str(&format!("{}:\n  type: aggregate\n  receives: []\n", agg));
+            }
+        }
+        let m = inline_model(&[
+            ("commands.yaml", "RegisterRestaurant:\n  type: object\n  properties: {}\n"),
+            ("actors.yaml", &actors),
+            (
+                "tests.yaml",
+                "tests:\n  TestX:\n    actor: { $ref: 'actors.yaml#/Restaurant' }\n    when:\n      type: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      gates:\n        - { $ref: 'configuration.yaml#/keys/ENFORCE_SERVICE_HOURS_GUARD' }\n      data: {}\n",
+            ),
+        ]);
+        let _ = emit_behaviour_tests(&m);
+    }
+
+    /// `when.at` on a command whose handler takes NO instant is an emitter PANIC, never a silent
+    /// no-op (the #413 "silently invisible" defect class): a value the generated test would drop
+    /// asserts nothing while looking like it asserts the clock.
+    #[test]
+    #[should_panic(
+        expected = "`when.at` is set but 'RegisterRestaurant' is not clock-consuming"
+    )]
+    fn behaviour_tests_emitter_refuses_when_at_on_a_non_clock_consuming_command() {
+        // `bt_event_owners` resolves EVERY `BT_AGGREGATES` entry up front, so the minimal model
+        // stubs the whole roster; only Restaurant receives the command under test.
+        let mut actors = String::new();
+        for (agg, _, _) in BT_AGGREGATES {
+            if *agg == "Restaurant" {
+                actors.push_str(
+                    "Restaurant:\n  type: aggregate\n  receives:\n    - message: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      emits: []\n",
+                );
+            } else {
+                actors.push_str(&format!("{}:\n  type: aggregate\n  receives: []\n", agg));
+            }
+        }
+        let m = inline_model(&[
+            ("commands.yaml", "RegisterRestaurant:\n  type: object\n  properties: {}\n"),
+            ("actors.yaml", &actors),
+            (
+                "tests.yaml",
+                "tests:\n  TestX:\n    actor: { $ref: 'actors.yaml#/Restaurant' }\n    when:\n      type: { $ref: 'commands.yaml#/RegisterRestaurant' }\n      at: \"2026-01-06T12:00:00Z\"\n      data: {}\n",
+            ),
+        ]);
+        let _ = emit_behaviour_tests(&m);
+    }
+
     /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
     ///
     /// The emitter used to substitute `0` for a defaultless `int`, so
@@ -1508,6 +1700,75 @@ keys:
              broken, not the code. Fix the parser rather than deleting the test."
         );
 
+        // The PRODUCTION sources every span constructor must be INVOKED from (RSO-1 Phase 4,
+        // #180): a constructor that exists in spans.rs but is called nowhere satisfies the
+        // "constructed" check above while the contract stays unsatisfiable by any real trace --
+        // exactly how `command.validate` sat declared-but-never-emitted through three phases.
+        // Scope: every `.rs` file under crates/ except spans.rs itself and `tests/`/`benches/`
+        // dirs, comment lines stripped (a doc sentence naming a constructor is prose, not a call
+        // site). Deliberately NOT cut at `#[cfg(test)]`: auth.rs holds production code AFTER a
+        // mid-file test module, so the naive cut loses real call sites -- and the primary
+        // false-positive risk (spans.rs's own self-test naming every constructor) is excluded by
+        // file. A `#[cfg(test)]` call site in some OTHER src file could in principle satisfy
+        // this; none exists today, and inventing one to dodge the gate would not survive review.
+        let production_sources: String = {
+            fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+                let Ok(entries) = std::fs::read_dir(dir) else { return };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if name == "target" || name == "tests" || name == "benches" {
+                            continue;
+                        }
+                        walk(&path, out);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                        out.push(path);
+                    }
+                }
+            }
+            let mut files = Vec::new();
+            walk(&root.join("crates"), &mut files);
+            assert!(
+                files.len() > 50,
+                "walked only {} .rs files under crates/ -- the walker is broken, not the code",
+                files.len()
+            );
+            let spans_path = root.join("crates/telemetry/src/spans.rs");
+            files
+                .into_iter()
+                .filter(|p| {
+                    p.canonicalize().ok() != spans_path.canonicalize().ok()
+                })
+                .filter_map(|p| std::fs::read_to_string(&p).ok())
+                .map(|s| {
+                    s.lines()
+                        .filter(|l| !l.trim_start().starts_with("//"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        // span name -> constructor fn name, the spans.rs naming law: dots become underscores.
+        // Callers are outside crates/telemetry, so every real call site path-qualifies through
+        // the module (`telemetry::spans::x(...)` / `spans::x(...)`).
+        let constructor_called =
+            |span_name: &str| -> bool {
+                production_sources.contains(&format!("spans::{}(", span_name.replace('.', "_")))
+            };
+        // Declared-required spans whose constructor is KNOWN to have no production call site yet
+        // -- the explicit, reviewable "deliberately not yet" (the UNWIRED_MUTATIONS pattern).
+        // Both predate this check and were surfaced BY it: the place-order prepare phase runs
+        // `require_cart` and `price_cart` inside the SDK-free application handler, so their spans
+        // need a framework-boundary seam that does not exist yet (follow-up owed from the #180
+        // Phase 4 report; the write path's cart/pricing steps are currently visible only through
+        // the read-side `cart.price` twin). An entry that GAINS a call site fails below until the
+        // exemption is removed -- a stale exemption is a gate failure, never a quiet allowance
+        // (the warning-ratchet discipline).
+        const KNOWN_UNINVOKED_REQUIRED_SPANS: &[(&str, &str)] =
+            &[("place-order", "cart.read"), ("place-order", "pricing.compute")];
+
         let mut missing: Vec<String> = Vec::new();
         // `read-authorization` joined the list with #469: its counters are now demonstrably emitted
         // (crates/server/tests/public_credential_degraded_metric.rs proves both branches), so
@@ -1532,6 +1793,26 @@ keys:
                 let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                 if !constructed.contains(name) {
                     missing.push(format!("  {feature}: span '{name}' is required but never constructed"));
+                    continue;
+                }
+                // Declared AND constructed is still not EMITTED: the constructor must be invoked
+                // from production code, or the required:true contract is unsatisfiable by any
+                // real trace (the `command.validate` state RSO-1 Phase 4 ended).
+                let exempt = KNOWN_UNINVOKED_REQUIRED_SPANS.contains(&(feature, name));
+                let called = constructor_called(name);
+                if exempt && called {
+                    missing.push(format!(
+                        "  {feature}: span '{name}' is in KNOWN_UNINVOKED_REQUIRED_SPANS but IS \
+                         invoked now -- bank the improvement: remove its exemption"
+                    ));
+                    continue;
+                }
+                if !exempt && !called {
+                    missing.push(format!(
+                        "  {feature}: span '{name}' has a constructor in spans.rs but no production \
+                         call site invokes it -- the contract marks it required, so no real run can \
+                         ever satisfy the contract"
+                    ));
                     continue;
                 }
                 for at in sp.get("attributes").and_then(|a| a.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {
@@ -4500,9 +4781,18 @@ Catalog:
         // Independent per-actor receives scan: ref path encodes the kind (§1b).
         let mut has_commands: HashSet<String> = HashSet::new();
         let mut has_facts: HashSet<String> = HashSet::new();
+        // #582: the ANSWERS declaration set — the spec permission for the sealed `ask` surface.
+        let mut has_answers: HashSet<String> = HashSet::new();
         if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
             for (k, def) in actors {
                 let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+                if def
+                    .get("answers")
+                    .and_then(|a| a.as_mapping())
+                    .is_some_and(|m| !m.is_empty())
+                {
+                    has_answers.insert(name.to_string());
+                }
                 let Some(receives) = def.get("receives").and_then(|r| r.as_sequence()) else {
                     continue;
                 };
@@ -4521,6 +4811,11 @@ Catalog:
             }
         }
         assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
+        assert!(
+            !has_answers.is_empty(),
+            "no actor declares answers — if the Order/Payment settlement pair left the spec, \
+             this guard needs a new positive case, not silence"
+        );
 
         // Since phase 2 (#306) each actor's surface is its OWN crate, so the per-actor unit of
         // inspection is a generated `lib.rs` rather than a block of one shared file — which makes
@@ -4547,6 +4842,13 @@ Catalog:
                 ),
                 ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
                 ("pub async fn cancel_scheduling", declaring.contains(name), "declares reminders:"),
+                // #582 (PROP-20260815-142349 §7): the typed ask surface exists IFF `answers:`.
+                ("pub async fn ask", has_answers.contains(name), "declares answers:"),
+                (
+                    &format!("pub trait {name}Answer") as &str,
+                    has_answers.contains(name),
+                    "declares answers:",
+                ),
             ];
             for (needle, justified, why) in surface {
                 assert_eq!(
@@ -4556,8 +4858,66 @@ Catalog:
                      declaration is the permission (product-owner directive, 2026-08-02)"
                 );
             }
+            // #582: the `application` dependency (the ask's EventStore port) is itself
+            // spec-gated — an unused dependency is an unheld capability (the D6 machete law).
+            assert_eq!(
+                c.manifest.contains("application = { path"),
+                has_answers.contains(name),
+                "{name}: the `application` dep must exist IFF the actor declares `answers:`"
+            );
         }
         assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
+    }
+
+    /// #582 — the emitted answers surface (PROP-20260815-142349 §§2/6/7): unconditional serde,
+    /// tolerant reader, absent-stays-absent nullables, and the three-armed `AskOutcome` envelope
+    /// with no escape hatch. V4's round-trip behaviour lives beside the hand folds (built from
+    /// real `fold()` fixtures); this pins the STRUCTURAL half the emitter owns.
+    #[test]
+    fn emitted_answers_types_are_serde_tolerant_and_the_envelope_is_closed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let answers = emit_domain_answers(&model);
+        // Every declared op derives its Request/Reply pair…
+        for ty in [
+            "pub struct OrderPaymentReferenceRequest",
+            "pub struct OrderPaymentReferenceReply",
+            "pub struct PaymentSettlementViewRequest",
+            "pub struct PaymentSettlementViewReply",
+        ] {
+            assert!(answers.contains(ty), "missing generated type: {ty}");
+        }
+        // …with serde ALWAYS (one derive line per struct — the wire shape may not rot)…
+        assert_eq!(
+            answers.matches("Serialize, Deserialize)]").count(),
+            answers.matches("pub struct ").count(),
+            "every Request/Reply must derive Serialize + Deserialize unconditionally"
+        );
+        // …a TOLERANT reader (additive-only producer / tolerant reader — V7's enforceable half)…
+        assert!(
+            !answers.contains("deny_unknown_fields"),
+            "a reply reader must tolerate additive fields — deny_unknown_fields is the exact \
+             opposite of the declared evolution contract"
+        );
+        // …and a nullable state field rides as Option + default + skip (absent round-trips as
+        // ABSENT — no key, not null).
+        assert!(
+            answers.contains("#[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub payment_intent_id: Option<PaymentIntentId>,"),
+            "the nullable paymentIntentId must be Option + serde(default, skip_serializing_if)"
+        );
+        // The hand-written envelope is CLOSED (V5): exactly the three declared arms, no
+        // `non_exhaustive` escape — the compiler then forces every caller to face
+        // Absent/Deadline; a `_` wildcard in a caller is a review defect, not a compile one,
+        // which is why the arms are few and named.
+        let ask_rs = std::fs::read_to_string(root.join("crates/actor_client/src/ask.rs")).expect("committed ask.rs");
+        for arm in ["Answered {", "Absent,", "Deadline,"] {
+            assert!(ask_rs.contains(arm), "AskOutcome must declare the `{arm}` arm");
+        }
+        assert!(
+            !ask_rs.contains("non_exhaustive"),
+            "AskOutcome must stay exhaustively matchable — non_exhaustive would let a caller \
+             compile without deciding Absent/Deadline"
+        );
     }
 
     /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
@@ -4637,6 +4997,342 @@ Catalog:
         assert_eq!(cmd_warns.len(), 1, "{:?}", cmd_warns.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
         assert_eq!(cmd_warns[0].location, "actors.yaml/Customer");
         assert!(cmd_warns[0].message.contains("RequestPhoneVerification"), "{}", cmd_warns[0].message);
+    }
+
+    // ── §2g — actor `answers:` blocks (PROP-20260815-142349, #582 actors half) ──────────────────
+    // Each rule red-first: one fixture violating ONLY that rule, asserting the exact rule id.
+    // V7 (breaking reshape = new answer name) deliberately has NO fixture — it is review-carried
+    // doctrine per the PROP; a fixture would be a fake gate. V1 (pairing) is deferred to the PM
+    // half: the consuming `ask:` step does not exist yet, so declared answers may be unconsumed.
+
+    const ANS_SCALARS: &str = "OrderId: { type: string }\nPaymentIntentId: { type: string }\nPaymentStatus: { type: string, enum: [PENDING, AUTHORIZED, CAPTURED] }\n";
+    const ANS_EVENTS: &str = "OrderPlaced:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n";
+    /// A well-formed answering aggregate: mailbox + declared nullable state field + identity.
+    const ANS_ORDER: &str = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  mailbox:\n    partitions: 1\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n";
+
+    fn ans_issues_files(files: &[(&str, &str)]) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_actor_answers(&inline_model(files), &mut issues);
+        issues
+    }
+
+    fn ans_issues(answers: &str) -> Vec<Issue> {
+        let actors = format!("{}  answers:\n{}", ANS_ORDER, answers);
+        ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+        ])
+    }
+
+    #[test]
+    fn well_formed_answers_block_is_clean() {
+        // Declared-state reply + description, PARAMS-FREE: an ask is addressed BY IDENTITY (the
+        // `Actor-{id}` stream key IS the argument, PROP §3) and the emitter derives that Request
+        // field; `params:` is refused this slice (ans-params-refused — nothing can consume one).
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"The payment intent this order was placed with.\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_may_serve_the_implicit_lifecycle_status_and_identity() {
+        // `status` is owned by the lifecycle block (st-status-duplicated forbids redeclaring it)
+        // and the identity is the stream key — both are implicitly declared, so a reply may
+        // compose them without a `state:` entry (the settlementView precedent, PROP §2).
+        let actors = "Payment:\n  type: aggregate\n  identity: { $ref: '#/Payment/state/paymentIntentId' }\n  mailbox:\n    partitions: 1\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial:\n      - event: { $ref: 'events.yaml#/OrderPlaced' }\n        to: PENDING\n    transitions: []\n    terminal: []\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    settlementView:\n      description: \"The settlement guard's facts.\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n        status: { $ref: '#/Payment/state/status' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_missing_description_is_refused() {
+        let issues = ans_issues(
+            "    paymentReference:\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_transport_or_deadline_key_is_unspellable() {
+        // D5/D6: no binding/transport/deadline key exists on the actor — absence means local and
+        // the deadline is the CALLER's. Introducing the key is the future PMW-3 gate flip.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      binding: local\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("binding"), "{}", issues[0].message);
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      deadline_ms: 250\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_shape_missing_reply_is_refused() {
+        let issues = ans_issues("    paymentReference:\n      description: \"x\"\n");
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_on_a_process_manager_is_refused() {
+        // Answering takes a fold; a PM has a state table. Only aggregates declare the block.
+        let actors = "RefundProcess:\n  type: process-manager\n  answers:\n    refundView:\n      description: \"x\"\n      reply:\n        orderId: { $ref: '#/RefundProcess/state/orderId' }\n";
+        let issues = ans_issues_files(&[("actors.yaml", actors)]);
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_inline_type_is_refused() {
+        // "One name = one dedicated scalar": a reply may declare NO new scalar. (The params
+        // grammar has no inline-type case anymore — `params:` is refused wholesale this slice.)
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { type: string }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-inline-type"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_reply_ref_must_be_a_same_actor_known_state_field() {
+        // A foreign actor's state is not this actor's answer…
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Payment/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // …and an unknown field (not declared state, not identity, not lifecycle status) is a
+        // missing STATE declaration, reported as such.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        ghost: { $ref: '#/Order/state/ghost' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // `status` without a lifecycle block is NOT implicitly declared.
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      reply:\n        status: { $ref: '#/Order/state/status' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-reply-ref"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_params_are_refused_until_given_semantics() {
+        // #583 hardening: the local ask is load → fold → project(state) — a param CANNOT change
+        // the answer this slice, so an accepted `params:` would be a control that renders and
+        // does nothing (the CLAUDE.md class). Same posture as the transport/deadline keys:
+        // refused outright; reintroducing the key is a later slice's recorded decision. The
+        // fixture keeps the params PARSER path covered (a well-formed scalar param is still
+        // refused).
+        let issues = ans_issues(
+            "    paymentReference:\n      description: \"x\"\n      params:\n        statusFilter: { $ref: 'scalars.yaml#/PaymentStatus' }\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["ans-params-refused"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("later slice"), "the message must say when params come back: {}", issues[0].message);
+    }
+
+    #[test]
+    fn answers_ref_isolation_refuses_processmanager_sites_today() {
+        // #583 hardening: NO grammar consumes an answer today — the PM `ask:` step is the PM
+        // half of #582, and when it lands it carves its allowance STRUCTURALLY against the
+        // parsed step, never a location-substring match. Until then a processmanager.yaml ref
+        // into `answers/` is refused like every other site.
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\n",
+            ANS_ORDER
+        );
+        let pm = "SettlementProcess:\n  type: process-manager\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      steps:\n        - ask:\n            operation: { $ref: 'actors.yaml#/Order/answers/paymentReference' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+            ("processmanager.yaml", pm),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-ref-isolation"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_require_a_mailbox_so_the_ask_surface_has_a_client_to_ride() {
+        // #583 hardening: the typed `ask` lives on the sealed per-actor CLIENT, and the client
+        // crate exists only for a `mailbox:` actor — answers without a mailbox would silently
+        // generate NO surface at all (worse than refusing).
+        let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-shape"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("mailbox"), "{}", issues[0].message);
+    }
+
+    /// The emitter-side belt to the same braces: if an answers-declaring actor ever slips past
+    /// the validator without a mailbox (e.g. a future loader path), generation REFUSES loudly
+    /// instead of silently dropping the ask surface.
+    #[test]
+    #[should_panic(expected = "no client crate was generated for this actor")]
+    fn answers_without_a_mailbox_refuse_to_generate_a_silently_absent_surface() {
+        let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/Order/state/paymentIntentId' }\n";
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        let _ = emit_client_crates(&m);
+    }
+
+    #[test]
+    fn nested_lineage_follows_relative_entity_refs_in_their_own_file() {
+        // #583 hardening (item 4): the nested-hop walk must carry the FILE of the node it
+        // resolved into as the ctx for the next hop — pinning ctx to "events.yaml" makes a
+        // relative entity-in-entity ref (a) dangle loudly when no event shares the entity's
+        // name, and (b) resolve SILENTLY through the wrong type when one does.
+        let entities = "CheckoutSnapshot:\n  type: object\n  properties:\n    slot: { $ref: '#/TimeSlot' }\nTimeSlot:\n  type: object\n  properties:\n    slotId: { $ref: 'scalars.yaml#/OrderId' }\n";
+        // (a) LOUD-WRONG: no colliding event — under pinned ctx the relative '#/TimeSlot' hop
+        // resolves against events.yaml and the walk dangles (None).
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", entities),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/slot/slotId").as_deref(),
+            Some("scalars.yaml#/OrderId"),
+            "a two-level entity-in-entity lineage with a relative ref must resolve"
+        );
+        assert!(is_nested_event_property_ref(
+            &m,
+            "events.yaml#/PaymentIntentCreated/properties/checkout/slot/slotId",
+            "actors.yaml"
+        ));
+        // (b) SILENT-WRONG: an EVENT also named TimeSlot with a DIFFERENTLY-typed slotId — the
+        // pinned ctx captures the walk through the wrong file and reports the wrong scalar.
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", entities),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\nTimeSlot:\n  type: object\n  properties:\n    slotId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/slot/slotId").as_deref(),
+            Some("scalars.yaml#/OrderId"),
+            "a same-named EVENT must not capture an entity-relative hop"
+        );
+    }
+
+    /// The belt's sibling case: a `type: process-manager` WITH a mailbox gets a client crate, so
+    /// the leftover assert alone never fires for it — yet only an AGGREGATE answers (the reply
+    /// projects its own fold; a PM has a state table). Same reachability class as the
+    /// mailbox-less case (main.rs exits on validation errors first): the emitter refuses rather
+    /// than generating a typed ask surface on a PM.
+    #[test]
+    #[should_panic(expected = "only an aggregate answers")]
+    fn answers_on_a_mailbox_pm_refuse_to_generate_an_ask_surface() {
+        let actors = "SettlementProcess:\n  type: process-manager\n  identity: { $ref: '#/SettlementProcess/state/orderId' }\n  mailbox:\n    partitions: 1\n  state:\n    paymentIntentId:\n      type: { $ref: 'scalars.yaml#/PaymentIntentId' }\n      nullable: true\n      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/paymentIntentId' }]\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: { $ref: '#/SettlementProcess/state/paymentIntentId' }\n";
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors),
+        ]);
+        let _ = emit_client_crates(&m);
+    }
+
+    #[test]
+    fn answers_derived_type_names_are_catalog_unique() {
+        // `Order` + `paymentReference` and `OrderPayment` + `reference` both derive
+        // `OrderPaymentReference{Request,Reply}` — a code collision the YAML keys hide.
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\nOrderPayment:\n  type: aggregate\n  identity: {{ $ref: '#/OrderPayment/state/orderId' }}\n  mailbox:\n    partitions: 1\n  receives:\n    - message: {{ $ref: 'events.yaml#/OrderPlaced' }}\n      emits: []\n  answers:\n    reference:\n      description: \"x\"\n      reply:\n        orderId: {{ $ref: '#/OrderPayment/state/orderId' }}\n",
+            ANS_ORDER
+        );
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-op-unique"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn answers_are_isolated_from_every_non_ask_ref_site() {
+        // Kind isolation (PROP §4 rules 2-3): a reply is constitutionally unpersistable — no
+        // api/screen/event/projection site may $ref into `answers/`. The only legal consumer is
+        // the PM `ask:` step (PM half of #582).
+        let actors = format!(
+            "{}  answers:\n    paymentReference:\n      description: \"x\"\n      reply:\n        paymentIntentId: {{ $ref: '#/Order/state/paymentIntentId' }}\n",
+            ANS_ORDER
+        );
+        let api = "queries:\n  paymentReference:\n    output: { $ref: 'actors.yaml#/Order/answers/paymentReference' }\n";
+        let issues = ans_issues_files(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("events.yaml", ANS_EVENTS),
+            ("actors.yaml", actors.as_str()),
+            ("api.yaml", api),
+        ]);
+        assert_eq!(rules_of(&issues), vec!["ans-ref-isolation"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn implicit_lifecycle_status_ref_is_exempt_from_ref_dangling() {
+        // Mirror of `implicit_identity_state_ref_is_exempt_from_ref_dangling`: the lifecycle
+        // block OWNS `status`, so `#/<Actor>/state/status` is declared by the block itself.
+        let m = inline_model(&[(
+            "actors.yaml",
+            "Payment:\n  type: aggregate\n  lifecycle:\n    status: { $ref: 'scalars.yaml#/PaymentStatus' }\n    initial: []\n    transitions: []\n    terminal: []\n  receives: []\nOrder:\n  type: aggregate\n  receives: []\n",
+        )]);
+        assert!(is_implicit_lifecycle_status_ref(&m, "#/Payment/state/status", "actors.yaml"));
+        assert!(is_implicit_lifecycle_status_ref(&m, "actors.yaml#/Payment/state/status", "processmanager.yaml"));
+        // No lifecycle → not implicit; another field name is never the status.
+        assert!(!is_implicit_lifecycle_status_ref(&m, "#/Order/state/status", "actors.yaml"));
+        assert!(!is_implicit_lifecycle_status_ref(&m, "#/Payment/state/orderId", "actors.yaml"));
+    }
+
+    #[test]
+    fn nested_event_payload_lineage_resolves_through_entity_refs() {
+        // #582: `PaymentIntentCreated.checkout` is an entity `$ref`; the true lineage of the
+        // Payment state's `orderId` is `…/properties/checkout/orderId`. The naive walk cannot
+        // cross the entity boundary, so the nested resolver follows the refs — and the leaf's
+        // scalar feeds st-type-mismatch end-to-end.
+        let m = inline_model(&[
+            ("scalars.yaml", ANS_SCALARS),
+            ("entities.yaml", "CheckoutSnapshot:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n"),
+            ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+        ]);
+        assert_eq!(
+            event_property_type_ref(&m, "PaymentIntentCreated", "checkout/orderId").as_deref(),
+            Some("scalars.yaml#/OrderId")
+        );
+        assert!(is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/checkout/orderId", "actors.yaml"));
+        // A ghost leaf or a non-nested path stays dangling/ordinary.
+        assert!(!is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/checkout/ghost", "actors.yaml"));
+        assert!(!is_nested_event_property_ref(&m, "events.yaml#/PaymentIntentCreated/properties/paymentIntentId", "actors.yaml"));
+    }
+
+    #[test]
+    fn nested_lineage_feeds_st_type_mismatch() {
+        // The end-to-end typing claim: a state field whose declared type disagrees with the
+        // NESTED lineage leaf's scalar is refused, exactly like a top-level lineage.
+        let base = |ty: &str| {
+            format!(
+                "Payment:\n  type: aggregate\n  identity: {{ $ref: '#/Payment/state/paymentIntentId' }}\n  state:\n    orderId:\n      type: {{ $ref: 'scalars.yaml#/{}' }}\n      from: [{{ $ref: 'events.yaml#/PaymentIntentCreated/properties/checkout/orderId' }}]\n  receives:\n    - message: {{ $ref: 'events.yaml#/PaymentIntentCreated' }}\n      emits: [{{ $ref: 'events.yaml#/PaymentIntentCreated' }}]\n",
+                ty
+            )
+        };
+        let run = |actors: &str| {
+            let m = inline_model(&[
+                ("scalars.yaml", ANS_SCALARS),
+                ("entities.yaml", "CheckoutSnapshot:\n  type: object\n  properties:\n    orderId: { $ref: 'scalars.yaml#/OrderId' }\n"),
+                ("events.yaml", "PaymentIntentCreated:\n  type: object\n  properties:\n    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }\n    checkout: { $ref: 'entities.yaml#/CheckoutSnapshot' }\n"),
+                ("actors.yaml", actors),
+            ]);
+            let mut issues = Vec::new();
+            validate_actor_state(&m, &mut issues);
+            issues
+        };
+        let ok = run(&base("OrderId"));
+        assert!(ok.is_empty(), "{:?}", ok.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+        let bad = run(&base("PaymentIntentId"));
+        assert_eq!(rules_of(&bad), vec!["st-type-mismatch"], "{:?}", bad.iter().map(|i| &i.message).collect::<Vec<_>>());
     }
 
     #[test]
@@ -5199,6 +5895,146 @@ Catalog:
             .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
             .collect();
         assert!(errors.is_empty(), "proposal hygiene must be 0-error on the committed corpus:\n{}", errors.join("\n"));
+    }
+
+    // ─── §13b — markdown table integrity (#572) ──────────────────────────────────────────────────
+
+    fn tables(md: &str) -> Vec<Issue> {
+        validate_markdown_tables(&[("docs/proposals/DECISIONS.md".to_string(), md.to_string())])
+    }
+
+    fn table_locations(issues: &[Issue]) -> Vec<String> {
+        issues.iter().map(|i| i.location.clone()).collect()
+    }
+
+    /// The defect the issue was filed for: a row that gained a cell renders with its tail SILENTLY
+    /// DROPPED by GFM. Seen red before the rule existed — on the parent commit this input produced
+    /// zero issues, because `DECISIONS.md` was outside the corpus `load_proposal_files` globs.
+    #[test]
+    fn a_stray_pipe_reshapes_a_row_and_the_rule_fires() {
+        let broken = "| # | Decision | Status |\n|---|---|---|\n| A | fine | open |\n| B | a | stray | pipe | open |\n";
+        let issues = tables(broken);
+        assert_eq!(hygiene_rules(&issues), vec!["markdown-table-row-cell-count"]);
+        assert_eq!(table_locations(&issues), vec!["docs/proposals/DECISIONS.md:4"], "file:line of the broken row");
+        assert!(issues[0].message.contains("5 cell(s)") && issues[0].message.contains("declares 3"), "expected vs actual: {}", issues[0].message);
+        // The other direction — a row that LOST a pipe renders a blank trailing column.
+        let short = "| # | Decision | Status |\n|---|---|---|\n| B | merged status |\n";
+        let issues = tables(short);
+        assert_eq!(hygiene_rules(&issues), vec!["markdown-table-row-cell-count"]);
+        assert!(issues[0].message.contains("2 cell(s)"), "{}", issues[0].message);
+        // A well-formed table is silent.
+        assert!(tables("| # | D |\n|---|---|\n| A | b |\n| C | d |\n").is_empty());
+    }
+
+    /// "Effective" cell count, the part a naive implementation gets wrong. The escape is what makes
+    /// a pipe inert — NOT the backticks around it (GFM spec §4.10: "include a pipe in a cell's
+    /// content by escaping it, INCLUDING INSIDE OTHER INLINE SPANS", example 200). So the corpus
+    /// form `` `NORMAL \| BUSY` `` counts as one cell and a raw `` `a|b` `` genuinely does not.
+    #[test]
+    fn a_pipe_is_made_inert_by_the_escape_not_by_a_code_span() {
+        let escaped = "| # | D |\n|---|---|\n| `NORMAL \\| BUSY \\| PAUSED` | ok |\n| x \\| y | ok |\n";
+        assert!(tables(escaped).is_empty(), "an escaped pipe never opens a cell, inside backticks or not");
+        // Raw pipe inside a code span: GFM splits it, so the row really is 3 cells wide and the
+        // tail really is dropped on GitHub. Firing here is the CORRECT behaviour, not a false
+        // positive — treating code spans as pipe-neutral would blind the rule to the #572 defect.
+        let raw_in_code_span = "| # | D |\n|---|---|\n| `filter(|g| g.scope)` | ok |\n";
+        assert_eq!(hygiene_rules(&tables(raw_in_code_span)), vec!["markdown-table-row-cell-count"]);
+        // Run length decides: `\|` (one backslash, odd) is inert, `\\|` (two, even) is an escaped
+        // BACKSLASH followed by a live pipe — so this row really is 3 cells against a 2-cell header.
+        let escaped_backslash = "| # | D |\n|---|---|\n| a\\\\|b | ok |\n";
+        assert_eq!(hygiene_rules(&tables(escaped_backslash)), vec!["markdown-table-row-cell-count"]);
+    }
+
+    /// Structure: fenced code is program text, the delimiter row is checked against the header
+    /// rather than as a body row, and leading/trailing pipes are delimiters rather than cells.
+    #[test]
+    fn table_scanning_skips_fences_and_checks_the_delimiter_row() {
+        let fenced = "```rust\n| this | is | code |\n|---|---|\n| and | so | is | this |\n```\n";
+        assert!(tables(fenced).is_empty(), "a fenced block is not a table");
+        // A wider fence is not closed by a narrower one nested inside it.
+        let nested = "````md\n```\n| a | b |\n|---|---|\n| c |\n```\n````\n";
+        assert!(tables(nested).is_empty());
+        // Pipe-less rows: GFM would treat the trailing prose line as a row; we end the table there
+        // instead, deliberately (no false positive on prose glued under a table).
+        assert!(tables("| a | b |\n|---|---|\n| c | d |\nprose glued on\n").is_empty());
+        // A delimiter row that disagrees with its header means NOTHING renders as a table.
+        let mismatch = "| a | b | c |\n|---|---|\n| d | e | f |\n";
+        assert_eq!(hygiene_rules(&tables(mismatch)), vec!["markdown-table-delimiter-cell-count"]);
+        // Alignment colons are delimiter cells; a table without leading/trailing pipes still counts.
+        assert!(tables("| a | b |\n|:--|--:|\n| c | d |\n").is_empty());
+        assert!(tables("a | b\n:-: | ---\nc | d\n").is_empty());
+        // A blank line or a heading ends the table, so what follows is not measured against it.
+        assert!(tables("| a | b |\n|---|---|\n| c | d |\n\n## Next\n| e |\n").is_empty());
+    }
+
+    /// The committed corpus is CLEAN: the seven known breaks (#572 — SPEC-2, LOSS-1, IDOR-1,
+    /// ENF-1, CAP-READY, CAP-READY-LEGAL, PROP-20260811-090000 row 3) were repaired by #577, so
+    /// the calibration baseline is now zero findings, the same shape as
+    /// `real_proposals_satisfy_the_hygiene_rules`. Asserted over ALL levels with the joined
+    /// rule/location/message text — never a bare `is_empty()` (a silent list tells a reviewer
+    /// nothing) and never an `.all(|i| level == …)` over a list that is expected to be empty
+    /// (vacuously true, the named trap the replaced identity test carried).
+    #[test]
+    fn the_real_corpus_has_no_table_breaks() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_table_files(&root);
+        assert!(files.iter().any(|(p, _)| p.ends_with("DECISIONS.md")), "the register must be in the corpus");
+        let findings: Vec<String> = validate_markdown_tables(&files)
+            .iter()
+            .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
+            .collect();
+        assert!(findings.is_empty(), "§13b must be silent on the committed corpus:\n{}", findings.join("\n"));
+    }
+
+    /// The gate's whole purpose, exercised against the REAL register rather than a fixture: a stray
+    /// `|` added to a currently-correct row must be caught. Injected in memory (the committed file is
+    /// never touched) so the proof is permanent and repeatable instead of a one-off manual
+    /// experiment. Without this, "the rule works" rests on synthetic 2-column tables — and the row
+    /// this injects is a genuine 4-column register row, 800+ characters of links, bold and code
+    /// spans, which is where a naive splitter actually breaks.
+    #[test]
+    fn an_eighth_break_in_the_real_register_is_caught() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_table_files(&root);
+        let (path, register) = files
+            .iter()
+            .find(|(p, _)| p.ends_with("DECISIONS.md"))
+            .expect("the register must be in the corpus");
+
+        // Pick a row the rule currently accepts, and give it one extra cell.
+        let clean_rows: Vec<(usize, &str)> = register
+            .lines()
+            .enumerate()
+            .filter(|(n, l)| {
+                l.starts_with("| **")
+                    && split_table_row(l).map(|c| c.len()) == Some(4)
+                    && !validate_markdown_tables(&[(path.clone(), register.clone())])
+                        .iter()
+                        .any(|i| i.location == format!("{}:{}", path, n + 1))
+            })
+            .collect();
+        let (line_no, row) = *clean_rows.first().expect("the register must contain at least one clean 4-cell row");
+
+        let injected: String = register
+            .lines()
+            .map(|l| if l == row { row.replacen(" | ", " | stray | ", 1) } else { l.to_string() })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let before = validate_markdown_tables(&[(path.clone(), register.clone())]).len();
+        let after = validate_markdown_tables(&[(path.clone(), injected)]);
+
+        assert_eq!(after.len(), before + 1, "one stray pipe must add exactly one finding");
+        let hit = after
+            .iter()
+            .find(|i| i.location == format!("{}:{}", path, line_no + 1))
+            .unwrap_or_else(|| panic!("the injected row at line {} must be reported", line_no + 1));
+        assert_eq!(hit.rule, "markdown-table-row-cell-count");
+        // §13b is an ERROR since the seven known breaks were repaired (#577): the corpus is clean,
+        // so a reshaped register row must FAIL the gate, not ride the warning ratchet.
+        // (`assert!` with `==` rather than `assert_eq!` because `Level` derives no `Debug` —
+        // the corpus style, same as `approved_proposal_must_reference_a_decision_record`.)
+        assert!(hit.level == Level::Error, "a register reshape must be a gate failure (Error), got a Warning");
+        assert!(hit.message.contains("5 cell(s)") && hit.message.contains("declares 4"), "{}", hit.message);
     }
 
     #[test]
@@ -7348,6 +8184,7 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     // errors today — the committed artifact is written from the CLI's profile, so the day §16 grows a
     // warning kind, a narrower profile here would go red against a CORRECT artifact.
     issues.extend(validate_proposal_hygiene(&load_proposal_files(&root)));
+    issues.extend(validate_markdown_tables(&load_decision_table_files(&root)));
     issues.extend(validate_writer_schema_agreement(
         &load_migration_files(&root),
         &load_writer_files(&root),

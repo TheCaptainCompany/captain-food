@@ -301,7 +301,10 @@ screens:
     sdui: true
     data_requirements: [restaurant.bySlug, catalog.byRestaurant]
     gaps:
-      - "Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges, isOpen) are not on the domain Restaurant/api type yet."
+      # `isOpen` left this list with RSO-1 (DECISIONS §43): the open/closed affordance is served by
+      # `restaurant.serviceWindow` (verdict at the request instant) — `isOpen` was a UI term
+      # colonising the domain, and keeping it declared as a gap would contradict the field.
+      - "Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges) are not on the domain Restaurant/api type yet."
     components:
       - type: back_button_header
         sticky: true
@@ -320,7 +323,15 @@ screens:
               - { icon: clock, value: "{{ restaurant.deliveryTime }}–{{ restaurant.deliveryTime + 10 }} min" }
               - { icon: truck, value: "{{ restaurant.deliveryFee == 0 ? '' : restaurant.deliveryFee | format_currency }}", empty_ref: { $ref: 'translations.yaml#/common.delivery.free' } }
               - { icon: shopping_bag, value: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.min_order' } }   # params: { amount }
+          # RSO-1 (DECISIONS §43): the open/closed BADGE binds the server-evaluated
+          # `restaurant.serviceWindow` — `verdict` is the ONLY discriminator, and the THIRD branch
+          # is explicit: HOURS_UNDECLARED renders NOTHING in this customer slot (never "Fermé" for
+          # a restaurant that accepts orders — the ETA carries the decision; the missing-hours
+          # prompt belongs in the restaurant's own backoffice, not here). Raw `openingHours` stays
+          # ONLY as the weekly listing (`schedule`); it no longer drives the badge.
           - type: opening_hours_row
+            window: "{{ restaurant.serviceWindow }}"
+            on_undeclared: render_nothing
             schedule: "{{ restaurant.openingHours }}"
             labels: { open: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.open' }, closed: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.closed' }, opens_at: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.opens_at' } }
       - { type: sticky_category_nav, id: catalog_nav, items: "{{ restaurant.catalog.categories }}" }
@@ -392,7 +403,12 @@ screens:
     # element binds payment_status.clientSecret below) — now declared. Its orderId arg is the
     # client-minted PlaceOrder.orderId (supplied by the page at dispatch time; /checkout has no
     # route param — see the place_order action note).
-    data_requirements: [cart.current, me.profile, paymentStatus.byOrder]
+    # restaurant.bySlug (RSO-1): declared so the page can RE-EVALUATE serviceWindow at its
+    # validUntil (the slug resolves from the storefront Host, as everywhere on this surface) —
+    # declaration only: no blocking state, no countdown UI. The guard's own refusal is
+    # POST-ENQUEUE (acceptance-first), so it surfaces through the operation outcome the
+    # confirmation flow already watches, not through this page's synchronous error path.
+    data_requirements: [cart.current, me.profile, paymentStatus.byOrder, restaurant.bySlug]
     actions_used: [place_order, set_delivery_address_saved]
     components:
       - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' } }

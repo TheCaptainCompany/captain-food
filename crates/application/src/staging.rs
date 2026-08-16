@@ -46,6 +46,14 @@ impl StagingEventStore {
     pub fn take_staged(&self) -> Vec<StagedAppend> {
         std::mem::take(&mut self.staged.lock().expect("staging buffer poisoned"))
     }
+
+    /// Read the buffer WITHOUT draining — the dispatch wrapper's evidence read (RSO-1: the
+    /// `command.validate` span records the service-window verdict off the staged
+    /// PaymentIntentCreated snapshot rather than recomputing it, so span and record can never
+    /// disagree). The flush still consumes via [`Self::take_staged`].
+    pub fn peek_staged(&self) -> Vec<StagedAppend> {
+        self.staged.lock().expect("staging buffer poisoned").clone()
+    }
 }
 
 #[async_trait]
