@@ -2,6 +2,26 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💸 **2026-08-16 — THE LOOP'S CONTEXT BUDGET IS NOW A RECORD, AND ONE HALF OF IT IS THE FOUNDER'S**
+> ([ADR-20260816-020752](adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md),
+> from the founder question *"Do you have recommendations to optimise tokens consumption?"*). Six
+> team-owned technique changes are Accepted: subagent `.output` transcripts are **banned** unless the
+> agent died (~300k/chunk of pure loss); the coordinator authors **one SHA-stamped dispatch card per
+> chunk** that lenses read instead of the repo (12x50k → 12x~5k) with its Findings block doubling as
+> the PR's mob evidence; the card carries **snapshot semantics** (a disposable cached fold —
+> card@SHA + `git diff`, discard on mismatch, every lens keeps fall-through to the tree); **phase
+> commits** make a dead executor cost one phase instead of ~400k tokens; mutation-red is paid once
+> (red-first, mutate data not source, no confirm-green-after-revert); and gate economics move the
+> pre-push bar on a PR branch from a full `make rust` to a seconds-long pre-flight. Cost becomes
+> observable via a `tokens`/`agent` field on the existing `.claude/loop-budget/` ledger, alarmed as a
+> **dead-man's-switch** (a threshold goes silent exactly when the writer dies). Honest baseline:
+> **~2.5M tokens for one merged work item, with no per-item instrument existing.** The one item that
+> is NOT the team's — **how the mob's fan-out is priced**, since narrowing the checkpoint roster
+> amends [ADR-20260809-013142](adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)
+> — is open as 🟡 **[DECISIONS §44 / MOB-COST-1](proposals/DECISIONS.md)** (recommendation: holub's
+> concern-declared checkpoint + business's price-by-reversibility, with a verification condition on
+> the next chunk).
+>
 > 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
 > the `answers:` DSL from
 > [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
