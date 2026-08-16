@@ -36,6 +36,27 @@
 > pin stays in `.mcp.json`).
 >
 
+> 📮 **2026-08-16 — `deliver:` IS RULED A LANE ENQUEUE, NOT A FOREIGN-STREAM APPEND**
+> ([ADR-20260816-040239](adr/ADR-20260816-040239-deliver-is-a-lane-enqueue-not-a-foreign-stream-append.md),
+> phase 0 of [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588)).
+> The DSL always said `deliver … to: <actor>` (a Tell); the emitter wrote the target aggregate's
+> stream itself, so `PlaceOrderProcess` saves **`Order-{id}` AND `Cart-{id}` in ONE transaction**
+> with neither write passing the Order's mailbox — and no production path ever enqueues the birth,
+> which is why the acceptance clock cannot arm for any real order. Ruling: **being the birth
+> AUTHORITY licenses the DECISION, never the APPEND** — the PM stages an enqueue that the handler
+> converts through the typed door inside the delivery transaction, and the clock arms on the
+> canonical `Recorded` verdict (**no dependency on #590**). Phase-0 enumeration: **13 of 13
+> `deliver:` steps qualify** under the routing predicate, so the change ships **behind a config flag
+> unconditionally** (farley, overturning the dispatch card) routing only the Order pair first; zero
+> steps fail the receives-declaration test, so that becomes a validator error with nothing to
+> grandfather. Verified: **no fold, view or projector reads `user_type`/`cause_id`**, so the envelope
+> change is invisible to every read model (never backfilled). Two gaps recorded, not fixed here: the
+> reclamation replacement birth (`runner.rs:487` → `reclamation.rs:104`) **is live** and stays
+> unlaned — it owns no transaction to stage into — and the #456 "a stranger paid us" counter is
+> called only on the PM-fact route, so the realization must record placements on the inbound-fact
+> route or the counter silently zeroes. Not a migration (payload/type/stream unchanged); the
+> `place-order` observability contract is amended in the realizing PR. **`HOLD: human`.**
+>
 > ⏱️ **2026-08-16 — #167 ACCEPTANCE TIMEOUT IS CODE-COMPLETE ON THE BRANCH (PHASES 0–3 + the mob
 > conditions): [#167 "No order-acceptance timeout: a paid, unaccepted order sits forever with no alert, cancel or refund"](https://github.com/TheCaptainCompany/captain-food/issues/167),
 > branch `167-acceptance-timeout-auto-cancel`, draft [PR #586](https://github.com/TheCaptainCompany/captain-food/pull/586)
