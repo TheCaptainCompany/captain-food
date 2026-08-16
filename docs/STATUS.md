@@ -2,6 +2,39 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔒 **2026-08-16 — THE LANE WIDTH IS NOW UNSPELLABLE, NOT MERELY UNSPELLED**
+> ([#609 "Lane addressing residue after #596: `stable_partition` is still `pub` and `mailbox_address` still carries a vestigial width"](https://github.com/TheCaptainCompany/captain-food/issues/609),
+> branch `609-lane-addressing-residue`, [PR #613](https://github.com/TheCaptainCompany/captain-food/pull/613)
+> — REVERSIBLE INTERNAL, auto-merge-on-green. Card: `docs/dispatch/609-lane-addressing-residue.md`;
+> [ADR-20260816-194428](adr/ADR-20260816-194428-the-lane-width-is-unspellable-not-merely-unspelled.md).)
+>
+> #596 removed the `width` PARAMETER from every routing site and the records said so at that true,
+> smaller size — `stable_partition(&id, some_width)` stayed spellable. It is now **private to its
+> module**: only `declared_lane` crosses the `actor_client` line, so no caller anywhere, production
+> or test, can hold a second opinion about the keyspace. No `pub`, no feature, no `cfg`, nothing for
+> a gate to police.
+>
+> **The residue was not idle**, which is what decided the option: 22 out-of-crate sites across 8 test
+> files spelled `stable_partition(&order, 5)` — copies of exactly the constant #596 was about, in
+> test clothing. A fixture at `N mod 5` against a declaration moved to 7 lands on a lane the new
+> grid's producers never use while the worker still drains it: green build, wrong lane, no error.
+> **Two obligations travelled with the conversion**: four assertion sites were INCIDENTALLY pinning
+> their actors' declared widths and can no longer (both sides now read the declaration), so the pin
+> moves into `partition.rs` as one deliberate test that names the migration (ADR-20260802-220402) and
+> runs without Postgres, where three of the four needed it; and the misroute guard drops its second
+> width for `declared >= SEEDED_LANES`, which holds for every id rather than the one under test.
+>
+> **The cheap alternative was measured, not assumed, and lost twice.** A `test-fixtures`-gated
+> re-export trips the crate's own `unreachable_pub = "deny"` (it does not compile as the card
+> specified), and its seal is real only for release artifacts: with the same production mutant
+> planted, `cargo build -p infrastructure` fails while `cargo test -p infrastructure` **compiles** —
+> resolver v2 unifies the dev-dependency's grant into the lib. Recorded in
+> [sessions.md](claude/sessions.md) because anyone verifying such a seal with `cargo test` gets a
+> false negative. **Item 2 (`mailbox_address`'s vestigial width) was CUT at briefing** — same
+> declaration as `ACTOR_MAILBOXES`, so a caller computes the CORRECT lane; carried forward on #609.
+> Gates: `make rust` 0 errors, `check-drift` clean, `make test-crates` on real Postgres **1252 passed,
+> 0 failed, no DB-skip receipt**; M1/M1b/M2 mutants measured in an isolated worktree.
+
 > 🛟 **2026-08-16 — A LANE IS ADDRESSED FROM THE DECLARATION, AND AN UNSEEDED LANE NOW WAITS INSTEAD OF
 > POISONING A PAID ORDER'S AUTHORIZATION**
 > ([#596 "chain_pm_copy_in_tx reads lane width from a seeded registry and errors at zero — an unseeded worker fails a paid order's saga"](https://github.com/TheCaptainCompany/captain-food/issues/596),

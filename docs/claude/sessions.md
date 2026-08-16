@@ -84,6 +84,12 @@ mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA"   # do it as the postgre
 chmod 700 "$PGDATA"
 su postgres -c "/usr/lib/postgresql/16/bin/initdb -D $PGDATA -A trust -U postgres"
 su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -l $PGDATA/server.log start"
+# Keep -l INSIDE $PGDATA. Point it at a root-owned scratchpad and pg_ctl reports "stopped waiting
+# / could not start server / Examine the log output" with NO log to examine -- it could not create
+# the file (2026-08-16, #609: one wasted start cycle diagnosing a permission error as a startup
+# failure). The infrastructure suite replays migrations itself from `include_str!`, so for
+# `crates/**` tests you need only initdb + `createdb cf<NN>` -- the psql migration dance below is
+# for a database you are inspecting by hand.
 
 # sqlx-cli is NOT installed (CI gets it prebuilt from taiki-e/install-action, and building it
 # here costs minutes). psql applies the migrations, but needs a per-file fallback: some
@@ -1245,6 +1251,32 @@ to see a split fleet was the one monitor with zero reds. Two consequences, both 
 - **A monitor with no red is not covered, whatever the prose beside it says.** If the driver is a
   composition root, drive the composition root — it is `pub`, it resolves real values, and asserting
   against the values it RESOLVED (never a literal) is what separates the test from the tautology.
+
+**A visibility seal must be measured with `cargo build`, and `cargo test` is not the same
+question** (2026-08-16, #609, measured both ways). A `#[cfg(any(test, feature = "test-fixtures"))]`
+re-export looks like a seal and is one *for release artifacts only*. With a caller planted in a
+PRODUCTION source file of `infrastructure`, `cargo build -p infrastructure` failed with
+`error[E0425]: cannot find function ...` while `cargo test -p infrastructure` on the identical tree
+**compiled and linked**: resolver v2 (`Cargo.toml:8`) unifies a dev-dependency's feature grant into
+the single unit the lib links against during a test build, so the lib itself is compiled with the
+test-only export lit. Consequences, both of which cost real time here:
+
+- **Anyone verifying such a seal with `cargo test` gets a false negative** and will report
+  "unspellable" for something that is spellable in half the builds. The honest claim is
+  *"unspellable in any release artifact; still spellable from the lib of a crate whose
+  dev-dependencies light the feature, under `cargo test`"* — level 4 for the shipped binary,
+  level 3 elsewhere. Do not round it up.
+- **Prefer making the item private over gating its export**, when the call sites allow it: the
+  qualifier disappears, and so does the assertion you would otherwise need to stop one unreviewed
+  line from deleting the `cfg`.
+
+**And a boundary crate may refuse the gated-export shape outright.** `crates/actor_client` sets
+`unreachable_pub = "deny"` in its `[lints]`, so gating only the *re-export* leaves `pub fn` in a
+private module unreachable in a release build and the crate fails with `error: unreachable pub
+item`. The gated-export design therefore has to open with
+`#[cfg_attr(not(...), allow(unreachable_pub))]` — suppressing the lint that was already telling you
+to make the item private. Check `[lints]` in the target crate's `Cargo.toml` before pricing a
+`cfg`-gated export at "five lines"; here the price was two rebuild cycles to discover.
 
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
