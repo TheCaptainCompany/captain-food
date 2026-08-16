@@ -58,10 +58,35 @@
 > `place-order` observability contract is amended in the realizing PR. **`HOLD: human`.**
 >
 
+> 🔒 **2026-08-16 — THE LANE CONSTRAINT IS COMPILER-CARRIED, AND THE GATE IT SUBSUMES IS DELETED**
+> ([#597 "Make the lane constraint compiler-carried: TriggerEnvelope.lanes is public, so 'only a transaction-owning route may carry a sink' is a convention"](https://github.com/TheCaptainCompany/captain-food/issues/597),
+> branch `597-lane-constraint-compiler-carried`, [PR #599](https://github.com/TheCaptainCompany/captain-food/pull/599)
+> — merge posture **`HOLD: human`**, mailbox runtime). A **flip-blocker for
+> `ROUTE_ORDER_BIRTH_THROUGH_LANE`**, from the third-look review of #594; both halves are the same
+> class — a constraint stated in prose and guarded by nothing. **(1)** `TriggerEnvelope.lanes` was a
+> `pub` field, so ADR-20260816-040239's constraint 1 (*the enqueue is never in `prepare`*, which
+> `actor_runtime::completion` re-runs with NO transaction open) held by structural reading alone:
+> any construction site could write `lanes: Some(...)` and strand a birth message outside the
+> delivery's commit. The field is **private**; `TriggerEnvelope::laned` / `::unlaned` are the only
+> constructors, and a field write from `prepare` is now `error[E0451]`. **(2)** `record_order_placements`
+> is **private to a new `mailbox::flush` submodule** — a delivery route calling it is `error[E0603]`,
+> in every build mode and every crate — so the #588 source scan
+> `no_delivery_route_decides_when_to_count_a_placement` (which read `handler.rs` only, while the
+> function was `pub`) is **DELETED**: deleting a gate the compiler subsumes is the correct outcome
+> (ADR-20260803-234035). The #456 spy binary reaches the emit through a `test-fixtures`-gated
+> delegating seam, so the feature guard now covers a third declaring crate. **Both privacy changes
+> carry their rustc error as evidence** — a privacy change that compiles when violated has done
+> nothing. Honest residue: `laned` cannot DEMAND proof of a transaction (`application` cannot name a
+> Postgres transaction without inverting the dependency rule), so it turns an anonymous field write
+> into one named, greppable, documented seam; the claim lives in its doc. Also de-claimed the
+> docstring of `a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row`, which advertised a
+> `prepare` fence it never provided (it fails the `PlaceOrder` leg, so the routed leg never runs, in
+> BOTH flag states).
+>
 > 🛬 **2026-08-16 — AND IT IS BUILT: THE ORDER BIRTH RIDES THE ORDER LANE, BEHIND A FLAG**
 > (phases 2–3 of [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),
-> branch `588-order-lane-birth-enqueue`, draft [PR #594](https://github.com/TheCaptainCompany/captain-food/pull/594)
-> — NOT on `main`; merge posture **`HOLD: human`**). The saga stages a `LaneEnqueue`
+> branch `588-order-lane-birth-enqueue`, [PR #594](https://github.com/TheCaptainCompany/captain-food/pull/594)
+> — **MERGED to `main` as `693dab3`**). The saga stages a `LaneEnqueue`
 > (`crates/application/src/lanes.rs`) that the delivery glue converts into an `inbound_messages`
 > row **inside the same fenced transaction**, and the Order's own worker appends the birth — so
 > `record_inbound_order_placed` runs on the canonical `Recorded` arm and the acceptance deadline
@@ -75,7 +100,8 @@
 > "a stranger paid us" counter ran off the PM route's staged set and was called there ONLY, so
 > moving the append would have zeroed it silently; the decision now lives inside
 > `flush_staged_in_tx` — the one way a staged event reaches `domain_events` — so no route can forget
-> and none can double-count, with a source guard failing the build if a route starts deciding again.
+> and none can double-count. (The source guard that shipped alongside it was replaced by privacy in
+> #597 above, and deleted.)
 > Also: `event.store.append` is no longer a REQUIRED `place-order` span (the routed birth appends in
 > a different delivery, so the 800 ms p95 budget would have silently changed meaning) and a new
 > `order_birth_lag_ms{routed}` histogram measures the handover nothing measured before; validator
