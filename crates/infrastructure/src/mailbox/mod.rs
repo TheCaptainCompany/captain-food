@@ -4,6 +4,8 @@
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
 mod activation;
+// THE BIRTH-GAP dead-man's switch (#608) — "money held, no order" made a signal, on its own clock.
+mod birth_gap_watch;
 // The staged-event flush and the BAM counter's WHEN (#597). PRIVATE, and it exports only
 // `flush_staged_in_tx` + `record_order_birth_lag`: the emit decision itself
 // (`record_order_placements`) is unreachable from any delivery route — see `flush.rs`'s module
@@ -23,6 +25,7 @@ mod promotion_watch;
 mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
+pub use birth_gap_watch::{birth_gap_watch_tick, spawn_birth_gap_watch};
 pub use flush::{flush_staged_in_tx, record_order_birth_lag};
 pub use order_lane_watch::{
     declared_lanes, order_lane_watch_tick, spawn_order_lane_watch,

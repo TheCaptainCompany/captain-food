@@ -1246,6 +1246,30 @@ to see a split fleet was the one monitor with zero reds. Two consequences, both 
   composition root, drive the composition root — it is `pub`, it resolves real values, and asserting
   against the values it RESOLVED (never a literal) is what separates the test from the tautology.
 
+**A monitor whose HEALTHY value is ZERO needs five assertions, not one** (2026-08-16, #608 —
+the general form of the two rules above, and of #598's second-drain lesson). "The gauge reads 0" is
+satisfied by a dead emitter, an absent series, a hard-coded constant, an emitter that fired once at
+startup, and a correct monitor — five different worlds, one observation. Three signals nearly
+shipped unverified in one session on exactly that. The suite:
+
+1. **presence** — with nothing wrong, a data point EXISTS for every declared label value, at 0,
+   asserted **by equality over the full point set**. `contains` cannot see the member that stopped
+   reporting, which is the failure the zero contract exists to prevent.
+2. **a VALUE-DERIVED positive control** — not "it went above zero": two subjects at DISTINCT
+   magnitudes must yield the right one, and a **second scenario at a different magnitude must yield
+   a different number**. Without the second, a latched constant passes everything.
+3. **a SAME-SWEEP negative control** — a subject that must NOT be counted, present in the same
+   state on the same tick. Without it, "count everything" passes.
+4. **repetition** — a second tick over unchanged state must re-emit. Under delta temporality a
+   once-at-startup emitter drains identically to a correct one on tick 1, and *every tick* is the
+   whole dead-man's-switch claim.
+5. **recovery** — fix the condition and the next tick must return to 0. A gauge nobody can close an
+   incident on is not a gauge.
+
+Plus one guard the harness itself needs: assert the exporter is non-empty overall and fail with
+*"spy provider not installed before first meter call"* — the `OnceLock` meter binding makes a silent
+no-op provider the default failure, and it looks exactly like "nothing was emitted".
+
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
 introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was

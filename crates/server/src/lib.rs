@@ -1129,6 +1129,14 @@ pub async fn router() -> Router {
                         pool.clone(),
                         std::time::Duration::from_secs(30),
                     );
+                    // #608: THE BIRTH-GAP dead-man's switch — "a customer's money is held and no
+                    // order exists". UNCONDITIONAL, for the same reason as the lane watch above:
+                    // both gauges it emits read 0 on a healthy system, so the only way to know the
+                    // switch works is to have watched it work before the day it is needed.
+                    infrastructure::mailbox::spawn_birth_gap_watch(
+                        pool.clone(),
+                        std::time::Duration::from_secs(30),
+                    );
 
                     // (The startup Stripe-fact backfill runs INLINE before the saga runner
                     // spawns — see the pm_backfill block above the RUN_PROCESS_MANAGERS gate.)

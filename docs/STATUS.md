@@ -13,6 +13,74 @@
 > dispatch card now states its class and banks a `Checkpoint verification:` line either way; a MISS
 > reverts that class to the whole roster (open sub-obligation **MOB-COST-1a**).
 
+> 💸 **2026-08-16 — "MONEY HELD, NO ORDER" IS NOW A SIGNAL THE SYSTEM EMITS**
+> ([#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608),
+> branch `608-authorized-payment-no-birth-detection`,
+> [PR #610](https://github.com/TheCaptainCompany/captain-food/pull/610) — merge posture
+> **`HOLD: human`**, money-path detection + a new long-running monitor). Card:
+> `docs/dispatch/608-authorized-payment-no-birth-detection.md`. Decision:
+> [ADR-20260816-213000](adr/ADR-20260816-213000-the-birth-gap-detector-reads-the-saga-run-not-an-anti-join.md).
+>
+> **(1) The source is the saga's own run state, NOT an anti-join of two aggregates.** The dispatch
+> proposed anti-joining Payment authorizations against Order births; vernon refused (two write
+> paths, two clocks, and another consumer's projection becomes an input to the money path) and he
+> and observability then independently verified the fact that settled it: **the
+> `payment_process_manager` row is created at CHECKOUT**, by the `PlaceOrder` handler, before any
+> Stripe outcome exists — the PM legs only `expect` it. So an authorization the saga never
+> processed still HAS a run row, and the #596 unseeded-lane case is visible, not blind.
+>
+> **(2) ONE gauge, three reasons, zeros always.**
+> `payment_authorized_no_order_birth_age_seconds{reason}` over the declared bounded set
+> `{retry_pending, delivery_exhausted, no_run}`, plus
+> `payment_birth_gap_sweep_heartbeat_total` after a COMPLETE sweep. `no_run` is the residue the run
+> state cannot see: `PlaceOrder` does two sequential unfenced durable writes (Stripe intent-create,
+> then the run-row upsert) and a crash between them leaves **funds held with no run row** — visible
+> only in `domain_events`. Every member reports every tick, 0 included, so an absent series means
+> the sweep died, never "all clear".
+>
+> **(3) Thresholds are lane-derived and their antecedents are `$ref`s.**
+> `MAILBOX_HEARTBEAT_SECONDS × (2^MAILBOX_MAX_DELIVERY_ATTEMPTS − 1)` = **310 s**, not the 50 s a
+> linear reading gives — the mailbox backoff is EXPONENTIAL, and 50 s would page on every healthy
+> retry. `retry_pending` = 600 s; `delivery_exhausted` and `no_run` = **0** (page on the first one:
+> at V0 the base rate is ~0/day and no rate is tolerable). New `REF_CONTRACT` site
+> `*.metrics[*].thresholds[*].derived_from[*]` → `ConfigKey`, so a renamed key reds the validator
+> instead of leaving a stale bound.
+>
+> **(4) The existing gauge is AMENDED, and now actually emitted.**
+> `payment_authorized_unsettled_age_seconds` is correct for born-but-never-CAPTURED; only its
+> header's claim to cover the never-born case was false. It had **zero emit sites in `crates/**`**
+> and rides the same sweep now — shipping a second declared-but-silent money-path contract was the
+> failure this chunk existed to stop.
+>
+> **(5) New gate: `obs-metric-no-emitter` (validator §20).** Every metric declared in
+> `specs/observability.yaml` must have a name constant in `crates/telemetry/src/contract.rs` AND an
+> instrument built from it in `meters.rs`. **41 declared metrics fail it today** (webhook ingestion,
+> prospection, refunds, SIRENE, delivery dispatch — contracts written before their runtimes), so it
+> is a WARNING on the §17 ratchet: the 41 are frozen, a 42nd is a hard gate failure. Proved by
+> planting a metric into the REAL catalog and watching it red.
+>
+> **(6) The response is routed as far as the repo can route it.**
+> `docs/runbooks/authorized-payment-no-order-birth.md` — Stripe dashboard → cancel the intent BY
+> HAND → contact the customer → note the reclamation. Remediation automation stays out (money
+> movement). **Open gap, recorded not invented: there is no alert-route wiring anywhere in this
+> repo**, so no artifact names a human or a rota. Same gap as the `ROUTE_ORDER_BIRTH_THROUGH_LANE`
+> flip's "the rollback trigger has no observer" obligation, which is founder-gated; both are
+> cross-linked.
+>
+> **(7) Proof: `crates/infrastructure/tests/authorized_no_birth_metric.rs`**, own binary, one
+> `#[tokio::test]`, real Postgres. State manufactured through the REAL seams end to end — a real
+> `PlaceOrder` on the real PM command lane (which opens the run row), a real `PaymentAuthorized` on
+> the real Payment lane (which records the fact and chains the hop), and then simply no drain.
+> Nothing the detector queries is hand-inserted; only the CLOCK is moved, because
+> `extract(epoch)::bigint` truncates and a value-derived control needs distinct ages. beck's
+> zero-healthy suite in full: presence by EQUALITY, a value-derived positive control (two stranded
+> at distinct ages ⇒ the older; then a different age ⇒ a different value, which kills a latched
+> constant), a same-sweep negative control (an order born in the same database on the same tick),
+> a second tick, and recovery to zero. **Known gap stated rather than faked**: `delivery_exhausted`
+> is asserted present-at-zero and mutant-covered but not driven positive — every honest route to
+> "terminal hop, run still AWAITING" in today's runtime is an induced infrastructure fault, and
+> manufacturing it would mean inserting the row the detector reads.
+
 > 📡 **2026-08-16 — THE ORDER LANE HAS A HEARTBEAT, AND THE CHECKOUT SUCCESS RULE STOPS LYING**
 > ([#598 "Before the birth-lane flip: the place-order latency budget still measures the old workflow, and a flat order_birth_lag_ms cannot be told from a dead lane"](https://github.com/TheCaptainCompany/captain-food/issues/598)
 > + [#589](https://github.com/TheCaptainCompany/captain-food/issues/589), branch

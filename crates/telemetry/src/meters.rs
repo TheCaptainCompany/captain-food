@@ -352,6 +352,78 @@ pub mod payment_settlement {
     }
 }
 
+/// THE BIRTH-GAP DEAD-MAN'S SWITCH (#608): *is a customer's money held right now with no order
+/// behind it, and for how long?*
+///
+/// Emitted by `infrastructure::mailbox::birth_gap_watch_tick`, a MONITOR on its own clock outside
+/// every worker it watches (ADR-20260810-231300's monitoring carve-out — for a monitor, silence is
+/// ambiguous, so it keeps a poll permanently and with no exit).
+///
+/// The three functions below are separate on purpose, unlike `place_order::order_lane_watch`'s
+/// fused pair: the two gauges have DIFFERENT populations (never-born vs born-never-captured) and
+/// the heartbeat must be able to lag both — it certifies a COMPLETE sweep, so the sweep calls it
+/// last, after every gauge has reported.
+pub mod birth_gap {
+    use super::*;
+
+    /// The DECLARED bounded label set, mirroring `specs/observability.yaml`'s
+    /// `payment_authorized_no_order_birth_age_seconds.attribute_values.reason`.
+    ///
+    /// It is a constant rather than three call sites because the contract is "every member reports
+    /// on every tick, 0 included": a sweep that iterates this list cannot forget a member, and a
+    /// member that stops reporting is the exact silence the switch exists to abolish. Sorted, so
+    /// an equality assertion over an emitted point set is order-stable.
+    pub const REASONS: [&str; 3] = ["delivery_exhausted", "no_run", "retry_pending"];
+
+    fn no_order_birth_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_gauge(metric::PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS)
+                .with_unit("s")
+                .build()
+        })
+    }
+
+    fn unsettled_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_gauge(metric::PAYMENT_AUTHORIZED_UNSETTLED_AGE_SECONDS)
+                .with_unit("s")
+                .build()
+        })
+    }
+
+    fn sweep_heartbeat_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::PAYMENT_BIRTH_GAP_SWEEP_HEARTBEAT_TOTAL).build())
+    }
+
+    /// `payment_authorized_no_order_birth_age_seconds{reason}` — the age of the OLDEST stranded
+    /// authorization in that class, **0 when the class is empty**. Call it for EVERY member of
+    /// [`REASONS`] on every tick; an early return on an empty population is the defect
+    /// ADR-20260810-231300 names, one level down.
+    pub fn no_order_birth_age(reason: &str, age_seconds: i64) {
+        no_order_birth_gauge()
+            .record(age_seconds, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `payment_authorized_unsettled_age_seconds` — the age of the oldest BORN order still
+    /// AUTHORIZED (never captured). Declared since ADR-20260808-195315 and emitted by nothing until
+    /// #608; it rides this sweep because it is the same question one hop later, and a second
+    /// declared-but-silent money-path contract is what this chunk exists to stop shipping.
+    pub fn authorized_unsettled_age(age_seconds: i64) {
+        unsettled_gauge().record(age_seconds, &[]);
+    }
+
+    /// `payment_birth_gap_sweep_heartbeat_total` — one COMPLETED sweep. Called LAST, so it can
+    /// never certify a pass that failed halfway. Alert on the absence of an increment.
+    pub fn sweep_completed() {
+        sweep_heartbeat_counter().add(1, &[]);
+    }
+}
+
 /// Technical + BAM metrics for the `read-authorization` contract (#144).
 pub mod read_authorization {
     use opentelemetry::metrics::Gauge;
