@@ -61,7 +61,98 @@
 > lenses that declared a concern there, and the chunk's **reversibility class** sizes the briefing
 > roster — full mob for money, stored event shapes, legal surfaces and anything Tours-facing. Every
 > dispatch card now states its class and banks a `Checkpoint verification:` line either way; a MISS
-> reverts that class to the whole roster (open sub-obligation **MOB-COST-1a**).
+> reverts that class to the whole roster (sub-obligation **MOB-COST-1a**).
+>
+> ⛔ **The first answer, 2026-08-16, is a MISS — HIGH-CONSEQUENCE is REVERTED to the whole roster at
+> BRIEFING AND CHECKPOINT.** Banked on [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
+> (see below): a money-path threshold derived in the dispatch card as `attempts × spacing` ≈ 50 s
+> when the mailbox backoff is exponential (310 s; landed 600 s). `dba` was named at briefing for
+> that surface and was not returned to at the checkpoint; the error was the coordinator's, in the
+> card, and the executor caught it while implementing rather than the checkpoint catching it.
+> (b)+(c) stand unchanged for the reversible classes, whose first data point is still to come.
+> Evidence in [DECISIONS §44 MOB-COST-1a](proposals/DECISIONS.md).
+
+> 💸 **2026-08-16 — "MONEY HELD, NO ORDER" IS NOW A SIGNAL THE SYSTEM EMITS**
+> ([#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608),
+> branch `608-authorized-payment-no-birth-detection`,
+> [PR #610](https://github.com/TheCaptainCompany/captain-food/pull/610) — merge posture
+> **`HOLD: human`**, money-path detection + a new long-running monitor). Card:
+> `docs/dispatch/608-authorized-payment-no-birth-detection.md`. Decision:
+> [ADR-20260816-213000](adr/ADR-20260816-213000-the-birth-gap-detector-reads-the-saga-run-not-an-anti-join.md).
+>
+> **(1) The source is the saga's own run state, NOT an anti-join of two aggregates.** The dispatch
+> proposed anti-joining Payment authorizations against Order births; vernon refused (two write
+> paths, two clocks, and another consumer's projection becomes an input to the money path) and he
+> and observability then independently verified the fact that settled it: **the
+> `payment_process_manager` row is created at CHECKOUT**, by the `PlaceOrder` handler, before any
+> Stripe outcome exists — the PM legs only `expect` it. So an authorization the saga never
+> processed still HAS a run row, and the #596 unseeded-lane case is visible, not blind.
+>
+> **(2) ONE gauge, three reasons, zeros always.**
+> `payment_authorized_no_order_birth_age_seconds{reason}` over the declared bounded set
+> `{retry_pending, delivery_exhausted, no_run}`, plus
+> `payment_birth_gap_sweep_heartbeat_total` after a COMPLETE sweep. `no_run` is the residue the run
+> state cannot see: `PlaceOrder` does two sequential unfenced durable writes (Stripe intent-create,
+> then the run-row upsert) and a crash between them leaves **funds held with no run row** — visible
+> only in `domain_events`. Every member reports every tick, 0 included, so an absent series means
+> the sweep died, never "all clear".
+>
+> **(3) Thresholds are lane-derived and their antecedents are `$ref`s.**
+> `MAILBOX_HEARTBEAT_SECONDS × (2^MAILBOX_MAX_DELIVERY_ATTEMPTS − 1)` = **310 s**, not the 50 s a
+> linear reading gives — the mailbox backoff is EXPONENTIAL, and 50 s would page on every healthy
+> retry. `retry_pending` = 600 s; `delivery_exhausted` and `no_run` = **0** (page on the first one:
+> at V0 the base rate is ~0/day and no rate is tolerable). New `REF_CONTRACT` site
+> `*.metrics[*].thresholds[*].derived_from[*]` → `ConfigKey`, so a renamed key reds the validator
+> instead of leaving a stale bound.
+>
+> **(4) The existing gauge is AMENDED, emitted, and PROVEN.**
+> `payment_authorized_unsettled_age_seconds` is correct for born-but-never-CAPTURED; only its
+> header's claim to cover the never-born case was false. It had **zero emit sites in `crates/**`**
+> and rides the same sweep now — shipping a second declared-but-silent money-path contract was the
+> failure this chunk existed to stop. **Its first cut nearly repeated that failure in a subtler
+> form**: no projector ran in the test binary, so `ordertracking` held **0 rows for the whole
+> suite** and the gauge's `== 0.0` assertion was satisfied by a query that could not return anything
+> else — a mis-spelled predicate (`'AUTHORISED'`) left the suite green. It is now driven off rows
+> folded by the real `ProjectionWorker` to two DIFFERENT positive values, and that mutant is red.
+>
+> **(5) New gate: `obs-metric-no-emitter` (validator §20).** Every metric declared in
+> `specs/observability.yaml` must have a name constant in `crates/telemetry/src/contract.rs` AND an
+> instrument built from it in `meters.rs`. **41 declared metrics fail it today** (webhook ingestion,
+> prospection, refunds, SIRENE, delivery dispatch — contracts written before their runtimes), so it
+> is a WARNING on the §17 ratchet: the 41 are frozen, a 42nd is a hard gate failure. Proved by
+> planting a metric into the REAL catalog and watching it red.
+>
+> **(6) The response is routed as far as the repo can route it.**
+> `docs/runbooks/authorized-payment-no-order-birth.md` — Stripe dashboard → cancel the intent BY
+> HAND → contact the customer → note the reclamation. Remediation automation stays out (money
+> movement). **Open gap, recorded not invented: there is no alert-route wiring anywhere in this
+> repo**, so no artifact names a human or a rota. Same gap as the `ROUTE_ORDER_BIRTH_THROUGH_LANE`
+> flip's "the rollback trigger has no observer" obligation, which is founder-gated; both are
+> cross-linked.
+>
+> **(7) Proof: `crates/infrastructure/tests/authorized_no_birth_metric.rs`**, own binary, one
+> `#[tokio::test]`, real Postgres. State manufactured through the REAL seams end to end — a real
+> `PlaceOrder` on the real PM command lane (which opens the run row), a real `PaymentAuthorized` on
+> the real Payment lane (which records the fact and chains the hop), and then simply no drain.
+> Nothing the detector queries is hand-inserted; only the CLOCK is moved, because
+> `extract(epoch)::bigint` truncates and a value-derived control needs distinct ages. beck's
+> zero-healthy suite in full: presence by EQUALITY, a value-derived positive control (two stranded
+> at distinct ages ⇒ the older; then a different age ⇒ a different value, which kills a latched
+> constant), a same-sweep negative control (an order born in the same database on the same tick,
+> itself AGED so the exclusion has something to exclude), a second tick, and recovery. **All three
+> reasons are now driven POSITIVE**, including `delivery_exhausted` — the member with threshold 0.
+> **Ten mutants, applied-check and revert-check.**
+>
+> **(8) The third look FAILED this branch, and the discharge is part of it.** Three blockers:
+> the born-but-uncaptured gauge shipped emitted-but-unproven (item 4); the MOB-COST-1a MISS was
+> banked in the card but never reached the register (top of this file); and the card's second banked
+> claim — *"every honest route to a terminal hop while the run stays `AWAITING_PAYMENT_RESULT` is an
+> induced infrastructure fault rather than a seam"* — was **verifiably false and is retracted, not
+> softened**. The seam is built from ports the test file already substitutes: a decorator on the
+> injected `EventStore` failing the PM leg's Order-stream `load` with `DomainError::Repository`, plus
+> `max_delivery_attempts: 1`, takes the hop terminal through the worker's own poison path while the
+> completion transaction rolls the run back at `AWAITING_PAYMENT_RESULT`. That control has landed,
+> which also answers [#611](https://github.com/TheCaptainCompany/captain-food/issues/611).
 
 > 📡 **2026-08-16 — THE ORDER LANE HAS A HEARTBEAT, AND THE CHECKOUT SUCCESS RULE STOPS LYING**
 > ([#598 "Before the birth-lane flip: the place-order latency budget still measures the old workflow, and a flat order_birth_lag_ms cannot be told from a dead lane"](https://github.com/TheCaptainCompany/captain-food/issues/598)

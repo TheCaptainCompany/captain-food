@@ -563,6 +563,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // A span attribute's VALUE SET, by $ref to the domain enum scalar that declares it (RSO-1,
     // "one name = one dedicated scalar" applied to value sets — never a hand-copied enum list).
     ("observability.yaml", "*.spans[*].attributes[*].values", &[Kind::EnumScalar]),
+    // A metric threshold's ANTECEDENTS (#608): the declared configuration keys the number is
+    // derived from. "A threshold citing a number no contract owns is not a threshold"
+    // (observability) — so the derivation names its inputs as `$ref`s into configuration.yaml,
+    // which makes a renamed or deleted key a red validator instead of a silently stale bound.
+    ("observability.yaml", "*.metrics[*].thresholds[*].derived_from[*]", &[Kind::ConfigKey]),
 
     // Read models. `from` is event LINEAGE (a whole event for occurrence columns, a property
     // otherwise); `fk` is the read-navigation graph, so it must name a COLUMN.

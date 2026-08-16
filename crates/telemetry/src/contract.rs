@@ -161,6 +161,29 @@ pub mod metric {
     /// never a page: the hold self-heals (Stripe expires it within ~7 days and reports
     /// PaymentReleased). Attribute `reason` (deterministic | transient).
     pub const PAYMENT_RELEASE_FAILED_TOTAL: &str = "payment_release_failed_total";
+    /// `payment-settlement` contract: the age of the OLDEST OrderTracking row still
+    /// `payment_status = AUTHORIZED`, from its `placed_at`. BORN-but-never-CAPTURED only — an order
+    /// that was never born has no OrderTracking row, so this gauge is structurally blind to it
+    /// (#608 corrected the contract header that claimed otherwise; the never-born population is
+    /// [`PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS`]). Emitted by the #608 birth-gap sweep,
+    /// which is also the first thing that ever emitted it at all.
+    pub const PAYMENT_AUTHORIZED_UNSETTLED_AGE_SECONDS: &str =
+        "payment_authorized_unsettled_age_seconds";
+    /// `place-order` contract (#608): THE BIRTH-GAP DEAD-MAN'S SWITCH — the age in seconds of the
+    /// OLDEST authorization with no order behind it, 0 when the class is empty. Attribute `reason`,
+    /// over the DECLARED bounded set [`crate::meters::birth_gap::REASONS`]: `retry_pending` (the
+    /// saga hop is still deliverable), `delivery_exhausted` (terminal hop, run never resolved),
+    /// `no_run` (a PaymentAuthorized fact with no `payment_process_manager` row — the crash window
+    /// between PlaceOrder's two durable writes). EVERY member is emitted EVERY tick: an absent
+    /// series must never read as "nothing stranded".
+    pub const PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS: &str =
+        "payment_authorized_no_order_birth_age_seconds";
+    /// `place-order` contract (#608): the birth-gap sweep's own liveness, incremented once per
+    /// COMPLETED sweep. ALERT ON THE ABSENCE OF AN INCREMENT, never a threshold — the gauges it
+    /// accompanies read 0 on a healthy system, and 0 is indistinguishable from a dead sweep
+    /// without this counter (the `order_lane_watch_heartbeat_total` shape, same reason).
+    pub const PAYMENT_BIRTH_GAP_SWEEP_HEARTBEAT_TOTAL: &str =
+        "payment_birth_gap_sweep_heartbeat_total";
     /// `place-order` contract (#440): the checkout shell rendered WITHOUT a mountable payment
     /// element — a DEFECT counter (the customer_claim_stamp_failed_total pattern), attribute
     /// `reason`. A degraded render produces ZERO place-order runs (the customer cannot even try),

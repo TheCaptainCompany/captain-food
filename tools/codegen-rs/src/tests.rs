@@ -8562,10 +8562,65 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
         &load_migration_files(&root),
         &load_writer_files(&root),
     ));
+    // §20 (#608) DOES emit warnings, so it must be here: the artifact is written from the CLI's
+    // profile, and a narrower profile in this test goes red against a CORRECT baseline.
+    let (contract_rs, meters_rs) = load_metric_emitter_sources(&root);
+    issues.extend(validate_metric_emitters(&declared_metrics(&model), &contract_rs, &meters_rs));
     let live = warning_profile(&issues);
     if let Err(msg) = check_warning_baseline(&root, &live) {
         panic!("{msg}");
     }
+}
+
+/// §20 against the REAL catalog, proved by MUTATING SPEC DATA rather than a fixture (#608, beck's
+/// condition): plant a metric no constant can name into the real declared set and the rule must
+/// go red. Without this, `validate_metric_emitters`'s unit tests prove the function works and
+/// nothing proves it is asked about the specs we actually ship.
+#[test]
+fn a_metric_planted_into_the_real_catalog_with_no_emitter_reds_section_20() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let model = load_model(&root.join("specs")).expect("load real specs");
+    let (contract_rs, meters_rs) = load_metric_emitter_sources(&root);
+    assert!(
+        !contract_rs.is_empty() && !meters_rs.is_empty(),
+        "the §20 sources must be readable from the repo root — an empty read would make every \
+         metric report and the mutation below would prove nothing"
+    );
+
+    let mut declared = declared_metrics(&model);
+    let baseline = validate_metric_emitters(&declared, &contract_rs, &meters_rs);
+
+    // The two #608 gauges are the reason this rule exists; they must be CLEAN now, or the rule is
+    // reporting the very metrics this chunk emitted.
+    for name in [
+        "payment_authorized_no_order_birth_age_seconds",
+        "payment_authorized_unsettled_age_seconds",
+        "payment_birth_gap_sweep_heartbeat_total",
+    ] {
+        assert!(
+            declared.iter().any(|(_, _, n)| n == name),
+            "'{name}' must be DECLARED in specs/observability.yaml"
+        );
+        let just_this: Vec<DeclaredMetric> =
+            declared.iter().filter(|(_, _, n)| n == name).cloned().collect();
+        assert!(
+            validate_metric_emitters(&just_this, &contract_rs, &meters_rs).is_empty(),
+            "'{name}' is declared but §20 still reports it — the #608 gauges must not be silent"
+        );
+    }
+
+    let planted = "a_metric_no_constant_will_ever_name_total".to_string();
+    declared.push(("place-order".to_string(), "metrics".to_string(), planted.clone()));
+    let mutated = validate_metric_emitters(&declared, &contract_rs, &meters_rs);
+    assert_eq!(
+        mutated.len(),
+        baseline.len() + 1,
+        "planting a declared metric with no constant must add exactly one §20 finding"
+    );
+    assert!(
+        mutated.iter().any(|i| i.rule == "obs-metric-no-emitter" && i.message.contains(&planted)),
+        "the planted metric must be the one reported"
+    );
 }
 
 /// Shared mutation helpers for the two suites below, which both prove their rules by MUTATING THE

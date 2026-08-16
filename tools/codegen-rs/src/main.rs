@@ -89,6 +89,14 @@ fn main() {
         &load_migration_files(&root),
         &load_writer_files(&root),
     ));
+    // ─── §20 — DECLARED-BUT-SILENT metrics (#608): a contract that declares a signal nothing emits
+    // reads exactly like one that works — the dashboard is empty either way, and on a money-path
+    // dead-man's switch that is the most reassuring failure there is. Warning-level, on the §17
+    // ratchet: the existing backlog is frozen and a NEW one is a hard gate failure.
+    {
+        let (contract_rs, meters_rs) = load_metric_emitter_sources(&root);
+        issues.extend(validate_metric_emitters(&declared_metrics(&model), &contract_rs, &meters_rs));
+    }
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
@@ -145,6 +153,10 @@ fn main() {
     eprintln!(
         "    - proposals: {} docs/proposals/PROP-*.md — Status header, tracking-issue link, Concerns resolved before Approved, Approved names an ADR",
         proposals.len()
+    );
+    eprintln!(
+        "    - metrics: {} declared observability metrics — each has a name constant and an instrument in crates/telemetry (§20)",
+        declared_metrics(&model).len()
     );
     eprintln!(
         "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",

@@ -1246,6 +1246,44 @@ to see a split fleet was the one monitor with zero reds. Two consequences, both 
   composition root, drive the composition root — it is `pub`, it resolves real values, and asserting
   against the values it RESOLVED (never a literal) is what separates the test from the tautology.
 
+**A monitor whose HEALTHY value is ZERO needs five assertions, not one** (2026-08-16, #608 —
+the general form of the two rules above, and of #598's second-drain lesson). "The gauge reads 0" is
+satisfied by a dead emitter, an absent series, a hard-coded constant, an emitter that fired once at
+startup, and a correct monitor — five different worlds, one observation. Three signals nearly
+shipped unverified in one session on exactly that. The suite:
+
+1. **presence** — with nothing wrong, a data point EXISTS for every declared label value, at 0,
+   asserted **by equality over the full point set**. `contains` cannot see the member that stopped
+   reporting, which is the failure the zero contract exists to prevent.
+2. **a VALUE-DERIVED positive control** — not "it went above zero": two subjects at DISTINCT
+   magnitudes must yield the right one, and a **second scenario at a different magnitude must yield
+   a different number**. Without the second, a latched constant passes everything.
+   **A SIXTH world hides here, and it shipped**: the query's population may be EMPTY IN THE TEST
+   BINARY. #608's second gauge read `ordertracking` while nothing in that binary projected — 0 rows
+   for the whole suite against 3 `OrderPlaced` in `domain_events` — so mis-spelling its predicate
+   (`'AUTHORIZED'` → `'AUTHORISED'`) left the suite GREEN, and the metric was claimed "no longer
+   silent" in an ADR, SPEC-LOG and STATUS on the strength of a runtime nobody had seen work. **Every
+   table a monitor reads needs a row that arrived the way production makes it** (here: run the real
+   `ProjectionWorker`) — a gauge over a permanently-empty population is not distinguishable on a
+   dashboard from the declared-but-silent state it replaced. Corollary for `obs-metric-no-emitter`
+   (validator §20) and any rule like it: it proves a name can be SPELLED at a call site, never that
+   the call site is reached with a value.
+3. **a SAME-SWEEP negative control** — a subject that must NOT be counted, present in the same
+   state on the same tick. Without it, "count everything" passes. **Age the excluded subject too**:
+   #608's negative control was vacuous at its own assertion point because the born order's hop was
+   fresh, so `max(age)` over the wrongly-included row was 0 and the drop-the-exclusion mutant passed
+   there, dying three assertions later. A control whose subject reads the healthy value anyway
+   discriminates nothing where it claims to.
+4. **repetition** — a second tick over unchanged state must re-emit. Under delta temporality a
+   once-at-startup emitter drains identically to a correct one on tick 1, and *every tick* is the
+   whole dead-man's-switch claim.
+5. **recovery** — fix the condition and the next tick must return to 0. A gauge nobody can close an
+   incident on is not a gauge.
+
+Plus one guard the harness itself needs: assert the exporter is non-empty overall and fail with
+*"spy provider not installed before first meter call"* — the `OnceLock` meter binding makes a silent
+no-op provider the default failure, and it looks exactly like "nothing was emitted".
+
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
 introduced alongside its own tests. Reviewers caught both; no gate could have. A scanner was
@@ -1302,6 +1340,16 @@ belongs to whoever holds the feature branch. Same root cause, other direction: *
 dispatch targeting `main` must open with an explicit `git checkout main`** — an executor dispatched
 for a `main` docs task started on a feature branch someone else had left checked out, correctly
 refused to write, and burned its entire run doing nothing before a session limit killed it.
+
+**The COORDINATOR is a writer too, and that is the case that actually fires** (2026-08-16, #608).
+The rule above was worded for reviewers and executors, so it read as satisfied while the coordinator
+kept using the shared checkout for its own work: mid-review of #608 that checkout was switched off
+the branch, a #609 dispatch card was committed onto it and cherry-picked to `main`. It cost nothing
+this time — branch refs came through intact (`local == origin == 5354d31`), PR content unaffected,
+and the reviewer had already moved to its own linked worktree — but only because the reviewer had
+independently isolated itself. **Nobody writes in the shared checkout while a dispatch is live in
+it, the coordinator included**; claim commits and docs commits are writes, and `git worktree add` is
+200 ms. The reviewer's isolation is a second belt, never the reason this was safe.
 
 ### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
 

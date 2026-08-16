@@ -331,6 +331,13 @@ async fn run_standalone_workers(
     if actor_types.iter().any(|a| super::declared_lanes().contains(a)) {
         super::spawn_order_lane_watch(pool.clone(), std::time::Duration::from_secs(30));
     }
+    // #608: THE BIRTH-GAP dead-man's switch, for a fleet that hosts a MONEY lane — whichever
+    // process delivers the saga's Stripe facts is the one that must notice when it stops. Same
+    // monitor-outside-the-worker posture as the two watches above; the sweep reads database-wide
+    // state, so it is gated on hosting the lane, never on being the monolith.
+    if actor_types.iter().any(|a| is_money_lane(a)) {
+        super::spawn_birth_gap_watch(pool.clone(), std::time::Duration::from_secs(30));
+    }
     let handler = Arc::new(
         super::MailboxCommandHandler::new(deps)
             .with_reminder_windows(reminder_windows)
