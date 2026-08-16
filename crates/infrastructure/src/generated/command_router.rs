@@ -32,6 +32,11 @@ pub struct CommandDeps {
     /// enforcement gate, resolved ONCE at the composition root -- the handler takes it as a
     /// parameter (the `when_at` style), never reads config/env itself.
     pub enforce_service_hours_guard: bool,
+    /// #167 (`configuration.yaml#/ENFORCE_ACCEPTANCE_TIMEOUT`): the acceptance-timeout ACTION
+    /// gate, read at DELIVERY time by the kind-MESSAGE OrderAcceptanceTimedOut route -- same
+    /// composition-root resolution as `enforce_service_hours_guard`. OFF (the default) is SHADOW
+    /// MODE: the full still-PLACED guard runs, only the append is inert.
+    pub enforce_acceptance_timeout: bool,
 }
 
 /// The slice of the request envelope some handler calls read (placeOrder's session scope).

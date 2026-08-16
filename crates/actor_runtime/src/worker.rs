@@ -336,7 +336,7 @@ impl MailboxWorker {
             let rows = sqlx::query(
                 "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
                         payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                        session_id, received_at, attempts, next_attempt_at \
+                        session_id, received_at, scheduled_at, attempts, next_attempt_at \
                  FROM inbound_messages \
                  WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' \
                  ORDER BY position \

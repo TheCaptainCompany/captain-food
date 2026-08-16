@@ -270,9 +270,12 @@ Order:
         evaluated on the identical fold+predicate code path and the append alone is inert (the
         fired-while-OFF occurrence lands Ignored, spent forever — flipping ON is prospective
         only), with the shadow decision exported as OTLP evidence at the mailbox layer
-        (specs/observability.yaml, business.shadow/would_cancel). Recording it also schedules
-        the OrderExpired retention reminder like every other terminal — a timed-out order must
-        still get its GDPR clock.
+        (specs/observability.yaml#/acceptance-timeout, business.shadow/would_cancel). THE FENCE
+        (young+vernon, PR #586 checkpoint — binding): the `schedules:` below applies on the
+        RECORDED/Cancelled arm ONLY — Recording the cancellation also starts the OrderExpired
+        retention reminder like every other terminal (a timed-out order must still get its GDPR
+        clock), but a shadow WouldCancel→Ignored delivery must NEVER arm the GDPR deletion clock
+        on a still-PLACED order, and neither may any other no-append arm.
       schedules:
         - { $ref: '#/Order/reminders/OrderExpired' }
 

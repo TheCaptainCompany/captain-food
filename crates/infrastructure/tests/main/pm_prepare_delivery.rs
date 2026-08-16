@@ -231,6 +231,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
         // RSO-1: the service-hours enforcement gate at its spec default (OFF = shadow).
         enforce_service_hours_guard: false,
+        // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
+        enforce_acceptance_timeout: false,
     }
 }
 

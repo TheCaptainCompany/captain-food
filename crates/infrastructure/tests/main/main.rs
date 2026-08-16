@@ -27,6 +27,7 @@ mod customer_projection;
 mod deletion_engine;
 mod delivery_read_model;
 mod event_wake;
+mod mailbox_acceptance_timeout;
 mod mailbox_activations;
 mod mailbox_delivery;
 mod mailbox_requeue;

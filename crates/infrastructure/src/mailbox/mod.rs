@@ -12,9 +12,11 @@ mod activation;
 // worker spawn, and the activation cache.
 mod handler;
 mod pm_delivery;
+mod promotion_watch;
 mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
+pub use promotion_watch::{promotion_watch_tick, spawn_promotion_watch};
 pub use standalone::{
     shutdown_signal, spawn_standalone_workers,
     spawn_standalone_workers_with, standalone_deps, standalone_workers_enabled,

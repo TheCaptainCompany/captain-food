@@ -130,6 +130,11 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         enforce_service_hours_guard: std::env::var("ENFORCE_SERVICE_HOURS_GUARD")
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false),
+        // #167: the acceptance-timeout ACTION gate — same ENV-GATED posture, same boolean
+        // parse, same default (OFF = shadow) as the spec.
+        enforce_acceptance_timeout: std::env::var("ENFORCE_ACCEPTANCE_TIMEOUT")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+            .unwrap_or(false),
     }
 }
 
@@ -270,6 +275,14 @@ async fn run_standalone_workers(
                 }
             }
         });
+    }
+    // #167: a fleet hosting a `schedules:` lane also runs the promotion dead-man's switch —
+    // the SCHEDULED backlog is per-database, so whichever process drains the lane watches it
+    // (monitor outside the worker, ADR-20260810-231300 monitoring carve-out).
+    if actor_types.iter().any(|a| {
+        application::generated::reminders::REMINDER_SCHEDULES.iter().any(|s| s.actor_type == *a)
+    }) {
+        super::spawn_promotion_watch(pool.clone(), std::time::Duration::from_secs(30));
     }
     let handler = Arc::new(
         super::MailboxCommandHandler::new(deps)

@@ -1078,6 +1078,37 @@ pub async fn record_inbound_order_event(
     Ok(RecordOutcome::Recorded)
 }
 
+/// Record the delivered `OrderPlaced` BIRTH fact on its order's stream — the kind-EVENT delivery
+/// route for the spec's birth receive (`specs/ordering/actors.yaml`: "Birth: PlaceOrderProcess
+/// delivers OrderPlaced; the Order records it (idempotent)"). Recorded exactly once:
+/// `AlreadyRecorded` when the birth is already on the stream (a redelivered birth — the caller
+/// still RE-APPLIES the receive's `schedules:`, which is safe by design: the acceptance deadline
+/// is `reschedule: keep`, so the FIRST scheduled_at wins, #167), `NoChange` when the stream is
+/// non-empty yet birthless (an erased or partial stream — absorb, never a second birth).
+pub async fn record_inbound_order_placed(
+    store: &dyn EventStore,
+    event: DomainEvent,
+    actor: &Actor,
+) -> Result<crate::payments::RecordOutcome, DomainError> {
+    use crate::payments::RecordOutcome;
+
+    let DomainEvent::OrderPlaced(placed) = &event else {
+        return Err(DomainError::Repository(format!(
+            "record_inbound_order_placed routed a non-birth fact: {event:?}"
+        )));
+    };
+    let stream_name = order_stream(&placed.order_id);
+    let (events, version) = store.load(&stream_name).await?;
+    if events.iter().any(|ev| matches!(ev, DomainEvent::OrderPlaced(_))) {
+        return Ok(RecordOutcome::AlreadyRecorded);
+    }
+    if !events.is_empty() {
+        return Ok(RecordOutcome::NoChange);
+    }
+    Repository::new(store).save(&stream_name, version, &[event], actor).await?;
+    Ok(RecordOutcome::Recorded)
+}
+
 /// What one delivered acceptance deadline decided (#167). Richer than
 /// `payments::RecordOutcome` ON PURPOSE: the mailbox delivery arm labels its OTLP shadow
 /// evidence from this — `WouldCancel` is the flip ADR's whole data set — and a coarser outcome

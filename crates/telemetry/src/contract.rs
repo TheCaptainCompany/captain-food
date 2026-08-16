@@ -44,6 +44,11 @@ pub mod span {
     /// the money-free Cart row priced fresh from the live catalog via `price_cart`. The pricer
     /// itself stays SDK-free; only the resolver boundary constructs this span.
     pub const CART_PRICE: &str = "cart.price";
+    /// INTERNAL — one promoted reminder's DELIVERY at the mailbox layer (`acceptance-timeout`
+    /// contract, #167): the fire delay against the declared due time, and — while the enforcement
+    /// gate is OFF — the shadow would-cancel decision that is the flip ADR's whole evidence set
+    /// (the `service_window_verdict` precedent). Never in the pure handler (SDK-free rule).
+    pub const REMINDER_PROMOTE: &str = "reminder.promote";
 }
 
 /// Attribute keys. All business context is `business.*` per `docs/claude/observability.md`; the two
@@ -73,6 +78,20 @@ pub mod attr {
     /// `trace_id` is technical and may rotate across async boundaries, so both are recorded.
     pub const CORRELATION_ID: &str = "business.correlation_id";
     pub const ORDER_ID: &str = "business.order_id";
+
+    /// `acceptance-timeout` contract keys (#167) — the `reminder.promote` shadow-evidence span.
+    /// The reminder's name (`OrderAcceptanceTimedOut`, `OrderExpired`, …).
+    pub const REMINDER_TYPE: &str = "business.reminder_type";
+    /// The row's declared due time (RFC 3339) — `scheduled_at`, which promotion never clears.
+    pub const DUE_AT: &str = "business.due_at";
+    /// Delivery time minus due time, ms — the honest promotion-slop measurement.
+    pub const FIRE_DELAY_MS: &str = "business.fire_delay_ms";
+    /// The gate position at DELIVERY time: `true` = ENFORCE_ACCEPTANCE_TIMEOUT off (shadow mode,
+    /// append inert), `false` = enforcement live.
+    pub const SHADOW: &str = "business.shadow";
+    /// The guard's decision: `true` = the identical still-PLACED fold+predicate would cancel
+    /// (Cancelled when enforcing, Ignored-with-evidence in shadow), `false` = benign no-op.
+    pub const WOULD_CANCEL: &str = "business.would_cancel";
 
     /// `read-authorization` contract keys (#144).
     pub const ROLE: &str = "business.role";
@@ -168,6 +187,17 @@ pub mod metric {
     /// policy_missing | stock_unknown). Each one is a customer who saw NO payable amount — a
     /// sale silently lost; alert on any sustained non-zero rate.
     pub const CART_PRICE_UNRESOLVABLE_TOTAL: &str = "cart_price_unresolvable_total";
+    /// `acceptance-timeout` contract (#167): the promotion machinery's DEAD-MAN'S SWITCH —
+    /// emitted on EVERY watch tick per actor type (0 when nothing is due), never only when a
+    /// reminder arrives (ADR-20260810-231300: a monitor that can only fire when a signal arrives
+    /// goes quiet exactly when it should scream). Value = now minus the oldest DUE SCHEDULED
+    /// row's `scheduled_at` (0 when none due). A GROWING value = promotion is dead; the metric
+    /// STOPPING = the watcher itself is dead — both are alertable. Attribute `actor_type`.
+    pub const REMINDER_PROMOTION_DUE_LAG_MS: &str = "reminder_promotion_due_lag_ms";
+    /// `acceptance-timeout` contract (#167, the dba gauge): SCHEDULED row depth by
+    /// (`actor_type`, `purpose` = the reminder's message_type) — the cardinality watch on the
+    /// reminder table (V0 expectation ≈ single digits; a runaway here is a scheduling leak).
+    pub const MAILBOX_SCHEDULED_DEPTH: &str = "mailbox_scheduled_depth";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

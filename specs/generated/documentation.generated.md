@@ -11530,6 +11530,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
+- ⚠️ Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code.
 
 <a id="screen-order_history"></a>
 ### 📱 `order_history` · `/orders` · 📱 SDUI · 🔒 auth

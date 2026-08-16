@@ -105,6 +105,42 @@ pub mod mailbox {
     pub fn push_down(reason: &str) {
         push_down_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
     }
+
+    fn promotion_due_lag_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::REMINDER_PROMOTION_DUE_LAG_MS).with_unit("ms").build()
+        })
+    }
+
+    fn scheduled_depth_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::MAILBOX_SCHEDULED_DEPTH).build())
+    }
+
+    /// The promotion machinery's DEAD-MAN'S SWITCH (`reminder_promotion_due_lag_ms{actor_type}`,
+    /// #167 / ADR-20260810-231300): recorded on EVERY watch tick, 0 included — a monitor that
+    /// only fires when a reminder arrives goes quiet exactly when it should scream. A growing
+    /// value = the promotion pass is dead while due reminders pile up; the series STOPPING = the
+    /// watcher itself died. Emitted by the promotion watch (a sampler OUTSIDE the worker, so a
+    /// dead worker cannot silence its own alarm — the ADR's monitoring carve-out).
+    pub fn promotion_due_lag(actor_type: &str, lag_ms: f64) {
+        promotion_due_lag_histogram()
+            .record(lag_ms, &[KeyValue::new("actor_type", actor_type.to_string())]);
+    }
+
+    /// SCHEDULED row depth by (actor_type, purpose) (`mailbox_scheduled_depth`, the #167 dba
+    /// gauge): the reminder table's cardinality watch — V0 expectation is single digits, and a
+    /// runaway here is a scheduling leak, not load.
+    pub fn scheduled_depth(actor_type: &str, purpose: &str, depth: i64) {
+        scheduled_depth_gauge().record(
+            depth,
+            &[
+                KeyValue::new("actor_type", actor_type.to_string()),
+                KeyValue::new("purpose", purpose.to_string()),
+            ],
+        );
+    }
 }
 
 /// The `place-order` contract: one technical histogram plus the two BAM counters.

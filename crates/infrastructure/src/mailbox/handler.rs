@@ -393,6 +393,30 @@ impl MailboxCommandHandler {
                 application::commands::record_inbound_order_event(store.as_ref(), event.clone(), &actor)
                     .await
             }
+            // #167: the Order BIRTH as a mailbox delivery — the spec's "Birth: PlaceOrderProcess
+            // delivers OrderPlaced" receive. Recorded idempotently; its `schedules:` start the
+            // acceptance clock, and a redelivered (AlreadyRecorded) birth RE-APPLIES them —
+            // safe by design: `reschedule: keep` means the first deadline wins.
+            E::OrderPlaced(_) => {
+                application::commands::record_inbound_order_placed(store.as_ref(), event.clone(), &actor)
+                    .await
+            }
+            // #167: the promoted acceptance deadline — its own route because its outcome is
+            // richer than RecordOutcome (the shadow WouldCancel arm is the flip ADR's evidence)
+            // and because of the young+vernon fence below: schedules apply on the
+            // Recorded/Cancelled arm ONLY.
+            E::OrderAcceptanceTimedOut(_) => {
+                return self
+                    .handle_acceptance_timeout(
+                        tx,
+                        message,
+                        event.clone(),
+                        staging.clone(),
+                        activation,
+                        &actor,
+                    )
+                    .await;
+            }
             _ => {
                 return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                     "code": "Internal",
@@ -463,6 +487,13 @@ impl MailboxCommandHandler {
                 if let Some(a) = &activation {
                     a.guard_freshness_in_tx(tx).await?;
                 }
+                // A redelivered, duplicate-absorbed fact RE-DECLARES its `schedules:` (#167,
+                // vernon's design note): under `reschedule: keep` the re-declaration is the
+                // in-tx ON CONFLICT no-op — the FIRST deadline wins — and a birth redelivered
+                // across a deploy that introduced its reminder still gets a clock. A no-op for
+                // every route whose receive declares no schedules. (The NoChange arm below
+                // deliberately does NOT: an erased/birthless stream must not get a clock.)
+                super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
                 Delivery::of(HandlerVerdict::Duplicate)
             }
             // A conflict surfaced by the recorder itself: the stream moved under it — retry, same
@@ -476,6 +507,141 @@ impl MailboxCommandHandler {
             // Transient infrastructure failure while loading/folding the stream: ABORT for retry.
             // A terminal FAILED would be absorbed by the enqueue-side pk dedupe when the provider
             // redelivers, permanently losing the payment/delivery fact (PR #270 review C3).
+            Err(DomainError::Repository(detail)) => {
+                return Err(sqlx::Error::Protocol(detail));
+            }
+            Err(e) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Failed(
+                    serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+                ))
+            }
+        };
+        Ok(delivery)
+    }
+
+    /// The #167 acceptance-timeout delivery (kind MESSAGE, the promoted deadline). Its own route
+    /// because [`application::commands::AcceptanceTimeoutOutcome`] is deliberately richer than
+    /// `RecordOutcome` — the shadow `WouldCancel` decision is the ENFORCE_ACCEPTANCE_TIMEOUT flip
+    /// ADR's whole evidence set — and because of THE FENCE (PR #586 mob checkpoint, young+vernon
+    /// binding): `apply_schedules_in_tx` is verdict-blind and this receive declares
+    /// `schedules: OrderExpired`, so schedules apply on the **Recorded/Cancelled arm ONLY**
+    /// (mirroring the record route's shape). A shadow `WouldCancel`→Ignored delivery must NEVER
+    /// arm the GDPR deletion clock on a still-PLACED order.
+    ///
+    /// The OTLP shadow evidence (`reminder.promote`, specs/observability.yaml
+    /// `acceptance-timeout`) is emitted HERE at the mailbox layer — the pure handler only
+    /// decides (SDK-free rule; the `service_window_verdict` precedent).
+    async fn handle_acceptance_timeout(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        event: domain::generated::events::DomainEvent,
+        staging: Arc<StagingEventStore>,
+        activation: Option<DeliveryActivation>,
+        actor: &Actor,
+    ) -> Result<Delivery, sqlx::Error> {
+        use application::commands::AcceptanceTimeoutOutcome as O;
+        use domain::generated::events::DomainEvent as E;
+        use tracing::Instrument as _;
+
+        let enforce = self.deps.enforce_acceptance_timeout;
+        let span = telemetry::spans::reminder_promote(&message.message_type, !enforce);
+        // The honest promotion slop: delivery time against the row's declared due time.
+        // Absent on a redelivery under a fresh (unscheduled) identity.
+        if let Some(due) = message.scheduled_at {
+            let delay = (chrono::Utc::now() - due).num_milliseconds();
+            telemetry::spans::record_reminder_due(&span, &due.to_rfc3339(), delay);
+        }
+        if let E::OrderAcceptanceTimedOut(t) = &event {
+            telemetry::spans::record_order_id(&span, &t.order_id.0.to_string());
+        }
+
+        let store: Arc<dyn EventStore> = staging.clone();
+        let outcome = application::commands::record_order_acceptance_timeout(
+            store.as_ref(),
+            event,
+            enforce,
+            actor,
+        )
+        .instrument(span.clone())
+        .await;
+
+        let delivery = match outcome {
+            // Gate ON, still PLACED: the append is real — the ONLY arm that applies schedules.
+            Ok(O::Cancelled) => {
+                telemetry::spans::record_would_cancel(&span, true);
+                let staged = staging.take_staged();
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                match flush_staged_in_tx(tx, &staged).await {
+                    Ok(()) => {
+                        // THE FENCE: `schedules:` (the OrderExpired GDPR clock — a timed-out
+                        // order is terminal and must still be erased on schedule) rides the
+                        // SAME transaction as the recorded cancellation, and ONLY here.
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
+                            .await?;
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            activation.as_ref(),
+                            &staged,
+                        );
+                        self.fanout_delivery(&staged, None, promote)
+                    }
+                    Err(e) if is_version_conflict(&e) => {
+                        if let Some(a) = &activation {
+                            a.invalidate_scoped();
+                        }
+                        return Err(sqlx::Error::Protocol(e.to_string()));
+                    }
+                    Err(DomainError::Repository(detail)) => {
+                        return Err(sqlx::Error::Protocol(detail));
+                    }
+                    Err(e) => Delivery::of(HandlerVerdict::Failed(
+                        serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+                    )),
+                }
+            }
+            // Gate OFF (shadow), still PLACED: the IDENTICAL guard decided it would cancel and
+            // only the append was inert. Ignored — record semantics, never Rejected — and the
+            // occurrence is spent forever (flipping ON is prospective only). NO schedules: a
+            // shadow delivery must never arm the GDPR clock on a still-PLACED order.
+            Ok(O::WouldCancel) => {
+                telemetry::spans::record_would_cancel(&span, true);
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Ignored)
+            }
+            // Acceptance/rejection/cancellation won the race, or the stream is gone: benign
+            // no-op under either gate position. No append, no schedules.
+            Ok(O::NotPlaced) | Ok(O::NoOrder) => {
+                telemetry::spans::record_would_cancel(&span, false);
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Ignored)
+            }
+            // A redelivered deadline: the order already timed out. The fold-based dedupe stays
+            // authoritative.
+            Ok(O::AlreadyTimedOut) => {
+                telemetry::spans::record_would_cancel(&span, false);
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Duplicate)
+            }
+            Err(e) if is_version_conflict(&e) => {
+                if let Some(a) = &activation {
+                    a.invalidate_scoped();
+                }
+                return Err(sqlx::Error::Protocol(e.to_string()));
+            }
+            // Transient infrastructure failure: ABORT for retry — a terminal verdict here would
+            // spend the one occurrence this order ever gets.
             Err(DomainError::Repository(detail)) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
