@@ -63,12 +63,27 @@ silently different keyspace.
 **1. Lane addressing comes from the DECLARATION. There is one accessor and it takes no width.**
 
 `actor_client::declared_lane(actor_type, actor_id) -> Option<i16>` reads `ACTOR_MAILBOXES`
-(generated from `actors.yaml` `mailbox.partitions`) and applies the frozen routing function. Every
-routing site calls it. No routing site takes a `width` parameter, so **no call site can decide
-where a width comes from** — ADR-20260803-234035's level-4 floor, reached by removing the
-parameter rather than by adding a gate. We deliberately did **not** write the text-grep check the
-dispatch card proposed (§3): decision 3 below subsumes it, and a gate the compiler subsumes should
-not be written.
+(generated from `actors.yaml` `mailbox.partitions`) and applies the frozen routing function.
+
+**Every routing site calls it, and none of them takes a `width` parameter.** Reaching that took
+more than the three sites the dispatch card named — review blocker B1 caught the first draft of
+this ADR *asserting* the property while five other places still took or hand-rolled a width, and
+using the assertion to drop the card's grep gate. What it actually took:
+`ActorDoor::send_command`/`schedule_command`, `command_entry`, `inbound_entry` and the reminder
+scheduler all lost their `width` argument, and the **emitter** stopped writing a literal width into
+the generated typed clients — `send_command("Order", 5, …)` in generated code was the one genuinely
+independent copy of the routing constant, replicated once per actor crate.
+
+**What remains true and is not more than that**: `stable_partition` is still `pub` and still
+re-exported, because tests legitimately compute an expected lane with it and the golden-value
+freeze lives on it. So the wrong two-step is still *spellable*; after B1 it is simply not *spelled*
+anywhere outside `declared_lane` itself and test code. That is level 4 for the parameter and
+nothing stronger for the function, and this ADR now says so rather than rounding it up.
+
+Because the parameter is gone, the text-grep check the dispatch card proposed (§3) is not written:
+decision 3 below subsumes the runtime half, and a gate the compiler subsumes should not exist. That
+conclusion is only load-bearing *given* B1 was actually done — it was not a licence to skip the
+work.
 
 The width is not configuration. It is an **addressing contract**, and the registry is an
 *observation* of what some worker did at some past startup. An observation may be absent, partial
@@ -97,6 +112,25 @@ registry) is catastrophic if applied to a first boot.
 serves; then delete the stale registry rows and restart. With no in-flight rows there is no
 aggregate whose stamped partition can disagree with the new addressing.
 
+**Pre-deploy check, because this decision can refuse a start that used to succeed.** Before
+deploying this change, confirm the live registry already matches the declaration:
+
+```sql
+SELECT actor_type, count(*) FROM mailbox_partitions GROUP BY 1 ORDER BY 1;
+-- must equal ACTOR_MAILBOXES: 5 for every actor, 1 for MailboxSupervision
+```
+
+It does, and the reason is specific rather than general. The argument from `ON CONFLICT DO NOTHING`
+alone is **not sufficient** — it says seeding never deletes, which is why a *narrowing* leaves
+stale rows behind. What makes live databases safe is that the one narrowing this system has ever
+performed cleaned up after itself: migration `20260802220000_mailbox_width_100_to_5.sql` ends with
+`DELETE FROM mailbox_partitions WHERE partition >= 5`, so every actor present at that time is
+`[0..4]`. And `MailboxSupervision`, the only actor whose declared width is not 5, was introduced on
+2026-08-03 by #315 — **after** that migration — and has only ever declared `partitions: 1`, so it
+can only ever hold `[0]`. Both cases satisfy the check, so no live worker refuses to start on this
+deploy. A future narrowing that does *not* carry its own `DELETE` would break this, which is
+exactly what decision 3 now catches at startup instead of at 20:30 on a Friday.
+
 The check lives in `actor_runtime`, which carries **no path dependency into the workspace**
 (extraction-readiness, `tests/dependency_rule.rs`). It therefore validates the registry against the
 width it was **given**, not against `ACTOR_MAILBOXES` — the declared width arrives from the caller,
@@ -111,9 +145,24 @@ operator opens to ask "is anything stuck?" would have answered "no" over a backl
 **Trading a loud wrong failure for a silent right one is not an improvement.**
 
 The lane population is now the declared grid `UNION` anything actually carrying work, with the
-registry `LEFT JOIN`ed in. Three states are visible and distinguishable: seeded; declared but
-unseeded and holding work; and the **orphan** an old width decrease stranded outside the declared
-grid. Split-lane detector, for the state that predates decision 3:
+registry `LEFT JOIN`ed in.
+
+Visible is not the same as diagnosable, and the first draft of this ADR overstated it (review
+follow-up): a declared-but-never-seeded lane and a seeded-but-merely-unclaimed one render
+`ownershipVersion 0` / `claimedBy null` / `checkpoint 0` — **byte-identical** — while only one of
+them will ever be drained. So `MailboxLane` gains a **`registration`** field
+(`scalars.yaml#/MailboxLaneRegistration`: `SEEDED` / `DECLARED_UNSEEDED` / `UNDECLARED_ORPHAN`),
+additive on the GraphQL type, and the ADMIN page reads it as its first badge. *With* that field the
+three states are distinguishable; the pair-identity is now pinned by an assertion in
+`crates/server/tests/mailbox_lanes.rs` so the field cannot quietly stop being load-bearing.
+
+The screen copy moved with it, because prose that teaches the opposite of the code is not something
+`make validate` can see: the empty state no longer says *"Lanes appear when a mailbox worker seeds
+the partition registry on startup"* (the exact belief this change destroys, on a state that is now
+unreachable), and the reading guide names the never-seeded case and says plainly that `pending > 0`
+there is a paid order waiting on a worker that was never deployed.
+
+Split-lane detector, for the state that predates decision 3:
 
 ```sql
 SELECT actor_type, actor_id FROM inbound_messages
@@ -172,6 +221,13 @@ detector at all, for any cause, before there *are* real orders. That ordering is
   flip-time backfill carried an identical `count(*)` and an identical zero-width error, found
   independently by `dba` and `beck`. It mattered *more* there: a rescue pass for facts nobody
   reacted to, running at startup, that refused to run when the system was cold.
+- **And that site shipped its first draft with no negative test** (review blocker B3): reverting
+  the backfill to the seeded `count(*)` left all 84 infrastructure tests green, because its only
+  test seeds the PM lanes first — the very coincidence this branch indicts, reproduced inside the
+  fix for it. `backfill_enqueues_to_the_declared_partition_with_the_target_unseeded` is the cold
+  case, and it is verified red against the pre-fix body. The lesson generalises: a test written
+  against a system in its *warm* state cannot see a defect that only exists when it is cold, and
+  startup code is exactly where cold is the normal condition.
 
 ## Consulted
 

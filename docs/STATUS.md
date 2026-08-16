@@ -26,8 +26,12 @@
 > says nothing detects.
 >
 > **Landed**: ONE accessor `actor_client::declared_lane(actor_type, actor_id)` over `ACTOR_MAILBOXES`,
-> and **no routing site takes a `width` any more** — compiler-first level 4, so the planned text-grep
-> gate was NOT written (a gate the compiler subsumes should not exist). **THREE sites, not the card's
+> and **no routing site takes a `width` any more**. That took the review to reach: the first draft
+> ASSERTED it while the typed door, the entry constructors, the reminder scheduler and a hand-copied
+> literal `5` in all 17 generated client crates still passed one, and used the assertion to drop the
+> planned grep gate. All of those lost the argument, emitter included; `stable_partition` stays `pub`
+> for tests and its golden freeze, so the two-step is still spellable and the records now say that
+> rather than rounding it up. The grep gate stays unwritten because the parameter is genuinely gone. **THREE sites, not the card's
 > two**: record-time chaining, the **flip-time backfill** (same `count(*)`, same zero-width error,
 > found independently by `dba` and `beck` — and worse there, a cold-start rescue pass that refused to
 > run when the system was cold), and the already-correct sibling converted so they cannot drift apart

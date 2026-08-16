@@ -88,8 +88,13 @@ types:
   MailboxLane:
     description: >
       One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a
-      (actorType, partition) row from the mailbox_partitions registry joined with live
-      pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT
+      (actorType, partition) lane from the DECLARED routing contract (actors.yaml
+      `mailbox.partitions`), joined with its mailbox_partitions registry row when it has one and
+      with live pending/scheduled counts from inbound_messages. The population is the DECLARATION,
+      not the registry (#596): a lane appears whether or not a worker has ever seeded it, because
+      the case that must never be invisible is a lane holding a paid order whose worker never
+      started. `registration` says which of the three situations a row is in — without it a
+      never-seeded lane and a seeded-but-unclaimed one render identically. checkpoint/ownershipVersion are BIGINT
       rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest
       attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being
       re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap
@@ -111,6 +116,7 @@ types:
       oldestPendingAt: { type: string, format: date-time, nullable: true }
       retryingAttempts: { type: integer }
       poisoned: { type: integer }
+      registration: { $ref: 'scalars.yaml#/MailboxLaneRegistration' }   # #596: declared+seeded / declared+never-seeded / undeclared orphan
 
   PoisonedMailboxMessage:
     description: >
@@ -182,8 +188,9 @@ queries:
     description: >
       Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and
       live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient —
-      served from mailbox_partitions + inbound_messages directly, no View_* (write-path
-      infrastructure, not a business read model).
+      served from the DECLARED lane grid LEFT JOINed to mailbox_partitions and inbound_messages
+      (#596 — driven by the declaration, so an unseeded lane holding work is visible rather than
+      absent), no View_* (write-path infrastructure, not a business read model).
     args: {}
     returns: { $ref: '#/types/MailboxLane', array: true }
     roles: [ADMIN]

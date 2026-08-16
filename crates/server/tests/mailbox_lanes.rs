@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use actor_client::mailbox::MailboxAccess;
 use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow};
+use domain::generated::scalars::MailboxLaneRegistration;
 use infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository;
 use infrastructure::{
     PgCartRepository, PgCatalogRepository, PgCustomerCreditRepository, PgCustomerRepository,
@@ -206,12 +207,39 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     assert_eq!((unseeded.ownership_version, unseeded.checkpoint), (0, 0));
     assert!(unseeded.claimed_by.is_none() && unseeded.lease_until.is_none());
     assert_eq!((unseeded.pending, unseeded.scheduled), (0, 0));
+    assert_eq!(unseeded.registration, MailboxLaneRegistration::DECLARED_UNSEEDED);
+
+    // THE REASON `registration` EXISTS: lane 1 is SEEDED and merely unclaimed, lane 4 was NEVER
+    // seeded, and every OTHER field on the two rows is identical. One of them will be drained by
+    // the next claim pass and the other will never be drained by anybody, and without this field
+    // an operator staring at the page cannot tell which is which.
+    assert_eq!(
+        (
+            lane1.ownership_version, lane1.checkpoint,
+            lane1.claimed_by.is_none(), lane1.pending, lane1.scheduled,
+        ),
+        (
+            unseeded.ownership_version, unseeded.checkpoint,
+            unseeded.claimed_by.is_none(), unseeded.pending, unseeded.scheduled,
+        ),
+        "if these ever differ, re-read whether `registration` is still load-bearing"
+    );
+    assert_ne!(
+        lane1.registration, unseeded.registration,
+        "seeded-but-unclaimed and never-seeded must NOT render the same"
+    );
+    assert_eq!(lane1.registration, MailboxLaneRegistration::SEEDED);
 
     // THE CASE #596's FIX CREATES: declared, never seeded, and HOLDING AN ORDER. Its worker has
     // not started, so nothing claims it and nothing will drain it — and the chained hop no longer
     // errors, so this page is the only place that says so.
     let waiting = lane(&lanes, "Order", 2);
     assert_eq!(waiting.pending, 1, "an order waiting on a worker that never started: {waiting:?}");
+    assert_eq!(
+        waiting.registration,
+        MailboxLaneRegistration::DECLARED_UNSEEDED,
+        "declared, never seeded, and holding a paid order -- the row the page exists for"
+    );
     assert!(waiting.claimed_by.is_none(), "nobody owns an unseeded lane");
     assert_eq!(waiting.ownership_version, 0, "no registry row -> no fencing counter yet");
     assert!(waiting.oldest_pending_at.is_some(), "and it has been waiting since a knowable time");
@@ -221,12 +249,13 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     // was already stranded before the check existed.
     let orphan = lane(&lanes, "Conversation", 7);
     assert_eq!(orphan.pending, 1, "beyond the declared five, and still holding a message");
+    assert_eq!(orphan.registration, MailboxLaneRegistration::UNDECLARED_ORPHAN);
     assert_eq!(orphan.ownership_version, 0);
     assert!(orphan.claimed_by.is_none());
 
     // 2) The GraphQL surface, as ADMIN: lanes serialize with the BIGINT counters as strings.
     let schema = schema_over(&pool);
-    let query = "{ mailboxLanes { actorType partition ownershipVersion claimedBy checkpoint pending scheduled oldestPendingAt } }";
+    let query = "{ mailboxLanes { actorType partition ownershipVersion claimedBy checkpoint pending scheduled oldestPendingAt registration } }";
     let resp = schema
         .execute(async_graphql::Request::new(query).data(RequestRole::Admin))
         .await;
@@ -254,6 +283,9 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     assert_eq!(waiting["pending"], 1);
     assert_eq!(waiting["claimedBy"], serde_json::Value::Null);
     assert_eq!(waiting["ownershipVersion"], "0");
+    assert_eq!(waiting["registration"], "DECLARED_UNSEEDED", "the badge the guide tells them to read first");
+    assert_eq!(gql("Conversation", 1)["registration"], "SEEDED");
+    assert_eq!(gql("Conversation", 7)["registration"], "UNDECLARED_ORPHAN");
 
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
     for role in every_non_admin_role() {

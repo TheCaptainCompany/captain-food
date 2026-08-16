@@ -4,8 +4,13 @@
 # The SYSTEM surface: internal operations screens for the platform team — audience role ADMIN only.
 # First screen: the ACTOR MAILBOX supervision page (#242 Runtime B, ADR-20260730-231500,
 # PROP-20260728-152752 §3.2 "the ops surface: the mailbox lane monitor") — one row per
-# (actor_type, partition) lane out of `mailbox_partitions` joined with the pending/scheduled
-# backlog in `inbound_messages`, served by the ADMIN-only `mailboxLanes` query. This refines
+# (actor_type, partition) lane of the DECLARED routing contract (actors.yaml `mailbox.partitions`),
+# LEFT JOINed to its `mailbox_partitions` registry row and to the pending/scheduled backlog in
+# `inbound_messages`, served by the ADMIN-only `mailboxLanes` query. The population is the
+# DECLARATION, not the registry (#596, ADR-20260816-165714): a lane whose worker has never started
+# has no registry row, and a page driven by the registry would have shown NOTHING for it — while
+# that is exactly the lane that can be holding a paid order nobody is coming for. The
+# `registration` badge names which of the three situations each row is in. This refines
 # ADR-0037's impersonation-only stance exactly as CLAUDE.md anticipated ("a `system`/admin screen
 # set may follow"): supervision needs a first-class read surface, not an impersonated one.
 #
@@ -63,9 +68,14 @@ screens:
           - type: list
             id: lane_list
             items: "{{ mailbox_lanes }}"
+            # Reachable only in a build where NO actor declares a mailbox: the lane list is the
+            # declared grid, so it is non-empty in every real deployment (#596). Kept, and its copy
+            # rewritten, because "no rows" must not be read as "no workers have started" — that was
+            # the belief this change exists to destroy.
             empty_state: { icon: inbox, title: { $ref: 'system.translations.yaml#/mailbox.empty.title' }, body: { $ref: 'system.translations.yaml#/mailbox.empty.body' } }
             item_components:
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lane' },       value: "{{ item.actorType }} / {{ item.partition }}" }
+              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.registration' }, value: "{{ item.registration }}", variant_when: { warning: "item.registration != 'SEEDED'" } }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.owner' },      value: "{{ item.claimedBy }}" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lease' },      value: "{{ item.leaseUntil }}" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.ownership' },  value: "{{ item.ownershipVersion }}" }

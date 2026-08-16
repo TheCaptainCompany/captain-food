@@ -23,9 +23,18 @@ pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
 /// `None` when the actor type declares no mailbox at all — a wiring bug, never a business outcome,
 /// and each caller names it in its own terms.
 ///
-/// It exists to make a whole class of defect unspellable rather than merely discouraged
-/// (ADR-20260803-234035, compiler-first). Callers pass no `width`, so no call site can decide
-/// where a width comes from — and the wrong source was a real, shipped, money-path defect:
+/// It exists to take a decision away from call sites (ADR-20260803-234035, compiler-first):
+/// callers pass no `width`, so no routing site can decide where a width comes from. Since #596's
+/// review that is true of every routing site — the typed door, the entry constructors, the
+/// reminder scheduler and the generated clients all lost their `width` argument.
+///
+/// **Precisely**: the PARAMETER is gone, not the possibility. [`stable_partition`] stays `pub` for
+/// tests (which legitimately compute an expected lane) and for its golden-value freeze, so the
+/// two-step `stable_partition(id, some_width)` remains SPELLABLE — it is simply not spelled
+/// anywhere outside this function and test code. Claiming more than that was itself a review
+/// finding on #596, so the claim is kept at its true size here.
+///
+/// The wrong source was a real, shipped, money-path defect:
 /// `chain_pm_copy_in_tx` derived the keyspace from `SELECT count(*) FROM mailbox_partitions`, a
 /// RUNTIME artifact written only by the workers at startup, while every other producer used the
 /// DECLARED contract below.

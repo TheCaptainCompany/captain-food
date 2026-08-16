@@ -13,6 +13,7 @@ use actor_client::mailbox::MailboxAccess;
 use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow, PoisonedMessageRow};
 use application::queries::{MailboxRequeue, MailboxRequeueAccess, RequeueOutcome};
 use async_trait::async_trait;
+use domain::generated::scalars::MailboxLaneRegistration;
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
@@ -30,8 +31,22 @@ impl PgMailboxLaneRepository {
     }
 }
 
+/// `MailboxLaneRegistration` for one row, from the two facts the query already carries: is the
+/// lane in the DECLARED grid, and does it have a registry row (#596).
+fn registration_of(declared: bool, seeded: bool) -> MailboxLaneRegistration {
+    match (declared, seeded) {
+        (_, true) => MailboxLaneRegistration::SEEDED,
+        (true, false) => MailboxLaneRegistration::DECLARED_UNSEEDED,
+        (false, false) => MailboxLaneRegistration::UNDECLARED_ORPHAN,
+    }
+}
+
 fn decode_lane(row: &PgRow) -> Result<MailboxLaneRow, DomainError> {
     Ok(MailboxLaneRow {
+        registration: registration_of(
+            row.try_get::<bool, _>("declared").map_err(db_err)?,
+            row.try_get::<bool, _>("seeded").map_err(db_err)?,
+        ),
         actor_type: row.try_get("actor_type").map_err(db_err)?,
         partition: row.try_get::<i16, _>("partition").map_err(db_err)?,
         ownership_version: row.try_get::<i64, _>("ownership_version").map_err(db_err)?,
@@ -69,10 +84,24 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
         //     in the system would ever mention it; `seed_partitions`' drift check refuses the
         //     start that creates it, and this row is where an operator sees what was stranded.
         //
-        // Cost: one extra distinct-scan of the pending/scheduled rows on the drain and scheduler
-        // partial indexes. The LEFT JOIN LATERAL probes are unchanged and still keep the per-lane
-        // aggregates off a full-table GROUP BY, so the page stays cheap while a backlog is large —
-        // which is exactly when someone is staring at it.
+        // The three are told apart by `registration`, NOT by the operator's eye: a
+        // declared-but-never-seeded lane and a seeded-but-unclaimed one produce identical
+        // `ownership_version 0` / `claimed_by NULL` / `checkpoint 0` rows, and only one of them is
+        // ever going to be drained.
+        //
+        // COST, stated properly (#596 review): the orphan arm is
+        // `SELECT DISTINCT actor_type, partition FROM inbound_messages WHERE status IN (...)`, and
+        // Postgres has no loose index scan, so neither partial index can serve it as a single
+        // skip-scan — it reads every live row to return at most a handful of distinct pairs. That
+        // is **O(live backlog) on every page load**, and the page is opened precisely when the
+        // backlog is large. It is bounded by RECEIVED+SCHEDULED (never the terminal history, which
+        // is where the volume actually lives), and it buys the only view of stranded work there
+        // is. If it ever bites, the fix is to split it: keep the per-declared-lane LATERAL probes
+        // (which are indexed and bounded by the declared population) and move the orphan hunt to a
+        // separate, explicitly-requested query rather than the default page load.
+        //
+        // The LEFT JOIN LATERAL probes themselves are unchanged and still keep the per-lane
+        // aggregates off a full-table GROUP BY.
         let declared = crate::generated::command_router::ACTOR_MAILBOXES;
         let mut actor_types: Vec<&str> = Vec::new();
         let mut partitions: Vec<i16> = Vec::new();
@@ -95,6 +124,8 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
                    WHERE status IN ('RECEIVED', 'SCHEDULED') \
              ) \
              SELECT l.actor_type, l.partition, \
+                    (d.actor_type IS NOT NULL) AS declared, \
+                    (p.actor_type IS NOT NULL) AS seeded, \
                     COALESCE(p.ownership_version, 0)::bigint AS ownership_version, \
                     p.claimed_by, p.lease_until, \
                     COALESCE(p.checkpoint, 0)::bigint AS checkpoint, \
@@ -102,6 +133,8 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
                     COALESCE(b.retrying_attempts, 0)::bigint AS retrying_attempts, \
                     COALESCE(x.poisoned, 0)::bigint AS poisoned \
              FROM lanes l \
+             LEFT JOIN declared d \
+                    ON d.actor_type = l.actor_type AND d.partition = l.partition \
              LEFT JOIN mailbox_partitions p \
                     ON p.actor_type = l.actor_type AND p.partition = l.partition \
              LEFT JOIN LATERAL ( \

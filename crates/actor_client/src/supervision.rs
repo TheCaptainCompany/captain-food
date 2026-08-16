@@ -17,9 +17,14 @@ use domain::shared::errors::DomainError;
 use crate::mailbox::MailboxAccess;
 
 /// One actor-supervision lane (#242 Runtime B, PROP-20260728-152752): a `(actor_type, partition)`
-/// row from the `mailbox_partitions` registry joined with the live pending/scheduled backlog counted
-/// out of `inbound_messages`. Write-path infrastructure, not a business read model — served by the
-/// ADMIN-only `mailboxLanes` query, no backing `View_*`.
+/// lane of the DECLARED routing contract, joined with its `mailbox_partitions` registry row WHEN IT
+/// HAS ONE and with the live pending/scheduled backlog counted out of `inbound_messages`. Write-path
+/// infrastructure, not a business read model — served by the ADMIN-only `mailboxLanes` query, no
+/// backing `View_*`.
+///
+/// The population is the DECLARATION, not the registry (#596): a lane whose worker has never
+/// started has no registry row, and it is precisely the lane that can be holding a paid order
+/// nobody is coming for. [`MailboxLaneRow::registration`] says which case each row is.
 #[derive(Debug, Clone)]
 pub struct MailboxLaneRow {
     pub actor_type: String,
@@ -44,6 +49,18 @@ pub struct MailboxLaneRow {
     pub retrying_attempts: i64,
     /// Rows terminally FAILED by the delivery-attempts cap — each one is an operator event.
     pub poisoned: i64,
+    /// How this lane relates to the DECLARED routing contract (#596,
+    /// `scalars.yaml#/MailboxLaneRegistration`): `SEEDED`, `DECLARED_UNSEEDED` or
+    /// `UNDECLARED_ORPHAN`. The domain scalar, not a string — one name, one dedicated type.
+    ///
+    /// It exists because the other fields cannot express the difference. A lane that is declared
+    /// but has NEVER been seeded has no registry row, so it renders `ownership_version 0`,
+    /// `claimed_by None`, `checkpoint 0` — **byte-identical** to a seeded lane that simply is not
+    /// claimed right now. The first will never be drained by anybody; the second is waiting for
+    /// the next claim pass. Without this field the page lets an operator LOOK at the difference
+    /// but not DIAGNOSE it, which on a lane with `pending > 0` is the difference between "fine"
+    /// and "a paid order nobody is coming for".
+    pub registration: domain::generated::scalars::MailboxLaneRegistration,
 }
 
 /// One cap-poisoned mailbox row (#315): an `inbound_messages` row the delivery-attempts cap
@@ -74,7 +91,9 @@ pub struct PoisonedMessageRow {
 /// constructing one. Callers go through [`mailbox_lanes`] / [`poisoned_messages`] below.
 #[async_trait]
 pub trait MailboxLaneRepository: Send + Sync {
-    /// Every registered lane, `(actor_type, partition)` order — empty until a worker seeds the registry.
+    /// Every DECLARED lane plus anything carrying work outside the declared grid, in
+    /// `(actor_type, partition)` order. NOT "every registered lane", and never empty because no
+    /// worker has started (#596) — that reading is the defect this port was changed to remove.
     async fn list(&self, access: MailboxAccess) -> Result<Vec<MailboxLaneRow>, DomainError>;
     /// Every cap-poisoned row (#315), newest first, optionally filtered to one actor type;
     /// `limit` is the resolver-clamped page size. Backs the ADMIN `poisonedMailboxMessages` query.

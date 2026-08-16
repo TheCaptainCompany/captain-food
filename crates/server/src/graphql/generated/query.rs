@@ -43,7 +43,7 @@ impl QueryRoot {
         // tree (a catalog created before any content event) yields an empty list.
         Ok(row.map(|r| catalog_tree_section::<CatalogCategory>(&r.tree, "categories")).unwrap_or_default())
     }
-    /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
+    /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from the DECLARED lane grid LEFT JOINed to mailbox_partitions and inbound_messages (#596 — driven by the declaration, so an unseeded lane holding work is visible rather than absent), no View_* (write-path infrastructure, not a business read model).
     #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
     async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {
         let repo = ctx.data::<std::sync::Arc<dyn actor_client::supervision::MailboxLaneRepository>>()?;
