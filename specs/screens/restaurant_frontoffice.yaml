@@ -141,7 +141,7 @@ component_registry:
   catalog: [sticky_category_nav, catalog_sections, catalog_item_row, item_thumbnail, add_button, item_header, option_groups, quantity_selector]
   cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, minimum_order_warning, cart_summary_mini]
   checkout: [checkout_section, address_selector, form, text_input, phone_input, email_input, text_area, stripe_express_checkout_element]
-  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, order_card_state, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies; order_card_state (#167): a status-scoped card treatment (the backoffice "expired — no response" surfacing)
+  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, order_card_status, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies; order_card_status (#167, renamed from order_card_state on the evans STOP — `state:` must keep one meaning per surface): a per-card STATUS treatment rendered only for bound orders actually holding the declared status (the backoffice "expired — no response" surfacing)
   account: [account_header, menu_section, sign_out_button]
   inputs: [button, text_button, icon_button, avatar_button, logo, location_pill, search_input, phone_field, otp_input, inline_error, countdown, star_rating, chip_multi_select, tip_amount_selector]
 

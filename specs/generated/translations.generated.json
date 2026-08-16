@@ -384,8 +384,8 @@
     "fr": "Prêtes"
   },
   "back.orders.timed_out.body": {
-    "en": "This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold was released.",
-    "fr": "Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client a été libérée."
+    "en": "This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold is being released.",
+    "fr": "Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client est en cours de libération."
   },
   "back.orders.timed_out.title": {
     "en": "Expired — no response",

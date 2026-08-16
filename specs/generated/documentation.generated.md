@@ -11202,7 +11202,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ page_header — Order queue                │
 │ tab_bar                                  │
 │ order_list                               │
-│ order_card_state — Expired — no response │
+│ order_card_status — Expired — no respon… │
 │ section                                  │
 │ «staff_nav»                              │
 └──────────────────────────────────────────┘
@@ -11795,7 +11795,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-orders-ready"></a>`back.orders.ready` | — | Mark ready | Marquer prête |
 | <a id="translation-back-orders-cancel"></a>`back.orders.cancel` | — | Cancel order | Annuler la commande |
 | <a id="translation-back-orders-timed_out-title"></a>`back.orders.timed_out.title` | — | Expired — no response | Expirée — sans réponse |
-| <a id="translation-back-orders-timed_out-body"></a>`back.orders.timed_out.body` | — | This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold was released. | Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client a été libérée. |
+| <a id="translation-back-orders-timed_out-body"></a>`back.orders.timed_out.body` | — | This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold is being released. | Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client est en cours de libération. |
 | <a id="translation-back-orders-empty-title"></a>`back.orders.empty.title` | — | No orders right now | Aucune commande pour le moment |
 | <a id="translation-back-orders-empty-body"></a>`back.orders.empty.body` | — | New orders appear here the moment they are placed. | Les nouvelles commandes apparaissent ici dès qu'elles sont passées. |
 | <a id="translation-back-deliveries-title"></a>`back.deliveries.title` | — | Delivery board | Tableau des livraisons |

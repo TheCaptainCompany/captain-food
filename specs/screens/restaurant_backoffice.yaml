@@ -136,11 +136,16 @@ screens:
         empty_state: { icon: receipt, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.body' } }
       # #167: the DECLARED surfacing for a timed-out card. When the acceptance deadline cancels
       # an order (CANCELLED_BY_TIMEOUT) the card leaves the incoming tab with THIS expired
-      # treatment — "expired, no response, payment hold released" — never a silent vanish: the
-      # restaurant must see what it lost and why. Renders nothing while the enforcement gate is
-      # OFF (no order ever reaches the status).
-      - type: order_card_state
+      # treatment — "expired, no response, payment hold being released" — never a silent vanish:
+      # the restaurant must see what it lost and why. Rendering is PER-CARD and status-driven
+      # (renderer.rs OrderCardStatus arm): one treatment card per bound order whose `status`
+      # equals the declared token, and NOTHING when no bound order holds it — so today, with the
+      # enforcement gate OFF and no order ever reaching CANCELLED_BY_TIMEOUT, the board shows
+      # nothing here (mob STOP on PR #586: the previous unconditional screen-level node rendered
+      # the expired copy on every board load).
+      - type: order_card_status
         id: acceptance_timed_out
+        items: "{{ orders }}"
         status: CANCELLED_BY_TIMEOUT
         icon: clock_x
         title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.timed_out.title' }

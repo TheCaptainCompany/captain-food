@@ -368,6 +368,40 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
             }
         }
 
+        // ── status-scoped card treatment (#167) ────────────────────────────────
+        ComponentKind::OrderCardStatus => {
+            // A PER-CARD treatment, never an unconditional banner (the PR #586 ux STOP: the
+            // generic fallback rendered "Expired — no response" on every board load with zero
+            // timed-out orders). One treatment card per bound order actually holding the
+            // declared `status`; NOTHING when no bound order holds it.
+            let status = prop_text(node, "status", ctx);
+            let icon = prop_text(node, "icon", ctx);
+            let title = prop_text(node, "title", ctx);
+            let body = prop_text(node, "body", ctx);
+            let cards: Vec<AnyView> = items_of(node, ctx)
+                .iter()
+                .filter(|item| {
+                    item.get("status").and_then(Value::as_str) == Some(status.as_str())
+                })
+                .map(|item| {
+                    let id = item.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                    view! {
+                        <article data-c=ty data-order=id data-status=status.clone() data-icon=icon.clone()>
+                            <h3>{title.clone()}</h3>
+                            <p>{body.clone()}</p>
+                        </article>
+                    }
+                    .into_any()
+                })
+                .collect();
+            if cards.is_empty() {
+                // Absent, not hidden: no DOM node at all when no order holds the status.
+                ().into_any()
+            } else {
+                cards.into_any()
+            }
+        }
+
         // ── conversation (#145) ───────────────────────────────────────────────────
         ComponentKind::MessageBubble => {
             // The order chat timeline: one bubble per message (mirrors OrderList → order_card),
@@ -792,6 +826,67 @@ mod tests {
         // Empty data → the spec's empty state, not a blank div.
         let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), ctx());
         assert!(html.contains("data-empty=\"true\""));
+    }
+
+    /// #167 (PR #586 ux STOP): the timed-out treatment is a PER-CARD render, never an
+    /// unconditional banner. Absent when no bound order holds CANCELLED_BY_TIMEOUT; present
+    /// exactly on the timed-out card when one does.
+    #[test]
+    fn order_card_status_is_absent_without_a_timed_out_order_and_present_exactly_on_it() {
+        let screen = Surface::RestaurantBackoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "orders_queue")
+            .unwrap();
+
+        // A busy board with ZERO timed-out orders: the expired copy must not render at all —
+        // the exact false signifier the mob stopped (the generic fallback rendered
+        // "Expired — no response" on every board load).
+        let mut c = ctx();
+        c.insert_resolved(
+            "orders.byRestaurant",
+            json!([
+                { "id": "o-1", "status": "PLACED", "totalAmount": { "amountCents": 2350, "currency": "EUR" } },
+                { "id": "o-2", "status": "ACCEPTED", "totalAmount": { "amountCents": 980, "currency": "EUR" } },
+            ]),
+        );
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), c);
+        assert!(
+            !html.contains("data-c=\"order_card_status\""),
+            "no timed-out order → no treatment node at all: {html}"
+        );
+        assert!(!html.contains("Expired"), "no expired copy without a timed-out order: {html}");
+
+        // And the empty board renders nothing either (the zero-orders load the STOP named).
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), ctx());
+        assert!(!html.contains("data-c=\"order_card_status\""), "{html}");
+        assert!(!html.contains("Expired"), "{html}");
+
+        // One order actually holding CANCELLED_BY_TIMEOUT: the treatment renders ONCE, bound to
+        // THAT card (data-order), with the declared icon and the legal-register copy
+        // ("is being released" — in progress, never done).
+        let mut c = ctx();
+        c.insert_resolved(
+            "orders.byRestaurant",
+            json!([
+                { "id": "o-1", "status": "PLACED", "totalAmount": { "amountCents": 2350, "currency": "EUR" } },
+                { "id": "o-3", "status": "CANCELLED_BY_TIMEOUT", "totalAmount": { "amountCents": 980, "currency": "EUR" } },
+            ]),
+        );
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), c);
+        assert_eq!(
+            html.matches("data-c=\"order_card_status\"").count(),
+            1,
+            "exactly one treatment, on the one timed-out card: {html}"
+        );
+        assert!(
+            html.contains("data-c=\"order_card_status\" data-order=\"o-3\""),
+            "bound to the timed-out order, not the PLACED one: {html}"
+        );
+        assert!(html.contains("data-icon=\"clock_x\""), "{html}");
+        assert!(html.contains("Expired — no response"), "{html}");
+        assert!(html.contains("is being released"), "release stated in progress, never done: {html}");
+        assert!(!html.contains("was released"), "the legal STOP wording must be gone: {html}");
     }
 
     #[test]
