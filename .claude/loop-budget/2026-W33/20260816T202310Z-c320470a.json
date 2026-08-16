@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 1800,
+  "recordedAt": "2026-08-16T20:23:10.939Z",
+  "branch": "main",
+  "note": "#608 third-look discharge (PR #610): B1 value-derived positive control for payment_authorized_unsettled_age_seconds via the real ProjectionWorker (the 'AUTHORISED' mutant reproduced SURVIVING on 5354d31, then red), B2 MOB-COST-1a MISS banked into DECISIONS+STATUS+ADR with the HIGH-CONSEQUENCE reversion, B3 the false seam claim retracted AND the delivery_exhausted control landed via a gated EventStore decorator; plus the vacuous negative control, the stale count in the SS20 module doc, the split-fleet runbook line, ten mutants applied+reverted, and a main merge. NOTE: this run's timer was closed by a concurrent session at 19:53:23Z (segment fc08a51b, 1839s, unattributed = the run's first half); this segment is the remainder 19:53:23Z-20:23Z"
+}
