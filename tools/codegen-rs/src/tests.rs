@@ -8431,6 +8431,44 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     }
 }
 
+/// Shared mutation helpers for the two suites below, which both prove their rules by MUTATING THE
+/// REAL COMMITTED CATALOG rather than a fixture. That technique buys a rule that cannot drift away
+/// from the specs it polices, and it has exactly one failure mode, which is SILENT: when the catalog
+/// drifts to already hold the value a test plants, the mutation becomes a no-op and the test keeps
+/// passing while asserting nothing at all. It happened here — the source-vs-shape test flipped a step
+/// to the value it already carried and reported 5/5 green with zero signal.
+///
+/// So the fix is structural rather than per-test: `plant`/`unplant` turn a vacuous mutation into a
+/// RED test, and `find_at` stops an issue raised by some OTHER definition from standing in for the
+/// one this test planted (`find`'s catalog-wide first-match is the same defect one layer up).
+mod catalog_mutation {
+    use super::super::*;
+
+    /// A mutation that changes nothing tests nothing. Every plant goes through here.
+    pub(super) fn plant(m: &mut serde_yaml::Mapping, key: &str, val: Value) {
+        let prev = m.insert(Value::from(key), val.clone());
+        assert_ne!(
+            prev.as_ref(),
+            Some(&val),
+            "the mutation is a NO-OP: `{}` was already {:?} — this test stopped testing when the catalog changed",
+            key,
+            val
+        );
+    }
+
+    /// The inverse: removing a key that was not there is equally vacuous.
+    pub(super) fn unplant(m: &mut serde_yaml::Mapping, key: &str) {
+        m.remove(Value::from(key)).unwrap_or_else(|| panic!("`{}` was there to remove", key));
+    }
+
+    /// The issue a rule raised AT THE MUTATED SITE. Scoped on purpose: a catalog-wide `find(rule)`
+    /// answers with some other definition's identical rule, so the test passes whether or not the
+    /// mutation did anything — ANY violation in the tree satisfies it.
+    pub(super) fn find_at<'a>(issues: &'a [Issue], rule: &str, location: &str) -> Option<&'a Issue> {
+        issues.iter().find(|i| i.rule == rule && i.location == location)
+    }
+}
+
 /// §5c-bis — the read-target ownership wall (`validate::read_targets`, ADR-20260812-214500).
 ///
 /// Every mutation here was SEEN RED before the rules existed: on the parent commit, planting
@@ -8439,6 +8477,7 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
 /// exist, so they mutate the REAL committed catalog rather than a hand-built fixture: a rule proven
 /// only against a fixture is a rule that can drift away from the specs it is supposed to police.
 mod read_target_ownership {
+    use super::catalog_mutation::find_at;
     use super::super::*;
 
     fn real_model() -> Model {
@@ -8481,6 +8520,11 @@ mod read_target_ownership {
             .unwrap_or_else(|| panic!("api.yaml types.{}.{} was there to remove", ty, key));
     }
 
+    /// The first issue of `rule` ANYWHERE in the catalog. Correct only where the test goes on to pin
+    /// the location itself, or where the committed catalog is separately proven to trip the rule
+    /// nowhere (`the_committed_catalog_trips_no_read_target_ownership_rule`). Where a test plants at
+    /// a KNOWN site, use `find_at` — otherwise any type's violation satisfies the assertion and the
+    /// mutation stops mattering.
     fn find<'a>(issues: &'a [Issue], rule: &str) -> Option<&'a Issue> {
         issues.iter().find(|i| i.rule == rule)
     }
@@ -8529,7 +8573,8 @@ mod read_target_ownership {
             "[{ $ref: 'database/tables/integration_staging.yaml#/external_hubrise_callbacks' }]",
         );
         let issues = validate(&m).issues;
-        let hit = find(&issues, "reads-infrastructure-owned").expect("staging is never a read target");
+        let hit = find_at(&issues, "reads-infrastructure-owned", "api.yaml/types.CustomerProfile")
+            .expect("staging is never a read target");
         assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
         assert!(hit.message.contains("staging table"), "names the category: {}", hit.message);
         assert!(
@@ -8614,12 +8659,10 @@ mod read_target_ownership {
             "readsInfrastructure",
             "[{ $ref: 'database/tables/projection_tables.yaml#/Customer' }]",
         );
-        assert!(
-            validate(&m).issues.iter().any(|i| i.rule == "ref-kind"
-                && i.message.contains("projection table")
-                && i.location.contains("readsInfrastructure")),
-            "a projection belongs under `reads:` -- the REF_CONTRACT row is what proves this"
-        );
+        let report = validate(&m);
+        let hit = find_at(&report.issues, "ref-kind", "api.yaml.types.Operation.readsInfrastructure[0]")
+            .expect("a projection belongs under `reads:` -- the REF_CONTRACT row is what proves this");
+        assert!(hit.message.contains("projection table"), "names the kind it got: {}", hit.message);
 
         let mut both = real_model();
         set_type_key(
@@ -8629,9 +8672,8 @@ mod read_target_ownership {
             "[{ $ref: 'database/tables/journals.yaml#/inbound_messages' }]",
         );
         let report = validate(&both);
-        let hit = find(&report.issues, "reads-infrastructure-with-read-model")
+        find_at(&report.issues, "reads-infrastructure-with-read-model", "api.yaml/types.CustomerProfile")
             .expect("a type is a projection or a transient write-path view, never both");
-        assert_eq!(hit.location, "api.yaml/types.CustomerProfile");
     }
 
     /// The #413 defect class, closed for this site: a BARE name is collected by `name_list` but
@@ -8651,9 +8693,24 @@ mod read_target_ownership {
     /// Asserted-alive: the committed catalog trips none of the new rules. Deliberately NOT
     /// `issues.is_empty()` — the catalog carries warnings by design (the ratchet owns those), so a
     /// blanket assertion would either be false or would have to be weakened later.
+    ///
+    /// It is also the VACUITY BACKSTOP for every `find(rule)` above: a catalog-wide first-match is a
+    /// sound assertion only while the committed tree raises that rule NOWHERE, so proving exactly
+    /// that is what keeps the mutation tests honest. `ref-kind` joins the list filtered to
+    /// `readsInfrastructure` sites — the two mutation tests that pin an `api.yaml.types.*` location
+    /// need to know no OTHER `readsInfrastructure` ref already trips it.
     #[test]
     fn the_committed_catalog_trips_no_read_target_ownership_rule() {
         let issues = validate(&real_model()).issues;
+        assert!(
+            !issues.iter().any(|i| i.rule == "ref-kind" && i.location.contains("readsInfrastructure")),
+            "a committed readsInfrastructure ref already trips ref-kind: {:?}",
+            issues
+                .iter()
+                .filter(|i| i.rule == "ref-kind" && i.location.contains("readsInfrastructure"))
+                .map(|i| (&i.location, &i.message))
+                .collect::<Vec<_>>()
+        );
         for rule in [
             "reference-flag-not-a-read-target",
             "reads-infrastructure-owned",
@@ -8711,10 +8768,7 @@ mod read_target_ownership {
             let mut m = real_model();
             set_type_key(&mut m, "Operation", "readsInfrastructure", &format!("[{{ $ref: '{}' }}]", target));
             let report = validate(&m);
-            let hit = report
-                .issues
-                .iter()
-                .find(|i| i.rule == "ref-kind" && i.location.contains("readsInfrastructure"))
+            let hit = find_at(&report.issues, "ref-kind", "api.yaml.types.Operation.readsInfrastructure[0]")
                 .unwrap_or_else(|| {
                     panic!("{} must not be reachable through readsInfrastructure -- it is not a mailbox or a saga row", target)
                 });
@@ -8774,6 +8828,336 @@ mod read_target_ownership {
                 &BTreeSet::new()
             ),
             Some(refs::Kind::ReservationTable)
+        );
+    }
+}
+
+/// §2b — a process-manager `read:` step declares its SOURCE (#564).
+///
+/// `model:` says what SHAPE a leg consumes; it has never said where the bytes come from. Two legs
+/// can name the same projection table and do entirely different things: a generated pipeline leg
+/// SELECTs from it, while a hand-written leg folds the entity from the `captain_write` event stream
+/// and never touches the projection at all (`PlaceOrder` folds `Restaurant` and `Cart`;
+/// `DeliveryDispatchProcess`'s `read_restaurant` hook folds the restaurant stream even though its
+/// leg IS generated). Anything derived from these steps — a reader set, a deploy grant, a crate
+/// dependency — is wrong in one direction or the other while that distinction is unwritten.
+///
+/// Why REQUIRED rather than optional-with-default: `validate_process_managers` rejected no unknown
+/// key on a `read:` body, so an unvalidated `source:` would have been silently invisible (#413), and
+/// a default would make the distinction survive only where someone remembered to write it — the
+/// "transience by omission" defect ADR-20260812-214500 §2 records. So the key set is closed too, by
+/// its own rule: without that, the NEXT key added here is invisible again.
+///
+/// These mutate the REAL committed catalog rather than a fixture, for the reason
+/// `read_target_ownership` gives: a rule proven only against a fixture can drift away from the specs
+/// it polices.
+mod pm_read_source {
+    use super::catalog_mutation::{find_at, plant, unplant};
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// The `read:` body of `processmanager.yaml#/<pm>.receives[leg].steps[step]`, mutable.
+    fn read_body<'a>(
+        m: &'a mut Model,
+        pm: &str,
+        leg: usize,
+        step: usize,
+    ) -> &'a mut serde_yaml::Mapping {
+        m.defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut(pm))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.get_mut(leg))
+            .and_then(|v| v.get_mut("steps"))
+            .and_then(|v| v.get_mut(step))
+            .and_then(|v| v.get_mut("read"))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| {
+                panic!("processmanager.yaml#/{}.receives[{}].steps[{}] is a read step", pm, leg, step)
+            })
+    }
+
+    /// The precondition the `PROJECTION`-arm tests below cannot assert by mutating: they plant an
+    /// unresolvable `model:` onto a step that must ALREADY be `PROJECTION`, and if the catalog flips
+    /// that step the tests would fail with "must be refused" — technically red, but pointing at the
+    /// rule instead of at the reason. `plant` catches a vacuous mutation; only this catches a
+    /// mutation applied somewhere it no longer means anything.
+    fn expect_projection(body: &mut serde_yaml::Mapping) -> &mut serde_yaml::Mapping {
+        assert_eq!(
+            body.get(Value::from("source")).and_then(|v| v.as_str()),
+            Some("PROJECTION"),
+            "precondition: this test needs a committed PROJECTION step to attach an unresolvable model to"
+        );
+        body
+    }
+
+    /// Every `read:` step of one leg as `(model $ref, source)`, in declaration order.
+    fn leg_reads(m: &Model, pm: &str, leg: usize) -> Vec<(String, String)> {
+        m.defs
+            .get("processmanager.yaml")
+            .and_then(|v| v.get(pm))
+            .and_then(|v| v.get("receives"))
+            .and_then(|v| v.get(leg))
+            .and_then(|v| v.get("steps"))
+            .and_then(|v| v.as_sequence())
+            .unwrap_or_else(|| panic!("processmanager.yaml#/{}.receives[{}].steps is a list", pm, leg))
+            .iter()
+            .filter_map(|s| s.get("read"))
+            .map(|b| {
+                let s = |k: &str| b.get(k).and_then(|x| x.as_str()).unwrap_or("<missing>").to_string();
+                (
+                    b.get("model").and_then(|x| x.get("$ref")).and_then(|x| x.as_str()).unwrap_or("<missing>").to_string(),
+                    s("source"),
+                )
+            })
+            .collect()
+    }
+
+    /// THE guard for the under-declaration this chunk fixed, and the cheapest evidence it fixed
+    /// anything. `PlaceOrderProcess`'s checkout leg re-prices every cart line from the `Catalog`
+    /// projection — that recomputed total IS the amount authorized on the card — and declared no read
+    /// of it. Until this test existed the fix could be reverted by DELETING ONE STEP, with
+    /// `make validate` still at 0 errors and every codegen test green: the under-grant returning
+    /// exactly as silently as it arrived.
+    ///
+    /// It pins the WHOLE ordered read set of the leg rather than the `Catalog` line alone, because on
+    /// this leg an ADDITION is as much a change as a deletion: every read here is a cross-boundary
+    /// dependency of the money path, so gaining one must cost a line in this list and a sentence in
+    /// `docs/SPEC-LOG.md`. Two reads the leg's CODE performs are deliberately NOT in this list and are
+    /// named in the #564 record instead — `PaymentAuthorized`'s `Payment-<intentId>` snapshot load and
+    /// `ReclamationProcess`'s `OrderTracking` read — because declaring them changes generated hooks,
+    /// which is a code change and not this PR's scope.
+    #[test]
+    fn the_checkout_leg_declares_every_read_it_prices_an_order_from() {
+        let want: Vec<(String, String)> = [
+            // The cart being checked out — folded, so a lagging projector cannot check out a stale cart.
+            ("database/tables/projection_tables.yaml#/Cart", "EVENT_STREAM"),
+            // ACTIVE/PAUSED + TEST mode — folded, so the acceptance decision is race-free.
+            ("database/tables/projection_tables.yaml#/Restaurant", "EVENT_STREAM"),
+            // THE PRICE AUTHORITY. Deleting this line is the exact regression this test exists for.
+            ("database/tables/projection_tables.yaml#/Catalog", "PROJECTION"),
+            // The goodwill ledger spent at checkout — folded, because retry-stability needs the
+            // per-order consumption key the balance row does not carry.
+            ("database/tables/projection_tables.yaml#/CustomerCreditBalance", "EVENT_STREAM"),
+        ]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+
+        assert_eq!(
+            leg_reads(&real_model(), "PlaceOrderProcess", 0),
+            want,
+            "the checkout leg's declared reads changed. This leg decides what a customer is CHARGED: a \
+             read it performs and does not declare is an access a derived reader set would revoke (the \
+             `Catalog` case — no catalog access means no checkout can be priced at all), and a read it \
+             declares and does not perform is a grant nobody needs. Change this list only together with \
+             the note on the step and the docs/SPEC-LOG.md sentence."
+        );
+    }
+
+    /// Omission is the defect, so omission is the error: dropping `source:` from the checkout's cart
+    /// read must fail the gate, naming the step and the closed set.
+    #[test]
+    fn a_read_step_without_a_source_is_refused() {
+        let mut m = real_model();
+        unplant(read_body(&mut m, "PlaceOrderProcess", 0, 0), "source");
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-source",
+            "processmanager.yaml/PlaceOrderProcess.receives[0].steps[0].source",
+        )
+        .expect("a read step that declares no source must be an ERROR, never a default");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR, not a warning: {}", hit.message);
+        assert!(hit.message.contains("PROJECTION"), "lists the closed set: {}", hit.message);
+        assert!(hit.message.contains("EVENT_STREAM"), "lists the closed set: {}", hit.message);
+    }
+
+    /// The value comes from a CLOSED set enforced in the validator (ADR-20260811-014129 D2 category
+    /// 3): an unlisted token is refused rather than carried through to whatever reads it.
+    #[test]
+    fn a_source_outside_the_closed_set_is_refused() {
+        let mut m = real_model();
+        plant(read_body(&mut m, "PlaceOrderProcess", 0, 0), "source", Value::from("PROJECTION_TABLE"));
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-source",
+            "processmanager.yaml/PlaceOrderProcess.receives[0].steps[0].source",
+        )
+        .expect("an unlisted source token must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("PROJECTION_TABLE"), "quotes the offending value: {}", hit.message);
+    }
+
+    /// The half that makes the two rules above enforceable rather than decorative: the `read:` body's
+    /// key set is closed, so a misspelled or invented key is refused instead of ignored. Without it,
+    /// `sourc: EVENT_STREAM` would be a silent no-op and the next key added would be invisible again.
+    #[test]
+    fn an_unknown_key_on_a_read_step_is_refused() {
+        let mut m = real_model();
+        plant(read_body(&mut m, "CartBindingProcess", 0, 0), "from_stream", Value::from(true));
+        let issues = validate(&m).issues;
+
+        let hit = find_at(
+            &issues,
+            "pm-read-key",
+            "processmanager.yaml/CartBindingProcess.receives[0].steps[0].from_stream",
+        )
+        .expect("an unknown key on a read step must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("from_stream"), "quotes the offending key: {}", hit.message);
+    }
+
+    /// SOURCE is not SHAPE, and the rules must never conflate them. Both values are legal on the SAME
+    /// projection-shaped `model:`, so flipping one is clean in both directions: `EVENT_STREAM` over a
+    /// projection table is the hand-written-leg case (the fold borrows the projection's shape and
+    /// never reads the table). A future "tightening" that demanded a stream-shaped model for
+    /// `EVENT_STREAM` would break every hand-written leg, and this is the test that would stop it.
+    ///
+    /// It flips `CartBindingProcess`'s read, which is declared `PROJECTION`, precisely so the
+    /// assertion is a real change rather than a re-write of the value already there.
+    ///
+    /// **This test cannot make itself honest, and no delta helper can.** It asserts an ABSENCE, so a
+    /// mutation that changed nothing produces a green run indistinguishable from a real pass — the
+    /// first cut of it flipped a step that was ALREADY `EVENT_STREAM` and reported 5/5 with zero
+    /// signal. `plant`'s previous-value check is therefore not a convenience here but the PRECONDITION
+    /// that carries the whole test: it is the only thing asserting the flip was a flip. Never replace
+    /// it with a bare `insert`, and never point this test at a step already carrying the value it
+    /// plants.
+    #[test]
+    fn either_source_is_legal_on_a_projection_shaped_model() {
+        const AT: &str = "processmanager.yaml/CartBindingProcess.receives[0].steps[0]";
+        let at_step = |issues: &[Issue]| -> Vec<(&'static str, String)> {
+            issues
+                .iter()
+                .filter(|i| i.location.starts_with(AT))
+                .map(|i| (i.rule, i.message.clone()))
+                .collect()
+        };
+
+        // As committed: PROJECTION over the `Cart` projection table.
+        assert!(at_step(&validate(&real_model()).issues).is_empty(), "the committed step is clean");
+
+        // Flipped: EVENT_STREAM over the very same projection-shaped model.
+        let mut m = real_model();
+        plant(read_body(&mut m, "CartBindingProcess", 0, 0), "source", Value::from("EVENT_STREAM"));
+        assert!(
+            at_step(&validate(&m).issues).is_empty(),
+            "source and shape are independent: {:?}",
+            at_step(&validate(&m).issues)
+        );
+    }
+
+    /// The committed catalog satisfies its own gate: every `read:` step declares a legal source, no
+    /// stray key, and every `PROJECTION` step names a table with a derivable database. This is the
+    /// test that fails when a new PM read step forgets the key.
+    ///
+    /// It is ALSO the vacuity backstop for `a_read_step_without_a_source_is_refused` and its
+    /// siblings: those pin one location, but "the rule fired here" only proves the mutation caused it
+    /// while the committed tree fires the rule NOWHERE. Simplifying either one away leaves the other
+    /// half-proven, so they travel together.
+    ///
+    /// The filter stays an ENUMERATED list of this family's rules and must never become
+    /// `issues.is_empty()` — the catalog carries warnings by design and a blanket assertion would have
+    /// to be weakened the first time one lands. It is also the LIVE COUNT of the split, which is why
+    /// no prose anywhere pins "N EVENT_STREAM / M PROJECTION": a number in a sentence goes stale, this
+    /// walk cannot.
+    #[test]
+    fn the_committed_process_managers_all_declare_a_source() {
+        let issues = validate(&real_model()).issues;
+        let offenders: Vec<_> = issues
+            .iter()
+            .filter(|i| {
+                i.rule == "pm-read-source"
+                    || i.rule == "pm-read-key"
+                    || i.rule == "pm-read-projection-database"
+            })
+            .map(|i| (i.rule, &i.location))
+            .collect();
+        assert!(offenders.is_empty(), "committed read steps must be clean: {:?}", offenders);
+    }
+
+    /// §B — a `PROJECTION` step names a table whose DATABASE is derivable, or the gate refuses it.
+    ///
+    /// A `View_*` is a legal `read.model` target (`pm-read` accepts `database/projection_views.yaml`)
+    /// and NO view declares a `database:` — a `View_*` is a view over `domain_events`, so there is no
+    /// projection database to grant CONNECT on. Neither token is right for it: `PROJECTION` resolves
+    /// to no database (the empty-CONNECT class, reproduced on the process-manager side) and
+    /// `EVENT_STREAM` would get the database right and the privilege story wrong. Nothing committed
+    /// does this; the grammar admits it, so it fails closed at the gate rather than in prose, and the
+    /// third token that would express it properly is a decision, not a patch.
+    #[test]
+    fn a_projection_read_of_a_view_has_no_derivable_database() {
+        let mut m = real_model();
+        plant(
+            expect_projection(read_body(&mut m, "CartBindingProcess", 0, 0)),
+            "model",
+            serde_yaml::from_str("{ $ref: 'database/projection_views.yaml#/View_Reclamation' }").unwrap(),
+        );
+        let report = validate(&m);
+        let hit = find_at(
+            &report.issues,
+            "pm-read-projection-database",
+            "processmanager.yaml/CartBindingProcess.receives[0].steps[0].source",
+        )
+        .expect("a PROJECTION read of a View_* resolves to no database and must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("View_Reclamation"), "names the target: {}", hit.message);
+    }
+
+    /// The same hole from the replication side: a `replicated: read-databases` table resolves to the
+    /// SET of every `recovery: replay` database, not to one — so "which database does this leg need
+    /// CONNECT on" has no single answer, and picking one silently is how a wall gets taken with the
+    /// wrong grant. Refused for the same reason and by the same rule.
+    #[test]
+    fn a_projection_read_of_a_replicated_table_has_no_single_database() {
+        let mut m = real_model();
+        plant(
+            expect_projection(read_body(&mut m, "CartBindingProcess", 0, 0)),
+            "model",
+            serde_yaml::from_str("{ $ref: 'database/tables/projection_tables.yaml#/ScopeMembership' }").unwrap(),
+        );
+        let report = validate(&m);
+        let hit = find_at(
+            &report.issues,
+            "pm-read-projection-database",
+            "processmanager.yaml/CartBindingProcess.receives[0].steps[0].source",
+        )
+        .expect("a PROJECTION read of a replicated table resolves to a SET and must be refused");
+        assert!(matches!(hit.level, Level::Error), "must be an ERROR: {}", hit.message);
+        assert!(hit.message.contains("replicated"), "names why it does not resolve: {}", hit.message);
+    }
+
+    /// The rule is scoped to `PROJECTION` and must stay there: the SAME unresolvable target under
+    /// `EVENT_STREAM` is NOT refused by it, because a fold reads `captain_write` and the model is
+    /// borrowed shape only. That leaves the `EVENT_STREAM`-over-a-view case (right database, wrong
+    /// privilege story) open ON PURPOSE — it needs the third token this PR deliberately does not
+    /// invent. Pinning it here means widening the rule cannot happen by accident.
+    #[test]
+    fn an_event_stream_read_is_outside_the_projection_database_rule() {
+        let mut m = real_model();
+        let body = read_body(&mut m, "CartBindingProcess", 0, 0);
+        plant(
+            body,
+            "model",
+            serde_yaml::from_str("{ $ref: 'database/projection_views.yaml#/View_Reclamation' }").unwrap(),
+        );
+        plant(body, "source", Value::from("EVENT_STREAM"));
+        assert!(
+            find_at(
+                &validate(&m).issues,
+                "pm-read-projection-database",
+                "processmanager.yaml/CartBindingProcess.receives[0].steps[0].source",
+            )
+            .is_none(),
+            "the database rule is about where a PROJECTION step SELECTs from; a fold does not SELECT there"
         );
     }
 }

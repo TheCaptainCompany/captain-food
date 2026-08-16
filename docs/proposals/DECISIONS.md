@@ -2172,6 +2172,101 @@ meaning of `[]` is a defect nothing counts, plus the observability contract the 
 
 ---
 
+## 42. Reader-set derivation carry-forwards — [#564](https://github.com/TheCaptainCompany/captain-food/issues/564) nine-lens mob checkpoint (2026-08-15)
+
+The mob checkpoint of PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566) (issue
+[#564 "Derive reader sets mechanically: a declared, walkable `reads:` grammar that distinguishes
+source from shape"](https://github.com/TheCaptainCompany/captain-food/issues/564)) stopped nothing,
+and surfaced **one genuine option space that a test is currently foreclosing**, plus a set of build
+constraints for PR2 that must not evaporate with the session (the anti-repeat discipline of §37 /
+[ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md)).
+**PR1 (the grammar + its gates) and PR2 (the derivation that consumes it) are deliberately split**:
+the declaration is provably incomplete today — the carried reads below cannot be declared without
+code changes or a grammar decision — so a derivation built on it now would be honest about the wrong
+set, and a money-path runtime narrowing does not belong under a doc-comment diff.
+
+**Carried undeclared reads (a NON-EXHAUSTIVE list — PR2's independent derivation is what closes it).**
+The branch originally enumerated exactly two; the independent third-look review of PR
+[#566](https://github.com/TheCaptainCompany/captain-food/pull/566) found a third it never named:
+**(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` with no `read:` step
+(`reclamation.rs:141`, wired `runner.rs:488-490`); **(2)** `PlaceOrderProcess`/`PaymentAuthorized`
+loads `Payment-<intentId>` for the frozen `CheckoutSnapshot` (`place_order.rs:47`); **(3)**
+`DeliveryDispatchProcess`/`OrderMarkedReady`'s `build_delivery_requested`
+(`crates/application/src/process_managers/delivery_dispatch.rs:150`) folds the Order aggregate's own
+stream to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode` (the code's own
+comment). (3) is also the grammar counterexample RDR-1 below wants: `mode` exists on **no**
+projection table, so this read is *inexpressible* under the borrowed-projection-shape rule — stronger
+option-B evidence than the `balance_cents` hole. Practical grant risk today nil: the leg's Restaurant
+`EVENT_STREAM` step already grants `captain_write` — hence carried, not blocking.
+
+| # | Decision | Options & the trade-off | Recommendation / status |
+|---|---|---|---|
+| **RDR-1** 🟡 **TEAM-OWNED — open 2026-08-15** | **What may an `EVENT_STREAM` `read:` step's `model:` point at?** Today it borrows a PROJECTION TABLE's shape while the leg folds the aggregate and never reads that table — `model:` is documented as "borrowed SHAPE only". That is not merely the status quo: it is **GATED**. `either_source_is_legal_on_a_projection_shaped_model` (`tools/codegen-rs/src/tests.rs`, cited by name because line numbers do not survive) asserts both sources are legal on a projection-shaped model *and its doc comment says so on purpose* — "a future tightening that demanded a stream-shaped model for `EVENT_STREAM` would break every hand-written leg, and this is the test that would stop it". A design commitment with a gate on it is a register row, not a rustdoc | **(A) Keep the borrowed projection shape** (status quo + its gate). Pros: no churn; the projection table genuinely IS the field set the fold produces for these legs; one vocabulary for every `read:` step. Cons: the spec says a leg reads a table it never reads, which is the exact conflation #564 exists to remove — solved one level up (`source:`) and left standing one level down (`model:`). **(B) An `EVENT_STREAM` step's `model:` `$ref`s the AGGREGATE** (`actors.yaml#/Cart`), the entity the fold actually produces. Pros: this is the **final-vision** shape under [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) — the declaration stops naming a thing it does not touch, and a derivation can then ignore `model:` entirely for stream steps rather than filtering it out. Cons: an aggregate has no column list, so every downstream consumer of `read.model` columns (`where:` checking, the C4 sequence emitter, the generated hook signatures) needs a second resolution path; breaks all four committed stream steps at once. **(C) A third `model:` form per source** — refused on sight as (A) and (B) at the same cost. | ✅ **recommend deciding this BEFORE PR2's emitter, not after**: PR2 derives reader sets from `source:` and will encode an assumption about `model:` either way, and reversing it afterwards means re-deriving grants that will by then be in generated manifests. **Unguarded hole to close whichever way it goes**: nothing checks that a borrowed projection shape is INHABITABLE by the fold, so a guard could reference a projector-COMPUTED column (a SUM, a denormalized join) on an `EVENT_STREAM` step and validate green — `CustomerCreditBalance.balance_cents` is exactly such a column and is now borrowed by a committed step |
+
+**PR2 build constraints (pointers, not decisions — each earned by a named lens at the checkpoint):**
+
+- **Derive the set TWICE and diff it** — once from the `source:` declarations, once from the ports
+  the composition roots actually construct. Agreement validates the tokens cheaply; **disagreement IS
+  the reader-set bug list, found mechanically** rather than by a fifth hand-sweep (holub).
+- **Assert every PM app's derived set contains `captain_write`.** `pm-payment-settlement`,
+  `pm-refund` and `pm-cart-binding` have ZERO `EVENT_STREAM` steps, so a read-only walk gives them no
+  write access at all — they could read the order and then be unable to append the settlement fact
+  (dba).
+- **Resolve a PM's boundary through `boundary_map()`'s `of_actor`, never `of_scope`.** `of_scope` is
+  aggregates-only, and `CartBindingProcess` (ordering folder, customer C4 home) lands in the wrong
+  database's reader set otherwise (graphql).
+- **Scope the `source:` walk to `read:` bodies explicitly.** `source` is now the FOURTH meaning of
+  that token in the DSL (`specs/observability.yaml`, `specs/database/tables/journals.yaml`,
+  `specs/catalog/events.yaml`); a naive collector picks up all four (architect).
+- **Key the port catalog by `(bin, app-class)`, not by bin.** `RUN_MAILBOX_WORKERS`
+  (`specs/common/configuration.yaml`, default false) makes one bin host two app classes (farley).
+- **Generate the deps struct in `application` with `pub(crate)` fields and `#![deny(dead_code)]` on
+  the generated module.** Without it only UNDER-declaration breaks the build; over-declaration — the
+  over-grant direction — stays invisible, and when a narrowing breaks a build the cheapest edit is to
+  add `PROJECTION`, which makes the wrong answer the easy one (farley).
+- **Acceptance test for the narrowing**: flip the checkout leg's `Catalog` step to `EVENT_STREAM`,
+  regenerate, and `cargo build` MUST fail. If the tree still builds, the narrowing is decorative
+  (beck).
+- **A port-agreement rule** (`PROJECTION` ⇒ a read repository over that table; `EVENT_STREAM` ⇒ the
+  event-store port), or the derivation just restates an unverified claim in a second vocabulary
+  (beck).
+- **`_sqlx_migrations` + `projection_checkpoint` need a declared `machinery:` floor in the tables
+  catalog BEFORE the emitter** — not a hand-maintained "always add these two" list inside it, which is
+  the hand-sweep that already failed four times. `specs/database/databases.yaml` currently calls
+  `projection_checkpoint` *"runtime machinery, not spec-declared"*; PR2 contradicts that sentence and
+  amends it in the same change (dba).
+- **`provenance[]` needs a KIND discriminator** (`pm-read-step` | `machinery-floor` |
+  `mailbox-append` | `migration`). Removal works by *"no remaining provenance row justifies this
+  grant"*, and the machinery floor has no `read:` step behind it — so without the discriminator the
+  first cleanup pass deletes the health probe's SELECT. **Unrecoverable to add after the first removal
+  pass.** Reuse the validator's own step path as the provenance atom (dba).
+- **The deletion engine must be fenced out of the walk or given its own declaration.** It is not a
+  PM, has no `read:` steps, and a narrowing does not fail it with `permission denied` — it returns a
+  WRONG NUMBER, legally (architect).
+- **Post-reshape sweep**: `specs/database/databases.yaml` still says *"until the grammar can
+  distinguish projection-read from stream-fold…"* in two places. The grammar exists as of PR1; the
+  DERIVATION does not, so the sentences stay accurate-in-spirit today and are updated in the same
+  change as PR2's derivation (graphql).
+- **Do not infer lag-tolerance from `source:`.** `PROJECTION` spans the benign case
+  (`CartBindingProcess`) and the fatal one (`PaymentSettlementProcess`, the #544 class: an unprojected
+  `payment_status` skips the capture and the hold expires). Only the step's prose separates them
+  (architect) — recorded at both step notes and on `READ_SOURCE_PROJECTION`'s doc comment.
+- **PR2's "independent" reader list must be built from `crates/**` only** (or from
+  `git show main:specs/...` taken before PR1's notes landed). PR1's `note:` fields import call-site
+  answers into the spec, and PR1 already performed one comparison — see the correction in
+  `docs/STATUS.md` (architect).
+- **The `DispatchStrategyRepository` referential-table reads (`dispatch_strategy.rs:35-57`) are a
+  read class outside both the grammar and this list** — name them in PR2's sweep so the derivation
+  does not silently drop their grant (third-look review of
+  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
+- **The C4 sequence emitter is a `read.model` consumer RDR-1 must sweep**: today it still renders the
+  `CustomerCreditBalance` `EVENT_STREAM` step as a read-model SELECT, i.e. it draws the read the leg
+  never performs (third-look review of
+  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
+
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

@@ -38,10 +38,10 @@ pub mod delivery_dispatch_process {
     /// For a DELIVERY order: create the delivery job (birth) and offer it. COLLECTION orders need no dispatch. 
     #[async_trait::async_trait]
     pub trait OrderMarkedReadyHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). SELECTed from the `ordertracking` projection. An order not yet projected SKIPS the leg rather than dispatching blind. Return `Skip` to end the leg as a benign no-op.
         async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
 
-        /// Execute `read restaurant` over `Restaurant` (where restaurant_id = message.restaurantId). The pickup address. Return `Skip` to end the leg as a benign no-op.
+        /// Execute `read restaurant` over `Restaurant` (where restaurant_id = message.restaurantId). The pickup address -- FOLDED from the restaurant's own stream, never SELECTed from the `restaurant` projection: a courier sent to a stale address is a wasted trip and a cold order, so this read cannot wait on a projector. Folded even though the surrounding leg IS generated. Return `Skip` to end the leg as a benign no-op.
         async fn read_restaurant(&self, restaurant_id: domain::generated::scalars::RestaurantId) -> Result<super::HookOutcome<RestaurantRead>, domain::shared::errors::DomainError>;
 
         /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
@@ -90,7 +90,7 @@ pub mod delivery_dispatch_process {
     ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
         use crate::process_managers::Outcome;
         let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
+        // read `order` ← OrderTracking where order_id = message.orderId. SELECTed from the `ordertracking` projection. An order not yet projected SKIPS the leg rather than dispatching blind.
         let order = match hooks.read_order(event.order_id).await? {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
@@ -99,7 +99,7 @@ pub mod delivery_dispatch_process {
         if order.service_type != domain::generated::scalars::ServiceType::DELIVERY {
             return Ok(Outcome::Skipped(format!("order.service_type is {:?}, not DELIVERY — COLLECTION orders need no dispatch.", order.service_type)));
         }
-        // read `restaurant` ← Restaurant where restaurant_id = message.restaurantId. The pickup address.
+        // read `restaurant` ← Restaurant where restaurant_id = message.restaurantId. The pickup address -- FOLDED from the restaurant's own stream, never SELECTed from the `restaurant` projection: a courier sent to a stale address is a wasted trip and a cold order, so this read cannot wait on a projector. Folded even though the surrounding leg IS generated.
         let restaurant = match hooks.read_restaurant(event.restaurant_id).await? {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
@@ -743,7 +743,7 @@ pub mod cart_binding_process {
     /// Bind every OPEN cart of the identified session to the customer.
     #[async_trait::async_trait]
     pub trait CustomerIdentifiedHooks: Send + Sync {
-        /// Execute `read open_carts` over `Cart` (where session_id = message.sessionId, status = OPEN). Absence = empty (no skip).
+        /// Execute `read open_carts` over `Cart` (where session_id = message.sessionId, status = OPEN). SELECTed from the `cart` projection: the leg needs to ENUMERATE a session's carts, which no single aggregate stream can answer. Projector lag is benign here -- a cart missed on this pass binds on the next identification, and the Cart's one-time bind absorbs a duplicate. Absence = empty (no skip).
         async fn read_open_carts(&self, session_id: domain::generated::scalars::SessionId) -> Result<Vec<OpenCartsRead>, domain::shared::errors::DomainError>;
 
         /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
@@ -768,7 +768,7 @@ pub mod cart_binding_process {
     ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
         use crate::process_managers::Outcome;
         let actor = crate::process_managers::saga_actor(env);
-        // read `open_carts` ← Cart where session_id = message.sessionId, status = OPEN.
+        // read `open_carts` ← Cart where session_id = message.sessionId, status = OPEN. SELECTed from the `cart` projection: the leg needs to ENUMERATE a session's carts, which no single aggregate stream can answer. Projector lag is benign here -- a cart missed on this pass binds on the next identification, and the Cart's one-time bind absorbs a duplicate.
         let open_carts = hooks.read_open_carts(event.session_id).await?;
         // admission: the run row this leg would (re-)open — `admit` may veto with a benign skip.
         if let Some(existing) = state.by_session(event.session_id).await? {
@@ -873,7 +873,7 @@ pub mod payment_settlement_process {
     /// The order was handed to the customer (delivered / picked up) — capture the authorized payment. The capture keys on the PRESENCE OF A CAPTAIN AUTHORIZATION, never on the delivery fact alone (rules.yaml#/PaymentCapturedOnFulfilment): the read skips orders with no payment_intent_id and the guard skips payments not AUTHORIZED — so a $0 replacement today, and a post-V0 EXTERNAL order (Uber Eats ingest: already paid on the partner's rails, no Captain PaymentIntent — ADR-20260813-233418 AR-2), can never trip a phantom capture; the concrete ExternalOrderReceived regression test lands with that slice. The wrapper seam records PaymentCaptureFailed (+ pages) when the capture call fails; the settled fact arrives as inbound PaymentCaptured. 
     #[async_trait::async_trait]
     pub trait OrderDeliveredHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). The fulfilled order, with its folded payment state. Return `Skip` to end the leg as a benign no-op.
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). The fulfilled order, with its folded payment state. SELECTed from the `ordertracking` projection, like all four legs of this saga -- the projected row is where `payment_status` and `payment_intent_id` are folded together, which is the pair the capture/release decision needs. PROJECTION HERE IS NOT LAG-BENIGN, and nothing in the token says so: an unprojected `payment_status` makes the guard below SKIP, the capture never happens, and the ~7-day authorization expires silently -- the restaurant is never paid (the #544 class, which shipped inert for exactly this reason). Do not read `source: PROJECTION` as `tolerates lag`; the two are independent and only prose distinguishes them. Return `Skip` to end the leg as a benign no-op.
         async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
 
         /// Build the `payment.capture` input for this leg. — Capture the FULL authorized amount (partial capture / tips-at-delivery is the recorded open tips discussion, ADR-20260808-195315 §1.4); PaymentCaptured settles asynchronously. `Skip` skips just this call — the leg continues.
@@ -889,7 +889,7 @@ pub mod payment_settlement_process {
         env: &crate::process_managers::TriggerEnvelope,
     ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
         use crate::process_managers::Outcome;
-        // read `order` ← OrderTracking where order_id = message.orderId. The fulfilled order, with its folded payment state.
+        // read `order` ← OrderTracking where order_id = message.orderId. The fulfilled order, with its folded payment state. SELECTed from the `ordertracking` projection, like all four legs of this saga -- the projected row is where `payment_status` and `payment_intent_id` are folded together, which is the pair the capture/release decision needs. PROJECTION HERE IS NOT LAG-BENIGN, and nothing in the token says so: an unprojected `payment_status` makes the guard below SKIP, the capture never happens, and the ~7-day authorization expires silently -- the restaurant is never paid (the #544 class, which shipped inert for exactly this reason). Do not read `source: PROJECTION` as `tolerates lag`; the two are independent and only prose distinguishes them.
         let order = match hooks.read_order(event.order_id).await? {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
@@ -1056,7 +1056,7 @@ pub mod refund_process {
     /// The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
     #[async_trait::async_trait]
     pub trait OrderRejectedByRestaurantHooks: Send + Sync {
-        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). Return `Skip` to end the leg as a benign no-op.
+        /// Execute `read order` over `OrderTracking` (where order_id = message.orderId). SELECTed from the `ordertracking` projection, like all four opening legs of this saga -- the captured total and the payment intent the RefundOpened fact carries come from the projected row. Return `Skip` to end the leg as a benign no-op.
         async fn read_order(&self, order_id: domain::generated::scalars::OrderId) -> Result<super::HookOutcome<OrderRead>, domain::shared::errors::DomainError>;
 
         /// Whether an EXISTING run row may be re-upserted by this opening leg — `Some(reason)` ends
@@ -1085,7 +1085,7 @@ pub mod refund_process {
     ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
         use crate::process_managers::Outcome;
         let actor = crate::process_managers::saga_actor(env);
-        // read `order` ← OrderTracking where order_id = message.orderId.
+        // read `order` ← OrderTracking where order_id = message.orderId. SELECTed from the `ordertracking` projection, like all four opening legs of this saga -- the captured total and the payment intent the RefundOpened fact carries come from the projected row.
         let order = match hooks.read_order(event.order_id).await? {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
