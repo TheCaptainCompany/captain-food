@@ -50,6 +50,20 @@
 //! racing the same binding. Same constraint and same shape as `tests/mailbox_liveness_metrics.rs`
 //! and `tests/orders_placed_metric.rs`.
 //!
+//! **SEEN RED — seven mutants, each a SEMANTIC edit of `mailbox/birth_gap_watch.rs` applied to the
+//! committed phase, with an applied-check AND a revert-check** (never a line range: a range rots at
+//! the next commit). All seven red on apply, all seven green on `git checkout --`:
+//!
+//! | Mutant | The edit | Where it dies |
+//! |---|---|---|
+//! | delete the emit | drop the `no_order_birth_age` loop — literally the pre-#608 world | presence, `left: []` |
+//! | invert the predicate | `process_status <> 'AWAITING_PAYMENT_RESULT'` | positive control, `retry_pending` 0 vs 3600 |
+//! | return 0 | emit `0` whatever the query found | positive control, every reason 0 |
+//! | latch the value | memoize the first non-zero reading and re-emit it forever | the SECOND value control, 3600 vs 7200 |
+//! | emit once | a `OnceLock` around the emit — the once-at-startup seeder | the re-emission assertion, `left: []` |
+//! | re-point at OrderTracking | source the population from the read model — TODAY'S BLINDNESS | positive control, `retry_pending` 0 (a never-born order has no row) |
+//! | drop the no-birth exclusion | count every hop, born or not | the negative control, `delivery_exhausted` 7200 vs 0 |
+//!
 //! **Known coverage gap, stated rather than faked**: `delivery_exhausted` is asserted PRESENT AT
 //! ZERO on every tick and is covered by the predicate mutants, but is not driven to a positive
 //! value here. Producing it honestly needs a PM hop that reaches a terminal status while its run
