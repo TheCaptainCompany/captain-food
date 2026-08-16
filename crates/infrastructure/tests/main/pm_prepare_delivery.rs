@@ -233,6 +233,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         enforce_service_hours_guard: false,
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
+        // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
+        route_order_birth_through_lane: false,
     }
 }
 
@@ -656,6 +658,435 @@ async fn payment_authorized_chains_to_the_pm_lane_and_materializes_the_order() {
             .expect("row")
             .get("status");
     assert_eq!(redelivered, "IGNORED", "a re-delivered authorization is a benign skip");
+}
+
+// ================================================================================================
+// #588 — the Order-lane birth enqueue (ADR-20260816-040239)
+//
+// The `deliver: OrderPlaced to: Order` step is a TELL: the saga decides the birth, the Order's own
+// lane appends it. These three tests are the red-first proof, authored against the PRE-CHANGE HEAD
+// where the PM still calls `Repository::save` on the foreign `Order-{id}` stream.
+//
+// Why the lane matters and not just the append: `record_inbound_order_placed` is what returns the
+// `Recorded` verdict `apply_schedules_in_tx` keys the acceptance deadline on. A birth that never
+// rides the lane leaves the clock unarmed for every real order — a paid order nobody is told about.
+// ================================================================================================
+
+/// Fetch the single Order-lane birth message, or fail loudly with how many there were.
+async fn birth_row(pool: &PgPool) -> sqlx::postgres::PgRow {
+    let rows = sqlx::query(
+        "SELECT message_id, actor_id, partition, cause_id, status, source, external_id, payload \
+         FROM inbound_messages WHERE actor_type = 'Order' AND message_type = 'OrderPlaced'",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query the Order lane");
+    assert_eq!(
+        rows.len(),
+        1,
+        "exactly ONE Order-lane birth message must exist after the authorized checkout \
+         (found {}) — the `deliver: OrderPlaced to: Order` step is a lane ENQUEUE, not a \
+         foreign-stream append (ADR-20260816-040239)",
+        rows.len()
+    );
+    rows.into_iter().next().unwrap()
+}
+
+/// [`deps_over`] with the #588 birth routing ON.
+///
+/// The ONE knob these tests turn, and turning it is the point: ADR-20260816-040239 ships the
+/// routing behind `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`, default OFF, because it
+/// changes a money-path saga's commit path (gate-then-stabilize — rollback must be a flip, not a
+/// redeploy). The flag-OFF path is not left unproven: it is exactly what
+/// `payment_authorized_chains_to_the_pm_lane_and_materializes_the_order` above asserts, on plain
+/// [`deps_over`] — the saga appends `OrderPlaced` itself and no Order-lane message exists. So the
+/// two postures are covered by two tests, and neither is a weakened version of the other.
+fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
+    CommandDeps { route_order_birth_through_lane: true, ..deps_over(pool, payments) }
+}
+
+/// An Order-lane worker with the reminder windows wired — a missing window aborts every delivery
+/// on the lane by design, so the acceptance clock cannot be observed without them.
+async fn order_worker(pool: &PgPool, id: &str, deps: CommandDeps) -> MailboxWorker {
+    let windows = std::collections::HashMap::from([
+        ("ORDER_ACCEPTANCE_TIMEOUT_SECONDS", std::time::Duration::from_secs(300)),
+        ("ORDER_RETENTION_WINDOW_DAYS", std::time::Duration::from_secs(30 * 86_400)),
+    ]);
+    let w = MailboxWorker::new(
+        pool.clone(),
+        id,
+        "Order",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps).with_reminder_windows(windows)),
+    );
+    w.seed(5).await.expect("seed order lanes");
+    w.claim().await.expect("claim order lanes");
+    w
+}
+
+/// Run the checkout up to and including the PM leg that decides the birth: `PlaceOrder` (prepare,
+/// intent + run row) → the inbound Stripe `PaymentAuthorized` on the Payment lane (recorded +
+/// chained) → the `PlaceOrderProcess` lane delivering the chained copy. Returns
+/// `(pm_worker, chained_message_id)`.
+async fn checkout_through_authorization(
+    pool: &PgPool,
+    gateway: Arc<StubGateway>,
+    stripe_event: &str,
+) -> (MailboxWorker, uuid::Uuid) {
+    enqueue_pm(pool, "PlaceOrderProcess", uid(ORDER), 0xC1, "PlaceOrder", place_order_payload(None))
+        .await;
+    let pm_worker = worker_over(pool, "PlaceOrderProcess", routed_deps(pool, gateway.clone())).await;
+    assert_eq!(drain_all(&pm_worker).await, 1, "the checkout leg delivers");
+
+    let payment_actor = actor_client::surrogate_actor_id("Payment", "pi_prepare_test");
+    let authorized = serde_json::json!({
+        "eventType": "PaymentAuthorized",
+        "payload": {
+            "paymentIntentId": "pi_prepare_test",
+            "orderId": uid(ORDER),
+            "restaurantId": uid(RESTAURANT),
+            "amount": { "amountCents": 1960, "currency": "EUR" },
+        }
+    });
+    let fact_id = uid(0xFAC8);
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, \
+            channel, user_type, correlation_id, source, external_id) \
+         VALUES ($1, 'EVENT', 'Payment', $2, $3, 'PaymentAuthorized', $4, 'hFACT588', 'EXTERNAL', \
+                 'EXTERNAL', $1, 'stripe', $5)",
+    )
+    .bind(fact_id)
+    .bind(payment_actor)
+    .bind(actor_client::stable_partition(&payment_actor, 5))
+    .bind(&authorized)
+    .bind(stripe_event)
+    .execute(pool)
+    .await
+    .expect("enqueue the authorization");
+
+    let pay_worker = MailboxWorker::new(
+        pool.clone(),
+        "w-PAY588",
+        "Payment",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(routed_deps(pool, gateway.clone()))),
+    );
+    pay_worker.seed(5).await.expect("seed payment lanes");
+    pay_worker.claim().await.expect("claim payment lanes");
+    assert_eq!(drain_all(&pay_worker).await, 1, "the authorization delivers");
+
+    let chained_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT message_id FROM inbound_messages WHERE actor_type = 'PlaceOrderProcess' \
+         AND kind = 'EVENT' AND message_type = 'PaymentAuthorized'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("the chained PM copy exists");
+
+    pm_worker.claim().await.expect("re-claim pm lanes");
+    assert_eq!(drain_all(&pm_worker).await, 1, "the saga leg delivers");
+    (pm_worker, chained_id)
+}
+
+/// **#588 / beck's named red.** The normal checkout path must ENQUEUE the birth on the Order lane
+/// and arm the acceptance clock off the lane's own `Recorded` verdict. Three claims, in order:
+///
+/// (a) the saga's `deliver:` step produces exactly ONE `inbound_messages` row
+///     `('Order','OrderPlaced')`, committed in the SAME transaction as the `payment_process_manager`
+///     row — both or neither — and appends NOTHING to `Order-{id}` itself (vernon: being the birth
+///     AUTHORITY licenses the decision, never the append). Its door identity is derived from the
+///     ORDER ID, never from the trigger's message id (`inbound_message_id(source, external_id)`,
+///     FROZEN like `surrogate_actor_id`), so redelivery dedups at the door.
+/// (b) after an EXPLICIT lane drain (never a sleep) the verdict is the `Recorded` arm — SUCCEEDED,
+///     with the birth on the stream exactly once. This holds on FIRST delivery only; the
+///     redelivery case is `redelivered_authorization_dedups_the_birth_at_the_door`.
+/// (c) EXACTLY ONE acceptance-deadline row exists, SCHEDULED, caused by THAT birth message and due
+///     one window after it — not merely "a row exists".
+///
+/// Deviation from the dispatch's letter, stated on purpose: `apply_schedules_in_tx` computes
+/// `chrono::Utc::now() + window` inside the delivery transaction, not `occurred_at + window`
+/// (`crates/infrastructure/src/mailbox/mod.rs`). The two are the same instant to within the
+/// transaction's own duration, so the assertion is `scheduled_at - occurred_at ≈ window` with a
+/// 2 s tolerance PLUS the exact `cause_id` link — which is the stronger half of "keyed to that
+/// birth" anyway, and cannot pass by coincidence.
+#[tokio::test]
+async fn authorized_payment_enqueues_the_order_birth_and_arms_the_clock() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+    seed_checkout_world(&pool, true).await;
+
+    let gateway = Arc::new(StubGateway::default());
+    let (_pm_worker, chained_id) =
+        checkout_through_authorization(&pool, gateway, "evt_588_a").await;
+
+    // --- (a) the birth is an ENQUEUE, and the saga wrote no foreign stream -----------------------
+    let direct: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(
+        direct, 0,
+        "PlaceOrderProcess must NOT append OrderPlaced to the Order's stream: the birth passes \
+         the Order's own mailbox, which is the serialization point for its writer. Today the \
+         saga saves Order-{{id}} AND Cart-{{id}} in ONE transaction (vernon, #588)"
+    );
+
+    let birth = birth_row(&pool).await;
+    // Both or neither, asserted about the COMMIT and not about row counts (beck): Postgres exposes
+    // the inserting transaction id as the system column `xmin`, so two rows written by the same
+    // transaction share it. If the door insert ever moves off the passed `&mut Transaction` onto a
+    // pool handle — the exact mistake vernon's constraint (ii) exists to prevent, and one no count
+    // of rows can see — the two xmins diverge and this goes red.
+    let (run_status, run_xmin): (String, i64) = sqlx::query_as(
+        "SELECT process_status, xmin::text::bigint FROM payment_process_manager WHERE cart_id = $1",
+    )
+    .bind(uid(CART))
+    .fetch_one(&pool)
+    .await
+    .expect("the run row committed with the delivery");
+    assert_eq!(run_status, "ORDER_PLACED", "the saga leg resolved its run");
+    let birth_xmin: i64 = sqlx::query_scalar(
+        "SELECT xmin::text::bigint FROM inbound_messages WHERE message_id = $1",
+    )
+    .bind(birth.get::<uuid::Uuid, _>("message_id"))
+    .fetch_one(&pool)
+    .await
+    .expect("the birth row's inserting transaction");
+    assert_eq!(
+        birth_xmin, run_xmin,
+        "the birth message and the run row were written by the SAME transaction — the door insert \
+         rides the delivery's `&mut Transaction`, never `self.deps`' pool (ADR-20260816-040239 \
+         constraint 2)"
+    );
+    assert_eq!(birth.get::<uuid::Uuid, _>("actor_id"), uid(ORDER), "lane = the Order");
+    assert_eq!(
+        birth.get::<Option<uuid::Uuid>, _>("cause_id"),
+        Some(chained_id),
+        "cause-chained to the saga hop that decided it"
+    );
+    let source: String = birth.get::<Option<String>, _>("source").expect("a door row has a source");
+    let external_id: String =
+        birth.get::<Option<String>, _>("external_id").expect("a door row has an external_id");
+    assert_eq!(
+        external_id,
+        uid(ORDER).to_string(),
+        "external_id MUST be the ORDER ID — deriving it from the trigger's message id mints a \
+         fresh identity on every redelivery and births the order twice (vernon, FROZEN)"
+    );
+    assert_eq!(
+        birth.get::<uuid::Uuid, _>("message_id"),
+        actor_client::inbound_message_id(&source, &external_id),
+        "the door identity is UUIDv5(source:external_id) — FROZEN, like surrogate_actor_id"
+    );
+    assert_ne!(
+        birth.get::<uuid::Uuid, _>("message_id"),
+        actor_client::inbound_message_id(&source, &chained_id.to_string()),
+        "and it is NOT derived from the trigger's message id"
+    );
+
+    // --- (b) explicit drain → the canonical Recorded arm -----------------------------------------
+    let worker = order_worker(&pool, "w-ORD588a", routed_deps(&pool, Arc::new(StubGateway::default())))
+        .await;
+    // Bracket the drain: `apply_schedules_in_tx` computes `now() + window` INSIDE the delivery
+    // transaction, so the deadline must land in `[t0 + window, t1 + window]` — deterministic under
+    // any CI pause, where a fixed tolerance is a flake waiting for a slow runner (beck).
+    let t0 = chrono::Utc::now();
+    assert_eq!(drain_all(&worker).await, 1, "the Order lane delivers the birth");
+    let t1 = chrono::Utc::now();
+    let birth_id: uuid::Uuid = birth.get("message_id");
+    let (status, error) = verdict_of(&pool, birth_id).await;
+    assert_eq!(
+        (status.as_str(), error),
+        ("SUCCEEDED", None),
+        "first delivery = record_inbound_order_placed's `Recorded` arm, never `AlreadyRecorded` \
+         (no dependency on #590's verdict-blind arm)"
+    );
+    let placed = sqlx::query(
+        "SELECT occurred_at FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_all(&pool)
+    .await
+    .expect("order stream");
+    assert_eq!(placed.len(), 1, "one birth on the stream, appended by the Order's own lane");
+    let occurred_at: chrono::DateTime<chrono::Utc> = placed[0].get("occurred_at");
+
+    // --- (c) exactly one acceptance deadline, keyed to THAT birth --------------------------------
+    let deadlines = sqlx::query(
+        "SELECT message_id, status, scheduled_at, cause_id FROM inbound_messages \
+         WHERE actor_id = $1 AND message_type = 'OrderAcceptanceTimedOut'",
+    )
+    .bind(uid(ORDER))
+    .fetch_all(&pool)
+    .await
+    .expect("query the deadline");
+    assert_eq!(deadlines.len(), 1, "exactly ONE pending occurrence per (actor, purpose)");
+    assert_eq!(deadlines[0].get::<String, _>("status"), "SCHEDULED");
+    assert_eq!(
+        deadlines[0].get::<uuid::Uuid, _>("message_id"),
+        application::reminders::reminder_message_id(uid(ORDER), "OrderAcceptanceTimedOut")
+    );
+    assert_eq!(
+        deadlines[0].get::<Option<uuid::Uuid>, _>("cause_id"),
+        Some(birth_id),
+        "the clock is armed BY the birth delivery, not by some other route"
+    );
+    let scheduled_at: chrono::DateTime<chrono::Utc> = deadlines[0].get("scheduled_at");
+    let window = chrono::Duration::seconds(300);
+    assert!(
+        (t0 + window..=t1 + window).contains(&scheduled_at),
+        "due one ORDER_ACCEPTANCE_TIMEOUT_SECONDS window after the birth delivery: expected \
+         within [{}, {}], got {scheduled_at} (the birth appended at {occurred_at})",
+        t0 + window,
+        t1 + window
+    );
+}
+
+/// **#588 mutation kill — redelivery.** Deliver the authorization TWICE. Because the door identity
+/// is `UUIDv5(source:order_id)`, the second saga pass collides on the primary key: ONE birth
+/// message, ONE birth on the stream, and the acceptance deadline does NOT move (`reschedule: keep`).
+/// A duplicate enqueue is a SUCCESS outcome to the saga, never an error — the run must not fail or
+/// wedge its lane because the door deduped.
+///
+/// Mutants this kills: deriving the door id from the trigger's message id; treating the dedup as a
+/// PM error; turning the `Keep` arm's `ON CONFLICT DO NOTHING` into `DO UPDATE`. It is also the
+/// producer-driven replacement for the hand-INSERT `enqueue_birth` crutch in
+/// `mailbox_acceptance_timeout.rs` — that crutch exists ONLY because no producer did this, and it
+/// is deleted in the same change (leaving it would keep the producer-free path green forever).
+#[tokio::test]
+async fn redelivered_authorization_dedups_the_birth_at_the_door() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+    seed_checkout_world(&pool, true).await;
+
+    let gateway = Arc::new(StubGateway::default());
+    let (pm_worker, chained_id) =
+        checkout_through_authorization(&pool, gateway, "evt_588_b").await;
+
+    let birth = birth_row(&pool).await;
+    let birth_id: uuid::Uuid = birth.get("message_id");
+
+    // Arm the clock through the Order lane, then park the deadline at a time NO fresh declaration
+    // would compute — a Keep→InPlace mutation becomes an unmissable seven-day move, not jitter.
+    let worker = order_worker(&pool, "w-ORD588b", routed_deps(&pool, Arc::new(StubGateway::default())))
+        .await;
+    assert_eq!(drain_all(&worker).await, 1);
+    let deadline_id = application::reminders::reminder_message_id(uid(ORDER), "OrderAcceptanceTimedOut");
+    let sentinel = chrono::Utc::now() + chrono::Duration::days(7);
+    sqlx::query("UPDATE inbound_messages SET scheduled_at = $2 WHERE message_id = $1")
+        .bind(deadline_id)
+        .bind(sentinel)
+        .execute(&pool)
+        .await
+        .expect("park the sentinel");
+
+    // MUTATION: the same authorization is delivered a second time (at-least-once is the contract).
+    sqlx::query(
+        "UPDATE inbound_messages SET status = 'RECEIVED', completed_at = NULL WHERE message_id = $1",
+    )
+    .bind(chained_id)
+    .execute(&pool)
+    .await
+    .expect("force saga redelivery");
+    pm_worker.claim().await.expect("re-claim pm lanes");
+    assert_eq!(drain_all(&pm_worker).await, 1, "the redelivered hop completes — never a wedged lane");
+
+    let again = birth_row(&pool).await;
+    assert_eq!(
+        again.get::<uuid::Uuid, _>("message_id"),
+        birth_id,
+        "the redelivered saga pass re-derives the SAME door identity and dedups at the door"
+    );
+
+    // Drain again: whatever the door left, the stream still holds exactly one birth.
+    worker.claim().await.expect("re-claim order lanes");
+    let _ = drain_all(&worker).await;
+    let placed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(placed, 1, "one birth, never two — commands.rs's absorber stays authoritative");
+
+    let after: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT scheduled_at FROM inbound_messages WHERE message_id = $1")
+            .bind(deadline_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the deadline row survives");
+    assert_eq!(
+        after.timestamp_micros(),
+        sentinel.timestamp_micros(),
+        "reschedule: keep — the FIRST scheduled_at wins; a redelivered birth must never push the \
+         acceptance deadline out"
+    );
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM inbound_messages WHERE actor_id = $1 \
+         AND message_type = 'OrderAcceptanceTimedOut'",
+    )
+    .bind(uid(ORDER))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(pending, 1, "one pending occurrence per (actor, purpose)");
+}
+
+/// **#588 mutation kill — atomicity, and the `prepare` fence.** The gateway refuses the checkout,
+/// so nothing about this order was ever authorized. Expect ZERO Order-lane birth messages AND no
+/// run row.
+///
+/// This is the fence for vernon's constraint (i): `actor_runtime/src/completion.rs` re-runs
+/// `prepare` with NO transaction open, so an enqueue staged in `prepare` would leave a birth
+/// message behind despite the REJECTED verdict — a paid-order message for an order that does not
+/// exist, on the money path. The enqueue must happen in `handle`, inside the delivery transaction,
+/// through the passed `&mut Transaction` and never a pool handle off `self.deps`.
+///
+/// Honest status: this passes vacuously at the pre-change HEAD (nothing enqueues anything yet). It
+/// is a negative control, not red evidence, and it becomes load-bearing the moment the seam lands.
+#[tokio::test]
+async fn a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+    seed_checkout_world(&pool, true).await;
+
+    // MUTATION: the payment service fails, so the delivery transaction rolls back.
+    let deps = deps_over(&pool, Arc::new(RefusingGateway));
+    let mid = enqueue_pm(
+        &pool,
+        "PlaceOrderProcess",
+        uid(ORDER),
+        0xC2,
+        "PlaceOrder",
+        place_order_payload(None),
+    )
+    .await;
+    let worker = worker_over(&pool, "PlaceOrderProcess", deps).await;
+    assert_eq!(drain_all(&worker).await, 1);
+    assert_eq!(verdict_of(&pool, mid).await.0, "FAILED");
+
+    let births: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM inbound_messages WHERE actor_type = 'Order' \
+         AND message_type = 'OrderPlaced'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(
+        births, 0,
+        "no birth message for a checkout that never authorized — an enqueue staged in `prepare` \
+         (which runs with no transaction, completion.rs) would leave one behind"
+    );
+    let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM payment_process_manager")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(runs, 0, "and no run row — both or neither");
 }
 
 /// Review CRITICAL-1: a DETERMINISTIC gateway refusal (Stripe 4xx invalid_request /

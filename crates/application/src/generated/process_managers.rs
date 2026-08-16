@@ -658,12 +658,23 @@ pub mod place_order_process {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
         };
-        let stream = format!("Order-{}", order_placed.order_id.0);
-        let (stream_events, stream_version) = store.load(&stream).await?;
-        if hooks.should_deliver_order_placed(&stream_events, &order_placed) {
-            crate::repository::Repository::new(store)
-                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())], &actor)
-                .await?;
+        if let Some(lanes) = env.lanes.as_ref() {
+            lanes.stage(crate::lanes::LaneEnqueue {
+                actor_type: "Order",
+                actor_id: order_placed.order_id.0,
+                event_type: "OrderPlaced",
+                payload: serde_json::to_value(domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())).map_err(|e| domain::shared::errors::DomainError::Repository(format!("OrderPlaced lane enqueue payload: {e}")))?,
+                source: "pm:PlaceOrderProcess:OrderPlaced".to_string(),
+                external_id: order_placed.order_id.0.to_string(),
+            });
+        } else {
+            let stream = format!("Order-{}", order_placed.order_id.0);
+            let (stream_events, stream_version) = store.load(&stream).await?;
+            if hooks.should_deliver_order_placed(&stream_events, &order_placed) {
+                crate::repository::Repository::new(store)
+                    .save(&stream, stream_version, &[domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())], &actor)
+                    .await?;
+            }
         }
         // deliver CartCheckedOut → Cart (the aggregate records the fact)
         let cart_checked_out = domain::generated::events::CartCheckedOut {

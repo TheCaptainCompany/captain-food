@@ -14,6 +14,7 @@ pub mod deliveries;
 pub mod dispatch_strategy;
 pub mod generated;
 pub mod journal;
+pub mod lanes;
 pub mod payments;
 pub mod pricing;
 pub mod process_managers;

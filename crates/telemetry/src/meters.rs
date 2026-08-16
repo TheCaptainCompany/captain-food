@@ -174,6 +174,22 @@ pub mod place_order {
         placed_counter().add(1, &[KeyValue::new("status", status.to_string())]);
     }
 
+    fn birth_lag_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::ORDER_BIRTH_LAG_MS).with_unit("ms").build()
+        })
+    }
+
+    /// `order_birth_lag_ms{routed}` (#588) — enqueue to `Recorded`, the handover the routed birth
+    /// introduces. Recorded by the Order lane's delivery, at the framework boundary, from the
+    /// mailbox row's own `received_at`: the row that carries the birth IS the enqueue instant, so
+    /// this needs no clock the domain can see. A GROWING p95 is the acceptance clock arming late.
+    pub fn birth_lag(routed: bool, elapsed_ms: f64) {
+        birth_lag_histogram()
+            .record(elapsed_ms, &[KeyValue::new("routed", routed.to_string())]);
+    }
+
     /// BUSINESS metric: `checkout_payment_failures_total{reason}`.
     ///
     /// The one number that answers "did we take money and fail to tell anyone" at a glance — the worst

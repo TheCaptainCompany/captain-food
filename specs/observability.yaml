@@ -184,9 +184,18 @@ place-order:
       attributes:
         - { key: "messaging.system", type: string, required: true }
         - { key: "business.result", type: string, required: true }
+    # NOT required since #588 (ADR-20260816-040239, farley): with
+    # `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` ON the saga no longer appends
+    # OrderPlaced — it enqueues onto the Order's lane, and the append happens in a DIFFERENT
+    # mailbox delivery with its own trace. Keeping this span REQUIRED for place-order success
+    # would mean one of two lies: either the contract fails a saga that did exactly the right
+    # thing, or the trace is stitched across deliveries and the 800 ms p95 budget silently starts
+    # measuring a shorter workflow while reading green. The append is still instrumented and still
+    # required by the contracts that own it; what place-order now owns is the DECISION and the
+    # handover, and the handover's own latency is `order_birth_lag_ms` below.
     - name: "event.store.append"
       kind: INTERNAL
-      required: true
+      required: false
       attributes:
         - { key: "business.event_type", type: string, required: true }
         - { key: "business.stream_id", type: string, required: true }
@@ -217,13 +226,27 @@ place-order:
     # Alert on ANY sustained non-zero rate. Distinct from checkout_payment_failures_total below,
     # the saga's business metric for payments that RAN and failed.
     - { name: "checkout_degraded_render_total", type: counter, attributes: ["reason"] }
+    # #588 (ADR-20260816-040239): the HANDOVER latency the routed birth introduces — from the
+    # saga's lane enqueue committing to the Order lane's delivery recording OrderPlaced. Nothing
+    # measured this before, because before #588 there was no handover: the saga appended inline.
+    # It is a technical metric, not a BAM fold: it is a property of the runtime (lane depth,
+    # worker liveness, head-of-line blocking on a hot order), not of the business, and it must
+    # keep working when Postgres is degraded — exactly the operational/BAM split
+    # ADR-20260811-014129 draws. `routed` (true|false) is the gate-then-stabilize label: while
+    # ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF nothing is recorded at all, so a flat series here is
+    # the honest reading of "the flag is off", and a GROWING p95 after the flip is the first sign
+    # the acceptance clock is arming late — a paid order the restaurant learns about a beat later.
+    - { name: "order_birth_lag_ms", type: histogram, attributes: ["routed"] }
   business_metrics:
     - { name: "orders_placed_total", type: counter, attributes: ["status"] }
     - { name: "checkout_payment_failures_total", type: counter, attributes: ["reason"] }
 
   status_rules:
     success:
-      required_spans: ["command.receive", "command.journal", "pricing.compute", "payment.intent.create", "event.store.append", "event.publish", "event.consume.projection"]
+      # `event.store.append` left this list with #588: see the span's own comment — the routed
+      # birth appends in a different delivery, so requiring it here would either fail a correct
+      # saga or quietly redefine what the latency budget measures.
+      required_spans: ["command.receive", "command.journal", "pricing.compute", "payment.intent.create", "event.publish", "event.consume.projection"]
       # 'authorized' is recorded by the webhook path (payment_intent.amount_capturable_updated ->
       # PaymentAuthorized), never by the create call itself; capture success lives in the
       # payment-settlement contract (ADR-20260808-195315 §1.2).

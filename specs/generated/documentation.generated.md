@@ -7629,12 +7629,12 @@ _criticality: **high**_
 | `cart.read` | `INTERNAL` | ✅ | — | `business.aggregate_id`* |
 | `pricing.compute` | `INTERNAL` | ✅ | — | `business.service_fee`*, `business.split_ok`* |
 | `payment.intent.create` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
-| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
+| `event.store.append` | `INTERNAL` | ⬜ | — | `business.event_type`*, `business.stream_id`* |
 | `event.publish` | `PRODUCER` | ✅ | — | `messaging.system`*, `business.event_type`* |
 | `event.consume.projection` | `CONSUMER` | ✅ | `>= 1` | `business.projection_name`* |
 
-- **Metrics**: `place_order_duration_ms` _(histogram)_, `checkout_degraded_render_total` _(counter)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
-- **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `pricing.compute`, `payment.intent.create`, `event.store.append`, `event.publish`, `event.consume.projection`]
+- **Metrics**: `place_order_duration_ms` _(histogram)_, `checkout_degraded_render_total` _(counter)_, `order_birth_lag_ms` _(histogram)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
+- **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `pricing.compute`, `payment.intent.create`, `event.publish`, `event.consume.projection`]
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 1500ms · error rate ≤ 1%
 
 <a id="obs-refund"></a>

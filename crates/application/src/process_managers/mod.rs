@@ -34,7 +34,7 @@ use crate::ports::Actor;
 /// The trigger's ENVELOPE bits an event leg may reference (`from_envelope`, ADR-0041): the
 /// `domain_events` row's id (dedup keys, `cause_id`), its correlation and its occurrence time.
 /// Infrastructure metadata — never business payload.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TriggerEnvelope {
     /// `domain_events.id` of the trigger — `from_envelope: event_id`; also the `cause_id` stamped on
     /// everything the reaction delivers/sends.
@@ -43,6 +43,39 @@ pub struct TriggerEnvelope {
     pub correlation_id: uuid::Uuid,
     /// `domain_events.occurred_at` of the trigger — `from_envelope: occurred_at`.
     pub occurred_at: chrono::DateTime<chrono::Utc>,
+    /// Where a ROUTED `deliver:` step stages its lane enqueue (ADR-20260816-040239). It lives on
+    /// the envelope rather than in a leg parameter because it is a property of the INVOCATION
+    /// ROUTE, not of the saga: a mailbox delivery owns a fenced transaction to stage into, the
+    /// polling `ProcessManagerRunner` owns none.
+    ///
+    /// `None` — the DEFAULT, and the only value on any route that cannot stage — means the routed
+    /// branch is off and the legacy foreign-stream append runs unchanged. That is the
+    /// gate-then-stabilize rollback path: `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`
+    /// resolves to `None` here when OFF, so flipping it back is a config flip, never a redeploy.
+    pub lanes: Option<std::sync::Arc<dyn crate::lanes::LaneSink>>,
+}
+
+/// Hand-written because the lane sink is a trait object with no meaningful identity: two
+/// envelopes are the same TRIGGER when their ids and instant match. The sink is delivery-route
+/// plumbing, not part of what the envelope IS.
+impl PartialEq for TriggerEnvelope {
+    fn eq(&self, other: &Self) -> bool {
+        self.event_id == other.event_id
+            && self.correlation_id == other.correlation_id
+            && self.occurred_at == other.occurred_at
+    }
+}
+
+impl TriggerEnvelope {
+    /// The envelope of a trigger delivered on a route with NO lane sink (the polling runner, unit
+    /// tests): routed `deliver:` steps fall back to the legacy append.
+    pub fn unlaned(
+        event_id: uuid::Uuid,
+        correlation_id: uuid::Uuid,
+        occurred_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self { event_id, correlation_id, occurred_at, lanes: None }
+    }
 }
 
 /// How an EVENT leg ended when it did NOT throw: the run either executed its steps to the end, or hit
@@ -162,12 +195,14 @@ pub(crate) mod test_support {
         }
     }
 
-    /// A canned trigger envelope (fixed ids so tests can assert the dedup key).
+    /// A canned trigger envelope (fixed ids so tests can assert the dedup key). NO lane sink: the
+    /// in-memory bed has no transaction to stage into, so routed `deliver:` steps take the legacy
+    /// append branch and the generated behaviour tests keep asserting on the stream.
     pub fn envelope() -> TriggerEnvelope {
-        TriggerEnvelope {
-            event_id: uuid::Uuid::from_u128(0xEE),
-            correlation_id: uuid::Uuid::from_u128(0xCC),
-            occurred_at: chrono::Utc::now(),
-        }
+        TriggerEnvelope::unlaned(
+            uuid::Uuid::from_u128(0xEE),
+            uuid::Uuid::from_u128(0xCC),
+            chrono::Utc::now(),
+        )
     }
 }

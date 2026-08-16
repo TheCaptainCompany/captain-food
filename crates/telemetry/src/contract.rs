@@ -117,6 +117,13 @@ pub mod metric {
     pub const PLACE_ORDER_DURATION_MS: &str = "place_order_duration_ms";
     pub const ORDERS_PLACED_TOTAL: &str = "orders_placed_total";
     pub const CHECKOUT_PAYMENT_FAILURES_TOTAL: &str = "checkout_payment_failures_total";
+    /// `place-order` contract (#588, ADR-20260816-040239): the HANDOVER latency the routed Order
+    /// birth introduces — the saga's lane enqueue committing, to the Order lane's delivery
+    /// recording `OrderPlaced`. Nothing measured this before #588 because there was no handover:
+    /// the saga appended inline. Attribute `routed` (`true`|`false`). Technical, not BAM: it is a
+    /// property of the runtime (lane depth, worker liveness, head-of-line blocking), and it must
+    /// keep working when Postgres is degraded.
+    pub const ORDER_BIRTH_LAG_MS: &str = "order_birth_lag_ms";
     /// `payment-settlement` contract (ADR-20260808-195315 §1.2): capturing a confirmed
     /// authorization FAILED after fulfilment — the food is cooked and the money did not move, the
     /// inverse of the paid-order-nobody-told-about class. Attribute `reason` =

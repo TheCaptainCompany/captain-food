@@ -437,6 +437,11 @@ impl MailboxCommandHandler {
                     // command-emitted fact — the retired drain published through
                     // PgEventStore::with_bus, and the checkout screen's push depends on it.
                     Ok(()) => {
+                        super::record_order_birth_lag(
+                            message,
+                            &staged,
+                            self.deps.route_order_birth_through_lane,
+                        );
                         // Recorded facts may declare `schedules:` too (same third-effect rule).
                         super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
                             .await?;
@@ -726,12 +731,22 @@ impl MailboxCommandHandler {
             application::staging::StagingPaymentProcessState::new(self.deps.pm_state.clone());
         let refund_staging =
             application::staging::StagingRefundProcessState::new(self.deps.refund_state.clone());
+        // The lane sink for ROUTED `deliver:` steps (#588, ADR-20260816-040239). Handed to the
+        // saga ONLY when `ROUTE_ORDER_BIRTH_THROUGH_LANE` is on; `None` leaves every deliver on
+        // the legacy foreign-stream append, which is the whole rollback story. It is safe to hand
+        // over here and nowhere else: THIS is the phase that owns the fenced transaction — the
+        // prepare phase (`pm_delivery::prepare`) owns none and re-runs on redelivery, so an
+        // enqueue staged there would survive a verdict that never committed.
+        let lane_sink = Arc::new(application::lanes::StagingLaneSink::new());
         // The trigger envelope: the chained row IS the trigger (its deterministic id doubles as
         // the dedup key the run row records).
         let env = TriggerEnvelope {
             event_id: message.message_id,
             correlation_id: message.correlation_id,
             occurred_at: message.received_at,
+            lanes: self.deps.route_order_birth_through_lane.then(|| {
+                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>
+            }),
         };
         let outcome = match (message.actor_type.as_str(), &event) {
             ("PlaceOrderProcess", E::PaymentAuthorized(e)) => {
@@ -763,12 +778,12 @@ impl MailboxCommandHandler {
                 let staged = staging.take_staged();
                 match flush_staged_in_tx(tx, &staged).await {
                     Ok(()) => {
-                        // #456: the "a stranger paid us" BAM counter. Keyed on OrderPlaced being
-                        // in THIS delivery's staged set (the place-order guard's transitive
-                        // output) — NOT on `Outcome::Completed`, which a replay that appended
-                        // nothing also returns. Emitted after the flush so the count only moves
-                        // once the append is in the completion transaction.
-                        super::record_order_placements(&staged);
+                        // The ROUTED `deliver:` steps' door rows (#588): same transaction as the
+                        // staged appends above and the run row below — both or neither. A
+                        // duplicate collides on the primary key and is a SUCCESS, never an error.
+                        super::flush_lane_enqueues_in_tx(tx, message, &lane_sink.take_staged())
+                            .await
+                            .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
                         pm_delivery::flush_pm_rows_in_tx(
                             tx,
                             &payment_staging.take_staged(),

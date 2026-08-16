@@ -57,6 +57,32 @@
 > route or the counter silently zeroes. Not a migration (payload/type/stream unchanged); the
 > `place-order` observability contract is amended in the realizing PR. **`HOLD: human`.**
 >
+
+> 🛬 **2026-08-16 — AND IT IS BUILT: THE ORDER BIRTH RIDES THE ORDER LANE, BEHIND A FLAG**
+> (phases 2–3 of [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),
+> branch `588-order-lane-birth-enqueue`, draft [PR #594](https://github.com/TheCaptainCompany/captain-food/pull/594)
+> — NOT on `main`; merge posture **`HOLD: human`**). The saga stages a `LaneEnqueue`
+> (`crates/application/src/lanes.rs`) that the delivery glue converts into an `inbound_messages`
+> row **inside the same fenced transaction**, and the Order's own worker appends the birth — so
+> `record_inbound_order_placed` runs on the canonical `Recorded` arm and the acceptance deadline
+> keys on it. The sink rides the `TriggerEnvelope` because it is a property of the invocation ROUTE:
+> a mailbox delivery owns a transaction, the polling runner owns none. Both #588 gates GREEN against
+> real Postgres, including a **same-`xmin` assertion** — the birth row and the PM run row must be
+> written by the same transaction, which no count of rows could prove. Gate:
+> **`ROUTE_ORDER_BIRTH_THROUGH_LANE`, default OFF** — the flag is unconditional (13 of 13 `deliver:`
+> steps qualify, so only the Order pair is routed) and the flag-OFF posture stays proven by the
+> untouched pre-existing test. **The regression the mob did not see, fixed structurally**: the #456
+> "a stranger paid us" counter ran off the PM route's staged set and was called there ONLY, so
+> moving the append would have zeroed it silently; the decision now lives inside
+> `flush_staged_in_tx` — the one way a staged event reaches `domain_events` — so no route can forget
+> and none can double-count, with a source guard failing the build if a route starts deciding again.
+> Also: `event.store.append` is no longer a REQUIRED `place-order` span (the routed birth appends in
+> a different delivery, so the 800 ms p95 budget would have silently changed meaning) and a new
+> `order_birth_lag_ms{routed}` histogram measures the handover nothing measured before; validator
+> rule **`pm-deliver-lane`** (a `deliver:` target must declare a `mailbox:` and the event as an
+> events.yaml fact) landed with mutation-red evidence. The reclamation second unlaned birth site is
+> [#595](https://github.com/TheCaptainCompany/captain-food/issues/595), out of scope by decision.
+>
 > ⏱️ **2026-08-16 — #167 ACCEPTANCE TIMEOUT IS CODE-COMPLETE ON THE BRANCH (PHASES 0–3 + the mob
 > conditions): [#167 "No order-acceptance timeout: a paid, unaccepted order sits forever with no alert, cancel or refund"](https://github.com/TheCaptainCompany/captain-food/issues/167),
 > branch `167-acceptance-timeout-auto-cancel`, draft [PR #586](https://github.com/TheCaptainCompany/captain-food/pull/586)

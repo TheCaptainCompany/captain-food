@@ -95,6 +95,29 @@ pub(crate) struct PmOrchDef {
 /// the PlaceOrder command leg is the server-side pricing path; it stays `commands::place_order`).
 pub(crate) const PM_HAND_WRITTEN_LEGS: &[(&str, &str)] = &[("PlaceOrderProcess", "PlaceOrder")];
 
+/// The `deliver:` steps ROUTED through the target actor's mailbox lane instead of appending to its
+/// stream from the saga — `(target actor, event)` (ADR-20260816-040239).
+///
+/// **Why this is a list and not the predicate.** The ADR's semantic rule is "a `deliver:` whose
+/// target declares the event in its `receives` is a lane ENQUEUE", and phase 0 established that
+/// **13 of 13** `deliver:` steps in the DSL satisfy it — twelve of them on the money or dispatch
+/// path. Gate-then-stabilize does not price a money-path commit change by blast count, so the
+/// change ships routing the ONE pair the acceptance clock needs and leaves the other twelve on the
+/// legacy append until each is moved by its own recorded decision. The list is the record of which
+/// ones have been moved; the runtime flag
+/// (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`) is what turns the routed branch on.
+///
+/// Not routed and not routable through this seam: the replacement-order birth in
+/// `process_managers/reclamation.rs`, which the polling `ProcessManagerRunner` reaches with no
+/// delivery transaction to stage into — tracked as
+/// [#595](https://github.com/TheCaptainCompany/captain-food/issues/595).
+pub(crate) const PM_LANE_ROUTED_DELIVERS: &[(&str, &str)] = &[("Order", "OrderPlaced")];
+
+/// Is this `deliver:` step routed through the target's mailbox lane?
+pub(crate) fn deliver_is_lane_routed(to: &str, event: &str) -> bool {
+    PM_LANE_ROUTED_DELIVERS.contains(&(to, event))
+}
+
 /// Aggregate → payload key property for `deliver` stream addressing. Convention: `<camel(agg)>Id`;
 /// the Payment aggregate is keyed by the Stripe intent (`domain::payment::stream`).
 pub(crate) fn pm_aggregate_key(aggregate: &str) -> String {
@@ -1003,6 +1026,13 @@ impl<'a> PmLegGen<'a> {
         if self.admission_pending {
             self.emit_admission(ind);
         }
+        // A routed deliver reads `env.lanes`, which only EVENT legs carry (`env_needed`).
+        assert!(
+            !self.is_cmd || !deliver_is_lane_routed(to, event),
+            "processmanager.yaml#/{}: a lane-ROUTED deliver ({} -> {}) on a COMMAND leg has no \
+             trigger envelope to carry the lane sink",
+            self.pm.name, event, to
+        );
         let model = self.ctx.model;
         let var = snake_type(event);
         let covered = pm_deliver_covered(model, "events.yaml", event, with);
@@ -1051,20 +1081,61 @@ impl<'a> PmLegGen<'a> {
             .and_then(|n| n.get("properties"))
             .map(|p| p.get(key_prop.as_str()).is_some())
             .unwrap_or(false);
+        let routed = deliver_is_lane_routed(to, event);
+        let pm_name = self.pm.name.clone();
         let append = |gen: &mut Self, key_expr: &str, ind: usize| {
-            gen.push(ind, &format!("let stream = format!(\"{}-{{}}\", {}.0);", to, key_expr));
-            gen.push(ind, "let (stream_events, stream_version) = store.load(&stream).await?;");
-            gen.push(ind, &format!("if hooks.should_deliver_{}(&stream_events, &{}) {{", var, var));
-            gen.push(ind + 4, "crate::repository::Repository::new(store)");
+            let (route_ind, legacy_ind) = if routed { (ind + 4, ind + 4) } else { (ind, ind) };
+            if routed {
+                // ADR-20260816-040239: this `deliver:` is a lane ENQUEUE. The saga DECIDES the
+                // fact; the target actor's own mailbox lane APPENDS it, so the write passes the
+                // target's serialization point and the delivery's `Recorded` verdict is what its
+                // `schedules:` key on. `env.lanes` is `Some` only on a route that owns a fenced
+                // transaction to stage into AND with
+                // `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` ON; `None` takes the
+                // legacy foreign-stream append below unchanged (gate-then-stabilize — rollback
+                // is a config flip, not a redeploy).
+                gen.push(ind, "if let Some(lanes) = env.lanes.as_ref() {");
+                gen.push(route_ind, "lanes.stage(crate::lanes::LaneEnqueue {");
+                gen.push(route_ind + 4, &format!("actor_type: \"{}\",", to));
+                gen.push(route_ind + 4, &format!("actor_id: {}.0,", key_expr));
+                gen.push(route_ind + 4, &format!("event_type: \"{}\",", event));
+                gen.push(
+                    route_ind + 4,
+                    &format!(
+                        "payload: serde_json::to_value(domain::generated::events::DomainEvent::{}({}.clone())).map_err(|e| domain::shared::errors::DomainError::Repository(format!(\"{} lane enqueue payload: {{e}}\")))?,",
+                        event, var, event
+                    ),
+                );
+                // The FROZEN door identity: `UUIDv5(source:external_id)` with `source` = the ROUTE
+                // (so two routed steps addressing the same aggregate cannot collide) and
+                // `external_id` = the TARGET AGGREGATE's id — never the trigger's message id,
+                // which changes on every redelivery and would mint a second birth. Changing
+                // either half re-mints the identity of every in-flight message, the same
+                // treatment `actor_client::surrogate_actor_id` carries.
+                gen.push(
+                    route_ind + 4,
+                    &format!("source: \"pm:{}:{}\".to_string(),", pm_name, event),
+                );
+                gen.push(route_ind + 4, &format!("external_id: {}.0.to_string(),", key_expr));
+                gen.push(route_ind, "});");
+                gen.push(ind, "} else {");
+            }
+            gen.push(legacy_ind, &format!("let stream = format!(\"{}-{{}}\", {}.0);", to, key_expr));
+            gen.push(legacy_ind, "let (stream_events, stream_version) = store.load(&stream).await?;");
+            gen.push(legacy_ind, &format!("if hooks.should_deliver_{}(&stream_events, &{}) {{", var, var));
+            gen.push(legacy_ind + 4, "crate::repository::Repository::new(store)");
             gen.push(
-                ind + 8,
+                legacy_ind + 8,
                 &format!(
                     ".save(&stream, stream_version, &[domain::generated::events::DomainEvent::{}({}.clone())], {})",
                     event, var, gen.actor_ref()
                 ),
             );
-            gen.push(ind + 8, ".await?;");
-            gen.push(ind, "}");
+            gen.push(legacy_ind + 8, ".await?;");
+            gen.push(legacy_ind, "}");
+            if routed {
+                gen.push(ind, "}");
+            }
         };
         if in_payload {
             append(self, &format!("{}.{}", var, rust_ident(&key_snake)), ind);

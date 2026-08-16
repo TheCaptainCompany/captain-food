@@ -219,6 +219,9 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
     const CTX: &str = "processmanager.yaml";
     // actors.yaml aggregate inboxes: name → received message names.
     let mut agg_inbox: HashMap<String, BTreeSet<String>> = HashMap::new();
+    // The DELIVERABLE half of each inbox: the `events.yaml#/…` refs, plus whether the actor has a
+    // mailbox at all — what a `deliver:` step needs, since a deliver is now a lane ENQUEUE.
+    let mut agg_facts: HashMap<String, (BTreeSet<String>, bool)> = HashMap::new();
     if let Some(Value::Mapping(m)) = model.defs.get("actors.yaml") {
         for (k, node) in m {
             let name = match k.as_str() {
@@ -226,14 +229,24 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
                 None => continue,
             };
             let mut set = BTreeSet::new();
+            let mut facts = BTreeSet::new();
             if let Some(seq) = node.get("receives").and_then(|x| x.as_sequence()) {
                 for e in seq {
-                    if let Some(n) = e.get("message").and_then(|x| x.get("$ref")).and_then(|x| x.as_str()).and_then(ref_name) {
-                        set.insert(n);
+                    let r = e.get("message").and_then(|x| x.get("$ref")).and_then(|x| x.as_str());
+                    if let Some(n) = r.and_then(ref_name) {
+                        set.insert(n.clone());
+                        // A `deliver:` is a lane ENQUEUE (ADR-20260816-040239), and only an
+                        // EVENT can ride a lane as an inbound fact — the same `events.yaml#/…`
+                        // scan the sealed `{Actor}Fact` traits and ACTOR_INBOUND_FACTS come from.
+                        if ref_target_file(r.unwrap_or_default(), CTX).as_deref() == Some("events.yaml") {
+                            facts.insert(n);
+                        }
                     }
                 }
             }
+            let has_mailbox = node.get("mailbox").is_some();
             agg_inbox.insert(name.to_string(), set);
+            agg_facts.insert(name.to_string(), (facts, has_mailbox));
         }
     }
 
@@ -600,6 +613,36 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
                                     format!("aggregate '{}' does not receive '{}' (actors.yaml inbox) — the {} would be dropped.", tname, mname, mkey),
                                 )),
                                 _ => {}
+                            }
+                            // `pm-deliver-lane` (#588, ADR-20260816-040239, evans' compiler-first
+                            // condition). A `deliver:` is a TELL that becomes a lane ENQUEUE: the
+                            // saga decides the fact, the target's own mailbox worker appends it.
+                            // Two things must therefore be true of the target, and the inbox-name
+                            // check above proves neither — it matches a bare NAME against the
+                            // merged `receives` set, so a COMMAND of the same name satisfies it
+                            // and an actor with no mailbox passes it. Enforced rather than
+                            // renamed: the DSL word `deliver` and the spec notes already say
+                            // Tell; only the code was lying (no keyword split, no rename).
+                            if kind == "deliver" {
+                                match agg_facts.get(&tname) {
+                                    Some((_, false)) => issues.push(err(
+                                        "pm-deliver-lane",
+                                        format!("{}.to", sw),
+                                        format!(
+                                            "aggregate '{}' declares no `mailbox:` — a deliver: is a lane ENQUEUE (ADR-20260816-040239), so '{}' would have no lane to arrive on.",
+                                            tname, mname
+                                        ),
+                                    )),
+                                    Some((facts, true)) if !facts.contains(&mname) => issues.push(err(
+                                        "pm-deliver-lane",
+                                        format!("{}.to", sw),
+                                        format!(
+                                            "aggregate '{}' does not declare '{}' as an inbound EVENT in its actors.yaml `receives` — a deliver: is a lane ENQUEUE (ADR-20260816-040239) and only an events.yaml fact can ride a lane; the birth would be refused at the door.",
+                                            tname, mname
+                                        ),
+                                    )),
+                                    _ => {}
+                                }
                             }
                         }
                         let target_props = resolve_ref(model, mref, CTX).map(|d| props_info(model, d, CTX)).unwrap_or_default();
