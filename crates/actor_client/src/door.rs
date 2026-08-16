@@ -43,7 +43,11 @@ pub struct ActorDoor {
 
 impl ActorDoor {
     /// A door over this mailbox. Held by exactly one `{Actor}Client`, which pairs it with the
-    /// `actor_type`/width its own generated code hard-codes from actors.yaml.
+    /// `actor_type` its own generated code hard-codes from actors.yaml.
+    ///
+    /// It no longer pairs it with a WIDTH (#596): the door's command methods take none, and the
+    /// lane is read from the declaration inside `command_entry`. The emitted clients used to pass
+    /// a literal width, which put a copy of the routing constant in every generated client crate.
     pub fn new(mailbox: Arc<dyn Mailbox>) -> Self {
         Self { mailbox }
     }
@@ -56,13 +60,12 @@ impl ActorDoor {
     pub async fn send_command(
         &self,
         actor_type: &str,
-        width: u16,
         actor_id: uuid::Uuid,
         message_type: &str,
         payload: serde_json::Value,
         env: Envelope,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let entry = command_entry(actor_type, width, actor_id, message_type, payload, env);
+        let entry = command_entry(actor_type, actor_id, message_type, payload, env)?;
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -73,14 +76,13 @@ impl ActorDoor {
     pub async fn schedule_command(
         &self,
         actor_type: &str,
-        width: u16,
         actor_id: uuid::Uuid,
         message_type: &str,
         payload: serde_json::Value,
         env: Envelope,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<ScheduleOutcome, DomainError> {
-        let entry = command_entry(actor_type, width, actor_id, message_type, payload, env);
+        let entry = command_entry(actor_type, actor_id, message_type, payload, env)?;
         let payload_hash = entry.payload_hash.clone();
         // A scheduled COMMAND keeps the historical in-place semantics — `keep` exists for
         // reminder deadlines (#167), and no command door declares a policy today.
