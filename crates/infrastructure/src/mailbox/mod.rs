@@ -73,16 +73,16 @@ pub async fn flush_lane_enqueues_in_tx(
     enqueues: &[application::lanes::LaneEnqueue],
 ) -> Result<(), DomainError> {
     for enqueue in enqueues {
-        // The lane keyspace WIDTH comes from the DECLARED contract (`actors.yaml`
-        // `mailbox.partitions`, generated into `ACTOR_MAILBOXES`), not from the seeded
-        // `mailbox_partitions` row count the PM chain reads. Deliberate, and it is the money-path
-        // difference: the seeded count is a runtime artifact, so reading it would make a checkout
-        // saga FAIL because a worker had not started yet — a paid order with no birth, the worst
-        // failure mode this product has. The declared width is the frozen routing contract, so the
-        // row is always addressed correctly and simply WAITS on its lane until a worker claims it.
-        let Some((_, width)) = crate::generated::command_router::ACTOR_MAILBOXES
-            .iter()
-            .find(|(a, _)| *a == enqueue.actor_type)
+        // The lane comes from the DECLARED contract (`actors.yaml` `mailbox.partitions`, generated
+        // into `ACTOR_MAILBOXES`). This site was always right and was the reference the #596 fix
+        // copied; it now shares that fix's single accessor, `actor_client::declared_lane`, so the
+        // two can no longer drift apart the way they had. The reason, kept verbatim because it is
+        // the money-path difference: the seeded `mailbox_partitions` count is a RUNTIME artifact,
+        // so reading it would make a checkout saga FAIL because a worker had not started yet — a
+        // paid order with no birth, the worst failure mode this product has. The declared width is
+        // the frozen routing contract, so the row is always addressed correctly and simply WAITS
+        // on its lane until a worker claims it.
+        let Some(partition) = actor_client::declared_lane(enqueue.actor_type, &enqueue.actor_id)
         else {
             // Unreachable through the emitter (the `pm-deliver-lane` validator rule proves the
             // target declares a mailbox); a wiring bug, never a business outcome.
@@ -107,7 +107,7 @@ pub async fn flush_lane_enqueues_in_tx(
         .bind(message_id)
         .bind(enqueue.actor_type)
         .bind(enqueue.actor_id)
-        .bind(actor_client::stable_partition(&enqueue.actor_id, *width))
+        .bind(partition)
         .bind(enqueue.event_type)
         .bind(&enqueue.payload)
         .bind(application::journal::payload_hash(&enqueue.payload))

@@ -19,9 +19,57 @@ pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
     (hash % u64::from(width.clamp(1, i16::MAX as u16))) as i16
 }
 
+/// **The one accessor every routing site uses** (#596): the DECLARED lane for an aggregate.
+/// `None` when the actor type declares no mailbox at all — a wiring bug, never a business outcome,
+/// and each caller names it in its own terms.
+///
+/// It exists to take a decision away from call sites (ADR-20260803-234035, compiler-first):
+/// callers pass no `width`, so no routing site can decide where a width comes from. Since #596's
+/// review that is true of every routing site — the typed door, the entry constructors, the
+/// reminder scheduler and the generated clients all lost their `width` argument.
+///
+/// **Precisely**: the PARAMETER is gone, not the possibility. [`stable_partition`] stays `pub` for
+/// tests (which legitimately compute an expected lane) and for its golden-value freeze, so the
+/// two-step `stable_partition(id, some_width)` remains SPELLABLE — it is simply not spelled
+/// anywhere outside this function and test code. Claiming more than that was itself a review
+/// finding on #596, so the claim is kept at its true size here.
+///
+/// The wrong source was a real, shipped, money-path defect:
+/// `chain_pm_copy_in_tx` derived the keyspace from `SELECT count(*) FROM mailbox_partitions`, a
+/// RUNTIME artifact written only by the workers at startup, while every other producer used the
+/// DECLARED contract below.
+///
+/// **Why the declaration is the only admissible source.** The keyspace width is not configuration,
+/// it is an ADDRESSING contract, and it is the sole thing that maps an aggregate to exactly ONE
+/// lane. The lease and the completion fence are both keyed by *lane*, so two producers disagreeing
+/// on the width put one aggregate in two lanes, each with a live lease, each passing its own
+/// fence: one-writer is broken at the addressing function, upstream of anything a fence can
+/// observe. A source that can be empty, stale or partial cannot carry that.
+pub fn declared_lane(actor_type: &str, actor_id: &uuid::Uuid) -> Option<i16> {
+    let (_, width) = crate::generated::addresses::ACTOR_MAILBOXES
+        .iter()
+        .find(|(a, _)| *a == actor_type)?;
+    Some(stable_partition(actor_id, *width))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::stable_partition;
+    use super::{declared_lane, stable_partition};
+
+    /// The accessor and the frozen function agree for a declared actor, and an undeclared actor
+    /// is `None` rather than a silent default lane 0 — a "wiring bug" that routed everything to
+    /// one lane would look like a working system under any test with a single aggregate.
+    ///
+    /// `MailboxSupervision` is the load-bearing case: it is the ONLY actor whose declared width is
+    /// not 5, so it is the only thing in the repository that can distinguish "reads the
+    /// declaration" from "happens to say 5" (mutation 3 of #596's kill set).
+    #[test]
+    fn declared_lane_reads_the_declaration_and_refuses_the_undeclared() {
+        let id = uuid::Uuid::from_u128(0x0AD1);
+        assert_eq!(declared_lane("PlaceOrderProcess", &id), Some(stable_partition(&id, 5)));
+        assert_eq!(declared_lane("MailboxSupervision", &id), Some(0), "width 1 => one lane");
+        assert_eq!(declared_lane("NotAnActor", &id), None);
+    }
 
     /// THE FREEZE: these values may never change. A failure here means the routing function
     /// drifted — which strands every in-flight mailbox row. Fix the code, never the constants.

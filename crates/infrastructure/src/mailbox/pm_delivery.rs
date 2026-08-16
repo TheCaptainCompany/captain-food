@@ -291,18 +291,30 @@ pub(super) async fn chain_pm_copy_in_tx(
     else {
         return Ok(None);
     };
-    // The lane keyspace WIDTH is the actor's seeded registry row count — the same source the
-    // workers seeded from, so the chain can never address a partition no worker drains.
-    let width: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
-            .bind(actor_type)
-            .fetch_one(&mut **tx)
-            .await?;
-    if width == 0 {
+    // The lane comes from the DECLARED routing contract (#596) — `actor_client::declared_lane`
+    // over `ACTOR_MAILBOXES`, the same source `flush_lane_enqueues_in_tx` and every typed client
+    // use. It used to be `count(*) FROM mailbox_partitions`, and that was wrong twice over:
+    //
+    //   - at ZERO rows it returned `sqlx::Error::Protocol`, INSIDE this completion transaction.
+    //     The registry is written only by `MailboxWorker::seed` at worker startup — migrations
+    //     never touch it — so "the target actor's worker has not started" aborted the recording of
+    //     an authorization Stripe had already accepted. And it is worse than a delay: a failed
+    //     completion transaction takes the poison path (`worker.rs`), which holds the Payment lane
+    //     head-of-line below the attempt cap and, AT the cap, flips the authorization row itself
+    //     to terminal FAILED. A paid customer whose order can then never be born, even once the
+    //     worker comes up.
+    //   - at a PARTIAL row count it silently addressed a narrower keyspace than every other
+    //     producer, which is a one-writer violation: see `declared_lane`'s docs.
+    //
+    // Behaviour now: the hop is addressed correctly and simply WAITS on its lane. Waiting is the
+    // correct answer to "no worker yet"; failing never was.
+    let Some(partition) = actor_client::declared_lane(actor_type, &actor_id) else {
+        // Unreachable through the emitter (`chain_target_of` only names actors with mailboxes);
+        // a wiring bug, never a business outcome.
         return Err(sqlx::Error::Protocol(format!(
-            "PM fact chaining is on but '{actor_type}' has no seeded lanes — start its worker first"
+            "PM fact chaining targets '{actor_type}', which declares no mailbox — wiring bug"
         )));
-    }
+    };
     let chained_id = uuid::Uuid::new_v5(
         &actor_id,
         format!("{}:{}", message.message_type, message.message_id).as_bytes(),
@@ -325,7 +337,7 @@ pub(super) async fn chain_pm_copy_in_tx(
     .bind(chained_id)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_client::stable_partition(&actor_id, width as u16))
+    .bind(partition)
     .bind(&message.message_type)
     .bind(&message.payload)
     .bind(&message.payload_hash)
@@ -423,17 +435,18 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
         else {
             continue;
         };
-        let width: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
-                .bind(actor_type)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| DomainError::Repository(e.to_string()))?;
-        if width == 0 {
+        // THE SAME declared source as the record-time chain above (#596). This site carried an
+        // identical `count(*)` read and an identical zero-width error, and the card that
+        // dispatched the fix named only two sites — `dba` and `beck` found this one independently.
+        // It matters more here, not less: the backfill exists precisely to rescue facts nobody
+        // reacted to, and it runs at STARTUP, where "the other actor's worker has not seeded yet"
+        // is the likeliest state in the process's life. A rescue pass that refuses to run when the
+        // system is cold is no rescue.
+        let Some(partition) = actor_client::declared_lane(actor_type, &actor_id) else {
             return Err(DomainError::Repository(format!(
-                "pm backfill: '{actor_type}' has no seeded lanes — seed before backfilling"
+                "pm backfill: '{actor_type}' declares no mailbox — wiring bug"
             )));
-        }
+        };
         let chained_id =
             uuid::Uuid::new_v5(&actor_id, format!("{event_type}:{event_id}").as_bytes());
         let correlation_id: uuid::Uuid = row.try_get("correlation_id").map_err(|e| DomainError::Repository(e.to_string()))?;
@@ -449,7 +462,7 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
         .bind(chained_id)
         .bind(actor_type)
         .bind(actor_id)
-        .bind(actor_client::stable_partition(&actor_id, width as u16))
+        .bind(partition)
         .bind(&event_type)
         .bind(&tagged)
         .bind(application::journal::payload_hash(&tagged))

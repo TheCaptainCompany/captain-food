@@ -996,16 +996,16 @@
     "fr": "Point de contrôle"
   },
   "mailbox.empty.body": {
-    "en": "Lanes appear when a mailbox worker seeds the partition registry on startup.",
-    "fr": "Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage."
+    "en": "No actor declares a mailbox in this build. Lanes come from the declaration (actors.yaml mailbox.partitions), not from what a worker has registered, so this list is never empty just because no worker has started.",
+    "fr": "Aucun acteur ne declare de boite aux lettres dans cette version. Les voies proviennent de la declaration (actors.yaml mailbox.partitions), pas de ce qu'un worker a enregistre : cette liste n'est donc jamais vide du seul fait qu'aucun worker n'a demarre."
   },
   "mailbox.empty.title": {
     "en": "No lanes registered",
     "fr": "Aucune voie enregistrée"
   },
   "mailbox.guide.body": {
-    "en": "A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments.",
-    "fr": "Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements."
+    "en": "Every DECLARED lane is listed, seeded or not, so read the Registration badge first. Seeded: a healthy lane has a live lease and pending near zero; a growing pending count with an expired lease means no worker owns the lane, and with a live lease it means the owner is stuck. Never seeded: no worker has EVER started for this lane, so no owner, no lease and ownership version 0 are expected, not a fault — but pending above zero here is the serious one, because nothing is coming to drain it; that is a paid order waiting on a worker that was never deployed. Stranded: work addressed outside the declared keyspace by a past width change — nothing will ever drain it and it needs a deliberate cutover. Ownership version increments on every takeover, so it should be stable outside deployments.",
+    "fr": "Toutes les voies DECLAREES sont listees, initialisees ou non : lisez d'abord le badge Enregistrement. Initialisee : une voie saine a un bail actif et un arriere proche de zero ; un arriere croissant avec un bail expire signifie qu'aucun worker ne possede la voie, et avec un bail actif que le proprietaire est bloque. Jamais initialisee : aucun worker n'a JAMAIS demarre pour cette voie, donc l'absence de proprietaire et de bail et une version de propriete a 0 sont normales — mais un arriere superieur a zero y est le cas grave, car rien ne viendra le traiter : c'est une commande payee qui attend un worker jamais deploye. Orpheline : du travail adresse hors de l'espace declare par un ancien changement de largeur — rien ne le traitera jamais et cela exige une bascule deliberee. La version de propriete s'incremente a chaque reprise : elle doit rester stable hors deploiements."
   },
   "mailbox.guide.title": {
     "en": "How to read this page",
@@ -1078,6 +1078,10 @@
   "mailbox.poisoned.title": {
     "en": "Poisoned rows",
     "fr": "Lignes empoisonnées"
+  },
+  "mailbox.registration": {
+    "en": "Registration",
+    "fr": "Enregistrement"
   },
   "mailbox.scheduled": {
     "en": "Scheduled",

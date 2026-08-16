@@ -177,6 +177,12 @@ enum InboundMessageKind {
   MESSAGE
 }
 
+enum MailboxLaneRegistration {
+  SEEDED
+  DECLARED_UNSEEDED
+  UNDECLARED_ORPHAN
+}
+
 enum InboundMessageStatus {
   SCHEDULED
   CANCELLED
@@ -703,6 +709,7 @@ type MailboxLane {
   oldestPendingAt: DateTime
   retryingAttempts: Int!
   poisoned: Int!
+  registration: MailboxLaneRegistration!
 }
 
 type PoisonedMailboxMessage {

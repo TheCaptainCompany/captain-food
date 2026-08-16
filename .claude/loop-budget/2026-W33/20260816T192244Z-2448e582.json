@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 299,
+  "recordedAt": "2026-08-16T19:22:44.155Z",
+  "branch": "main",
+  "note": "unattributed open timer found at #608 discharge start (opened 19:17:44Z on main, pid 5656 dead); billed as its own segment so the discharge run could open a clean timer"
+}

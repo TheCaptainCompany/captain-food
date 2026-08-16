@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use actor_client::mailbox::MailboxAccess;
 use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow};
+use domain::generated::scalars::MailboxLaneRegistration;
 use infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository;
 use infrastructure::{
     PgCartRepository, PgCatalogRepository, PgCustomerCreditRepository, PgCustomerRepository,
@@ -81,8 +82,17 @@ async fn reset_mailbox_tables(pool: &PgPool) {
         .expect("apply the mailbox backoff migration");
 }
 
-/// A minimal seeded world: two Conversation lanes; lane 0 carries two RECEIVED commands (one old),
-/// one SCHEDULED reminder and one SUCCEEDED (terminal — must be invisible); lane 1 is empty.
+/// A minimal seeded world, covering the three states the page must distinguish (#596):
+///
+/// - **declared AND seeded**: two Conversation registry rows. Lane 0 carries two RECEIVED commands
+///   (one old), one SCHEDULED reminder and one SUCCEEDED (terminal — must be invisible); lane 1 is
+///   empty. Conversation declares FIVE lanes, so 2, 3 and 4 are declared-but-unseeded.
+/// - **declared, NOT seeded, and carrying work**: an `Order` RECEIVED row with no registry row at
+///   all. This is the state #596's fix creates and `dba` caught: before the fix a hop addressed to
+///   an unseeded lane errored loudly, after it the row simply waits — and a page driven by
+///   `mailbox_partitions` would have shown nothing at all for it.
+/// - **NOT declared, carrying work**: a Conversation row on partition 7, beyond the declared five.
+///   The orphan a width DECREASE strands; nothing else in the system would ever mention it.
 async fn seed(pool: &PgPool) {
     sqlx::raw_sql(
         "INSERT INTO mailbox_partitions (actor_type, partition, ownership_version, claimed_by, lease_until, checkpoint) VALUES\n\
@@ -92,12 +102,30 @@ async fn seed(pool: &PgPool) {
            ('00000000-0000-0000-0000-000000000001', 'COMMAND', 'Conversation', '10000000-0000-0000-0000-000000000001', 0, 'PostMessage', '{}', 'h1', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-000000000001', 'RECEIVED', NULL, now() - interval '60 seconds', NULL),\n\
            ('00000000-0000-0000-0000-000000000002', 'COMMAND', 'Conversation', '10000000-0000-0000-0000-000000000001', 0, 'PostMessage', '{}', 'h2', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-000000000002', 'RECEIVED', NULL, now(), NULL),\n\
            ('00000000-0000-0000-0000-000000000003', 'MESSAGE', 'Conversation', '10000000-0000-0000-0000-000000000001', 0, 'CheckPreparationDelay', '{}', 'h3', 'WORKER', 'ADMIN', '20000000-0000-0000-0000-000000000003', 'SCHEDULED', now() + interval '10 minutes', now(), NULL),\n\
-           ('00000000-0000-0000-0000-000000000004', 'COMMAND', 'Conversation', '10000000-0000-0000-0000-000000000001', 0, 'PostMessage', '{}', 'h4', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-000000000004', 'SUCCEEDED', NULL, now() - interval '120 seconds', now());\n\
+           ('00000000-0000-0000-0000-000000000004', 'COMMAND', 'Conversation', '10000000-0000-0000-0000-000000000001', 0, 'PostMessage', '{}', 'h4', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-000000000004', 'SUCCEEDED', NULL, now() - interval '120 seconds', now()),\n\
+           ('00000000-0000-0000-0000-000000000005', 'EVENT', 'Order', '10000000-0000-0000-0000-000000000005', 2, 'OrderPlaced', '{}', 'h5', 'WORKER', 'EXTERNAL', '20000000-0000-0000-0000-000000000005', 'RECEIVED', NULL, now(), NULL),\n\
+           ('00000000-0000-0000-0000-000000000006', 'COMMAND', 'Conversation', '10000000-0000-0000-0000-000000000006', 7, 'PostMessage', '{}', 'h6', 'GRAPHQL', 'CUSTOMER', '20000000-0000-0000-0000-000000000006', 'RECEIVED', NULL, now(), NULL);\n\
          UPDATE inbound_messages SET position = NULL WHERE status = 'SCHEDULED';",
     )
     .execute(pool)
     .await
     .expect("seed lanes + backlog");
+}
+
+/// Every lane the DECLARATION says exists — the population this page is now driven by.
+fn declared_lane_count() -> usize {
+    infrastructure::generated::command_router::ACTOR_MAILBOXES
+        .iter()
+        .map(|(_, width)| *width as usize)
+        .sum()
+}
+
+/// Find one lane by its key, failing with the whole population rather than an index panic.
+fn lane<'a>(lanes: &'a [MailboxLaneRow], actor_type: &str, partition: i16) -> &'a MailboxLaneRow {
+    lanes
+        .iter()
+        .find(|l| l.actor_type == actor_type && l.partition == partition)
+        .unwrap_or_else(|| panic!("no lane {actor_type}/{partition} among {} lanes", lanes.len()))
 }
 
 /// A schema whose read side is entirely Pg-backed over `pool` — only `mailboxLanes` is queried, so
@@ -140,13 +168,20 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     reset_mailbox_tables(&pool).await;
     seed(&pool).await;
 
-    // 1) The repository join: live rows only, per lane, (actor_type, partition) order.
+    // 1) The repository join: live rows only, per lane, (actor_type, partition) order — over the
+    //    DECLARED population plus anything carrying work outside it (#596).
     let repo = PgMailboxLaneRepository::new(pool.clone());
     let lanes: Vec<MailboxLaneRow> = repo.list(MailboxAccess::for_tests()).await.expect("list lanes");
-    assert_eq!(lanes.len(), 2, "two registered lanes: {lanes:?}");
+    assert_eq!(
+        lanes.len(),
+        declared_lane_count() + 1,
+        "every DECLARED lane, plus the one undeclared orphan carrying work. The population is the \
+         declaration, NOT the registry: a page driven by `mailbox_partitions` would have shown 2 \
+         rows here and hidden both the unseeded Order lane holding an order and the stranded \
+         Conversation/7 backlog: {lanes:?}"
+    );
 
-    let lane0 = &lanes[0];
-    assert_eq!((lane0.actor_type.as_str(), lane0.partition), ("Conversation", 0));
+    let lane0 = lane(&lanes, "Conversation", 0);
     assert_eq!(lane0.ownership_version, 3);
     assert_eq!(lane0.claimed_by.as_deref(), Some("w-A"));
     assert!(lane0.lease_until.is_some(), "lane 0 holds a live lease");
@@ -160,30 +195,97 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
         "oldest pending is the 60s-old RECEIVED row (not the 120s-old SUCCEEDED one): age {age}"
     );
 
-    let lane1 = &lanes[1];
-    assert_eq!((lane1.actor_type.as_str(), lane1.partition), ("Conversation", 1));
+    let lane1 = lane(&lanes, "Conversation", 1);
     assert_eq!((lane1.pending, lane1.scheduled), (0, 0), "empty lane counts zero");
     assert!(lane1.claimed_by.is_none() && lane1.lease_until.is_none(), "lane 1 unowned");
     assert!(lane1.oldest_pending_at.is_none());
 
+    // Declared but never seeded, and EMPTY: present, with the registry's absence rendered as
+    // zeroes rather than as a missing row. Seeing the declared topology is the point — an
+    // operator cannot notice that a lane is missing from a list they have never seen complete.
+    let unseeded = lane(&lanes, "Conversation", 4);
+    assert_eq!((unseeded.ownership_version, unseeded.checkpoint), (0, 0));
+    assert!(unseeded.claimed_by.is_none() && unseeded.lease_until.is_none());
+    assert_eq!((unseeded.pending, unseeded.scheduled), (0, 0));
+    assert_eq!(unseeded.registration, MailboxLaneRegistration::DECLARED_UNSEEDED);
+
+    // THE REASON `registration` EXISTS: lane 1 is SEEDED and merely unclaimed, lane 4 was NEVER
+    // seeded, and every OTHER field on the two rows is identical. One of them will be drained by
+    // the next claim pass and the other will never be drained by anybody, and without this field
+    // an operator staring at the page cannot tell which is which.
+    assert_eq!(
+        (
+            lane1.ownership_version, lane1.checkpoint,
+            lane1.claimed_by.is_none(), lane1.pending, lane1.scheduled,
+        ),
+        (
+            unseeded.ownership_version, unseeded.checkpoint,
+            unseeded.claimed_by.is_none(), unseeded.pending, unseeded.scheduled,
+        ),
+        "if these ever differ, re-read whether `registration` is still load-bearing"
+    );
+    assert_ne!(
+        lane1.registration, unseeded.registration,
+        "seeded-but-unclaimed and never-seeded must NOT render the same"
+    );
+    assert_eq!(lane1.registration, MailboxLaneRegistration::SEEDED);
+
+    // THE CASE #596's FIX CREATES: declared, never seeded, and HOLDING AN ORDER. Its worker has
+    // not started, so nothing claims it and nothing will drain it — and the chained hop no longer
+    // errors, so this page is the only place that says so.
+    let waiting = lane(&lanes, "Order", 2);
+    assert_eq!(waiting.pending, 1, "an order waiting on a worker that never started: {waiting:?}");
+    assert_eq!(
+        waiting.registration,
+        MailboxLaneRegistration::DECLARED_UNSEEDED,
+        "declared, never seeded, and holding a paid order -- the row the page exists for"
+    );
+    assert!(waiting.claimed_by.is_none(), "nobody owns an unseeded lane");
+    assert_eq!(waiting.ownership_version, 0, "no registry row -> no fencing counter yet");
+    assert!(waiting.oldest_pending_at.is_some(), "and it has been waiting since a knowable time");
+
+    // THE ORPHAN a width DECREASE strands: undeclared, unseeded, carrying work. `seed_partitions`'
+    // drift check refuses the start that would create it; this row is where the operator sees what
+    // was already stranded before the check existed.
+    let orphan = lane(&lanes, "Conversation", 7);
+    assert_eq!(orphan.pending, 1, "beyond the declared five, and still holding a message");
+    assert_eq!(orphan.registration, MailboxLaneRegistration::UNDECLARED_ORPHAN);
+    assert_eq!(orphan.ownership_version, 0);
+    assert!(orphan.claimed_by.is_none());
+
     // 2) The GraphQL surface, as ADMIN: lanes serialize with the BIGINT counters as strings.
     let schema = schema_over(&pool);
-    let query = "{ mailboxLanes { actorType partition ownershipVersion claimedBy checkpoint pending scheduled oldestPendingAt } }";
+    let query = "{ mailboxLanes { actorType partition ownershipVersion claimedBy checkpoint pending scheduled oldestPendingAt registration } }";
     let resp = schema
         .execute(async_graphql::Request::new(query).data(RequestRole::Admin))
         .await;
     assert!(resp.errors.is_empty(), "admin mailboxLanes errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
     let lanes = data["mailboxLanes"].as_array().expect("lanes array");
-    assert_eq!(lanes.len(), 2);
-    assert_eq!(lanes[0]["actorType"], "Conversation");
-    assert_eq!(lanes[0]["partition"], 0);
-    assert_eq!(lanes[0]["ownershipVersion"], "3", "BIGINT renders as a decimal string");
-    assert_eq!(lanes[0]["checkpoint"], "18000", "BIGINT renders as a decimal string");
-    assert_eq!(lanes[0]["pending"], 2);
-    assert_eq!(lanes[0]["scheduled"], 1);
-    assert!(lanes[0]["oldestPendingAt"].is_string());
-    assert_eq!(lanes[1]["claimedBy"], serde_json::Value::Null);
+    assert_eq!(lanes.len(), declared_lane_count() + 1);
+    let gql = |actor_type: &str, partition: i64| -> serde_json::Value {
+        lanes
+            .iter()
+            .find(|l| l["actorType"] == actor_type && l["partition"] == partition)
+            .unwrap_or_else(|| panic!("no {actor_type}/{partition} lane in the GraphQL response"))
+            .clone()
+    };
+    let gql0 = gql("Conversation", 0);
+    assert_eq!(gql0["ownershipVersion"], "3", "BIGINT renders as a decimal string");
+    assert_eq!(gql0["checkpoint"], "18000", "BIGINT renders as a decimal string");
+    assert_eq!(gql0["pending"], 2);
+    assert_eq!(gql0["scheduled"], 1);
+    assert!(gql0["oldestPendingAt"].is_string());
+    assert_eq!(gql("Conversation", 1)["claimedBy"], serde_json::Value::Null);
+    // The unseeded lane holding an order serializes too — the whole point is that an operator
+    // reading the ADMIN page, not a Rust test, is the one who has to see it.
+    let waiting = gql("Order", 2);
+    assert_eq!(waiting["pending"], 1);
+    assert_eq!(waiting["claimedBy"], serde_json::Value::Null);
+    assert_eq!(waiting["ownershipVersion"], "0");
+    assert_eq!(waiting["registration"], "DECLARED_UNSEEDED", "the badge the guide tells them to read first");
+    assert_eq!(gql("Conversation", 1)["registration"], "SEEDED");
+    assert_eq!(gql("Conversation", 7)["registration"], "UNDECLARED_ORPHAN");
 
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
     for role in every_non_admin_role() {

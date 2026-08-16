@@ -562,7 +562,7 @@ pub struct MutationAcceptance {
     pub duplicate: bool,
 }
 
-/// One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+/// One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) lane from the DECLARED routing contract (actors.yaml `mailbox.partitions`), joined with its mailbox_partitions registry row when it has one and with live pending/scheduled counts from inbound_messages. The population is the DECLARATION, not the registry (#596): a lane appears whether or not a worker has ever seeded it, because the case that must never be invisible is a lane holding a paid order whose worker never started. `registration` says which of the three situations a row is in — without it a never-seeded lane and a seeded-but-unclaimed one render identically. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxLane {
@@ -588,6 +588,8 @@ pub struct MailboxLane {
     pub retrying_attempts: i64,
     #[graphql(name = "poisoned")]
     pub poisoned: i64,
+    #[graphql(name = "registration")]
+    pub registration: MailboxLaneRegistration,
 }
 
 /// One cap-poisoned mailbox row (#315): an inbound_messages row the delivery-attempts cap flipped to terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4). The ADMIN supervision detail behind MailboxLane.poisoned's bare count — carries the messageId an operator needs to requeue it (requeueMailboxMessage) after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*.
@@ -1519,6 +1521,7 @@ impl From<MailboxLaneRow> for MailboxLane {
             oldest_pending_at: row.oldest_pending_at,
             retrying_attempts: row.retrying_attempts,
             poisoned: row.poisoned,
+            registration: row.registration.into(),
         }
     }
 }
