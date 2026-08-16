@@ -22,6 +22,18 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 CLAUDE.md already permits skipping it for docs-only changes — the point here is that the saving is
 minutes per invocation, so it is worth being deliberate.
 
+**On a PR BRANCH, a full local `make rust` before every push duplicates CI.** It is load-bearing in
+exactly one case: a **direct-to-`main` spec/doc push, where no CI follows**. On a branch, the
+pre-flight that pays for itself takes seconds — **(1)** `git fetch origin main` + a rebase/merge
+check (does this branch still merge?), **(2)** `make validate`, **(3)** a markdown-table lint on any
+touched register/proposal row. That triple **would have caught BOTH red CI rounds of 2026-08-15** — a
+merge conflict and a malformed `DECISIONS.md` row — **without a workspace build**
+([ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md)
+decision 6). Corollary for CI itself: path filters are keyed on one question — *can this change
+generated output?* (`docs/**`/ADRs/`STATUS.md` skip the matrix, **`specs/**` is never filtered**), and
+a filtered job must still report its **required-check name** from a skip job or branch protection
+deadlocks.
+
 **CLAUDE.md's architecture summary can be STALE — check it against `docs/STATUS.md` whenever
 hosting, storage or deployment topology matters.** Nothing regenerates that paragraph and no gate
 covers it, so it drifts silently in the one file every session reads first. Measured cost: on
@@ -150,8 +162,10 @@ the fix is to **commit your own change**, not to regenerate. Real drift names fi
 `specs/generated/**` or `crates/**/generated/**`. The check is a plain whole-tree `git diff --quiet`
 (`Makefile:75`), which is why a docs-only edit trips a gate whose message only talks about generated
 files — it hit again on 2026-08-13 (#516) and cost a full `make rust` cycle spent diagnosing a
-phantom drift. The pre-emption is the rule in §"Run `make rust` only on a COMMITTED tree": commit
-first, then gate. Treat `make rust` as the gate, never as a mid-edit progress check.
+phantom drift, and **again on 2026-08-15, costing an ~8-minute gate run** that failed on legitimately
+uncommitted WIP in an unrelated path. Three recurrences: the pre-emption is the rule in §"Run `make
+rust` only on a COMMITTED tree" — **commit first, then gate**, and check `git status --short` before
+invoking. Treat `make rust` as the gate, never as a mid-edit progress check.
 
 **A PR "waiting on checks" may not be waiting on checks at all — read `mergeable_state` FIRST
 (2026-08-09).** `pull_request_read` with `method: get_status` returns `{state: pending,
@@ -566,15 +580,35 @@ the budget-cap lift (founder antecedent 2026-08-12) was relayed ~10:00Z, nothing
 `loop-budget.sh start`'s guaranteed exit 2 — one full dispatch round for zero output, standing down
 against an already-lifted gate (ADR-20260813-132540).
 
+**`loop-budget.sh stop` takes a FLAG, not a positional** — `stop --note "what ran"` (and
+`stop --elapsed <seconds>` when the timer was never opened or went stale). A bare
+`stop "what ran"` silently loses the note, so the ledger segment lands with no attribution and the
+week's usage becomes a set of anonymous durations. Cost: one un-attributable segment per occurrence,
+unrecoverable after the fact. The ledger itself is `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json`,
+append-only, one file per segment — the week's usage is their sum.
+
 **Context discipline — the rules that keep a session under ~80k** (2026-08-01, after a week at
 87% of requests >150k context): (1) `specs/generated/**` and `crates/**/generated/**` are
 GREP-ONLY — never `Read` a generated artifact wholesale (`documentation.generated.md` alone can
 eat a third of a session); (2) GitHub MCP calls use `minimal_output: true` and small `perPage`
 unless the full payload is the point — a bare PR `get_diff` on a large PR returns megabytes
 (fetch the branch and use local `git diff` instead); (3) fan-out exploration goes to SUBAGENTS
-(Explore/reviewer/generator), never inline — their transcripts stay out of the main context;
+(Explore/reviewer/generator), never inline — their transcripts stay out of the main context, **and
+never read a finished agent's `.output` transcript: the completion notification IS the artifact.**
+Re-opening the file "to check" adds nothing the notification did not carry and costs the run's whole
+context — **~300k tokens per chunk of pure loss** (measured 2026-08-15; banned by
+[ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md)
+decision 1). The file has exactly one legitimate use: recovering the answer of an agent that **DIED
+before answering**;
 (4) ONE SESSION PER WORK CHUNK (CLAUDE.md rigor rules) — the repo carries the state, so ending a
-session is free and long context measurably raises the staleness error rate.
+session is free and long context measurably raises the staleness error rate;
+(5) a lens invited to a mob briefing reads the **dispatch card**, not the repo — one coordinator-authored
+file per chunk (chunk, paths, phases, gates, fences), SHA-stamped, with lens replies appended to its
+Findings block, which is then the mob evidence the PR body cites. 12x50k becomes 12x~5k, and nothing is
+written twice. The card is a **cached fold — disposable, never authoritative**: a checkpoint loads
+card@SHA + `git diff <SHA>..HEAD`, a version mismatch is DISCARDED rather than patched, and every lens
+keeps the right to fall through to the tree. Falsification test before trusting a card: delete it,
+re-run one briefing, and no verdict may change (same ADR, decisions 2-3).
 
 **Coordinator/executor split** (founder directive, 2026-08-07): a session that has planned a
 multi-step program NEVER executes the steps itself — it DISPATCHES each step to a fresh session
@@ -599,6 +633,20 @@ attempt, 2026-08-01). A cross-session note: the pgdata lives in the PREVIOUS ses
 scratchpad directory (session-specific paths), so a resumed branch reuses it by absolute path —
 don't initdb a fresh cluster when yesterday's is one `pg_ctl start` away. Diagnose "tests
 suddenly failing" with `pg_isready`/`psql` FIRST, before reading a single line of code.
+
+**The Debian SYSTEM cluster is a different incantation, and `postgres` will not start as root**
+(2026-08-15). Same missing-PATH trap, plus the config file lives outside the data directory, so the
+`-o '-c config_file=...'` is not optional:
+
+```sh
+su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/postgresql/16/main \
+  -o '-c config_file=/etc/postgresql/16/main/postgresql.conf' start"
+```
+
+And read the WHOLE output before reacting: **"could not start server" immediately followed by a
+SUCCESSFUL `ALTER ROLE`/`psql` means it was already running** — the start failed because the cluster
+was up, not because it is broken. Cost of not reading to the end: a needless teardown attempt on a
+healthy cluster.
 
 ## 11. Installing a dev tool: crates.io works, GitHub release downloads do not
 
@@ -1156,6 +1204,17 @@ reaches review then contains a deliberate defect nobody wrote on purpose. Git al
 pristine copy: `git checkout -- <path>` is idempotent, needs no bookkeeping, and cannot restore the
 wrong generation. Verify with `git status --short` before every gate run, not only at the end —
 a clean tree is the only evidence the plants are gone.
+
+**Pay for the red ONCE.** Plant-after-green pays for the mutation, the run, the restore and a
+re-verification; four cheaper habits get the same evidence
+([ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md)
+decision 5): **(1) red-FIRST** — write the assertion before the rule it checks, and the red is a TDD
+byproduct that costs nothing extra; **(2) mutate DATA, not Rust source** — a deliberately bad spec
+fragment pushed through `make validate` proves a validator rule with **no recompile**, where editing
+a `.rs` file buys a full rebuild; **(3) BATCH** independent mutations whose tests fail
+*distinguishably* into one run; **(4) never re-run the full suite "to confirm green after revert"** —
+an empty `git diff` plus the prior green already is that evidence, and the extra run is a whole gate
+cycle bought for zero information.
 
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 

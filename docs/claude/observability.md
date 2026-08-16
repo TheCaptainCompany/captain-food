@@ -63,6 +63,14 @@ Traces/metrics go to **Honeycomb EU (`eu1`)** — a GDPR constraint, not a defau
 (ADR-20260729-183000: spans carry `customerId`/`orderId`; ADR-0042 pinned data to Frankfurt).
 The MCP server is declared in `.mcp.json`, pinned to `https://mcp.eu1.honeycomb.io/mcp`.
 
+**The server is currently DISABLED, on purpose** — `disabledMcpjsonServers: ["honeycomb"]` in
+`.claude/settings.json` (ADR-20260816-020752 §11): unauthenticated, its tools cannot run, and no
+`apps/` runtime emits spans yet, so it is "not a blinded instrument, it is a broken one" and its
+tool list is pure per-session context cost. **Re-auth is the event that re-enables it**: authorize,
+then delete that array entry. The definition stays in `.mcp.json` precisely so the `eu1` pin below
+is not lost with the server config — and this disablement is recorded in CLAUDE.md too, because
+"no Honeycomb server" must never read as "no telemetry concern".
+
 **The region is the trap**: the `honeycomb` plugin ships the US default (`mcp.honeycomb.io`),
 and US/EU are separate tenancies — authorizing the US host SUCCEEDS and then returns an empty
 environment list, which reads as a broken integration rather than a wrong region. The

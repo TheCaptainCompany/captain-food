@@ -2,6 +2,40 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💸 **2026-08-16 — THE LOOP'S CONTEXT BUDGET IS NOW A RECORD, AND ONE HALF OF IT IS THE FOUNDER'S**
+> ([ADR-20260816-020752](adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md),
+> from the founder question *"Do you have recommendations to optimise tokens consumption?"*). Six
+> team-owned technique changes are Accepted: subagent `.output` transcripts are **banned** unless the
+> agent died (~300k/chunk of pure loss); the coordinator authors **one SHA-stamped dispatch card per
+> chunk** that lenses read instead of the repo (12x50k → 12x~5k) with its Findings block doubling as
+> the PR's mob evidence; the card carries **snapshot semantics** (a disposable cached fold —
+> card@SHA + `git diff`, discard on mismatch, every lens keeps fall-through to the tree); **phase
+> commits** make a dead executor cost one phase instead of ~400k tokens; mutation-red is paid once
+> (red-first, mutate data not source, no confirm-green-after-revert); and gate economics move the
+> pre-push bar on a PR branch from a full `make rust` to a seconds-long pre-flight. Cost becomes
+> observable via a `tokens`/`agent` field on the existing `.claude/loop-budget/` ledger, alarmed as a
+> **dead-man's-switch** (a threshold goes silent exactly when the writer dies). Honest baseline:
+> **~2.5M tokens for one merged work item, with no per-item instrument existing.** The one item that
+> is NOT the team's — **how the mob's fan-out is priced**, since narrowing the checkpoint roster
+> amends [ADR-20260809-013142](adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)
+> — is open as 🟡 **[DECISIONS §44 / MOB-COST-1](proposals/DECISIONS.md)** (recommendation: holub's
+> concern-declared checkpoint + business's price-by-reversibility, with a verification condition on
+> the next chunk).
+>
+> ✂️ **2026-08-16 — THE TOKEN DIET IS LANDED** (same ADR, amendment §8-§11, from the founder's
+> *"Apply these recommendations"*): `make test-quiet` / `make rust-quiet` filter a gate's output to
+> VERDICTS (grep-first, tail-second, full log in `target/quiet-gate.log`) under the rule *filtering
+> may drop progress, never verdicts* -- proven red, an early panic survives a 50-line tail and
+> `exit=101` propagates; `.claudeignore` + `permissions.deny` deny build output and object stores
+> while **keeping `specs/generated/**`, `Cargo.lock` and the warning baseline readable** (they are
+> gate evidence); CLAUDE.md is compressed to a resident INDEX (~7.6k -> ~4.6k tokens by a crude
+> `wc -w` proxy) with **no rule dropped** -- the ~2.5k target was deliberately not reached, since
+> closing the gap would mean dropping rules, which is a decision reversal; and the **honeycomb MCP
+> server is deliberately DISABLED** pending re-auth, recorded in CLAUDE.md and
+> `.claude/settings.json` so its absence never reads as "no telemetry concern" (the `eu1` EU-host
+> pin stays in `.mcp.json`).
+>
+
 > ⏱️ **2026-08-16 — #167 ACCEPTANCE TIMEOUT IS CODE-COMPLETE ON THE BRANCH (PHASES 0–3 + the mob
 > conditions): [#167 "No order-acceptance timeout: a paid, unaccepted order sits forever with no alert, cancel or refund"](https://github.com/TheCaptainCompany/captain-food/issues/167),
 > branch `167-acceptance-timeout-auto-cancel`, draft [PR #586](https://github.com/TheCaptainCompany/captain-food/pull/586)
@@ -33,7 +67,6 @@
 > (3) unreachable by the mechanism shipped here. The producer is tracked as
 > [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),
 > and it is now the FIFTH named precondition in the gate text.
-
 > 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
 > the `answers:` DSL from
 > [PROP-20260815-142349](proposals/PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)

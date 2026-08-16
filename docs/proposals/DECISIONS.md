@@ -2267,6 +2267,29 @@ option-B evidence than the `balance_cents` hole. Practical grant risk today nil:
 
 ---
 
+## 44. How the mob's fan-out is priced (founder question, 2026-08-16) — 🟡 FOUNDER-OWNED
+
+Record: [ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md).
+Founder question, verbatim: *"Do you have recommendations to optimise tokens consumption?"*
+
+**Six of the seven answers are technique and are the team's — they are Accepted in that ADR.** This
+row is the ONE item that is not: narrowing who is invited to a mob checkpoint **amends a founder
+directive** ([ADR-20260809-013142](../adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md):
+*"the roster is invited by default and a lens excuses itself"*), so it is a **decision reversal, not
+a technique change**, whatever the diff size.
+
+**Measured baseline, honestly**: **~2.5M tokens for one merged work item** (2026-08-15), of which the
+mob fan-out is **~1.2M per chunk** — and **no per-item instrument exists**; that figure is a
+reconstruction, not a reading (the ADR's decision 7 is what fixes that). **The dispatch card (ADR
+decision 2) cuts the per-lens cost ~10× whichever way this row goes**, so this decision is about
+**detection policy, not about the bill.**
+
+| # | Decision | Options & the trade-off | Recommendation / status |
+|---|---|---|---|
+| **MOB-COST-1** 🟡 **FOUNDER-OWNED — open 2026-08-16** | **Is the whole roster invited at BOTH the briefing and the checkpoint, or is the checkpoint priced differently?** The directive says invited-by-default at every phase; the checkpoint is the expensive half, and today's evidence about what it catches is real but thin (n=1) | **(a) Status quo — whole roster at briefing AND checkpoint.** Pros: maximal detection, and not theoretical — today's checkpoint caught **a false UI banner** (a state the built checkout could show but never render) and **a GDPR-clock hazard**, neither of which any gate catches. Cons: **~1.2M tokens per chunk, of which the second pass is ~500k**. **(b) holub — whole roster at BRIEFING, checkpoint only to lenses that DECLARED a concern in the briefing.** Pros: the briefing is where the catches originate, and there is **empirical support, n=1**: both of today's checkpoint STOPs (**ux**'s false banner, **legal**'s tense) came from lenses that **had** declared a concern at briefing, so a narrowed checkpoint would have lost neither. Cons: **a lens silent at briefing might still catch something in the actual diff** — the diff is the first time a lens sees what was really built — and **n=1 is not a law**. **(c) business — price review by REVERSIBILITY, not by chunk**: full mob for **money movement, stored event shapes, legal surfaces, anything Tours-facing**; **2-3 lenses** for reversible internal refactors, generated artifacts, doc sweeps. Pros: spends detection where a mistake is expensive to undo, the same axis the `HOLD: human` class already uses ([ADR-20260815-115220](../adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)) — one vocabulary, two uses. Cons: needs a call on which side a chunk falls, made **before** the diff exists. **(b) and (c) COMPOSE** — (c) sets the size of the briefing roster, (b) sets who returns for the checkpoint | OPEN -- founder's call. **Recommendation: (b)+(c) together**, with **holub's own verification condition attached**: the next chunk **records whether the narrowed checkpoint missed anything the full roster would have caught**, and the answer is **banked either way** — a miss reverts to (a) with evidence, a clean run turns n=1 into n=2. Without that condition the change is untestable and should not be made. **Not delegated**, because it amends a founder directive; the team will not narrow the roster on its own authority |
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
