@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 1257,
+  "recordedAt": "2026-08-16T20:59:25.339Z",
+  "branch": "main",
+  "note": "#609 merge round (PR #613): merge origin/main (#610), resolve the sessions.md both-append keeping both sides, merge the 2026-08-08 stale-generate-binary rule and this run's stale-test-binary near-miss into ONE section-2 rule with three defences, and fix the SEMANTIC conflict git could not see -- #610's new authorized_no_birth_metric.rs reintroduced stable_partition(&id, 5) and the merged tree did not compile. Gates re-run: make rust 0 errors, test-crates 1260 passed / 0 failed / 190 suites / no DB-skip, new gate verified BY NAME. No timer open (previous segment closed 20:38:28Z); billed by wall clock."
+}
