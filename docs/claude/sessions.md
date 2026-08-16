@@ -1087,6 +1087,12 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   them took the allowance from 2.3G to 6.9G. Same class as the dead worktree above and same price —
   free — but easier to miss, because nothing in `git status` mentions the scratchpad. Check it before
   every `target/debug` lever in §2, all of which cost a rebuild.
+- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING** (2026-08-16, #609):
+  cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
+  zero bytes. It looks like the biggest lever on the list and it is not a lever at all. The real
+  ones are above — dead worktrees, the scratchpad sweep, then `incremental`. Symptom that sent this
+  session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit` while `df`
+  still reported 2.3G free, which is §2's "writes fail while the numbers still look fine".
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
   allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
   checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses
@@ -1270,13 +1276,25 @@ test-only export lit. Consequences, both of which cost real time here:
   qualifier disappears, and so does the assertion you would otherwise need to stop one unreviewed
   line from deleting the `cfg`.
 
-**And a boundary crate may refuse the gated-export shape outright.** `crates/actor_client` sets
-`unreachable_pub = "deny"` in its `[lints]`, so gating only the *re-export* leaves `pub fn` in a
-private module unreachable in a release build and the crate fails with `error: unreachable pub
-item`. The gated-export design therefore has to open with
-`#[cfg_attr(not(...), allow(unreachable_pub))]` — suppressing the lint that was already telling you
-to make the item private. Check `[lints]` in the target crate's `Cargo.toml` before pricing a
-`cfg`-gated export at "five lines"; here the price was two rebuild cycles to discover.
+**A candidate seam that needs `allow(<lint>)` to compile is the COMPILER VOTING FOR THE OTHER
+OPTION** (`beck`, 2026-08-16, #609 — the generalisation, and it is the cheap one). `crates/actor_client`
+sets `unreachable_pub = "deny"` in its `[lints]`, so gating only the *re-export* leaves `pub fn` in a
+private module unreachable in a release build: `error: unreachable pub item`. The gated-export design
+therefore has to open with `#[cfg_attr(not(...), allow(unreachable_pub))]` — suppressing the exact
+lint that exists to catch "a `pub` item nobody outside uses". **Read the suppression as a verdict,
+not an obstacle**: the alternative it was arguing for (make the item private) is the one to take.
+Read `[lints]` in the target crate's `Cargo.toml` *at briefing*, before pricing a `cfg`-gated export
+at "five lines" — here the option died after a counterfactual build instead of in one line.
+
+**When a chunk's method is "make X unspellable", every existing spelling of X is a candidate
+INCIDENTAL PIN — enumerate what each one was holding before deleting it** (`vernon`, 2026-08-16,
+#609; this is the rule that would have caught that chunk's checkpoint MISS). Four test assertions
+spelled `stable_partition(&cart_id, 5)`. Converting them to read the declaration was the whole point
+and also silently removed the only thing in the repository pinning Cart's and Order's declared
+widths — a contract over STORED rows, where a change is a migration (ADR-20260802-220402), so the
+"cleanup" was a gate weakening that every gate would have reported green. A spelling being redundant
+with the declaration is exactly what makes it a pin; the redundancy is the point, not the defect. Ask
+of each site: *what would notice if this expectation and the thing it duplicates stopped agreeing?*
 
 Two fabricated claims shipped on one branch (`crates/server/tests/graphql_cart_read.rs` and
 `crates/application/src/pricing.rs`), both asserting a red against a stub that the same commit had
@@ -1357,6 +1375,9 @@ ADR-20260720-233000 mandates the draft PR **before any code**, and `POST /repos/
 rejects exactly that: a branch pointing at the same sha as `main` gets
 `422 Unprocessable Entity — No commits between main and <branch>`. There is no flag for it. Push a
 `git commit --allow-empty -m "chore(NN): claim -- <title>"` first and open the PR against that.
+**Better than empty when something real is already in hand** (2026-08-16, #609): the claim commit is
+the natural home for the card/dispatch correction the executor makes while verifying it — same one
+commit, same 422 avoided, and the branch opens with a diff that says what the run already learned.
 
 This container has **no `gh` on PATH**, so every session drives the API with `curl` and meets the
 hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
@@ -1369,9 +1390,14 @@ different capabilities, and only one of them is missing:
 - the **`mcp__github__*` tools are unavailable to an executor** — every call answers `No such tool
   available`, even though the server's instructions are injected into the prompt, so the tool list
   reads as if they existed;
-- **`curl` against `api.github.com` with `$GITHUB_TOKEN` works, for READ and WRITE.** Proven in one
-  executor run: issue read, `status/in-progress` label add, claim comment, draft PR create, PR body
-  PATCH, check-runs read.
+- **`curl` against `api.github.com` works, for READ and WRITE.** Proven in one executor run: issue
+  read, `status/in-progress` label add, claim comment, draft PR create, PR body PATCH, check-runs
+  read. **You do not have to supply a token** (re-confirmed 2026-08-16, #609): the agent proxy
+  injects the credential, so a bare `curl https://api.github.com/…` already authenticates —
+  `GET /user` returned the account. Same reason `git ls-remote` and `git push` succeed with **no**
+  credential helper and no `extraheader` configured. Do not go hunting the environment for a token
+  when a call 401s; check the response body first. (The classifier blocks `env | grep -i token`
+  anyway, and correctly.)
 
 So an executor **performs its own claim, draft PR and PR-body updates** and only reports a GitHub
 failure it actually met. Handing the mechanics back on the assumption of no access costs a

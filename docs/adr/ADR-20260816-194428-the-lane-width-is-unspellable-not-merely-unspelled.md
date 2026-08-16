@@ -44,18 +44,29 @@ the difference between a level-4 claim and a level-3 one.
 Two obligations travelled with the conversion and are part of the decision:
 
 - **The width pin becomes deliberate.** Four assertion sites were *incidentally* pinning their
-  actors' declared widths by comparing a production stamp against a literal `5`. With both sides
-  reading the declaration they no longer can. The pin moves into `partition.rs` as
+  actors' declared widths by comparing a production stamp against a literal `5`. Those assertions
+  carried TWO facts — the width literal, and that the production stamping path agrees with the
+  routing function — and only the first is at risk here: the converted assertions still compare a
+  REAL production stamp against `declared_lane`, so producer-independence is intact, and a wrong
+  actor-type string now yields `None` and a panic rather than a plausible wrong lane. The missing
+  half moves into `partition.rs` as
   `every_declared_width_is_the_standard_one_because_changing_one_is_a_migration`, which names the
   reason (ADR-20260802-220402 had to remap every non-terminal in-flight row for 100 -> 5, and only
   because 5 divides 100) and runs on every `cargo test` — where three of the four needed a Postgres.
   It pins the SHAPE, not the roster: a new actor on the standard width costs nothing, a changed
-  width or a second exception stops the build and asks for the migration story.
+  width or a second exception stops the build and asks for the migration story. **Not the same
+  guarantee — the missing half of it, deliberately placed and widened from 3 actors to 17.**
+  A FLOOR on the slice length and a SEED asserting the `MailboxSupervision` entry sit before the
+  loop, in this repo's existing anti-blindness idiom, so the generated slice cannot be emptied or
+  lose its only non-5 actor and leave a loop scanning nothing.
 - **The misroute guard stops needing a second opinion.** `a_partially_seeded_actor_still_routes_to_the_declared_partition`
   guarded its data with `declared != stable_partition(id, 2)`. It now asserts
-  `declared >= SEEDED_LANES`: a producer that believes the keyspace is 2 wide can only ever stamp 0
-  or 1, so this holds for every id rather than the one under test. The test asserts the ABSENCE of a
-  misroute and never stamps one, so it never needed to be able to compute one.
+  `declared >= SEEDED_LANES`. **Precisely**: the IMPLICATION is universal — a producer that believes
+  the keyspace is 2 wide can only ever stamp 0 or 1, so any declared lane at or above 2 is
+  unreachable under the narrowed keyspace — while the ASSERTION is not, since `declared` is one of
+  `{0,1,2,3,4}` and two of those values would fail it. What the reformulation buys is that it names
+  the seeded KEYSPACE the row must avoid instead of one arbitrary lane inside it. The test asserts
+  the ABSENCE of a misroute and never stamps one, so it never needed to be able to compute one.
 
 ## Alternatives considered
 
@@ -114,7 +125,12 @@ Out of this chunk's class and filed as follow-up work rather than lost.
   because its width comes from the same declaration as `ACTOR_MAILBOXES`, so a caller using it
   computes the CORRECT lane — a redundant copy of the right answer, not a second opinion. Carried
   forward on #609 as a drive-by for the next change to `tools/codegen-rs/src/emit/actor_clients.rs`.
-- `vernon`'s `Lane(i16)` newtype (alternative D) deserves its own issue.
+- `vernon`'s `Lane(i16)` newtype (alternative D) is filed as
+  [#612](https://github.com/TheCaptainCompany/captain-food/issues/612).
+- The `removed == 3` literal in `pm_prepare_delivery.rs` is the last INDEPENDENT restatement of a
+  declared width in that file, and is therefore valuable rather than residual — it must be
+  commented, not converted:
+  [#617](https://github.com/TheCaptainCompany/captain-food/issues/617).
 - `crates/infrastructure/tests/main/mailbox_requeue.rs` seeds a poisoned Cart row with a bare
   literal partition `3` that is not any declared lane for its id. It is a listing fixture, not a
   routing one, and no longer reachable through `stable_partition` — noted, not changed.

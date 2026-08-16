@@ -1459,11 +1459,16 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
     // over the defect for as long as it did.
     //
     // Stated as `declared >= SEEDED_LANES` rather than against a second, hand-computed lane
-    // (#609): a producer that thinks the keyspace is SEEDED_LANES wide can only ever stamp
-    // `0..SEEDED_LANES`, so a declared lane at or above it is unreachable under the narrowed
-    // keyspace -- for EVERY id, not just this one. Stronger than comparing two widths for one id,
-    // and it needs no second opinion about the width in test code at all. This test asserts the
-    // ABSENCE of a misroute; it never stamps one, so it never needs to be able to compute one.
+    // (#609). Be precise about what is universal here, because the difference is the difference
+    // between this guard and a vacuous one: the IMPLICATION holds for every id -- a producer that
+    // thinks the keyspace is SEEDED_LANES wide can only ever stamp `0..SEEDED_LANES`, so ANY
+    // declared lane at or above it is unreachable under the narrowed keyspace. The ASSERTION does
+    // not: `declared` is one of {0,1,2,3,4} and two of those five would fail it, so this line is
+    // still falsifiable on the id under test and still has to be re-checked if `ORDER` changes.
+    // What it buys over `declared != stable_partition(id, 2)` is that it names the SEEDED KEYSPACE
+    // the row must avoid rather than one arbitrary lane inside it, and needs no second opinion
+    // about the width in test code at all. This test asserts the ABSENCE of a misroute; it never
+    // stamps one, so it never needs to be able to compute one.
     const SEEDED_LANES: i16 = 2;
     let declared = actor_client::declared_lane("PlaceOrderProcess", &uid(ORDER))
         .expect("PlaceOrderProcess declares a mailbox");

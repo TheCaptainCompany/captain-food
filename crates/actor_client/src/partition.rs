@@ -104,13 +104,44 @@ mod tests {
     /// It pins the SHAPE, not the roster: a new actor taking the standard width adds nothing to
     /// maintain, while changing an existing width — or introducing a second exception — stops the
     /// build and asks for the migration story.
+    ///
+    /// **Anti-blindness, named specifically** (same idiom as
+    /// `test_fixtures_feature_never_reaches_a_release_artifact` and the DOORS guard's AST seed in
+    /// `tools/codegen-rs/src/tests.rs`). A loop over a generated slice has two ways to pass by
+    /// scanning nothing, and both are reachable from an ordinary `specs/*/actors.yaml` edit:
+    /// an EMPTY slice iterates zero times, and losing the one non-5 actor turns the whole body
+    /// into `5 == 5` sixteen times over. The two assertions before the loop are the floor and the
+    /// seed; neither costs anything when a new standard-width actor is declared.
     #[test]
     fn every_declared_width_is_the_standard_one_because_changing_one_is_a_migration() {
-        for (actor_type, width) in crate::generated::addresses::ACTOR_MAILBOXES {
+        let declared = crate::generated::addresses::ACTOR_MAILBOXES;
+
+        // FLOOR, not equality: a new actor is free, an actor DISAPPEARING is not. An empty or
+        // truncated slice makes the loop below a silent no-op wearing a loop.
+        assert!(
+            declared.len() >= 17,
+            "ACTOR_MAILBOXES is down to {} entries from 17. Removing a mailbox actor is a real \
+             decision (its in-flight rows have nowhere to drain), so raise this floor deliberately \
+             in the same change — a shrinking slice must never quietly shrink what this test reads",
+            declared.len()
+        );
+
+        // SEED: the ONE non-5 width in the repository, and therefore the only case in it that can
+        // distinguish "reads the declaration" from "happens to say 5" (mutation 3 of #596's kill
+        // set). Without this the loop still passes over sixteen identical fives and the load-
+        // bearing case is gone with no test noticing.
+        assert!(
+            declared.iter().any(|(a, w)| *a == "MailboxSupervision" && *w == 1),
+            "no actor named 'MailboxSupervision' declares width 1 any more. If it was RENAMED that \
+             is fine — update this seed to the new name. If its width became 5, that is a lane \
+             MIGRATION and belongs above. If the actor was REMOVED, the repository has lost its \
+             only non-standard width and the loop below can no longer tell a declaration read from \
+             a hard-coded 5: replace this seed with another exception, do not delete the test"
+        );
+
+        for (actor_type, width) in declared {
             let expected: u16 = match *actor_type {
-                // Operator actions are rare and human-paced (specs/common/actors.yaml), and this is
-                // the ONLY non-5 width in the repository — the single thing that can distinguish
-                // "reads the declaration" from "happens to say 5".
+                // Operator actions are rare and human-paced (specs/common/actors.yaml).
                 "MailboxSupervision" => 1,
                 _ => 5,
             };

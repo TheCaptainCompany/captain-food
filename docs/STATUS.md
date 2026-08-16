@@ -19,10 +19,15 @@
 > test clothing. A fixture at `N mod 5` against a declaration moved to 7 lands on a lane the new
 > grid's producers never use while the worker still drains it: green build, wrong lane, no error.
 > **Two obligations travelled with the conversion**: four assertion sites were INCIDENTALLY pinning
-> their actors' declared widths and can no longer (both sides now read the declaration), so the pin
-> moves into `partition.rs` as one deliberate test that names the migration (ADR-20260802-220402) and
-> runs without Postgres, where three of the four needed it; and the misroute guard drops its second
-> width for `declared >= SEEDED_LANES`, which holds for every id rather than the one under test.
+> their actors' declared widths and can no longer (both sides now read the declaration), so that half
+> moves into `partition.rs` as one deliberate test that names the migration (ADR-20260802-220402),
+> runs without Postgres where three of the four needed it, and covers 17 actors instead of 3 — **not
+> the same guarantee, the missing half of it, deliberately placed and widened**, since the converted
+> assertions still compare a real production stamp against `declared_lane`; and the misroute guard
+> drops its second width for `declared >= SEEDED_LANES`, where the *implication* is universal and the
+> assertion is still falsifiable on the id under test. Review found the new test blind two ways a
+> spec edit can reach (an emptied slice, a renamed `MailboxSupervision`) and it now carries a floor
+> and a seed in this repo's existing anti-blindness idiom, all three mutants red.
 >
 > **The cheap alternative was measured, not assumed, and lost twice.** A `test-fixtures`-gated
 > re-export trips the crate's own `unreachable_pub = "deny"` (it does not compile as the card

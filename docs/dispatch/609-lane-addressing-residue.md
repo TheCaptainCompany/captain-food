@@ -123,28 +123,36 @@ _(Card defect, minor: the amendment left the `## Findings` heading duplicated �
 
 Banked honestly rather than conveniently, because a MISS is the outcome that carries information.
 
-**Did the narrow three-lens set miss anything the whole roster would have caught? Yes — one thing.**
-The four assertion sites were **incidentally pinning their actors' declared widths**, and Option B
-removes that pin. A declared width is a contract over **stored rows** — changing it re-lanes every
+**Yes — one thing: the four assertion sites were incidentally pinning their actors' declared
+widths**, and Option B removes that pin. Nothing else in the repository pinned Cart's or Order's
+width. A declared width is a contract over **stored rows** — changing it re-lanes every
 non-terminal `inbound_messages` row, which is why ADR-20260802-220402 needed a migration and only
-worked because 5 divides 100. "This change quietly stops something from noticing a stored-shape
-contract move" is `young`'s lens (stored shapes, versioning, what a fold or a projection would have
-to replay), and `young` was **not at the briefing** — the roster was sized to three by the
-REVERSIBLE INTERNAL class. Had it gone unnoticed, Option B would have weakened a gate to get green
-while every gate reported green, which is precisely the class of thing the mob exists to stop.
+worked because 5 divides 100. Had it gone unnoticed, Option B would have weakened a gate to get
+green while every gate reported green.
 
-**Everything else that was wrong was missed by lenses that WERE invited, on their own home turf**:
-`beck` asserted the misroute site must hold a second opinion (it never stamps one), and both
-`vernon` and `beck` counted the call sites and got both numbers wrong. That is a depth failure of
-invited lenses, not evidence that the class needs more of them — inviting `young` would not have
-fixed `beck`'s count.
+**The attribution is SHARED, and weighted to `vernon` — not handed to an absent lens.** This first
+read as a roster-width failure, and the review corrected it, correctly. `vernon`'s briefing finding
+(c) named these exact literals and observed that they were coupled to the declaration. He was on the
+surface he claimed, with the fact in hand, and read the coupling as a **liability** without taking
+the one further step to reading it as a **pin**. That is a depth miss by a lens who was present, and
+calling it anything else makes roster sizing look like the cause when it was not.
 
-So the honest reading is: **the class boundary leaked once, on the one axis where "internal
-refactor" and "stored-shape contract" touch.** Recommendation for the coordinator, offered rather
-than taken: the cheap fix is not reverting REVERSIBLE INTERNAL to the whole roster, but a standing
-question for any chunk that converts a hand-written expectation into a read of a declaration —
-**what was the hand-written expectation pinning, and what pins it now?** That is one line in a card
-template and it generalises past this area, where a fourth lens is a per-chunk cost forever.
+What is genuinely `young`'s — and `young` was not at the briefing — is only the **escalation**: that
+a declared width is a contract over stored rows, so removing its pin is a *gate weakening* under
+ADR-20260802-220402 and therefore a stop, not a follow-up. Absent that framing this lands as "we
+lost some coverage, file it"; with it, it blocks the merge. So the roster width cost the SEVERITY,
+and an invited lens missed the FACT.
+
+**Everything else that was wrong was missed by invited lenses on their own turf**: `beck` asserted
+the misroute site must hold a second opinion (it never stamps one), and both `vernon` and `beck`
+counted the call sites and got both numbers wrong. Inviting `young` would not have fixed `beck`'s
+count.
+
+Recommendation, offered rather than taken, and cheaper than reverting the class: `vernon`'s own
+generalisation of what he missed — **when a chunk's method is "make X unspellable", every existing
+spelling of X is a candidate incidental pin; enumerate what each one was holding before deleting
+it.** One line in the card template, and it generalises past this area, where a fourth lens is a
+per-chunk cost forever.
 
 ### Executor findings — the card was wrong a third time, in three more places
 
@@ -179,16 +187,26 @@ figure is eight files, and the landed diff is **+137 / −54 over 10 files** —
 to read at the checkpoint. Under-counting sites while over-counting files by 2.5× made B look like a
 sprawl when it is one afternoon of mechanical edits.
 
-**(F) The misroute site does not need to hold a second opinion.** The card (following `beck`) says
+**(F, and CORRECTED at the checkpoint) The misroute site does not need to hold a second opinion —
+but the first statement of why over-claimed.** The card (following `beck`) says
 `pm_prepare_delivery.rs:1447` *"is the **misroute** test and must be able to hold a second opinion — a
 bare literal is more honest there than any function call"*. Reading the test: `seeded_two` is never
 stamped on any row. It appears in exactly two places — a guard `assert_ne!(declared, seeded_two)` and
 a diagnostic message. **The test asserts the ABSENCE of a misroute; it never produces one.** So the
-sharper guard needs no second width at all: `declared >= SEEDED_LANES`, because a producer that
-believes the keyspace is 2 wide can only ever stamp 0 or 1. That holds for **every** id rather than
-the one under test, which is strictly stronger than the assertion it replaces. `vernon`'s caveat was
-run over all 23 sites and **no site deliberately stamps a foreign lane**, so the external count went
-to **zero**, not to one.
+sharper guard needs no second width at all: `declared >= SEEDED_LANES`.
+
+**`beck` corrected the justification at the checkpoint, by computing rather than reasoning, and he
+is right.** The first version of this section said the new guard "holds for every id". It does not:
+`declared ∈ {0,1,2,3,4}` and two of those five values fail it — he computed FNV-1a-64 over
+`uid(ORDER)` and got lane 3, so the assertion is still falsifiable on the id under test and still
+has to be re-checked if `ORDER` changes. **What is universal is the IMPLICATION, not the
+assertion**: for any id, a producer that believes the keyspace is 2 wide can only stamp 0 or 1, so
+*any* declared lane at or above 2 is unreachable under the narrowed keyspace. What the reformulation
+actually buys is that it names the seeded KEYSPACE the row must avoid instead of one arbitrary lane
+inside it. That distinction is exactly what separates this from #608's negative control, which
+genuinely did go vacuous, so the code comment now states it precisely. `vernon`'s caveat was run
+over all 23 sites and **no site deliberately stamps a foreign lane**, so the external count went to
+**zero**, not to one.
 
 ### The thing neither the card nor the issue noticed, and it is a real cost of Option B
 
@@ -207,6 +225,24 @@ So B carries `every_declared_width_is_the_standard_one_because_changing_one_is_a
 pins all 17 actors instead of 3, names the reason, and runs on every `cargo test` where three of the
 four incidental pins needed a Postgres attached. It pins the SHAPE (`5`, except `MailboxSupervision`
 at `1`), so a new actor on the standard width costs nothing to maintain.
+
+**Say precisely which half moved, because "replaces the four assertions" overstates it.** Those
+assertions were carrying TWO facts: (i) the declared width literal, and (ii) that the production
+stamping path agrees with the routing function for this actor type and this id. **The new unit test
+restores only (i).** (ii) is not lost — the converted assertions still compare a **real production
+stamp** against `declared_lane`, so the producer-independence is intact; what changed is that the
+expected side reads the declaration instead of a literal. That is a *better* pin than `5` ever was:
+a wrong actor-type string now yields `None` and a panic naming the actor, where the literal would
+have produced a plausible wrong lane. `vernon`'s summary at the checkpoint is the accurate one —
+**"not the same guarantee, the missing half of it, deliberately placed and widened."**
+
+**Anti-blindness on the new gate — found independently by `vernon` and `beck`, fixed before ready.**
+The first version pinned the shape but not the roster, and a loop over a generated slice has two
+ways to pass by scanning nothing, both reachable from an ordinary `specs/*/actors.yaml` edit. It now
+carries a FLOOR (`declared.len() >= 17`) and a SEED (`any(|(a, w)| *a == "MailboxSupervision" && *w == 1)`)
+before the loop, in the idiom this repo already uses at `tools/codegen-rs/src/tests.rs:4157`
+(*"if it is renamed, this guard must move with it, never silently scan for nothing"*) and `:3663`.
+Neither costs anything when a new standard-width actor is declared.
 
 ### Evidence — every mutant measured in an isolated worktree, against a live Postgres
 
@@ -231,6 +267,17 @@ failed**, and **all 22 tests in the 8 converted files are among them** — every
 (drift_guard). **No lane-computing test stayed green**, so no converted site is quietly
 re-implementing the hash. Sites the detector did NOT reach: none in the converted set. The one
 partition unit test that survives is the width pin, correctly — it never calls the hash.
+
+**W1/W2/W3 — the NEW gate seen red, because a brand-new gate nobody has seen fail is not a gate.**
+`beck`'s bar applies to the test that replaces a pin as much as to the pin. All three mutate
+`ACTOR_MAILBOXES` in the generated slice, which is exactly what the corresponding
+`specs/*/actors.yaml` edit emits.
+
+| mutant | before the fix | after the fix | message |
+|---|---|---|---|
+| **W1** `("Order", 5)` → `("Order", 10)` | red | **red** | `'Order' declares width 10, not 5: changing a declared width re-lanes every in-flight row of that actor, so it needs a migration (ADR-20260802-220402)` |
+| **W2** `MailboxSupervision` renamed | **GREEN** — match arm dies, loop asserts `5 == 5` sixteen times | **red** | `no actor named 'MailboxSupervision' declares width 1 any more. If it was RENAMED that is fine — update this seed … do not delete the test` |
+| **W3** `ACTOR_MAILBOXES: &[]` | **GREEN** — zero iterations | **red** | `ACTOR_MAILBOXES is down to 0 entries from 17. Removing a mailbox actor is a real decision (its in-flight rows have nowhere to drain)` |
 
 **M2 — the seal, both build modes, both options.** Mutant planted in a **production** source file of
 a crate that already depends on `actor_client` and behind no `cfg`:
@@ -285,4 +332,11 @@ polices a width at a call site.
   (#596/#607) was never added to `docs/adr/README.md`. Added in this change alongside the new ADR,
   since the index row was one line and an unindexed ADR is an ADR nobody finds.
 - `vernon`'s `Lane(i16)` newtype with a private constructor (make the USE unspellable, not just the
-  COMPUTATION) — genuinely the next level and genuinely outside this class. Worth an issue.
+  COMPUTATION) — genuinely the next level and genuinely outside this class. Filed as
+  [#612](https://github.com/TheCaptainCompany/captain-food/issues/612).
+- The `removed == 3` literal in `pm_prepare_delivery.rs` — the one width literal the reformulation
+  did NOT de-literalise, and `beck` is right that it should stay: it is now the last INDEPENDENT
+  restatement of PlaceOrderProcess's declared width in that file, so it stays red on a silent width
+  change where the converted sites cannot. The fix is one clause of comment saying so, before
+  someone "cleans it up". Filed as
+  [#617](https://github.com/TheCaptainCompany/captain-food/issues/617).
