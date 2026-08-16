@@ -115,6 +115,6 @@ _(Lenses and the executor append here. Empty is not the same as unread — a len
 - **`beck`** — declared. Watching for two evidence-honesty failures: the `cargo build` / `cargo test` split in M2 being rounded up to "unspellable", and byte-identity being reported as a shape pin. Both are the failure class this card's own standing caution is about.
 - **`holub`** — declared. Watching for scope creep: item 2 getting done anyway because a card once listed it, the tuple becoming a struct, or a `#[doc(hidden)]`/new-gate variant being built when the existing seam covers it. Wants to read the diff line count. Standing conditional above. Flow observation banked: **four consecutive chunks (#588, #596, #598, #609) have all been in `actor_client`/`mailbox`** — the runtime has absorbed the team's last four dispatches, and the next release should answer a question with a Tours restaurant or rider at the end of it. He could not reach the backlog from his sandbox and declined to guess an alternative; **that is a coordinator action item, not his.**
 
-## Findings
+**Executor, claim (`7b9e1da`)** — claimed on branch `609-lane-addressing-residue`, draft PR open, item-2 carry-forward posted on #609. Verification of the card's factual claims against the tree follows in this section.
 
-_(Lenses and the executor append here. Empty is not the same as unread — a lens with nothing to say writes "nothing in my lens".)_
+_(Card defect, minor: the amendment left the `## Findings` heading duplicated — the empty second copy is removed here.)_
