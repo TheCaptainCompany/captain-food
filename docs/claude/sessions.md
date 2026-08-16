@@ -1087,12 +1087,29 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   them took the allowance from 2.3G to 6.9G. Same class as the dead worktree above and same price —
   free — but easier to miss, because nothing in `git status` mentions the scratchpad. Check it before
   every `target/debug` lever in §2, all of which cost a rebuild.
-- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING** (2026-08-16, #609):
-  cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
-  zero bytes. It looks like the biggest lever on the list and it is not a lever at all. The real
-  ones are above — dead worktrees, the scratchpad sweep, then `incremental`. Symptom that sent this
-  session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit` while `df`
-  still reported 2.3G free, which is §2's "writes fail while the numbers still look fine".
+- **Deleting the top-level `target/debug/<bin>` link products reclaims NOTHING, and it can make
+  cargo SERVE A STALE TEST BINARY** (2026-08-16, #609 — the second half is the expensive part).
+  Cargo HARDLINKS them to their `deps/` artifact, so 73 files and 6.45 GB by `stat` moved `df` by
+  zero bytes. It looks like the biggest lever on the list and is not a lever at all. **Worse: after
+  that hand-deletion, `cargo test --workspace` re-linked `actor_client`'s unit binary from cached
+  objects instead of recompiling the changed source, and a test added ten minutes earlier was NOT
+  IN THE BINARY** — `running 11 tests` where the same source built with `cargo test -p actor_client`
+  gave 12. The suite reported **1251 passed, 0 failed, exit 0**, and the brand-new gate had never
+  executed. `cargo clean -p actor_client` restored it immediately.
+
+  **The tell is a test COUNT, not a failure** — nothing goes red, so no gate can catch it. Two
+  defences, both cheap:
+  - **After any manual deletion inside `target/`, `cargo clean -p <crate>` every package you edited
+    before believing a green run.** Reclaiming disk by hand desynchronises cargo's fingerprints from
+    what is actually on disk; cargo trusts the fingerprints.
+  - **Verify by NAME that a newly added test appears in the run** (`grep -a '^test .*<name> \.\.\. ok'`
+    over the log), never by the total. A count that drops by one while everything passes is exactly
+    what this looks like, and "1252 → 1251, still green" is easy to read as noise.
+
+  The real disk levers are above — dead worktrees, the scratchpad sweep, then `incremental`, and
+  `cargo clean -p` on a few big packages (2.7 GB here) which is honest and cheap. Symptom that sent
+  this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit` while
+  `df` still reported 2.3G free, which is §2's "writes fail while the numbers still look fine".
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
   allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
   checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses

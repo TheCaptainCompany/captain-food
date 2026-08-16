@@ -279,6 +279,17 @@ partition unit test that survives is the width pin, correctly — it never calls
 | **W2** `MailboxSupervision` renamed | **GREEN** — match arm dies, loop asserts `5 == 5` sixteen times | **red** | `no actor named 'MailboxSupervision' declares width 1 any more. If it was RENAMED that is fine — update this seed … do not delete the test` |
 | **W3** `ACTOR_MAILBOXES: &[]` | **GREEN** — zero iterations | **red** | `ACTOR_MAILBOXES is down to 0 entries from 17. Removing a mailbox actor is a real decision (its in-flight rows have nowhere to drain)` |
 
+**A near-miss worth recording, because it would have made the table above a lie.** The first
+post-fix `make test-crates` reported **1251 passed / 0 failed / exit 0** — and the new gate had
+**not run**. Reclaiming disk by hand inside `target/` had desynchronised cargo's fingerprints, so
+`cargo test --workspace` re-linked `actor_client`'s unit binary from cached objects instead of
+recompiling: `running 11 tests` where the identical source under `cargo test -p actor_client` gave
+12. Nothing went red; the only tell was the total dropping by one against the pre-fix run, which
+reads as noise. `cargo clean -p` on the five touched packages fixed it and the final numbers below
+are from after that. Filed to [sessions.md](../claude/sessions.md) as: **verify a new test by NAME
+in the run log, never by the count**, and **`cargo clean -p` every edited package after any manual
+deletion inside `target/`**.
+
 **M2 — the seal, both build modes, both options.** Mutant planted in a **production** source file of
 a crate that already depends on `actor_client` and behind no `cfg`:
 `crates/infrastructure/src/persistence/mailbox_lanes.rs`, `pub fn second_opinion(id: &uuid::Uuid) -> i16 { actor_client::stable_partition(id, 2) }`.
