@@ -1785,14 +1785,48 @@ keys:
             let spans = node.get("spans").and_then(|s| s.as_sequence()).unwrap_or_else(|| {
                 panic!("'{feature}' declares no spans")
             });
+            // Every span NAMED IN THE SUCCESS RULE must be emitted too, whatever its `required:`
+            // flag says (#598, farley). The two are different claims and the gate used to see only
+            // one: `required: true` means "every run has it", while a member of an ALTERNATION
+            // (`{ any_of: [event.store.append, order.lane.enqueue] }`) is `required: false` — one
+            // of them occurs per run — yet the rule VERDICT depends on it. Without this union an
+            // alternation could name a span nothing constructs, and every place-order run would be
+            // scored by a branch that can never be satisfied: a gate that lies, in the shape the
+            // alternation was added to end.
+            let in_success_rule: std::collections::BTreeSet<String> = node
+                .get("status_rules")
+                .and_then(|sr| sr.get("success"))
+                .and_then(|s| s.get("required_spans"))
+                .and_then(|x| x.as_sequence())
+                .map(|terms| {
+                    let mut out = std::collections::BTreeSet::new();
+                    for t in terms {
+                        if let Some(s) = t.as_str() {
+                            out.insert(s.to_string());
+                        }
+                        for alt in t
+                            .get("any_of")
+                            .and_then(|x| x.as_sequence())
+                            .map(|s| s.as_slice())
+                            .unwrap_or(&[])
+                        {
+                            if let Some(s) = alt.as_str() {
+                                out.insert(s.to_string());
+                            }
+                        }
+                    }
+                    out
+                })
+                .unwrap_or_default();
             for sp in spans {
-                let required = sp.get("required").and_then(|r| r.as_bool()).unwrap_or(false);
+                let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                let required = sp.get("required").and_then(|r| r.as_bool()).unwrap_or(false)
+                    || in_success_rule.contains(name);
                 if !required {
                     continue;
                 }
-                let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                 if !constructed.contains(name) {
-                    missing.push(format!("  {feature}: span '{name}' is required but never constructed"));
+                    missing.push(format!("  {feature}: span '{name}' is required (or named in status_rules.success) but never constructed"));
                     continue;
                 }
                 // Declared AND constructed is still not EMITTED: the constructor must be invoked
@@ -1810,8 +1844,8 @@ keys:
                 if !exempt && !called {
                     missing.push(format!(
                         "  {feature}: span '{name}' has a constructor in spans.rs but no production \
-                         call site invokes it -- the contract marks it required, so no real run can \
-                         ever satisfy the contract"
+                         call site invokes it -- the contract marks it required (or its success \
+                         rule names it), so no real run can ever satisfy the contract"
                     ));
                     continue;
                 }

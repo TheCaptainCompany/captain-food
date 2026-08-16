@@ -190,6 +190,34 @@ pub mod place_order {
             .record(elapsed_ms, &[KeyValue::new("routed", routed.to_string())]);
     }
 
+    fn lane_heartbeat_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL).build())
+    }
+
+    fn lane_oldest_pending_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS).build())
+    }
+
+    /// The Order lane's DEAD-MAN'S SWITCH, one tick (#598): `order_lane_watch_heartbeat_total`
+    /// increments and `order_lane_oldest_pending_age_ms` re-reports, for EVERY declared
+    /// routed-birth lane, on EVERY tick, whatever `ROUTE_ORDER_BIRTH_THROUGH_LANE` says.
+    ///
+    /// Emitted as ONE fn because the two series are one fact: the gauge is only readable while the
+    /// counter proves the reporter alive, and a tick that emitted one without the other would be
+    /// a monitor whose two halves can disagree. Alert on the ABSENCE OF AN INCREMENT — never a
+    /// threshold: [`birth_lag`] is silent by design while the flag is OFF, so without this pair
+    /// "flag off" and "the Order lane worker is dead" are the same observation.
+    ///
+    /// Never a zero-seeding of [`birth_lag`] itself: injected zeros would poison the p95 the flip
+    /// is judged on.
+    pub fn order_lane_watch(lane: &str, oldest_pending_age_ms: i64) {
+        let labels = [KeyValue::new("lane", lane.to_string())];
+        lane_heartbeat_counter().add(1, &labels);
+        lane_oldest_pending_gauge().record(oldest_pending_age_ms, &labels);
+    }
+
     /// BUSINESS metric: `checkout_payment_failures_total{reason}`.
     ///
     /// The one number that answers "did we take money and fail to tell anyone" at a glance — the worst
@@ -213,6 +241,84 @@ pub mod place_order {
     /// [`payment_failure`], which counts payments that RAN and failed.
     pub fn degraded_render(reason: &str) {
         degraded_render_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
+/// DEPLOY-TIME FLEET PARITY (#598, farley): `runtime_flag_state{flag,value,bin}`.
+///
+/// The problem it solves is not "is the flag on" — a reviewer can read that. It is that a rolling
+/// deploy runs SEVERAL processes at once (the monolith, standalone adapter fleets, per-actor bins)
+/// and, while it is in flight, they can resolve the SAME flag to DIFFERENT values. For
+/// `ROUTE_ORDER_BIRTH_THROUGH_LANE` that split is invisible in every other series: both halves
+/// birth exactly one order (four absorbers make double-birth unreachable), but only the routed
+/// half arms the acceptance deadline — so a split fleet yields a coin-flip on the deadline, per
+/// order, and the only histogram that could see it (`order_birth_lag_ms`) records nothing on the
+/// unrouted path. Review-time parity is an assertion; this is EVIDENCE, and
+/// `count(distinct value) by (flag) > 1` is a condition a flip can be BLOCKED on.
+///
+/// An OBSERVABLE gauge, for the reason `otp_send::enforcing_gauge` documents at length: a value
+/// written once at boot says "this process once started" and then says nothing however wrong the
+/// fleet becomes. The callback re-asserts every declaration on every export cycle, so a process
+/// that dies stops contributing its value with no timer of our own.
+pub mod runtime {
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// `(flag, bin)` → the resolved value, re-read by the gauge callback on every export cycle.
+    fn declared() -> &'static Mutex<BTreeMap<(String, String), bool>> {
+        static D: OnceLock<Mutex<BTreeMap<(String, String), bool>>> = OnceLock::new();
+        D.get_or_init(|| Mutex::new(BTreeMap::new()))
+    }
+
+    fn flag_state_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::RUNTIME_FLAG_STATE)
+                .with_callback(|observer| {
+                    // Poisoned is not a reason to go silent: a monitor that stops reporting
+                    // because one writer panicked reads exactly like the fleet being gone.
+                    let d = declared().lock().unwrap_or_else(|e| e.into_inner());
+                    for ((flag, bin), value) in d.iter() {
+                        observer.observe(
+                            1,
+                            &[
+                                KeyValue::new("flag", flag.clone()),
+                                KeyValue::new("value", value.to_string()),
+                                KeyValue::new("bin", bin.clone()),
+                            ],
+                        );
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// This process's binary name — the `bin` label. Derived, never passed: a caller that has to
+    /// name itself eventually names itself wrong, and one deploy runs several binaries whose
+    /// DISAGREEMENT is the whole hazard.
+    pub fn current_bin() -> String {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    /// Declare this process's RESOLVED value for one runtime flag. Call at the composition root,
+    /// where the value is decided — the callback re-asserts it from there on.
+    ///
+    /// The value is a LABEL, not the measurement: the gauge always observes `1`, so
+    /// `count(distinct value) by (flag)` is a straight parity query and a flag nobody declares is
+    /// an absent series rather than a `0` that reads as "false".
+    pub fn declare_flag(flag: &str, value: bool) {
+        declared()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((flag.to_string(), current_bin()), value);
+        // Registers the callback on first declaration; idempotent afterwards.
+        let _ = flag_state_gauge();
     }
 }
 

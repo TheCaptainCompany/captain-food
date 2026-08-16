@@ -897,6 +897,25 @@ pub async fn router() -> Router {
                         enforce_acceptance_timeout: config.enforce_acceptance_timeout,
                         route_order_birth_through_lane: config.route_order_birth_through_lane,
                     };
+                    // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
+                    // resolved value for the same three gates the standalone fleets declare
+                    // (`infrastructure::mailbox::standalone_deps`), so a rolling deploy in which
+                    // half the fleet routes the Order birth and half appends it is a FACT
+                    // (`count(distinct value) by (flag) > 1`) rather than a review-time
+                    // assertion. Nothing else can see that split: both halves birth exactly one
+                    // order, and only the routed half arms the acceptance deadline.
+                    telemetry::meters::runtime::declare_flag(
+                        "ENFORCE_SERVICE_HOURS_GUARD",
+                        config.enforce_service_hours_guard,
+                    );
+                    telemetry::meters::runtime::declare_flag(
+                        "ENFORCE_ACCEPTANCE_TIMEOUT",
+                        config.enforce_acceptance_timeout,
+                    );
+                    telemetry::meters::runtime::declare_flag(
+                        "ROUTE_ORDER_BIRTH_THROUGH_LANE",
+                        config.route_order_birth_through_lane,
+                    );
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a
                     // sweep timer so idle actors leave memory on schedule (not only when
@@ -1098,6 +1117,15 @@ pub async fn router() -> Router {
                     // carve-out), emitting on every tick so a dead promotion pass reads as a
                     // GROWING lag, never as silence.
                     infrastructure::mailbox::spawn_promotion_watch(
+                        pool.clone(),
+                        std::time::Duration::from_secs(30),
+                    );
+                    // #598: the ROUTED-BIRTH lane dead-man's switch. UNCONDITIONAL — never behind
+                    // ROUTE_ORDER_BIRTH_THROUGH_LANE: `order_birth_lag_ms` is silent by design
+                    // while the flag is OFF, so without a heartbeat that has been running all
+                    // along, "flag off" and "the Order lane worker is dead" are the same
+                    // observation on the day of the flip.
+                    infrastructure::mailbox::spawn_order_lane_watch(
                         pool.clone(),
                         std::time::Duration::from_secs(30),
                     );

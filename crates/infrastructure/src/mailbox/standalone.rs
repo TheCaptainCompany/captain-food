@@ -106,7 +106,7 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
                 Arc::new(application::auth_sessions::NoopAuthSessionStore)
             }
         };
-    CommandDeps {
+    let deps = CommandDeps {
         store: Arc::new(crate::persistence::PgEventStore::new(pool.clone())),
         restaurants: Arc::new(crate::persistence::PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(crate::PgSlugReservationRepository::new(pool.clone())),
@@ -137,12 +137,45 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
             .unwrap_or(false),
         // #588 (ADR-20260816-040239): route the Order birth through the Order's own lane — same
         // ENV-GATED posture, same boolean parse, same default (OFF = the legacy foreign-stream
-        // append) as the spec. A standalone worker fleet and the monolith MUST read the same
-        // value: half a fleet routing and half appending would birth some orders twice.
+        // append) as the spec.
+        //
+        // A standalone worker fleet and the monolith MUST read the same value, and the hazard is
+        // SPLIT-CLOCK, not double-birth (#598, vernon — the earlier wording here said "would
+        // birth some orders twice" and was WRONG). Double-birth is unreachable: both routes
+        // converge on `Order-{id}` with an expected-version precondition at 0 (OFF gates on
+        // `should_deliver_order_placed` and saves at the loaded version; ON stages a door row and
+        // `record_inbound_order_placed` returns `AlreadyRecorded` if any `OrderPlaced` is already
+        // on the stream), the door row's primary key dedups, and the trigger skips on redelivery.
+        // Four absorbers.
+        //
+        // What a split fleet DOES do: under OFF, `apply_schedules_in_tx` runs against the
+        // *PlaceOrderProcess* message (handler.rs, the saga leg), so the Order's own `OrderPlaced`
+        // receive schedules never apply; ON arms them (the PM-fact route's `Recorded` arm). So the
+        // order is born exactly ONCE either way, and the ACCEPTANCE DEADLINE is a coin-flip, per
+        // order, INVISIBLY — invisible because `order_birth_lag_ms` only records on the routed
+        // path. Bounded by the rolling-deploy window; `runtime_flag_state` below is what makes it
+        // observable while that window is open.
         route_order_birth_through_lane: std::env::var("ROUTE_ORDER_BIRTH_THROUGH_LANE")
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false),
-    }
+    };
+    // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
+    // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
+    // composition root, next to where the value is decided — the monolith declares the same three
+    // from its Config, so `count(distinct value) by (flag) > 1` is the parity query.
+    telemetry::meters::runtime::declare_flag(
+        "ENFORCE_SERVICE_HOURS_GUARD",
+        deps.enforce_service_hours_guard,
+    );
+    telemetry::meters::runtime::declare_flag(
+        "ENFORCE_ACCEPTANCE_TIMEOUT",
+        deps.enforce_acceptance_timeout,
+    );
+    telemetry::meters::runtime::declare_flag(
+        "ROUTE_ORDER_BIRTH_THROUGH_LANE",
+        deps.route_order_birth_through_lane,
+    );
+    deps
 }
 
 /// Spawn the supervised worker fleet for `actor_types` — the standalone mirror of the monolith's
@@ -290,6 +323,13 @@ async fn run_standalone_workers(
         application::generated::reminders::REMINDER_SCHEDULES.iter().any(|s| s.actor_type == *a)
     }) {
         super::spawn_promotion_watch(pool.clone(), std::time::Duration::from_secs(30));
+    }
+    // #598: the ROUTED-BIRTH lane dead-man's switch, for a fleet that hosts a routed lane. Same
+    // monitor-outside-the-worker posture as the promotion watch, and UNCONDITIONAL on
+    // ROUTE_ORDER_BIRTH_THROUGH_LANE — a liveness signal that starts with the flip has never been
+    // seen to work at the moment it is first needed.
+    if actor_types.iter().any(|a| super::declared_lanes().contains(a)) {
+        super::spawn_order_lane_watch(pool.clone(), std::time::Duration::from_secs(30));
     }
     let handler = Arc::new(
         super::MailboxCommandHandler::new(deps)

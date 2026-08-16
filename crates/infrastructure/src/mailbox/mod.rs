@@ -16,12 +16,17 @@ mod flush;
 // delivery glue over SQL (handler, in-tx flush/schedules), the PM lane chaining, the standalone
 // worker spawn, and the activation cache.
 mod handler;
+// The ROUTED-BIRTH lane dead-man's switch (#598) — a monitor on its own clock, outside the lane.
+mod order_lane_watch;
 mod pm_delivery;
 mod promotion_watch;
 mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
 pub use flush::{flush_staged_in_tx, record_order_birth_lag};
+pub use order_lane_watch::{
+    declared_lanes, order_lane_watch_tick, spawn_order_lane_watch,
+};
 pub use promotion_watch::{promotion_watch_tick, spawn_promotion_watch};
 pub use standalone::{
     shutdown_signal, spawn_standalone_workers,
@@ -32,6 +37,7 @@ pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
 use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
+use tracing::Instrument as _;
 
 /// Flush staged lane ENQUEUES into the completion transaction — the second half of
 /// ADR-20260816-040239's seam, and the reason a routed `deliver:` is not a dual write: the door
@@ -108,7 +114,14 @@ pub async fn flush_lane_enqueues_in_tx(
         .bind(message.message_id)
         .bind(&enqueue.source)
         .bind(&enqueue.external_id)
+        // `order.lane.enqueue` (#598): the HANDOVER's act, instrumented HERE at the
+        // infrastructure seam — `c4-l3.yaml` keeps the saga and the aggregates SDK-free, and this
+        // glue is the framework boundary that owns the write. It is the second branch of
+        // `place-order`'s success ALTERNATION: with the flag ON no `event.store.append` occurs in
+        // the saga's trace, so without this span a checkout that lost the birth entirely and one
+        // that handed it over correctly are the same trace shape.
         .execute(&mut **tx)
+        .instrument(telemetry::spans::order_lane_enqueue(enqueue.event_type, &enqueue.external_id))
         .await
         .map_err(|e| DomainError::Repository(e.to_string()))?;
     }
