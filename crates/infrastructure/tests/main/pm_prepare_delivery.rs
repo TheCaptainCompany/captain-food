@@ -1408,7 +1408,10 @@ async fn chained_fact_is_enqueued_with_no_seeded_lanes_and_drains_once_the_worke
         "the hop WAITS for its worker -- waiting is the correct behaviour, failing is not"
     );
 
-    // Leg 3 -- the worker starts (seeds + claims) and the waiting hop drains.
+    // Leg 3 -- the worker starts (seeds + claims) and the waiting hop drains. This also pins the
+    // other half of the startup drift check: an EMPTY registry is a first boot, not drift, so
+    // `seed` succeeds here. Getting that backwards would turn every fresh environment into a
+    // crash loop.
     let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway)).await;
     assert_eq!(drain_all(&pm_worker).await, 1, "the waiting hop delivers the moment a worker starts");
     let placed: i64 = sqlx::query_scalar(
@@ -1481,7 +1484,27 @@ async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
          writer"
     );
 
-    // And once the registry catches up with the declaration, that lane drains it.
+    // And the STARTUP DRIFT CHECK refuses to paper over the partial registry: a worker brought up
+    // against 2 of the declared 5 lanes must not come up at all. Papering over it is what let the
+    // two keyspaces coexist in the first place.
+    let stuck = MailboxWorker::new(
+        pool.clone(),
+        "w-DRIFT",
+        "PlaceOrderProcess",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps_over(&pool, gateway.clone()))),
+    );
+    let refused = stuck.seed(5).await.expect_err("a partial registry must refuse the start");
+    let refused = refused.to_string();
+    assert!(refused.contains("DRIFT for 'PlaceOrderProcess'"), "{refused}");
+    assert!(
+        refused.contains("NOT the 'not seeded yet' case"),
+        "the message must distinguish drift from a first boot, or an operator reads it as a \
+         crash loop and clears the registry of a live system: {refused}"
+    );
+
+    // Once the stale rows are cleared per the cutover procedure, the declared lane drains it.
+    unseed(&pool, "PlaceOrderProcess").await;
     let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway)).await;
     assert_eq!(drain_all(&pm_worker).await, 1, "the declared lane owns the hop");
     let placed: i64 = sqlx::query_scalar(

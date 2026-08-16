@@ -68,7 +68,7 @@ pub use mailbox::{
     Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
     MailboxStatusRow, ReschedulePolicy,
 };
-pub use partition::stable_partition;
+pub use partition::{declared_lane, stable_partition};
 pub use status_bus::{OperationStatusBus, OperationUpdate};
 
 // The drift-guard REFERENCE implementations (test-only, PROP-20260802-130500 D5): visible to

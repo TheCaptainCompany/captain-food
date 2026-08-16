@@ -1,9 +1,13 @@
 //! sqlx read adapter for the ADMIN `mailboxLanes` supervision query (#242 Runtime B,
-//! PROP-20260728-152752): every `mailbox_partitions` registry row joined with its live backlog —
+//! PROP-20260728-152752): every DECLARED lane joined with its registry row and its live backlog —
 //! RECEIVED (pending) and SCHEDULED (future) counts plus the oldest pending `received_at` — from
 //! `inbound_messages`. Write-path infrastructure, not a business read model: no `View_*`, and the
 //! numbers are a monitoring snapshot, not a serialized truth (the worker's completion transaction
 //! is the authority on a lane).
+//!
+//! Since #596 the lane population comes from the DECLARATION (`ACTOR_MAILBOXES`) rather than from
+//! `mailbox_partitions`, so a lane that has work but no registry row is visible instead of absent.
+//! See [`MailboxLaneRepository::list`]'s body for why that inversion is load-bearing.
 
 use actor_client::mailbox::MailboxAccess;
 use actor_client::supervision::{MailboxLaneRepository, MailboxLaneRow, PoisonedMessageRow};
@@ -45,32 +49,80 @@ fn decode_lane(row: &PgRow) -> Result<MailboxLaneRow, DomainError> {
 #[async_trait]
 impl MailboxLaneRepository for PgMailboxLaneRepository {
     async fn list(&self, _access: MailboxAccess) -> Result<Vec<MailboxLaneRow>, DomainError> {
-        // LEFT JOIN LATERAL keeps the aggregate scan on the drain/scheduler partial indexes:
-        // one indexed probe per lane rather than a full-table GROUP BY, so the page stays cheap
-        // even while a backlog is large (which is exactly when someone is staring at it).
+        // The lane population is DRIVEN BY THE DECLARATION (#596, `dba`), not by the registry.
+        //
+        // This used to read `FROM mailbox_partitions p`, and the #596 fix would have made that a
+        // blind spot: before it, a hop addressed to an unseeded lane ERRORED, so the operator
+        // heard about it immediately (too immediately — it aborted a money-path transaction).
+        // After it, the hop is written and WAITS, which is correct — but a lane with no registry
+        // row was invisible to this page, so the one screen an operator opens to ask "is anything
+        // stuck?" would answer "no" over a backlog of orders waiting on a worker that never
+        // started. Trading a loud wrong failure for a silent right one is not an improvement.
+        //
+        // So the driving set is the declared grid (`ACTOR_MAILBOXES`, `unnest`ed below) UNIONed
+        // with any lane actually CARRYING work, and the registry is the thing LEFT JOINed in.
+        // Three states are now all visible and distinguishable:
+        //   - declared + seeded  -> the normal row, lease and checkpoint populated;
+        //   - declared, NOT seeded -> `ownership_version = 0`, `claimed_by = NULL`, and a real
+        //     pending count: exactly the "waiting on a worker that never started" case;
+        //   - NOT declared but carrying rows -> the orphan a width DECREASE strands. Nothing else
+        //     in the system would ever mention it; `seed_partitions`' drift check refuses the
+        //     start that creates it, and this row is where an operator sees what was stranded.
+        //
+        // Cost: one extra distinct-scan of the pending/scheduled rows on the drain and scheduler
+        // partial indexes. The LEFT JOIN LATERAL probes are unchanged and still keep the per-lane
+        // aggregates off a full-table GROUP BY, so the page stays cheap while a backlog is large —
+        // which is exactly when someone is staring at it.
+        let declared = crate::generated::command_router::ACTOR_MAILBOXES;
+        let mut actor_types: Vec<&str> = Vec::new();
+        let mut partitions: Vec<i16> = Vec::new();
+        for (actor_type, width) in declared {
+            for partition in 0..*width as i16 {
+                actor_types.push(actor_type);
+                partitions.push(partition);
+            }
+        }
         let rows = sqlx::query(
-            "SELECT p.actor_type, p.partition, p.ownership_version, p.claimed_by, p.lease_until, \
-                    p.checkpoint, b.pending, b.scheduled, b.oldest_pending_at, \
+            "WITH declared AS ( \
+                 SELECT * FROM unnest($1::text[], $2::smallint[]) AS d(actor_type, partition) \
+             ), \
+             lanes AS ( \
+                 SELECT actor_type, partition FROM declared \
+                 UNION \
+                 SELECT actor_type, partition FROM mailbox_partitions \
+                 UNION \
+                 SELECT DISTINCT actor_type, partition FROM inbound_messages \
+                   WHERE status IN ('RECEIVED', 'SCHEDULED') \
+             ) \
+             SELECT l.actor_type, l.partition, \
+                    COALESCE(p.ownership_version, 0)::bigint AS ownership_version, \
+                    p.claimed_by, p.lease_until, \
+                    COALESCE(p.checkpoint, 0)::bigint AS checkpoint, \
+                    b.pending, b.scheduled, b.oldest_pending_at, \
                     COALESCE(b.retrying_attempts, 0)::bigint AS retrying_attempts, \
                     COALESCE(x.poisoned, 0)::bigint AS poisoned \
-             FROM mailbox_partitions p \
+             FROM lanes l \
+             LEFT JOIN mailbox_partitions p \
+                    ON p.actor_type = l.actor_type AND p.partition = l.partition \
              LEFT JOIN LATERAL ( \
                  SELECT count(*) FILTER (WHERE m.status = 'RECEIVED') AS pending, \
                         count(*) FILTER (WHERE m.status = 'SCHEDULED') AS scheduled, \
                         min(m.received_at) FILTER (WHERE m.status = 'RECEIVED') AS oldest_pending_at, \
                         max(m.attempts) FILTER (WHERE m.status = 'RECEIVED') AS retrying_attempts \
                  FROM inbound_messages m \
-                 WHERE m.actor_type = p.actor_type AND m.partition = p.partition \
+                 WHERE m.actor_type = l.actor_type AND m.partition = l.partition \
                    AND m.status IN ('RECEIVED', 'SCHEDULED') \
              ) b ON true \
              LEFT JOIN LATERAL ( \
                  SELECT count(*) AS poisoned \
                  FROM inbound_messages m \
-                 WHERE m.actor_type = p.actor_type AND m.partition = p.partition \
+                 WHERE m.actor_type = l.actor_type AND m.partition = l.partition \
                    AND m.status = 'FAILED' AND (m.error->>'code') = 'DeliveryInfrastructureError' \
              ) x ON true \
-             ORDER BY p.actor_type, p.partition",
+             ORDER BY l.actor_type, l.partition",
         )
+        .bind(&actor_types)
+        .bind(&partitions)
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;

@@ -19,7 +19,51 @@ pub struct Lane {
 /// Seed the registry rows for `actor_type` at `width` partitions — idempotent (`ON CONFLICT DO
 /// NOTHING`), run by every worker at startup. The widths live in the host's actor catalog
 /// (actors.yaml `mailbox.partitions`), not in a migration: the spec stays the source of truth.
+///
+/// **The startup DRIFT CHECK (#596)**: before seeding, refuse to start when the registry already
+/// describes a DIFFERENT keyspace than the one declared. A width change is not a configuration
+/// edit — `inbound_messages.partition` is stamped at INSERT, so changing `mailbox.partitions`
+/// while rows exist puts one aggregate in two lanes across the change, and lane is what the lease
+/// and the completion fence are keyed by. That is a stored-shape migration and it needs a
+/// procedure (below), not a redeploy. Crashing at startup is the cheap end of this: the expensive
+/// end is two live leases over one aggregate, discovered from a customer's duplicated order.
+///
+/// **Never seeded is NOT drift.** Zero rows is a first boot — seed and proceed. Treating it as a
+/// mismatch would turn every fresh environment into a crash loop, which is the same class of
+/// mistake as the defect this check exists to prevent, only louder. The distinction is spelled out
+/// in the failure message so an operator reading it at 20:30 on a Friday does not have to infer it.
+///
+/// **The cutover procedure**, when the width must genuinely change (`vernon`): drain the affected
+/// actor's `inbound_messages` backlog to empty — or run exactly ONE worker for that actor for the
+/// duration — before the new width serves. With no in-flight rows there is no aggregate whose
+/// stamped partition can disagree with the new addressing, so the re-seed is safe. Then delete the
+/// stale registry rows and let the new width seed.
 pub async fn seed_partitions(pool: &PgPool, actor_type: &str, width: i16) -> sqlx::Result<()> {
+    let seeded: Vec<i16> = sqlx::query_scalar(
+        "SELECT partition FROM mailbox_partitions WHERE actor_type = $1 ORDER BY partition",
+    )
+    .bind(actor_type)
+    .fetch_all(pool)
+    .await?;
+    let declared: Vec<i16> = (0..width.max(0)).collect();
+    if !seeded.is_empty() && seeded != declared {
+        return Err(sqlx::Error::Protocol(format!(
+            "mailbox registry DRIFT for '{actor_type}': the declared keyspace is {} lane(s) \
+             (actors.yaml `mailbox.partitions`) but the registry already holds {} lane(s) \
+             {seeded:?}. Refusing to start.\n\
+             This is NOT the 'not seeded yet' case — an empty registry is a first boot and seeds \
+             normally. A NON-EMPTY registry describing a different keyspace means the width \
+             changed while rows may already be stamped with the old addressing \
+             (`inbound_messages.partition` is written at INSERT), so one aggregate can occupy two \
+             lanes — and the lease and the completion fence are both keyed by lane.\n\
+             Cutover: drain this actor's inbound_messages backlog to empty (or run exactly ONE \
+             worker for it) BEFORE the new width serves, then delete its mailbox_partitions rows \
+             and restart. Split-lane detector: SELECT actor_type, actor_id FROM inbound_messages \
+             GROUP BY 1,2 HAVING count(DISTINCT partition) > 1;",
+            declared.len(),
+            seeded.len(),
+        )));
+    }
     sqlx::query(
         "INSERT INTO mailbox_partitions (actor_type, partition, ownership_version, checkpoint) \
          SELECT $1, p, 0, 0 FROM generate_series(0, $2::int - 1) AS p \
