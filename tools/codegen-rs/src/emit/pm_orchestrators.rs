@@ -1026,7 +1026,7 @@ impl<'a> PmLegGen<'a> {
         if self.admission_pending {
             self.emit_admission(ind);
         }
-        // A routed deliver reads `env.lanes`, which only EVENT legs carry (`env_needed`).
+        // A routed deliver reads `env.lane_sink()`, which only EVENT legs carry (`env_needed`).
         assert!(
             !self.is_cmd || !deliver_is_lane_routed(to, event),
             "processmanager.yaml#/{}: a lane-ROUTED deliver ({} -> {}) on a COMMAND leg has no \
@@ -1089,12 +1089,13 @@ impl<'a> PmLegGen<'a> {
                 // ADR-20260816-040239: this `deliver:` is a lane ENQUEUE. The saga DECIDES the
                 // fact; the target actor's own mailbox lane APPENDS it, so the write passes the
                 // target's serialization point and the delivery's `Recorded` verdict is what its
-                // `schedules:` key on. `env.lanes` is `Some` only on a route that owns a fenced
-                // transaction to stage into AND with
+                // `schedules:` key on. `env.lane_sink()` is `Some` only on a route that built the
+                // envelope with `TriggerEnvelope::laned` — i.e. one that owns a fenced transaction
+                // to stage into (the field is private, #597) — AND with
                 // `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` ON; `None` takes the
                 // legacy foreign-stream append below unchanged (gate-then-stabilize — rollback
                 // is a config flip, not a redeploy).
-                gen.push(ind, "if let Some(lanes) = env.lanes.as_ref() {");
+                gen.push(ind, "if let Some(lanes) = env.lane_sink() {");
                 gen.push(route_ind, "lanes.stage(crate::lanes::LaneEnqueue {");
                 gen.push(route_ind + 4, &format!("actor_type: \"{}\",", to));
                 gen.push(route_ind + 4, &format!("actor_id: {}.0,", key_expr));

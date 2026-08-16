@@ -658,7 +658,7 @@ pub mod place_order_process {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
         };
-        if let Some(lanes) = env.lanes.as_ref() {
+        if let Some(lanes) = env.lane_sink() {
             lanes.stage(crate::lanes::LaneEnqueue {
                 actor_type: "Order",
                 actor_id: order_placed.order_id.0,
