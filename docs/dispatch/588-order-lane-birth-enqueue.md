@@ -128,3 +128,42 @@ in [ADR-20260816-040239](../adr/ADR-20260816-040239-deliver-is-a-lane-enqueue-no
 - **farley** (release path) — **PASS, overturning card §4**: the routing predicate goes behind a config flag UNCONDITIONALLY (gate-then-stabilize does not price a money-path commit change by blast-count; `ENFORCE_ACCEPTANCE_TIMEOUT` does not cover it), and `specs/observability.yaml:226` must be amended in the same PR — `event.store.append` stops being a REQUIRED `place-order` span and a birth-lag histogram (enqueue → `Recorded`) is added, or the 800 ms p95 budget goes green for a saga that no longer does the measured thing.
 - **evans** (ubiquitous language) — **PASS**: no keyword split and no rename — the DSL, the spec note and the emitter's own comment all already say Tell; the CODE is the falsehood and Option A makes it true; compiler-first condition — a `deliver:` target that does not declare the event in its `receives` becomes a VALIDATOR ERROR, never a new word.
 - **beck** (proof) — **PASS, conditional on red-first**: `pm_prepare_delivery.rs::authorized_payment_enqueues_the_order_birth_and_arms_the_clock` entered via `PlaceOrder` → `PaymentIntentCreated` → `PaymentAuthorized`, asserting the birth message and the PM row commit together, `Recorded` on FIRST delivery only, and exactly one deadline row keyed to that birth; plus three mutations in one batch and the DELETION of the `enqueue_birth` hand-INSERT crutch; no sleeps, explicit drains, `DB_TESTS_REQUIRED=1` in the transcript.
+
+### P2/P3 — the realization (appended by the executor)
+
+Landed on `588-order-lane-birth-enqueue`; both red gates GREEN against real Postgres with
+`DB_TESTS_REQUIRED=1`. What differs from the plan above, and why:
+
+- **The lane sink rides the `TriggerEnvelope`**, not a new leg parameter (card §2 expected
+  `staging.rs`). Same seam, better placement: whether an enqueue can be staged is a property of the
+  INVOCATION ROUTE — a mailbox delivery owns a fenced transaction, the polling
+  `ProcessManagerRunner` owns none — and `TriggerEnvelope::unlaned` makes that unmissable at the
+  four construction sites. No generated signature moved, so `behaviour_tests.rs` is untouched.
+- **The typed `ActorDoor` is NOT the construction site** (card §2 named `door.rs:120`). It cannot
+  be: the door inserts through `Arc<dyn Mailbox>`, i.e. a pool handle, and constraint (ii) requires
+  the PASSED `&mut Transaction`. `flush_lane_enqueues_in_tx` builds the row in `infrastructure`,
+  the same shape and the same place `chain_pm_copy_in_tx` already does, reusing the door's public
+  FROZEN derivations (`inbound_message_id`, `stable_partition`). The `receives` proof the door does
+  at runtime is replaced by the stronger `pm-deliver-lane` validator rule, at build time.
+- **Lane width comes from the DECLARED contract, not the seeded registry.** `chain_pm_copy_in_tx`
+  reads `count(*) FROM mailbox_partitions` and errors at zero. Copying that made the checkout saga
+  FAIL when the Order worker had not seeded yet — a paid order with no birth, the domain lens's
+  worst failure mode, and it showed up immediately in the pg run. `ACTOR_MAILBOXES` is the frozen
+  routing contract, so the row is always addressed correctly and simply waits for a worker.
+- **evans' rule already half-existed.** `pm-deliver`'s inbox check matches a bare NAME against the
+  merged `receives` set, so it proves neither "the target has a mailbox" nor "the event is an
+  events.yaml fact". `pm-deliver-lane` adds both arms. Mutation-red, spec data only: dropping
+  Order's `mailbox:` fires arm 1 alone; re-pointing the step at `Restaurant` fires arm 2 (alongside
+  the older name check, with the sharper diagnosis).
+- **The `record_order_placements` hole is closed STRUCTURALLY, not by a second call site.** Adding
+  the call to the inbound-fact route would have left the same shape that produced the bug — each
+  route deciding for itself. The decision now lives inside `flush_staged_in_tx`, the one way a
+  staged event reaches `domain_events`: no route can forget, none can double-count (exactly one
+  route ever flushes a given birth), and `no_delivery_route_decides_when_to_count_a_placement`
+  fails the build if a route starts deciding again.
+- **beck's addendum, both items folded in**: the 2 s tolerance is replaced by deterministic `t0`/`t1`
+  bracketing around the drain, and "both or neither" is now a same-`xmin` assertion — an assertion
+  about the COMMIT, which goes red if the door insert ever leaves the delivery transaction.
+- **Flag posture**: `ROUTE_ORDER_BIRTH_THROUGH_LANE`, default OFF. The two #588 gates turn it ON via
+  `routed_deps()`; the flag-OFF posture stays proven by the pre-existing, untouched
+  `payment_authorized_chains_to_the_pm_lane_and_materializes_the_order`. Two postures, two tests.
