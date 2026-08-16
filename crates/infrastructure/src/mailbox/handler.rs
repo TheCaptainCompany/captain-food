@@ -35,10 +35,11 @@ pub struct MailboxCommandHandler {
     /// (the GraphQL domain-fact subscriptions) — POST-COMMIT, via the runtime's Delivery hook,
     /// exactly where the pool-backed PgEventStore publishes.
     event_bus: Option<EventBus>,
-    /// Reminder window keys → DAYS (`Config::reminder_windows()`): what `apply_schedules_in_tx`
-    /// resolves a `schedules:` declaration's `after` against. Empty = no windows wired; a
-    /// delivery that then needs one aborts for retry (wiring bug, never a terminal verdict).
-    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    /// Reminder window keys → typed Duration (`Config::reminder_windows()`, which applies each
+    /// key's declared `unit:` — #167): what `apply_schedules_in_tx` resolves a `schedules:`
+    /// declaration's `after` against. Empty = no windows wired; a delivery that then needs one
+    /// aborts for retry (wiring bug, never a terminal verdict).
+    reminder_windows: std::collections::HashMap<&'static str, std::time::Duration>,
     /// Enqueue-side wake signals: a committed chain hop nudges the PM lane's worker post-commit,
     /// cutting the saga hop from the heartbeat poll to ~immediate (B2's "nudged" property).
     nudges: Option<std::sync::Arc<crate::persistence::mailbox_store::MailboxNudges>>,
@@ -74,7 +75,7 @@ impl MailboxCommandHandler {
     /// Wire the configured reminder windows (composition root: `Config::reminder_windows()`).
     pub fn with_reminder_windows(
         mut self,
-        windows: std::collections::HashMap<&'static str, i64>,
+        windows: std::collections::HashMap<&'static str, std::time::Duration>,
     ) -> Self {
         self.reminder_windows = windows;
         self

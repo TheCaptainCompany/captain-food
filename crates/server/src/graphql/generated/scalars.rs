@@ -760,6 +760,8 @@ pub enum OrderStatus {
     CANCELLED_BY_CUSTOMER,
     #[graphql(name = "CANCELLED_BY_RESTAURANT")]
     CANCELLED_BY_RESTAURANT,
+    #[graphql(name = "CANCELLED_BY_TIMEOUT")]
+    CANCELLED_BY_TIMEOUT,
 }
 impl From<ds::OrderStatus> for OrderStatus {
     fn from(v: ds::OrderStatus) -> Self {
@@ -773,6 +775,7 @@ impl From<ds::OrderStatus> for OrderStatus {
             ds::OrderStatus::DELIVERED => Self::DELIVERED,
             ds::OrderStatus::CANCELLED_BY_CUSTOMER => Self::CANCELLED_BY_CUSTOMER,
             ds::OrderStatus::CANCELLED_BY_RESTAURANT => Self::CANCELLED_BY_RESTAURANT,
+            ds::OrderStatus::CANCELLED_BY_TIMEOUT => Self::CANCELLED_BY_TIMEOUT,
         }
     }
 }
@@ -788,6 +791,7 @@ impl From<OrderStatus> for ds::OrderStatus {
             OrderStatus::DELIVERED => Self::DELIVERED,
             OrderStatus::CANCELLED_BY_CUSTOMER => Self::CANCELLED_BY_CUSTOMER,
             OrderStatus::CANCELLED_BY_RESTAURANT => Self::CANCELLED_BY_RESTAURANT,
+            OrderStatus::CANCELLED_BY_TIMEOUT => Self::CANCELLED_BY_TIMEOUT,
         }
     }
 }

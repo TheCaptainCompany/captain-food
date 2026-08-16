@@ -4379,6 +4379,10 @@ OrderExpired:
   type: object
   properties:
     orderId: { $ref: 'scalars.yaml#/OrderId' }
+OrderTimedOut:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
 OrderDeleted:
   type: object
   properties:
@@ -4392,7 +4396,7 @@ CatalogDeleted:
   properties:
     catalogId: { $ref: 'scalars.yaml#/CatalogId' }
 "#;
-    const RD_CONFIG: &str = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    default: 365\n    gates: \"Retention window for terminal orders.\"\n";
+    const RD_CONFIG: &str = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    unit: days\n    default: 365\n    gates: \"Retention window for terminal orders.\"\n  ORDER_TIMEOUT_SECONDS:\n    type: int\n    unit: seconds\n    default: 300\n    gates: \"Acceptance timeout window.\"\n";
 
     /// The pilot shapes of ADR-20260731-214500: a windowed reminder + windowed deletion trigger
     /// with an undo (`Order`), and a child-declared PROPAGATION trigger with a typed `match`
@@ -4406,12 +4410,19 @@ Order:
       payload: { $ref: 'events.yaml#/OrderExpired' }
       after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
       reschedule: in-place
+    OrderTimedOut:
+      payload: { $ref: 'events.yaml#/OrderTimedOut' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_TIMEOUT_SECONDS' }
+      reschedule: keep
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: []
       schedules:
         - { $ref: '#/Order/reminders/OrderExpired' }
+        - { $ref: '#/Order/reminders/OrderTimedOut' }
     - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: []
+    - message: { $ref: '#/Order/reminders/OrderTimedOut' }
       emits: []
   deletion:
     triggers:
@@ -4505,9 +4516,9 @@ Catalog:
     }
 
     #[test]
-    fn reminder_payload_must_be_an_events_yaml_fact_and_reschedule_in_place() {
+    fn reminder_payload_must_be_an_events_yaml_fact_and_reschedule_known() {
         // A command payload models the wrong thing: the deadline's passage cannot be refused
-        // (ADR-20260731-153000 §1a); and `in-place` is the only reschedule semantics that exists.
+        // (ADR-20260731-153000 §1a); and `in-place`/`keep` are the only reschedule semantics that exist (#167).
         let issues = rd_issues(
             "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'commands.yaml#/PlaceOrder' }\n      reschedule: cancel-and-recreate\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
         );
@@ -4515,6 +4526,28 @@ Catalog:
         assert!(rules.contains(&"reminder-payload-not-event"), "{:?}", rules);
         assert!(rules.contains(&"reminder-reschedule-unknown"), "{:?}", rules);
         assert_eq!(issues.len(), 2, "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn window_keys_must_declare_a_typed_unit() {
+        // #167: the duration unit is a TYPED field of the configuration key -- the emitters
+        // branch on it; the name-suffix parse is the deleted shape. Missing unit -> error.
+        let no_unit_config = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    default: 365\n    gates: \"No unit declared.\"\n";
+        let bad_unit_config = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    unit: fortnights\n    default: 365\n    gates: \"Unknown unit.\"\n";
+        let actors = "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n";
+        for (config, needle) in [(no_unit_config, "declares no `unit:`"), (bad_unit_config, "fortnights")] {
+            let m = inline_model(&[
+                ("scalars.yaml", RD_SCALARS),
+                ("events.yaml", RD_EVENTS),
+                ("commands.yaml", "PlaceOrder:\n  type: object\n"),
+                ("configuration.yaml", config),
+                ("actors.yaml", actors),
+            ]);
+            let mut issues = Vec::new();
+            validate_reminders_and_deletion(&m, &mut issues);
+            assert_eq!(rules_of(&issues), vec!["reminder-window-unit"], "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+            assert!(issues[0].message.contains(needle), "{}", issues[0].message);
+        }
     }
 
     #[test]
@@ -4591,8 +4624,16 @@ Catalog:
             "reminder: \"OrderExpired\"",
             "payload_event: \"OrderExpired\"",
             "identity_prop: \"orderId\"",
-            "after_days_key: \"ORDER_RETENTION_WINDOW_DAYS\"",
-            "after_default_days: 365",
+            // The unit is the KEY's typed `unit:` field, applied at generation (#167): a days
+            // key renders its default multiplied out; a seconds key renders verbatim. The
+            // deleted `_DAYS` suffix-parse must never come back.
+            "after_key: \"ORDER_RETENTION_WINDOW_DAYS\"",
+            "after_default: std::time::Duration::from_secs(365 * 86_400)",
+            "reschedule: ReschedulePolicy::InPlace",
+            "reminder: \"OrderTimedOut\"",
+            "after_key: \"ORDER_TIMEOUT_SECONDS\"",
+            "after_default: std::time::Duration::from_secs(300)",
+            "reschedule: ReschedulePolicy::Keep",
         ] {
             assert!(table.contains(needle), "missing `{}` in:\n{}", needle, table);
         }
@@ -5528,6 +5569,53 @@ Catalog:
     }
 
     #[test]
+    fn status_config_must_cover_the_order_status_enum_both_ways() {
+        // #167 — `screen-status-config-incomplete`: a status hero's map keys exactly the
+        // scalars.yaml#/OrderStatus enum, both ways. The live drift that earned it: the map keyed
+        // a bare `CANCELLED` that matches NO enum member, so every cancelled order silently fell
+        // through to the renderer's fallback.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-status-config-incomplete")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        // GREEN — the real catalog's one status_config is complete after the #167 fix.
+        assert!(hits(&model).is_empty(), "{:?}", hits(&model));
+
+        // RED — remove CANCELLED_BY_TIMEOUT (missing member) and re-introduce the bare
+        // CANCELLED key (unknown key): the exact pre-#167 drift, both directions at once.
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_frontoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("frontoffice declares screens");
+        let tracking = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("order_tracking"))
+            .expect("the order_tracking screen exists");
+        let sc = tracking
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|cs| cs.iter_mut().find(|c| c.get("type").and_then(|t| t.as_str()) == Some("order_status_hero")))
+            .and_then(|hero| hero.get_mut("status_config"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("the hero declares status_config");
+        let entry = sc.remove(Value::from("CANCELLED_BY_TIMEOUT")).expect("the #167 entry exists");
+        sc.insert(Value::from("CANCELLED"), entry);
+        let hits = hits(&model);
+        assert_eq!(hits.len(), 1, "{:?}", hits);
+        assert!(hits[0].contains("CANCELLED_BY_TIMEOUT"), "names the missing member: {}", hits[0]);
+        assert!(hits[0].contains("\"CANCELLED\""), "names the dead key: {}", hits[0]);
+        assert!(hits[0].contains("order_tracking"), "locates the screen: {}", hits[0]);
+    }
+
+    #[test]
     fn view_fedby_tombstone_counts_as_a_use() {
         // #346 — `tombstone:` is a first-class fold output: the projector routes the event to row
         // DELETION (emit/projectors.rs), so by construction it can never map to a column `from`.
@@ -5736,8 +5824,8 @@ Catalog:
         let reminders = parse_reminders(&model);
         assert_eq!(
             reminders.iter().map(|r| (r.actor.as_str(), r.name.as_str())).collect::<Vec<_>>(),
-            vec![("Order", "OrderExpired")],
-            "the Order pilot is the one declared reminder"
+            vec![("Order", "OrderExpired"), ("Order", "OrderAcceptanceTimedOut")],
+            "the declared reminders: the retention pilot + the #167 acceptance deadline"
         );
         let deletions = parse_deletions(&model);
         assert_eq!(
@@ -5757,7 +5845,7 @@ Catalog:
             );
         }
         let Report { issues, .. } = validate(&model);
-        const NEW_RULES: [&str; 10] = [
+        const NEW_RULES: [&str; 11] = [
             "reminder-identity-declared",
             "reminder-without-receive",
             "receive-without-reminder",
@@ -5768,6 +5856,7 @@ Catalog:
             "reminder-payload-not-event",
             "reminder-after-unresolved",
             "reminder-reschedule-unknown",
+            "reminder-window-unit",
         ];
         for i in &issues {
             assert!(!NEW_RULES.contains(&i.rule), "unexpected {} at {}: {}", i.rule, i.location, i.message);
@@ -8027,6 +8116,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
         secret,
         gates: String::new(),
         mode_of: None,
+        unit: None,
         consumer: consumer.into(),
         scalar: None,
         pattern: None,

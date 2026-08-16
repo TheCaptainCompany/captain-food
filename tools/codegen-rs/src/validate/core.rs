@@ -145,6 +145,32 @@ fn collect_screen_actions(node: &Value, out: &mut Vec<(String, BTreeSet<String>)
     }
 }
 
+/// Every `status_config:` map found under a screen's components, with the component's `type`
+/// (#167): `(component_type, keys)`. Recursive like [`collect_screen_actions`].
+fn collect_status_configs(node: &Value, out: &mut Vec<(String, Vec<String>)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_status_configs(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let Some(sc) = map.get(Value::String("status_config".to_string())).and_then(|x| x.as_mapping()) {
+                let ty = map
+                    .get(Value::String("type".to_string()))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                out.push((ty, sc.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()));
+            }
+            for (_, v) in map {
+                collect_status_configs(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The full validator — a faithful port of validate.ts §1–§11. Returns issues + coverage.
 pub(crate) fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
@@ -1599,6 +1625,59 @@ pub(crate) fn validate(model: &Model) -> Report {
                                     "screen-unknown-resolver",
                                     format!("{}/screens/{}", sfkey, sid),
                                     format!("data_requirement '{}' is not a declared resolver.", name),
+                                ));
+                            }
+                        }
+                    }
+                    // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
+                    // ADR-0032-style bidirectional completeness). The defect class this kills
+                    // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so
+                    // a cancelled order silently fell through to the renderer's fallback —
+                    // invisible until a human stared at the screen. A key outside the enum is
+                    // dead copy; an enum member outside the map is a status with no story.
+                    {
+                        let order_statuses: BTreeSet<String> = model
+                            .defs
+                            .get("scalars.yaml")
+                            .and_then(|sc| sc.get("OrderStatus"))
+                            .and_then(|os| os.get("enum"))
+                            .and_then(|e| e.as_sequence())
+                            .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                            .unwrap_or_default();
+                        let mut found: Vec<(String, Vec<String>)> = Vec::new();
+                        if let Some(cs) = s.get("components") {
+                            collect_status_configs(cs, &mut found);
+                        }
+                        for (cty, keys) in found {
+                            if order_statuses.is_empty() {
+                                continue;
+                            }
+                            let keys: BTreeSet<String> = keys.into_iter().collect();
+                            let missing: Vec<&String> =
+                                order_statuses.iter().filter(|m| !keys.contains(*m)).collect();
+                            let unknown: Vec<&String> =
+                                keys.iter().filter(|k| !order_statuses.contains(*k)).collect();
+                            if !missing.is_empty() || !unknown.is_empty() {
+                                let mut parts = Vec::new();
+                                if !missing.is_empty() {
+                                    parts.push(format!(
+                                        "missing OrderStatus member(s) {:?} (a status with no declared story)",
+                                        missing
+                                    ));
+                                }
+                                if !unknown.is_empty() {
+                                    parts.push(format!(
+                                        "key(s) {:?} are not OrderStatus members (dead copy that can never render)",
+                                        unknown
+                                    ));
+                                }
+                                issues.push(err(
+                                    "screen-status-config-incomplete",
+                                    format!("{}/screens/{}/{}", sfkey, sid, cty),
+                                    format!(
+                                        "status_config must key exactly the scalars.yaml#/OrderStatus enum: {}.",
+                                        parts.join("; ")
+                                    ),
                                 ));
                             }
                         }

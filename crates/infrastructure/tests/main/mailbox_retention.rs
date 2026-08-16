@@ -185,8 +185,13 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
     .await
     .expect("enqueue MarkOrderDelivered");
 
-    // The wired window: 30 days (the map the composition root builds from Config).
-    let windows = std::collections::HashMap::from([("ORDER_RETENTION_WINDOW_DAYS", 30i64)]);
+    // The wired window: 30 days (the map the composition root builds from Config — typed
+    // Duration since #167; the key's declared `unit: days` is applied by the generated
+    // `Config::reminder_windows()`, so the handler sees only a Duration).
+    let windows = std::collections::HashMap::from([(
+        "ORDER_RETENTION_WINDOW_DAYS",
+        std::time::Duration::from_secs(30 * 86_400),
+    )]);
     let worker = MailboxWorker::new(
         pool.clone(),
         "w-A",

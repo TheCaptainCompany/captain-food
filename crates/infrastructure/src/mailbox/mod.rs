@@ -107,22 +107,26 @@ fn actor_user_id(actor: &Actor) -> uuid::Uuid {
 /// `(actor_type, message_type)`, upsert the SCHEDULED reminder — the ADR-20260731-150500 §4
 /// atomic form, same statement as the pool-backed `PgMailbox::schedule`, so a committed delivery
 /// can never lose its declared reminder to a crash between commit and a post-commit hand-off.
-/// The window comes from `windows` (config key → DAYS, the composition root's
-/// `Config::reminder_windows()`); a missing key is a WIRING bug and aborts the delivery for
-/// retry — it must never land a terminal verdict or silently skip a GDPR clock.
+/// The window comes from `windows` (config key → typed Duration, the composition root's
+/// `Config::reminder_windows()`, which applies the key's declared `unit:` — #167); a missing key
+/// is a WIRING bug and aborts the delivery for retry — it must never land a terminal verdict or
+/// silently skip a GDPR clock. The conflict arm follows the reminder's DECLARED reschedule
+/// policy: `in-place` postpones the pending row, `keep` (#167) leaves the first scheduled_at —
+/// a deadline a redelivered birth fact must never push out.
 pub async fn apply_schedules_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     message: &actor_runtime::InboundMessage,
-    windows: &std::collections::HashMap<&'static str, i64>,
+    windows: &std::collections::HashMap<&'static str, std::time::Duration>,
 ) -> Result<(), sqlx::Error> {
+    use application::generated::reminders::ReschedulePolicy;
     for spec in application::generated::reminders::reminder_schedules_for(
         &message.actor_type,
         &message.message_type,
     ) {
-        let Some(days) = windows.get(spec.after_days_key) else {
+        let Some(window) = windows.get(spec.after_key) else {
             return Err(sqlx::Error::Protocol(format!(
                 "reminder window {} not wired — pass Config::reminder_windows() to the mailbox handler",
-                spec.after_days_key
+                spec.after_key
             )));
         };
         let entry = actor_client::reminders::scheduled_entry(
@@ -132,20 +136,35 @@ pub async fn apply_schedules_in_tx(
             message.correlation_id,
             Some(message.message_id),
         );
-        let scheduled_at = chrono::Utc::now() + chrono::Duration::days(*days);
-        sqlx::query(
-            "INSERT INTO inbound_messages \
-               (message_id, position, kind, actor_type, actor_id, partition, message_type, \
-                payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                session_id, trace_id, source, external_id, scheduled_at, status) \
-             VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, 'SCHEDULED') \
-             ON CONFLICT (message_id) DO UPDATE \
-               SET scheduled_at = EXCLUDED.scheduled_at, \
-                   payload = EXCLUDED.payload, \
-                   payload_hash = EXCLUDED.payload_hash \
-               WHERE inbound_messages.status = 'SCHEDULED'",
-        )
+        let window = chrono::Duration::from_std(*window).map_err(|_| {
+            sqlx::Error::Protocol(format!("reminder window {} out of range", spec.after_key))
+        })?;
+        let scheduled_at = chrono::Utc::now() + window;
+        let sql = match spec.reschedule {
+            ReschedulePolicy::InPlace => {
+                "INSERT INTO inbound_messages \
+                   (message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                    payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                    session_id, trace_id, source, external_id, scheduled_at, status) \
+                 VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                         $16, $17, $18, 'SCHEDULED') \
+                 ON CONFLICT (message_id) DO UPDATE \
+                   SET scheduled_at = EXCLUDED.scheduled_at, \
+                       payload = EXCLUDED.payload, \
+                       payload_hash = EXCLUDED.payload_hash \
+                   WHERE inbound_messages.status = 'SCHEDULED'"
+            }
+            ReschedulePolicy::Keep => {
+                "INSERT INTO inbound_messages \
+                   (message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                    payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                    session_id, trace_id, source, external_id, scheduled_at, status) \
+                 VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                         $16, $17, $18, 'SCHEDULED') \
+                 ON CONFLICT (message_id) DO NOTHING"
+            }
+        };
+        sqlx::query(sql)
         .bind(entry.message_id())
         .bind(entry.kind())
         .bind(entry.actor_type())

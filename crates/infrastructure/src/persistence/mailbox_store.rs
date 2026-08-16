@@ -149,6 +149,7 @@ impl Mailbox for PgMailbox {
         &self,
         entry: &MailboxEntry,
         scheduled_at: chrono::DateTime<chrono::Utc>,
+        policy: actor_client::ReschedulePolicy,
         _access: MailboxAccess,
     ) -> Result<MailboxScheduleOutcome, DomainError> {
         // The ADR-20260731-150500 §4 atomic form. Two constraints shape the statement:
@@ -158,20 +159,35 @@ impl Mailbox for PgMailbox {
         // - the conflict arm updates ONLY WHERE the row is still SCHEDULED, so a reschedule can
         //   never race the promotion pass into rewriting a promoted row. `(xmax = 0)` is the
         //   standard upsert discriminator: 0 on a fresh insert, the updater's xid on DO UPDATE.
-        let row = sqlx::query(
-            "INSERT INTO inbound_messages \
-               (message_id, position, kind, actor_type, actor_id, partition, message_type, \
-                payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                session_id, trace_id, source, external_id, scheduled_at, status) \
-             VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, 'SCHEDULED') \
-             ON CONFLICT (message_id) DO UPDATE \
-               SET scheduled_at = EXCLUDED.scheduled_at, \
-                   payload = EXCLUDED.payload, \
-                   payload_hash = EXCLUDED.payload_hash \
-               WHERE inbound_messages.status = 'SCHEDULED' \
-             RETURNING (xmax = 0) AS inserted",
-        )
+        // Under `reschedule: keep` (#167) the conflict arm is DO NOTHING — the first occurrence
+        // wins and the fallback SELECT distinguishes Kept (still SCHEDULED) from Duplicate.
+        let sql = match policy {
+            actor_client::ReschedulePolicy::InPlace => {
+                "INSERT INTO inbound_messages \
+                   (message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                    payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                    session_id, trace_id, source, external_id, scheduled_at, status) \
+                 VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                         $16, $17, $18, 'SCHEDULED') \
+                 ON CONFLICT (message_id) DO UPDATE \
+                   SET scheduled_at = EXCLUDED.scheduled_at, \
+                       payload = EXCLUDED.payload, \
+                       payload_hash = EXCLUDED.payload_hash \
+                   WHERE inbound_messages.status = 'SCHEDULED' \
+                 RETURNING (xmax = 0) AS inserted"
+            }
+            actor_client::ReschedulePolicy::Keep => {
+                "INSERT INTO inbound_messages \
+                   (message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                    payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                    session_id, trace_id, source, external_id, scheduled_at, status) \
+                 VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                         $16, $17, $18, 'SCHEDULED') \
+                 ON CONFLICT (message_id) DO NOTHING \
+                 RETURNING (xmax = 0) AS inserted"
+            }
+        };
+        let row = sqlx::query(sql)
         .bind(entry.message_id())
         .bind(entry.kind())
         .bind(entry.actor_type())
@@ -199,7 +215,8 @@ impl Mailbox for PgMailbox {
                 Ok(MailboxScheduleOutcome::Scheduled)
             }
             Some(_) => Ok(MailboxScheduleOutcome::Rescheduled),
-            // The conflict arm's WHERE excluded the row: a non-SCHEDULED collision, untouched.
+            // No row back: in-place's WHERE excluded a non-SCHEDULED collision, or keep's
+            // DO NOTHING absorbed any collision. Read the row to say which.
             None => {
                 let row = sqlx::query(
                     "SELECT status, payload_hash FROM inbound_messages WHERE message_id = $1",
@@ -208,10 +225,16 @@ impl Mailbox for PgMailbox {
                 .fetch_one(&self.pool)
                 .await
                 .map_err(db_err)?;
+                let status: domain::generated::scalars::InboundMessageStatus =
+                    EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?;
+                if matches!(policy, actor_client::ReschedulePolicy::Keep)
+                    && status == domain::generated::scalars::InboundMessageStatus::SCHEDULED
+                {
+                    // #167: still pending — the first scheduled_at won, nothing moved.
+                    return Ok(MailboxScheduleOutcome::Kept);
+                }
                 Ok(MailboxScheduleOutcome::Duplicate {
-                    status: EnumText::from_text(
-                        &row.try_get::<String, _>("status").map_err(db_err)?,
-                    )?,
+                    status,
                     payload_hash: row.try_get("payload_hash").map_err(db_err)?,
                 })
             }

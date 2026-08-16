@@ -325,6 +325,9 @@ pub enum ScheduleOutcome {
     /// The identity was still SCHEDULED: `scheduled_at` + payload moved in place — the
     /// "declare the reminder with the time you NOW want" contract (ADR-20260731-150500).
     Rescheduled,
+    /// The identity was still SCHEDULED under `reschedule: keep` (#167): the first occurrence
+    /// stands untouched — a deadline that re-declaring never extends.
+    Kept,
     /// The pending occurrence is spent (promoted or terminal) and the payload matches — the
     /// idempotent re-declaration; nothing to do.
     Deduplicated(InboundMessageStatus),
@@ -355,6 +358,7 @@ pub async fn schedule_reminder(
     reminder_name: &str,
     payload_event_tagged: serde_json::Value,
     scheduled_at: chrono::DateTime<chrono::Utc>,
+    policy: crate::mailbox::ReschedulePolicy,
     correlation_id: uuid::Uuid,
 ) -> Result<ScheduleOutcome, DomainError> {
     let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {
@@ -394,7 +398,7 @@ pub async fn schedule_reminder(
         source: None,
         external_id: None,
     };
-    schedule_mapped(mailbox, entry, scheduled_at, &payload_hash).await
+    schedule_mapped(mailbox, entry, scheduled_at, policy, &payload_hash).await
 }
 
 /// Schedule one entry and map the port outcome onto [`ScheduleOutcome`] — shared by
@@ -404,11 +408,13 @@ pub(crate) async fn schedule_mapped(
     mailbox: &dyn Mailbox,
     entry: MailboxEntry,
     scheduled_at: chrono::DateTime<chrono::Utc>,
+    policy: crate::mailbox::ReschedulePolicy,
     payload_hash: &str,
 ) -> Result<ScheduleOutcome, DomainError> {
-    match mailbox.schedule(&entry, scheduled_at, MailboxAccess::granted()).await? {
+    match mailbox.schedule(&entry, scheduled_at, policy, MailboxAccess::granted()).await? {
         MailboxScheduleOutcome::Scheduled => Ok(ScheduleOutcome::Scheduled),
         MailboxScheduleOutcome::Rescheduled => Ok(ScheduleOutcome::Rescheduled),
+        MailboxScheduleOutcome::Kept => Ok(ScheduleOutcome::Kept),
         MailboxScheduleOutcome::Duplicate { status, payload_hash: existing } => {
             if existing == payload_hash {
                 Ok(ScheduleOutcome::Deduplicated(status))

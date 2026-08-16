@@ -23,6 +23,11 @@ back.orders.reject:        { messages: { en: "Reject", fr: "Refuser" } }
 back.orders.start:         { messages: { en: "Start preparing", fr: "Lancer la préparation" } }
 back.orders.ready:         { messages: { en: "Mark ready", fr: "Marquer prête" } }
 back.orders.cancel:        { messages: { en: "Cancel order", fr: "Annuler la commande" } }
+# #167: the timed-out card's expired treatment — an order that left the incoming queue because
+# the acceptance deadline elapsed says so explicitly, never a silent vanish. Release-not-refund
+# register on the payment half.
+back.orders.timed_out.title: { messages: { en: "Expired — no response", fr: "Expirée — sans réponse" } }
+back.orders.timed_out.body:  { messages: { en: "This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold was released.", fr: "Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client a été libérée." } }
 back.orders.empty.title:   { messages: { en: "No orders right now", fr: "Aucune commande pour le moment" } }
 back.orders.empty.body:    { messages: { en: "New orders appear here the moment they are placed.", fr: "Les nouvelles commandes apparaissent ici dès qu'elles sont passées." } }
 

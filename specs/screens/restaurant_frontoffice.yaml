@@ -505,7 +505,14 @@ screens:
           READY:            { icon: bag_check,    title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.title' },    body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.body' } }
           OUT_FOR_DELIVERY: { icon: truck,        title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.body' } }
           DELIVERED:        { icon: home,         title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.body' } }
-          CANCELLED:        { icon: x_circle,     title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          # Keys are scalars.yaml#/OrderStatus MEMBERS, exactly (validator: screen-status-config-incomplete).
+          # The bare `CANCELLED` key that sat here matched NO enum value — a cancelled order fell
+          # through to the renderer's fallback (#167 fixed the drift; the rule keeps it fixed).
+          CANCELLED_BY_CUSTOMER:   { icon: x_circle, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          CANCELLED_BY_RESTAURANT: { icon: x_circle, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+          # #167: the restaurant did not respond in time — release-not-refund register: the hold
+          # is released, the customer was never charged; no promised bank date.
+          CANCELLED_BY_TIMEOUT:    { icon: clock_x,  title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.body' } }
       - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
       - { type: order_timeline, events: "{{ order.timeline }}" }
       - { type: restaurant_contact_row, name: "{{ order.restaurant.name }}", phone: "{{ order.restaurant.phone }}", action: { type: phone_call, number: "{{ order.restaurant.phone }}" } }
@@ -515,7 +522,7 @@ screens:
         id: post_order_actions
         content:
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.rate' }, variant: outline, icon: star, visible_when: "order.status == 'DELIVERED'", action: { type: open_bottom_sheet, sheet_id: rating_sheet, data: { orderId: "{{ order.id }}" } } }
-          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED_BY_CUSTOMER','CANCELLED_BY_RESTAURANT','CANCELLED_BY_TIMEOUT']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
 
   # SCREEN 5 — Order history

@@ -1078,6 +1078,66 @@ pub async fn record_inbound_order_event(
     Ok(RecordOutcome::Recorded)
 }
 
+/// What one delivered acceptance deadline decided (#167). Richer than
+/// `payments::RecordOutcome` ON PURPOSE: the mailbox delivery arm labels its OTLP shadow
+/// evidence from this — `WouldCancel` is the flip ADR's whole data set — and a coarser outcome
+/// would force the infrastructure layer to re-run the guard to know what happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcceptanceTimeoutOutcome {
+    /// Gate ON, order still PLACED: `OrderAcceptanceTimedOut` appended —
+    /// PLACED → CANCELLED_BY_TIMEOUT (terminal; the GDPR clock is scheduled by the delivery glue).
+    Cancelled,
+    /// Gate OFF (shadow), order still PLACED: the IDENTICAL guard decided it would cancel, and
+    /// only the append was inert. The delivery lands Ignored; the occurrence is spent forever
+    /// (flipping the gate ON is prospective only).
+    WouldCancel,
+    /// Acceptance/rejection/cancellation won the race — the order is no longer PLACED. Benign
+    /// no-op under either gate position (rules.yaml#/AcceptanceTimeoutOnlyCancelsAStillPlacedOrder).
+    NotPlaced,
+    /// A redelivered deadline: the order already timed out. Benign duplicate no-op.
+    AlreadyTimedOut,
+    /// The stream has no order (erased, or never born) — nothing left to cancel.
+    NoOrder,
+}
+
+/// Record the delivered `OrderAcceptanceTimedOut` reminder fact (#167, ADR-20260808-195315
+/// §1.3) — the kind-MESSAGE delivery route, mirroring [`record_inbound_order_event`]. Record
+/// semantics iff STILL PLACED, NEVER a rejection: the deadline's passage cannot be refused, and
+/// an order that moved on absorbs the delivery. `enforce_acceptance_timeout` is the
+/// ENFORCE_ACCEPTANCE_TIMEOUT gate read at DELIVERY time (never at scheduling): the FULL guard
+/// runs on this one code path in both positions — the gate parks the append alone, so the shadow
+/// evidence is the real predicate, not a parallel one. Business code stays SDK-free: this
+/// function only DECIDES; the OTLP shadow span lives at the mailbox/promotion layer.
+pub async fn record_order_acceptance_timeout(
+    store: &dyn EventStore,
+    event: DomainEvent,
+    enforce_acceptance_timeout: bool,
+    actor: &Actor,
+) -> Result<AcceptanceTimeoutOutcome, DomainError> {
+    let DomainEvent::OrderAcceptanceTimedOut(timed_out) = &event else {
+        return Err(DomainError::Repository(format!(
+            "record_order_acceptance_timeout routed a non-timeout fact: {event:?}"
+        )));
+    };
+    let stream_name = order_stream(&timed_out.order_id);
+    let (events, version) = store.load(&stream_name).await?;
+    if events.iter().any(|ev| matches!(ev, DomainEvent::OrderAcceptanceTimedOut(_))) {
+        return Ok(AcceptanceTimeoutOutcome::AlreadyTimedOut);
+    }
+    let Some(state) = domain::order::fold(&events) else {
+        return Ok(AcceptanceTimeoutOutcome::NoOrder);
+    };
+    if state.status != OrderStatus::PLACED {
+        return Ok(AcceptanceTimeoutOutcome::NotPlaced);
+    }
+    // The guard has decided. The gate governs the APPEND alone (action-gate pattern):
+    if !enforce_acceptance_timeout {
+        return Ok(AcceptanceTimeoutOutcome::WouldCancel);
+    }
+    Repository::new(store).save(&stream_name, version, &[event], actor).await?;
+    Ok(AcceptanceTimeoutOutcome::Cancelled)
+}
+
 /// Rehydrate the Order aggregate and require existence UNDER the commanding restaurant: a missing
 /// stream — or an order belonging to another restaurant (tenant scoping) — rejects with
 /// `errors.yaml#/OrderNotFound`.

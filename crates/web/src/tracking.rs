@@ -151,8 +151,9 @@ pub struct StatusHero {
     pub body_key: &'static str,
 }
 
-/// `status_config` as data. Both CANCELLED_* statuses render the spec's single `CANCELLED` entry —
-/// who cancelled changes the copy server-side (the pushed order carries it), not the hero shape.
+/// `status_config` as data. CANCELLED_BY_CUSTOMER/CANCELLED_BY_RESTAURANT share the spec's
+/// `cancelled` copy; CANCELLED_BY_TIMEOUT (#167) carries its own "didn't respond in time" entry.
+/// The spec map keys the FULL OrderStatus enum (validator: screen-status-config-incomplete).
 pub fn status_hero(status: &str) -> Option<StatusHero> {
     let hero = |icon, key: &'static str| StatusHero {
         icon,
@@ -165,6 +166,7 @@ pub fn status_hero(status: &str) -> Option<StatusHero> {
             "order.status.ready.title" => "order.status.ready.body",
             "order.status.out_for_delivery.title" => "order.status.out_for_delivery.body",
             "order.status.delivered.title" => "order.status.delivered.body",
+            "order.status.acceptance_timed_out.title" => "order.status.acceptance_timed_out.body",
             _ => "order.status.cancelled.body",
         },
     };
@@ -179,6 +181,9 @@ pub fn status_hero(status: &str) -> Option<StatusHero> {
         "CANCELLED_BY_CUSTOMER" | "CANCELLED_BY_RESTAURANT" => {
             Some(hero("x_circle", "order.status.cancelled.title"))
         }
+        // #167: the restaurant did not respond in time — dedicated copy (release-not-refund
+        // register), never the generic cancelled body.
+        "CANCELLED_BY_TIMEOUT" => Some(hero("clock_x", "order.status.acceptance_timed_out.title")),
         _ => None,
     }
 }

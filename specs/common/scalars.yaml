@@ -288,6 +288,9 @@ OrderStatus:
     - DELIVERED
     - CANCELLED_BY_CUSTOMER
     - CANCELLED_BY_RESTAURANT
+    # #167: the acceptance deadline elapsed while still PLACED (OrderAcceptanceTimedOut) —
+    # `CANCELLED_BY_{cause}` grammar; timeout is a cause, not an actor (like REJECTED).
+    - CANCELLED_BY_TIMEOUT
 
 
 # Lifecycle of a DeliveryJob, orthogonal to OrderStatus (a delivery is a separate aggregate).

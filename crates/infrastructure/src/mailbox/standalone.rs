@@ -147,7 +147,7 @@ pub fn spawn_standalone_workers(
     actor_types: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
-    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    reminder_windows: std::collections::HashMap<&'static str, std::time::Duration>,
 ) {
     spawn_standalone_workers_with(pool, adapter, actor_types, payments, nudges, reminder_windows, None)
 }
@@ -163,7 +163,7 @@ pub fn spawn_standalone_workers_with(
     actor_types: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
-    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    reminder_windows: std::collections::HashMap<&'static str, std::time::Duration>,
     worker_config: Option<actor_runtime::WorkerConfig>,
 ) {
     // The whole fleet spawn rides ONE task so the caller's startup is never blocked by the
@@ -180,36 +180,77 @@ fn is_money_lane(actor_type: &str) -> bool {
     matches!(actor_type, "Payment" | "PlaceOrderProcess" | "RefundProcess")
 }
 
+/// Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when the
+/// caller wired none (the monolith reads Config; an adapter fleet has no Config reader) — a
+/// missing window would otherwise abort every delivery on that lane while its heartbeat keeps
+/// the lease: a permanent head-of-line wedge, not a retry. A window the caller DID wire is never
+/// overwritten. Extracted from `run_standalone_workers` so the fallback has its own unit test
+/// (#167 Phase 0 — it had none while the day-granular table sat underneath it).
+fn seed_spec_default_windows(
+    adapter: &str,
+    actor_types: &[&'static str],
+    reminder_windows: &mut std::collections::HashMap<&'static str, std::time::Duration>,
+) {
+    for schedule in application::generated::reminders::REMINDER_SCHEDULES {
+        if actor_types.contains(&schedule.actor_type) {
+            reminder_windows.entry(schedule.after_key).or_insert_with(|| {
+                tracing::info!(
+                    adapter,
+                    key = schedule.after_key,
+                    window = ?schedule.after_default,
+                    "standalone mailbox: reminder window from spec default"
+                );
+                schedule.after_default
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::seed_spec_default_windows;
+
+    /// The pre-existing gap the #167 widening touches: an adapter fleet hosting a `schedules:`
+    /// lane with NO wired window gets the SPEC DEFAULT (typed Duration), a wired window is never
+    /// overwritten, and a fleet without that lane seeds nothing.
+    #[test]
+    fn spec_default_fallback_fills_only_missing_windows_of_hosted_lanes() {
+        let spec = application::generated::reminders::REMINDER_SCHEDULES
+            .first()
+            .expect("the catalog declares at least one schedule");
+
+        // Missing window on a hosted lane → seeded with the spec default.
+        let mut windows = std::collections::HashMap::new();
+        seed_spec_default_windows("test", &[spec.actor_type], &mut windows);
+        assert_eq!(windows.get(spec.after_key), Some(&spec.after_default));
+
+        // A wired window wins over the default (the monolith's Config value must survive).
+        let wired = std::time::Duration::from_secs(60);
+        let mut windows = std::collections::HashMap::from([(spec.after_key, wired)]);
+        seed_spec_default_windows("test", &[spec.actor_type], &mut windows);
+        assert_eq!(windows.get(spec.after_key), Some(&wired), "never overwrite a wired window");
+
+        // A fleet that does not host the lane seeds nothing for it.
+        let mut windows = std::collections::HashMap::new();
+        seed_spec_default_windows("test", &["NoSuchLane"], &mut windows);
+        assert!(windows.is_empty());
+    }
+}
+
 async fn run_standalone_workers(
     pool: PgPool,
     adapter: &'static str,
     actor_types: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
-    mut reminder_windows: std::collections::HashMap<&'static str, i64>,
+    mut reminder_windows: std::collections::HashMap<&'static str, std::time::Duration>,
     worker_config: Option<actor_runtime::WorkerConfig>,
 ) {
     // No posture read since #242 Runtime D: the PM_MAILBOX_DELIVERY gate retired with
     // `command_journal`, so a fleet spawns exactly the lane set it was handed. There is no value
     // a peer could hold differently, hence nothing to fail closed against.
     let actor_types: Vec<&'static str> = actor_types.to_vec();
-    // Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when
-    // the caller wired none (the monolith reads Config; an adapter fleet has no Config reader) —
-    // a missing window would otherwise abort every delivery on that lane while its heartbeat
-    // keeps the lease: a permanent head-of-line wedge, not a retry.
-    for schedule in application::generated::reminders::REMINDER_SCHEDULES {
-        if actor_types.contains(&schedule.actor_type) {
-            reminder_windows.entry(schedule.after_days_key).or_insert_with(|| {
-                tracing::info!(
-                    adapter,
-                    key = schedule.after_days_key,
-                    days = schedule.after_default_days,
-                    "standalone mailbox: reminder window from spec default"
-                );
-                schedule.after_default_days
-            });
-        }
-    }
+    seed_spec_default_windows(adapter, &actor_types, &mut reminder_windows);
     let deps = standalone_deps(&pool, payments);
     // Parity with the monolith (#272 review MAJOR): a fleet that runs the PM lanes must also run
     // the startup backfill, or a fact the retired saga runner accepted but never reacted to stays

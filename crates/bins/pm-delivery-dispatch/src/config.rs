@@ -292,6 +292,10 @@ pub struct Config {
     pub coopcycle_instances: Option<String>,
     /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
     pub enforce_service_hours_guard: bool,
+    /// The acceptance deadline (#167, ADR-20260808-195315 §1.3): a paid order still PLACED this many seconds after birth records OrderAcceptanceTimedOut (PLACED -> CANCELLED_BY_TIMEOUT; the payment leg RELEASES the authorization — capture-on-fulfilment means the customer was never charged, no refund machinery on this path). Honest precision: the cancellation lands at due + up to ~60 s promotion slop (the pass runs on the worker heartbeat — 10 s cadence, 60 s while push is live) + head-of-line drain on the order's lane, so 300 means "within roughly five to six minutes", which is the right grain for a restaurant SLA. Scheduled with `reschedule: keep`: a redelivered birth fact never extends the deadline. The window is read at delivery via Config::reminder_windows(); the key must ALWAYS be wired — gate-OFF is ENFORCE_ACCEPTANCE_TIMEOUT=false, never an absent key (a missing window aborts every delivery on the Order lane for retry, by design). Per-restaurant override is a recorded later step (§1.3), not this key.
+    pub order_acceptance_timeout_seconds: i64,
+    /// The #167 acceptance-timeout ACTION gate (gate-then-stabilize; the ENFORCE_SERVICE_HOURS_GUARD pattern): ON, a due OrderAcceptanceTimedOut delivery whose order is still PLACED appends the cancellation. OFF — the DEFAULT — is SHADOW MODE: scheduling, firing and the FULL still-PLACED guard all run on the identical code path; only the append is inert, the delivery lands Ignored, and the would-cancel decision is exported as OTLP shadow evidence (specs/observability.yaml). OFF is a first-class value, never an absent key. The flip is a separate one-line ADR gated on: the payment-release leg reacting to OrderAcceptanceTimedOut (behind PR #566's answers work), the customer notice (comms), and shadow evidence — and it is PROSPECTIVE only: occurrences fired-and-absorbed while OFF are spent, nobody synthesizes timeouts for orders already past the TTL.
+    pub enforce_acceptance_timeout: bool,
     /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
     pub order_retention_window_days: i64,
 }
@@ -445,6 +449,11 @@ impl Config {
             .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
             .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
             .unwrap_or(false);
+        let order_acceptance_timeout_seconds = raw("ORDER_ACCEPTANCE_TIMEOUT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
+        let enforce_acceptance_timeout = raw("ENFORCE_ACCEPTANCE_TIMEOUT")
+            .or_else(|| baked("ENFORCE_ACCEPTANCE_TIMEOUT", profile).map(str::to_string))
+            .map(|v| parse_bool("ENFORCE_ACCEPTANCE_TIMEOUT", &v, false))
+            .unwrap_or(false);
         let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -559,6 +568,8 @@ impl Config {
                 uber_direct_scope,
                 coopcycle_instances,
                 enforce_service_hours_guard,
+                order_acceptance_timeout_seconds,
+                enforce_acceptance_timeout,
                 order_retention_window_days,
             },
             problems,
@@ -566,11 +577,13 @@ impl Config {
     }
 
     /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its
-    /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling
-    /// reads configuration, never a constant (ADR-20260731-214500).
-    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {
+    /// resolved runtime value as a TYPED Duration (the key's declared `unit:` is applied HERE,
+    /// #167) — handed to the mailbox delivery glue so scheduling reads configuration, never a
+    /// constant (ADR-20260731-214500).
+    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
-            ("ORDER_RETENTION_WINDOW_DAYS", self.order_retention_window_days),
+            ("ORDER_ACCEPTANCE_TIMEOUT_SECONDS", std::time::Duration::from_secs(u64::try_from(self.order_acceptance_timeout_seconds).expect("ORDER_ACCEPTANCE_TIMEOUT_SECONDS must be non-negative"))),
+            ("ORDER_RETENTION_WINDOW_DAYS", std::time::Duration::from_secs(u64::try_from(self.order_retention_window_days).expect("ORDER_RETENTION_WINDOW_DAYS must be non-negative") * 86_400)),
         ]
         .into_iter()
         .collect()
@@ -636,13 +649,15 @@ impl Config {
         out.push_str(&format!("  UBER_DIRECT_SCOPE          = {}\n", self.uber_direct_scope.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
+        out.push_str(&format!("  ORDER_ACCEPTANCE_TIMEOUT_SECONDS = {}\n", self.order_acceptance_timeout_seconds));
+        out.push_str(&format!("  ENFORCE_ACCEPTANCE_TIMEOUT = {}\n", self.enforce_acceptance_timeout));
         out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 56;
+pub const KEY_COUNT: usize = 58;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -702,6 +717,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "UBER_DIRECT_SCOPE",
     "COOPCYCLE_INSTANCES",
     "ENFORCE_SERVICE_HOURS_GUARD",
+    "ORDER_ACCEPTANCE_TIMEOUT_SECONDS",
+    "ENFORCE_ACCEPTANCE_TIMEOUT",
     "ORDER_RETENTION_WINDOW_DAYS",
 ];
 

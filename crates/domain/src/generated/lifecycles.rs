@@ -231,7 +231,7 @@ pub mod order {
     use crate::generated::scalars::OrderStatus;
 
     /// Terminal states — no outgoing transitions.
-    pub const TERMINAL: &[OrderStatus] = &[OrderStatus::DELIVERED, OrderStatus::REJECTED, OrderStatus::CANCELLED_BY_CUSTOMER, OrderStatus::CANCELLED_BY_RESTAURANT];
+    pub const TERMINAL: &[OrderStatus] = &[OrderStatus::DELIVERED, OrderStatus::REJECTED, OrderStatus::CANCELLED_BY_CUSTOMER, OrderStatus::CANCELLED_BY_RESTAURANT, OrderStatus::CANCELLED_BY_TIMEOUT];
 
     /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
     pub fn initial(event: &DomainEvent) -> Option<OrderStatus> {
@@ -256,6 +256,7 @@ pub mod order {
             (OrderStatus::ACCEPTED, DomainEvent::OrderCancelledByRestaurant(_)) => Some(OrderStatus::CANCELLED_BY_RESTAURANT),
             (OrderStatus::PREPARING, DomainEvent::OrderCancelledByRestaurant(_)) => Some(OrderStatus::CANCELLED_BY_RESTAURANT),
             (OrderStatus::READY, DomainEvent::OrderCancelledByRestaurant(_)) => Some(OrderStatus::CANCELLED_BY_RESTAURANT),
+            (OrderStatus::PLACED, DomainEvent::OrderAcceptanceTimedOut(_)) => Some(OrderStatus::CANCELLED_BY_TIMEOUT),
             _ => None,
         }
     }
@@ -273,6 +274,7 @@ pub mod order {
             DomainEvent::OrderRejectedByRestaurant(_) => Some(OrderStatus::REJECTED),
             DomainEvent::OrderCancelledByCustomer(_) => Some(OrderStatus::CANCELLED_BY_CUSTOMER),
             DomainEvent::OrderCancelledByRestaurant(_) => Some(OrderStatus::CANCELLED_BY_RESTAURANT),
+            DomainEvent::OrderAcceptanceTimedOut(_) => Some(OrderStatus::CANCELLED_BY_TIMEOUT),
             _ => None,
         }
     }

@@ -60,6 +60,7 @@ enum_text!(OrderStatus {
     DELIVERED,
     CANCELLED_BY_CUSTOMER,
     CANCELLED_BY_RESTAURANT,
+    CANCELLED_BY_TIMEOUT,
 });
 enum_text!(DeliveryStatus {
     PENDING,
@@ -167,6 +168,12 @@ mod tests {
         assert_eq!(ServiceType::COLLECTION.to_text(), "COLLECTION");
         assert_eq!(OrderStatus::CANCELLED_BY_RESTAURANT.to_text(), "CANCELLED_BY_RESTAURANT");
         assert_eq!(OrderStatus::from_text("READY").unwrap(), OrderStatus::READY);
+        // #167: the acceptance-timeout terminal state round-trips as its variant name.
+        assert_eq!(OrderStatus::CANCELLED_BY_TIMEOUT.to_text(), "CANCELLED_BY_TIMEOUT");
+        assert_eq!(
+            OrderStatus::from_text("CANCELLED_BY_TIMEOUT").unwrap(),
+            OrderStatus::CANCELLED_BY_TIMEOUT
+        );
         assert_eq!(DeliveryStatus::CANCELLED.to_text(), "CANCELLED");
         assert_eq!(DeliveryProvider::PARTNER.to_text(), "PARTNER");
         assert_eq!(DeliveryProvider::from_text("INDEPENDENT").unwrap(), DeliveryProvider::INDEPENDENT);

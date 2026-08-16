@@ -362,6 +362,11 @@ fn fx_order_expired() -> DomainEvent {
     DomainEvent::OrderExpired(evs::OrderExpired { order_id: sc::OrderId(support::uid("order-1")) })
 }
 
+/// tests.yaml#/fixtures/orderAcceptanceTimedOut — events.yaml#/OrderAcceptanceTimedOut
+fn fx_order_acceptance_timed_out() -> DomainEvent {
+    DomainEvent::OrderAcceptanceTimedOut(evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) })
+}
+
 /// tests.yaml#/fixtures/orderRated — events.yaml#/OrderRated
 fn fx_order_rated() -> DomainEvent {
     DomainEvent::OrderRated(evs::OrderRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), rider_thumb: sc::ThumbRating::UP })
@@ -2227,7 +2232,7 @@ async fn test_order_delivered() {
     bed.assert_appended("TestOrderDelivered", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_delivered()),
     ]);
-    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
     {
         use actor_client::MailboxScheduleOutcome;
         let mailbox = actor_client::mailbox::mem::MemMailbox::default();
@@ -2235,7 +2240,7 @@ async fn test_order_delivered() {
         let spec = actor_client::reminders::reminder_schedules_for("Order", "MarkOrderDelivered")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderDelivered: schedule declared in actors.yaml");
-        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderDelivered: window fits chrono");
         let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderDelivered: declare");
@@ -2266,7 +2271,7 @@ async fn test_order_rejected() {
     bed.assert_appended("TestOrderRejected", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_rejected_by_restaurant()),
     ]);
-    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
     {
         use actor_client::MailboxScheduleOutcome;
         let mailbox = actor_client::mailbox::mem::MemMailbox::default();
@@ -2274,7 +2279,7 @@ async fn test_order_rejected() {
         let spec = actor_client::reminders::reminder_schedules_for("Order", "RejectOrder")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderRejected: schedule declared in actors.yaml");
-        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderRejected: window fits chrono");
         let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderRejected: declare");
@@ -2305,7 +2310,7 @@ async fn test_order_cancelled_by_customer() {
     bed.assert_appended("TestOrderCancelledByCustomer", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_cancelled_by_customer()),
     ]);
-    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
     {
         use actor_client::MailboxScheduleOutcome;
         let mailbox = actor_client::mailbox::mem::MemMailbox::default();
@@ -2313,7 +2318,7 @@ async fn test_order_cancelled_by_customer() {
         let spec = actor_client::reminders::reminder_schedules_for("Order", "CancelOrderByCustomer")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderCancelledByCustomer: schedule declared in actors.yaml");
-        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderCancelledByCustomer: window fits chrono");
         let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByCustomer: declare");
@@ -2344,7 +2349,7 @@ async fn test_order_cancelled_by_restaurant() {
     bed.assert_appended("TestOrderCancelledByRestaurant", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_cancelled_by_restaurant()),
     ]);
-    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
     {
         use actor_client::MailboxScheduleOutcome;
         let mailbox = actor_client::mailbox::mem::MemMailbox::default();
@@ -2352,7 +2357,7 @@ async fn test_order_cancelled_by_restaurant() {
         let spec = actor_client::reminders::reminder_schedules_for("Order", "CancelOrderByRestaurant")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderCancelledByRestaurant: schedule declared in actors.yaml");
-        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderCancelledByRestaurant: window fits chrono");
         let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByRestaurant: declare");
@@ -2383,6 +2388,198 @@ async fn test_order_expired_recorded() {
     bed.assert_appended("TestOrderExpiredRecorded", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_expired()),
     ]);
+}
+
+/// tests.yaml#/tests/TestOrderAcceptanceTimedOutCancelsPlacedOrder — "A due acceptance deadline on a still-PLACED order records the timeout (gate ON): PLACED → CANCELLED_BY_TIMEOUT"
+/// rules: UnacceptedOrderIsCancelledByTimeoutAndNeverCharged
+#[tokio::test]
+async fn test_order_acceptance_timed_out_cancels_placed_order() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed()]).await;
+    let before = bed.snapshot();
+    let enforce_acceptance_timeout: bool = true;
+    let ev = evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;
+    let _ = result.expect("TestOrderAcceptanceTimedOutCancelsPlacedOrder: the spec expects acceptance");
+    bed.assert_appended("TestOrderAcceptanceTimedOutCancelsPlacedOrder", &before, &[
+        (format!("Order-{}", support::uid("order-1")), fx_order_acceptance_timed_out()),
+    ]);
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderAcceptanceTimedOut")
+            .find(|s| s.reminder == "OrderExpired")
+            .expect("TestOrderAcceptanceTimedOutCancelsPlacedOrder: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderAcceptanceTimedOutCancelsPlacedOrder: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimedOutCancelsPlacedOrder: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderAcceptanceTimedOutCancelsPlacedOrder: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderAcceptanceTimedOutCancelsPlacedOrder: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimedOutCancelsPlacedOrder: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderAcceptanceTimedOutCancelsPlacedOrder: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t2), "TestOrderAcceptanceTimedOutCancelsPlacedOrder: the pending occurrence moved in place");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderAcceptanceTimedOutCancelsPlacedOrder: one pending occurrence per (actor, purpose)");
+    }
+}
+
+/// tests.yaml#/tests/TestOrderAcceptanceTimeoutShadowModeAppendsNothing — "Gate OFF (the default) is shadow mode: the full still-PLACED guard runs, the append is inert"
+/// rules: UnacceptedOrderIsCancelledByTimeoutAndNeverCharged
+#[tokio::test]
+async fn test_order_acceptance_timeout_shadow_mode_appends_nothing() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed()]).await;
+    let before = bed.snapshot();
+    let enforce_acceptance_timeout: bool = false;
+    let ev = evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;
+    let _ = result.expect("TestOrderAcceptanceTimeoutShadowModeAppendsNothing: the spec expects acceptance");
+    bed.assert_appended("TestOrderAcceptanceTimeoutShadowModeAppendsNothing", &before, &[]);
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderAcceptanceTimedOut")
+            .find(|s| s.reminder == "OrderExpired")
+            .expect("TestOrderAcceptanceTimeoutShadowModeAppendsNothing: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderAcceptanceTimeoutShadowModeAppendsNothing: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutShadowModeAppendsNothing: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderAcceptanceTimeoutShadowModeAppendsNothing: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderAcceptanceTimeoutShadowModeAppendsNothing: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutShadowModeAppendsNothing: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderAcceptanceTimeoutShadowModeAppendsNothing: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t2), "TestOrderAcceptanceTimeoutShadowModeAppendsNothing: the pending occurrence moved in place");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderAcceptanceTimeoutShadowModeAppendsNothing: one pending occurrence per (actor, purpose)");
+    }
+}
+
+/// tests.yaml#/tests/TestOrderAcceptanceTimeoutAbsorbedWhenAccepted — "Acceptance won the race: the due deadline on an ACCEPTED order is a benign no-op"
+/// rules: AcceptanceTimeoutOnlyCancelsAStillPlacedOrder
+#[tokio::test]
+async fn test_order_acceptance_timeout_absorbed_when_accepted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_accepted_by_restaurant()]).await;
+    let before = bed.snapshot();
+    let enforce_acceptance_timeout: bool = true;
+    let ev = evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;
+    let _ = result.expect("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: the spec expects acceptance");
+    bed.assert_appended("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted", &before, &[]);
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderAcceptanceTimedOut")
+            .find(|s| s.reminder == "OrderExpired")
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t2), "TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: the pending occurrence moved in place");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderAcceptanceTimeoutAbsorbedWhenAccepted: one pending occurrence per (actor, purpose)");
+    }
+}
+
+/// tests.yaml#/tests/TestOrderAcceptanceTimeoutAbsorbedWhenTerminal — "A terminal order absorbs the deadline: no double-cancel on a customer-cancelled order"
+/// rules: AcceptanceTimeoutOnlyCancelsAStillPlacedOrder
+#[tokio::test]
+async fn test_order_acceptance_timeout_absorbed_when_terminal() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_cancelled_by_customer()]).await;
+    let before = bed.snapshot();
+    let enforce_acceptance_timeout: bool = true;
+    let ev = evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;
+    let _ = result.expect("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: the spec expects acceptance");
+    bed.assert_appended("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal", &before, &[]);
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderAcceptanceTimedOut")
+            .find(|s| s.reminder == "OrderExpired")
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t2), "TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: the pending occurrence moved in place");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderAcceptanceTimeoutAbsorbedWhenTerminal: one pending occurrence per (actor, purpose)");
+    }
+}
+
+/// tests.yaml#/tests/TestOrderAcceptanceTimeoutRedeliveryIsNoOp — "A redelivered acceptance deadline is a benign no-op — the order already timed out"
+/// rules: AcceptanceTimeoutOnlyCancelsAStillPlacedOrder
+#[tokio::test]
+async fn test_order_acceptance_timeout_redelivery_is_no_op() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_acceptance_timed_out()]).await;
+    let before = bed.snapshot();
+    let enforce_acceptance_timeout: bool = true;
+    let ev = evs::OrderAcceptanceTimedOut { order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::record_order_acceptance_timeout(&bed.store, DomainEvent::OrderAcceptanceTimedOut(ev), enforce_acceptance_timeout, &support::actor()).await;
+    let _ = result.expect("TestOrderAcceptanceTimeoutRedeliveryIsNoOp: the spec expects acceptance");
+    bed.assert_appended("TestOrderAcceptanceTimeoutRedeliveryIsNoOp", &before, &[]);
+    // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2; reschedule: in-place)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderAcceptanceTimedOut")
+            .find(|s| s.reminder == "OrderExpired")
+            .expect("TestOrderAcceptanceTimeoutRedeliveryIsNoOp: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderAcceptanceTimeoutRedeliveryIsNoOp: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutRedeliveryIsNoOp: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderAcceptanceTimeoutRedeliveryIsNoOp: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderAcceptanceTimeoutRedeliveryIsNoOp: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderAcceptanceTimeoutRedeliveryIsNoOp: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderAcceptanceTimeoutRedeliveryIsNoOp: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t2), "TestOrderAcceptanceTimeoutRedeliveryIsNoOp: the pending occurrence moved in place");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderAcceptanceTimeoutRedeliveryIsNoOp: one pending occurrence per (actor, purpose)");
+    }
 }
 
 /// tests.yaml#/tests/TestOrderExpiredRedeliveryIsNoOp — "A redelivered expiry reminder is a benign no-op — the order is already expired"
@@ -3274,6 +3471,29 @@ async fn test_order_placed_birth_recorded() {
     bed.assert_appended("TestOrderPlacedBirthRecorded", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_placed()),
     ]);
+    // schedules: OrderAcceptanceTimedOut — the third observable effect (ADR-20260731-214500 §2; reschedule: keep)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "OrderPlaced")
+            .find(|s| s.reminder == "OrderAcceptanceTimedOut")
+            .expect("TestOrderPlacedBirthRecorded: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestOrderPlacedBirthRecorded: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestOrderPlacedBirthRecorded: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderPlacedBirthRecorded: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderPlacedBirthRecorded: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestOrderPlacedBirthRecorded: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Kept), "TestOrderPlacedBirthRecorded: re-declaring must KEEP the first occurrence (reschedule: keep, #167), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderPlacedBirthRecorded: the first scheduled_at wins — a re-declaration never extends the deadline");
+        assert_eq!(mailbox.entries().len(), 1, "TestOrderPlacedBirthRecorded: one pending occurrence per (actor, purpose)");
+    }
 }
 
 /// tests.yaml#/tests/TestPaymentIntentCreatedRecorded — "The Payment is born by recording PaymentIntentCreated with the frozen checkout snapshot"
@@ -4534,6 +4754,29 @@ async fn test_place_replacement_order_copies_items() {
     bed.assert_appended("TestPlaceReplacementOrderCopiesItems", &before, &[
         (format!("Order-{}", support::uid("replacement-order-1")), fx_order_placed_replacement()),
     ]);
+    // schedules: OrderAcceptanceTimedOut — the third observable effect (ADR-20260731-214500 §2; reschedule: keep)
+    {
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
+        let actor_id = support::uid("replacement-order-1");
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "PlaceReplacementOrder")
+            .find(|s| s.reminder == "OrderAcceptanceTimedOut")
+            .expect("TestPlaceReplacementOrderCopiesItems: schedule declared in actors.yaml");
+        let t1 = chrono::Utc::now() + chrono::Duration::from_std(spec.after_default).expect("TestPlaceReplacementOrderCopiesItems: window fits chrono");
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+            .await
+            .expect("TestPlaceReplacementOrderCopiesItems: declare");
+        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestPlaceReplacementOrderCopiesItems: expected a fresh SCHEDULED row, got {first:?}");
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestPlaceReplacementOrderCopiesItems: due at +window");
+        let t2 = t1 + chrono::Duration::days(1);
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+            .await
+            .expect("TestPlaceReplacementOrderCopiesItems: redeclare");
+        assert!(matches!(again, MailboxScheduleOutcome::Kept), "TestPlaceReplacementOrderCopiesItems: re-declaring must KEEP the first occurrence (reschedule: keep, #167), got {again:?}");
+        assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestPlaceReplacementOrderCopiesItems: the first scheduled_at wins — a re-declaration never extends the deadline");
+        assert_eq!(mailbox.entries().len(), 1, "TestPlaceReplacementOrderCopiesItems: one pending occurrence per (actor, purpose)");
+    }
 }
 
 /// tests.yaml#/tests/TestMailboxMessageRequeued — "Requeues a cap-poisoned mailbox row and records the intervention"

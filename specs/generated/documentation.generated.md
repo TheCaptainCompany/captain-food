@@ -3619,8 +3619,8 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [⚡ `OrderPlaced`](#event-orderplaced) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
-| [📩 `PlaceReplacementOrder`](#command-placereplacementorder) | [⚡ `OrderPlaced`](#event-orderplaced) | [⛔ `OrderNotFound`](#error-ordernotfound) |
+| [⚡ `OrderPlaced`](#event-orderplaced) | [⚡ `OrderPlaced`](#event-orderplaced), ⏰ schedules `OrderAcceptanceTimedOut` | — |
+| [📩 `PlaceReplacementOrder`](#command-placereplacementorder) | [⚡ `OrderPlaced`](#event-orderplaced), ⏰ schedules `OrderAcceptanceTimedOut` | [⛔ `OrderNotFound`](#error-ordernotfound) |
 | [📩 `AcceptOrder`](#command-acceptorder) | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `StartPreparation`](#command-startpreparation) | [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `MarkOrderReady`](#command-markorderready) | [⚡ `OrderMarkedReady`](#event-ordermarkedready) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
@@ -3634,12 +3634,14 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 | [📩 `TipOrder`](#command-tiporder) | [⚡ `OrderTipped`](#event-ordertipped) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `InvalidTipRecipient`](#error-invalidtiprecipient) |
 | [📩 `RequestRefund`](#command-requestrefund) | [⚡ `RefundRequested`](#event-refundrequested) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | ⏰ `OrderExpired` _(reminder)_ | [⚡ `OrderExpired`](#event-orderexpired) | — |
+| ⏰ `OrderAcceptanceTimedOut` _(reminder)_ | [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout), ⏰ schedules `OrderExpired` | — |
 
 Reminders (self-scheduled facts — ADR-20260731-214500):
 
 | Reminder | Payload | After | Reschedule |
 | --- | --- | --- | --- |
 | ⏰ `OrderExpired` | [⚡ `OrderExpired`](#event-orderexpired) | ⚙️ `ORDER_RETENTION_WINDOW_DAYS` | in-place |
+| ⏰ `OrderAcceptanceTimedOut` | [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout) | ⚙️ `ORDER_ACCEPTANCE_TIMEOUT_SECONDS` | keep |
 
 Deletion (declarative, generic engine — ADR-20260731-214500):
 
@@ -3663,10 +3665,12 @@ stateDiagram-v2
   ACCEPTED --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
   PREPARING --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
   READY --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
+  PLACED --> CANCELLED_BY_TIMEOUT : OrderAcceptanceTimedOut
   DELIVERED --> [*]
   REJECTED --> [*]
   CANCELLED_BY_CUSTOMER --> [*]
   CANCELLED_BY_RESTAURANT --> [*]
+  CANCELLED_BY_TIMEOUT --> [*]
 ```
 
 <a id="actor-reclamation"></a>
@@ -4794,7 +4798,7 @@ Spend a customer's available store credit at checkout (rejected if it exceeds th
 | <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
 | <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
-### ⚡ Events _(43)_
+### ⚡ Events _(44)_
 
 <a id="event-paymentintentcreated"></a>
 #### ⚡ Event: `PaymentIntentCreated`
@@ -5138,6 +5142,19 @@ The restaurant cancelled the order after initial acceptance.
 | <a id="event-ordercancelledbyrestaurant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-ordercancelledbyrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-ordercancelledbyrestaurant--reason"></a>`reason` | `string` | ✅ |  |
+
+<a id="event-orderacceptancetimedout"></a>
+#### ⚡ Event: `OrderAcceptanceTimedOut`
+
+The acceptance deadline elapsed while the order was still PLACED — at this moment the order IS cancelled by timeout: a FACT, never a command (ADR-20260731-153000 §1a — the deadline's passage cannot be refused). Scheduled by the Order actor's OrderAcceptanceTimedOut reminder on BOTH birth receives (reschedule keep: the first deadline wins, #167), delivered by the promotion pass when due, and recorded with record semantics iff the order is still PLACED — Ignored when acceptance won the race, Duplicate on redelivery, NEVER Rejected. Downstream the payment leg RELEASES the authorization (capture-on-fulfilment, ADR-20260808-195315 §1.2/§1.3): the customer was never charged, so there is no refund on this path. Payload = orderId only, mirroring OrderExpired: the TTL value is policy (configuration), not fact, and is derivable from the envelope timestamps.
+
+- **Emitted by**: [🎭 `Order`](#actor-order)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-orderacceptancetimedout--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
 <a id="event-orderrated"></a>
 #### ⚡ Event: `OrderRated`
@@ -5694,7 +5711,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-paymentintentid"></a>🔤 `PaymentIntentId` | string | Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'. |
 | <a id="scalar-moneycents"></a>🔤 `MoneyCents` | integer | Monetary amount in minor units (e.g. cents). |
 | <a id="scalar-ordernote"></a>🔤 `OrderNote` | string |  |
-| <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
+| <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT \| CANCELLED_BY_TIMEOUT) |  |
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| AUTHORIZED \| CAPTURED \| FAILED \| REFUNDED \| RELEASED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Authorized/Captured/Failed/ Refunded/Released). Authorize-then-capture posture (ADR-20260808-195315 §1.2): AUTHORIZED = funds held on the customer's card at checkout confirmation, not yet moved; CAPTURED = the money moved (capture on delivered / picked up); RELEASED = an uncaptured authorization was voided (rejection, cancellation or expiry — "no need to refund because no capture").  |
 | <a id="scalar-servicewindowverdict"></a>🔤 `ServiceWindowVerdict` | enum (OPEN \| OUTSIDE_HOURS \| HOURS_UNDECLARED) | "Is this restaurant serving right now?" as a three-valued VERDICT derived AT AN INSTANT from the declared opening hours + timezone with the clock injected — deliberately NOT a `*Status` (that suffix means stored state; nobody stores this, everybody computes it, and no event announces it). The third value is the whole point (DECISIONS §43 blocker): `opening_hours` storage collapses "never provided", "cleared" and "unparseable" into ONE `[]`, so `[]` IS HOURS_UNDECLARED by definition — never "closed" — and a NULL timezone (or one that does not parse while hours are declared) is HOURS_UNDECLARED too, because the once-documented account-timezone fallback has no materialized source. Evaluation converts the UTC instant into the restaurant's LOCAL time (total, DST-safe), never slot times to UTC; overnight slots (`to` < `from`, e.g. Friday 19:00–01:00) are legal and cross midnight. At checkout, OUTSIDE_HOURS is the ONLY refusing verdict — OPEN and HOURS_UNDECLARED accept (rules.yaml#/CheckoutRefusesOnlyOutsideServiceHours).  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
@@ -5774,7 +5791,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 
-### 📐 Business rules _(54)_
+### 📐 Business rules _(56)_
 
 <a id="rule-checkoutsnapshotfrozenatintent"></a>
 #### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
@@ -6104,6 +6121,20 @@ _Every order reaching a terminal state (delivered, rejected or cancelled) schedu
 _Delivering the due OrderExpired reminder records the fact with record semantics: Recorded the first time, a benign no-op when the order is already expired — a retention deadline's passage cannot be refused, so REJECTED is not a possible verdict for this delivery (ADR-20260731-153000 §1a, #272)._
 
 - **Verified by**: [🧪 `TestOrderExpiredRecorded`](#test-testorderexpiredrecorded), [🧪 `TestOrderExpiredRedeliveryIsNoOp`](#test-testorderexpiredredeliveryisnoop)
+
+<a id="rule-unacceptedorderiscancelledbytimeoutandnevercharged"></a>
+#### 📐 Rule: `UnacceptedOrderIsCancelledByTimeoutAndNeverCharged`
+
+_A paid order that nobody accepts is never left sitting forever: if it is still PLACED when the acceptance deadline (ORDER_ACCEPTANCE_TIMEOUT_SECONDS past birth — both births, including the $0 replacement, whose first deadline wins: reschedule keep) is delivered, the timeout is recorded and the order moves PLACED -> CANCELLED_BY_TIMEOUT, a terminal state that also starts the GDPR retention clock. The customer is never charged on this path: capture happens on fulfilment (ADR-20260808-195315 §1.2), so the downstream payment leg RELEASES the authorization — release, not refund. Enforcement is gated (ENFORCE_ACCEPTANCE_TIMEOUT, read at delivery time): while OFF the identical guard runs in shadow and only the append is inert._
+
+- **Verified by**: [🧪 `TestOrderAcceptanceTimedOutCancelsPlacedOrder`](#test-testorderacceptancetimedoutcancelsplacedorder), [🧪 `TestOrderAcceptanceTimeoutShadowModeAppendsNothing`](#test-testorderacceptancetimeoutshadowmodeappendsnothing)
+
+<a id="rule-acceptancetimeoutonlycancelsastillplacedorder"></a>
+#### 📐 Rule: `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`
+
+_The timeout delivery is record-semantics, never a rejection, and it cancels ONLY an order that is still PLACED: an order accepted, rejected or cancelled before the deadline fires absorbs the delivery as a benign no-op (the race is lost by design — cancel_scheduled loses to promotion, so the still-PLACED guard is the real protection), and a redelivered timeout on an already timed-out order is a duplicate no-op (#167)._
+
+- **Verified by**: [🧪 `TestOrderAcceptanceTimeoutAbsorbedWhenAccepted`](#test-testorderacceptancetimeoutabsorbedwhenaccepted), [🧪 `TestOrderAcceptanceTimeoutAbsorbedWhenTerminal`](#test-testorderacceptancetimeoutabsorbedwhenterminal), [🧪 `TestOrderAcceptanceTimeoutRedeliveryIsNoOp`](#test-testorderacceptancetimeoutredeliveryisnoop)
 
 <a id="rule-checkoutabortsonpaymentfailure"></a>
 #### 📐 Rule: `CheckoutAbortsOnPaymentFailure`
@@ -6521,6 +6552,56 @@ _The delivered retention reminder records the expiry fact (record semantics, nev
 - **When**: [📩 `OrderExpired`](#command-orderexpired)
 - **Then**: [⚡ `OrderExpired`](#event-orderexpired)
 - **Verifies**: [📐 `OrderExpiryIsRecordedNeverRejected`](#rule-orderexpiryisrecordedneverrejected)
+
+<a id="test-testorderacceptancetimedoutcancelsplacedorder"></a>
+#### 🧪 Test: `TestOrderAcceptanceTimedOutCancelsPlacedOrder`
+
+_A due acceptance deadline on a still-PLACED order records the timeout (gate ON): PLACED → CANCELLED_BY_TIMEOUT_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **Then**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
+- **Verifies**: [📐 `UnacceptedOrderIsCancelledByTimeoutAndNeverCharged`](#rule-unacceptedorderiscancelledbytimeoutandnevercharged)
+
+<a id="test-testorderacceptancetimeoutshadowmodeappendsnothing"></a>
+#### 🧪 Test: `TestOrderAcceptanceTimeoutShadowModeAppendsNothing`
+
+_Gate OFF (the default) is shadow mode: the full still-PLACED guard runs, the append is inert_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `UnacceptedOrderIsCancelledByTimeoutAndNeverCharged`](#rule-unacceptedorderiscancelledbytimeoutandnevercharged)
+
+<a id="test-testorderacceptancetimeoutabsorbedwhenaccepted"></a>
+#### 🧪 Test: `TestOrderAcceptanceTimeoutAbsorbedWhenAccepted`
+
+_Acceptance won the race: the due deadline on an ACCEPTED order is a benign no-op_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant)
+- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
+
+<a id="test-testorderacceptancetimeoutabsorbedwhenterminal"></a>
+#### 🧪 Test: `TestOrderAcceptanceTimeoutAbsorbedWhenTerminal`
+
+_A terminal order absorbs the deadline: no double-cancel on a customer-cancelled order_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer)
+- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
+
+<a id="test-testorderacceptancetimeoutredeliveryisnoop"></a>
+#### 🧪 Test: `TestOrderAcceptanceTimeoutRedeliveryIsNoOp`
+
+_A redelivered acceptance deadline is a benign no-op — the order already timed out_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
+- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
 
 <a id="test-testorderexpiredredeliveryisnoop"></a>
 #### 🧪 Test: `TestOrderExpiredRedeliveryIsNoOp`
@@ -11121,6 +11202,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ page_header — Order queue                │
 │ tab_bar                                  │
 │ order_list                               │
+│ order_card_state — Expired — no response │
 │ section                                  │
 │ «staff_nav»                              │
 └──────────────────────────────────────────┘
@@ -11712,6 +11794,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-orders-start"></a>`back.orders.start` | — | Start preparing | Lancer la préparation |
 | <a id="translation-back-orders-ready"></a>`back.orders.ready` | — | Mark ready | Marquer prête |
 | <a id="translation-back-orders-cancel"></a>`back.orders.cancel` | — | Cancel order | Annuler la commande |
+| <a id="translation-back-orders-timed_out-title"></a>`back.orders.timed_out.title` | — | Expired — no response | Expirée — sans réponse |
+| <a id="translation-back-orders-timed_out-body"></a>`back.orders.timed_out.body` | — | This order timed out before it was accepted. It was cancelled automatically and the customer's payment hold was released. | Cette commande a expiré avant d'être acceptée. Elle a été annulée automatiquement et l'empreinte bancaire du client a été libérée. |
 | <a id="translation-back-orders-empty-title"></a>`back.orders.empty.title` | — | No orders right now | Aucune commande pour le moment |
 | <a id="translation-back-orders-empty-body"></a>`back.orders.empty.body` | — | New orders appear here the moment they are placed. | Les nouvelles commandes apparaissent ici dès qu'elles sont passées. |
 | <a id="translation-back-deliveries-title"></a>`back.deliveries.title` | — | Delivery board | Tableau des livraisons |
@@ -11900,6 +11984,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-status-delivered-body"></a>`order.status.delivered.body` | — | Enjoy your meal. 🎉 | Bon appétit. 🎉 |
 | <a id="translation-order-status-cancelled-title"></a>`order.status.cancelled.title` | — | Order cancelled | Commande annulée |
 | <a id="translation-order-status-cancelled-body"></a>`order.status.cancelled.body` | — | If your card was already charged, a refund is on its way; otherwise the authorization is released and you were never charged. | Si votre carte a déjà été débitée, un remboursement est en cours ; sinon l'autorisation est annulée et vous n'avez jamais été débité. |
+| <a id="translation-order-status-acceptance_timed_out-title"></a>`order.status.acceptance_timed_out.title` | — | The restaurant didn't respond in time | Le restaurant n'a pas répondu à temps |
+| <a id="translation-order-status-acceptance_timed_out-body"></a>`order.status.acceptance_timed_out.body` | — | Your order was cancelled automatically and the hold on your card is being released — you were never charged. | Votre commande a été annulée automatiquement et l'empreinte sur votre carte est en cours de libération — vous n'avez jamais été débité. |
 | <a id="translation-order-eta"></a>`order.eta` | — | Estimated arrival | Arrivée estimée |
 | <a id="translation-order-id_label"></a>`order.id_label` | — | Order ID | N° de commande |
 | <a id="translation-order-rate"></a>`order.rate` | — | Rate your order | Évaluer la commande |

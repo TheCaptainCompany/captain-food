@@ -153,3 +153,24 @@ OrderExpiryIsRecordedNeverRejected:
     first time, a benign no-op when the order is already expired — a retention deadline's passage
     cannot be refused, so REJECTED is not a possible verdict for this delivery
     (ADR-20260731-153000 §1a, #272).
+
+
+# --- Acceptance timeout (#167, ADR-20260808-195315 §1.3) ---
+UnacceptedOrderIsCancelledByTimeoutAndNeverCharged:
+  description: >
+    A paid order that nobody accepts is never left sitting forever: if it is still PLACED when
+    the acceptance deadline (ORDER_ACCEPTANCE_TIMEOUT_SECONDS past birth — both births, including
+    the $0 replacement, whose first deadline wins: reschedule keep) is delivered, the timeout is
+    recorded and the order moves PLACED -> CANCELLED_BY_TIMEOUT, a terminal state that also starts
+    the GDPR retention clock. The customer is never charged on this path: capture happens on
+    fulfilment (ADR-20260808-195315 §1.2), so the downstream payment leg RELEASES the
+    authorization — release, not refund. Enforcement is gated (ENFORCE_ACCEPTANCE_TIMEOUT, read
+    at delivery time): while OFF the identical guard runs in shadow and only the append is inert.
+
+AcceptanceTimeoutOnlyCancelsAStillPlacedOrder:
+  description: >
+    The timeout delivery is record-semantics, never a rejection, and it cancels ONLY an order
+    that is still PLACED: an order accepted, rejected or cancelled before the deadline fires
+    absorbs the delivery as a benign no-op (the race is lost by design — cancel_scheduled loses
+    to promotion, so the still-PLACED guard is the real protection), and a redelivered timeout
+    on an already timed-out order is a duplicate no-op (#167).

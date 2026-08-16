@@ -134,6 +134,17 @@ screens:
         items: "{{ orders }}"
         item_type: order_card
         empty_state: { icon: receipt, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.body' } }
+      # #167: the DECLARED surfacing for a timed-out card. When the acceptance deadline cancels
+      # an order (CANCELLED_BY_TIMEOUT) the card leaves the incoming tab with THIS expired
+      # treatment — "expired, no response, payment hold released" — never a silent vanish: the
+      # restaurant must see what it lost and why. Renders nothing while the enforcement gate is
+      # OFF (no order ever reaches the status).
+      - type: order_card_state
+        id: acceptance_timed_out
+        status: CANCELLED_BY_TIMEOUT
+        icon: clock_x
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.timed_out.title' }
+        body: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.timed_out.body' }
       - type: section
         id: order_actions
         content:

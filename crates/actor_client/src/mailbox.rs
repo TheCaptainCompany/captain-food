@@ -15,6 +15,12 @@ use async_trait::async_trait;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
 
+/// Re-declaration semantics for a scheduled row (#167): `InPlace` postpones the pending
+/// occurrence (ADR-20260731-150500), `Keep` leaves the first `scheduled_at` untouched — a
+/// deadline that re-declaring must never extend. Declared per reminder in actors.yaml
+/// (`reschedule:`) and carried on the generated `ReminderSchedule` table.
+pub use application::generated::reminders::ReschedulePolicy;
+
 /// One mailbox insert — the envelope is the columns (ADR-0041), `payload` is business-only.
 ///
 /// Fields are `pub(crate)` ON PURPOSE: the crate is the permission (PROP-20260802-130500). The
@@ -280,6 +286,9 @@ pub enum MailboxScheduleOutcome {
     /// The identity was still SCHEDULED: `scheduled_at` + payload moved IN PLACE — same row,
     /// same history, one pending occurrence per (actor, purpose) (ADR-20260731-150500 §1).
     Rescheduled,
+    /// The identity was still SCHEDULED and the policy is [`ReschedulePolicy::Keep`] (#167): the
+    /// row is untouched — the FIRST scheduled_at wins, a re-declaration never extends a deadline.
+    Kept,
     /// The pending occurrence is SPENT (promoted or terminal): the row is untouched
     /// (ADR-20260731-150500 §2) — replay vs conflict is the caller's call, as on insert.
     Duplicate { status: InboundMessageStatus, payload_hash: String },
@@ -381,13 +390,16 @@ pub trait Mailbox: Send + Sync {
     ) -> Result<Option<MailboxStatusRow>, DomainError>;
 
     /// Persist the entry as SCHEDULED (`position` NULL until the promotion pass stamps one).
-    /// Re-declaring an identity that is still SCHEDULED postpones IN PLACE — `scheduled_at` and
-    /// the payload move, nothing else (ADR-20260731-150500); a collision with a promoted or
-    /// terminal row leaves it untouched.
+    /// Re-declaring an identity that is still SCHEDULED follows `policy` (#167):
+    /// [`ReschedulePolicy::InPlace`] postpones — `scheduled_at` and the payload move, nothing
+    /// else (ADR-20260731-150500) — while [`ReschedulePolicy::Keep`] leaves the first occurrence
+    /// untouched (a deadline never extends). A collision with a promoted or terminal row leaves
+    /// it untouched under either policy.
     async fn schedule(
         &self,
         entry: &MailboxEntry,
         scheduled_at: chrono::DateTime<chrono::Utc>,
+        policy: ReschedulePolicy,
         access: MailboxAccess,
     ) -> Result<MailboxScheduleOutcome, DomainError>;
 
@@ -515,6 +527,7 @@ pub mod mem {
             &self,
             entry: &MailboxEntry,
             scheduled_at: chrono::DateTime<chrono::Utc>,
+            policy: ReschedulePolicy,
             _access: MailboxAccess,
         ) -> Result<MailboxScheduleOutcome, DomainError> {
             let mut rows = self.rows.lock().expect("mem mailbox poisoned");
@@ -531,12 +544,16 @@ pub mod mem {
                     );
                     Ok(MailboxScheduleOutcome::Scheduled)
                 }
-                Some(row) if row.status == InboundMessageStatus::SCHEDULED => {
-                    row.scheduled_at = Some(scheduled_at);
-                    row.entry.payload = entry.payload.clone();
-                    row.entry.payload_hash = entry.payload_hash.clone();
-                    Ok(MailboxScheduleOutcome::Rescheduled)
-                }
+                Some(row) if row.status == InboundMessageStatus::SCHEDULED => match policy {
+                    ReschedulePolicy::InPlace => {
+                        row.scheduled_at = Some(scheduled_at);
+                        row.entry.payload = entry.payload.clone();
+                        row.entry.payload_hash = entry.payload_hash.clone();
+                        Ok(MailboxScheduleOutcome::Rescheduled)
+                    }
+                    // #167: the first occurrence wins — row, payload and scheduled_at untouched.
+                    ReschedulePolicy::Keep => Ok(MailboxScheduleOutcome::Kept),
+                },
                 Some(row) => Ok(MailboxScheduleOutcome::Duplicate {
                     status: row.status,
                     payload_hash: row.entry.payload_hash.clone(),
@@ -597,17 +614,43 @@ mod tests {
         let t2 = t1 + chrono::Duration::hours(1);
         let first = entry(serde_json::json!({"eventType": "OrderExpired"}));
         assert_eq!(
-            mailbox.schedule(&first, t1, MailboxAccess::granted()).await.unwrap(),
+            mailbox.schedule(&first, t1, ReschedulePolicy::InPlace, MailboxAccess::granted()).await.unwrap(),
             MailboxScheduleOutcome::Scheduled
         );
         let second = entry(serde_json::json!({"eventType": "OrderExpired", "window": "P2Y"}));
         assert_eq!(
-            mailbox.schedule(&second, t2, MailboxAccess::granted()).await.unwrap(),
+            mailbox.schedule(&second, t2, ReschedulePolicy::InPlace, MailboxAccess::granted()).await.unwrap(),
             MailboxScheduleOutcome::Rescheduled
         );
         assert_eq!(mailbox.entries().len(), 1, "one pending occurrence per (actor, purpose)");
         assert_eq!(mailbox.scheduled_at(first.message_id), Some(t2));
         assert_eq!(mailbox.entry(first.message_id).unwrap().payload_hash, second.payload_hash);
+    }
+
+    /// #167: under `reschedule: keep` the FIRST scheduled_at wins — a re-declaration is absorbed
+    /// as [`MailboxScheduleOutcome::Kept`], nothing moves (deadlines never extend).
+    #[tokio::test]
+    async fn mem_schedule_keep_never_extends_the_first_occurrence() {
+        let mailbox = MemMailbox::default();
+        let t1 = chrono::Utc::now() + chrono::Duration::minutes(5);
+        let t2 = t1 + chrono::Duration::minutes(5);
+        let first = entry(serde_json::json!({"eventType": "OrderAcceptanceTimedOut"}));
+        assert_eq!(
+            mailbox.schedule(&first, t1, ReschedulePolicy::Keep, MailboxAccess::granted()).await.unwrap(),
+            MailboxScheduleOutcome::Scheduled
+        );
+        let again = entry(serde_json::json!({"eventType": "OrderAcceptanceTimedOut", "n": 2}));
+        assert_eq!(
+            mailbox.schedule(&again, t2, ReschedulePolicy::Keep, MailboxAccess::granted()).await.unwrap(),
+            MailboxScheduleOutcome::Kept
+        );
+        assert_eq!(mailbox.entries().len(), 1, "one pending occurrence per (actor, purpose)");
+        assert_eq!(mailbox.scheduled_at(first.message_id), Some(t1), "the deadline did not move");
+        assert_eq!(
+            mailbox.entry(first.message_id).unwrap().payload_hash,
+            first.payload_hash,
+            "the first payload stays too"
+        );
     }
 
     /// ADR-20260731-150500 §2/§3: a spent occurrence is a Duplicate, and cancellation only wins
@@ -618,7 +661,7 @@ mod tests {
         let e = entry(serde_json::json!({"eventType": "OrderExpired"}));
         // An immediate insert (RECEIVED) is a spent identity for any later schedule.
         mailbox.insert(&e, MailboxAccess::granted()).await.unwrap();
-        match mailbox.schedule(&e, chrono::Utc::now(), MailboxAccess::granted()).await.unwrap() {
+        match mailbox.schedule(&e, chrono::Utc::now(), ReschedulePolicy::InPlace, MailboxAccess::granted()).await.unwrap() {
             MailboxScheduleOutcome::Duplicate { status, .. } => {
                 assert_eq!(status, InboundMessageStatus::RECEIVED)
             }
@@ -627,7 +670,7 @@ mod tests {
         assert!(!mailbox.cancel_scheduled(e.message_id, MailboxAccess::granted()).await.unwrap(), "RECEIVED is not cancellable");
 
         let scheduled = MailboxEntry { message_id: uuid::Uuid::from_u128(0x5EED2), ..entry(serde_json::json!({})) };
-        mailbox.schedule(&scheduled, chrono::Utc::now(), MailboxAccess::granted()).await.unwrap();
+        mailbox.schedule(&scheduled, chrono::Utc::now(), ReschedulePolicy::InPlace, MailboxAccess::granted()).await.unwrap();
         assert!(mailbox.cancel_scheduled(scheduled.message_id, MailboxAccess::granted()).await.unwrap());
         assert!(!mailbox.cancel_scheduled(scheduled.message_id, MailboxAccess::granted()).await.unwrap(), "already CANCELLED");
         assert_eq!(

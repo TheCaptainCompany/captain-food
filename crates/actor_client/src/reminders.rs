@@ -54,10 +54,12 @@ pub fn scheduled_entry(
     }
 }
 
-/// Declare (or re-declare) one reminder through the [`Mailbox`] port: "schedule it for the time
-/// you NOW want" — idempotent and self-postponing (ADR-20260731-150500). Used by tests and
-/// pool-side callers; the mailbox delivery glue applies [`scheduled_entry`] inside its completion
-/// transaction instead, so a committed delivery can never lose its declared reminder.
+/// Declare (or re-declare) one reminder through the [`Mailbox`] port, under the spec's DECLARED
+/// reschedule policy: `in-place` is "schedule it for the time you NOW want" — idempotent and
+/// self-postponing (ADR-20260731-150500) — while `keep` (#167) lets the FIRST scheduled_at win
+/// (a deadline never extends). Used by tests and pool-side callers; the mailbox delivery glue
+/// applies [`scheduled_entry`] inside its completion transaction instead, so a committed
+/// delivery can never lose its declared reminder.
 pub async fn declare(
     mailbox: &dyn Mailbox,
     spec: &ReminderSchedule,
@@ -70,6 +72,7 @@ pub async fn declare(
         .schedule(
             &scheduled_entry(spec, actor_id, partition, correlation_id, None),
             scheduled_at,
+            spec.reschedule,
             MailboxAccess::granted(),
         )
         .await
