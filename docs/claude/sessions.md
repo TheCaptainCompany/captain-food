@@ -1464,6 +1464,14 @@ containing `` `system` `` silently lost the word and committed the gap. The exis
 covers Makefile recipes; this is the same class one layer over. Write any commit message with
 backticks, `$`, or `!` to a file and use `git commit -F <file>`.
 
+**It is not just commit messages — it is every double-quoted payload, and GitHub comment bodies are
+the one that gets seen** (2026-08-16, #609). `python3 -c "…"` inside double quotes has exactly the
+same hole: a PR comment built that way posted as *"Final head  — CI green.       all `success`"*,
+with the head sha and six check names eaten, and bash helpfully logged `276af29: command not found`
+next to an `HTTP=201`. **A 201 is not evidence the body is right.** Same fix, one level up: build any
+body with a **quoted** heredoc (`<<'PYEOF'`), never `-c "…"`, and for a comment that already went out
+wrong, `PATCH /repos/{o}/{r}/issues/comments/{id}` repairs it in place.
+
 ## 18. A CI-workflow change: does it fit the job's timeout, and does it regress the rollback path?
 
 A mob briefing for a change to a `.github/workflows/*.yml` step must ask two questions no code lens
