@@ -2971,6 +2971,7 @@ dependencies = [
  "futures",
  "hex",
  "hmac",
+ "infrastructure",
  "opentelemetry",
  "opentelemetry_sdk",
  "reqwest",

@@ -1,8 +1,14 @@
 //! #456: the one emission this chunk declares — `orders_placed_total{status="PLACED"}`, the "a
-//! stranger paid us" BAM counter — proved FIRING through the real emit seam
-//! (`infrastructure::mailbox::record_order_placements`, called after `flush_staged_in_tx` at
-//! handler.rs), never assumed from the constant in `contract.rs`. Before this chunk there were
-//! ZERO emission sites, so the un-told-order alarm could never fire.
+//! stranger paid us" BAM counter — proved FIRING through the real emit seam, never assumed from
+//! the constant in `contract.rs`. Before this chunk there were ZERO emission sites, so the
+//! un-told-order alarm could never fire.
+//!
+//! The seam is `mailbox::flush::record_order_placements`, the LAST thing `flush_staged_in_tx` does
+//! once the staged appends are in the completion transaction — the single place the counter's WHEN
+//! is decided, for every delivery route there is or ever will be (#588). Since #597 it is PRIVATE
+//! to that module, so this binary drives it through `record_order_placements_spy`, a delegating
+//! seam compiled only under `test-fixtures`: the test keeps its proof, and no delivery route can
+//! reach the decision.
 //!
 //! Its OWN test binary on purpose: `telemetry::meters` binds `opentelemetry::global::meter` once
 //! per process (`OnceLock`), so the spy provider must be installed before the process's FIRST
@@ -22,7 +28,7 @@ use application::staging::StagedAppend;
 use domain::generated::entities as ent;
 use domain::generated::events::{self as evs, DomainEvent};
 use domain::generated::scalars as sc;
-use infrastructure::mailbox::record_order_placements;
+use infrastructure::mailbox::record_order_placements_spy as record_order_placements;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 

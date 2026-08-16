@@ -6,6 +6,16 @@ license-file.workspace = true
 publish = false
 description = "Captain.Food infrastructure: adapters implementing the application ports — the event store (append to domain_events), read-model repos over the materialized projection tables, the app-layer projection worker (ADR-0040), the SIRENE staging-table sync worker (ADR-0045), and the integrations ACL (HubRise/Stripe/delivery). Depends on `application` + `domain` + `sirene_ingest` (ADR-0035/0045)."
 
+[features]
+# Cross-crate TEST access (the PROP-20260802-130500 D5 mechanism, applied at this crate for #597):
+# the #456 spy seam `mailbox::record_order_placements_spy`, the only path to the BAM counter's emit
+# decision, which is otherwise private to `mailbox::flush` so no delivery route can call it. The
+# spy runs in its OWN test binary (one process, one meter provider), so it links this crate from
+# outside and cannot see `cfg(test)` — hence a feature, enabled ONLY from [dev-dependencies]. The
+# codegen guard `test_fixtures_feature_never_reaches_a_release_artifact` fails the build if any
+# [dependencies] entry (i.e. a release artifact) turns it on.
+test-fixtures = []
+
 [dependencies]
 domain = { path = "../domain" }
 application = { path = "../application" }
@@ -67,6 +77,11 @@ base64 = "0.22"
 aes-gcm = "0.10"
 
 [dev-dependencies]
+# The SELF dev-dependency is what lights this crate's own `test-fixtures` for its integration-test
+# targets (the actor_client precedent): `tests/orders_placed_metric.rs` reaches the #456 spy seam
+# through it. A dev-dependency cycle Cargo permits precisely for this shape; it never reaches a
+# release graph.
+infrastructure = { path = ".", features = ["test-fixtures"] }
 # The #474 database-test gate: DB-gated suites are REQUIRED by default and skip only under an
 # explicit `DB_TESTS_REQUIRED=0`, which leaves a receipt. Dev-only -- the release graph never
 # links it (std-only, no build cost).

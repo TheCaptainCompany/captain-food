@@ -4144,6 +4144,17 @@ keys:
             application_manifest.contains("test-fixtures = []"),
             "application no longer declares the `test-fixtures` feature — move this guard with it"
         );
+        // #597: `infrastructure` declares the same feature for the #456 spy seam
+        // (`mailbox::record_order_placements_spy`) — the emit decision itself is private to
+        // `mailbox::flush`, so no delivery route can name it, and the out-of-crate spy binary
+        // reaches it through this feature alone. Same rule, third declaring crate.
+        let infrastructure_manifest =
+            std::fs::read_to_string(root.join("crates/infrastructure/Cargo.toml"))
+                .expect("crates/infrastructure/Cargo.toml readable");
+        assert!(
+            infrastructure_manifest.contains("test-fixtures = []"),
+            "infrastructure no longer declares the `test-fixtures` feature — move this guard with it"
+        );
 
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -4180,7 +4191,8 @@ keys:
             // feature for every dependent with no grant anywhere. So the ONLY line these two
             // manifests may say outside [dev-dependencies] is the declaration itself.
             let declaring = rel == "crates/actor_client/Cargo.toml"
-                || rel == "crates/application/Cargo.toml";
+                || rel == "crates/application/Cargo.toml"
+                || rel == "crates/infrastructure/Cargo.toml";
             let mut section = String::new();
             for line in src.lines() {
                 let t = line.trim();
