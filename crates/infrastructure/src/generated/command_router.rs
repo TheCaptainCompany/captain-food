@@ -37,6 +37,12 @@ pub struct CommandDeps {
     /// composition-root resolution as `enforce_service_hours_guard`. OFF (the default) is SHADOW
     /// MODE: the full still-PLACED guard runs, only the append is inert.
     pub enforce_acceptance_timeout: bool,
+    /// #588 (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`, ADR-20260816-040239): route
+    /// the saga's `deliver: OrderPlaced to: Order` through the Order's own mailbox lane instead of
+    /// appending to its stream from the saga. Read at DELIVERY time by the PM-fact route, which
+    /// hands the saga a lane sink only when this is ON -- OFF (the default) leaves the legacy
+    /// foreign-stream append untouched, so rollback is a config flip, never a redeploy.
+    pub route_order_birth_through_lane: bool,
 }
 
 /// The slice of the request envelope some handler calls read (placeOrder's session scope).

@@ -895,6 +895,7 @@ pub async fn router() -> Router {
                         // at DELIVERY time by the OrderAcceptanceTimedOut route — same
                         // composition-root resolution.
                         enforce_acceptance_timeout: config.enforce_acceptance_timeout,
+                        route_order_birth_through_lane: config.route_order_birth_through_lane,
                     };
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

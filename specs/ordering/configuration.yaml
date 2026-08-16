@@ -24,6 +24,34 @@ keys:
       it is additive and nothing binds acceptance to it.
 
 
+  ROUTE_ORDER_BIRTH_THROUGH_LANE:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The Order-lane BIRTH routing (#588, ADR-20260816-040239 "deliver: is a lane ENQUEUE, not a
+      foreign-stream append"). ON, PlaceOrderProcess's `deliver: OrderPlaced to: Order` step stops
+      calling Repository::save on the Order's stream and instead stages a lane ENQUEUE that the
+      delivery glue turns into an inbound_messages row INSIDE the same fenced transaction; the
+      Order's own lane worker then appends the birth, and it is THAT delivery's Recorded verdict
+      the acceptance deadline is keyed on. OFF — the DEFAULT — is today's behaviour byte for byte:
+      the saga appends OrderPlaced (and CartCheckedOut) itself and no Order-lane message exists.
+      What flipping it CHANGES, stated plainly: (a) the birth gains one lane hop of latency after
+      the payment authorization commits — the order is still accepted acceptance-first, but the
+      OrderPlaced row appears a beat later; (b) the birth's ENVELOPE changes — user_id/user_type
+      and cause_id come from the mailbox row rather than the saga's system actor (no fold, view or
+      projector reads either, verified in the ADR §2, and stored rows are NEVER backfilled); (c)
+      one aggregate per transaction on the checkout saga's most expensive leg, where today
+      Order-{id} and Cart-{id} are written in one; (d) the acceptance clock can arm at all, which
+      is precondition (5) of ENFORCE_ACCEPTANCE_TIMEOUT below. ROLLBACK IS A FLIP, NOT A REDEPLOY:
+      set it OFF and the next delivery appends the legacy way; already-routed births stay as they
+      are (reversible in code, not in state — those rows exist). Both the monolith and any
+      standalone worker fleet MUST read the same value; a split fleet would route some births and
+      append others. Flipping the default is a SEPARATE recorded decision, and it is scoped to the
+      Order/OrderPlaced pair alone — the other twelve deliver: steps keep the legacy append until
+      each is moved by its own record.
+
   ORDER_ACCEPTANCE_TIMEOUT_SECONDS:
     type: int
     unit: seconds     # typed duration unit (#167) — the emitters branch on THIS, never on the name
@@ -62,12 +90,17 @@ keys:
       from how long real restaurants actually take per daypart, never guessed: a 300 s deadline
       that cancels a quarter of Friday-dinner orders at a slow-but-honest kitchen is a product
       decision made blind. AND (5) a production PRODUCER for the Order-lane birth message — issue
-      #588, "the normal checkout path never enqueues OrderPlaced onto the Order lane": today NO
-      path does (the PlaceOrderProcess deliver: step appends OrderPlaced straight to the event
-      store, the reclamation PM calls place_replacement_order in-process), so no acceptance clock
-      is armed for any real order and precondition (3) cannot be satisfied at all — a flip on an
-      unarmed clock would change nothing while reading as shipped. This precondition is FIRST in
-      dependency order even though it is listed last. The flip is PROSPECTIVE only: occurrences
+      #588, "the normal checkout path never enqueues OrderPlaced onto the Order lane": the
+      producer now EXISTS but is gated — it is ROUTE_ORDER_BIRTH_THROUGH_LANE above, and while
+      that is OFF the saga still appends OrderPlaced straight to the event store, so no acceptance
+      clock is armed for any real order and precondition (3) cannot be satisfied at all — a flip
+      on an unarmed clock would change nothing while reading as shipped. So this precondition now
+      reads: ROUTE_ORDER_BIRTH_THROUGH_LANE is ON in production and births are observed arriving
+      on the Order lane (the birth-lag histogram, specs/observability.yaml#/place-order). It is
+      FIRST in dependency order even though it is listed last. Second, unfixed producer gap: the
+      reclamation PM calls place_replacement_order in-process from the polling runner, which owns
+      no delivery transaction and therefore cannot use this seam — a replacement order's clock
+      stays unarmed until issue #595 moves that route onto the mailbox. The flip is PROSPECTIVE only: occurrences
       fired-and-absorbed while OFF are spent, nobody synthesizes timeouts for orders already past
       the TTL.
 

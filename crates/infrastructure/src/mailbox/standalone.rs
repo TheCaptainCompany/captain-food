@@ -135,6 +135,13 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         enforce_acceptance_timeout: std::env::var("ENFORCE_ACCEPTANCE_TIMEOUT")
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false),
+        // #588 (ADR-20260816-040239): route the Order birth through the Order's own lane — same
+        // ENV-GATED posture, same boolean parse, same default (OFF = the legacy foreign-stream
+        // append) as the spec. A standalone worker fleet and the monolith MUST read the same
+        // value: half a fleet routing and half appending would birth some orders twice.
+        route_order_birth_through_lane: std::env::var("ROUTE_ORDER_BIRTH_THROUGH_LANE")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+            .unwrap_or(false),
     }
 }
 

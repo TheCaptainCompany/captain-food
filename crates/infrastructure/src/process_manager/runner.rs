@@ -400,7 +400,10 @@ impl ProcessManagerRunner {
         let trigger = Trigger {
             event_type,
             event,
-            envelope: TriggerEnvelope { event_id, correlation_id, occurred_at },
+            // NO lane sink (#588): the polling runner owns no delivery transaction to stage an
+            // enqueue into, so routed `deliver:` steps take the legacy append here. The
+            // reclamation replacement birth this route reaches is issue #595.
+            envelope: TriggerEnvelope::unlaned(event_id, correlation_id, occurred_at),
         };
         self.dispatch(group.pm, &trigger).await
     }

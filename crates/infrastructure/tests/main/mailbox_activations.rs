@@ -92,6 +92,8 @@ fn deps_over(store: Arc<dyn EventStore>, pool: &PgPool) -> CommandDeps {
         enforce_service_hours_guard: false,
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
+        // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
+        route_order_birth_through_lane: false,
     }
 }
 

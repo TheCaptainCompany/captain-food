@@ -233,6 +233,8 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         enforce_service_hours_guard: false,
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
+        // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
+        route_order_birth_through_lane: false,
     }
 }
 
@@ -690,6 +692,19 @@ async fn birth_row(pool: &PgPool) -> sqlx::postgres::PgRow {
     rows.into_iter().next().unwrap()
 }
 
+/// [`deps_over`] with the #588 birth routing ON.
+///
+/// The ONE knob these tests turn, and turning it is the point: ADR-20260816-040239 ships the
+/// routing behind `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`, default OFF, because it
+/// changes a money-path saga's commit path (gate-then-stabilize — rollback must be a flip, not a
+/// redeploy). The flag-OFF path is not left unproven: it is exactly what
+/// `payment_authorized_chains_to_the_pm_lane_and_materializes_the_order` above asserts, on plain
+/// [`deps_over`] — the saga appends `OrderPlaced` itself and no Order-lane message exists. So the
+/// two postures are covered by two tests, and neither is a weakened version of the other.
+fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
+    CommandDeps { route_order_birth_through_lane: true, ..deps_over(pool, payments) }
+}
+
 /// An Order-lane worker with the reminder windows wired — a missing window aborts every delivery
 /// on the lane by design, so the acceptance clock cannot be observed without them.
 async fn order_worker(pool: &PgPool, id: &str, deps: CommandDeps) -> MailboxWorker {
@@ -720,7 +735,7 @@ async fn checkout_through_authorization(
 ) -> (MailboxWorker, uuid::Uuid) {
     enqueue_pm(pool, "PlaceOrderProcess", uid(ORDER), 0xC1, "PlaceOrder", place_order_payload(None))
         .await;
-    let pm_worker = worker_over(pool, "PlaceOrderProcess", deps_over(pool, gateway.clone())).await;
+    let pm_worker = worker_over(pool, "PlaceOrderProcess", routed_deps(pool, gateway.clone())).await;
     assert_eq!(drain_all(&pm_worker).await, 1, "the checkout leg delivers");
 
     let payment_actor = actor_client::surrogate_actor_id("Payment", "pi_prepare_test");
@@ -755,7 +770,7 @@ async fn checkout_through_authorization(
         "w-PAY588",
         "Payment",
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
-        Arc::new(MailboxCommandHandler::new(deps_over(pool, gateway.clone()))),
+        Arc::new(MailboxCommandHandler::new(routed_deps(pool, gateway.clone()))),
     );
     pay_worker.seed(5).await.expect("seed payment lanes");
     pay_worker.claim().await.expect("claim payment lanes");
@@ -821,17 +836,31 @@ async fn authorized_payment_enqueues_the_order_birth_and_arms_the_clock() {
     );
 
     let birth = birth_row(&pool).await;
-    // Both or neither: the door insert rides the delivery transaction that also flushed the run row.
-    let run_status: String = sqlx::query_scalar(
-        "SELECT process_status FROM payment_process_manager WHERE cart_id = $1",
+    // Both or neither, asserted about the COMMIT and not about row counts (beck): Postgres exposes
+    // the inserting transaction id as the system column `xmin`, so two rows written by the same
+    // transaction share it. If the door insert ever moves off the passed `&mut Transaction` onto a
+    // pool handle — the exact mistake vernon's constraint (ii) exists to prevent, and one no count
+    // of rows can see — the two xmins diverge and this goes red.
+    let (run_status, run_xmin): (String, i64) = sqlx::query_as(
+        "SELECT process_status, xmin::text::bigint FROM payment_process_manager WHERE cart_id = $1",
     )
     .bind(uid(CART))
     .fetch_one(&pool)
     .await
     .expect("the run row committed with the delivery");
+    assert_eq!(run_status, "ORDER_PLACED", "the saga leg resolved its run");
+    let birth_xmin: i64 = sqlx::query_scalar(
+        "SELECT xmin::text::bigint FROM inbound_messages WHERE message_id = $1",
+    )
+    .bind(birth.get::<uuid::Uuid, _>("message_id"))
+    .fetch_one(&pool)
+    .await
+    .expect("the birth row's inserting transaction");
     assert_eq!(
-        run_status, "ORDER_PLACED",
-        "the run row and the birth message are one transaction — both or neither"
+        birth_xmin, run_xmin,
+        "the birth message and the run row were written by the SAME transaction — the door insert \
+         rides the delivery's `&mut Transaction`, never `self.deps`' pool (ADR-20260816-040239 \
+         constraint 2)"
     );
     assert_eq!(birth.get::<uuid::Uuid, _>("actor_id"), uid(ORDER), "lane = the Order");
     assert_eq!(
@@ -860,9 +889,14 @@ async fn authorized_payment_enqueues_the_order_birth_and_arms_the_clock() {
     );
 
     // --- (b) explicit drain → the canonical Recorded arm -----------------------------------------
-    let worker = order_worker(&pool, "w-ORD588a", deps_over(&pool, Arc::new(StubGateway::default())))
+    let worker = order_worker(&pool, "w-ORD588a", routed_deps(&pool, Arc::new(StubGateway::default())))
         .await;
+    // Bracket the drain: `apply_schedules_in_tx` computes `now() + window` INSIDE the delivery
+    // transaction, so the deadline must land in `[t0 + window, t1 + window]` — deterministic under
+    // any CI pause, where a fixed tolerance is a flake waiting for a slow runner (beck).
+    let t0 = chrono::Utc::now();
     assert_eq!(drain_all(&worker).await, 1, "the Order lane delivers the birth");
+    let t1 = chrono::Utc::now();
     let birth_id: uuid::Uuid = birth.get("message_id");
     let (status, error) = verdict_of(&pool, birth_id).await;
     assert_eq!(
@@ -902,10 +936,13 @@ async fn authorized_payment_enqueues_the_order_birth_and_arms_the_clock() {
         "the clock is armed BY the birth delivery, not by some other route"
     );
     let scheduled_at: chrono::DateTime<chrono::Utc> = deadlines[0].get("scheduled_at");
-    let lag = (scheduled_at - occurred_at).num_milliseconds() - 300_000;
+    let window = chrono::Duration::seconds(300);
     assert!(
-        (0..=2_000).contains(&lag),
-        "due one ORDER_ACCEPTANCE_TIMEOUT_SECONDS window after the birth; off by {lag} ms"
+        (t0 + window..=t1 + window).contains(&scheduled_at),
+        "due one ORDER_ACCEPTANCE_TIMEOUT_SECONDS window after the birth delivery: expected \
+         within [{}, {}], got {scheduled_at} (the birth appended at {occurred_at})",
+        t0 + window,
+        t1 + window
     );
 }
 
@@ -935,7 +972,7 @@ async fn redelivered_authorization_dedups_the_birth_at_the_door() {
 
     // Arm the clock through the Order lane, then park the deadline at a time NO fresh declaration
     // would compute — a Keep→InPlace mutation becomes an unmissable seven-day move, not jitter.
-    let worker = order_worker(&pool, "w-ORD588b", deps_over(&pool, Arc::new(StubGateway::default())))
+    let worker = order_worker(&pool, "w-ORD588b", routed_deps(&pool, Arc::new(StubGateway::default())))
         .await;
     assert_eq!(drain_all(&worker).await, 1);
     let deadline_id = application::reminders::reminder_message_id(uid(ORDER), "OrderAcceptanceTimedOut");

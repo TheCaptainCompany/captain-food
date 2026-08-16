@@ -142,6 +142,8 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         enforce_service_hours_guard: false,
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
+        // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
+        route_order_birth_through_lane: false,
     };
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));

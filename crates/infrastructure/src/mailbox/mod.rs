@@ -45,14 +45,49 @@ fn staged_contains_order_placed(staged: &[StagedAppend]) -> bool {
 
 /// Emit `orders_placed_total{status="PLACED"}` once per delivery that actually placed an order —
 /// the "a stranger paid us" BAM signal (#456 "Emit orders_placed_total so the un-told-order alarm
-/// can fire"). Call AFTER [`flush_staged_in_tx`] succeeds, so the counter only advances once the
-/// `OrderPlaced` append is in the completion transaction (durable-first). Keying on the staged set
-/// rather than the delivery outcome is what makes it replay-safe — see
-/// [`staged_contains_order_placed`]. This is the infra/framework boundary the c4-l3 `instrumented`
-/// rule allows the telemetry SDK to live at; the domain and application layers stay SDK-free.
+/// can fire"). Keying on the staged set rather than the delivery outcome is what makes it
+/// replay-safe — see [`staged_contains_order_placed`]. This is the infra/framework boundary the
+/// c4-l3 `instrumented` rule allows the telemetry SDK to live at; the domain and application
+/// layers stay SDK-free.
+///
+/// **WHEN it fires is not this function's business, and no route's either** (#588). It used to be
+/// called from ONE delivery route — the PM fact route, because that was the only place an
+/// `OrderPlaced` could be staged. Moving the birth onto the Order lane moved the append to a
+/// DIFFERENT route, and the counter would have gone silently to zero: a dashboard reading "no
+/// stranger has paid us" while orders were being placed normally, which is precisely the failure
+/// the counter exists to detect. Nothing caught it, because "which routes count" was a decision
+/// each route made separately.
+///
+/// So the decision now lives in exactly one place — [`flush_staged_in_tx`], THE way staged events
+/// reach `domain_events`. A delivery that appends an `OrderPlaced` counts it because it flushed
+/// it, and a new route cannot forget. This function stays public because it is the EMIT seam the
+/// #456 spy test drives (`tests/orders_placed_metric.rs`); calling it from a delivery route is the
+/// mistake, and `no_delivery_route_decides_when_to_count_a_placement` below fails the build if one
+/// starts again.
 pub fn record_order_placements(staged: &[StagedAppend]) {
     if staged_contains_order_placed(staged) {
         telemetry::meters::place_order::placed("PLACED");
+    }
+}
+
+/// Record `order_birth_lag_ms{routed}` — the HANDOVER a routed birth introduces (#588,
+/// ADR-20260816-040239): the mailbox row's `received_at` IS the instant the saga's enqueue
+/// committed, so `now - received_at` at the Order lane's delivery is enqueue → `Recorded` with no
+/// extra clock and nothing for the domain to know about. Call AFTER the flush, and only when the
+/// delivery actually appended the birth (the staged set holds `OrderPlaced` on the `Recorded` arm
+/// only) — a redelivery that absorbed an already-recorded birth measured nothing and must not
+/// report a lag of "however long ago the first delivery was".
+///
+/// Operational, not BAM (ADR-20260811-014129): this is lane depth and worker liveness, and it has
+/// to keep working when Postgres is degraded.
+pub fn record_order_birth_lag(
+    message: &actor_runtime::InboundMessage,
+    staged: &[StagedAppend],
+    routed: bool,
+) {
+    if staged_contains_order_placed(staged) {
+        let lag_ms = (chrono::Utc::now() - message.received_at).num_milliseconds().max(0) as f64;
+        telemetry::meters::place_order::birth_lag(routed, lag_ms);
     }
 }
 
@@ -97,11 +132,95 @@ pub async fn flush_staged_in_tx(
             }
         }
     }
+    // The #456 BAM counter, decided HERE and nowhere else (#588): this function is the only way a
+    // staged event reaches `domain_events`, so whichever delivery route appends the birth counts
+    // it — and exactly one route ever can, so the routing flag cannot double-count. Emitted after
+    // the inserts, so the count only moves once the append is in the completion transaction
+    // (durable-first). See [`record_order_placements`] for the regression this shape prevents.
+    record_order_placements(staged);
     Ok(())
 }
 
 fn actor_user_id(actor: &Actor) -> uuid::Uuid {
     actor.user_id
+}
+
+/// Flush staged lane ENQUEUES into the completion transaction — the second half of
+/// ADR-20260816-040239's seam, and the reason a routed `deliver:` is not a dual write: the door
+/// row and the saga's own effects (the run row, the remaining appends, the verdict) commit or roll
+/// back together. A degenerate outbox — same database, same transaction, no relay.
+///
+/// Three properties, each load-bearing:
+///
+/// - **`&mut Transaction`, never `self.deps`' pool.** Get this wrong and the atomicity is a
+///   fiction: a crash between the insert and the commit would leave a birth message for a saga hop
+///   that never happened.
+/// - **The identity is the caller's, and it is FROZEN**: `inbound_message_id(source, external_id)`
+///   with `external_id` = the TARGET AGGREGATE's id. A redelivered trigger re-derives the SAME id
+///   and collides on the primary key, so redelivery dedups at the door rather than at the
+///   aggregate — and `ON CONFLICT DO NOTHING` makes that collision a **success**, never an error
+///   the process manager must handle.
+/// - **`pg_notify` rides the same transaction** (PROP-20260802-223522 D1), so the target lane's
+///   worker — in this process or any other — wakes when the delivery commits and never on a
+///   rolled-back one. A deduplicated insert notifies nobody, which is correct: the first insert
+///   already did.
+///
+/// The ENVELOPE is stamped from the triggering mailbox row: `cause_id` is that row (the causality
+/// chain the saga hop belongs to) and the principal carries over, so the birth records who actually
+/// caused it. Post-flip `OrderPlaced` rows therefore carry a different envelope from the
+/// saga-appended ones — legal, permanent and never backfilled (ADR-20260816-040239 "What
+/// legitimately changes").
+pub async fn flush_lane_enqueues_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    message: &actor_runtime::InboundMessage,
+    enqueues: &[application::lanes::LaneEnqueue],
+) -> Result<(), DomainError> {
+    for enqueue in enqueues {
+        // The lane keyspace WIDTH is the actor's seeded registry row count — the same source the
+        // workers seeded from, so a routed deliver can never address a partition no worker drains.
+        let width: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
+                .bind(enqueue.actor_type)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| DomainError::Repository(e.to_string()))?;
+        if width == 0 {
+            return Err(DomainError::Repository(format!(
+                "routed deliver of '{}' but '{}' has no seeded lanes — start its worker first",
+                enqueue.event_type, enqueue.actor_type
+            )));
+        }
+        let message_id = actor_client::inbound_message_id(&enqueue.source, &enqueue.external_id);
+        sqlx::query(
+            "WITH ins AS ( \
+               INSERT INTO inbound_messages \
+                 (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+                  payload_hash, channel, user_id, user_type, correlation_id, cause_id, source, \
+                  external_id) \
+               VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11, $12, $13) \
+               ON CONFLICT (message_id) DO NOTHING \
+               RETURNING actor_type \
+             ) \
+             SELECT pg_notify('inbound_messages', actor_type) FROM ins",
+        )
+        .bind(message_id)
+        .bind(enqueue.actor_type)
+        .bind(enqueue.actor_id)
+        .bind(actor_client::stable_partition(&enqueue.actor_id, width as u16))
+        .bind(enqueue.event_type)
+        .bind(&enqueue.payload)
+        .bind(application::journal::payload_hash(&enqueue.payload))
+        .bind(message.user_id)
+        .bind(&message.user_type)
+        .bind(message.correlation_id)
+        .bind(message.message_id)
+        .bind(&enqueue.source)
+        .bind(&enqueue.external_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| DomainError::Repository(e.to_string()))?;
+    }
+    Ok(())
 }
 
 /// Apply the delivered message's declared `schedules:` INSIDE the completion transaction
@@ -294,6 +413,31 @@ mod order_placed_predicate_tests {
         let mut appends = staged(vec![cart_started()]);
         appends.extend(staged(vec![order_placed()]));
         assert!(staged_contains_order_placed(&appends));
+    }
+
+    /// **#588 regression guard.** The zeroing this prevents: `record_order_placements` used to be
+    /// called by ONE delivery route, because that route was the only place an `OrderPlaced` could
+    /// be staged. Routing the birth onto the Order lane moved the append to another route and the
+    /// #456 counter would have gone silently to zero — a flat "nobody has paid us" dashboard while
+    /// checkout worked fine. NOTHING caught that, because "does this route count?" was a decision
+    /// each route took on its own.
+    ///
+    /// The fix is structural: [`flush_staged_in_tx`] — the single way a staged event reaches
+    /// `domain_events` — decides, so a route cannot forget. This test is the other half: it fails
+    /// if any delivery route starts deciding again. A source scan rather than a type, because the
+    /// mistake is an ABSENT call, and absence is exactly what the type system cannot see (the
+    /// `actor_door_is_named_only_by_generated_client_crates` pattern: level 3 where level 4
+    /// cannot reach).
+    #[test]
+    fn no_delivery_route_decides_when_to_count_a_placement() {
+        let handler = include_str!("handler.rs");
+        assert!(
+            !handler.contains("record_order_placements"),
+            "handler.rs names `record_order_placements`: the BAM counter's WHEN belongs to \
+             flush_staged_in_tx alone (#588). A per-route call is how the counter silently went \
+             to zero when the Order birth moved lanes — add the append to the flush, not the \
+             count to the route."
+        );
     }
 
     #[test]
