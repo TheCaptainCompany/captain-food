@@ -176,6 +176,11 @@ impl Mailbox for PgMailbox {
                    WHERE inbound_messages.status = 'SCHEDULED' \
                  RETURNING (xmax = 0) AS inserted"
             }
+            // Guarded by `keep_policy_never_extends_the_first_scheduled_at`
+            // (crates/infrastructure/tests/main/mailbox_schedule_pg.rs), the declare-time path.
+            // NOTE this is NOT the site the #167 birth clock goes through — that is
+            // `infrastructure::mailbox`'s post-delivery pass; the two DO NOTHING clauses need
+            // separate mutation coverage and have it.
             actor_client::ReschedulePolicy::Keep => {
                 "INSERT INTO inbound_messages \
                    (message_id, position, kind, actor_type, actor_id, partition, message_type, \

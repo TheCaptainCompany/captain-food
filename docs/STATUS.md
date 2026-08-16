@@ -23,6 +23,16 @@
 > machinery) — now the FOURTH flip precondition in the gate text, and
 > `screen-status-token-unknown` (status-typed screen fields must be enum members). The flip
 > stays a separate recorded decision; nothing enforces until then.
+> **What this does NOT ship — the acceptance clock is armed for NO real order today.** No
+> production path enqueues an `Order`-lane birth message: the PlaceOrderProcess `deliver:` step
+> appends `OrderPlaced` straight to the event store (`crates/application/src/generated/process_managers.rs:663-667`)
+> and the reclamation PM calls `place_replacement_order` in-process
+> (`crates/application/src/process_managers/reclamation.rs:104`), so the birth route this PR adds
+> is reachable from tests only. Consequences, both of them real: a paid order still sits PLACED
+> forever in production, and **zero shadow evidence accumulates**, which makes flip precondition
+> (3) unreachable by the mechanism shipped here. The producer is tracked as
+> [#588 "The normal checkout path never enqueues OrderPlaced onto the Order lane — the acceptance clock cannot start for saga-appended births"](https://github.com/TheCaptainCompany/captain-food/issues/588),
+> and it is now the FIFTH named precondition in the gate text.
 
 > 🛠️ **2026-08-15 — #582 ACTORS HALF IN FLIGHT (branch `582-actor-answers-dsl`, draft PR #583)**:
 > the `answers:` DSL from

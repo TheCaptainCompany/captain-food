@@ -54,15 +54,22 @@ keys:
       still-PLACED guard all run on the identical code path; only the append is inert, the
       delivery lands Ignored, and the would-cancel decision is exported as OTLP shadow evidence
       (specs/observability.yaml#/acceptance-timeout). OFF is a first-class value, never an absent
-      key. The flip is a separate one-line ADR gated on FOUR preconditions: (1) the
+      key. The flip is a separate one-line ADR gated on FIVE preconditions: (1) the
       payment-release leg reacting to OrderAcceptanceTimedOut (behind PR #566's answers work),
       (2) the customer notice (comms), (3) shadow evidence from the reminder.promote span, AND
       (4) the time-to-accept distribution — business_metrics.yaml#/metrics/time_to_accept_ms,
       p50/p90/p99 by daypart AND restaurantId — live and read, because the TTL must be CHOSEN
       from how long real restaurants actually take per daypart, never guessed: a 300 s deadline
       that cancels a quarter of Friday-dinner orders at a slow-but-honest kitchen is a product
-      decision made blind. The flip is PROSPECTIVE only: occurrences fired-and-absorbed while OFF
-      are spent, nobody synthesizes timeouts for orders already past the TTL.
+      decision made blind. AND (5) a production PRODUCER for the Order-lane birth message — issue
+      #588, "the normal checkout path never enqueues OrderPlaced onto the Order lane": today NO
+      path does (the PlaceOrderProcess deliver: step appends OrderPlaced straight to the event
+      store, the reclamation PM calls place_replacement_order in-process), so no acceptance clock
+      is armed for any real order and precondition (3) cannot be satisfied at all — a flip on an
+      unarmed clock would change nothing while reading as shipped. This precondition is FIRST in
+      dependency order even though it is listed last. The flip is PROSPECTIVE only: occurrences
+      fired-and-absorbed while OFF are spent, nobody synthesizes timeouts for orders already past
+      the TTL.
 
   ORDER_RETENTION_WINDOW_DAYS:
     type: int
