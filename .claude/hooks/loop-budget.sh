@@ -7,7 +7,9 @@
 #                                        # over-cap exits 0 when config sets "capIsAStopSign": false (see below)
 #   loop-budget.sh start                 # check + open a run timer (writes NOTHING tracked)
 #   loop-budget.sh stop [--note "..."]   # close the timer and APPEND the segment to the ledger
-#   loop-budget.sh stop --elapsed 900    # record a run whose timer was never opened / was stale
+#   loop-budget.sh stop --elapsed-seconds 900   # record a run whose timer was never opened / was stale
+#                                        # (`--elapsed` is the older spelling and still works, but it
+#                                        #  REFUSES a value under 60 -- see the seconds/minutes note)
 #   loop-budget.sh status                # print the week's breakdown, including any open timer
 #   loop-budget.sh reset                 # discard an open timer WITHOUT billing it
 #   loop-budget.sh prune                 # delete ledger weeks older than the retention window
@@ -44,9 +46,17 @@ set -uo pipefail
 BUDGET_CMD="${1:-check}"
 [ $# -gt 0 ] && shift
 BUDGET_ELAPSED=""
+BUDGET_ELAPSED_UNIT_STATED=""
 BUDGET_NOTE=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    # The UNAMBIGUOUS spelling: the unit is in the flag, so any value is taken at face value.
+    --elapsed-seconds)   BUDGET_ELAPSED="${2:-}"; BUDGET_ELAPSED_UNIT_STATED=1; shift 2 || shift ;;
+    --elapsed-seconds=*) BUDGET_ELAPSED="${1#*=}"; BUDGET_ELAPSED_UNIT_STATED=1; shift ;;
+    # The original spelling, kept so every recorded incantation keeps working. It reads like
+    # minutes -- every number this tool PRINTS is minutes -- and a caller who means minutes
+    # under-bills by 60x in silence (#597: `--elapsed 16` recorded 0.3m and printed success). So
+    # this spelling refuses the range where that mistake lives; see the check below.
     --elapsed)   BUDGET_ELAPSED="${2:-}"; shift 2 || shift ;;
     --elapsed=*) BUDGET_ELAPSED="${1#*=}"; shift ;;
     --note)      BUDGET_NOTE="${2:-}"; shift 2 || shift ;;
@@ -113,7 +123,7 @@ else
 fi
 
 BUDGET_LABEL="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-export BUDGET_CMD BUDGET_CONFIG BUDGET_LEDGER BUDGET_TIMER BUDGET_ELAPSED BUDGET_NOTE BUDGET_LABEL ROOT
+export BUDGET_CMD BUDGET_CONFIG BUDGET_LEDGER BUDGET_TIMER BUDGET_ELAPSED BUDGET_ELAPSED_UNIT_STATED BUDGET_NOTE BUDGET_LABEL ROOT
 
 node <<'NODE'
 'use strict';
@@ -225,7 +235,7 @@ if (cmd === 'check' || cmd === 'start') {
       console.error(`⛔ loop-budget: a run timer is ALREADY OPEN (${describe(t)}).`);
       console.error(`   Two overlapping runs would bill one segment twice. Close it first:`);
       console.error(`     loop-budget.sh stop                 # bill it from ${new Date(t.startedAt).toISOString()}`);
-      console.error(`     loop-budget.sh stop --elapsed <s>   # bill the true duration instead`);
+      console.error(`     loop-budget.sh stop --elapsed-seconds <s>   # bill the true duration instead`);
       console.error(`     loop-budget.sh reset                # discard it without billing`);
       process.exit(EXIT_REFUSED);
     }
@@ -254,6 +264,16 @@ if (cmd === 'stop') {
       console.error(`⛔ loop-budget: --elapsed must be a non-negative number of seconds (got '${raw}').`);
       process.exit(EXIT_USAGE);
     }
+    // The 60x trap (#597): the flag takes SECONDS, every message here prints MINUTES, and a value
+    // meant as minutes bills a sixtieth of the truth while printing a cheerful success. A ledger
+    // that under-reports silently is worse than one that refuses. The unambiguous spelling opts
+    // out of this check, because a genuinely sub-minute segment is a real thing to record.
+    if (n > 0 && n < 60 && (process.env.BUDGET_ELAPSED_UNIT_STATED || '') !== '1') {
+      console.error(`⛔ loop-budget: --elapsed ${raw} is SECONDS -- that is ${mins(n)}m. Did you mean minutes?`);
+      console.error(`   If you meant ${raw} minutes:  loop-budget.sh stop --elapsed-seconds ${Math.round(n * 60)}`);
+      console.error(`   If you really meant ${raw} seconds, say so:  loop-budget.sh stop --elapsed-seconds ${raw}`);
+      process.exit(EXIT_USAGE);
+    }
     if (n > budget) {
       console.error(`⛔ loop-budget: --elapsed ${mins(n)}m exceeds the ENTIRE weekly cap (${mins(budget)}m). Refusing.`);
       process.exit(EXIT_REFUSED);
@@ -266,7 +286,7 @@ if (cmd === 'stop') {
       // NEVER a silent no-op. An unrecorded run defeats the cap, which is the whole point of ADR-0014.
       console.error(`⛔ loop-budget: NO RUN TIMER IS OPEN -- this run would be recorded as ZERO and silently vanish from the weekly cap.`);
       console.error(`   Either the run never called \`loop-budget.sh start\`, or \`stop\` already ran.`);
-      console.error(`   Record it honestly instead:  loop-budget.sh stop --elapsed <seconds> --note "<what ran>"`);
+      console.error(`   Record it honestly instead:  loop-budget.sh stop --elapsed-seconds <n> --note "<what ran>"`);
       console.error(`   Current: ${summary()}.`);
       process.exit(EXIT_REFUSED);
     }
@@ -277,7 +297,7 @@ if (cmd === 'stop') {
       console.error(`⛔ loop-budget: the open timer is STALE (${describe(t)}) -- older than ${mins(STALE_TIMER_SECONDS)}m.`);
       console.error(`   It was left open by an earlier run, so billing it would charge ${mins(t.age)}m of wall clock that nobody worked.`);
       console.error(`   NOTHING was recorded and the stale timer is now discarded. Record THIS run's true duration:`);
-      console.error(`     loop-budget.sh stop --elapsed <seconds> --note "<what ran>"`);
+      console.error(`     loop-budget.sh stop --elapsed-seconds <n> --note "<what ran>"`);
       console.error(`   Current: ${summary()}.`);
       process.exit(EXIT_REFUSED);
     }
@@ -320,6 +340,6 @@ if (cmd === 'prune') {
   process.exit(EXIT_OK);
 }
 
-console.error('usage: loop-budget.sh check|start|stop [--elapsed N] [--note "..."]|status|reset|prune|selftest');
+console.error('usage: loop-budget.sh check|start|stop [--elapsed-seconds N] [--note "..."]|status|reset|prune|selftest');
 process.exit(EXIT_USAGE);
 NODE

@@ -43,7 +43,7 @@ measured actual time, and inflating one steals from the next week.
     **Refuses** (exit 3) if a timer is already open; **discards without billing** one older than 4 h.
   - `stop` → close the timer and append the segment. **Refuses** (exit 3) when no timer is open —
     never a silent zero — and when the timer is stale.
-  - `stop --elapsed <seconds> --note "…"` → the honest escape hatch when `start` never ran or the
+  - `stop --elapsed-seconds <n> --note "…"` → the honest escape hatch when `start` never ran or the
     timer was stale. Use it rather than hand-editing anything.
   - `status` → the week's breakdown; `reset` → drop an open timer without billing it.
   - `audit` → the ~10 ms invariant check the stop-gate runs every turn; `selftest` → the full suite.
@@ -99,7 +99,7 @@ split across two trees.
 **On RESUME after a rate-limit cut, re-open `start` before touching the tree.** The timer does not
 survive the cut as an open segment you can just `stop` — either it is gone (`stop` exits 3, refusing
 to record a silent zero) or it is stale (discarded, unbilled). Working first and reconstructing later
-means the resumed segment is invisible to the ledger unless someone remembers `--elapsed`; that is
+means the resumed segment is invisible to the ledger unless someone remembers `--elapsed-seconds`; that is
 how ~45 minutes went unbilled on 2026-08-14.
 
 What remains true, and is inherent rather than a defect: **usage converges upward**. A checkout sees
@@ -141,7 +141,7 @@ was still spent, so main holding the entry is *more* correct, not less.
 **If you hit a merge conflict on `.claude/loop-budget.json`**, the branch is old enough to still carry
 the retired `secondsUsed`/`startedAt` counter. Resolution: **take `main`'s config-only file**, then
 record whatever that branch's counter held above main's migrated seed with
-`loop-budget.sh stop --elapsed <difference> --note "carried over from the pre-ledger counter"`. Never
+`loop-budget.sh stop --elapsed-seconds <difference> --note "carried over from the pre-ledger counter"`. Never
 hand-merge the numbers. The stop-gate's `loop-budget.sh audit` fails the turn if the old fields survive.
 
 ## Rule
@@ -149,5 +149,5 @@ hand-merge the numbers. The stop-gate's `loop-budget.sh audit` fails the turn if
 A recurring loop MUST be budget-guarded (`budgeted-loop` or the routine-prompt guard) and MUST commit
 the ledger file its `stop` wrote, so the weekly total survives across runs. Never hand-edit budget
 state: an unrecorded run defeats the cap, and an invented one steals from the next session. If `stop`
-refuses, it is telling you the truth is not knowable from the timer — supply it with `--elapsed`.
+refuses, it is telling you the truth is not knowable from the timer — supply it with `--elapsed-seconds`.
 See ADR-0014 and ADR-20260812-011057.

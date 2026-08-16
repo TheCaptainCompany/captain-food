@@ -806,10 +806,10 @@ async fn checkout_through_authorization(
 ///
 /// Deviation from the dispatch's letter, stated on purpose: `apply_schedules_in_tx` computes
 /// `chrono::Utc::now() + window` inside the delivery transaction, not `occurred_at + window`
-/// (`crates/infrastructure/src/mailbox/mod.rs`). The two are the same instant to within the
-/// transaction's own duration, so the assertion is `scheduled_at - occurred_at ≈ window` with a
-/// 2 s tolerance PLUS the exact `cause_id` link — which is the stronger half of "keyed to that
-/// birth" anyway, and cannot pass by coincidence.
+/// (`crates/infrastructure/src/mailbox/mod.rs`). So the deadline is asserted against a BRACKET the
+/// test itself takes around the drain — `scheduled_at ∈ [t0 + window, t1 + window]`, which is exact
+/// under any CI pause where a fixed tolerance would eventually flake — PLUS the exact `cause_id`
+/// link, the stronger half of "keyed to that birth" anyway, which cannot pass by coincidence.
 #[tokio::test]
 async fn authorized_payment_enqueues_the_order_birth_and_arms_the_clock() {
     let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
@@ -1037,18 +1037,27 @@ async fn redelivered_authorization_dedups_the_birth_at_the_door() {
     assert_eq!(pending, 1, "one pending occurrence per (actor, purpose)");
 }
 
-/// **#588 mutation kill — atomicity, and the `prepare` fence.** The gateway refuses the checkout,
-/// so nothing about this order was ever authorized. Expect ZERO Order-lane birth messages AND no
-/// run row.
+/// **A refused checkout leaves nothing behind — ONE load-bearing half, one negative control, and
+/// they are not the same thing.** The gateway refuses the checkout, so the `PlaceOrder` leg throws
+/// and the delivery transaction rolls back.
 ///
-/// This is the fence for vernon's constraint (i): `actor_runtime/src/completion.rs` re-runs
-/// `prepare` with NO transaction open, so an enqueue staged in `prepare` would leave a birth
-/// message behind despite the REJECTED verdict — a paid-order message for an order that does not
-/// exist, on the money path. The enqueue must happen in `handle`, inside the delivery transaction,
-/// through the passed `&mut Transaction` and never a pool handle off `self.deps`.
+/// - `runs == 0` is the **mutation kill**: the leg reached `payment_process_manager` staging before
+///   it threw, so a flush that did not roll back with the verdict shows up here. Both or neither.
+/// - `births == 0` is a **negative control**, and stays one in both flag states: this leg carries no
+///   routed `deliver:` at all, so no code path could have written a birth row to begin with. Kept
+///   because a future leg that DID enqueue here would be caught, not because it proves something
+///   today.
 ///
-/// Honest status: this passes vacuously at the pre-change HEAD (nothing enqueues anything yet). It
-/// is a negative control, not red evidence, and it becomes load-bearing the moment the seam lands.
+/// **It does NOT fence "the enqueue is never in `prepare`"** (ADR-20260816-040239 constraint 1),
+/// and the claim that it did was deleted with #597. It could never have: the refusal fails the
+/// *`PlaceOrder`* leg, so `on_payment_authorized` — the only leg carrying the routed `deliver:` —
+/// never runs, in either flag state. That constraint is carried elsewhere, in two pieces: the
+/// COMPILER refuses an anonymous `lanes: Some(..)` field write (`TriggerEnvelope` is private-field
+/// and alone in its own module), and the GUARD
+/// `trigger_envelope_laned_has_exactly_one_call_site` holds the remaining hole — `prepare` calling
+/// `TriggerEnvelope::laned(..)` compiles, because `application` cannot name a transaction to demand
+/// as proof (ADR-20260803-234035: compiler first, a check where types cannot reach). Neither piece
+/// is a thing a delivery test could have provided.
 #[tokio::test]
 async fn a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row() {
     let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
@@ -1079,8 +1088,8 @@ async fn a_refused_checkout_enqueues_no_birth_and_leaves_no_run_row() {
     .expect("count");
     assert_eq!(
         births, 0,
-        "no birth message for a checkout that never authorized — an enqueue staged in `prepare` \
-         (which runs with no transaction, completion.rs) would leave one behind"
+        "no birth message for a checkout that never authorized — the rolled-back delivery must \
+         leave the door as empty as it found it"
     );
     let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM payment_process_manager")
         .fetch_one(&pool)

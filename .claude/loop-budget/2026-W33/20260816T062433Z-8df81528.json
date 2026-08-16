@@ -1,0 +1,7 @@
+{
+  "week": "2026-W33",
+  "seconds": 944,
+  "recordedAt": "2026-08-16T06:24:33.103Z",
+  "branch": "597-lane-constraint-compiler-carried",
+  "note": "#597 follow-ups: correcting the previous entry, which billed 16 SECONDS because --elapsed is seconds, not minutes"
+}

@@ -101,11 +101,19 @@ rust: rust-build rust-test validate check-drift
 # --no-fail-fast on purpose: without it cargo stops launching further test binaries after the first
 # failure, so the pass TOTAL silently shrinks and two runs are not comparable (990 vs 744 was
 # measured exactly this way).
+#
+# The recipe is SILENCED (`@`) and echoes its own command instead, because make printing the recipe
+# put the literal text `test-crates: DB-GATED SUITES SKIPPED` in the output of every run -- including
+# runs where nothing was skipped (#597). A reader grepping their own gate evidence for the skip
+# warning matched the recipe line and concluded the DB suites had not run; QUIET_KEEP's `DB-GATED`
+# alternative matched it too, so the quiet wrapper reprinted it as a verdict. With the echo gone,
+# `^test-crates:` is unambiguous: those lines exist only when the run actually emitted them.
 DB_TEST_RECEIPT = target/db-test-skips.log
 test-crates:
 	@rm -f $(DB_TEST_RECEIPT)
 	@mkdir -p target
-	DB_TEST_SKIP_RECEIPT=$(abspath $(DB_TEST_RECEIPT)) $(CARGO) test --workspace --no-fail-fast; \
+	@echo "test-crates: running cargo test --workspace --no-fail-fast"
+	@DB_TEST_SKIP_RECEIPT=$(abspath $(DB_TEST_RECEIPT)) $(CARGO) test --workspace --no-fail-fast; \
 	  status=$$?; \
 	  if [ -s $(DB_TEST_RECEIPT) ]; then \
 	    echo "test-crates: DB-GATED SUITES SKIPPED -- this run exercised NO database behaviour."; \

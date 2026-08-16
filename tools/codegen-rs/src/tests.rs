@@ -4216,8 +4216,111 @@ keys:
              ship the sealed type's test constructors:\n{}\n\nFix: move the grant to that \
              crate's [dev-dependencies] (tests get it; the shipped lib/bin never does). If the \
              line is `default = [\"test-fixtures\"]` in a declaring crate, delete it — a default \
-             feature is a grant to every dependent at once.",
+             feature is a grant to every dependent at once.\n\nIf the flagged line is \
+             `test-fixtures = []` under [features] — i.e. a crate DECLARING the feature for the \
+             first time, which is the correct thing to do — you are not the offender this message \
+             describes: add that manifest path to the `declaring` list in this guard (and an \
+             existence assertion above it, like the three already there), so the declaration is \
+             sanctioned while every non-dev GRANT in that same manifest stays refused.",
             offenders.join("\n")
+        );
+    }
+
+    /// **`TriggerEnvelope::laned` has EXACTLY ONE call site** (#597 review B2, the level-3 fallback
+    /// ADR-20260803-234035 sanctions where types demonstrably cannot reach).
+    ///
+    /// ADR-20260816-040239's constraint 1 is *the enqueue is never in `prepare`* —
+    /// `actor_runtime::completion` re-runs `prepare` with NO transaction open, so an enqueue staged
+    /// there strands a birth message outside the delivery's commit, on the money path. Making
+    /// `TriggerEnvelope.lanes` private carried HALF of that: a sink can no longer be attached by an
+    /// anonymous field write. It could not carry the other half, and this is the part that needs
+    /// saying plainly — **`prepare` calling `TriggerEnvelope::laned(..)` compiles.** `laned` cannot
+    /// DEMAND proof that its caller holds a transaction, because `application` cannot name a
+    /// `sqlx::Transaction` without inverting the dependency rule, so there is no witness value for
+    /// the signature to require.
+    ///
+    /// The residual was then described as "one named, greppable seam" — and nothing grepped it.
+    /// This does. A textual scan is the honest tier here: it cannot see an aliased import
+    /// (`use ... as TE; TE::laned(..)`), the same limit the door guard documents about itself, but
+    /// it turns "someone would have to be reviewed adding a second call" from a hope into a build
+    /// failure.
+    #[test]
+    fn trigger_envelope_laned_has_exactly_one_call_site() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        files.sort();
+
+        // The declaration must still exist under this exact name — a rename that this guard does
+        // not follow is a guard silently scanning for nothing (the stale-gate failure mode).
+        let envelope = std::fs::read_to_string(
+            root.join("crates/application/src/process_managers/envelope.rs"),
+        )
+        .expect("crates/application/src/process_managers/envelope.rs readable");
+        assert!(
+            envelope.contains("pub fn laned("),
+            "`TriggerEnvelope::laned` is gone or moved — move this guard with it, or delete it \
+             with a note saying what carries ADR-20260816-040239 constraint 1 now"
+        );
+
+        // `\\blaned(` never matches inside `unlaned(` (both sides are word characters), so the
+        // default constructor is not counted. Comments are stripped so the doc prose that EXPLAINS
+        // the constraint does not trip the guard that enforces it.
+        let mut call_sites: Vec<String> = Vec::new();
+        for f in &files {
+            let rel = f.strip_prefix(&root).unwrap_or(f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned tree is a silent no-op")
+            });
+            for (i, line) in src.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains("fn laned(") {
+                    continue; // the declaration itself
+                }
+                let mut rest = code;
+                while let Some(at) = rest.find("laned(") {
+                    let before = rest[..at].chars().next_back().unwrap_or(' ');
+                    if !before.is_alphanumeric() && before != '_' {
+                        call_sites.push(format!("  {rel}:{}: {}", i + 1, line.trim()));
+                        break;
+                    }
+                    rest = &rest[at + "laned(".len()..];
+                }
+            }
+        }
+
+        assert_eq!(
+            call_sites.len(),
+            1,
+            "`TriggerEnvelope::laned` must have EXACTLY ONE call site; found {}:\n{}\n\n\
+             A SECOND CALL SITE IS A DESIGN EVENT, NOT A LINT. `laned` means: *I hold the fenced \
+             delivery transaction, and whatever this sink buffers I will flush into it before I \
+             commit.* The type system cannot check that claim (ADR-20260816-040239 constraint 1; \
+             `application` cannot name a Postgres transaction), so the claim is audited by there \
+             being one place to audit. If the new caller genuinely owns a transaction and flushes \
+             the sink into it, update this guard's expected count IN THE SAME COMMIT and say so in \
+             the message — and if it does not, you have just written the bug this guard exists to \
+             catch: an enqueue that survives a verdict which never committed, i.e. a paid order \
+             with a birth message for an order that does not exist.",
+            call_sites.len(),
+            call_sites.join("\n")
         );
     }
 

@@ -740,13 +740,24 @@ impl MailboxCommandHandler {
         let lane_sink = Arc::new(application::lanes::StagingLaneSink::new());
         // The trigger envelope: the chained row IS the trigger (its deterministic id doubles as
         // the dedup key the run row records).
-        let env = TriggerEnvelope {
-            event_id: message.message_id,
-            correlation_id: message.correlation_id,
-            occurred_at: message.received_at,
-            lanes: self.deps.route_order_birth_through_lane.then(|| {
-                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>
-            }),
+        //
+        // `laned` vs `unlaned` is the WHOLE routing decision, and since #597 it is the only way to
+        // express it: `TriggerEnvelope::lanes` is private, so no phase can attach a sink by a field
+        // write. Naming `laned` here is a claim this function can honour — `tx` is in scope, and
+        // the flush below rides it.
+        let env = if self.deps.route_order_birth_through_lane {
+            TriggerEnvelope::laned(
+                message.message_id,
+                message.correlation_id,
+                message.received_at,
+                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
+            )
+        } else {
+            TriggerEnvelope::unlaned(
+                message.message_id,
+                message.correlation_id,
+                message.received_at,
+            )
         };
         let outcome = match (message.actor_type.as_str(), &event) {
             ("PlaceOrderProcess", E::PaymentAuthorized(e)) => {

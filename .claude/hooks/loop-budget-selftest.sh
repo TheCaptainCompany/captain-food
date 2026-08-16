@@ -103,12 +103,28 @@ expect_out  "3g ...announcing that it DISCARDED it rather than billing it" "DISC
 seq_start="$(total)"
 run bash "$HOOK" start; run bash "$HOOK" stop --note "seq 1"
 mid="$(total)"
-run bash "$HOOK" stop --elapsed 30 --note "seq 2"
+run bash "$HOOK" stop --elapsed-seconds 30 --note "seq 2"
 end="$(total)"
 { [ "$mid" -ge "$seq_start" ] && [ "$end" -ge "$mid" ]; } && ok "4a the weekly total is monotonically non-decreasing" || bad "4a monotonic total" "$seq_start -> $mid -> $end"
 [ "$end" = "$((mid+30))" ] && ok "4b ...and each stop ADDS its segment" || bad "4b stop adds" "$mid + 30 != $end"
 modified="$(git -C "$REPO" status --porcelain | grep -cv '^??' || true)"
 [ "$modified" = 0 ] && ok "4c no TRACKED file is ever modified -- the ledger is append-only" || bad "4c append-only" "$modified tracked file(s) modified"
+
+# --- 4bis. THE SECONDS/MINUTES TRAP (#597): a 60x silent under-report is worse than a refusal ----
+# The flag takes SECONDS while every number this tool prints is MINUTES. `--elapsed 16` meaning
+# "16 minutes" recorded 0.3m and printed success -- the ledger under-reported an entire session and
+# nothing said so. The ambiguous spelling now refuses the range where that mistake lives; the
+# spelling that states its unit accepts any value, because a genuinely short segment is real.
+before_trap="$(total)"
+run bash "$HOOK" stop --elapsed 16
+expect_code "4d --elapsed with a sub-minute value is REFUSED (the 60x trap)" 64
+expect_out  "4e ...and the refusal names the unit and offers both readings" "Did you mean minutes?"
+[ "$(total)" = "$before_trap" ] && ok "4f ...and bills NOTHING -- a refused entry is not a silent 0.3m" || bad "4f trap bills nothing" "total moved"
+run bash "$HOOK" stop --elapsed-seconds 16 --note "genuinely 16 seconds"
+expect_code "4g --elapsed-seconds states its unit, so a short segment is accepted" 0
+[ "$(total)" = "$((before_trap+16))" ] && ok "4h ...and bills exactly what it said" || bad "4h short segment billed" "expected $((before_trap+16))"
+run bash "$HOOK" stop --elapsed 90 --note "the old spelling, above the trap range"
+expect_code "4i the old --elapsed spelling still works above 60s -- recorded incantations keep running" 0
 
 # --- 5. an already-open timer must be refused, not silently overwritten --------------------------
 run bash "$HOOK" start
