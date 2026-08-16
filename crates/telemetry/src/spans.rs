@@ -111,6 +111,27 @@ pub fn record_event_count(span: &Span, count: usize) {
     span.record("event_count", count);
 }
 
+/// `order.lane.enqueue` (PRODUCER) — the routed birth's HANDOVER ACT (#598).
+///
+/// With `ROUTE_ORDER_BIRTH_THROUGH_LANE` ON the saga does not append the birth to the target
+/// aggregate's stream: it stages an enqueue onto that aggregate's own mailbox lane, and the glue
+/// writes the door row inside the SAME fenced transaction (ADR-20260816-040239). This span marks
+/// that act, in the saga's own trace — the lane delivery's append is a different delivery with a
+/// different trace, which is exactly why the `place-order` success rule alternates on THIS span
+/// and not on the lane-side append.
+///
+/// `business.aggregate_id` is the TARGET aggregate's id (the lane the message is addressed to),
+/// which is also the frozen door identity's `external_id` half.
+pub fn order_lane_enqueue(event_type: &str, aggregate_id: &str) -> Span {
+    tracing::info_span!(
+        "order.lane.enqueue",
+        otel.kind = "producer",
+        messaging.system = "captain.mailbox",
+        business.event_type = event_type,
+        business.aggregate_id = aggregate_id,
+    )
+}
+
 /// `event.publish` (PRODUCER) — publishing an appended event onto the bus.
 pub fn event_publish(event_type: &str) -> Span {
     tracing::info_span!(

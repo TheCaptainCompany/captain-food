@@ -1325,20 +1325,112 @@ pub(crate) fn validate(model: &Model) -> Report {
                     }
                 }
 
-                let req_spans = c
+                // `required_spans` is a conjunction whose terms are EITHER a span name OR an
+                // ALTERNATION `{ any_of: [a, b, ...] }` (#598). The alternation exists because a
+                // gated workflow can satisfy a requirement two legal ways — the routed Order
+                // birth is durable through `event.store.append` (flag OFF) or
+                // `order.lane.enqueue` (flag ON) — and the honest rule is "one of these
+                // happened", NOT a predicate that reads the flag: a rule that reads the gate is a
+                // second place the flip must be got right, and it returns different verdicts for
+                // the same trace. Without the alternation the only expressible shapes are "always
+                // require" (fails a correct routed saga) and "never require" (scores a checkout
+                // whose money-path append vanished as a success — a gate that lies).
+                let req_terms = c
                     .get("status_rules")
                     .and_then(|sr| sr.get("success"))
                     .and_then(|s| s.get("required_spans"))
                     .and_then(|x| x.as_sequence())
-                    .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect::<Vec<_>>())
+                    .cloned()
                     .unwrap_or_default();
-                for rs in &req_spans {
-                    if !span_names.contains(rs) {
+                let at_rule = format!("{}.status_rules.success", at);
+                let check_declared = |name: &str, issues: &mut Vec<Issue>| {
+                    if !span_names.contains(name) {
                         issues.push(err(
                             "obs-required-span-undeclared",
-                            format!("{}.status_rules.success", at),
-                            format!("required_span '{}' is not a declared span.", rs),
+                            at_rule.clone(),
+                            format!("required_span '{}' is not a declared span.", name),
                         ));
+                    }
+                };
+                for (i, term) in req_terms.iter().enumerate() {
+                    match term {
+                        Value::String(name) => check_declared(name, &mut issues),
+                        Value::Mapping(m) => {
+                            let keys: Vec<String> = m
+                                .keys()
+                                .map(|k| k.as_str().unwrap_or("<non-string>").to_string())
+                                .collect();
+                            if keys != ["any_of"] {
+                                issues.push(err(
+                                    "obs-required-span-shape",
+                                    format!("{}[{}]", at_rule, i),
+                                    format!(
+                                        "a required_spans term is either a span NAME or an alternation `{{ any_of: [..] }}`; found keys {:?}.",
+                                        keys
+                                    ),
+                                ));
+                                continue;
+                            }
+                            let alts: Vec<&str> = m
+                                .get(Value::String("any_of".into()))
+                                .and_then(|x| x.as_sequence())
+                                .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                                .unwrap_or_default();
+                            // A one-branch alternation is a flat requirement wearing a costume,
+                            // and an empty one requires nothing while LOOKING like a requirement
+                            // — the exact "gate that lies" shape this term was added to end.
+                            if alts.len() < 2 {
+                                issues.push(err(
+                                    "obs-required-span-alternation",
+                                    format!("{}[{}]", at_rule, i),
+                                    format!(
+                                        "`any_of` needs at least TWO span names (found {}); one branch is a plain requirement, none is no requirement at all.",
+                                        alts.len()
+                                    ),
+                                ));
+                            }
+                            for alt in alts {
+                                check_declared(alt, &mut issues);
+                            }
+                        }
+                        other => issues.push(err(
+                            "obs-required-span-shape",
+                            format!("{}[{}]", at_rule, i),
+                            format!(
+                                "a required_spans term is either a span NAME or an alternation `{{ any_of: [..] }}`; found {:?}.",
+                                other
+                            ),
+                        )),
+                    }
+                }
+
+                // A per-metric `latency_budget` (#598: the handover's own budget, so the shorter
+                // place-order workflow does not leave "paid order -> restaurant told" uncovered)
+                // is checked like the contract-level one — a budget whose percentiles are absent,
+                // non-numeric or inverted reads as a promise and enforces nothing.
+                for (i, m) in c
+                    .get("metrics")
+                    .and_then(|x| x.as_sequence())
+                    .map(|s| s.as_slice())
+                    .unwrap_or(&[])
+                    .iter()
+                    .enumerate()
+                {
+                    let Some(budget) = m.get("latency_budget") else { continue };
+                    let at_m = format!("{}.metrics[{}].latency_budget", at, i);
+                    let num = |k: &str| budget.get(k).and_then(|v| v.as_f64());
+                    match (num("max_p95_ms"), num("max_p99_ms")) {
+                        (Some(p95), Some(p99)) if p95 <= p99 => {}
+                        (Some(p95), Some(p99)) => issues.push(err(
+                            "obs-metric-budget",
+                            at_m,
+                            format!("max_p95_ms ({}) must not exceed max_p99_ms ({}).", p95, p99),
+                        )),
+                        _ => issues.push(err(
+                            "obs-metric-budget",
+                            at_m,
+                            "a metric latency_budget must declare numeric `max_p95_ms` and `max_p99_ms`.".into(),
+                        )),
                     }
                 }
             }

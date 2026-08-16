@@ -1636,6 +1636,67 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
     (trait_code, fn_code)
 }
 
+/// Emit `ROUTED_LANES` — the mailbox lanes a ROUTED `deliver:` addresses, DECLARED at runtime
+/// (#598).
+///
+/// Until this table existed the routed set lived only in the codegen's own
+/// [`PM_LANE_ROUTED_DELIVERS`], so nothing at runtime could name "the lanes a routed birth lands
+/// on". The Order-lane dead-man's switch needs exactly that: it must report on every DECLARED
+/// lane on every tick, zero included, and a watcher whose lane set is a hand-kept literal is one
+/// forgotten edit away from a lane that is silently unwatched — the failure the switch exists to
+/// make impossible.
+///
+/// `source` is carried because it is the FROZEN door identity's first half
+/// (`pm:{ProcessManager}:{Event}`): changing either half re-mints the identity of every in-flight
+/// routed message, so having the produced string in a committed generated file puts a rename in
+/// the diff instead of in production.
+fn emit_routed_lanes(pms: &[PmOrchDef]) -> String {
+    let mut rows: Vec<(String, String, String)> = Vec::new();
+    for pm in pms {
+        for leg in &pm.legs {
+            for step in &leg.steps {
+                if let PmStepDef::Deliver { event, to, .. } = step {
+                    if deliver_is_lane_routed(to, event) {
+                        rows.push((
+                            to.clone(),
+                            event.clone(),
+                            format!("pm:{}:{}", pm.name, event),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    rows.sort();
+    rows.dedup();
+    let mut out = String::from(
+        "\n/// One ROUTED `deliver:` target — the lane a process manager hands a fact to instead of\n\
+         /// appending to that aggregate's stream itself (ADR-20260816-040239).\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n\
+         pub struct RoutedLane {\n\
+         \x20   /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.\n\
+         \x20   pub actor_type: &'static str,\n\
+         \x20   /// `events.yaml` key of the fact handed over.\n\
+         \x20   pub event_type: &'static str,\n\
+         \x20   /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.\n\
+         \x20   pub source: &'static str,\n\
+         }\n\n\
+         /// Every routed `deliver:` in the DSL, sorted. The DECLARED population the Order-lane\n\
+         /// liveness watch reports on — every tick, every lane, zero included, whatever\n\
+         /// `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` says: a lane that only reports\n\
+         /// when something was routed is a lane whose silence is ambiguous.\n\
+         pub const ROUTED_LANES: &[RoutedLane] = &[\n",
+    );
+    for (to, event, source) in &rows {
+        out.push_str(&format!(
+            "    RoutedLane {{ actor_type: \"{}\", event_type: \"{}\", source: \"{}\" }},\n",
+            to, event, source
+        ));
+    }
+    out.push_str("];\n");
+    out
+}
+
 pub(crate) fn emit_pm_orchestrators(model: &Model) -> String {
     let tables = parse_pm_tables(model);
     let pms = parse_pm_orchestrators(model);
@@ -1652,6 +1713,7 @@ pub(crate) fn emit_pm_orchestrators(model: &Model) -> String {
          /// How a hook resolves: the value is ready, or the leg (or just this call) ends as a benign skip.\n\
          pub enum HookOutcome<T> {\n    Ready(T),\n    Skip(String),\n}\n",
     );
+    out.push_str(&emit_routed_lanes(&pms));
     for pm in &pms {
         let table = pm.state_table.as_ref().map(|t| {
             tables

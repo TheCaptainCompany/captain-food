@@ -14,6 +14,26 @@ pub enum HookOutcome<T> {
     Skip(String),
 }
 
+/// One ROUTED `deliver:` target — the lane a process manager hands a fact to instead of
+/// appending to that aggregate's stream itself (ADR-20260816-040239).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RoutedLane {
+    /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.
+    pub actor_type: &'static str,
+    /// `events.yaml` key of the fact handed over.
+    pub event_type: &'static str,
+    /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.
+    pub source: &'static str,
+}
+
+/// Every routed `deliver:` in the DSL, sorted. The DECLARED population the Order-lane
+/// liveness watch reports on — every tick, every lane, zero included, whatever
+/// `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` says: a lane that only reports
+/// when something was routed is a lane whose silence is ambiguous.
+pub const ROUTED_LANES: &[RoutedLane] = &[
+    RoutedLane { actor_type: "Order", event_type: "OrderPlaced", source: "pm:PlaceOrderProcess:OrderPlaced" },
+];
+
 /// Generated step pipelines for `processmanager.yaml#/DeliveryDispatchProcess`.
 pub mod delivery_dispatch_process {
 

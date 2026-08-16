@@ -199,6 +199,20 @@ place-order:
       attributes:
         - { key: "business.event_type", type: string, required: true }
         - { key: "business.stream_id", type: string, required: true }
+    # #598: the HANDOVER's ACT, and the other half of the alternation below. With
+    # ROUTE_ORDER_BIRTH_THROUGH_LANE ON the saga does not append the birth — it enqueues it onto
+    # the Order's own lane INSIDE the same fenced transaction (a degenerate outbox). That enqueue
+    # happens in the SAGA's trace, unlike the lane delivery's append, which is a different
+    # delivery with a different trace — which is exactly why it, and not the lane-side append, is
+    # what `place-order` can require. `required: false` because exactly ONE of the two spans
+    # occurs per run; `status_rules.success` is where "one of them MUST" becomes enforceable.
+    - name: "order.lane.enqueue"
+      kind: PRODUCER
+      required: false
+      attributes:
+        - { key: "messaging.system", type: string, required: true }
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.aggregate_id", type: string, required: true }
     - name: "event.publish"
       kind: PRODUCER
       required: true
@@ -236,17 +250,96 @@ place-order:
     # ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF nothing is recorded at all, so a flat series here is
     # the honest reading of "the flag is off", and a GROWING p95 after the flip is the first sign
     # the acceptance clock is arming late — a paid order the restaurant learns about a beat later.
-    - { name: "order_birth_lag_ms", type: histogram, attributes: ["routed"] }
+    #
+    # #598 — the handover carries its OWN budget, and that is the condition on keeping the
+    # contract's 800 ms unchanged (see `latency_budget` below). NEITHER number is measured (no
+    # distribution exists yet), and they are two DIFFERENT kinds of number — stated separately
+    # because "derived" is a provenance claim a reader will not re-check:
+    #
+    #   p95 1000 ms is a CHOSEN DISCRIMINATION THRESHOLD, not a derivation. It has no declared
+    #   antecedent: the lane wake rides the enqueue's own commit (an in-transaction pg_notify with
+    #   no declared latency) and the only declared cadences are 10 s and 60 s. A p95 above a
+    #   second means the PUSH path is not carrying the handover and the fallback is — that is the
+    #   discrimination it is picked to make, and the reason it is round.
+    #
+    #   p99 12000 ms is substantially DERIVED: one
+    #   `configuration.yaml#/MAILBOX_HEARTBEAT_SECONDS` fallback pass (10 s, declared) plus
+    #   2000 ms of drain slack for claiming the lease, reading the row and committing — that
+    #   slack is an allowance, declared nowhere. Above this bound neither push nor the fallback is
+    #   carrying it and the restaurant is learning about a paid order late.
+    - name: "order_birth_lag_ms"
+      type: histogram
+      attributes: ["routed"]
+      latency_budget: { max_p95_ms: 1000, max_p99_ms: 12000 }
+    # THE ORDER-LANE DEAD-MAN'S SWITCH (#598, ADR-20260810-231300's monitoring carve-out) — two
+    # series, deliberately NOT a zero-seeding of `order_birth_lag_ms` above.
+    #
+    # Why not seed that histogram: injected zeros would poison the p95 the flip is judged on. A
+    # liveness signal and a latency measurement are different facts and must not share a series.
+    #
+    # Emitted by `infrastructure::mailbox::order_lane_watch_tick` — a sampler OUTSIDE the lane it
+    # watches — on EVERY tick, for EVERY declared routed-birth lane, INCLUDING while
+    # ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF. "Nothing until the flip" would be the wrong shape:
+    # silence is the ambiguity these series exist to remove, and a switch first proved on the day
+    # of the flip is a switch proved by the flip.
+    #
+    # ALERT ON THE ABSENCE OF AN INCREMENT, NEVER ON A THRESHOLD: `..._heartbeat_total` is
+    # monotonic and must rise every tick — a flat or vanished counter is the watcher, or its
+    # process, dead. `..._oldest_pending_age_ms` is the backlog's own alarm (0 = the lane is
+    # drained), and is only readable BECAUSE the heartbeat proves the reporter alive.
+    - { name: "order_lane_watch_heartbeat_total", type: counter, attributes: ["lane"] }
+    - { name: "order_lane_oldest_pending_age_ms", type: gauge, attributes: ["lane"] }
+    # DEPLOY-TIME FLEET PARITY (#598, farley): each process re-asserts its RESOLVED value for each
+    # declared runtime flag, so "monolith and standalone workers agree" stops being a review-time
+    # assertion and becomes evidence. `count(distinct value) by (flag) > 1` is the condition that
+    # BLOCKS a flip — and, for ROUTE_ORDER_BIRTH_THROUGH_LANE, the only thing that can see the
+    # split-clock hazard (one birth, a coin-flip on the acceptance deadline, per order) while a
+    # rolling deploy is in flight. An OBSERVABLE gauge, re-asserted on every export cycle: a
+    # value written once at boot says only "this process once started", which is the inverted
+    # dead-man's switch `otp_send_guard_enforcing` already paid for.
+    #
+    # `version` is deliberately NOT a label: `service.version` (the build's short git SHA) is
+    # already a RESOURCE attribute on every export, so a label would duplicate it and multiply the
+    # series during exactly the rolling deploy this is meant to watch. `bin` stays, because one
+    # deploy runs several DIFFERENT binaries and their disagreement is the hazard.
+    - { name: "runtime_flag_state", type: gauge, attributes: ["flag", "value", "bin"] }
   business_metrics:
     - { name: "orders_placed_total", type: counter, attributes: ["status"] }
     - { name: "checkout_payment_failures_total", type: counter, attributes: ["reason"] }
 
   status_rules:
     success:
-      # `event.store.append` left this list with #588: see the span's own comment — the routed
-      # birth appends in a different delivery, so requiring it here would either fail a correct
-      # saga or quietly redefine what the latency budget measures.
-      required_spans: ["command.receive", "command.journal", "pricing.compute", "payment.intent.create", "event.publish", "event.consume.projection"]
+      # THE ALTERNATION (#598, farley — superseding #588's unconditional removal).
+      #
+      # #588 dropped `event.store.append` from this list with NO predicate, which loosened the
+      # rule in the state we are in TODAY: with the flag still OFF the birth is appended inline,
+      # so a checkout whose append never happened scored `success`. *A success rule that passes
+      # when the money-path append vanished is a gate that lies.*
+      #
+      # The fix is NOT a flag predicate — a rule that reads the gate is a second place the flip
+      # has to be got right, and it silently returns different verdicts for the same trace. It is
+      # an ALTERNATION: the run must show that the birth was made durable by ONE of the two
+      # legal means. OFF => `event.store.append`; ON => `order.lane.enqueue`. Same verdict in
+      # both flag states, no gate inside the rule, and a run that did NEITHER — the paid order
+      # nobody is told about — is no longer a success.
+      #
+      # KNOWN GAP, stated here rather than discovered from a false verdict (#598 review, F1):
+      # the OFF branch is not emitted on EVERY live birth route. The mailbox PM lane
+      # (`handler.rs`, live and unconditional since #242) births through `flush_staged_in_tx`,
+      # which constructs no span at all — so a birth taken through that route today satisfies
+      # NEITHER alternative. `event.publish` below has the identical gap and is still
+      # `required: true`, which predates this change. The reason no gate caught it: the
+      # emitted-contract test proves a span constructor runs SOMEWHERE in the workspace, never
+      # that it runs on THIS workflow's path. Tracked as issue #602; the alternation is correct
+      # as written and closing the gap is instrumentation, not a rule change.
+      required_spans:
+        - "command.receive"
+        - "command.journal"
+        - "pricing.compute"
+        - "payment.intent.create"
+        - { any_of: ["event.store.append", "order.lane.enqueue"] }
+        - "event.publish"
+        - "event.consume.projection"
       # 'authorized' is recorded by the webhook path (payment_intent.amount_capturable_updated ->
       # PaymentAuthorized), never by the create call itself; capture success lives in the
       # payment-settlement contract (ADR-20260808-195315 §1.2).
@@ -256,6 +349,24 @@ place-order:
     business_rejected:
       conditions: ["command.validate.business.validation_status == 'rejected'"]
 
+  # DECIDED UNCHANGED at 800/1500 (#598, option B of the dispatch card; the alternative was to
+  # re-baseline onto the routed workflow). The routed birth makes this workflow strictly SHORTER
+  # — the append moves to another delivery — so the number now scores less work than it used to.
+  # It stays anyway, for one reason and with two conditions.
+  #
+  # THE REASON: this budget is a CUSTOMER-PERCEIVED checkout ceiling, and the customer's
+  # perception did not change. Re-baselining today would invent a percentile from a distribution
+  # that does not exist — a guess wearing a number, and an evidence question answered without
+  # evidence (ADR-20260808-144738).
+  #
+  # CONDITION 1 — the removed time is still measured: `order_birth_lag_ms` above carries its own
+  # `latency_budget`, so "paid order -> restaurant told" stays covered END TO END rather than
+  # falling into the gap between two contracts.
+  #
+  # CONDITION 2 — THE RE-BASELINE TRIGGER, which is a date and not an intention: the FIRST
+  # Fri/Sat 19:00-21:30 service after ROUTE_ORDER_BIRTH_THROUGH_LANE is flipped ON. Peak is the
+  # only traffic that produces a distribution worth baselining from. Until then this number reads
+  # LOOSE on purpose, and that is a known, recorded cost — not an oversight to be re-derived.
   latency_budget: { max_p95_ms: 800, max_p99_ms: 1500 }
   error_budget: { max_error_rate_pct: 1.0 }
 

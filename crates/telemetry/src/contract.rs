@@ -29,6 +29,13 @@ pub mod span {
     pub const PAYMENT_INTENT_CREATE: &str = "payment.intent.create";
     /// INTERNAL — appending to `domain_events`.
     pub const EVENT_STORE_APPEND: &str = "event.store.append";
+    /// PRODUCER — the routed birth's HANDOVER ACT (`place-order` contract, #598): the saga
+    /// staging a `deliver:` onto the TARGET aggregate's mailbox lane inside its own fenced
+    /// transaction, instead of appending to that aggregate's stream itself
+    /// (ADR-20260816-040239). It is the second branch of `place-order`'s success ALTERNATION:
+    /// with ROUTE_ORDER_BIRTH_THROUGH_LANE ON no [`EVENT_STORE_APPEND`] happens in the saga's
+    /// trace, and requiring neither would score a checkout that lost the birth as a success.
+    pub const ORDER_LANE_ENQUEUE: &str = "order.lane.enqueue";
     /// PRODUCER — publishing an appended event onto the bus.
     pub const EVENT_PUBLISH: &str = "event.publish";
     /// CONSUMER — a projector applying an event to a read model.
@@ -124,6 +131,26 @@ pub mod metric {
     /// property of the runtime (lane depth, worker liveness, head-of-line blocking), and it must
     /// keep working when Postgres is degraded.
     pub const ORDER_BIRTH_LAG_MS: &str = "order_birth_lag_ms";
+    /// `place-order` contract (#598): the Order-lane DEAD-MAN'S SWITCH, monotonic, attribute
+    /// `lane`. Emitted on EVERY watch tick for EVERY declared routed-birth lane — including while
+    /// ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF, because a switch first proved on the day of the flip
+    /// is a switch proved BY the flip. ALERT ON THE ABSENCE OF AN INCREMENT, never a threshold:
+    /// [`ORDER_BIRTH_LAG_MS`] is silent by design while the flag is off, so without this counter
+    /// "flag off" and "the Order lane worker is dead" are the same observation.
+    pub const ORDER_LANE_WATCH_HEARTBEAT_TOTAL: &str = "order_lane_watch_heartbeat_total";
+    /// `place-order` contract (#598): age of the OLDEST still-pending message on a routed-birth
+    /// lane, in ms, attribute `lane`; 0 when the lane is drained. Deliberately NOT a zero-seeding
+    /// of [`ORDER_BIRTH_LAG_MS`] — injected zeros would poison the p95 the flip is judged on, and
+    /// a liveness signal and a latency measurement are different facts. Only readable because
+    /// [`ORDER_LANE_WATCH_HEARTBEAT_TOTAL`] proves the reporter alive.
+    pub const ORDER_LANE_OLDEST_PENDING_AGE_MS: &str = "order_lane_oldest_pending_age_ms";
+    /// `place-order` contract (#598, farley): each process's RESOLVED value for a declared runtime
+    /// flag, attributes `flag` | `value` | `bin`. Deploy-time fleet-parity EVIDENCE: review-time
+    /// parity is an assertion, `count(distinct value) by (flag) > 1` is a fact, and it is the
+    /// condition that blocks a flip mid-rolling-deploy. An OBSERVABLE gauge — a value written once
+    /// at boot only says "this process once started" (the `otp_send_guard_enforcing` lesson).
+    /// `version` is NOT a label: `service.version` is already a resource attribute.
+    pub const RUNTIME_FLAG_STATE: &str = "runtime_flag_state";
     /// `payment-settlement` contract (ADR-20260808-195315 §1.2): capturing a confirmed
     /// authorization FAILED after fulfilment — the food is cooked and the money did not move, the
     /// inverse of the paid-order-nobody-told-about class. Attribute `reason` =
