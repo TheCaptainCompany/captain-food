@@ -54,9 +54,15 @@ named class; wider class wins the tie against "reversible internal". → **Brief
 Expected declarers: `vernon` (one aggregate per transaction, chained hop inside the completion tx),
 `young` (nothing changes in stored events — confirm), `holub`, plus the money/telemetry lenses.
 
-**Checkpoint verification**: `PENDING` — at the checkpoint, record whether the narrowed set missed
-anything the full roster would have caught. Banked either way; a MISS reverts this class to
-full-roster review. An unanswered line here is a run defect.
+**Checkpoint verification**: `BANKED — NO MISS, and the briefing itself was the value`. The
+narrowed CHECKPOINT set (the lenses that declared at briefing) caught nothing the briefing had not
+already caught, because the briefing was FULL and it moved the chunk three times: the
+reclassification to a one-writer violation (`vernon`/`young`/`dba`, independently), the THIRD
+routing site (`dba`/`beck`, independently), and the SPEC-LOG row this card denied was owed (`dba`).
+A narrow briefing roster would have shipped a two-site queueing fix with no migration note and no
+spec row. The IRREVERSIBLE-ADJACENT → full-briefing sizing is therefore confirmed by outcome, not
+just by posture. No lens opted back in at the checkpoint; the red-test evidence matched every
+declared concern verbatim.
 
 **HOLD: human** — mailbox runtime. PR stops at ready-for-review for the independent reviewer pass;
 no founder wait.
@@ -74,4 +80,68 @@ path derives from the same constant before merging.
 
 ## Findings
 
-_(empty — filled by the mob)_
+Six lenses briefed off this card, **all PASS**. Several CORRECTED it; where a lens and §1–§4
+disagree, **the lens wins** and the correction is carried in the diff.
+
+### `vernon` / `young` / `dba` — PASS, but this is a ONE-WRITER violation, not a queueing nuisance
+
+Reclassified independently by three lenses, and it is the reason the item outranked everything
+else. The lease is keyed by **LANE**, not by stream (`actor_runtime/src/lease.rs:9,35-38`), and
+`completion.rs:95` fences on the *lane's* checkpoint — so `stable_partition(actor_id, width)` is the
+ONLY thing mapping an aggregate to exactly one lane. Two producers with different widths put the
+same `Order-{id}` in two lanes, each with a live lease, each passing its own fence: the mailbox's
+serialisation promise breaks **at the addressing function**, upstream of anything a fence can see.
+The append's expected-version check demotes silent corruption to a version conflict — but on the
+payment leg `prepare` runs *before* `pool.begin()` (`completion.rs:69`), so **the Stripe intent
+already exists when the loser rejects**. §2 of this card described only the symptom.
+
+### `dba` + `beck` — THREE sites, not two (§4's "both routing sites" is wrong)
+
+`pm_delivery.rs:294-305` (record-time chaining), the **flip-time backfill** at
+`pm_delivery.rs:426-436` (same `count(*)`, same zero-width error), and the correct sibling
+`mod.rs:73-80` the fix copies. Both wrong sites are fixed; all three now route through one accessor.
+
+### `beck` — why CI was blind, and the two tests that break the coincidence
+
+Every PM-chain test calls `worker.seed(5)` and **every declared width IS 5**, so seeded count ==
+declared count and the two implementations are indistinguishable. Migrations do not seed; only a
+worker start does — "unseeded" is honestly reachable by never starting the target worker. Two tests
+in `crates/infrastructure/tests/main/pm_prepare_delivery.rs`, authored red-first against the
+pre-change HEAD, with the partial-seed case **guarding its data** (`assert_ne!` on the two widths)
+so the partition assertion cannot be vacuous.
+
+### `farley` — NO flag, and the reconciliation with his opposite call on #588
+
+On #588 two valid paths made a toggle worth having; **here there is one valid path and the OFF
+state IS the paid-order-fails branch**. Gate-then-stabilize gates new behaviour, not the deletion of
+an error branch. Rollback is `git revert` + one image redeploy — no schema, no backfill. He also
+narrowed the risk in §"RISK": divergence arises only on a width **DECREASE** (seeding is
+`ON CONFLICT DO NOTHING`, it never deletes), and there the declared read is the safe side. And:
+after the #358 per-bin cutover the exposure window goes from seconds to **indefinite** — a Payment
+bin can run while the target actor's bin is not deployed at all.
+
+### `dba` + `young` — two things the fix must not leave behind
+
+- **The fix creates a blind spot.** Today an unseeded lane errors loudly; after the fix the row
+  waits — and the supervision query joins *from* `mailbox_partitions`, so an orphan lane shows
+  **nothing**. The monitor now starts from the DECLARED grid (`ACTOR_MAILBOXES`) and surfaces
+  undeclared lanes carrying rows as well. Detector for the split case:
+  `SELECT actor_type, actor_id FROM inbound_messages GROUP BY 1,2 HAVING count(DISTINCT partition) > 1;`
+- **A width change is a stored-shape migration, not a config edit** — `partition` is stamped at
+  insert, so changing `mailbox.partitions` puts one aggregate in two lanes across the change.
+  `young` wanted this executable: a **startup drift check** (declared width ≠ seeded rows ⇒ refuse
+  to start). Landed; it is the compiler-first answer to the whole class and it subsumes a text-grep
+  gate.
+- `dba`: `specs/database/tables/journals.yaml` must say the registry is **not** the routing source
+  (its job is lease + `ownership_version` + checkpoint + the ops monitor). That moves `specs/**`, so
+  **a SPEC-LOG row IS owed** — §4's "SPEC-LOG only if `specs/**` moves (not expected)" is wrong.
+
+### `vernon` — one DoD line added
+
+A width cutover requires the affected actor's `inbound_messages` backlog **drained** (or a single
+worker) before the new width serves. Written into the migration note.
+
+### `business` — out of scope here, filed as [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
+
+Nothing detects an authorized payment with no order birth, whatever the cause. Its ask on THIS
+chunk was one line, answered in the PR: whether any past occurrences exist.

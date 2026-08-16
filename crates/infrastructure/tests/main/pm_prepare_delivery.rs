@@ -1243,3 +1243,253 @@ async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
         .get("n");
     assert_eq!(placed, 1, "the authorized order got told about");
 }
+
+// ================================================================================================
+// #596 — the chained hop's lane WIDTH comes from the DECLARATION, never from the seeded registry
+//
+// `chain_pm_copy_in_tx` derived the target actor's keyspace width from
+// `SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1`. Two failures ride on that one
+// read, and both are on the money path:
+//
+// 1. **Zero seeded rows => the completion transaction ERRORS.** The authorization's record and its
+//    saga hop never commit, so the order is never born: a paid order nobody is told about, the
+//    worst failure mode this product has. Migrations do not seed the registry -- only a worker
+//    START does -- so "no rows for the target actor" is reachable by simply not running that
+//    actor's worker, and after the #358 per-bin cutover it stops being a seconds-long startup
+//    window and becomes indefinite: a Payment bin can run while the PlaceOrderProcess bin is not
+//    deployed at all.
+// 2. **A PARTIALLY seeded actor => a silently different keyspace**, which is a ONE-WRITER
+//    violation and not a queueing nuisance. The lease is keyed by LANE (`actor_runtime/src/lease.rs`
+//    `Lane { actor_type, partition, .. }`) and `completion.rs` fences on the LANE's checkpoint, so
+//    `stable_partition(actor_id, width)` is the ONLY thing mapping an aggregate to exactly one
+//    lane. Two producers disagreeing on the width put the same `Order-{id}` in two lanes, each with
+//    a live lease, each passing its own fence -- the mailbox's serialisation promise breaks at the
+//    addressing function, upstream of anything a fence can see.
+//
+// Why the existing suite was blind to both: every PM-chain test above calls `worker.seed(5)` and
+// every declared width IS 5, so the seeded count and the declared count agree and the two
+// implementations are indistinguishable. These two tests break that coincidence on purpose.
+// ================================================================================================
+
+/// The inbound Stripe `PaymentAuthorized` fact on the Payment lane (funds held for `ORDER`).
+async fn enqueue_authorization_fact(pool: &PgPool, n: u128, external_id: &str) -> uuid::Uuid {
+    let payment_actor = actor_client::surrogate_actor_id("Payment", "pi_prepare_test");
+    let authorized = serde_json::json!({
+        "eventType": "PaymentAuthorized",
+        "payload": {
+            "paymentIntentId": "pi_prepare_test",
+            "orderId": uid(ORDER),
+            "restaurantId": uid(RESTAURANT),
+            "amount": { "amountCents": 1960, "currency": "EUR" },
+        }
+    });
+    let fact_id = uid(n);
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, \
+            channel, user_type, correlation_id, source, external_id) \
+         VALUES ($1, 'EVENT', 'Payment', $2, $3, 'PaymentAuthorized', $4, 'hFACT', 'EXTERNAL', \
+                 'EXTERNAL', $1, 'stripe', $5)",
+    )
+    .bind(fact_id)
+    .bind(payment_actor)
+    .bind(actor_client::stable_partition(&payment_actor, 5))
+    .bind(&authorized)
+    .bind(external_id)
+    .execute(pool)
+    .await
+    .expect("enqueue payment fact");
+    fact_id
+}
+
+/// A Payment-lane worker: the one that records the Stripe fact and chains the PM copy in-tx.
+async fn payment_worker(pool: &PgPool, gateway: Arc<StubGateway>) -> MailboxWorker {
+    let w = MailboxWorker::new(
+        pool.clone(),
+        "w-PAY",
+        "Payment",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps_over(pool, gateway))),
+    );
+    w.seed(5).await.expect("seed payment lanes");
+    w.claim().await.expect("claim payment lanes");
+    w
+}
+
+/// [`drain_all`], but RETURNING the completion error instead of panicking on it: the test below
+/// asserts the ABSENCE of one, and `.expect()`'s panic would bury which error it actually was.
+async fn try_drain_all(worker: &MailboxWorker) -> Result<u64, actor_runtime::CompletionError> {
+    let mut delivered = 0;
+    for lane in worker.owned().await {
+        delivered += worker.drain_lane(&lane).await?;
+    }
+    Ok(delivered)
+}
+
+/// Remove the target actor's registry rows -- the deployment where its worker has never started.
+///
+/// The checkout leg above had to seed them (a worker cannot claim an unseeded lane), so the state
+/// is reached by deletion here; in production it is simply the default, because MIGRATIONS DO NOT
+/// SEED `mailbox_partitions` -- `MailboxWorker::seed` at worker startup is the only writer.
+async fn unseed(pool: &PgPool, actor_type: &str) -> u64 {
+    sqlx::query("DELETE FROM mailbox_partitions WHERE actor_type = $1")
+        .bind(actor_type)
+        .execute(pool)
+        .await
+        .expect("unseed the target actor")
+        .rows_affected()
+}
+
+/// Leg 1 of both tests: the checkout, so the saga has an `AWAITING_PAYMENT_RESULT` run row for the
+/// authorization to resolve. Returns after the PlaceOrderProcess worker has drained it.
+async fn checkout_leg(pool: &PgPool, gateway: Arc<StubGateway>, n: u128) {
+    enqueue_pm(pool, "PlaceOrderProcess", uid(ORDER), n, "PlaceOrder", place_order_payload(None))
+        .await;
+    let worker = worker_over(pool, "PlaceOrderProcess", deps_over(pool, gateway)).await;
+    assert_eq!(drain_all(&worker).await, 1, "the checkout leg commits its intent and run row");
+}
+
+/// **The paid order with no birth.** Stripe authorizes; the target saga actor has NOT started, so
+/// its registry is empty. The completion transaction must COMMIT -- the fact recorded, the hop
+/// enqueued at the DECLARED partition -- and the hop must simply WAIT until a worker starts.
+#[tokio::test]
+async fn chained_fact_is_enqueued_with_no_seeded_lanes_and_drains_once_the_worker_starts() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+    seed_checkout_world(&pool, true).await;
+    let gateway = Arc::new(StubGateway::default());
+
+    checkout_leg(&pool, gateway.clone(), 0xD1).await;
+    assert_eq!(
+        unseed(&pool, "PlaceOrderProcess").await,
+        5,
+        "the checkout leg had seeded the declared five lanes; the state under test is zero"
+    );
+
+    // Leg 2 -- Stripe's authorization on the Payment lane, target lane unseeded.
+    let fact_id = enqueue_authorization_fact(&pool, 0xFAC8, "evt_596_unseeded").await;
+    let pay = payment_worker(&pool, gateway.clone()).await;
+    let drained = try_drain_all(&pay).await;
+    assert!(
+        drained.is_ok(),
+        "the authorization's completion transaction must COMMIT while the target actor has no \
+         seeded lanes -- erroring here is a held payment whose order is never born: {:?}",
+        drained.err()
+    );
+    assert_eq!(drained.unwrap(), 1, "the payment fact delivers");
+
+    let recorded: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = 'Payment-pi_prepare_test' \
+         AND event_type = 'PaymentAuthorized'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(recorded, 1, "the fact is on the Payment stream -- the money moved, and we know it");
+
+    let chained = sqlx::query(
+        "SELECT message_id, actor_id, partition, status, cause_id FROM inbound_messages \
+         WHERE actor_type = 'PlaceOrderProcess' AND kind = 'EVENT' \
+           AND message_type = 'PaymentAuthorized'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the chained PM copy exists even with an unseeded target");
+    assert_eq!(chained.get::<uuid::Uuid, _>("actor_id"), uid(ORDER), "lane = the order");
+    assert_eq!(chained.get::<Option<uuid::Uuid>, _>("cause_id"), Some(fact_id), "cause-chained");
+    assert_eq!(
+        chained.get::<i16, _>("partition"),
+        actor_client::stable_partition(&uid(ORDER), 5),
+        "addressed by the DECLARED width (ACTOR_MAILBOXES), never by a registry with no rows"
+    );
+    assert_eq!(
+        chained.get::<String, _>("status"),
+        "RECEIVED",
+        "the hop WAITS for its worker -- waiting is the correct behaviour, failing is not"
+    );
+
+    // Leg 3 -- the worker starts (seeds + claims) and the waiting hop drains.
+    let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway)).await;
+    assert_eq!(drain_all(&pm_worker).await, 1, "the waiting hop delivers the moment a worker starts");
+    let placed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(placed, 1, "the authorized order got told about");
+    let status: String = sqlx::query_scalar(
+        "SELECT process_status FROM payment_process_manager WHERE cart_id = $1",
+    )
+    .bind(uid(CART))
+    .fetch_one(&pool)
+    .await
+    .expect("run row");
+    assert_eq!(status, "ORDER_PLACED");
+}
+
+/// **The one-writer violation.** A partially seeded actor yields a non-zero width SMALLER than the
+/// declared one, so the hop is stamped into a keyspace no other producer shares -- the same
+/// aggregate reachable through two leases. The declared width is the only correct answer.
+#[tokio::test]
+async fn a_partially_seeded_actor_still_routes_to_the_declared_partition() {
+    let Some(db) = crate::common::TestDb::acquire("pm_prepare_delivery").await else { return };
+    let pool = db.pool();
+
+    // GUARD THE DATA FIRST. With the two widths agreeing on this actor id the assertion below
+    // would be vacuous -- which is exactly how the existing suite (every seed 5, every declared
+    // width 5) stayed green over the defect for as long as it did.
+    let declared = actor_client::stable_partition(&uid(ORDER), 5);
+    let seeded_two = actor_client::stable_partition(&uid(ORDER), 2);
+    assert_ne!(
+        declared, seeded_two,
+        "test data must distinguish the declared width from the seeded one, or it proves nothing"
+    );
+
+    seed_checkout_world(&pool, true).await;
+    let gateway = Arc::new(StubGateway::default());
+    checkout_leg(&pool, gateway.clone(), 0xD2).await;
+
+    // THE STATE UNDER TEST: 2 of the declared 5 lanes present. Reachable in production from a
+    // half-applied width change, a partial seed failure, or an older binary seeding a narrower
+    // width -- `seed_partitions` is `ON CONFLICT DO NOTHING`, so it never deletes and the registry
+    // can lag the declaration in either direction.
+    let removed =
+        sqlx::query("DELETE FROM mailbox_partitions WHERE actor_type = 'PlaceOrderProcess' AND partition >= 2")
+            .execute(&pool)
+            .await
+            .expect("partially unseed")
+            .rows_affected();
+    assert_eq!(removed, 3, "2 of the declared 5 lanes remain");
+
+    let _ = enqueue_authorization_fact(&pool, 0xFAC9, "evt_596_partial").await;
+    let pay = payment_worker(&pool, gateway.clone()).await;
+    assert_eq!(try_drain_all(&pay).await.expect("the payment fact delivers"), 1);
+
+    let partition: i16 = sqlx::query_scalar(
+        "SELECT partition FROM inbound_messages WHERE actor_type = 'PlaceOrderProcess' \
+         AND kind = 'EVENT' AND message_type = 'PaymentAuthorized'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the chained PM copy exists");
+    assert_eq!(
+        partition, declared,
+        "the hop must land on the DECLARED lane ({declared}), not on the one the seeded row count \
+         happens to describe ({seeded_two}) -- two widths for one aggregate is two leases for one \
+         writer"
+    );
+
+    // And once the registry catches up with the declaration, that lane drains it.
+    let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway)).await;
+    assert_eq!(drain_all(&pm_worker).await, 1, "the declared lane owns the hop");
+    let placed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM domain_events WHERE stream_name = $1 AND event_type = 'OrderPlaced'",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(placed, 1, "the authorized order got told about");
+}
