@@ -72,3 +72,20 @@ _(Lenses and the executor append here.)_
 - **`young`** — reading the diff for: no new `errors.yaml` code; the mutation targeting the real discard site; and the attribution type making a raw body unspellable at the type level rather than by convention.
 - **`beck`** — the two seams as one test, and the canary assertion present in the diff rather than considered.
 - **`observability-agent`** — the contract-violation scope, and any `context` shape landing adjacent to the live leak.
+
+### Executor, claim time — the `Repository` divergence, read from source (measurement to follow)
+
+The card's reconciliation ("intercepted on the command arm and terminal on the process-manager
+arm") does **not** survive reading the tree. `verdict_of_error` has exactly three call sites, and
+`DomainError::Repository` is intercepted before **every one** of them:
+
+| call site | the interception above it |
+|---|---|
+| `handler.rs:228` (in-tx command arm) | `handler.rs:218` `Some(Err(DomainError::Repository(detail))) => return Err(sqlx::Error::Protocol(detail))` |
+| `handler.rs:282` (PM arm — the `PlaceOrder` arm) | `pm_delivery.rs:194`, inside `prepare`: `Err(DomainError::Repository(detail)) => return Err(sqlx::Error::Protocol(detail))`, so `PreparedPmCommand.outcome` can never hold a `Repository` |
+| `handler.rs:841` (PM fact arm) | `handler.rs:838`, same shape |
+
+So the `DomainError::Repository(_)` arm of `verdict_of_error` (`handler.rs:865`) is **dead on every
+live path**, not merely on the command arm — `observability-agent` was closest, but the interception
+that kills it for `PlaceOrder` is in `prepare`, not "the PM path returns it as `Err(sqlx)` earlier"
+in general. **M1 therefore needs a different second seam**; see the next finding.
