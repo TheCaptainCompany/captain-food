@@ -147,3 +147,52 @@ _(Lenses and the executor append here.)_
 - **`farley`** — target choice, the auth wiring as actually built, the `stripe listen` liveness proof, the "does not prove" section, and the nightly fixed in the same change.
 - **`beck`** — whether money-path assertions are on `domain_events` **and** kept alongside the read-model one; whether new timeouts carry the three-way diagnostic; whether the run block became declaration-driven. Found **no card errors** in the first version, which no other lens managed.
 - **`ux-designer`** — the corrected leg sequence, `CartBoundToCustomer`, the SIMULATED label, and the backoffice board finding recorded rather than fixed.
+
+### Executor, `a94fbb1`..`HEAD` — the card was wrong again, in three places
+
+The card asked to be told when it is wrong. It was, and every correction below came from
+measuring rather than reasoning — the same pattern as the briefing.
+
+1. **§3 Stripe is unrunnable here, and the card built the whole webhook design on it.** There is no
+   `sk_test_` key in this environment: `STRIPE_SECRET_KEY_TEST` is a repo secret, readable only
+   inside CI. `api.stripe.com` **is** reachable (a dummy key returns a Stripe-shaped `401`), so this
+   is an **authentication** gap, not the connectivity gap that blocks Supabase. The consequence is
+   larger than §3 assumed: no `PaymentAuthorized` means no order birth, so accept, ready, dispatch,
+   deliver and capture are ALL unreachable locally — legs 7–15, not two legs.
+
+2. **§1 omits that `sqlx` is absent**, so "apply the migration chain" has no runner. I wrote one,
+   and it was the wrong instinct: `sqlx-cli` installs from the prebuilt `cargo-quickinstall` tarball
+   in seconds (the shape `docs/runbooks/cutover-local-rehearsal.md` already documents) and CI uses
+   `sqlx` as the authoritative path. The runner was deleted. Worth recording because the semantics
+   are not trivial: migration `20260730043000` is a `VACUUM FULL` carrying sqlx's own
+   `-- no-transaction` directive, and a runner that wraps it in a transaction fails on a migration
+   sqlx executes happily — *`VACUUM cannot run inside a transaction block`*.
+
+3. **§0's "expect the first red at leg two" was right about the leg and wrong about the cause — and
+   the cause is a defect in the SMOKE, not the cart.** Reproduced `{"current":null}` on the first
+   run. The cart was never broken: `CartStarted` + `CartLineAdded` on `domain_events`, a `cart` row
+   `OPEN` with the right `session_id`, and the `Cart` projector checkpoint caught up. `current`
+   resolves its tenant from the **`Host` header** (#469) and returns `None` unbounded —
+   `cart_read.rs`: `let TenantScope::Restaurant(restaurant_id) = tenant else { return Ok(None) };`.
+   Same cart, same session id, measured both ways:
+
+   | Host | result |
+   |---|---|
+   | `live.captain.food` (what `prod-smoke.sh` sends) | `{"current":null}` |
+   | `walk-test.captain.food` (tenant host) | `OPEN`, `totalAmount` **1200 EUR cents** |
+
+   `prod-smoke.sh` L4 reads `current` on `$PUBLIC_BASE` = the marketplace host, so it **cannot pass
+   in its current form**. Filed as
+   [#622](https://github.com/TheCaptainCompany/captain-food/issues/622). The 2026-08-04 attribution
+   is **strong but unconfirmed** — confirming it needs the run log compared against #469's landing
+   date, which I did not do. The stored `total_amount_cents = 0` is correct, not a second defect:
+   the money-free fold (`20260810113000`) prices live at read (#451).
+
+**Also found, filed, not fixed** (card §7): a failed `PlaceOrder` records
+`{"code":"Internal","context":{}}` with nothing at ERROR/WARN in the log — unattributable after the
+fact, on the product's most consequential command
+([#623](https://github.com/TheCaptainCompany/captain-food/issues/623)).
+
+**Confirmed as carded, no correction needed**: the bare-process target; the JWKS-only stub with the
+verifier unmodified and fail-closed; `DELIVERY` over `COLLECTION`; the registration leg unwalkable
+and left RED; the three flags all default OFF with the chain still completing.

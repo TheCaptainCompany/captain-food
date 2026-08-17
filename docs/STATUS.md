@@ -2,6 +2,62 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🚶 **2026-08-17 — THE WALK RAN: FOUR LEGS GREEN, THE `{"cart":null}` RED REPRODUCED AND
+> DIAGNOSED, AND THE MONEY LEGS BLOCKED ON A KEY THAT ONLY EXISTS IN CI**
+> ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556), PR
+> [#621](https://github.com/TheCaptainCompany/captain-food/pull/621); harness in `tools/walk/`.)
+>
+> **An order still has not gone through this system end to end** — but for the first time the exact
+> leg that stops it is named, with evidence, rather than assumed.
+>
+> **Target**: a bare local process, not a cluster — local Postgres 16/main, the 47-migration chain
+> via `sqlx-cli`, one `cargo run -p server`, `APP_PROFILE=production` with the full required key
+> set. `/health` 200, `schemaVersion == requiredSchemaVersion == 20260813021500`. The k3s stack was
+> measured unusable here (4.7 GB free against a 9.6 GB DiskPressure threshold; its runbook forbids
+> `cargo build` while it is up, which is the red-first loop). **Local and CI are now the same
+> shape**, which the cluster target never was.
+>
+> **Auth**: the JWKS endpoint alone is stubbed; `SUPABASE_URL` keeps its real baked value so `iss`
+> is real. The verifier runs unmodified and fail-closed — a minted ADMIN token is 200 on `/admin`,
+> **403 on `/restaurant`** (strict role equality), and tampered signature / wrong issuer / no
+> `captain_food` role are all refused. **No GoTrue fake was built**, deliberately.
+>
+> **Verdicts** — `L01_target` `L02_browse` `L03_fixture` `L04_cart` **PASS**; `L05_register` **RED**
+> (unwalkable and named: phone-OTP exposes no admin API returning the code, and Supabase is
+> unreachable from here — proxy 502 on CONNECT); `L06_place` **RED**; `L07`–`L16` **BLOCKED**, a
+> cascade and explicitly not evidence.
+>
+> **The 2026-08-04 `{"cart":null}` red is reproduced and diagnosed, and it is a defect in the SMOKE,
+> not the cart** ([#622](https://github.com/TheCaptainCompany/captain-food/issues/622)). `current`
+> resolves its tenant from the `Host` header (#469) and returns `None` unbounded. `prod-smoke.sh`
+> L4 reads it on `live.captain.food`, the marketplace host. Same cart and session id:
+> `live.captain.food` → `{"current":null}`; `walk-test.captain.food` → `OPEN`, **1200 EUR cents**.
+> So `prod-smoke.sh` L4 **cannot pass in its current form**. The 08-04 attribution is strong but
+> **unconfirmed** (it needs the run log against #469's landing date). The stored
+> `total_amount_cents = 0` is correct, not a second defect — the money-free fold prices live at read.
+>
+> **The money legs are blocked on authentication, not connectivity.** No `sk_test_` key exists
+> outside CI (`STRIPE_SECRET_KEY_TEST` is a repo secret); `api.stripe.com` is reachable and returns
+> a Stripe-shaped 401 to a dummy key. Because `place_order` calls `payments.request` before any
+> append, no `PaymentAuthorized` means **no order birth**, so legs 7–15 are all unreachable locally
+> — larger than the dispatch card anticipated. The agreed shape is **CI as the walk's home, then
+> seam-level injection** for iterating the back half, with provenance printed per leg
+> (`WALKED`/`INJECTED`/`SIMULATED`) so an injected fact can never be read as a proven authorization.
+>
+> **Also filed, not fixed**: a failed `PlaceOrder` records `{"code":"Internal","context":{}}` with
+> nothing at ERROR/WARN — the product's most consequential command is unattributable after the fact
+> ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623)).
+>
+> **The nightly stops lying** ([#620](https://github.com/TheCaptainCompany/captain-food/issues/620),
+> the item this file recorded as *owed, unfiled*): `prod-smoke`'s **schedule is disabled** with the
+> reason in the workflow file, `workflow_dispatch` retained. It is **not** re-pointed at the walk —
+> the walk is red-first by method, and scheduling a job whose red is expected recreates the exact
+> pathology that let twenty nights pass unread. The condition for re-pointing is stated in the file:
+> the walk green end to end, in the change that turns the last leg green. **The 19 reds are no
+> longer unexplained** — 13 from the suspension, the rest resolved to five distinct causes on
+> 2026-08-17; the unexplained set is **zero**, and the "six earlier red nights have an unrecorded
+> cause" line above is superseded.
+
 > 🗳️ **2026-08-17 — THE FOUNDER ANSWERED THE WHOLE DECISION QUEUE: THE WALK GOES FIRST ON ONE
 > DATABASE, PRODUCTION STAYS DOWN ON PURPOSE, AND THE ROSTER REVERSION IS STRUCK**
 > (records-only run, straight to `main`; no `specs/**`, no `crates/**`, so no SPEC-LOG row and no

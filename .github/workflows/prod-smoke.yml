@@ -1,16 +1,52 @@
 # Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/prod-smoke.sh.
-# Manual (workflow_dispatch) + daily. Requires repo secrets STRIPE_SECRET_KEY_TEST (sk_test) and
-# SUPABASE_SECRET_KEY.
+# Manual (workflow_dispatch) ONLY while production is suspended — see "THE SCHEDULE IS OFF" below.
+# Requires repo secrets STRIPE_SECRET_KEY_TEST (sk_test) and SUPABASE_SECRET_KEY.
 #
 # SUPABASE_SECRET_KEY replaced RENDER_API_KEY here (#358): the smoke used to read the Supabase service
 # key off the Render service to mint role JWTs, which made it structurally unable to verify anything
 # that is not Render — including the cluster the cutover moves to. It is now supplied directly.
+#
+# ---------------------------------------------------------------------------------------------
+# THE SCHEDULE IS OFF, DELIBERATELY (2026-08-17, issue #620)
+#
+# Production is suspended ON PURPOSE (founder decision 2026-08-17, ADR-20260817-105844: "walk first
+# on one database; production stays deliberately suspended"). This job asserts against a live
+# deployment. With no deployment serving, every nightly run fails for a reason that is already
+# known before it starts — so the run carries no information, and a red that carries no information
+# is worse than no run at all: it trains everyone to scroll past this workflow's name, which is
+# exactly the state we would need it OUT of on the day production comes back.
+#
+# The 19 consecutive reds since the last green (2026-07-29) are NOT unexplained. 13 are attributable
+# to the suspension; the remainder were read off the run logs on 2026-08-17 and resolved to five
+# distinct causes. The unexplained set is zero. This is not a mystery being silenced.
+#
+# WHAT RE-ENABLES IT — the restore, not a date and not someone remembering.
+# Restoring production means restoring this schedule IN THE SAME CHANGE. Uncomment the `schedule`
+# block below. Leaving it commented while a deployment serves is the failure this comment exists to
+# prevent: a monitoring path that is quiet because it was switched off, indistinguishable from one
+# that is quiet because everything is healthy.
+#
+# `workflow_dispatch` stays ON so the smoke can be run by hand at any time — the capability is not
+# withdrawn, only the unattended cadence that currently reports nothing but its own premise.
+#
+# ITS SUCCESSOR — `tools/walk/` (#556), the browse-to-captured walk on one database.
+# The walk is deliberately NOT scheduled in its place, and that is the whole point of this change.
+# The walk is run RED-FIRST by method: legs are expected to fail while they are being built, and
+# several are red today by design (see the walk's own transcript). Scheduling a job whose red is
+# expected is precisely the pathology that let twenty nights pass unread — re-pointing this cron at
+# a red-by-design target would recreate it under a new name rather than fix it.
+#
+# CONDITION FOR RE-POINTING, stated so it is not a judgement call later: the walk is green END TO
+# END — every declared leg reporting PASS in one run, capture included. That happens in the change
+# that turns the LAST leg green, not in this one. Until then, no cron points anywhere.
+# ---------------------------------------------------------------------------------------------
 name: prod-smoke
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 6 * * *" # daily 06:17 UTC (off the top of the hour)
+  # Re-enable together with production (see above). Do not re-enable alone.
+  # schedule:
+  #   - cron: "17 6 * * *" # daily 06:17 UTC (off the top of the hour)
 
 permissions:
   contents: read
