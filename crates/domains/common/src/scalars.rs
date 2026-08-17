@@ -441,3 +441,29 @@ pub enum ScopeType {
     ORDER,
     RESTAURANT,
 }
+
+/// WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CommandFailureSeam {
+    PAYMENT_GATEWAY,
+    COMMAND_PAYLOAD,
+    EVENT_APPEND,
+    DOMAIN_INVARIANT,
+    INFRASTRUCTURE,
+}
+
+/// WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CommandFailureReason {
+    GATEWAY_REFUSED,
+    CARD_DECLINED,
+    PAYLOAD_UNDECODABLE,
+    UNCATALOGUED_INVARIANT,
+    TRANSIENT_INFRASTRUCTURE,
+}
+
+/// The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct GatewayStatusCode(pub i64);

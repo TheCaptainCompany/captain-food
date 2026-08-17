@@ -1739,6 +1739,95 @@ impl From<ScopeType> for ds::ScopeType {
     }
 }
 
+/// WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CommandFailureSeam {
+    #[graphql(name = "PAYMENT_GATEWAY")]
+    PAYMENT_GATEWAY,
+    #[graphql(name = "COMMAND_PAYLOAD")]
+    COMMAND_PAYLOAD,
+    #[graphql(name = "EVENT_APPEND")]
+    EVENT_APPEND,
+    #[graphql(name = "DOMAIN_INVARIANT")]
+    DOMAIN_INVARIANT,
+    #[graphql(name = "INFRASTRUCTURE")]
+    INFRASTRUCTURE,
+}
+impl From<ds::CommandFailureSeam> for CommandFailureSeam {
+    fn from(v: ds::CommandFailureSeam) -> Self {
+        match v {
+            ds::CommandFailureSeam::PAYMENT_GATEWAY => Self::PAYMENT_GATEWAY,
+            ds::CommandFailureSeam::COMMAND_PAYLOAD => Self::COMMAND_PAYLOAD,
+            ds::CommandFailureSeam::EVENT_APPEND => Self::EVENT_APPEND,
+            ds::CommandFailureSeam::DOMAIN_INVARIANT => Self::DOMAIN_INVARIANT,
+            ds::CommandFailureSeam::INFRASTRUCTURE => Self::INFRASTRUCTURE,
+        }
+    }
+}
+impl From<CommandFailureSeam> for ds::CommandFailureSeam {
+    fn from(v: CommandFailureSeam) -> Self {
+        match v {
+            CommandFailureSeam::PAYMENT_GATEWAY => Self::PAYMENT_GATEWAY,
+            CommandFailureSeam::COMMAND_PAYLOAD => Self::COMMAND_PAYLOAD,
+            CommandFailureSeam::EVENT_APPEND => Self::EVENT_APPEND,
+            CommandFailureSeam::DOMAIN_INVARIANT => Self::DOMAIN_INVARIANT,
+            CommandFailureSeam::INFRASTRUCTURE => Self::INFRASTRUCTURE,
+        }
+    }
+}
+
+/// WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CommandFailureReason {
+    #[graphql(name = "GATEWAY_REFUSED")]
+    GATEWAY_REFUSED,
+    #[graphql(name = "CARD_DECLINED")]
+    CARD_DECLINED,
+    #[graphql(name = "PAYLOAD_UNDECODABLE")]
+    PAYLOAD_UNDECODABLE,
+    #[graphql(name = "UNCATALOGUED_INVARIANT")]
+    UNCATALOGUED_INVARIANT,
+    #[graphql(name = "TRANSIENT_INFRASTRUCTURE")]
+    TRANSIENT_INFRASTRUCTURE,
+}
+impl From<ds::CommandFailureReason> for CommandFailureReason {
+    fn from(v: ds::CommandFailureReason) -> Self {
+        match v {
+            ds::CommandFailureReason::GATEWAY_REFUSED => Self::GATEWAY_REFUSED,
+            ds::CommandFailureReason::CARD_DECLINED => Self::CARD_DECLINED,
+            ds::CommandFailureReason::PAYLOAD_UNDECODABLE => Self::PAYLOAD_UNDECODABLE,
+            ds::CommandFailureReason::UNCATALOGUED_INVARIANT => Self::UNCATALOGUED_INVARIANT,
+            ds::CommandFailureReason::TRANSIENT_INFRASTRUCTURE => Self::TRANSIENT_INFRASTRUCTURE,
+        }
+    }
+}
+impl From<CommandFailureReason> for ds::CommandFailureReason {
+    fn from(v: CommandFailureReason) -> Self {
+        match v {
+            CommandFailureReason::GATEWAY_REFUSED => Self::GATEWAY_REFUSED,
+            CommandFailureReason::CARD_DECLINED => Self::CARD_DECLINED,
+            CommandFailureReason::PAYLOAD_UNDECODABLE => Self::PAYLOAD_UNDECODABLE,
+            CommandFailureReason::UNCATALOGUED_INVARIANT => Self::UNCATALOGUED_INVARIANT,
+            CommandFailureReason::TRANSIENT_INFRASTRUCTURE => Self::TRANSIENT_INFRASTRUCTURE,
+        }
+    }
+}
+
+/// The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct GatewayStatusCode(pub i64);
+async_graphql::scalar!(GatewayStatusCode, "GatewayStatusCode", "The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.");
+impl From<ds::GatewayStatusCode> for GatewayStatusCode {
+    fn from(v: ds::GatewayStatusCode) -> Self {
+        Self(v.0)
+    }
+}
+impl From<GatewayStatusCode> for ds::GatewayStatusCode {
+    fn from(v: GatewayStatusCode) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);

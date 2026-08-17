@@ -31,6 +31,7 @@ use application::generated::services::{
     PaymentCaptureInput, PaymentRefundInput, PaymentReleaseInput, PaymentRequestInput,
     PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
+use application::ports::payment_gateway_refused;
 use async_trait::async_trait;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
@@ -317,9 +318,16 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
                 ));
             }
             if kind == "invalid_request_error" || kind == "idempotency_error" {
-                return DomainError::Invariant(format!(
-                    "PaymentGatewayRefused: stripe {context} refused deterministically (HTTP {status}, code '{code}'): {message}"
-                ));
+                // The status travels STRUCTURALLY (application::ports encodes it in a shape its
+                // own reader parses back) so the mailbox can put `401` in the journal row without
+                // putting `{message}` there — Stripe's 401 message is literally
+                // "Invalid API Key provided: sk_test_…" (#623/#625).
+                return payment_gateway_refused(
+                    Some(status),
+                    &format!(
+                        "stripe {context} refused deterministically (code '{code}'): {message}"
+                    ),
+                );
             }
             return DomainError::Repository(format!(
                 "stripe: {context} rejected (HTTP {status}, code '{code}'): {message}"

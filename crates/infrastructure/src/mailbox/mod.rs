@@ -4,6 +4,8 @@
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
 mod activation;
+// The BOUNDED shape of what a failed command leaves in `inbound_messages.error` (#623/#625).
+pub mod attribution;
 // THE BIRTH-GAP dead-man's switch (#608) — "money held, no order" made a signal, on its own clock.
 mod birth_gap_watch;
 // The staged-event flush and the BAM counter's WHEN (#597). PRIVATE, and it exports only

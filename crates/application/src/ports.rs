@@ -44,6 +44,104 @@ pub fn is_version_conflict(err: &DomainError) -> bool {
     matches!(err, DomainError::Invariant(msg) if msg.starts_with(VERSION_CONFLICT_PREFIX))
 }
 
+/// Message prefix carried by the [`DomainError::Invariant`] a payment gateway returns when it
+/// refuses a request DETERMINISTICALLY — a bad payment method, a reused idempotency key, bad
+/// credentials. Terminal on both dispatch arms: retrying can never succeed.
+///
+/// **Why this is a shared const and not five `format!` literals** (#623 M3, measured rather than
+/// assumed). Before this change the prefix was minted at five sites and matched at **zero** — the
+/// experiment was to rename it in `stripe-adapter` and see what went red: `crates/application`'s
+/// 363 unit tests all passed, and the only failures were the adapter's own three tests, which
+/// simply restate the literal they mint. So the token carried no machine meaning at all; it was
+/// prose that happened to sit in a durable row.
+///
+/// [`crate::ports::payment_gateway_refused`] is what gives it meaning: the mailbox now READS it to
+/// attribute a failed command (`infrastructure::mailbox::attribution`), so the mint sites and the
+/// reader must agree, and a shared builder/reader pair is the cheapest place the compiler can help.
+/// The stronger form — a typed gateway-failure variant on `DomainError`, where the status is a
+/// field instead of something to parse — is
+/// [#625](https://github.com/TheCaptainCompany/captain-food/issues/625) and is deliberately not
+/// this change.
+pub const PAYMENT_GATEWAY_REFUSED_PREFIX: &str = "PaymentGatewayRefused";
+
+/// Build the canonical deterministic-gateway-refusal error.
+///
+/// The `(HTTP {status})` group sits AFTER the first colon on purpose: [`rejection_code`] splits an
+/// `Invariant` message on `:` to read its errors.yaml code, so a status folded into the head would
+/// make the code unreadable the day
+/// [#625](https://github.com/TheCaptainCompany/captain-food/issues/625) catalogues this prefix —
+/// a trap that would surface as a silently wrong verdict, not as a compile error.
+///
+/// `detail` is the gateway's own prose. It reaches the LOG only: the mailbox writes
+/// [`payment_gateway_refused_status`] into the journal row and nothing else, because a provider
+/// message can contain the API key (`"Invalid API Key provided: sk_test_…"`, #623).
+pub fn payment_gateway_refused(status: Option<u16>, detail: &str) -> DomainError {
+    DomainError::Invariant(match status {
+        Some(s) => format!("{PAYMENT_GATEWAY_REFUSED_PREFIX}: (HTTP {s}) {detail}"),
+        None => format!("{PAYMENT_GATEWAY_REFUSED_PREFIX}: {detail}"),
+    })
+}
+
+/// Whether `err` is a deterministic gateway refusal built by [`payment_gateway_refused`].
+pub fn is_payment_gateway_refused(err: &DomainError) -> bool {
+    matches!(err, DomainError::Invariant(msg) if msg.starts_with(PAYMENT_GATEWAY_REFUSED_PREFIX))
+}
+
+/// Read back the HTTP status [`payment_gateway_refused`] encoded, if it had one. The round trip is
+/// pinned by a test in this module: this reader and that builder are one contract, and the whole
+/// reason the journal row can name `401` (our credentials) versus `400` (our request) versus `402`
+/// (the customer's card) without carrying a byte of the gateway's prose.
+pub fn payment_gateway_refused_status(err: &DomainError) -> Option<u16> {
+    let DomainError::Invariant(msg) = err else { return None };
+    let rest = msg.strip_prefix(PAYMENT_GATEWAY_REFUSED_PREFIX)?;
+    let rest = rest.strip_prefix(": (HTTP ")?;
+    let end = rest.find(')')?;
+    rest[..end].parse::<u16>().ok()
+}
+
+#[cfg(test)]
+mod gateway_refusal_tests {
+    use super::*;
+
+    /// Builder and reader are ONE contract. A test that only checked the reader against a
+    /// hand-written string would keep passing while the builder drifted away from it.
+    #[test]
+    fn the_status_round_trips_through_the_message() {
+        for status in [400u16, 401, 402, 409, 429] {
+            let err = payment_gateway_refused(Some(status), "stripe create_payment_intent refused");
+            assert!(is_payment_gateway_refused(&err), "{err:?}");
+            assert_eq!(payment_gateway_refused_status(&err), Some(status), "{err:?}");
+        }
+    }
+
+    /// No status is a real case (the fail-closed stand-in never made a call), and it must read as
+    /// ABSENT rather than as a guess.
+    #[test]
+    fn a_refusal_with_no_call_carries_no_status() {
+        let err = payment_gateway_refused(None, "capture gateway not configured");
+        assert!(is_payment_gateway_refused(&err));
+        assert_eq!(payment_gateway_refused_status(&err), None);
+    }
+
+    /// The prefix must stay readable by [`rejection_code`]: the day #625 catalogues it, the
+    /// catalogue lookup has to find `PaymentGatewayRefused`, not `PaymentGatewayRefused (HTTP 401)`.
+    /// Getting this wrong flips a verdict silently, which is the one failure mode this whole change
+    /// is fenced against.
+    #[test]
+    fn the_code_stays_readable_with_a_status_attached() {
+        let err = payment_gateway_refused(Some(401), "stripe create_payment_intent refused");
+        assert_eq!(crate::commands::rejection_code(&err), Some(PAYMENT_GATEWAY_REFUSED_PREFIX));
+    }
+
+    /// A neighbouring error must not be mistaken for a gateway refusal.
+    #[test]
+    fn an_unrelated_invariant_is_not_a_gateway_refusal() {
+        let err = DomainError::Invariant("PaymentDeclined: Your card was declined.".into());
+        assert!(!is_payment_gateway_refused(&err));
+        assert_eq!(payment_gateway_refused_status(&err), None);
+    }
+}
+
 /// Write-side port: append business events to the `domain_events` log (CQRS-light, ADR-0035). Command
 /// handlers depend on this trait; the Postgres adapter lives in `infrastructure`.
 #[async_trait]

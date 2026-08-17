@@ -7,6 +7,7 @@
 //! §2.1 response bus, behind the boundary crate since #303) — after the commit, never before, so
 //! `ActorClient::watch` consumers only ever hear durable facts.
 
+use super::attribution;
 use std::sync::Arc;
 
 use actor_runtime::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler};
@@ -845,27 +846,55 @@ impl MailboxCommandHandler {
 
 /// Handler error → terminal verdict — the same discrimination the GraphQL completion applies
 /// (a catalogued errors.yaml rejection is REJECTED; everything else is the generic Internal).
+///
+/// **The verdict itself is unchanged by #623** and that is a fence, not an accident: catalogue
+/// membership is what splits REJECTED from FAILED, so a change that moved a code into or out of the
+/// catalogue would flip a verdict, an outcome and an alert's meaning at once. What changed is what
+/// the row SAYS, and where the prose goes.
+///
+/// Two destinations, deliberately two different calls:
+///
+/// - the **journal row** (`inbound_messages.error`, kept for the retention window and served as
+///   `Operation.errorCode`/`Operation.message`) gets a BOUNDED attribution and nothing else —
+///   [`attribution::context_of`] over a type with no free-text field;
+/// - the **log** gets the full diagnostic string, at the severity the class deserves.
+///
+/// Before this, the non-catalogued arm recorded `{}` (unattributable — #623) while the catalogued
+/// arm recorded the provider's message verbatim (a key leak — #625). Those are the same bug seen
+/// from two sides, which is why they are fixed in one function.
 pub fn verdict_of_error(e: DomainError) -> HandlerVerdict {
-    match e {
-        DomainError::Rejected { code, context } => {
-            HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": context }))
-        }
-        DomainError::Invariant(msg) => {
-            let code = msg.split(':').next().map(str::trim).unwrap_or("");
-            if domain::generated::errors::find(code).is_some() {
-                HandlerVerdict::Rejected(
-                    serde_json::json!({ "code": code, "context": { "detail": msg } }),
-                )
-            } else {
-                HandlerVerdict::Failed(
-                    serde_json::json!({ "code": "Internal", "context": {} }),
-                )
-            }
-        }
-        DomainError::Repository(_) => {
-            HandlerVerdict::Failed(serde_json::json!({ "code": "Internal", "context": {} }))
-        }
+    // A structured rejection already carries its declared errors.yaml context: pass it through
+    // untouched. It never held provider prose — the leak was only ever in the legacy string form.
+    if let DomainError::Rejected { code, context } = &e {
+        return HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": context }));
     }
+    if let Some(code) = attribution::catalogued_code(&e) {
+        // A CATALOGUED refusal: the code IS the attribution, and `errors.yaml` declares what its
+        // context may hold — for the legacy `"<Code>: <detail>"` form that is nothing. The `detail`
+        // this used to carry was the provider's message; no en/fr template interpolates `{detail}`
+        // (checked across every errors.yaml fragment), so dropping it changes no customer-facing
+        // message. Logged at INFO because a declined card is a business outcome, not a fault — the
+        // walk's "nothing at ERROR or WARN" finding is about the arm below, not this one.
+        let code = code.to_string();
+        tracing::info!(
+            error_code = %code,
+            detail = %attribution::log_detail(&e),
+            "command rejected with a catalogued code"
+        );
+        return HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": {} }));
+    }
+    // THE #623 DISCARD SITE. A failure nobody declared, on the most consequential command in the
+    // product: ERROR is the right severity, and its absence was half the defect.
+    let attributed = attribution::attribute(&e);
+    let context = attribution::context_of(&attributed);
+    tracing::error!(
+        seam = %context.get("seam").and_then(|v| v.as_str()).unwrap_or("?"),
+        reason = %context.get("reason").and_then(|v| v.as_str()).unwrap_or("?"),
+        gateway_status = ?context.get("gatewayStatus").and_then(|v| v.as_i64()),
+        detail = %attribution::log_detail(&e),
+        "command FAILED with no catalogued code — recorded as Internal"
+    );
+    HandlerVerdict::Failed(serde_json::json!({ "code": "Internal", "context": context }))
 }
 
 /// Post-commit fan-out of COMMAND verdicts onto the operation status bus — the mailbox-era home

@@ -12,6 +12,7 @@ use application::generated::services::{
     PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use async_trait::async_trait;
+use application::ports::payment_gateway_refused;
 use domain::shared::errors::DomainError;
 
 /// Fail-closed [`PaymentService`]: every create-intent is refused with the canonical
@@ -39,11 +40,17 @@ impl PaymentService for FailClosedPaymentGateway {
         input: application::generated::services::PaymentCaptureInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        Err(DomainError::Invariant(format!(
-            "PaymentGatewayRefused: capture gateway not configured (fail-closed stand-in; intent {}) \
-             — set STRIPE_SECRET_KEY to enable the real Stripe adapter",
-            input.payment_intent_id.0
-        )))
+        // No call was made, so there is NO gateway status: the shared builder's `None` is the
+        // honest shape, and the journal row will show the PAYMENT_GATEWAY seam with the status
+        // absent rather than a guessed one (#623).
+        Err(payment_gateway_refused(
+            None,
+            &format!(
+                "capture gateway not configured (fail-closed stand-in; intent {}) — set \
+                 STRIPE_SECRET_KEY to enable the real Stripe adapter",
+                input.payment_intent_id.0
+            ),
+        ))
     }
 
     async fn release(
@@ -51,11 +58,17 @@ impl PaymentService for FailClosedPaymentGateway {
         input: application::generated::services::PaymentReleaseInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        Err(DomainError::Invariant(format!(
-            "PaymentGatewayRefused: release gateway not configured (fail-closed stand-in; intent {}) \
-             — set STRIPE_SECRET_KEY to enable the real Stripe adapter",
-            input.payment_intent_id.0
-        )))
+        // No call was made, so there is NO gateway status: the shared builder's `None` is the
+        // honest shape, and the journal row will show the PAYMENT_GATEWAY seam with the status
+        // absent rather than a guessed one (#623).
+        Err(payment_gateway_refused(
+            None,
+            &format!(
+                "release gateway not configured (fail-closed stand-in; intent {}) — set \
+                 STRIPE_SECRET_KEY to enable the real Stripe adapter",
+                input.payment_intent_id.0
+            ),
+        ))
     }
 
     async fn refund(

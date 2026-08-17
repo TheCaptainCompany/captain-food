@@ -10775,7 +10775,7 @@ The deletion receipt (ADR-20260731-160000 §6): recorded on the DELETION LEDGER 
 | <a id="event-orderdeleted--policy"></a>`policy` | `string` | ✅ | The configuration key naming the retention window under which erasure ran (ORDER_RETENTION_WINDOW_DAYS). |
 | <a id="event-orderdeleted--tombstoneeventid"></a>`tombstoneEventId` | `string` | ⬜ | The technical tombstone event (envelope-level, ADR-20260731-160000 §5) that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp. |
 
-### 📦 Entities _(3)_
+### 📦 Entities _(4)_
 
 <a id="entity-courier"></a>
 #### 📦 Entity: `Courier`
@@ -10810,7 +10810,18 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(52)_
+<a id="entity-commandfailureattribution"></a>
+#### 📦 Entity: `CommandFailureAttribution`
+
+THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages.error.context` ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), [#625](https://github.com/TheCaptainCompany/captain-food/issues/625)). Every field is a closed set or a number, so a provider body is UNSPELLABLE here — the guarantee is the type, not a review convention, which is what the ten existing `context: { detail: e.to_string() }` sites show a convention is worth. The free diagnostic text still exists and still matters; it goes to the LOG at the seam that produced it, never into this row, because this row persists for the retention window and is served to callers as `Operation.errorCode` / `Operation.message`. NOT an event payload and not a projected entity: it is the vocabulary of one jsonb column.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-commandfailureattribution--seam"></a>`seam` | [🔤 `CommandFailureSeam`](#scalar-commandfailureseam) | ✅ | Which boundary failed — the first discrimination an operator needs. |
+| <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
+| <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
+
+### 🔤 Scalars _(55)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10866,6 +10877,9 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-honeycombingestkey"></a>🔤 `HoneycombIngestKey` | string `^[A-Za-z0-9_]{20,120}$` | A Honeycomb INGEST key — the credential the OTLP exporter sends as `x-honeycomb-team` (ADR-20260729 telemetry backend, issue #191). Deliberately PERMISSIVE on charset and length, and that is a considered choice rather than laziness. Honeycomb has shipped several ingest-key formats (32-char hex "classic" keys, and the newer `hc?ik_`-prefixed keys), and this value gates STARTUP: on production a pattern that is stricter than reality turns a perfectly good key into `exit 78` and a failed deploy. An over-tight regex here would manufacture exactly the outage this file exists to prevent, so the rule encodes only what is genuinely invariant across formats. What it does still catch is the mistake people actually make: a **management** key (`<Key ID>:<Secret Key>`, used by the Honeycomb MCP server and the Query API) pasted into the ingest slot. Management keys contain a colon, ingest keys never do — so the colon exclusion is the load- bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.  |
 | <a id="scalar-tracesampleratio"></a>🔤 `TraceSampleRatio` | string `^(0(\.[0-9]+)?|1(\.0+)?)$` | The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.  |
 | <a id="scalar-loglevel"></a>🔤 `LogLevel` | string `^(?i)(trace|debug|info|warn|error)$` | The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.  |
+| <a id="scalar-commandfailureseam"></a>🔤 `CommandFailureSeam` | enum (PAYMENT_GATEWAY \| COMMAND_PAYLOAD \| EVENT_APPEND \| DOMAIN_INVARIANT \| INFRASTRUCTURE) | WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here.  |
+| <a id="scalar-commandfailurereason"></a>🔤 `CommandFailureReason` | enum (GATEWAY_REFUSED \| CARD_DECLINED \| PAYLOAD_UNDECODABLE \| UNCATALOGUED_INVARIANT \| TRANSIENT_INFRASTRUCTURE) | WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.  |
+| <a id="scalar-gatewaystatuscode"></a>🔤 `GatewayStatusCode` | integer | The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.  |
 
 ### ⛔ Errors _(10)_
 
