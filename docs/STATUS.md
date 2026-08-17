@@ -2,6 +2,86 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧾 **2026-08-17 — FOUR RECORDS PUT RIGHT: THE IDOR COVERS 83 OF 118 OPERATIONS, NOT THE ORDER
+> LIFECYCLE'S WRITES, AND THE #608 CHECKPOINT MISS WAS NEVER A ROSTER MISS** (records-only run, straight to `main`; no `specs/**`, no
+> `crates/**`, so no SPEC-LOG row and no regeneration).
+>
+> **Why a whole session on records**: on 2026-08-16 a contradicting `STATUS.md` line propagated a false
+> claim into a founder-facing brief. That is the cost that earned this run — a wrong record is not
+> inert, it is an input.
+>
+> **(1) [DECISIONS §39](proposals/DECISIONS.md) IDOR-1 — scope corrected, verdict and deadline
+> untouched.** The row described a cross-tenant **write** IDOR on the order lifecycle. The real surface
+> is **83 of 118 operations on both sides**: 76 of 86 mutations with no proven domain binding — split
+> **37 bindable** (a payload field is the caller's own scope; prove field == verified claim) and **39
+> unbindable** (*no payload field corresponds to the caller at all*, so stripping ids from payloads does
+> nothing; needs a participant check against folded state) — plus **7 read surfaces with no
+> `ReadScope`**, filed as [#618 "Seven read surfaces have no `ReadScope` — and two return the whole
+> platform when called with no arguments"](https://github.com/TheCaptainCompany/captain-food/issues/618), **two of
+> which return other tenants' rows when called with NO ARGUMENTS**. `approveRefund`/`denyRefund` are the
+> worked unbindable case: role `RESTAURANT`, payload `{orderId, amount, reason}`, **no identity
+> consulted anywhere** — money movement decided by a caller nothing proves is a party to the order.
+> **Also corrected: the fix is not simply cheaper-because-claims.** The read side resolves identity from
+> JWT claims, but the **write** side does a **database lookup in the mailbox worker**
+> (`mailbox/handler.rs:244-257`) **and only for `CUSTOMER`**; every other role gets `None`. Any claim of
+> the form *"we already have the identity at the handler"* is **false today**. And `external_tokens` is
+> a **flat shared list with no per-partner identity** (`auth.rs:442,480-483`) — a partner action cannot
+> be attributed to a partner, **present tense**, not gated on the first order. Recorded but **not
+> enacted**: two lenses argued the trigger should be the **earliest of** a second restaurant credential
+> outside the team *including a demo or pilot*, a rider credential outside the team, or the first real
+> order — an IDOR needs two principals and the second credential exists at **onboarding**. Moving a
+> founder-facing deadline is a decision, not a correction.
+>
+> **(2) [DECISIONS §44](proposals/DECISIONS.md) MOB-COST-1a — the ATTRIBUTION was wrong; the RULING is
+> untouched.** The row blamed the [#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608)
+> miss on the checkpoint no longer inviting a lens. The committed
+> claim-time card (`6d00cb3`) says **`Briefing roster: WHOLE ROSTER`** — only the *checkpoint* was
+> narrowed, so the wrong arithmetic was in front of **every** lens and none challenged it. The card's
+> *"originated in THIS CARD"* is also imprecise: the committed card contains **no 50 s figure**, only
+> *"a threshold justified against the ~7-day Stripe hold expiry"*. **n=2**, and the second points the
+> same way: [#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609)
+> banked a MISS (its card's §"Checkpoint verification", now on `main` via PR #613) whose clean
+> attribution `vernon` **rejected** — his own briefing finding
+> named the literals and read their coupling to the declaration as a liability without taking the step
+> to reading it as a **pin** — banked shared, weighted to `vernon`, only the *escalation* to the absent
+> `young`. **The defect exposed is not roster width**: *a coordinator-authored derived number is
+> consumed by every lens as established fact and nothing verifies it.* §44 is the founder's own ruling,
+> so the **recorded reversion of HIGH-CONSEQUENCE to whole-roster STANDS** and no class is declared
+> un-reverted; the replacement — **a dispatch card may not state a derived number without naming its
+> antecedents, and any bare number it does state is marked UNVERIFIED input** (a gate, whose spec-side
+> half PR [#610 "Detect an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/pull/610) already built) — is
+> **recommended and PENDING FOUNDER**.
+>
+> **(3) Three stale readings in this file reconciled** (see the marked entries): the split-first
+> keystone tail is now labelled **the live sequence**, and the older *"harness before L5"* program of
+> record is labelled **superseded** in place with its still-true content named, so a reader landing on
+> either one knows which wins; and the Stripe-webhook line that still framed an ingress as an open
+> founder-owned blocker is corrected against
+> [ADR-20260813-004634](adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md)
+> — **no inbound ingress is required**, the CLI's outbound tunnel plus its own signing secret reaches a
+> local stack. The true residue is kept: nothing **wires** it yet.
+>
+> **(4) New [BRIEF-20260816-idor-obligation-map](legal/BRIEF-20260816-idor-obligation-map.md)** — the
+> `legal-specialist` obligation map and counsel packet (IDOR-L1…IDOR-L9) landed in the house format.
+> **Not legal advice, not clearance.** Two findings **survive the code fix**: (i) **free-text
+> special-category data** — reclamation descriptions and order conversations are unbounded customer
+> prose in a *food* business, so they predictably carry allergy, illness and dietary-religious
+> statements (Art. 9(1)), which makes individual notification close to automatic, is a mandatory-DPIA
+> trigger in its own right, and needs an **Art. 9(2) basis for the ORDINARY case** — unsolved design
+> work that scoping the reads does not answer; (ii) **blast-radius unboundability** — with no tenant
+> predicate, no pagination and no returned-row-count logging, a breach's scope could not be bounded
+> after the fact, so **notification would have to assume the maximum**. Cheap fix, on the artifact list.
+> The brief also records the **publication split** the team followed and its condition: **if production
+> is restored before the fix lands, the public posture page comes down until it does.**
+>
+> **Two adjacent findings, named not fixed** (both owe a `specs/**` edit + SPEC-LOG row, out of scope
+> here): `specs/ordering/api.yaml:207` claims *"Restaurant/ownership scoping is enforced server-side"*
+> and `specs/comms/api.yaml:58` claims *"Ownership enforced server-side"* — **both false**, and the
+> ordering one contradicts its own next sentence. A false control claim in the source of truth is how a
+> reviewer stops looking. And: **this repository is public**, so §39 and this file publish a `file:line`
+> recipe for a live unremediated cross-tenant IDOR — carried today only by there being no live instance
+> with real users, which is exactly the condition the publication split makes revocable.
+
 > 🔒 **2026-08-16 — THE LANE WIDTH IS NOW UNSPELLABLE, NOT MERELY UNSPELLED**
 > ([#609 "Lane addressing residue after #596: `stable_partition` is still `pub` and `mailbox_address` still carries a vestigial width"](https://github.com/TheCaptainCompany/captain-food/issues/609),
 > branch `609-lane-addressing-residue`, [PR #613](https://github.com/TheCaptainCompany/captain-food/pull/613)
@@ -949,6 +1029,12 @@
 > write-auth fix -> harden the `inbound_messages` write path -> #556 harness on the SPLIT stack -> L5
 > -> browser walls -> the six-clause acceptance walk. This run is **docs-only** (ADR + this entry); no
 > code, no claim, no backlog re-rank.
+>
+> **📌 THIS IS THE LIVE SEQUENCE** (marked 2026-08-17). The earlier *"program of record … harness
+> before L5"* bullet further down this file describes the **single-DB** intermediate this entry
+> supersedes; it is now labelled as superseded in place, with its still-true content named. If the two
+> ever disagree again, **this entry wins on the stack and the ordering**, the older one on the
+> *content* of the harness, L5's assertions, the browser walls and the honesty sentence.
 
 > 🔒 **2026-08-14 — L5 acceptance-walk executor handed back on two real problems; the architect
 > assessed, re-sequenced and recorded (docs-only run)**
@@ -1198,7 +1284,26 @@
 >   exists, `capture_method=manual` is set, and `PaymentSettlementProcess` captures on the
 >   delivered fact. The walk harness's capture assertions can now run against the implemented
 >   semantics.
-> - **The program of record** (ADR §5, **re-sequenced 2026-08-14 — harness before L5**):
+> - **⛔ The program of record below is SUPERSEDED — read the 2026-08-14 "full enforcement and full
+>   split" entry instead** (higher in this file; ADR-20260813-191111 "Scope clarification (2026-08-14)").
+>   *Reconciled 2026-08-17: these two entries contradicted each other and a reader landing on either
+>   one had no way to tell which was current.* **What changed**: this sequence targets a **single-DB
+>   monolith stack** for the harness and L5, deferring the split ("the harness's single-DB stack is
+>   enough for L5"). The founder directive *"The acceptance include the full enforcement and full
+>   split"* removed that intermediate — under final-vision-first
+>   ([ADR-20260808-235113](adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)) the
+>   single-DB stack would have to be rebuilt — so the harness and the six-clause walk now target the
+>   **physically-split, least-privilege, write-authorization-enforced eleven-database stack from the
+>   start**. **The one live sequence, superseding everything below**: physical split band #513 →
+>   #514 → #509 → the write-auth fix ([DECISIONS §39](proposals/DECISIONS.md) IDOR-1 / #178, whose
+>   scope was corrected 2026-08-17 to cover the read side too) → harden the `inbound_messages` write
+>   path → #556 harness **on the SPLIT stack** → L5 → browser walls → the six-clause acceptance walk.
+>   What survives below unchanged: the **content** of each step (what the harness must contain, what
+>   L5 asserts, the browser walls, the honesty sentence) — only the stack it runs on and the ordering
+>   moved. Kept rather than deleted because the founder's clause order and the mob's honesty sentence
+>   are quoted here verbatim.
+> - ~~**The program of record**~~ (ADR §5, **re-sequenced 2026-08-14 — harness before L5**; superseded
+>   2026-08-14 by the full-split scope clarification, marked 2026-08-17):
 >   [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
 >   (merged) → split slice 1 → the **local acceptance harness** (local-issuer/JWKS stub + a `mint_token`
 >   that signs role + `captain_food` claims **offline** against a key the fail-closed verifier is pointed
@@ -2135,10 +2240,21 @@
 > **confirmation, not a creation**: STATUS already records (2026-08-09, verified) that an Actions
 > secret of that name exists and that `render-config-sync` reaches it through `toJSON(secrets)`;
 > nothing in the repo can tell whether it is scoped to this workflow or still holds the value the
-> smoke needs, so the founder confirms or re-points it. (2) **A webhook ingress**, so Stripe can reach
-> L4's `CAPTURED` assertion: `stripe listen --forward-to` is outbound-only and **nothing in the repo
-> uses it** (grepped, zero hits) — the rehearsal cluster has no inbound address at all, so L4 cannot
-> be walked locally however green L1–L3 get. Both are FOUNDER actions and neither is built here.
+> smoke needs, so the founder confirms or re-points it. (2) ~~**A webhook ingress**, so Stripe can reach
+> L4's `CAPTURED` assertion … the rehearsal cluster has no inbound address at all, so L4 cannot be
+> walked locally however green L1–L3 get. Both are FOUNDER actions.~~
+> **⤷ SUPERSEDED 2026-08-13, corrected here 2026-08-17 — NO INBOUND INGRESS IS REQUIRED, and this was
+> never a founder action.** Two days after this entry,
+> [ADR-20260813-004634](adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md)
+> (§"What this un-blocks", and [DECISIONS §36 IDP-1](proposals/DECISIONS.md)) resolved it **from the
+> same fact this entry drew the opposite conclusion from**: `stripe listen --forward-to` being
+> outbound-only is exactly what makes it work — the CLI opens the tunnel *from* the local stack, reaches
+> it through the hosts entry the rehearsal runbook already writes, and its **own** signing secret
+> satisfies the fail-closed `STRIPE_WEBHOOK_SECRET` boot gate. Real Stripe, real signature, no shim, no
+> cluster ingress, no founder involvement. **The true residue, and all that survives**: nothing in the
+> repo **wires** it yet — `stripe listen` appears in exactly one place tree-wide, the ADR prose that
+> describes it (verified 2026-08-17), so it is an unbuilt step in the harness, not a blocker. Gap (1)
+> above is unaffected and remains a founder action.
 > Still open for the console session: everything in
 > [#362](https://github.com/TheCaptainCompany/captain-food/issues/362) — ingress-nginx and
 > cert-manager are vendorable and pinnable offline exactly like `cnpg-operator/PIN.json`, and are the
