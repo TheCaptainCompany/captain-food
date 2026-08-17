@@ -9,11 +9,17 @@
 //! e.to_string() }`.
 //!
 //! That repair leaks. `inbound_messages.error` is a jsonb column that persists for the retention
-//! window and is served to callers as `Operation.errorCode` / `Operation.message`, and Stripe's
-//! error `message` is provider-controlled: for an authentication failure it is literally
-//! `"Invalid API Key provided: sk_test_…"`. The `{}` that #623 reports is, measurably, the only
-//! branch on that path that was NOT already leaking — the catalogued arm copies the provider's
-//! prose verbatim (`crates/adapters/stripe/tests/journal_leak_canary.rs` proves it).
+//! window, and Stripe's error `message` is provider-controlled: for an authentication failure it is
+//! literally `"Invalid API Key provided: sk_test_…"`. The `{}` that #623 reports is, measurably,
+//! the only branch on that path that was NOT already leaking — the catalogued arm copied the
+//! provider's prose verbatim (`crates/adapters/stripe/tests/journal_leak_canary.rs` proves it).
+//!
+//! **Where it leaked TO, exactly** (`young`, #623 review — in a chunk about unverified claims, an
+//! earlier draft of this paragraph was itself one). Not to callers: no `errors.yaml` en/fr template
+//! in any scope fragment interpolates `{detail}` — the complete placeholder set across every
+//! fragment is 21 tokens and `detail` is not among them — and `context` was never on the wire.
+//! It leaked to **the column and therefore to the backups**, which is enough: a secret in a durable
+//! store is a secret you must now rotate and prove gone, and nothing about that needs a reader.
 //!
 //! ## The fence, and why it is a TYPE and not a rule
 //!
@@ -39,7 +45,7 @@
 //!   kernel type.
 
 use application::commands::rejection_code;
-use application::ports::{is_payment_gateway_refused, payment_gateway_refused_status};
+use application::ports::{gateway_status_of, is_payment_declined, is_payment_gateway_refused};
 use domain::generated::entities::CommandFailureAttribution;
 use domain::generated::scalars::{
     CommandFailureReason as Reason, CommandFailureSeam as Seam, GatewayStatusCode,
@@ -78,11 +84,16 @@ pub fn is_command_payload_undecodable(err: &DomainError) -> bool {
 /// It reads the error, never the call site, because the call site cannot tell a gateway refusal
 /// from an aggregate invariant — both arrive as `DomainError::Invariant` from the same `await`.
 pub fn attribute(err: &DomainError) -> CommandFailureAttribution {
+    // The CATALOGUED classification first, so `Reason::CARD_DECLINED` has exactly one producer and
+    // the two entry points ([`catalogued_context`] and this one) can never disagree about it.
+    if let Some(attribution) = attribute_catalogued(err) {
+        return attribution;
+    }
     if is_payment_gateway_refused(err) {
         return CommandFailureAttribution {
             seam: Seam::PAYMENT_GATEWAY,
             reason: Reason::GATEWAY_REFUSED,
-            gateway_status: payment_gateway_refused_status(err).map(|s| GatewayStatusCode(s.into())),
+            gateway_status: gateway_status_of(err).map(|s| GatewayStatusCode(s.into())),
         };
     }
     if is_command_payload_undecodable(err) {
@@ -105,13 +116,50 @@ pub fn attribute(err: &DomainError) -> CommandFailureAttribution {
             reason: Reason::TRANSIENT_INFRASTRUCTURE,
             gateway_status: None,
         },
-        // A card decline reaching here would be a catalogued code and would never have got this
-        // far; anything else is an invariant nobody declared, which is a DEFECT and not a refusal.
+        // The GENERAL CASE, and the one worth naming: an invariant nobody declared. It is a DEFECT
+        // rather than a refusal — a business outcome arriving here is a missing `errors.yaml`
+        // declaration, and the row saying so is how anyone finds out. Asserted in `tests` below;
+        // it is the least exotic input on this whole path and was the one nothing covered.
         _ => CommandFailureAttribution {
             seam: Seam::DOMAIN_INVARIANT,
             reason: Reason::UNCATALOGUED_INVARIANT,
             gateway_status: None,
         },
+    }
+}
+
+/// Attribute a CATALOGUED refusal — one whose `errors.yaml` code already names the outcome.
+///
+/// `None` means "nothing to add beyond the code", which is the honest answer for most of the
+/// catalogue: the code IS the attribution and `errors.yaml` declares the context empty.
+///
+/// The one member that earns more is the card decline, and it earns it by EVIDENCE: the gateway's
+/// HTTP status, which exists only if a gateway actually answered. That is deliberately strict —
+/// `infrastructure::integrations::payments`'s fail-closed stand-in mints the same catalogued code
+/// when NO gateway is configured, and attributing "we never called anyone" as "the customer's card
+/// was declined" is precisely the misattribution #623 exists to stop. No status, no claim.
+fn attribute_catalogued(err: &DomainError) -> Option<CommandFailureAttribution> {
+    if !is_payment_declined(err) {
+        return None;
+    }
+    Some(CommandFailureAttribution {
+        seam: Seam::PAYMENT_GATEWAY,
+        reason: Reason::CARD_DECLINED,
+        gateway_status: Some(GatewayStatusCode(gateway_status_of(err)?.into())),
+    })
+}
+
+/// The `context` a CATALOGUED rejection records alongside its code.
+///
+/// Before the #623 review this was the literal `{}` — safe, because the provider prose it replaced
+/// was the live leak, but a downgrade: a declined card left a row saying `PaymentDeclined` and
+/// nothing else, so "declined how?" needed the log rather than the row, on the money path. It now
+/// carries the same bounded [`CommandFailureAttribution`] the FAILED arm does, which is also why
+/// there is no second shape for a reader to learn.
+pub fn catalogued_context(err: &DomainError) -> serde_json::Value {
+    match attribute_catalogued(err) {
+        Some(attribution) => context_of(&attribution),
+        None => serde_json::json!({}),
     }
 }
 
@@ -137,7 +185,6 @@ fn json_of_seam(seam: Seam) -> serde_json::Value {
         match seam {
             Seam::PAYMENT_GATEWAY => "PAYMENT_GATEWAY",
             Seam::COMMAND_PAYLOAD => "COMMAND_PAYLOAD",
-            Seam::EVENT_APPEND => "EVENT_APPEND",
             Seam::DOMAIN_INVARIANT => "DOMAIN_INVARIANT",
             Seam::INFRASTRUCTURE => "INFRASTRUCTURE",
         }
@@ -174,4 +221,96 @@ pub fn log_detail(err: &DomainError) -> String {
 /// own copy of that parse, which is two places for one protocol.
 pub fn catalogued_code(err: &DomainError) -> Option<&str> {
     rejection_code(err).filter(|code| domain::generated::errors::find(code).is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use application::ports::{payment_declined, payment_gateway_refused};
+
+    /// EVERY declared seam must have a producer, and this is the executable form of that rule.
+    ///
+    /// The `match` is exhaustive, so adding a member to `CommandFailureSeam` does not compile until
+    /// someone writes down which error produces it; the `assert` then fails until one actually
+    /// does. That pairing is the whole point — a declared-but-unemitted member is the defect class
+    /// this module exists to fix, and #623 shipped one of its own (`EVENT_APPEND`, withdrawn from
+    /// the scalar in review because its producers are [#628]'s staged-flush arms, out of scope
+    /// here). A value nothing can emit is a dashboard filter that is always empty and a runbook
+    /// paragraph nobody can trigger.
+    #[test]
+    fn every_declared_seam_has_a_producer() {
+        for seam in [
+            Seam::PAYMENT_GATEWAY,
+            Seam::COMMAND_PAYLOAD,
+            Seam::DOMAIN_INVARIANT,
+            Seam::INFRASTRUCTURE,
+        ] {
+            let driver: DomainError = match seam {
+                Seam::PAYMENT_GATEWAY => payment_gateway_refused(Some(401), "stripe refused"),
+                Seam::COMMAND_PAYLOAD => command_payload_undecodable("PlaceOrder", "missing field"),
+                Seam::DOMAIN_INVARIANT => DomainError::Invariant("cart is empty".into()),
+                Seam::INFRASTRUCTURE => DomainError::Repository("connection reset".into()),
+            };
+            assert_eq!(
+                attribute(&driver).seam,
+                seam,
+                "no error in this repository produces {seam:?}; either produce it or remove it \
+                 from specs/common/scalars.yaml#/CommandFailureSeam"
+            );
+        }
+    }
+
+    /// The `_` arm is the GENERAL CASE of the bug this module fixes, not a defensive default, and
+    /// until the #623 review nothing asserted it — the two covered seams were both exotic.
+    #[test]
+    fn an_undeclared_invariant_is_a_domain_defect_not_a_refusal() {
+        let attributed = attribute(&DomainError::Invariant("order already accepted".into()));
+        assert_eq!(attributed.seam, Seam::DOMAIN_INVARIANT);
+        assert_eq!(attributed.reason, Reason::UNCATALOGUED_INVARIANT);
+        assert!(attributed.gateway_status.is_none(), "no call was made");
+    }
+
+    /// Measured-dead, not assumed-dead (#623): every `verdict_of_error` call site intercepts
+    /// `Repository` above it. The arm is still asserted, because "unreachable today" is a property
+    /// of three interceptions in two files and the day one is removed this row is the evidence.
+    #[test]
+    fn a_repository_failure_is_attributed_to_infrastructure() {
+        let attributed = attribute(&DomainError::Repository("pool timed out".into()));
+        assert_eq!(attributed.seam, Seam::INFRASTRUCTURE);
+        assert_eq!(attributed.reason, Reason::TRANSIENT_INFRASTRUCTURE);
+        assert!(attributed.gateway_status.is_none());
+    }
+
+    /// A card decline is a REJECTED business outcome, and its row now says which gateway answer it
+    /// was. `context: {}` was the safe answer in the first draft, not the right one.
+    #[test]
+    fn a_card_decline_carries_its_gateway_status() {
+        let err = payment_declined(Some(402), "Your card was declined. (card_declined)");
+        let context = catalogued_context(&err);
+        assert_eq!(context["seam"], "PAYMENT_GATEWAY");
+        assert_eq!(context["reason"], "CARD_DECLINED");
+        assert_eq!(context["gatewayStatus"], 402);
+        assert!(
+            !context.to_string().contains("declined."),
+            "the provider's prose must not reach the row: {context}"
+        );
+    }
+
+    /// The strictness that keeps the previous test honest: the fail-closed stand-in mints the SAME
+    /// catalogued code with no gateway behind it, and calling that "the customer's card was
+    /// declined" would be a misattribution on the money path.
+    #[test]
+    fn a_decline_with_no_gateway_behind_it_claims_nothing() {
+        let stand_in = DomainError::Invariant(
+            "PaymentDeclined: payment gateway not configured (fail-closed stand-in)".into(),
+        );
+        assert_eq!(catalogued_context(&stand_in), serde_json::json!({}));
+    }
+
+    /// Any other catalogued code keeps the empty context `errors.yaml` declares for it.
+    #[test]
+    fn a_catalogued_code_that_is_not_a_decline_adds_nothing() {
+        let err = DomainError::Invariant("NotAParticipant: not your order".into());
+        assert_eq!(catalogued_context(&err), serde_json::json!({}));
+    }
 }

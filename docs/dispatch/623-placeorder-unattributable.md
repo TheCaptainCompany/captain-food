@@ -168,3 +168,83 @@ The three declared concerns were all met by the diff, and each lens's named arti
 test with the distinctness assertion that makes splitting it vacuous, and
 `observability-agent`'s contract-violation scope is a validator rule that went red on `place-order`
 before the instrumentation landed.
+
+## Post-checkpoint — what the three PASS-WITH-FOLLOWUPS changed
+
+The checkpoint cleared with followups, and the followups are the better half of the chunk. Two
+executor claims were **corrected** rather than confirmed, which is what the third look is for.
+
+**The fence question, settled on better grounds than the card's.** `young` verified independently
+that nothing read `context.detail`: no `errors.yaml` template interpolates it (the complete
+placeholder set across every fragment is 21 tokens), `context` was never on the wire, no SQL or index
+touches it. And the deciding point the card missed — **there was no smaller form**. `detail` on the
+catalogued arm *was* the leak, so splitting the change yields "leak" and "no leak", not two changes.
+*A fence that forbids removing the leaking field is a fence protecting the defect.* The rule this
+generalises to, sharper than the executor's banking: **a card that authorises adding recorded data
+must also state what stops being recorded, and who read it. The removal is the reviewable act; the
+addition reviews itself.**
+
+**Correction 1 — "undiminished" was an overclaim** (`beck`). The structural property survives: both
+seams are classified by the same `attribute(&err)`, so M1 remains a one-token edit inside one
+function and remains red. But gateway-vs-cart-read would have crossed **two `DomainError` variants**,
+where gateway-vs-payload is two `Invariant`s discriminated by prefix. The test therefore exercises
+prefix discrimination twice and variant discrimination zero times. That is the honest statement and
+it is now the one in the PR body.
+
+**Correction 2 — "seen red rather than written green" is literally false for the validator**
+(`observability-agent`). §21 and its `place-order` fix are in the same commit, so 12→11 is asserted
+rather than re-checkable from history — the antecedent problem
+([ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md))
+in miniature. Accepted anyway, on a better ground: the planted-input test is red-on-mutant
+**permanently**, not once at authoring time, which outranks commit order as evidence. Stated in the
+PR body, because unqualified the claim reads as unverifiable and a reader is right to distrust it.
+
+### The six landed followups
+
+1. **The catalogued arm carries the attribution too.** `context: {}` was the safe answer, not the
+   right one: a declined card left a row saying `PaymentDeclined` and nothing else, so *declined how*
+   needed the log — a downgrade on the money path. `Reason::CARD_DECLINED` was, until this,
+   declared-and-unreachable, because `verdict_of_error` returned before `attribute` was called.
+   It is claimed on **evidence**: the gateway's HTTP status, which exists only if a gateway answered.
+   The fail-closed stand-in mints the same catalogued code with nothing behind it, and attributing
+   *we never called anyone* as *the customer's card was declined* is the misattribution this chunk
+   exists to stop.
+2. **`Seam::EVENT_APPEND` withdrawn from the scalar.** No producer anywhere; its producers are
+   #628's staged-flush arms. Shipping a declared-but-unemitted member inside the chunk about that
+   defect class would have been the joke writing itself. Replaced by an executable rule — see (3) —
+   and #628 now owns bringing it back with its producer.
+3. **`every_declared_seam_has_a_producer`.** An exhaustive `match` naming the error that drives each
+   member, plus the assertion. **Mutation run**: re-adding `EVENT_APPEND` to the spec and
+   regenerating fails the build in two places (`json_of_seam` and the test's own match) — the
+   compiler catches it before the assertion is even reached, which is the compiler-first floor rather
+   than a gate.
+4. **The `_` arm asserted.** It is the general case of this very bug — an invariant nobody declared —
+   and nothing covered it; the two covered seams were both exotic. Plus `Repository` →
+   `INFRASTRUCTURE`, which is measured-dead and asserted anyway, because "unreachable" is a property
+   of three interceptions in two files.
+5. **The secret predicate is a shared function**, `stripe_adapter::secrets::provider_secret_in`,
+   widened to `sk_` / `rk_` / `whsec_` / `pk_live_` / `sk_live_`. It cannot go red today — the row
+   carries no strings at all now — and that is the point: #627 will re-author this predicate from
+   memory otherwise, and from memory it is written narrower. `sk_live_` is redundant under `sk_` on
+   purpose, because the list is read by someone asking whether the live key is covered.
+6. **The module doc corrected.** It claimed the leak was *served to callers as
+   `Operation.errorCode`/`Operation.message`*. It was not. It reached the column and the backups,
+   which is enough — and in a chunk about unverified claims, being exact is the point. The canary's
+   header carried the same wrong sentence and is corrected too.
+
+### Filed, not fixed
+
+- [#631](https://github.com/TheCaptainCompany/captain-food/issues/631) — the eleven frozen
+  `obs-technical-error-unreachable` contracts, enumerated with their spans and grouped by cost, so
+  the baseline does not become their permanent home. Six of them share one `event.store.append` fix.
+- [#624](https://github.com/TheCaptainCompany/captain-food/issues/624) part 2 — the `values:` `$ref`
+  binding and the emitter-arms-EQUALS-enum test, carried forward now because #623 is the only moment
+  at which the classifier and `CommandFailureReason` are obviously one design.
+
+### Explicitly NOT done
+
+**The canary is not generalised to the event path.** `observability-agent` was explicit and the
+coordinator agreed: it has two outcomes and both are bad. Red, and it blocks a correct PR that the
+fences forbid from fixing #627. Green with an exclusion for the event path, and it is **a gate that
+certifies the leak**. It lands red, in its own commit, on #627's branch — the pattern this chunk
+already proved.

@@ -31,7 +31,7 @@ use application::generated::services::{
     PaymentCaptureInput, PaymentRefundInput, PaymentReleaseInput, PaymentRequestInput,
     PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
-use application::ports::payment_gateway_refused;
+use application::ports::{payment_declined, payment_gateway_refused};
 use async_trait::async_trait;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
@@ -308,7 +308,12 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
             let message = err.message.unwrap_or_else(|| "payment declined".into());
             if is_decline {
                 let code_suffix = if code.is_empty() { String::new() } else { format!(" ({code})") };
-                return DomainError::Invariant(format!("PaymentDeclined: {message}{code_suffix}"));
+                // Through the builder, so the HTTP status travels STRUCTURALLY exactly as it does
+                // for the refusal arm below. `{message}` is still provider prose and still reaches
+                // the LOG only — the mailbox writes back the status and the catalogued code, never
+                // this string (#623 review, `young`: `context: {}` on a decline answered "was it
+                // declined?" but not "declined how?", on the money path).
+                return payment_declined(Some(status), &format!("{message}{code_suffix}"));
             }
             // `idempotency_error` is two DIFFERENT conditions: HTTP 400 = the same key was
             // reused with different parameters (deterministic — a keying bug, terminal), but

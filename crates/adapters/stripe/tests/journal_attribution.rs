@@ -37,6 +37,7 @@ use domain::shared::errors::DomainError;
 use infrastructure::mailbox::attribution::command_payload_undecodable;
 use infrastructure::mailbox::verdict_of_error;
 use stripe_adapter::outbound::decode_create_intent_response;
+use stripe_adapter::secrets::provider_secret_in;
 
 /// SEAM 1 — the gateway refused deterministically. A recorded Stripe 401 (bad credentials) through
 /// the REAL decoder: the failure the #623 walk actually provoked.
@@ -149,10 +150,64 @@ fn two_failing_seams_record_two_distinguishable_journal_rows() {
     for (what, ctx) in [("gateway", gateway_ctx), ("payload", payload_ctx)] {
         let rendered = ctx.to_string();
         assert!(
-            !rendered.contains("sk_"),
+            provider_secret_in(&rendered).is_none(),
             "{what}: provider-controlled text reached the journal row\n{rendered}"
         );
     }
+}
+
+/// THE CATALOGUED ARM, which the first draft of #623 left saying nothing at all.
+///
+/// A declined card is a REJECTED business outcome, not a failure, so it never reaches the seam
+/// classification above — it returns one branch earlier, and that branch used to record
+/// `{"code":"PaymentDeclined","context":{}}` once its provider prose was dropped. Safe, and a
+/// downgrade: on the money path the operator's next question is never "was it declined" but
+/// "declined how", and the row could no longer answer it (#623 review, `young`).
+///
+/// Driven through the REAL decoder from a recorded Stripe 402, so the status is Stripe's rather
+/// than a literal this test chose.
+#[test]
+fn a_declined_card_records_its_gateway_status_without_the_provider_prose() {
+    let err = decode_create_intent_response(
+        402,
+        r#"{"error":{"message":"Your card was declined. (key sk_test_LEAK_CANARY)","type":"card_error","code":"card_declined"}}"#,
+    )
+    .expect_err("a 402 must decode to an error");
+
+    let verdict = verdict_of_error(err);
+    let row = verdict.error().cloned().expect("a decline records an error");
+
+    // THE FENCE. A decline was REJECTED/PaymentDeclined before this change and still is; the
+    // context is the only thing that moved.
+    assert_eq!(
+        row.get("code").and_then(|c| c.as_str()),
+        Some("PaymentDeclined"),
+        "the verdict must be unchanged — this arm is REJECTED, not FAILED\n{row}"
+    );
+
+    let ctx = row.get("context").expect("the decline row has a context");
+    assert_ne!(ctx, &serde_json::json!({}), "the empty context is the downgrade this test exists to catch\n{row}");
+
+    let seam: CommandFailureSeam =
+        serde_json::from_value(ctx.get("seam").cloned().unwrap_or(serde_json::Value::Null))
+            .unwrap_or_else(|e| panic!("`seam` is not a declared member: {e}\n{ctx}"));
+    let reason: CommandFailureReason =
+        serde_json::from_value(ctx.get("reason").cloned().unwrap_or(serde_json::Value::Null))
+            .unwrap_or_else(|e| panic!("`reason` is not a declared member: {e}\n{ctx}"));
+    assert_eq!(seam, CommandFailureSeam::PAYMENT_GATEWAY);
+    assert_eq!(reason, CommandFailureReason::CARD_DECLINED);
+    assert_eq!(
+        ctx.get("gatewayStatus").and_then(|v| v.as_i64()),
+        Some(402),
+        "402 is the whole point: the customer's instrument, not our credentials (401) and not our \
+         request (400)\n{ctx}"
+    );
+
+    // And the reason the status had to travel structurally rather than as text.
+    assert!(
+        provider_secret_in(&ctx.to_string()).is_none(),
+        "the provider's prose reached the row\n{ctx}"
+    );
 }
 
 /// The gateway seam's error must stay readable as a (non-catalogued) code. If it ever becomes

@@ -443,12 +443,12 @@ pub enum ScopeType {
 }
 
 /// WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here.
+/// EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers are the three staged-flush arms of [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix. It comes back with #628, in the change that emits it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum CommandFailureSeam {
     PAYMENT_GATEWAY,
     COMMAND_PAYLOAD,
-    EVENT_APPEND,
     DOMAIN_INVARIANT,
     INFRASTRUCTURE,
 }

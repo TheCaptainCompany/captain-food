@@ -869,19 +869,26 @@ pub fn verdict_of_error(e: DomainError) -> HandlerVerdict {
         return HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": context }));
     }
     if let Some(code) = attribution::catalogued_code(&e) {
-        // A CATALOGUED refusal: the code IS the attribution, and `errors.yaml` declares what its
-        // context may hold — for the legacy `"<Code>: <detail>"` form that is nothing. The `detail`
-        // this used to carry was the provider's message; no en/fr template interpolates `{detail}`
-        // (checked across every errors.yaml fragment), so dropping it changes no customer-facing
-        // message. Logged at INFO because a declined card is a business outcome, not a fault — the
-        // walk's "nothing at ERROR or WARN" finding is about the arm below, not this one.
+        // A CATALOGUED refusal. The `detail` this arm used to carry was the provider's message —
+        // the LIVE leak, since no en/fr template interpolates `{detail}` (the complete placeholder
+        // set across every errors.yaml fragment is 21 tokens and `detail` is not one), so it was
+        // reaching the column and the backups and nothing else. Dropping it changes no
+        // customer-facing message.
+        //
+        // It is replaced by the SAME bounded attribution the FAILED arm records, not by `{}`: a
+        // declined card leaving only `PaymentDeclined` behind answers "was it declined?" and not
+        // "declined how?", which is a downgrade on the money path (#623 review, `young`).
+        // Logged at INFO because a declined card is a business outcome, not a fault — the walk's
+        // "nothing at ERROR or WARN" finding is about the arm below, not this one.
         let code = code.to_string();
+        let context = attribution::catalogued_context(&e);
         tracing::info!(
             error_code = %code,
+            gateway_status = ?context.get("gatewayStatus").and_then(|v| v.as_i64()),
             detail = %attribution::log_detail(&e),
             "command rejected with a catalogued code"
         );
-        return HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": {} }));
+        return HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": context }));
     }
     // THE #623 DISCARD SITE. A failure nobody declared, on the most consequential command in the
     // product: ERROR is the right severity, and its absence was half the defect.

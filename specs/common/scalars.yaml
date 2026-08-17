@@ -744,7 +744,6 @@ CommandFailureSeam:
   enum:
     - PAYMENT_GATEWAY   # the outbound payment-gateway call refused or declined
     - COMMAND_PAYLOAD   # the journaled command payload did not decode into its declared shape
-    - EVENT_APPEND      # the staged events could not be flushed into the completion transaction
     - DOMAIN_INVARIANT  # an aggregate/handler invariant that is not a catalogued errors.yaml code
     - INFRASTRUCTURE    # a transient infrastructure failure that nonetheless landed terminally
   description: >
@@ -754,6 +753,15 @@ CommandFailureSeam:
     database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the
     boundary that failed, never what the boundary said. The operational response differs per member,
     which is the test for whether a value belongs here.
+
+    EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in
+    `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so
+    adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was
+    drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers
+    are the three staged-flush arms of
+    [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's
+    scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix.
+    It comes back with #628, in the change that emits it.
 
 CommandFailureReason:
   type: string

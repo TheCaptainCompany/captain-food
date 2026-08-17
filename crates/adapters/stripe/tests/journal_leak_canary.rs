@@ -3,11 +3,17 @@
 //!
 //! ## What this guards, and why it is not a hypothetical
 //!
-//! `inbound_messages.error` is a jsonb column that persists for the retention window (90 days) and
-//! is served to callers as `Operation.errorCode` / `Operation.message`. Stripe's error `message` is
-//! a **provider-controlled** string, and this adapter copies it VERBATIM into the `DomainError` it
-//! returns (`outbound.rs::map_error`). On the catalogued arm the mailbox then copies that message
-//! straight into `context.detail`.
+//! `inbound_messages.error` is a jsonb column that persists for the retention window (90 days).
+//! Stripe's error `message` is a **provider-controlled** string, and this adapter copies it
+//! VERBATIM into the `DomainError` it returns (`outbound.rs::map_error`). On the catalogued arm the
+//! mailbox used to copy that message straight into `context.detail`.
+//!
+//! **Where that reached, precisely.** Not the caller: no `errors.yaml` template interpolates
+//! `{detail}` and `context` was never on the wire (`young`, #623 review). It reached the COLUMN and
+//! the BACKUPS — which is the whole finding, because a credential in a durable store is one you
+//! must rotate and then prove gone. An earlier draft of this paragraph claimed it was served as
+//! `Operation.errorCode`/`Operation.message`; that was an unverified claim inside a change about
+//! unverified claims, and it is corrected here rather than quietly deleted.
 //!
 //! For an authentication failure Stripe's own message is literally
 //! `"Invalid API Key provided: sk_test_…"`. The walk that produced #623 was running with a
@@ -45,8 +51,11 @@
 use domain::shared::errors::DomainError;
 use infrastructure::mailbox::verdict_of_error;
 use stripe_adapter::outbound::decode_create_intent_response;
+use stripe_adapter::secrets::provider_secret_in;
 
-/// A key-shaped marker. Any occurrence of `sk_` in a journal row is a failure, whatever produced it.
+/// A key-shaped marker. Any credential shape in a journal row is a failure, whatever produced it —
+/// the shapes themselves live in `stripe_adapter::secrets`, so #627's canary makes the same
+/// judgement by calling the same function instead of re-remembering the list.
 const KEY_MARKER: &str = "sk_test_LEAK_CANARY";
 
 /// One recorded Stripe error response: `(what it is, HTTP status, body)`.
@@ -107,14 +116,14 @@ fn no_provider_secret_reaches_the_journal_row() {
     for refusal in recorded_refusals() {
         let json = journal_error_json(&refusal);
         let rendered = serde_json::to_string(&json).expect("journal error json is serialisable");
-        if rendered.contains("sk_") {
-            leaked.push(format!("  {} -> {rendered}", refusal.what));
+        if let Some(shape) = provider_secret_in(&rendered) {
+            leaked.push(format!("  {} -> [{shape}] {rendered}", refusal.what));
         }
     }
     assert!(
         leaked.is_empty(),
         "a provider-controlled string reached `inbound_messages.error` — a jsonb column that \
-         persists 90 days and is served as Operation.errorCode/message:\n{}\n\
+         persists 90 days and is therefore in the backups:\n{}\n\
          Free text belongs in the log, never in the journal row. Attribute the failure with the \
          bounded shape (`mailbox::attribution`) instead of copying the provider's prose.",
         leaked.join("\n")

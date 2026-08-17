@@ -34,9 +34,32 @@
 > class was structurally unreachable and its dashboard permanently empty. 12 findings before the
 > instrumentation, 11 after; the remainder are the frozen ratchet population, same posture as §20.
 >
+> **The review changed three things and they are the better half of the chunk.** The catalogued arm
+> no longer records `{}` either: a declined card now carries the same bounded shape with the
+> gateway's `402`, because `PaymentDeclined` and nothing else answers *was it declined* but not
+> *declined how*, on the money path. It is claimed on EVIDENCE — a real gateway answer — so the
+> fail-closed stand-in, which mints the same catalogued code with no gateway behind it, still says
+> nothing rather than blaming a customer's card. `Seam::EVENT_APPEND` was **withdrawn from the
+> scalar**: nothing in the tree produced it, its producers are #628's, and shipping a
+> declared-but-unemitted member inside the chunk about that defect class would have been the joke
+> writing itself — an exhaustive test now makes adding one fail the build. And the secret predicate
+> is a shared function (`stripe_adapter::secrets`) widened to `sk_` / `rk_` / `whsec_` / `pk_live_` /
+> `sk_live_`, so [#627](https://github.com/TheCaptainCompany/captain-food/issues/627)'s canary calls
+> it instead of re-remembering the list, narrower.
+>
+> Two claims were **corrected** by the review rather than confirmed. The second seam's mutation is
+> not "undiminished": gateway-vs-read would have crossed two `DomainError` variants, gateway-vs-
+> payload is two `Invariant`s discriminated by prefix, so the test exercises prefix discrimination
+> twice and variant discrimination never. And the validator's red was **not** seen before its fix —
+> rule and fix are one commit — which is accepted only because its planted-input test is red-on-
+> mutant permanently rather than once at authoring time.
+>
 > **Deferred and NOT in that PR** (`HOLD: human` or their own chunk): re-classifying gateway failures
 > out of `business_rejected` (#624 part 2), the typed gateway-failure enum and declaring
-> `PaymentGatewayRefused` in the catalogue (#625).
+> `PaymentGatewayRefused` in the catalogue (#625), and the eleven frozen
+> `obs-technical-error-unreachable` contracts, now enumerated with an owner in
+> [#631](https://github.com/TheCaptainCompany/captain-food/issues/631) so the baseline is not their
+> permanent home.
 
 > 🗳️ **2026-08-17 — THE FOUNDER ANSWERED THE WHOLE DECISION QUEUE: THE WALK GOES FIRST ON ONE
 > DATABASE, PRODUCTION STAYS DOWN ON PURPOSE, AND THE ROSTER REVERSION IS STRUCK**
