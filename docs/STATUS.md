@@ -45,6 +45,21 @@
 > merge without conflict. Without it, `main` would keep a nightly that runs a *fixed* smoke against a
 > deliberately-suspended production every morning: a red per night carrying no information.
 >
+> **The review found the same class a THIRD time, and that is the entry's real lesson.** Every round
+> of this change had one defect where a failure of the DIAGNOSIS was reported as a finding ABOUT THE
+> SYSTEM: the original `null` (host refusal read as a broken cart); then an EMPTY reading read as
+> "row absent" (caught by the rehearsal); then a **`null` reading** read as "row absent" — the
+> tolerant helper collapses a transport failure to `{}`, and `{} | .data.cart // .errors` prints a
+> bare `null`, which is non-empty, so an emptiness guard waves it through: **a failed ADMIN request
+> reported as a broken projection**. Both lenses found that fourth state independently. The rule that
+> survives it: **check the envelope before interpreting, and have the arm state its conclusion rather
+> than print a value plus a legend** — a legend is one more place to map the wrong row. Two more:
+> the order-timeout arm sat at function top level, so a failed mint **exited the script** and the
+> 90-second money-path wait ended with **no verdict at all**; and `TENANT BINDING BREACH`, the
+> loudest string in the file, asserted a cross-tenant leak for a symptom that a mis-pointed
+> `SMOKE_PUBLIC_BASE` produces identically — which is exactly how the red was produced. It now tests
+> the two bases for coincidence and names the configuration cause when they match.
+>
 > **Executed, not asserted** — a fix to a gate that is never run is a hypothesis. Against a local
 > single-database stack (bare server, real migration chain, the walk's JWKS stub): L1→L3b PASS and
 > the cart pair green (`1200` on the storefront, `null` on the marketplace host); the negative

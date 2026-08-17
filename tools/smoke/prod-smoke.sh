@@ -504,7 +504,7 @@ l4_negative() {
 
 # --- L4: full money path (TEST mode) --------------------------------------------------------------
 l4() {
-  local cart_id line_id session_id order_id customer_id customer admin resp mkt message_id op_status pi secret confirm status pay_status deadline t last
+  local cart_id line_id session_id order_id customer_id customer resp mkt message_id op_status pi secret confirm status pay_status deadline t last
   cart_id=$(uuid); line_id=$(uuid); session_id=$(uuid); order_id=$(uuid); customer_id=$(uuid)
 
   # The storefront host must be classifiable as a tenant, or every read below serves null with no
@@ -562,23 +562,44 @@ l4() {
   # tenant question — separates the two worlds the null used to merge. Its absence is why a null
   # went undiagnosed for twenty nights.
   #
-  # THE ARM MUST NEVER GO QUIET (seen red on the local rehearsal of this very change): when the
-  # ADMIN mint failed, the arm emitted an EMPTY reading into a sentence offering two
-  # interpretations, and an empty reading looks exactly like "row absent" — a diagnosis that
-  # mis-attributes is worse than none, and it is the same shape as the defect being fixed. So an
-  # unusable token, an unparseable body and a real answer are three DIFFERENT outputs.
+  # THE ARM MUST NEVER GO QUIET, AND MUST NEVER GUESS. Two rounds of this were wrong before they
+  # were right, both in the same direction — a failure of the DIAGNOSIS being reported as a finding
+  # ABOUT THE SYSTEM, which is the defect class this whole change closes, reappearing inside the
+  # thing closing it:
+  #   round 1 (seen red on the local rehearsal) — a failed ADMIN mint produced an EMPTY reading;
+  #   round 2 (review) — a failed ADMIN REQUEST produces `null`. `admin_gql` is the tolerant helper,
+  #     so a transport failure collapses to `{}`, and `{} | .data.cart // .errors` prints a bare
+  #     `null`: non-empty, so an emptiness guard waves it through, and it reads as "row absent" —
+  #     A BROKEN REQUEST REPORTED AS A BROKEN PROJECTION.
+  # Hence: check the ENVELOPE before interpreting anything, and only then is a literal `null`
+  # allowed to mean absent. And the arm STATES ITS CONCLUSION rather than printing a value plus a
+  # legend for the reader to apply — a legend is one more place to map the wrong row.
   diagnose_cart() {
     local a r seen
     if ! a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN") || [ -z "$a" ]; then
-      printf 'DIAGNOSIS UNAVAILABLE for cart %s: no ADMIN token could be minted (see the mint failure above), so read-path-vs-projection is UNANSWERED — do NOT read this as "the row is absent"' "$cart_id"
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: no ADMIN token could be minted (see the mint failure above) — read-path-vs-projection is UNANSWERED. Do NOT read this as "the row is absent"' "$cart_id"
       return 0
     fi
     r=$(admin_gql admin "$a" 'query($id: CartId!){ cart(input:{id:$id}) { id status totalAmount { amountCents currency } } }' \
       "$(jq -cn --arg id "$cart_id" '{id:$id}')")
-    seen=$(printf '%s' "$r" | jq -c '.data.cart // .errors' 2>/dev/null | head -c 240)
-    [ -n "$seen" ] || { printf 'DIAGNOSIS UNPARSEABLE for cart %s: the ADMIN read returned %s — UNANSWERED, not "absent"' "$cart_id" "$(printf '%s' "$r" | head -c 160)"; return 0; }
-    printf 'ADMIN sees cart %s: %s (row PRESENT = the row projected and the STOREFRONT READ or its host binding is the defect; row ABSENT = the projection never happened, expected total %s cents)' \
-      "$cart_id" "$seen" "$FIX_OFFER_PRICE_CENTS"
+    if [ "$(printf '%s' "$r" | jq -r 'has("data")' 2>/dev/null)" != "true" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: the ADMIN read returned no data envelope, i.e. the REQUEST failed (%s) — UNANSWERED. Do NOT read this as "the row is absent": nothing was successfully asked' \
+        "$cart_id" "$(printf '%s' "$r" | head -c 160)"
+      return 0
+    fi
+    if [ "$(printf '%s' "$r" | jq -r 'has("errors")' 2>/dev/null)" = "true" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: the ADMIN read ERRORED (%s) — UNANSWERED, not "absent"' \
+        "$cart_id" "$(printf '%s' "$r" | jq -c '.errors' 2>/dev/null | head -c 200)"
+      return 0
+    fi
+    seen=$(printf '%s' "$r" | jq -c '.data.cart' 2>/dev/null | head -c 240)
+    if [ "$seen" = "null" ]; then
+      printf 'ADMIN sees NO cart row for %s: the PROJECTION never happened (expected total %s cents). The storefront read path is NOT implicated' \
+        "$cart_id" "$FIX_OFFER_PRICE_CENTS"
+    else
+      printf 'ADMIN sees cart %s PRESENT: %s — the row projected, so the STOREFRONT READ or its host binding is the defect, NOT the projection' \
+        "$cart_id" "$seen"
+    fi
   }
   wait_for "L4" "the guest cart projected on the storefront and priced live to exactly ${FIX_OFFER_PRICE_CENTS} cents (== is deliberate: if cart pricing gains a component, UPDATE THIS EXPECTED TOTAL, never weaken the predicate to '> 0')" \
     60 check_cart_projected diagnose_cart
@@ -598,8 +619,18 @@ l4() {
     || fail "L4: marketplace-host cart control ERRORED (cannot prove the binding): $(printf '%s' "$mkt" | head -c 300)"
   [ "$(printf '%s' "$mkt" | jq -r 'has("data")')" = "true" ] \
     || fail "L4: marketplace-host cart control returned no data envelope (outage, not a refusal — the control would pass vacuously): $(printf '%s' "$mkt" | head -c 300)"
-  [ "$(printf '%s' "$mkt" | jq -r '.data.current')" = "null" ] \
-    || fail "L4: TENANT BINDING BREACH — the marketplace host served cart $cart_id for session $session_id, which must resolve to NO tenant (#469). A storefront read answering off-tenant is a cross-tenant leak, not a smoke defect: $(printf '%s' "$mkt" | head -c 300)"
+  # THE LOUDEST STRING IN THIS FILE MUST NOT CRY INCIDENT AT A TYPO. "A tenant host answered" and
+  # "the marketplace base was POINTED AT a tenant host" produce the identical non-null response —
+  # and the second is exactly how this control was proved red during development. So the two hosts
+  # are named in the message, and their coincidence is TESTED rather than left to the reader:
+  # misconfiguration is claimed only when the configuration actually says so, and a real breach
+  # keeps its full severity.
+  if [ "$(printf '%s' "$mkt" | jq -r '.data.current')" != "null" ]; then
+    if [ "$PUBLIC_BASE" = "$TENANT_BASE" ]; then
+      fail "L4: MISCONFIGURED PROBE, not a breach — the marketplace base and the storefront base are the SAME host ($PUBLIC_BASE), so the control arm asked a TENANT host and a non-null answer is the correct behaviour there. The pair has no control and proves nothing: unset/fix SMOKE_PUBLIC_BASE (marketplace is live.${SMOKE_BASE_DOMAIN}). Do NOT open an incident. Response: $(printf '%s' "$mkt" | head -c 300)"
+    fi
+    fail "L4: TENANT BINDING BREACH — the marketplace host $PUBLIC_BASE served cart $cart_id for session $session_id, while the storefront is $TENANT_BASE. That host must resolve to NO tenant (#469), and the two bases are NOT the same host, so this is not a probe misconfiguration: a storefront read answering off-tenant is a CROSS-TENANT LEAK, an incident rather than a smoke defect. Confirm what SMOKE_PUBLIC_BASE points at before escalating. Response: $(printf '%s' "$mkt" | head -c 300)"
+  fi
   say "      L4: cart pair OK — $cart_id priced ${FIX_OFFER_PRICE_CENTS} cents on the storefront, null on the marketplace host (#622)"
 
   # 2. Checkout as the smoke CUSTOMER (TEST mode order against the TEST restaurant).
@@ -699,11 +730,39 @@ l4() {
   done
   # Diagnosability on timeout (farley): ONE admin read separates "authorization never happened" from
   # "authorization landed but the customer's claim scope is broken" — otherwise both are the same 90s.
-  admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
-  resp=$(admin_gql admin "$admin" \
-    'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
-    "$(jq -cn --arg id "$order_id" '{id:$id}')")
-  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = authorization/projection broken)"
+  #
+  # SAME TREATMENT AS THE CART ARM, and this one was WORSE: it ran at function top level, so under
+  # `set -e` a failed ADMIN mint EXITED THE SCRIPT with the mint's error and the 90-second money-path
+  # wait ended with NO VERDICT AT ALL — the most expensive wait in the run, reporting nothing. It is
+  # now a function that always returns 0 and is invoked with its failure suppressed, so the verdict
+  # line below is unconditional; and it checks the ENVELOPE before interpreting, because `admin_gql`
+  # is the tolerant helper and a failed request's `null` would otherwise be read as "order absent"
+  # — a broken request reported as a broken authorization, on the money path.
+  diagnose_order() {
+    local a r seen
+    if ! a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN") || [ -z "$a" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: no ADMIN token could be minted, so claim-scope-vs-authorization is UNANSWERED. Do NOT read this as "the order is absent"'
+      return 0
+    fi
+    r=$(admin_gql admin "$a" \
+      'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
+      "$(jq -cn --arg id "$order_id" '{id:$id}')")
+    if [ "$(printf '%s' "$r" | jq -r 'has("data")' 2>/dev/null)" != "true" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: no data envelope, i.e. the REQUEST failed (%s) — UNANSWERED, not "absent"' "$(printf '%s' "$r" | head -c 160)"
+      return 0
+    fi
+    if [ "$(printf '%s' "$r" | jq -r 'has("errors")' 2>/dev/null)" = "true" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: the ADMIN read ERRORED (%s) — UNANSWERED, not "absent"' "$(printf '%s' "$r" | jq -c '.errors' 2>/dev/null | head -c 200)"
+      return 0
+    fi
+    seen=$(printf '%s' "$r" | jq -c '.data.order' 2>/dev/null | head -c 200)
+    if [ "$seen" = "null" ]; then
+      printf 'ADMIN sees NO order row either: the AUTHORIZATION or the projection never happened. The customer claim/scope path is NOT implicated'
+    else
+      printf 'ADMIN sees the order PRESENT (%s): it was authorized and projected, so the CUSTOMER CLAIM/SCOPE path is the defect' "$seen"
+    fi
+  }
+  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; $(diagnose_order 2>&1 || true)"
 }
 
 # --- Run ------------------------------------------------------------------------------------------
