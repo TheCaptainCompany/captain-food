@@ -1442,6 +1442,35 @@ gone, and the give-away was a still-red test after a "revert"). Two habits, both
   match any file(s) known to git"*, which reads like a typo and is actually the safe direction. A new
   module mutated before its first commit has to be reverted by editing it back.
 
+### A red CI job that never ran your code: `429` from `codeload.github.com`, and why re-pushing makes it worse
+
+`lint`, `build-test` and `codegen` all report `failure` for a reason that has nothing to do with the
+diff:
+
+```
+##[error]Response status code does not indicate success: 429 (Too Many Requests).
+##[error]Failed to download archive 'https://codeload.github.com/dtolnay/rust-toolchain/tar.gz/…'
+```
+
+The runner is rate-limited fetching a composite ACTION, before a line of the repo is compiled.
+Three things this session paid for (2026-08-17, #623):
+
+- **`codegen` failing does not mean drift.** It is the aggregate gate, and its message is
+  `a required gate job reported 'abandoned'` — one line, naming no job. Read the OTHER failing job
+  first; `codegen`'s own log will never say what went wrong.
+- **Read the failing job's log before believing any red.** `GET /actions/jobs/{id}/logs` follows a
+  redirect (`curl -L`) and works without a token like the rest of the REST surface. Thirty seconds,
+  and it is the difference between "my change broke the build" and "GitHub was busy".
+- **Back off before re-triggering, and re-trigger ONCE.** These jobs run several action downloads in
+  a matrix; an immediate second full run doubles the request rate against the same host and simply
+  moves the 429 to a different job — here the retrigger fixed `lint` and broke `build-test` instead.
+  Every job passed at least once across the two runs, which is the evidence that mattered. Wait
+  several minutes.
+- **`POST /actions/runs/{id}/rerun-failed-jobs` answers `403 Resource not accessible by
+  integration`**, so a session cannot re-run a job — the only lever is a new push, and `ci.yml`
+  triggers on EVERY branch push, so any commit does it (a `--allow-empty` one whose message records
+  the flake, if there is nothing real to land).
+
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 
 Concurrent executors run in **one checkout** unless the coordinator hands them separate worktrees,
