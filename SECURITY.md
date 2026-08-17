@@ -32,7 +32,7 @@ credit you in the advisory if you wish.
   have a known, published, tracked authorization defect — per-instance (cross-tenant) authorization
   is absent on a large part of the API, tracked at
   [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178)
-  and [#618 "Seven read surfaces have no `ReadScope`"](https://github.com/TheCaptainCompany/captain-food/issues/618)
+  and [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618)
   (see [DECISIONS §39](docs/proposals/DECISIONS.md)). Because we publish where that gap is, inviting
   testing against a live instance would be inviting you to reach other people's data — which is not
   something we are able to authorize, and not something we would want you to rely on us having

@@ -16,7 +16,7 @@
 > **37 bindable** (a payload field is the caller's own scope; prove field == verified claim) and **39
 > unbindable** (*no payload field corresponds to the caller at all*, so stripping ids from payloads does
 > nothing; needs a participant check against folded state) — plus **7 read surfaces with no
-> `ReadScope`**, filed as [#618 "Seven read surfaces have no `ReadScope` — and two return the whole
+> `ReadScope`**, filed as [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178) — and two return the whole
 > platform when called with no arguments"](https://github.com/TheCaptainCompany/captain-food/issues/618), **two of
 > which return other tenants' rows when called with NO ARGUMENTS**. `approveRefund`/`denyRefund` are the
 > worked unbindable case: role `RESTAURANT`, payload `{orderId, amount, reason}`, **no identity
@@ -111,10 +111,20 @@
 > **(3) ⚠️ THAT GATE HAS A HOLE — customer signup is SELF-SERVICE.** Verified: `verifyPhone` /
 > `requestPhoneVerification` are `roles: [PUBLIC, CUSTOMER]` and a first verified phone CREATES the
 > Customer. **Any stranger self-issues a CUSTOMER credential the moment the surface answers**, so the
-> gate must be **signup**, not onboarding. `orderConversation` is CUSTOMER-reachable and unscoped, i.e.
-> a stranger reads any order's free-text thread — the Art. 9(1) surface. Carried today **only** by the
-> 503. **Decision owed** (recorded, not taken): keep signup closed at the auth provider while
-> production runs, or close #618 first.
+> gate must be **signup**, not onboarding. **TWO** surfaces are CUSTOMER-reachable, take a
+> caller-supplied id and apply no ownership check — `orderConversation` **and `reclamation`** — and they
+> are exactly the two free-text stores the Art. 9(1) finding is about, so **a stranger who registers
+> with a phone number reads other customers' complaint text and message threads**. Carried today
+> **only** by the 503. **Decision owed** (recorded, not taken): keep signup closed at the auth provider
+> while production runs, or close #618 first.
+>
+> **(3b) `reclamation` was NOT part of the prose fix and needs its own work.** It asserts no control, so
+> there was no false claim to correct — but it is the sharpest unscoped read on the platform. Recorded
+> in §39 for whoever works #618. **Related record defects found and fixed the same run**: four records
+> cited #618 by a title it does not have (a *proposed* title never applied), and §39 claimed *"#618 owns
+> the authoritative list"* of unscoped surfaces when the issue body contains **no enumeration at all**.
+> Same shape as the defect this entry is about — **a record asserting that a control or an artifact
+> exists somewhere else, which nobody re-checked.** The verified enumeration now lives in §39.
 >
 > **(4) The strongest argument is not the legal one: `domain_events` is immutable.** A hostile write is
 > not deleted, it is upcast — it stays in the log forever. The empty-log window is what makes this

@@ -1923,7 +1923,7 @@ pointered here so this page stays the single index.**
 
 ---
 
-## 39. Per-instance authorization — a cross-tenant IDOR on BOTH sides, 83 of 118 operations — [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178) + [#618 "Seven read surfaces have no `ReadScope`"](https://github.com/TheCaptainCompany/captain-food/issues/618) / PROP-20260726-171500 (architect run, 2026-08-14; **SCOPE CORRECTED 2026-08-17**)
+## 39. Per-instance authorization — a cross-tenant IDOR on BOTH sides, 83 of 118 operations — [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178) + [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618) / PROP-20260726-171500 (architect run, 2026-08-14; **SCOPE CORRECTED 2026-08-17**)
 
 > ⚠️ **SCOPE CORRECTION, 2026-08-17 — this row understated the defect, and that is itself the finding.**
 > As first written (2026-08-14) this row described a cross-tenant **write** IDOR on the order
@@ -1957,7 +1957,7 @@ pointered here so this page stays the single index.**
 >     (`ApproveRefundInput`, `inputs.rs:1147`), **no identity consulted anywhere on the path**. A
 >     refund is money movement decided by a caller nothing proves is a party to the order.
 > - **7 read surfaces with no `ReadScope`** — filed as
->   [#618 "Seven read surfaces have no `ReadScope` — and two return the whole platform when called with no arguments"](https://github.com/TheCaptainCompany/captain-food/issues/618)
+>   [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618)
 >   (`type/bug`, `area/gdpr`, `area/security`; open, verified 2026-08-17).
 >   **Two of them return other tenants' data when called with NO ARGUMENTS**, because the filter is
 >   `Option<…>` and the query carries no tenant predicate — *verified*: `restaurant_reclamations`
@@ -1965,7 +1965,16 @@ pointered here so this page stays the single index.**
 >   `repo.list(filter)`, and the filter type has no restaurant field to narrow with). At least one more
 >   surface has the **identical** shape — `deliveryPartnerAvailabilities`, whose spec records the gap in
 >   so many words (`specs/delivery/api.yaml:75`, *"no per-owner narrowing in this slice (a recorded
->   gap)"*); #618 owns the authoritative list of which two the title counts.
+>   gap)"*). **Correction 2026-08-17: #618 does NOT own that list.** This row previously said *"#618
+>   owns the authoritative list of which two the title counts"*; the issue body carries no enumeration
+>   of surfaces at all, and its title is *"Read surfaces missing `ReadScope` — the read half of the
+>   write-path authorization gap (#178)"* — the *"Seven read surfaces … and two return the whole
+>   platform"* wording quoted in four records was a **proposed** title that was never applied. Both
+>   errors are the same shape as the defect this section is about: **a record asserting that a control
+>   or an artifact exists somewhere else, which nobody re-checked.** The enumeration now lives here,
+>   verified resolver-by-resolver: the **six** corrected sites above, plus **`reclamation`** (`by_id`
+>   with no scope, roles include CUSTOMER — see the note below) and **`deliveryPartnerAvailabilities`**
+>   (which already documented its own gap honestly). Whoever works #618 should paste this list into it.
 >   **The specs asserted a control the code does not have — ✅ CORRECTED 2026-08-17**, and the sweep
 >   found **SIX sites, not the two named here**. The two known (`specs/ordering/api.yaml:207`
 >   *"Restaurant/ownership scoping is enforced server-side"*, which contradicted its own next sentence,
@@ -1980,6 +1989,18 @@ pointered here so this page stays the single index.**
 >   `orderStatusChanged`, `operationStatus`, `paymentStatus` — all genuinely `ReadScope`- or
 >   ownership-checked), so the phrasing is *not* uniformly false and each site had to be read against
 >   its resolver individually. SPEC-LOG row landed in the same commit.
+> - **⚠️ `reclamation` — an unscoped surface the prose fix did NOT reach, and it is the one that matters
+>   most** (found 2026-08-17, **not fixed, no issue of its own yet**). The resolver is
+>   `repo.by_id(input.reclamation_id)` with **no scope argument**, and `roles:` includes **CUSTOMER**.
+>   It was left out of the prose sweep on a defensible but narrow rule — its description asserts no
+>   control, so there was no false claim to correct — yet the *exposure* is the sharpest on the read
+>   side. Combine three facts already in this register: **(1)** customer signup is **self-service**, so
+>   anyone can hold a CUSTOMER credential; **(2)** `reclamation` returns any claim **by id** to any
+>   customer; **(3)** finding (i) of the obligation map names **reclamation descriptions** — alongside
+>   conversation threads — as the unbounded free-text prose that predictably carries **Art. 9(1)**
+>   special-category data. So a stranger who registers with a phone number reads other customers'
+>   complaint text. `orderConversation` has the identical shape and is corrected in prose only — **the
+>   prose fix changes nothing about the exposure of either.** Whoever works #618 owns both.
 > - **Headline: 83 of 118 operations** (76 + 7). *Re-derived*: the denominator is 86 mutations + 32
 >   queries across `specs/*/api.yaml`; the **3 subscriptions are excluded** from it (121 operations
 >   in total), so quote "118" only with that qualifier.

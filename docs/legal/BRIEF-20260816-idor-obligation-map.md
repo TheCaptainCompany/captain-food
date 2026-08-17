@@ -4,7 +4,7 @@
 **Prepared by**: the `legal-specialist` lens of the 2026-08-16 IDOR posture consult ·
 **Defect record**: [DECISIONS §39](../proposals/DECISIONS.md) (IDOR-1), scope-corrected 2026-08-17 ·
 **Work items**: [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178)
-(write half) · [#618 "Seven read surfaces have no `ReadScope` — and two return the whole platform when called with no arguments"](https://github.com/TheCaptainCompany/captain-food/issues/618)
+(write half) · [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618)
 (read half) ·
 [PROP-20260726-171500](../proposals/PROP-20260726-171500-write-side-per-instance-authorization.md)
 
@@ -42,11 +42,22 @@ food business**, which predictably carries Art. 9(1) special-category data.
 - **Both sides, not one.** 76 of 86 mutations carry a role with no proven domain binding; 7 read
   surfaces carry no `ReadScope`. Detail, class split and the `file:line` trace live in
   [DECISIONS §39](../proposals/DECISIONS.md) and are not restated here.
-- *Verified 2026-08-17* — two read surfaces (`restaurantReclamations`, `deliveryPartnerAvailabilities`)
-  take an **optional** filter, fall back to a default filter on `None`, and issue a list query with **no
-  tenant predicate**. The specification prose asserts a control that does not exist
-  (`specs/ordering/api.yaml:207` *"Restaurant/ownership scoping is enforced server-side"*;
-  `specs/comms/api.yaml:58` *"Ownership enforced server-side"*).
+- *Verified 2026-08-17* — **three** read surfaces (`restaurantReclamations`,
+  `deliveryPartnerAvailabilities` and — found later the same day — **`pendingRefunds`**, which is on the
+  **money path**) take an **optional** filter, fall back to a default filter on `None`, and issue a list
+  query with **no tenant predicate**: omitting the argument returns every tenant's rows.
+- *Verified and CORRECTED 2026-08-17* — the specification prose asserted a control that does not exist,
+  at **six** sites rather than the two first identified. All six now describe what is actually enforced.
+  **This changed no behaviour**: the surfaces are exactly as exposed as they were, and nothing in this
+  brief's risk assessment moves. It removes a second-order harm only — a reviewer who reads *"ownership
+  enforced server-side"* in the source of truth stops looking, which is how the gap survived review.
+- *Verified 2026-08-17, NOT fixed* — **customer signup is self-service** (`verifyPhone` /
+  `requestPhoneVerification`, `roles: [PUBLIC, CUSTOMER]`; a first verified phone **creates** the
+  Customer). Two unscoped read surfaces accept CUSTOMER and take a caller-supplied id with no ownership
+  check — **`orderConversation`** and **`reclamation`** — and those are precisely the two free-text
+  stores finding (i) below is about. **A stranger who registers with a phone number reads other
+  customers' complaint text and message threads.** Today this is carried **only** by the deployed
+  surface answering 503; it is not carried by any control.
 - *Verified 2026-08-17* — `EXTERNAL` partner callers authenticate against a **flat shared list** of
   pre-shared secrets (`crates/server/src/auth.rs:442,480-483`). There is no per-partner identity, so
   **a partner action cannot be attributed to a partner**. This matters below (IDOR-L7) independently of
