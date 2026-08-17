@@ -2,6 +2,42 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔎 **2026-08-17 — A FAILED CHECKOUT IS ATTRIBUTABLE AGAIN, AND THE JOURNAL ROW CAN NO LONGER
+> CARRY A STRIPE KEY** ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), PR
+> [#626](https://github.com/TheCaptainCompany/captain-food/pull/626); floor of
+> [#625](https://github.com/TheCaptainCompany/captain-food/issues/625) and part 1 of
+> [#624](https://github.com/TheCaptainCompany/captain-food/issues/624). SPEC-LOG row landed.)
+>
+> The walk's failed `PlaceOrder` recorded `{"code":"Internal","context":{}}` with nothing at ERROR or
+> WARN. **The trap was that the obvious fix leaks**: ten handler sites already do
+> `context: { detail: e.to_string() }`, and Stripe's message for a bad key is literally
+> `"Invalid API Key provided: sk_test_…"` — so widening `detail` would have written a key into a
+> jsonb column kept for the retention window and served as `Operation.errorCode`. The leak canary
+> landed RED first and proved the catalogued (`PaymentDeclined`) arm was **already** copying provider
+> prose verbatim; the empty `{}` #623 reports was the only branch on that path that was not leaking.
+>
+> The row now carries a GENERATED bounded shape (`CommandFailureAttribution`: seam, reason, optional
+> gateway status) in which a provider body is unspellable, and the free text goes to the log. **No
+> verdict, outcome, status, retry behaviour or customer-facing message moved**, and **no
+> `errors.yaml` code was declared** — catalogue membership is the REJECTED-vs-FAILED discriminator,
+> so declaring one flips a verdict silently.
+>
+> Two things measured that the dispatch card had wrong or open. **`verdict_of_error`'s
+> `DomainError::Repository` arm is dead on every live path** (intercepted above all three call sites,
+> the `PlaceOrder` one inside `pm_delivery::prepare`), so the card's "cart read" second seam is
+> undrivable and the two-seam test uses `COMMAND_PAYLOAD` instead. **`PaymentGatewayRefused` was
+> minted at five sites and matched at ZERO** — renaming it left all 363 `application` unit tests
+> green — so it carried no machine meaning at all until this change gave it some.
+>
+> New validator **§21 `obs-technical-error-unreachable`**: `place-order` declared
+> `technical_error.any_span_errors` while not one of its spans could carry an error status, so the
+> class was structurally unreachable and its dashboard permanently empty. 12 findings before the
+> instrumentation, 11 after; the remainder are the frozen ratchet population, same posture as §20.
+>
+> **Deferred and NOT in that PR** (`HOLD: human` or their own chunk): re-classifying gateway failures
+> out of `business_rejected` (#624 part 2), the typed gateway-failure enum and declaring
+> `PaymentGatewayRefused` in the catalogue (#625).
+
 > 🗳️ **2026-08-17 — THE FOUNDER ANSWERED THE WHOLE DECISION QUEUE: THE WALK GOES FIRST ON ONE
 > DATABASE, PRODUCTION STAYS DOWN ON PURPOSE, AND THE ROSTER REVERSION IS STRUCK**
 > (records-only run, straight to `main`; no `specs/**`, no `crates/**`, so no SPEC-LOG row and no

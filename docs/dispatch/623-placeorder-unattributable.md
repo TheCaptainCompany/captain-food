@@ -89,3 +89,82 @@ So the `DomainError::Repository(_)` arm of `verdict_of_error` (`handler.rs:865`)
 live path**, not merely on the command arm — `observability-agent` was closest, but the interception
 that kills it for `PlaceOrder` is in `prepare`, not "the PM path returns it as `Err(sqlx)` earlier"
 in general. **M1 therefore needs a different second seam**; see the next finding.
+
+### Executor, at the checkpoint — what was measured
+
+**1. The `Repository` divergence: none of the three readings holds, and the card's reconciliation is
+wrong.** Measured above at claim time and unchanged by the work: `DomainError::Repository` is
+intercepted above **all three** `verdict_of_error` call sites, and the interception that kills it for
+`PlaceOrder` is `pm_delivery.rs:194` inside `prepare`, not anything in `handler.rs`. The arm is dead
+on every live path. **M1 therefore drives `COMMAND_PAYLOAD` as its second seam** — a journaled
+payload that does not decode into the deployed command shape (`pm_delivery.rs`'s three arms), which
+is live, terminal, and needs a genuinely different operational response from a gateway refusal. The
+mutation is undiminished: it is still a one-token relabel and it is still red.
+
+**2. M3: the prefix had ZERO consumers, which is stronger than "nothing goes red".** `beck` predicted
+nothing would. Renaming `PaymentGatewayRefused` in the adapter left `crates/application`'s 363 unit
+tests green; the only three failures were the adapter's own tests, which restate the literal they
+mint. Nothing anywhere matched it — `classify_capture_error` falls through to `GATEWAY_REFUSED`
+without ever spelling it, and `verdict_of_error` only asks the catalogue. So it was not a coupling
+that a shared const would protect; it was prose sitting in a durable row. **This change is what gives
+it machine meaning**, so the shared builder/reader pair lands in `application::ports` next to
+`VERSION_CONFLICT_PREFIX`, with the HTTP status encoded AFTER the first colon so `rejection_code`
+keeps working the day #625 catalogues the prefix. That ordering is itself a pinned test.
+
+**3. The canary was red on exactly one of three arms, and it was not the one #623 reports.**
+
+| recorded body | before | after |
+|---|---|---|
+| HTTP 401, invalid API key | `{"code":"Internal","context":{}}` | `{seam: PAYMENT_GATEWAY, reason: GATEWAY_REFUSED, gatewayStatus: 401}` |
+| HTTP 400, `parameter_missing` | `{"code":"Internal","context":{}}` | same shape, `gatewayStatus: 400` |
+| HTTP 402, `card_declined` | **`{"code":"PaymentDeclined","context":{"detail":"…sk_test_LEAK_CANARY…"}}`** | `{"code":"PaymentDeclined","context":{}}` |
+
+So the empty `{}` was the only branch on this path that was NOT leaking, exactly as §0 said — and
+the leak lives on the arm the card did not scope. Dropping `detail` there changes no customer-facing
+message: **no `errors.yaml` message template in any scope fragment interpolates `{detail}`** (checked
+across all eight fragments), so `message_en(code, context)` renders identically.
+
+**4. A consequence worth stating plainly: #625's "declare `PaymentGatewayRefused` in the catalogue"
+would, on today's code, have turned the REAL 401 body into a REAL key in a 90-day row.** It routes
+the 401 down the arm that copies `message` verbatim. The canary is now what makes that land red
+instead of landing quietly, and `journal_attribution.rs` asserts the code is still uncatalogued.
+
+**5. `§21` found its own defect on its first run.** Splitting `spans.rs` on `pub fn` runs each block
+into the NEXT function's doc comment, and this file's doc comments discuss `otel.status_code` at
+length — so the rule certified `cart.read` because `cart_price`'s doc comment explains why IT
+declares the field. A text rule that reads prose as instrumentation certifies exactly the contracts
+whose documentation is most conscientious. Fixed, and kept as a test.
+
+### Three defects found and NOT fixed here (issues, not this diff)
+
+- **`classify_capture_error` puts 500 characters of the provider's message into a STORED EVENT.**
+  `payment_settlement.rs:160` → `PaymentCaptureFailed.detail`, in `domain_events`, immutable and
+  forever. Same leak class as this chunk, one tier worse, and squarely `HOLD: human` (stored event
+  shape). **This is the most serious thing found today.**
+- **Three sibling `context: { detail: e.to_string() }` arms** in `handler.rs` (the staged-flush
+  failures, lines ~208/309/820) still write free text into the journal row. Not on the canary's path
+  and not scoped by the card.
+- **The GENERATED command router classifies an undecodable payload as `DomainError::Repository`**
+  (`command_router.rs`), i.e. RETRY FOREVER, while the hand-written PM prepare correctly makes the
+  same seam terminal. A crafted payload could wedge a lane. Changing it moves retry behaviour, which
+  this card's fence forbids.
+
+### The checkpoint question, banked
+
+**Did the three-lens set miss anything a wider roster would have caught?** One item, and the
+attribution is **card defect**, not roster width.
+
+`vernon`/`evans` were not at the briefing and neither is the lens that would have caught it. What was
+missed is that **the card scoped the leak to the branch that was not leaking**: §0 states the
+catalogued arm already leaks, and §Scope then asks only for the discard site to be populated, with
+the canary as evidence rather than as work. The greening of the canary — dropping `detail` on the
+`PaymentDeclined` arm — is a change to a REJECTED row's shape that no scope item names, and it was
+discovered at the keyboard by running the canary rather than by reading the card. A wider roster
+reading the same card would have read the same omission. The fix is the card's, not the roster's:
+**a scope list must name the change each piece of evidence will force**, not only the evidence.
+
+The three declared concerns were all met by the diff, and each lens's named artifact exists:
+`young`'s unspellability is a generated type rather than a convention, `beck`'s two seams are one
+test with the distinctness assertion that makes splitting it vacuous, and
+`observability-agent`'s contract-violation scope is a validator rule that went red on `place-order`
+before the instrumentation landed.
