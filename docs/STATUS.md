@@ -45,8 +45,22 @@
 > merge without conflict. Without it, `main` would keep a nightly that runs a *fixed* smoke against a
 > deliberately-suspended production every morning: a red per night carrying no information.
 >
+> **Executed, not asserted** — a fix to a gate that is never run is a hypothesis. Against a local
+> single-database stack (bare server, real migration chain, the walk's JWKS stub): L1→L3b PASS and
+> the cart pair green (`1200` on the storefront, `null` on the marketplace host); the negative
+> control **seen red** with its binding-breach message when the public base is pointed at a tenant
+> host; and the pre-fix state **seen red attributably** — `ADMIN sees cart …: {"status":"OPEN",
+> "totalAmount":{"amountCents":1200}} (row PRESENT = the STOREFRONT READ or its host binding is the
+> defect)` instead of a bare `{"cart":null}` timeout. **The rehearsal caught a defect in the fix
+> itself**: with the ADMIN mint unavailable the diagnosis arm emitted an EMPTY reading into a
+> sentence offering two interpretations — indistinguishable from "row absent", the same
+> mis-attribution class being fixed. Unusable token, unparseable body and a real answer are now three
+> different outputs.
+>
 > **Scope honesty**: nothing downstream of the cart leg has run green in production since 2026-07-29.
-> Further reds there are new findings, not this fix failing.
+> The rehearsal stops at `placeOrder` → `FAILED/Internal`, whose proximate cause is the placeholder
+> Stripe key (intent-create precedes any append). Further reds there are new findings, not this fix
+> failing, and this PR does not claim "L4 fixed".
 
 > 🔎 **2026-08-17 — A FAILED CHECKOUT IS ATTRIBUTABLE AGAIN, AND THE JOURNAL ROW CAN NO LONGER
 > CARRY A STRIPE KEY** ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), PR

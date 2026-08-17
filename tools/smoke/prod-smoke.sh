@@ -561,12 +561,24 @@ l4() {
   # cart by id — a query that is claim-scoped, NOT host-bound, so it answers regardless of the
   # tenant question — separates the two worlds the null used to merge. Its absence is why a null
   # went undiagnosed for twenty nights.
+  #
+  # THE ARM MUST NEVER GO QUIET (seen red on the local rehearsal of this very change): when the
+  # ADMIN mint failed, the arm emitted an EMPTY reading into a sentence offering two
+  # interpretations, and an empty reading looks exactly like "row absent" — a diagnosis that
+  # mis-attributes is worse than none, and it is the same shape as the defect being fixed. So an
+  # unusable token, an unparseable body and a real answer are three DIFFERENT outputs.
   diagnose_cart() {
-    local a r; a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
+    local a r seen
+    if ! a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN") || [ -z "$a" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: no ADMIN token could be minted (see the mint failure above), so read-path-vs-projection is UNANSWERED — do NOT read this as "the row is absent"' "$cart_id"
+      return 0
+    fi
     r=$(admin_gql admin "$a" 'query($id: CartId!){ cart(input:{id:$id}) { id status totalAmount { amountCents currency } } }' \
       "$(jq -cn --arg id "$cart_id" '{id:$id}')")
+    seen=$(printf '%s' "$r" | jq -c '.data.cart // .errors' 2>/dev/null | head -c 240)
+    [ -n "$seen" ] || { printf 'DIAGNOSIS UNPARSEABLE for cart %s: the ADMIN read returned %s — UNANSWERED, not "absent"' "$cart_id" "$(printf '%s' "$r" | head -c 160)"; return 0; }
     printf 'ADMIN sees cart %s: %s (row PRESENT = the row projected and the STOREFRONT READ or its host binding is the defect; row ABSENT = the projection never happened, expected total %s cents)' \
-      "$cart_id" "$(printf '%s' "$r" | jq -c '.data.cart // .errors' | head -c 240)" "$FIX_OFFER_PRICE_CENTS"
+      "$cart_id" "$seen" "$FIX_OFFER_PRICE_CENTS"
   }
   wait_for "L4" "the guest cart projected on the storefront and priced live to exactly ${FIX_OFFER_PRICE_CENTS} cents (== is deliberate: if cart pricing gains a component, UPDATE THIS EXPECTED TOTAL, never weaken the predicate to '> 0')" \
     60 check_cart_projected diagnose_cart
