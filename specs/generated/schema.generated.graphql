@@ -71,6 +71,7 @@ scalar HoneycombIngestKey
 scalar TraceSampleRatio
 scalar LogLevel
 scalar RestaurantAccountId
+scalar GatewayStatusCode
 scalar ConversationMessageId
 scalar MessageBody
 scalar MuteReason
@@ -280,6 +281,21 @@ enum ReclamationResolution {
 enum ScopeType {
   ORDER
   RESTAURANT
+}
+
+enum CommandFailureSeam {
+  PAYMENT_GATEWAY
+  COMMAND_PAYLOAD
+  DOMAIN_INVARIANT
+  INFRASTRUCTURE
+}
+
+enum CommandFailureReason {
+  GATEWAY_REFUSED
+  CARD_DECLINED
+  PAYLOAD_UNDECODABLE
+  UNCATALOGUED_INVARIANT
+  TRANSIENT_INFRASTRUCTURE
 }
 
 enum MessageVisibility {
@@ -537,6 +553,12 @@ type CheckoutSnapshot {
   windowTo: DateTime
   timezone: TimeZone
   evaluatedAt: DateTime
+}
+
+type CommandFailureAttribution {
+  seam: CommandFailureSeam!
+  reason: CommandFailureReason!
+  gatewayStatus: GatewayStatusCode
 }
 
 type ConversationMessage {

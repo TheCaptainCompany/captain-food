@@ -169,9 +169,15 @@ the fix is to **commit your own change**, not to regenerate. Real drift names fi
 (`Makefile:75`), which is why a docs-only edit trips a gate whose message only talks about generated
 files — it hit again on 2026-08-13 (#516) and cost a full `make rust` cycle spent diagnosing a
 phantom drift, and **again on 2026-08-15, costing an ~8-minute gate run** that failed on legitimately
-uncommitted WIP in an unrelated path. Three recurrences: the pre-emption is the rule in §"Run `make
-rust` only on a COMMITTED tree" — **commit first, then gate**, and check `git status --short` before
-invoking. Treat `make rust` as the gate, never as a mid-edit progress check.
+uncommitted WIP in an unrelated path, and **a fourth time on 2026-08-17 (#623)** — on a branch whose
+whole point was regenerating from a spec change, which is the case where "the emitter has gone mad"
+is the MOST believable reading and the diagnosis therefore costs the most. Four recurrences: the
+pre-emption is the rule in §"Run `make rust` only on a COMMITTED tree" — **commit first, then gate**,
+and check `git status --short` before invoking. Treat `make rust` as the gate, never as a mid-edit
+progress check. The durable fix is not another paragraph here: it is the recipe printing *"N of these
+files are not generated — commit your own changes first"* when the `--stat` set is not confined to
+`specs/generated/**` and `crates/**/generated/**`, which is the one place a reader is actually
+looking when it fires.
 
 **A PR "waiting on checks" may not be waiting on checks at all — read `mergeable_state` FIRST
 (2026-08-09).** `pull_request_read` with `method: get_status` returns `{state: pending,
@@ -1098,7 +1104,14 @@ describes: writes fail while the numbers still look fine. Three things worth kno
 
 - **`CLAUDE_CODE_TMPDIR` is the escape hatch when even tool stdout cannot be written** — export it
   inline in the same command (shell state does not persist between calls), or every command fails
-  before it runs.
+  before it runs. **It does NOT help when the DEVICE is full, only when the tmp path is** (2026-08-17,
+  #623): here the scratchpad, the session tmpfs and `/home/user` are all `/dev/vda`, so pointing
+  `CLAUDE_CODE_TMPDIR` somewhere else fails identically, and the failure is total — every Bash call
+  dies with *"the temp filesystem … is full. The child process's stdout/stderr writes failed with
+  ENOSPC"* **before the command runs**, including the `rm` that would fix it. The way out is a command
+  that WRITES NOTHING: `rm -rf <big-dir> 2>/dev/null; true` succeeds where the same `rm` followed by
+  `df -h` does not, because only the second one needs to print. Recover first, measure second. Cost:
+  three dead tool calls spent trying to diagnose a full disk with commands that could not report.
 - **A dead agent's worktree is the first thing to reclaim, and it is free**: check
   `git status --porcelain` and `git log -1` against the pushed head; clean at the remote sha means
   nothing to lose. Here that was 8.8G — more than the whole review needed, and cheaper than
@@ -1114,7 +1127,12 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   not free** — that hand-deletion is what desynchronised the fingerprints in §2's stale-artifact
   rule, which cost a run its evidence; read that rule before reaching in here by hand. The honest
   levers are above (dead worktrees, the scratchpad sweep, then `incremental`) plus `cargo clean -p`
-  on a few big packages, which was 2.7 GB here and leaves cargo's bookkeeping intact. Symptom that
+  on a few big packages, which was 2.7 GB here and leaves cargo's bookkeeping intact — **and on a
+  workspace-test tree `cargo clean -p server -p web` alone was 5.8 GB in one command (2026-08-17,
+  #623), which makes it the LARGEST honest lever on this list, not a last resort**. Also: deleting
+  `target/debug/incremental` is wasted work if the next `cargo test` just recreates it — pass
+  `CARGO_INCREMENTAL=0` on every run for the rest of the session, or you will free 1.6 GB twice and
+  still run out. Symptom that
   sent this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit`
   while `df` still reported 2.3G free — §2's "writes fail while the numbers still look fine".
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
@@ -1409,6 +1427,80 @@ a `.rs` file buys a full rebuild; **(3) BATCH** independent mutations whose test
 *distinguishably* into one run; **(4) never re-run the full suite "to confirm green after revert"** —
 an empty `git diff` plus the prior green already is that evidence, and the extra run is a whole gate
 cycle bought for zero information.
+
+### Running a mutation by hand: `git checkout <file>` reverts to HEAD, not to your work
+
+The mutation loop is edit → run → **revert**, and `git checkout <file>` is the reflex for the third
+step. It is only correct when the file is COMMITTED. On a multi-phase branch the fix under test is
+usually still in the working tree, and the checkout throws it away silently — the mutation is
+reverted and so is the thing being proved (2026-08-17, #623: a 50-line `verdict_of_error` rewrite,
+gone, and the give-away was a still-red test after a "revert"). Two habits, both cheap:
+
+- **Commit the fix BEFORE mutating it.** A red mutation run wants a clean base anyway, and the
+  commit is what makes `git checkout` mean what the reflex assumes.
+- **`git checkout` cannot touch an UNTRACKED file at all** — it errors with *"pathspec … did not
+  match any file(s) known to git"*, which reads like a typo and is actually the safe direction. A new
+  module mutated before its first commit has to be reverted by editing it back.
+
+### A red CI job that never ran your code: `429` from `codeload.github.com`, and why re-pushing makes it worse
+
+`lint`, `build-test` and `codegen` all report `failure` for a reason that has nothing to do with the
+diff:
+
+```
+##[error]Response status code does not indicate success: 429 (Too Many Requests).
+##[error]Failed to download archive 'https://codeload.github.com/dtolnay/rust-toolchain/tar.gz/…'
+```
+
+The runner is rate-limited fetching a composite ACTION, before a line of the repo is compiled.
+Three things this session paid for (2026-08-17, #623):
+
+- **`codegen` failing does not mean drift.** It is the aggregate gate, and its message is
+  `a required gate job reported 'abandoned'` — one line, naming no job. Read the OTHER failing job
+  first; `codegen`'s own log will never say what went wrong.
+- **Read the failing job's log before believing any red.** `GET /actions/jobs/{id}/logs` follows a
+  redirect (`curl -L`) and works without a token like the rest of the REST surface. Thirty seconds,
+  and it is the difference between "my change broke the build" and "GitHub was busy".
+- **Back off before re-triggering, and re-trigger ONCE.** These jobs run several action downloads in
+  a matrix; an immediate second full run doubles the request rate against the same host and simply
+  moves the 429 to a different job — here the retrigger fixed `lint` and broke `build-test` instead.
+  Every job passed at least once across the two runs, which is the evidence that mattered. Wait
+  several minutes.
+- **`POST /actions/runs/{id}/rerun-failed-jobs` answers `403 Resource not accessible by
+  integration`**, so a session cannot re-run a job — the only lever is a new push, and `ci.yml`
+  triggers on EVERY branch push, so any commit does it (a `--allow-empty` one whose message records
+  the flake, if there is nothing real to land).
+
+### An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff
+
+Both are GraphQL-only operations (`markPullRequestReadyForReview`, `enablePullRequestAutoMerge`) and
+this session's GitHub access answers:
+
+```
+This GraphQL query is not enabled for this session — only the pinned set of PR-review
+operations is served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
+```
+
+The suggestion in that message does not help, and neither do the obvious REST attempts (2026-08-17,
+#623):
+
+- `POST /repos/{o}/{r}/pulls/{n}/ready_for_review` → **404**; the endpoint does not exist.
+- `PATCH /repos/{o}/{r}/pulls/{n}` with `{"draft": false}` → **200 and silently ignored**, the PR is
+  still a draft. This is the expensive one: it looks like it worked. Always read `draft` back out of
+  the response body rather than the status code.
+- `gh` is **not installed** in this container, so every instruction phrased as `gh pr ready` /
+  `gh pr merge --auto` is unexecutable here regardless.
+
+**What this means for the protocol.** ADR-20260815-115220's "mark ready and arm auto-merge together,
+as one indivisible step" is a COORDINATOR action, not an executor one — the executor's terminal state
+on a green branch is *draft, all checks green, body and records complete, handoff comment posted*.
+Anything else is the executor reporting a step it had no way to take. Say so explicitly in the PR
+comment, with the two commands the coordinator needs, so the handoff is one paste and not an
+investigation.
+
+Cost that earned this: a full round of REST/GraphQL probing at the end of a run, after the work was
+already green, plus a PR body that had to be re-edited because it announced a state that could not
+be reached.
 
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 

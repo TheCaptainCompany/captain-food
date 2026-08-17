@@ -8566,6 +8566,11 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
     // profile, and a narrower profile in this test goes red against a CORRECT baseline.
     let (contract_rs, meters_rs) = load_metric_emitter_sources(&root);
     issues.extend(validate_metric_emitters(&declared_metrics(&model), &contract_rs, &meters_rs));
+    // §21 (#623) emits warnings for the same reason and must be here for the same reason.
+    issues.extend(validate_span_error_status(
+        &contracts_classifying_by_span_error(&model),
+        &load_span_source(&root),
+    ));
     let live = warning_profile(&issues);
     if let Err(msg) = check_warning_baseline(&root, &live) {
         panic!("{msg}");

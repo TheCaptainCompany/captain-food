@@ -31,6 +31,7 @@ use application::generated::services::{
     PaymentCaptureInput, PaymentRefundInput, PaymentReleaseInput, PaymentRequestInput,
     PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
+use application::ports::{payment_declined, payment_gateway_refused};
 use async_trait::async_trait;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
@@ -127,6 +128,12 @@ impl PaymentService for StripePaymentGateway {
             },
         );
         if result.is_err() {
+            // The SPAN-side twin of the counter below (#623/#624 part 1). Without it the
+            // `place-order` contract's `technical_error: any_span_errors` rule cannot fire, so a
+            // Stripe refusal on the riskiest leg of checkout exports as a successful CLIENT span and
+            // the error budget never learns about it. Set here, at the framework boundary, and never
+            // in a handler: business code stays independent of the telemetry SDK.
+            telemetry::spans::record_payment_intent_create_error(&span);
             // BUSINESS metric: the checkout-failure counter is what answers "are customers unable to
             // pay right now" without reading a single trace.
             telemetry::meters::place_order::payment_failure("intent_create_failed");
@@ -301,7 +308,12 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
             let message = err.message.unwrap_or_else(|| "payment declined".into());
             if is_decline {
                 let code_suffix = if code.is_empty() { String::new() } else { format!(" ({code})") };
-                return DomainError::Invariant(format!("PaymentDeclined: {message}{code_suffix}"));
+                // Through the builder, so the HTTP status travels STRUCTURALLY exactly as it does
+                // for the refusal arm below. `{message}` is still provider prose and still reaches
+                // the LOG only — the mailbox writes back the status and the catalogued code, never
+                // this string (#623 review, `young`: `context: {}` on a decline answered "was it
+                // declined?" but not "declined how?", on the money path).
+                return payment_declined(Some(status), &format!("{message}{code_suffix}"));
             }
             // `idempotency_error` is two DIFFERENT conditions: HTTP 400 = the same key was
             // reused with different parameters (deterministic — a keying bug, terminal), but
@@ -317,9 +329,16 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
                 ));
             }
             if kind == "invalid_request_error" || kind == "idempotency_error" {
-                return DomainError::Invariant(format!(
-                    "PaymentGatewayRefused: stripe {context} refused deterministically (HTTP {status}, code '{code}'): {message}"
-                ));
+                // The status travels STRUCTURALLY (application::ports encodes it in a shape its
+                // own reader parses back) so the mailbox can put `401` in the journal row without
+                // putting `{message}` there — Stripe's 401 message is literally
+                // "Invalid API Key provided: sk_test_…" (#623/#625).
+                return payment_gateway_refused(
+                    Some(status),
+                    &format!(
+                        "stripe {context} refused deterministically (code '{code}'): {message}"
+                    ),
+                );
             }
             return DomainError::Repository(format!(
                 "stripe: {context} rejected (HTTP {status}, code '{code}'): {message}"

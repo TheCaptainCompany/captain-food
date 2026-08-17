@@ -72,3 +72,179 @@ _(Lenses and the executor append here.)_
 - **`young`** — reading the diff for: no new `errors.yaml` code; the mutation targeting the real discard site; and the attribution type making a raw body unspellable at the type level rather than by convention.
 - **`beck`** — the two seams as one test, and the canary assertion present in the diff rather than considered.
 - **`observability-agent`** — the contract-violation scope, and any `context` shape landing adjacent to the live leak.
+
+### Executor, claim time — the `Repository` divergence, read from source (measurement to follow)
+
+The card's reconciliation ("intercepted on the command arm and terminal on the process-manager
+arm") does **not** survive reading the tree. `verdict_of_error` has exactly three call sites, and
+`DomainError::Repository` is intercepted before **every one** of them:
+
+| call site | the interception above it |
+|---|---|
+| `handler.rs:228` (in-tx command arm) | `handler.rs:218` `Some(Err(DomainError::Repository(detail))) => return Err(sqlx::Error::Protocol(detail))` |
+| `handler.rs:282` (PM arm — the `PlaceOrder` arm) | `pm_delivery.rs:194`, inside `prepare`: `Err(DomainError::Repository(detail)) => return Err(sqlx::Error::Protocol(detail))`, so `PreparedPmCommand.outcome` can never hold a `Repository` |
+| `handler.rs:841` (PM fact arm) | `handler.rs:838`, same shape |
+
+So the `DomainError::Repository(_)` arm of `verdict_of_error` (`handler.rs:865`) is **dead on every
+live path**, not merely on the command arm — `observability-agent` was closest, but the interception
+that kills it for `PlaceOrder` is in `prepare`, not "the PM path returns it as `Err(sqlx)` earlier"
+in general. **M1 therefore needs a different second seam**; see the next finding.
+
+### Executor, at the checkpoint — what was measured
+
+**1. The `Repository` divergence: none of the three readings holds, and the card's reconciliation is
+wrong.** Measured above at claim time and unchanged by the work: `DomainError::Repository` is
+intercepted above **all three** `verdict_of_error` call sites, and the interception that kills it for
+`PlaceOrder` is `pm_delivery.rs:194` inside `prepare`, not anything in `handler.rs`. The arm is dead
+on every live path. **M1 therefore drives `COMMAND_PAYLOAD` as its second seam** — a journaled
+payload that does not decode into the deployed command shape (`pm_delivery.rs`'s three arms), which
+is live, terminal, and needs a genuinely different operational response from a gateway refusal. The
+mutation is undiminished: it is still a one-token relabel and it is still red.
+
+**2. M3: the prefix had ZERO consumers, which is stronger than "nothing goes red".** `beck` predicted
+nothing would. Renaming `PaymentGatewayRefused` in the adapter left `crates/application`'s 363 unit
+tests green; the only three failures were the adapter's own tests, which restate the literal they
+mint. Nothing anywhere matched it — `classify_capture_error` falls through to `GATEWAY_REFUSED`
+without ever spelling it, and `verdict_of_error` only asks the catalogue. So it was not a coupling
+that a shared const would protect; it was prose sitting in a durable row. **This change is what gives
+it machine meaning**, so the shared builder/reader pair lands in `application::ports` next to
+`VERSION_CONFLICT_PREFIX`, with the HTTP status encoded AFTER the first colon so `rejection_code`
+keeps working the day #625 catalogues the prefix. That ordering is itself a pinned test.
+
+**3. The canary was red on exactly one of three arms, and it was not the one #623 reports.**
+
+| recorded body | before | after |
+|---|---|---|
+| HTTP 401, invalid API key | `{"code":"Internal","context":{}}` | `{seam: PAYMENT_GATEWAY, reason: GATEWAY_REFUSED, gatewayStatus: 401}` |
+| HTTP 400, `parameter_missing` | `{"code":"Internal","context":{}}` | same shape, `gatewayStatus: 400` |
+| HTTP 402, `card_declined` | **`{"code":"PaymentDeclined","context":{"detail":"…sk_test_LEAK_CANARY…"}}`** | `{"code":"PaymentDeclined","context":{}}` |
+
+So the empty `{}` was the only branch on this path that was NOT leaking, exactly as §0 said — and
+the leak lives on the arm the card did not scope. Dropping `detail` there changes no customer-facing
+message: **no `errors.yaml` message template in any scope fragment interpolates `{detail}`** (checked
+across all eight fragments), so `message_en(code, context)` renders identically.
+
+**4. A consequence worth stating plainly: #625's "declare `PaymentGatewayRefused` in the catalogue"
+would, on today's code, have turned the REAL 401 body into a REAL key in a 90-day row.** It routes
+the 401 down the arm that copies `message` verbatim. The canary is now what makes that land red
+instead of landing quietly, and `journal_attribution.rs` asserts the code is still uncatalogued.
+
+**5. `§21` found its own defect on its first run.** Splitting `spans.rs` on `pub fn` runs each block
+into the NEXT function's doc comment, and this file's doc comments discuss `otel.status_code` at
+length — so the rule certified `cart.read` because `cart_price`'s doc comment explains why IT
+declares the field. A text rule that reads prose as instrumentation certifies exactly the contracts
+whose documentation is most conscientious. Fixed, and kept as a test.
+
+### Three defects found and NOT fixed here (issues, not this diff)
+
+- **`classify_capture_error` puts 500 characters of the provider's message into a STORED EVENT.**
+  `payment_settlement.rs:160` → `PaymentCaptureFailed.detail`, in `domain_events`, immutable and
+  forever. Same leak class as this chunk, one tier worse, and squarely `HOLD: human` (stored event
+  shape). **This is the most serious thing found today.**
+- **Three sibling `context: { detail: e.to_string() }` arms** in `handler.rs` (the staged-flush
+  failures, lines ~208/309/820) still write free text into the journal row. Not on the canary's path
+  and not scoped by the card.
+- **The GENERATED command router classifies an undecodable payload as `DomainError::Repository`**
+  (`command_router.rs`), i.e. RETRY FOREVER, while the hand-written PM prepare correctly makes the
+  same seam terminal. A crafted payload could wedge a lane. Changing it moves retry behaviour, which
+  this card's fence forbids.
+
+### The checkpoint question, banked
+
+**Did the three-lens set miss anything a wider roster would have caught?** One item, and the
+attribution is **card defect**, not roster width.
+
+`vernon`/`evans` were not at the briefing and neither is the lens that would have caught it. What was
+missed is that **the card scoped the leak to the branch that was not leaking**: §0 states the
+catalogued arm already leaks, and §Scope then asks only for the discard site to be populated, with
+the canary as evidence rather than as work. The greening of the canary — dropping `detail` on the
+`PaymentDeclined` arm — is a change to a REJECTED row's shape that no scope item names, and it was
+discovered at the keyboard by running the canary rather than by reading the card. A wider roster
+reading the same card would have read the same omission. The fix is the card's, not the roster's:
+**a scope list must name the change each piece of evidence will force**, not only the evidence.
+
+The three declared concerns were all met by the diff, and each lens's named artifact exists:
+`young`'s unspellability is a generated type rather than a convention, `beck`'s two seams are one
+test with the distinctness assertion that makes splitting it vacuous, and
+`observability-agent`'s contract-violation scope is a validator rule that went red on `place-order`
+before the instrumentation landed.
+
+## Post-checkpoint — what the three PASS-WITH-FOLLOWUPS changed
+
+The checkpoint cleared with followups, and the followups are the better half of the chunk. Two
+executor claims were **corrected** rather than confirmed, which is what the third look is for.
+
+**The fence question, settled on better grounds than the card's.** `young` verified independently
+that nothing read `context.detail`: no `errors.yaml` template interpolates it (the complete
+placeholder set across every fragment is 21 tokens), `context` was never on the wire, no SQL or index
+touches it. And the deciding point the card missed — **there was no smaller form**. `detail` on the
+catalogued arm *was* the leak, so splitting the change yields "leak" and "no leak", not two changes.
+*A fence that forbids removing the leaking field is a fence protecting the defect.* The rule this
+generalises to, sharper than the executor's banking: **a card that authorises adding recorded data
+must also state what stops being recorded, and who read it. The removal is the reviewable act; the
+addition reviews itself.**
+
+**Correction 1 — "undiminished" was an overclaim** (`beck`). The structural property survives: both
+seams are classified by the same `attribute(&err)`, so M1 remains a one-token edit inside one
+function and remains red. But gateway-vs-cart-read would have crossed **two `DomainError` variants**,
+where gateway-vs-payload is two `Invariant`s discriminated by prefix. The test therefore exercises
+prefix discrimination twice and variant discrimination zero times. That is the honest statement and
+it is now the one in the PR body.
+
+**Correction 2 — "seen red rather than written green" is literally false for the validator**
+(`observability-agent`). §21 and its `place-order` fix are in the same commit, so 12→11 is asserted
+rather than re-checkable from history — the antecedent problem
+([ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md))
+in miniature. Accepted anyway, on a better ground: the planted-input test is red-on-mutant
+**permanently**, not once at authoring time, which outranks commit order as evidence. Stated in the
+PR body, because unqualified the claim reads as unverifiable and a reader is right to distrust it.
+
+### The six landed followups
+
+1. **The catalogued arm carries the attribution too.** `context: {}` was the safe answer, not the
+   right one: a declined card left a row saying `PaymentDeclined` and nothing else, so *declined how*
+   needed the log — a downgrade on the money path. `Reason::CARD_DECLINED` was, until this,
+   declared-and-unreachable, because `verdict_of_error` returned before `attribute` was called.
+   It is claimed on **evidence**: the gateway's HTTP status, which exists only if a gateway answered.
+   The fail-closed stand-in mints the same catalogued code with nothing behind it, and attributing
+   *we never called anyone* as *the customer's card was declined* is the misattribution this chunk
+   exists to stop.
+2. **`Seam::EVENT_APPEND` withdrawn from the scalar.** No producer anywhere; its producers are
+   #628's staged-flush arms. Shipping a declared-but-unemitted member inside the chunk about that
+   defect class would have been the joke writing itself. Replaced by an executable rule — see (3) —
+   and #628 now owns bringing it back with its producer.
+3. **`every_declared_seam_has_a_producer`.** An exhaustive `match` naming the error that drives each
+   member, plus the assertion. **Mutation run**: re-adding `EVENT_APPEND` to the spec and
+   regenerating fails the build in two places (`json_of_seam` and the test's own match) — the
+   compiler catches it before the assertion is even reached, which is the compiler-first floor rather
+   than a gate.
+4. **The `_` arm asserted.** It is the general case of this very bug — an invariant nobody declared —
+   and nothing covered it; the two covered seams were both exotic. Plus `Repository` →
+   `INFRASTRUCTURE`, which is measured-dead and asserted anyway, because "unreachable" is a property
+   of three interceptions in two files.
+5. **The secret predicate is a shared function**, `stripe_adapter::secrets::provider_secret_in`,
+   widened to `sk_` / `rk_` / `whsec_` / `pk_live_` / `sk_live_`. It cannot go red today — the row
+   carries no strings at all now — and that is the point: #627 will re-author this predicate from
+   memory otherwise, and from memory it is written narrower. `sk_live_` is redundant under `sk_` on
+   purpose, because the list is read by someone asking whether the live key is covered.
+6. **The module doc corrected.** It claimed the leak was *served to callers as
+   `Operation.errorCode`/`Operation.message`*. It was not. It reached the column and the backups,
+   which is enough — and in a chunk about unverified claims, being exact is the point. The canary's
+   header carried the same wrong sentence and is corrected too.
+
+### Filed, not fixed
+
+- [#631](https://github.com/TheCaptainCompany/captain-food/issues/631) — the eleven frozen
+  `obs-technical-error-unreachable` contracts, enumerated with their spans and grouped by cost, so
+  the baseline does not become their permanent home. Six of them share one `event.store.append` fix.
+- [#624](https://github.com/TheCaptainCompany/captain-food/issues/624) part 2 — the `values:` `$ref`
+  binding and the emitter-arms-EQUALS-enum test, carried forward now because #623 is the only moment
+  at which the classifier and `CommandFailureReason` are obviously one design.
+
+### Explicitly NOT done
+
+**The canary is not generalised to the event path.** `observability-agent` was explicit and the
+coordinator agreed: it has two outcomes and both are bad. Red, and it blocks a correct PR that the
+fences forbid from fixing #627. Green with an exclusion for the event path, and it is **a gate that
+certifies the leak**. It lands red, in its own commit, on #627's branch — the pattern this chunk
+already proved.

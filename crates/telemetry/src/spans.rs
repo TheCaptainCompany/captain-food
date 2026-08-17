@@ -152,12 +152,21 @@ pub fn event_consume_projection(projection_name: &str) -> Span {
 }
 
 /// `payment.intent.create` (CLIENT) — the outbound Stripe call, the riskiest leg of checkout.
+///
+/// `otel.status_code` is late-bound and DECLARED here for the reason validator §21 now enforces
+/// (#623/#624 part 1): the `place-order` contract classifies failures as `technical_error` via
+/// `status_rules.technical_error.any_span_errors`, and before this NOT ONE span on that workflow
+/// could carry an error status. So the class was structurally unreachable — every gateway refusal
+/// exported as a plain, successful CLIENT span, and the dashboard for the riskiest leg of checkout
+/// was empty because nothing could ever populate it, not because nothing ever failed. A field not
+/// declared at construction cannot be `record`ed later by `tracing`.
 pub fn payment_intent_create() -> Span {
     tracing::info_span!(
         "payment.intent.create",
         otel.kind = "client",
         messaging.system = "stripe",
         business.result = Empty,
+        otel.status_code = Empty,
     )
 }
 
@@ -257,6 +266,18 @@ pub fn record_service_window_verdict(span: &Span, verdict: &str) {
 /// condition tests for).
 pub fn record_payment_result(span: &Span, result: &str) {
     span.record(attr::RESULT, result);
+}
+
+/// Mark the outbound intent-create as FAILED. Sets OTel ERROR status so the `place-order`
+/// contract's `technical_error: any_span_errors` rule can classify the run at all.
+///
+/// DELIBERATELY SEPARATE from [`record_payment_result`]: `business.result` is the workflow's own
+/// vocabulary (`created` | `failed`) and the status is the TRANSPORT's. Folding the status into the
+/// result recorder would tie the span's error semantics to one particular string value, and the day
+/// a third result value appears the classification would move with it silently. The naming
+/// (`record_` + the constructor's identifier + `_error`) is what validator §21 matches on.
+pub fn record_payment_intent_create_error(span: &Span) {
+    span.record("otel.status_code", "ERROR");
 }
 
 /// Record the `pricing.compute` outputs.
@@ -473,6 +494,18 @@ mod tests {
         assert!(
             sf.field("otel.status_code").is_some(),
             "otel.status_code is late-bound but declared -- without it a failed stamp could not export ERROR status"
+        );
+
+        let pay = payment_intent_create();
+        record_payment_result(&pay, "failed");
+        record_payment_intent_create_error(&pay);
+        let pf = pay.metadata().unwrap().fields();
+        assert!(pf.field(attr::RESULT).is_some(), "business.result is late-bound but declared");
+        assert!(
+            pf.field("otel.status_code").is_some(),
+            "otel.status_code is late-bound but declared -- without it the place-order contract's \
+             technical_error rule (any_span_errors) could NEVER fire and every Stripe refusal on \
+             the riskiest leg of checkout would classify as a success (#623)"
         );
 
         let price = cart_price("cart-1");

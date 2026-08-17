@@ -228,6 +228,21 @@ pub struct CheckoutSnapshot {
     pub evaluated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages.error.context` ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), [#625](https://github.com/TheCaptainCompany/captain-food/issues/625)). Every field is a closed set or a number, so a provider body is UNSPELLABLE here — the guarantee is the type, not a review convention, which is what the ten existing `context: { detail: e.to_string() }` sites show a convention is worth. The free diagnostic text still exists and still matters; it goes to the LOG at the seam that produced it, never into this row, because this row persists for the retention window and is served to callers as `Operation.errorCode` / `Operation.message`. NOT an event payload and not a projected entity: it is the vocabulary of one jsonb column.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandFailureAttribution {
+    /// Which boundary failed — the first discrimination an operator needs.
+    #[graphql(name = "seam")]
+    pub seam: CommandFailureSeam,
+    /// Why it failed, in the coarsest vocabulary that changes the operational response.
+    #[graphql(name = "reason")]
+    pub reason: CommandFailureReason,
+    /// The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.
+    #[graphql(name = "gatewayStatus")]
+    pub gateway_status: Option<GatewayStatusCode>,
+}
+
 /// One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

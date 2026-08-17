@@ -110,3 +110,12 @@ pub struct CheckoutSnapshot {
     pub timezone: Option<TimeZone>,
     pub evaluated_at: Option<String>,
 }
+
+/// THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages.error.context` ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), [#625](https://github.com/TheCaptainCompany/captain-food/issues/625)). Every field is a closed set or a number, so a provider body is UNSPELLABLE here — the guarantee is the type, not a review convention, which is what the ten existing `context: { detail: e.to_string() }` sites show a convention is worth. The free diagnostic text still exists and still matters; it goes to the LOG at the seam that produced it, never into this row, because this row persists for the retention window and is served to callers as `Operation.errorCode` / `Operation.message`. NOT an event payload and not a projected entity: it is the vocabulary of one jsonb column.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandFailureAttribution {
+    pub seam: CommandFailureSeam,
+    pub reason: CommandFailureReason,
+    pub gateway_status: Option<GatewayStatusCode>,
+}

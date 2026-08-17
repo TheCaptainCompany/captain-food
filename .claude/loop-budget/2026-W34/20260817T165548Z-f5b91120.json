@@ -1,0 +1,7 @@
+{
+  "week": "2026-W34",
+  "seconds": 1194,
+  "recordedAt": "2026-08-17T16:55:48.986Z",
+  "branch": "623-placeorder-attribution",
+  "note": "#623 executor: post-checkpoint followups (decline attribution, seam withdrawal, shared secret predicate)"
+}

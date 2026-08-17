@@ -12,6 +12,7 @@ pub mod acl;
 mod http;
 pub mod outbound;
 pub mod raw;
+pub mod secrets;
 
 pub use acl::{RawStripeEvents, StripeWebhookIngestor};
 pub use http::routes;

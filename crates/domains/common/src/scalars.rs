@@ -441,3 +441,29 @@ pub enum ScopeType {
     ORDER,
     RESTAURANT,
 }
+
+/// WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here.
+/// EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers are the three staged-flush arms of [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix. It comes back with #628, in the change that emits it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CommandFailureSeam {
+    PAYMENT_GATEWAY,
+    COMMAND_PAYLOAD,
+    DOMAIN_INVARIANT,
+    INFRASTRUCTURE,
+}
+
+/// WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CommandFailureReason {
+    GATEWAY_REFUSED,
+    CARD_DECLINED,
+    PAYLOAD_UNDECODABLE,
+    UNCATALOGUED_INVARIANT,
+    TRANSIENT_INFRASTRUCTURE,
+}
+
+/// The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct GatewayStatusCode(pub i64);

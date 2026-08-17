@@ -17,6 +17,7 @@ pub(crate) mod scopes; // §14 per-scope spec folders (placement, DAG, kernel pu
 pub(crate) mod reminders; // §2f reminders/schedules/deletion DSL
 pub(crate) mod services; // §2d service catalog
 pub(crate) mod shape; // api-shape helpers (roles, inline types, data shapes)
+pub(crate) mod span_error_status; // §21 technical_error rules that cannot fire (observability.yaml vs spans.rs, #623/#624)
 pub(crate) mod translations; // §10 translation hygiene
 pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warning-baseline.json)
 
@@ -36,5 +37,6 @@ pub(crate) use services::*;
 pub(crate) use schema_writers::*;
 pub(crate) use scopes::*;
 pub(crate) use shape::*;
+pub(crate) use span_error_status::*;
 pub(crate) use translations::*;
 pub(crate) use warning_baseline::*;

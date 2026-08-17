@@ -91,7 +91,7 @@ pub(super) async fn prepare(
             ) {
                 // An unparsable payload is deterministic — a terminal FAILED (generic Internal),
                 // never a retry (the GraphQL edge validates before enqueueing; defensive arm).
-                Err(e) => Err(DomainError::Invariant(format!("PlaceOrder payload: {e}"))),
+                Err(e) => Err(super::attribution::command_payload_undecodable("PlaceOrder", &e.to_string())),
                 Ok(cmd) => application::commands::place_order(
                     store.as_ref(),
                     deps.catalogs.as_ref(),
@@ -114,7 +114,7 @@ pub(super) async fn prepare(
             "ApproveRefund" => match serde_json::from_value::<domain::generated::commands::ApproveRefund>(
                 message.payload.clone(),
             ) {
-                Err(e) => Err(DomainError::Invariant(format!("ApproveRefund payload: {e}"))),
+                Err(e) => Err(super::attribution::command_payload_undecodable("ApproveRefund", &e.to_string())),
                 Ok(cmd) => application::process_managers::refund::approve_refund(
                     store.as_ref(),
                     refund_staging.as_ref() as &dyn RefundProcessStateStore,
@@ -127,7 +127,7 @@ pub(super) async fn prepare(
             "DenyRefund" => match serde_json::from_value::<domain::generated::commands::DenyRefund>(
                 message.payload.clone(),
             ) {
-                Err(e) => Err(DomainError::Invariant(format!("DenyRefund payload: {e}"))),
+                Err(e) => Err(super::attribution::command_payload_undecodable("DenyRefund", &e.to_string())),
                 Ok(cmd) => application::process_managers::refund::deny_refund(
                     store.as_ref(),
                     refund_staging.as_ref() as &dyn RefundProcessStateStore,

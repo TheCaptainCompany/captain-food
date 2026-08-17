@@ -1,0 +1,7 @@
+{
+  "week": "2026-W34",
+  "seconds": 5280,
+  "recordedAt": "2026-08-17T16:24:01.433Z",
+  "branch": "623-placeorder-attribution",
+  "note": "#623 executor: attribute a failed PlaceOrder without leaking the provider body"
+}

@@ -1120,8 +1120,14 @@ impl PaymentService for RefusingGateway {
         _input: PaymentRequestInput,
         _meta: &ServiceCallMeta,
     ) -> Result<PaymentRequestOutput, DomainError> {
-        Err(DomainError::Invariant(
-            "PaymentGatewayRefused: stripe create_payment_intent refused deterministically (HTTP 400, code 'parameter_missing'): No such payment_method".into(),
+        // Built by the SHARED builder the real adapter uses (#623), not a hand-written literal:
+        // a stub that restates a message format is a stub that keeps passing after the format
+        // moves. The provider prose here deliberately carries a key-shaped marker — the row
+        // asserted below must not contain it.
+        Err(application::ports::payment_gateway_refused(
+            Some(400),
+            "stripe create_payment_intent refused deterministically (code 'parameter_missing'): \
+             No such payment_method (sk_test_STUB_MARKER)",
         ))
     }
 
@@ -1172,6 +1178,31 @@ async fn deterministic_gateway_refusal_is_terminal_never_a_wedged_lane() {
 
     let (status, error) = verdict_of(&pool, mid).await;
     assert_eq!(status, "FAILED", "deterministic refusal = terminal FAILED, lane free: {error:?}");
+
+    // #623 — THE ROW ITSELF, read back out of Postgres. The canary and the two-seam test assert on
+    // `verdict_of_error`'s output; this is the only place that proves what `completion.rs` actually
+    // BINDS to `inbound_messages.error`, which is the column that persists for the retention window
+    // and is served as `Operation.errorCode`.
+    let error = error.expect("a FAILED delivery records an error");
+    assert_eq!(error.get("code").and_then(|c| c.as_str()), Some("Internal"), "{error}");
+    let context = error.get("context").expect("the row carries a context");
+    assert_eq!(
+        context.get("seam").and_then(|v| v.as_str()),
+        Some("PAYMENT_GATEWAY"),
+        "an operator reading this row must be able to tell 'Stripe is refusing us' from 'our \
+         database is wedged' — that was the whole of #623\n{error}"
+    );
+    assert_eq!(
+        context.get("reason").and_then(|v| v.as_str()),
+        Some("GATEWAY_REFUSED"),
+        "{error}"
+    );
+    assert_eq!(context.get("gatewayStatus").and_then(|v| v.as_i64()), Some(400), "{error}");
+    assert!(
+        !error.to_string().contains("sk_"),
+        "the provider's prose reached the durable journal row\n{error}"
+    );
+
     let events: i64 =
         sqlx::query("SELECT count(*) AS n FROM domain_events WHERE stream_name LIKE 'Payment-%'")
             .fetch_one(&pool)

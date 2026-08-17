@@ -4,6 +4,8 @@
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
 mod activation;
+// The BOUNDED shape of what a failed command leaves in `inbound_messages.error` (#623/#625).
+pub mod attribution;
 // THE BIRTH-GAP dead-man's switch (#608) — "money held, no order" made a signal, on its own clock.
 mod birth_gap_watch;
 // The staged-event flush and the BAM counter's WHEN (#597). PRIVATE, and it exports only
@@ -35,7 +37,15 @@ pub use standalone::{
     shutdown_signal, spawn_standalone_workers,
     spawn_standalone_workers_with, standalone_deps, standalone_workers_enabled,
 };
-pub use handler::{MailboxCommandHandler, StatusBusObserver};
+// `verdict_of_error` is PUBLIC for one reason (#623): it is the ONLY function that decides what
+// a failed command leaves behind in `inbound_messages.error` — the jsonb column that persists 90
+// days and is served as `Operation.errorCode`. The leak canary in
+// `crates/adapters/stripe/tests/journal_leak_canary.rs` drives a RECORDED Stripe error body
+// through the REAL adapter decoder and then through this function, which is the only way to
+// assert on the journal row's error JSON without a live call, a hand-written error string, or a
+// database. It cannot live in this crate: the decoder is in `stripe-adapter`, which depends on
+// `infrastructure`, so the test has to sit on the other side of that edge.
+pub use handler::{verdict_of_error, MailboxCommandHandler, StatusBusObserver};
 pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
 use domain::shared::errors::DomainError;

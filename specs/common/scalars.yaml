@@ -729,3 +729,61 @@ ScopeType:
     per-instance authorization asks one question of this vocabulary — "is this principal a member of
     (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an
     order or a restaurant is.
+
+
+# --- Command-failure attribution (#623) -------------------------------------------------------
+#
+# `inbound_messages.error` persists for the retention window and is served as
+# `Operation.errorCode`/`Operation.message`. A failed command must be ATTRIBUTABLE from that row
+# without the row ever carrying provider prose: Stripe's error `message` is provider-controlled and
+# for an authentication failure literally contains `sk_test_…`. So the attribution vocabulary is a
+# pair of CLOSED sets — free text has nowhere to go, by type rather than by convention.
+
+CommandFailureSeam:
+  type: string
+  enum:
+    - PAYMENT_GATEWAY   # the outbound payment-gateway call refused or declined
+    - COMMAND_PAYLOAD   # the journaled command payload did not decode into its declared shape
+    - DOMAIN_INVARIANT  # an aggregate/handler invariant that is not a catalogued errors.yaml code
+    - INFRASTRUCTURE    # a transient infrastructure failure that nonetheless landed terminally
+  description: >
+    WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing
+    [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed
+    `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our
+    database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the
+    boundary that failed, never what the boundary said. The operational response differs per member,
+    which is the test for whether a value belongs here.
+
+    EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in
+    `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so
+    adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was
+    drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers
+    are the three staged-flush arms of
+    [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's
+    scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix.
+    It comes back with #628, in the change that emits it.
+
+CommandFailureReason:
+  type: string
+  enum:
+    - GATEWAY_REFUSED           # the gateway refused DETERMINISTICALLY (a retry cannot succeed)
+    - CARD_DECLINED             # the gateway declined the instrument (a business outcome)
+    - PAYLOAD_UNDECODABLE       # the stored payload does not fit the deployed command shape
+    - UNCATALOGUED_INVARIANT    # an invariant with no errors.yaml code — a defect, not a refusal
+    - TRANSIENT_INFRASTRUCTURE  # an infrastructure failure that reached a terminal verdict
+  description: >
+    WHY the seam failed, in the coarsest vocabulary that still changes what an operator does.
+    Paired with `CommandFailureSeam`, never alone: the same reason means different things at
+    different seams. Closed for the same reason as the seam — this value is written into a durable,
+    customer-servable jsonb row, so the set of things it can say must be enumerable in advance.
+    `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding:
+    a business refusal that reaches it is a missing `errors.yaml` declaration.
+
+GatewayStatusCode:
+  type: integer
+  minimum: 100
+  description: >
+    The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER,
+    on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 =
+    our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry
+    a provider's prose. The provider's message goes to the log; this goes to the journal row.
