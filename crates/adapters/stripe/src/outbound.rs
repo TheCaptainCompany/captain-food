@@ -128,6 +128,12 @@ impl PaymentService for StripePaymentGateway {
             },
         );
         if result.is_err() {
+            // The SPAN-side twin of the counter below (#623/#624 part 1). Without it the
+            // `place-order` contract's `technical_error: any_span_errors` rule cannot fire, so a
+            // Stripe refusal on the riskiest leg of checkout exports as a successful CLIENT span and
+            // the error budget never learns about it. Set here, at the framework boundary, and never
+            // in a handler: business code stays independent of the telemetry SDK.
+            telemetry::spans::record_payment_intent_create_error(&span);
             // BUSINESS metric: the checkout-failure counter is what answers "are customers unable to
             // pay right now" without reading a single trace.
             telemetry::meters::place_order::payment_failure("intent_create_failed");

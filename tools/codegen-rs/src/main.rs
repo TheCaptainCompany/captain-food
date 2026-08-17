@@ -97,6 +97,13 @@ fn main() {
         let (contract_rs, meters_rs) = load_metric_emitter_sources(&root);
         issues.extend(validate_metric_emitters(&declared_metrics(&model), &contract_rs, &meters_rs));
     }
+    // ─── §21 — a `technical_error` rule that CANNOT FIRE (#623/#624 part 1): the contract declares
+    // the class, the dashboard offers it, and no span on the workflow can carry an error status, so
+    // it is permanently empty and reads as healthy. Warning-level on the same §17 ratchet as §20.
+    issues.extend(validate_span_error_status(
+        &contracts_classifying_by_span_error(&model),
+        &load_span_source(&root),
+    ));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
