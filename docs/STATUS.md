@@ -2,6 +2,83 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗳️ **2026-08-17 — THE FOUNDER ANSWERED THE WHOLE DECISION QUEUE: THE WALK GOES FIRST ON ONE
+> DATABASE, PRODUCTION STAYS DOWN ON PURPOSE, AND THE ROSTER REVERSION IS STRUCK**
+> (records-only run, straight to `main`; no `specs/**`, no `crates/**`, so no SPEC-LOG row and no
+> regeneration. New [DECISIONS §45](proposals/DECISIONS.md) ·
+> [ADR-20260817-105844](adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md) ·
+> [ADR-20260817-105845](adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md).)
+>
+> Six rows went to him as one queue and came back answered. **Two went against the team's own
+> recommendation** (PROD-1, REV-1) and are recorded with the reasoning that supports what he chose.
+>
+> **(1) PROD-1 — production STAYS SUSPENDED, as a decided state.** He declined restoring-with-signup-
+> closed and chose to walk locally. **The defect underneath was never the 503**: the nightly
+> `prod-smoke` has been RED for **19 consecutive scheduled runs** (last green **2026-07-29**;
+> 2026-07-30 → 2026-08-17, no gaps), of which the suspension explains only **13** — **six earlier red
+> nights have an unrecorded cause** — and no record in this repository called it a broken gate. The
+> "Open incident" section at the foot of this file is retitled accordingly. **Owed, unfiled**:
+> re-point the nightly at the local walk target or disable its schedule with the reason in the
+> workflow.
+>
+> **(2) SEQ-1 — the walk goes FIRST, on ONE database.** The acceptance criterion is **unchanged as
+> what certifies** (local, eleven databases, full enforcement, the six clauses, the auth posture, the
+> D2 semantics, the honesty sentence); it simply stops **gating** the first end-to-end reading. The
+> target is the single-node k3s stack that already stood up on **2026-08-11**. This resolves the
+> 2026-08-13 ↔ 2026-08-14 contradiction **in favour of the 2026-08-13 sequence**, and the two
+> `STATUS.md` markers placed earlier today are re-cut: the 2026-08-14 entry is now labelled **the
+> sequence that CERTIFIES**, the older program of record **the sequence that RUNS NEXT**. They no
+> longer compete. **It does not overturn final-vision-first**: that directive forbids an intermediate
+> *where the final step can be built*, and it cannot be — the split band is blocked on **STO-7**,
+> **STO-8** and **STO-9** (each independently), with **STO-10** parked and **RDR-1** open upstream of
+> #513's grant emitter. **Mandatory label**: what the one-database walk produces is a **reading**,
+> never *accepted*.
+>
+> **(3) MOB-ANTECEDENT (§44 MOB-COST-1a, CLOSED) — the roster reversion is STRUCK.** HIGH-CONSEQUENCE
+> returns to (b)+(c) as originally ruled. In its place: **a dispatch card may not state a derived
+> number without naming its antecedents, and any bare number it does state is marked `UNVERIFIED
+> input`** — the cause both banked misses share (#608's briefing was `WHOLE ROSTER` on the committed
+> card; #609's clean attribution `vernon` rejected as his own depth miss). **Banking and holub's
+> verification condition are untouched**; only what a MISS *triggers* changed. **Residue, named**: a
+> genuine roster-width MISS now has no automatic consequence — it is banked with an attribution and
+> returns to the founder. Spec-side half already executable (PR #610's `derived_from` → `ConfigKey`);
+> dispatch-side half filed as [#619](https://github.com/TheCaptainCompany/captain-food/issues/619).
+> CLAUDE.md's mob bullet is amended in this change.
+>
+> **(4) REV-1 — `claude-review` comes OUT of the required checks.** A knowingly-given-up mechanical
+> guarantee: the team's own reviewer is the gate that finds things (it failed
+> [PR #610](https://github.com/TheCaptainCompany/captain-food/pull/610)'s first head on three
+> blockers, one on the money path), while the bot check's live failure mode
+> ([#593](https://github.com/TheCaptainCompany/captain-food/issues/593)) is red-in-25-seconds with an
+> empty key and **no diff evaluated**, blocking every PR. **Compensating control: the independent
+> reviewer pass before ready-for-review stays MANDATORY.** ⚠️ **NOT EXECUTED** — the ruleset PATCH
+> returned **403 from this session's agent proxy** (*"Write access to this GitHub API path is not
+> permitted through this proxy"*), an egress block rather than a GitHub denial, and the proxy's README
+> forbids routing around it. **`claude-review` is still required on `main` today**; it is an open
+> action on #593. ADR-20260807-235930 carries an amendment box.
+>
+> **(5) STO-10 — PARKED until the walk lands**, reported blocked, never re-ranked; #513 still must not
+> emit the CONNECT that would decide it by default.
+>
+> **(6) IDOR-DEADLINE — the deadline is now the EARLIEST OF** a second **restaurant** credential
+> issued outside the team *including demos and pilots* · a **rider** credential to a non-team person ·
+> the **first real customer order**. Enacted as the two lenses proposed, and strictly **tighter** than
+> the wording it replaces. §39, [#178](https://github.com/TheCaptainCompany/captain-food/issues/178)
+> (a new `## Deadline` block) and [#618](https://github.com/TheCaptainCompany/captain-food/issues/618)
+> (which already carried it) all match. The condition travels with it: **an open item past its own
+> published deadline is the worst state available**, so it is met or publicly re-dated *before* it
+> passes.
+>
+> ⚠️ **ONE GAP FOUND WHILE LANDING THE SIX, raised not smoothed — new register row
+> `IDOR-DEADLINE-GAP`.** All three deadline triggers are things the **team** does. For `CUSTOMER`,
+> **nobody issues anything**: signup is self-service, and two CUSTOMER-reachable reads
+> (`orderConversation`, `reclamation`) take a caller-supplied id with no ownership check. So
+> *production restored with signup open* issues credentials outside the team, reaches other customers'
+> free-text prose, and **trips none of (i), (ii) or (iii)** — carried today **only** by PROD-1 keeping
+> production down. It was **not** treated as a contradiction that stops the answer: the new trigger set
+> is strictly tighter than the one it replaces and the gap existed identically under the old wording,
+> so landing it improved the record and the honest output is the open row plus this line.
+
 > 🧾 **2026-08-17 — FOUR RECORDS PUT RIGHT: THE IDOR COVERS 83 OF 118 OPERATIONS, NOT THE ORDER
 > LIFECYCLE'S WRITES, AND THE #608 CHECKPOINT MISS WAS NEVER A ROSTER MISS** (records-only run, straight to `main`; no `specs/**`, no
 > `crates/**`, so no SPEC-LOG row and no regeneration).
@@ -26,11 +103,16 @@
 > (`mailbox/handler.rs:244-257`) **and only for `CUSTOMER`**; every other role gets `None`. Any claim of
 > the form *"we already have the identity at the handler"* is **false today**. And `external_tokens` is
 > a **flat shared list with no per-partner identity** (`auth.rs:442,480-483`) — a partner action cannot
-> be attributed to a partner, **present tense**, not gated on the first order. Recorded but **not
-> enacted**: two lenses argued the trigger should be the **earliest of** a second restaurant credential
-> outside the team *including a demo or pilot*, a rider credential outside the team, or the first real
-> order — an IDOR needs two principals and the second credential exists at **onboarding**. Moving a
-> founder-facing deadline is a decision, not a correction.
+> be attributed to a partner, **present tense**, not gated on the first order. ~~Recorded but **not
+> enacted**~~ ✅ **ENACTED 2026-08-17 ON A FOUNDER ANSWER**: two lenses argued the trigger should be
+> the **earliest of** a second restaurant credential outside the team *including demos and pilots*, a
+> rider credential to a non-team person, or the first real customer order — an IDOR needs two
+> principals and the second credential exists at **onboarding** — and the founder took it. §39,
+> [#178](https://github.com/TheCaptainCompany/captain-food/issues/178) and
+> [#618](https://github.com/TheCaptainCompany/captain-food/issues/618) all carry the new wording.
+> ⚠️ **Gap raised while landing it** (new register row **IDOR-DEADLINE-GAP**): all three triggers are
+> things the TEAM does, while customer signup is **self-service** — so *production restored with
+> signup open* trips none of them, and is carried today only by production being deliberately down.
 >
 > **(2) [DECISIONS §44](proposals/DECISIONS.md) MOB-COST-1a — the ATTRIBUTION was wrong; the RULING is
 > untouched.** The row blamed the [#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608)
@@ -115,8 +197,12 @@
 > caller-supplied id and apply no ownership check — `orderConversation` **and `reclamation`** — and they
 > are exactly the two free-text stores the Art. 9(1) finding is about, so **a stranger who registers
 > with a phone number reads other customers' complaint text and message threads**. Carried today
-> **only** by the 503. **Decision owed** (recorded, not taken): keep signup closed at the auth provider
-> while production runs, or close #618 first.
+> **only** by the 503. ~~**Decision owed** (recorded, not taken): keep signup closed at the auth provider
+> while production runs, or close #618 first.~~ **ANSWERED BY CIRCUMSTANCE, NOT BY RULE, 2026-08-17**:
+> the founder chose to leave **production suspended** ([DECISIONS §45 PROD-1](proposals/DECISIONS.md)),
+> so neither arm is exercised and no surface answers. **It is not closed** — it becomes owed again,
+> unchanged, the day restoration is on the table, and the same fact is why the new IDOR deadline's
+> trigger set has a hole (**IDOR-DEADLINE-GAP**).
 >
 > **(3b) `reclamation` was NOT part of the prose fix and needs its own work.** It asserts no control, so
 > there was no false claim to correct — but it is the sharpest unscoped read on the platform. Recorded
@@ -236,17 +322,25 @@
 > the **briefing is untouched** (whole roster, before any code), the **checkpoint** goes only to
 > lenses that declared a concern there, and the chunk's **reversibility class** sizes the briefing
 > roster — full mob for money, stored event shapes, legal surfaces and anything Tours-facing. Every
-> dispatch card now states its class and banks a `Checkpoint verification:` line either way; a MISS
-> reverts that class to the whole roster (sub-obligation **MOB-COST-1a**).
+> dispatch card now states its class and banks a `Checkpoint verification:` line either way; ~~a MISS
+> reverts that class to the whole roster~~ (sub-obligation **MOB-COST-1a** — **the reversion was
+> STRUCK 2026-08-17**, see below).
 >
-> ⛔ **The first answer, 2026-08-16, is a MISS — HIGH-CONSEQUENCE is REVERTED to the whole roster at
-> BRIEFING AND CHECKPOINT.** Banked on [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
+> ⛔ ~~**The first answer, 2026-08-16, is a MISS — HIGH-CONSEQUENCE is REVERTED to the whole roster at
+> BRIEFING AND CHECKPOINT.**~~ Banked on [#608](https://github.com/TheCaptainCompany/captain-food/issues/608)
 > (see below): a money-path threshold derived in the dispatch card as `attempts × spacing` ≈ 50 s
-> when the mailbox backoff is exponential (310 s; landed 600 s). `dba` was named at briefing for
-> that surface and was not returned to at the checkpoint; the error was the coordinator's, in the
-> card, and the executor caught it while implementing rather than the checkpoint catching it.
-> (b)+(c) stand unchanged for the reversible classes, whose first data point is still to come.
-> Evidence in [DECISIONS §44 MOB-COST-1a](proposals/DECISIONS.md).
+> when the mailbox backoff is exponential (310 s; landed 600 s). ~~`dba` was named at briefing for
+> that surface and was not returned to at the checkpoint~~ — **that attribution is FALSE**: the
+> committed claim-time card says `Briefing roster: WHOLE ROSTER`, so only the *checkpoint* was
+> narrowed and the bad arithmetic was in front of every lens. The error was the coordinator's, in the
+> card, and the executor caught it while implementing.
+> ✅ **STRUCK 2026-08-17 ON A FOUNDER ANSWER** — the HIGH-CONSEQUENCE reversion is withdrawn, (b)+(c)
+> stand for every class, and the **antecedent rule** replaces it: *a dispatch card may not state a
+> derived number without naming its antecedents, and any bare number it does state is marked
+> `UNVERIFIED input`*. Banking and the verification condition are untouched.
+> [ADR-20260817-105845](adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md),
+> [DECISIONS §44 MOB-COST-1a](proposals/DECISIONS.md), issue
+> [#619](https://github.com/TheCaptainCompany/captain-food/issues/619).
 
 > 💸 **2026-08-16 — "MONEY HELD, NO ORDER" IS NOW A SIGNAL THE SYSTEM EMITS**
 > ([#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608),
@@ -1088,11 +1182,16 @@
 > -> browser walls -> the six-clause acceptance walk. This run is **docs-only** (ADR + this entry); no
 > code, no claim, no backlog re-rank.
 >
-> **📌 THIS IS THE LIVE SEQUENCE** (marked 2026-08-17). The earlier *"program of record … harness
-> before L5"* bullet further down this file describes the **single-DB** intermediate this entry
-> supersedes; it is now labelled as superseded in place, with its still-true content named. If the two
-> ever disagree again, **this entry wins on the stack and the ordering**, the older one on the
-> *content* of the harness, L5's assertions, the browser walls and the honesty sentence.
+> **📌 THIS IS THE SEQUENCE THAT CERTIFIES — IT IS NO LONGER THE SEQUENCE THAT RUNS NEXT**
+> (re-marked 2026-08-17 on a founder answer: [DECISIONS §45 SEQ-1](proposals/DECISIONS.md),
+> [ADR-20260817-105844](adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)).
+> Earlier on 2026-08-17 this entry was marked *"the live sequence"* over the older single-DB
+> *"program of record"* bullet further down. That reconciliation stated which reading won; it could
+> not state which was **right**, because that was a founder call. He made it: **the walk goes first,
+> on ONE database.** So the split band, the write-auth fix and the `inbound_messages` hardening
+> described here remain **exactly** what the acceptance criterion requires — they no longer **gate**
+> the first end-to-end reading, which runs on the single-DB stack per the restored program of record
+> below. The two entries no longer compete: **this one is the certificate, that one is the reading.**
 
 > 🔒 **2026-08-14 — L5 acceptance-walk executor handed back on two real problems; the architect
 > assessed, re-sequenced and recorded (docs-only run)**
@@ -1342,26 +1441,30 @@
 >   exists, `capture_method=manual` is set, and `PaymentSettlementProcess` captures on the
 >   delivered fact. The walk harness's capture assertions can now run against the implemented
 >   semantics.
-> - **⛔ The program of record below is SUPERSEDED — read the 2026-08-14 "full enforcement and full
->   split" entry instead** (higher in this file; ADR-20260813-191111 "Scope clarification (2026-08-14)").
->   *Reconciled 2026-08-17: these two entries contradicted each other and a reader landing on either
->   one had no way to tell which was current.* **What changed**: this sequence targets a **single-DB
->   monolith stack** for the harness and L5, deferring the split ("the harness's single-DB stack is
->   enough for L5"). The founder directive *"The acceptance include the full enforcement and full
->   split"* removed that intermediate — under final-vision-first
->   ([ADR-20260808-235113](adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)) the
->   single-DB stack would have to be rebuilt — so the harness and the six-clause walk now target the
->   **physically-split, least-privilege, write-authorization-enforced eleven-database stack from the
->   start**. **The one live sequence, superseding everything below**: physical split band #513 →
->   #514 → #509 → the write-auth fix ([DECISIONS §39](proposals/DECISIONS.md) IDOR-1 / #178, whose
->   scope was corrected 2026-08-17 to cover the read side too) → harden the `inbound_messages` write
->   path → #556 harness **on the SPLIT stack** → L5 → browser walls → the six-clause acceptance walk.
->   What survives below unchanged: the **content** of each step (what the harness must contain, what
->   L5 asserts, the browser walls, the honesty sentence) — only the stack it runs on and the ordering
->   moved. Kept rather than deleted because the founder's clause order and the mob's honesty sentence
->   are quoted here verbatim.
-> - ~~**The program of record**~~ (ADR §5, **re-sequenced 2026-08-14 — harness before L5**; superseded
->   2026-08-14 by the full-split scope clarification, marked 2026-08-17):
+> - **✅ RESOLVED 2026-08-17 BY A FOUNDER ANSWER — the program of record below is the LIVE sequence
+>   for the first END-TO-END READING** ([DECISIONS §45 SEQ-1](proposals/DECISIONS.md),
+>   [ADR-20260817-105844](adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)).
+>   *History, kept because a reader needs to know this line moved twice*: this sequence puts the
+>   harness and L5 on a **single-DB monolith stack**; on **2026-08-14** the founder directive *"The
+>   acceptance include the full enforcement and full split"* pulled the eleven-database split ahead of
+>   the walk and this bullet was marked superseded; on **2026-08-17** he answered the resulting
+>   contradiction **in favour of this sequence** — the walk goes first, on one database.
+>   **The two sequences are now ONE, split by purpose, and neither supersedes the other**:
+>   - **The first end-to-end READING (live, buildable today)** — exactly the program below: #556
+>     harness on a single-database monolith stack → L5 lifecycle legs → the non-auth browser walls.
+>     Its target is the single-node k3s stack that already stood up on 2026-08-11. Anything it
+>     produces is labelled a **reading**, never *accepted*.
+>   - **The walk that CERTIFIES (the 2026-08-14 entry higher in this file)** — physical split band
+>     #513 → #514 → #509 → the write-auth fix ([DECISIONS §39](proposals/DECISIONS.md) IDOR-1 / #178,
+>     scope-corrected 2026-08-17 to cover the read side) → harden the `inbound_messages` write path →
+>     the six-clause walk on the eleven-database, least-privilege, write-auth-enforced stack. **The
+>     acceptance criterion is unchanged**; it stopped *gating* the reading, it did not shrink.
+>   Why this is not a final-vision-first breach: the split band is blocked on **STO-7, STO-8 and
+>   STO-9** (each independently), with **STO-10 parked** and **RDR-1** open upstream of #513's grant
+>   emitter — so "build the final step first" means the first reading arrives never, not sooner.
+> - **The program of record** (ADR §5, **re-sequenced 2026-08-14 — harness before L5**; superseded
+>   2026-08-14 by the full-split scope clarification, **restored 2026-08-17 as the reading sequence**
+>   by the founder answer above):
 >   [#536](https://github.com/TheCaptainCompany/captain-food/issues/536)
 >   (merged) → split slice 1 → the **local acceptance harness** (local-issuer/JWKS stub + a `mint_token`
 >   that signs role + `captain_food` claims **offline** against a key the fail-closed verifier is pointed
@@ -6143,15 +6246,28 @@ Two sessions run in parallel — 🅐 = this (desktop) session, 🅑 = the iPhon
 | 10c | **Push-driven mailbox** ([#313](https://github.com/TheCaptainCompany/captain-food/issues/313), [PROP-20260802-223522](proposals/PROP-20260802-223522-push-driven-mailbox.md) approved D1–D5, ADR-20260802-224532) — `pg_notify` at the `PgMailbox` door (one channel, actor-type payload) wakes workers cross-process; lanes-with-work idle gate; attempts-cap poison policy (`FAILED` + error at the cap); gated `RUN_MAILBOX_PUSH` + `MAILBOX_MAX_DELIVERY_ATTEMPTS` | 🅐 | ✅ door notifies in the enqueue tx (`PgMailbox` + PM chain); listener per process feeds the nudge map cross-process; full pass 60 s under confirmed push (beat stays on heartbeat, degradation = pre-push cadence); poison cap default 5 (`0` = old behaviour); retries back off EXPONENTIALLY since #316 (base x 2^(N-1), ~5 min to terminal at cap 5); heartbeat/lease/cap wired from Config (MAILBOX_* keys were previously unread) |
 | 11 | **CoopCycle** delivery partner (#58) — third `PARTNER` adapter; **federated** per-instance registry + OAuth2 (ADR-20260721-122910) | 🅐 | 🚧 PR #59: DSL surface (staging + services + obs + c4 + integration doc) landed; `crates/adapters/coopcycle` + server wiring in progress |
 
-## 🚨 Open incident — production suspended (2026-08-05)
+## Production is DELIBERATELY SUSPENDED — a decided state, not an open incident (decided 2026-08-17)
 
-**`captain-food.onrender.com` is DOWN** (HTTP 404). The Render web service
-`srv-d9ctcpgk1i2s73cj6820` is **suspended for billing** (`suspenders: ["billing"]`, suspended
-~2026-08-04 12:26 UTC). No customer can order — the whole storefront is offline. **Resolution is a
-billing/account action in the Render dashboard** (owner-only; not a code fix). CI on `main` is
-all-green; this is purely the hosting account. Fixed in the same run: `render-status` now reports
-**red** on suspension (ADR-20260805-070138) — previously it read only the last deploy's status and
-showed a false green while prod was down.
+**Founder answer, 2026-08-17** ([DECISIONS §45 PROD-1](proposals/DECISIONS.md),
+[ADR-20260817-105844](adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)):
+**production stays down and the team walks locally.** The team had recommended restoring with signup
+closed at the auth provider; he declined. **The walk does not need production** — `stripe listen
+--forward-to` is outbound-only, so the money path walks against a local stack with the CLI's own
+signing secret and no cluster ingress (ADR-20260813-004634). Nothing here waits on an account action
+any more: restoring is a decision to re-take, not a task to finish.
+
+**The real defect was never the 503.** Verified against the Actions API on 2026-08-17: the nightly
+`prod-smoke` has been **RED for 19 consecutive scheduled runs** — last green **2026-07-29**,
+2026-07-30 through 2026-08-17 with no gaps — of which the billing suspension explains only **13**.
+Six earlier red nights (2026-07-28, 2026-07-30 through 2026-08-04) have an **unrecorded cause**. A
+scheduled gate whose red is expected trains everyone to skip the one signal that would say something
+new. **Owed** (not filed by the records run that landed the answer): re-point the nightly at the
+local walk target, or disable its schedule with the reason recorded in the workflow.
+
+*History*: the Render web service `srv-d9ctcpgk1i2s73cj6820` went `suspenders: ["billing"]` at
+~2026-08-04 12:26 UTC and `captain-food.onrender.com` has returned 404 since. `render-status` was
+fixed in that run to report **red** on suspension (ADR-20260805-070138) — it previously read only the
+last deploy's status and showed a false green while prod was down.
 
 ## 🧭 Architecture decisions
 See [`docs/adr/`](adr/) — latest: **20260802-200416 (drain loops woken by Postgres NOTIFY, not a 1.5 s poll — background polling was 95% of outbound bandwidth)**, 0047 (API auth — Supabase JWT/JWKS), 20260719-120000 (structured domain rejections), **20260719-014434 (checkout snapshot on `PaymentIntentCreated`)**, **20260719-031136 (write-side `Repository` / event-sourced actors — handlers + saga runner route through it, never the raw `EventStore`)**, 20260718-145856 amendment (adapter webhook routes → `/adapters/{partner}/webhooks`). **ADR ids are now date-time** to avoid concurrent-session collisions (ADR-20260718-135417).

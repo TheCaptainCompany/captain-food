@@ -11,7 +11,10 @@ recorded the same night.
 > excusal by coordinator taste. What changes: the **checkpoint** (§2) goes only to lenses that
 > DECLARED a concern at the briefing, and the chunk's **reversibility class** sizes the briefing
 > roster. A verification condition rides on it — the narrowed checkpoint's misses are banked either
-> way, and a miss reverts that class to the whole roster.
+> way, and ~~a miss reverts that class to the whole roster~~ — **struck 2026-08-17 by
+> [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)**:
+> banking survives, the automatic reversion does not. A MISS is banked **with an attribution**, and
+> only one attributed to roster width returns to the founder.
 
 ## The directive (verbatim)
 

@@ -1,6 +1,32 @@
 # ADR-20260807-235930 — `main` ruleset: required checks + required Claude review, admin bypass preserves straight-to-main
 
-- **Status**: Accepted (product owner configured and saved the ruleset, 2026-08-08 ~01:55 CEST)
+> ## ⚠️ AMENDED 2026-08-17 — `claude-review` LEAVES the required set (founder answer)
+>
+> The founder decided that **`claude-review` comes out of the required status checks**. `codegen`,
+> `build-test` and `db-test` stay required; the pull-request rule, the deletion/force-push
+> restrictions and the admin bypass are untouched. Everything below is otherwise still in force.
+>
+> **This is a knowing trade, not an erosion.** The mechanical guarantee this ADR bought — *nothing
+> merges without a review having RUN, whatever any agent does* — is being **given up deliberately**,
+> because the team's own reviewer pass is the gate that actually finds things (it failed
+> [PR #610](https://github.com/TheCaptainCompany/captain-food/pull/610)'s first head on three
+> blockers, one of them on the money path), while the bot check's live failure mode is
+> [#593 "The claude-review bot gate blocks every merge when it cannot run"](https://github.com/TheCaptainCompany/captain-food/issues/593):
+> red inside 25 s with an empty `ANTHROPIC_API_KEY` and **no diff evaluated**, blocking every PR in
+> the repository. **The compensating control**: the independent reviewer pass before
+> ready-for-review (founder directive 2026-08-01) stays **mandatory** — a process obligation where
+> there was a mechanism, which is precisely the trade.
+>
+> **⚠️ NOT YET EXECUTED.** The ruleset still requires `claude-review` today. The
+> `PATCH /repos/TheCaptainCompany/captain-food/rulesets/19179892` was attempted on 2026-08-17 and
+> returned **403 from the session's agent proxy** (*"Write access to this GitHub API path is not
+> permitted through this proxy"*) — an egress-policy block, **not** a GitHub permission denial,
+> and the proxy's README forbids routing around it. It is an open action on
+> [#593](https://github.com/TheCaptainCompany/captain-food/issues/593) for a founder or an
+> admin-capable session. Register: [DECISIONS §45 **REV-1**](../proposals/DECISIONS.md).
+
+- **Status**: Accepted, **amended 2026-08-17** (see the box above) — product owner configured and
+  saved the ruleset, 2026-08-08 ~01:55 CEST
 - **Context**: PR merging was gated only by CI and agent discipline: auto-merge fired on green
   checks, the three-lens review passes were self-administered by the executing agent, and nothing
   *mechanically* required a review to have happened. The product owner asked whether reviewer

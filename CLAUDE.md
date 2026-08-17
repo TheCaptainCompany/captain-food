@@ -192,7 +192,15 @@ re-enables it**. Auth, keys, query discipline:
   2026-08-16,
   [ADR-20260816-134352](docs/adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)).
   Every dispatch card states its class and BANKS at the checkpoint whether the narrow set missed
-  anything — a MISS reverts that class to the whole roster.
+  anything, **with an attribution** (card defect / invited-lens depth miss / roster width); only a
+  miss attributed to **roster width** goes back to the founder, because reverting a class amends his
+  ruling. **A MISS no longer reverts a class automatically** — struck 2026-08-17 on n=2 where neither
+  miss was a roster-width miss, and replaced by the rule that earned it
+  ([ADR-20260817-105845](docs/adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)):
+  **a dispatch card may not state a derived number without naming its antecedents, and any bare
+  number it does state is marked `UNVERIFIED input`** — because a coordinator-authored number is
+  consumed by every lens as established fact, and widening the roster puts more readers in front of
+  the same unverified figure.
 - **He is the FOUNDER / Tech CEO, and every founder message goes to the whole team before any
   answer** (founder directives 2026-08-12, verbatim in
   [ADR-20260812-143619](docs/adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)):

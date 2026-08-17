@@ -123,8 +123,14 @@ separate decision.
   [#611](https://github.com/TheCaptainCompany/captain-food/issues/611)'s reachability question.
 - **The checkpoint MISS this chunk produced** — the ~50 s threshold derived from a linear reading of
   an exponential backoff, in the dispatch card itself — is the FIRST answer to
-  [DECISIONS §44 MOB-COST-1a](../proposals/DECISIONS.md), and it **reverts the HIGH-CONSEQUENCE
-  reversibility class to the whole roster at briefing AND checkpoint** (ADR-20260816-134352).
+  [DECISIONS §44 MOB-COST-1a](../proposals/DECISIONS.md), and it ~~**reverts the HIGH-CONSEQUENCE
+  reversibility class to the whole roster at briefing AND checkpoint**~~ (ADR-20260816-134352).
+  **CORRECTED 2026-08-17**: the reversion is **struck** and the attribution was wrong — this chunk's
+  briefing was **`WHOLE ROSTER`** (committed card `6d00cb3`), so the bad arithmetic was in front of
+  every lens and the narrowing cannot have caused the miss. The consequence the evidence earned is
+  the **antecedent rule**
+  ([ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)),
+  whose spec-side half this very chunk built (`derived_from` → `ConfigKey`).
 - The gauge reports an AGE, never an identity — a payment intent id is not a metric label. The
   runbook carries the queries that recover the identities.
 - **Known gap, recorded, not invented**: there is **no alert-route wiring anywhere in this repo**,

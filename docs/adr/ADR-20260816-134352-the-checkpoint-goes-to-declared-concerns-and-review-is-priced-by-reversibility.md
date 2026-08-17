@@ -5,6 +5,8 @@
 **Amends**: [ADR-20260809-013142 "Mob programming: every agent is in the dev, so issues are found DURING it"](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)
 — itself a founder directive, so this is **a founder directive amending a founder directive** ·
 **Register**: [DECISIONS](../proposals/DECISIONS.md) §44 (**MOB-COST-1**), now decided ·
+**Amended 2026-08-17** by [ADR-20260817-105845 "A dispatch card may not state a derived number without its antecedents"](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
+— §4's revert trigger is **struck**; §1–§3 and the third look stand as ruled ·
 **Context**: [ADR-20260816-020752 "The loop's context budget: a dispatch card, snapshot semantics, and phase commits"](ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md)
 (the six technique changes; this is the seventh item, the one that was not the team's) ·
 **Session**: https://claude.ai/code/session_01SDJjYQsfwaa4DVyNfFepbA
@@ -84,8 +86,16 @@ Attached to the ruling, and the reason the change is legal at n=1:
 - **"Banked" means, either way**: (1) a line in the card, and (2) a sentence in the change's record
   — `STATUS.md` or the chunk's ADR. **A clean run is banked too**: it turns n=1 into n=2, and an
   unrecorded clean run is indistinguishable from a run nobody checked.
-- **A MISS reverts that reversibility class to (a)** — whole roster at briefing *and* checkpoint for
-  that class — with the evidence, recorded. A miss is a result, not a failure of the experiment.
+- ~~**A MISS reverts that reversibility class to (a)** — whole roster at briefing *and* checkpoint
+  for that class — with the evidence, recorded.~~ **STRUCK 2026-08-17 by
+  [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)**
+  (founder answer), after n=2 where **neither miss was a roster-width miss**. The consequence of a
+  MISS is now: banked **with an explicit attribution** (card defect / invited-lens depth miss /
+  roster width), and one attributed to **roster width** goes back to the founder with its evidence.
+  In place of the automatic reversion stands the rule the evidence earned — **a dispatch card may
+  not state a derived number without naming its antecedents, and any bare number it does state is
+  marked `UNVERIFIED input`.** Everything else in this ADR, including the rest of this section, is
+  unchanged. A miss is a result, not a failure of the experiment.
 
 ## The empirical support, and its limit
 
