@@ -1471,6 +1471,37 @@ Three things this session paid for (2026-08-17, #623):
   triggers on EVERY branch push, so any commit does it (a `--allow-empty` one whose message records
   the flake, if there is nothing real to land).
 
+### An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff
+
+Both are GraphQL-only operations (`markPullRequestReadyForReview`, `enablePullRequestAutoMerge`) and
+this session's GitHub access answers:
+
+```
+This GraphQL query is not enabled for this session — only the pinned set of PR-review
+operations is served. Use REST via `gh api repos/{owner}/{repo}/...` instead.
+```
+
+The suggestion in that message does not help, and neither do the obvious REST attempts (2026-08-17,
+#623):
+
+- `POST /repos/{o}/{r}/pulls/{n}/ready_for_review` → **404**; the endpoint does not exist.
+- `PATCH /repos/{o}/{r}/pulls/{n}` with `{"draft": false}` → **200 and silently ignored**, the PR is
+  still a draft. This is the expensive one: it looks like it worked. Always read `draft` back out of
+  the response body rather than the status code.
+- `gh` is **not installed** in this container, so every instruction phrased as `gh pr ready` /
+  `gh pr merge --auto` is unexecutable here regardless.
+
+**What this means for the protocol.** ADR-20260815-115220's "mark ready and arm auto-merge together,
+as one indivisible step" is a COORDINATOR action, not an executor one — the executor's terminal state
+on a green branch is *draft, all checks green, body and records complete, handoff comment posted*.
+Anything else is the executor reporting a step it had no way to take. Say so explicitly in the PR
+comment, with the two commands the coordinator needs, so the handoff is one paste and not an
+investigation.
+
+Cost that earned this: a full round of REST/GraphQL probing at the end of a run, after the work was
+already green, plus a PR body that had to be re-edited because it announced a state that could not
+be reached.
+
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 
 Concurrent executors run in **one checkout** unless the coordinator hands them separate worktrees,
