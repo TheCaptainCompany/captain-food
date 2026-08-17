@@ -845,7 +845,7 @@ impl MailboxCommandHandler {
 
 /// Handler error → terminal verdict — the same discrimination the GraphQL completion applies
 /// (a catalogued errors.yaml rejection is REJECTED; everything else is the generic Internal).
-fn verdict_of_error(e: DomainError) -> HandlerVerdict {
+pub fn verdict_of_error(e: DomainError) -> HandlerVerdict {
     match e {
         DomainError::Rejected { code, context } => {
             HandlerVerdict::Rejected(serde_json::json!({ "code": code, "context": context }))
