@@ -43,8 +43,13 @@ queries:
   orderConversation:
     description: >
       The customer-visible (PUBLIC) message thread for one order, with the order's live status; the
-      customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the
-      conversation has not been opened.
+      customer and the order's staff/rider read it (#129). NO ownership check exists today: the
+      resolver reads `by_order(orderId)` with the caller's argument and returns the thread to ANY
+      caller holding any of the listed roles — including a SELF-REGISTERED customer, since signup is
+      open (phone OTP, `verifyPhone` roles [PUBLIC, CUSTOMER]). This is the sharpest read surface in
+      the cross-tenant IDOR (#618; write side #178, DECISIONS §39) because the thread is unbounded
+      customer free text, which in a food business predictably carries Art. 9(1) special-category
+      prose (BRIEF-20260816-idor-obligation-map). Null when the conversation has not been opened.
     args:
       orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
     returns: { $ref: '#/types/OrderConversation', nullable: true }
@@ -55,8 +60,11 @@ queries:
   orderConversationInternalNotes:
     description: >
       The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on
-      the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the
-      conversation has not been opened.
+      the CUSTOMER schema (the visibility guarantee, #129). The role exclusion IS enforced — CUSTOMER
+      is absent from the composed schema — but NO ownership check exists beyond it: the resolver reads
+      `by_order(orderId)` from the caller's argument, so any RESTAURANT/RESTAURANT_ACCOUNT/RIDER
+      credential reads any order's internal notes. Read-side half of the cross-tenant IDOR (#618;
+      write side #178, DECISIONS §39). Null when the conversation has not been opened.
     args:
       orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
     returns: { $ref: '#/types/ConversationInternalNotes', nullable: true }

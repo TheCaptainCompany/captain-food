@@ -180,8 +180,12 @@ queries:
   restaurantDeliverySatisfaction:
     description: >
       A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the
-      customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced
-      server-side. Optionally filtered to a single timeliness verdict.
+      customer timeliness verdict feeding the self-dispatch-vs-Captain decision. NO ownership check
+      exists today: `restaurantId` is taken from the caller's argument and passed straight to
+      `by_restaurant`, with nothing proving the caller owns that restaurant — any
+      RESTAURANT/RESTAURANT_ACCOUNT credential reads any restaurant's satisfaction data. Read-side
+      half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Optionally filtered to a
+      single timeliness verdict.
     args:
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
       timeliness: { $ref: 'scalars.yaml#/DeliveryTimeliness' }
@@ -204,9 +208,12 @@ queries:
     description: >
       The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims,
       an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category.
-      Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a
-      recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the
-      EXTERNAL deliveryPartnerAvailabilities queue records).
+      NO per-restaurant scoping exists today — this is a role guard and nothing more. The resolver
+      reads `repo.list(filter)` and the filter type has no restaurant field to narrow with, so ANY
+      caller holding a RESTAURANT/RESTAURANT_ACCOUNT credential reads EVERY restaurant's claims, and
+      calling it with NO ARGUMENTS returns the whole platform's. Read-side half of the cross-tenant
+      IDOR (#618; write side #178, DECISIONS §39); the EXTERNAL deliveryPartnerAvailabilities queue
+      has the identical shape. Until #618 lands, treat this queue as unscoped.
     args:
       status: { $ref: 'scalars.yaml#/ReclamationStatus' }
       category: { $ref: 'scalars.yaml#/ReclamationCategory' }

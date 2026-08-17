@@ -71,16 +71,64 @@
 > work that scoping the reads does not answer; (ii) **blast-radius unboundability** — with no tenant
 > predicate, no pagination and no returned-row-count logging, a breach's scope could not be bounded
 > after the fact, so **notification would have to assume the maximum**. Cheap fix, on the artifact list.
-> The brief also records the **publication split** the team followed and its condition: **if production
-> is restored before the fix lands, the public posture page comes down until it does.**
+> The brief also records the **publication split** the team followed. ~~Its condition: if production is
+> restored before the fix lands, the public posture page comes down until it does.~~ **WITHDRAWN
+> 2026-08-17 — see the entry below.**
 >
 > **Two adjacent findings, named not fixed** (both owe a `specs/**` edit + SPEC-LOG row, out of scope
 > here): `specs/ordering/api.yaml:207` claims *"Restaurant/ownership scoping is enforced server-side"*
 > and `specs/comms/api.yaml:58` claims *"Ownership enforced server-side"* — **both false**, and the
 > ordering one contradicts its own next sentence. A false control claim in the source of truth is how a
-> reviewer stops looking. And: **this repository is public**, so §39 and this file publish a `file:line`
-> recipe for a live unremediated cross-tenant IDOR — carried today only by there being no live instance
-> with real users, which is exactly the condition the publication split makes revocable.
+> reviewer stops looking. **✅ BOTH CORRECTED 2026-08-17, along with four more the sweep found.** And:
+> **this repository is public**, so §39 and this file publish a `file:line` recipe for a live
+> unremediated cross-tenant IDOR — carried today only by there being no live instance with real users.
+
+> 🔒 **2026-08-17 — THE PUBLIC-REPO CORRECTION: SIX FALSE CONTROL CLAIMS FIXED, ONE THEATRE CONTROL
+> REPLACED, AND THE CREDENTIAL GATE HAS A HOLE**
+> (spec+docs direct-to-`main`; [DECISIONS §39](proposals/DECISIONS.md),
+> [SPEC-LOG](SPEC-LOG.md), [SECURITY.md](../SECURITY.md),
+> [BRIEF-20260816-idor-obligation-map](legal/BRIEF-20260816-idor-obligation-map.md).)
+>
+> Arising from a **corrected premise — this repository is public**, which nobody had established when
+> the 2026-08-16/17 security records were written. **Nothing was reverted**: `legal-specialist` was
+> explicit that narrowing the §39 widening would be strictly worse, since the diff stays in public git
+> history and the code says everything anyway — a concealment signal bought for zero secrecy.
+>
+> **(1) Six false control claims in the DSL, corrected.** `specs/**` descriptions asserted
+> *"ownership enforced server-side"* on surfaces that enforce nothing beyond a role guard:
+> `restaurantReclamations`, `restaurantDeliverySatisfaction`, `orderConversation`,
+> `orderConversationInternalNotes`, **`pendingRefunds`** (money path — the `restaurantId` filter is
+> OPTIONAL, so omitting it returns every restaurant's refund queue) and `restaurantLocationsByAccount`.
+> The register named two; **the sweep found four more**. **Nine sibling sites with the same phrasing
+> were verified TRUE and left alone** — the phrasing is not uniformly false, so each site had to be
+> read against its resolver.
+>
+> **(2) The publication-split control was theatre — withdrawn and replaced.** *"The posture page comes
+> down"* protects nothing when the source is public. Replaced by: **production may be restored, but no
+> credential is issued outside the team until the write-binding lands**, enforceable at the auth
+> provider rather than by promise.
+>
+> **(3) ⚠️ THAT GATE HAS A HOLE — customer signup is SELF-SERVICE.** Verified: `verifyPhone` /
+> `requestPhoneVerification` are `roles: [PUBLIC, CUSTOMER]` and a first verified phone CREATES the
+> Customer. **Any stranger self-issues a CUSTOMER credential the moment the surface answers**, so the
+> gate must be **signup**, not onboarding. `orderConversation` is CUSTOMER-reachable and unscoped, i.e.
+> a stranger reads any order's free-text thread — the Art. 9(1) surface. Carried today **only** by the
+> 503. **Decision owed** (recorded, not taken): keep signup closed at the auth provider while
+> production runs, or close #618 first.
+>
+> **(4) The strongest argument is not the legal one: `domain_events` is immutable.** A hostile write is
+> not deleted, it is upcast — it stays in the log forever. The empty-log window is what makes this
+> defect free today, and **one stranger's write ends it permanently.**
+>
+> **(5) Public-tree sweep for personal data and secrets: CLEAN** — a useful recorded negative. Scanned
+> the tracked tree and **618 issues/PRs**. Every phone number is synthetic (`+336123456xx`,
+> `+33611223344`, `+33600000000`); the only non-example emails are `noreply@anthropic.com` and
+> `ops@uberdirect.example`; commit authors are all `users.noreply`/bot addresses. Stripe-key hits are
+> **prefix validators** (`sk_live_` comparisons), not keys, and `deploy/generated/secret-keys.json` is
+> names-only by construction. Tours street names in fixtures are real streets but identify no person.
+> **Nothing was deleted, because nothing genuine was found** — and a deletion in public git history
+> would not be a deletion anyway. **Standing rule recorded: no production data ever enters this
+> repository**, including a pasted log line in an issue.
 
 > 🔒 **2026-08-16 — THE LANE WIDTH IS NOW UNSPELLABLE, NOT MERELY UNSPELLED**
 > ([#609 "Lane addressing residue after #596: `stable_partition` is still `pub` and `mailbox_address` still carries a vestigial width"](https://github.com/TheCaptainCompany/captain-food/issues/609),

@@ -162,26 +162,68 @@ not**:
 - **Not publishable once a live instance serves real users**: the exploitable specifics — the operation
   names, the payload shapes, the no-argument call that returns another tenant's rows.
 
-**The condition attached, and it is the operative half:**
+**The condition originally attached — WITHDRAWN 2026-08-17:**
 
-> **If production is restored before the fix lands, the public posture page comes down until it does.**
+> ~~If production is restored before the fix lands, the public posture page comes down until it does.~~
 
-The split holds today only because **no production instance serves real users** — Render is suspended,
-no OVH spend has been authorized ([DECISIONS §35 INV-1](../proposals/DECISIONS.md)), and Q-L3 is *no*.
-Those are the facts carrying the publication, and **the moment any of them changes, the publication
-decision has to be re-taken, not inherited.** This is a standing trigger, not a note: whoever restores a
-live instance owns executing it.
+**The lens withdrew its own recommendation** once the premise was corrected: **this repository is
+public.** A takedown of the posture *summary* protects nothing while the *source* — which says
+everything the summary says and more — remains published. The control bought zero secrecy and would
+have read as suppression of an Art. 5(2) record. Withdrawing it is not a softening; it is replacing a
+control that could not work with one that can.
+
+**The replacement, which is enforceable rather than declaratory:**
+
+> Production may be restored. **No credential is issued to anyone outside the team until the
+> write-binding lands** — tied to the existing trigger: the earliest of a second restaurant credential,
+> a non-team rider credential, or the first real customer order. Enforceable at the auth provider
+> rather than by promise.
+
+**⚠️ The replacement has a verified hole, and it decides whether the gate works at all.** It assumes
+credentials are *team-issued*. **For CUSTOMER they are not**: `requestPhoneVerification` and
+`verifyPhone` carry `roles: [PUBLIC, CUSTOMER]` (`specs/customer/api.yaml`), and a first verified phone
+**creates** the Customer. **Any stranger with a phone in an allowlisted dialing code self-issues a
+CUSTOMER credential the moment the surface answers**, so **the gate must be SIGNUP, not onboarding** —
+restoring production with signup open *is* issuing credentials outside the team. This matters most for
+`orderConversation`, which accepts CUSTOMER, takes `orderId` from the caller and applies no ownership
+check: a self-registered stranger reads any order's thread, i.e. exactly the unbounded free-text
+Art. 9(1) prose of finding (i). Today the only thing carrying this is the surface answering **503**.
+**Options — a decision, not a correction, and not taken here**: hold signup closed at the auth provider
+for as long as production runs, or close #618 before restoring.
+
+**The non-legal argument points the same way and is stronger.** `domain_events` is **immutable**: a
+hostile write is never deleted, only **upcast**, so it persists in the log and in every future replay.
+The **empty-log window** is precisely what makes this defect cost nothing today, and **one stranger's
+write ends it permanently.** There is no "clean it up afterwards" in an event-sourced system.
+
+The publication itself holds today because **no production instance serves real users** — Render is
+suspended, no OVH spend has been authorized ([DECISIONS §35 INV-1](../proposals/DECISIONS.md)), and
+Q-L3 is *no*. **The condition that now governs the public record is the DATE, not a takedown:**
+
+> A public, dated, tracked record is a **stronger** accountability asset than a private one — it is
+> provable against a third-party remote. But it also proves the team appreciated the severity. That is
+> harmless while the deadline holds and toxic the day it lapses. **An open item past its own published
+> deadline is the worst state available** — worse than having no record. The asset is conditional on the
+> date being met, or publicly re-dated with a reason *before* it passes.
 
 ## Triage
 
 - **BLOCKER (pre-launch)** — per-instance authorization on both sides (#178 + #618); an Art. 9(2) basis
   or a field redesign for free-text customer prose (IDOR-L4); the DPIA if IDOR-L3 confirms it is
   mandatory.
-- **BLOCKER (conditional, immediate)** — taking the public posture page down if production is restored
-  before the fix lands. Cheap, and it has an owner only if it is written down.
-- **EXPOSURE** — blast-radius unboundability (finding 2 / IDOR-L8); partner non-attribution via the
-  shared `external_tokens` list (IDOR-L7), which is present tense; the Art. 25 by-design question
-  (IDOR-L6).
-- **HYGIENE** — the two specification descriptions that assert a server-side ownership control the code
-  does not implement (`specs/ordering/api.yaml:207`, `specs/comms/api.yaml:58`). A false control claim
-  in the source of truth is how a reviewer stops looking; it owes a `specs/**` edit and a SPEC-LOG row.
+- **BLOCKER (conditional, immediate)** — ~~taking the public posture page down if production is
+  restored before the fix lands~~ **WITHDRAWN 2026-08-17** (see the publication split above). Replaced
+  by: **no credential issued outside the team until the write-binding lands** — and, because customer
+  signup is **self-service** (phone OTP, `roles: [PUBLIC, CUSTOMER]`), **the gate is SIGNUP, not
+  onboarding**. Whoever restores a live instance owns executing it, at the auth provider.
+- **EXPOSURE** — blast-radius unboundability (finding 2 / IDOR-L8); **partner non-attribution**
+  (IDOR-L7), which is present tense — *the storage shape is deliberately omitted from the public
+  record, and the partners should be informed directly before or as this is published; whether a
+  **pre-contractual duty** attaches is open and for counsel*; the Art. 25 by-design question (IDOR-L6).
+- **HYGIENE — ✅ DISCHARGED 2026-08-17.** The specification descriptions asserting a server-side
+  ownership control the code does not implement are corrected. **The sweep found SIX sites, not the two
+  named here**: the two known plus `restaurantDeliverySatisfaction`, `orderConversation`,
+  **`pendingRefunds`** (money path — an OPTIONAL `restaurantId` filter, so omitting it returns every
+  restaurant's refund queue) and `restaurantLocationsByAccount`. **Nine sibling sites carrying the same
+  phrasing were verified TRUE and left alone**, so the phrasing was not uniformly false and each had to
+  be checked against its resolver. SPEC-LOG row landed with the change.

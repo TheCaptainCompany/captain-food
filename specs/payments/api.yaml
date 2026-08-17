@@ -101,8 +101,12 @@ queries:
   pendingRefunds:
     description: >
       The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status
-      (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders'
-      refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+      (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across
+      restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied
+      filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every
+      restaurant's refund queue — and one that supplies another restaurant's id reads that queue.
+      Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is
+      approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
     args:
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
       status: { $ref: 'scalars.yaml#/RefundStatus' }

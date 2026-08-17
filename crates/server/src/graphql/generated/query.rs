@@ -79,14 +79,14 @@ impl QueryRoot {
         }
         Ok(None)
     }
-    /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
+    /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). NO ownership check exists today: the resolver reads `by_order(orderId)` with the caller's argument and returns the thread to ANY caller holding any of the listed roles — including a SELF-REGISTERED customer, since signup is open (phone OTP, `verifyPhone` roles [PUBLIC, CUSTOMER]). This is the sharpest read surface in the cross-tenant IDOR (#618; write side #178, DECISIONS §39) because the thread is unbounded customer free text, which in a food business predictably carries Art. 9(1) special-category prose (BRIEF-20260816-idor-obligation-map). Null when the conversation has not been opened.
     #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn order_conversation(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
         let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(OrderConversation::from))
     }
-    /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
+    /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). The role exclusion IS enforced — CUSTOMER is absent from the composed schema — but NO ownership check exists beyond it: the resolver reads `by_order(orderId)` from the caller's argument, so any RESTAURANT/RESTAURANT_ACCOUNT/RIDER credential reads any order's internal notes. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Null when the conversation has not been opened.
     #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
     async fn order_conversation_internal_notes(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
@@ -282,7 +282,7 @@ impl QueryRoot {
         let row = repo.by_slug(input.slug.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(|r| Restaurant::at(r, now, horizon)))
     }
-    /// All restaurant locations under an account (back-office; ownership enforced server-side).
+    /// All restaurant locations under an account (back-office). NO ownership check exists today: `accountId` is taken from the caller's argument and passed straight to `by_account`, with nothing proving the caller holds that account — any RESTAURANT_ACCOUNT credential enumerates any other account's estate. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
@@ -490,7 +490,7 @@ impl QueryRoot {
             .ok_or_else(|| async_graphql::Error::new("order references an unknown restaurant"))?;
         Ok(Some(Order::from((row, Restaurant::at(restaurant, now, horizon)))))
     }
-    /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+    /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. NO ownership check exists today: `restaurantId` is taken from the caller's argument and passed straight to `by_restaurant`, with nothing proving the caller owns that restaurant — any RESTAURANT/RESTAURANT_ACCOUNT credential reads any restaurant's satisfaction data. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Optionally filtered to a single timeliness verdict.
     #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
     async fn restaurant_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliverySatisfactionQueryInput) -> async_graphql::Result<Vec<DeliverySatisfaction>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliverySatisfactionReadRepository>>()?;
@@ -513,7 +513,7 @@ impl QueryRoot {
         let rows = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(Reclamation::from).collect())
     }
-    /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
+    /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. NO per-restaurant scoping exists today — this is a role guard and nothing more. The resolver reads `repo.list(filter)` and the filter type has no restaurant field to narrow with, so ANY caller holding a RESTAURANT/RESTAURANT_ACCOUNT credential reads EVERY restaurant's claims, and calling it with NO ARGUMENTS returns the whole platform's. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39); the EXTERNAL deliveryPartnerAvailabilities queue has the identical shape. Until #618 lands, treat this queue as unscoped.
     #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
     async fn restaurant_reclamations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantReclamationsQueryInput>) -> async_graphql::Result<Vec<Reclamation>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
@@ -566,7 +566,7 @@ impl QueryRoot {
             status: row.payment_status.into(),
         }))
     }
-    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every restaurant's refund queue — and one that supplies another restaurant's id reads that queue. Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
     #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
     async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;

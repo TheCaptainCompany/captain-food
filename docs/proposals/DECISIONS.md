@@ -1966,19 +1966,35 @@ pointered here so this page stays the single index.**
 >   surface has the **identical** shape — `deliveryPartnerAvailabilities`, whose spec records the gap in
 >   so many words (`specs/delivery/api.yaml:75`, *"no per-owner narrowing in this slice (a recorded
 >   gap)"*); #618 owns the authoritative list of which two the title counts.
->   **The specs assert a control the code does not have**:
->   `specs/ordering/api.yaml:207` says *"Restaurant/ownership scoping is enforced server-side"* and
->   `specs/comms/api.yaml:58` says *"Ownership enforced server-side"* — both false today, and the
->   ordering one contradicts its own next sentence. Correcting that prose is a `specs/**` edit owing a
->   SPEC-LOG row, **named here, not made**.
+>   **The specs asserted a control the code does not have — ✅ CORRECTED 2026-08-17**, and the sweep
+>   found **SIX sites, not the two named here**. The two known (`specs/ordering/api.yaml:207`
+>   *"Restaurant/ownership scoping is enforced server-side"*, which contradicted its own next sentence,
+>   and `specs/comms/api.yaml:58` *"Ownership enforced server-side"*) plus **four the register did not
+>   know about**, each verified against its resolver: `restaurantDeliverySatisfaction`
+>   (`specs/ordering/api.yaml`), `orderConversation` (`specs/comms/api.yaml`), **`pendingRefunds`**
+>   (`specs/payments/api.yaml` — the *money-path* one: `restaurantId` is an OPTIONAL caller filter, so a
+>   RESTAURANT credential that OMITS it reads every restaurant's refund queue) and
+>   `restaurantLocationsByAccount` (`specs/network/api.yaml`). All six now state what is actually
+>   enforced and point at #618/#178. **Nine sibling sites carrying the same phrasing were verified TRUE
+>   and left alone** (`carts`, `cart`, `orders`, `order`, `delivery`, `restaurantDeliveries`,
+>   `orderStatusChanged`, `operationStatus`, `paymentStatus` — all genuinely `ReadScope`- or
+>   ownership-checked), so the phrasing is *not* uniformly false and each site had to be read against
+>   its resolver individually. SPEC-LOG row landed in the same commit.
 > - **Headline: 83 of 118 operations** (76 + 7). *Re-derived*: the denominator is 86 mutations + 32
 >   queries across `specs/*/api.yaml`; the **3 subscriptions are excluded** from it (121 operations
 >   in total), so quote "118" only with that qualifier.
-> - **`external_tokens` is a flat shared list with no per-partner identity** — *verified*:
->   `crates/server/src/auth.rs:442,480-483`, `Vec<String>` parsed from `EXTERNAL_API_TOKENS`, any
->   member authenticating any `/external` call. **A partner action cannot be attributed to a partner.**
->   This is **present tense**; it is not gated on the first order, and it means the `EXTERNAL` role's
->   audit trail is unusable for repudiation today.
+> - **Partner authentication carries no per-partner identity, so a partner action cannot be attributed
+>   to a partner** — *verified* in `crates/server/src/auth.rs`. This is **present tense**; it is not
+>   gated on the first order, and it means the `EXTERNAL` role's audit trail is unusable for
+>   repudiation today. **The storage detail is deliberately omitted from this public record**
+>   (2026-08-17): unlike every other item in §39, this one describes the shape of a control protecting
+>   **third parties'** access, and publishing that shape says something about *their* exposure before
+>   *they* have been told. The specifics stay in the code, which is where a reader who needs them
+>   already has them. **Action owed: the affected partners should be informed directly, before or as
+>   this is published.** `legal-specialist` has raised — and it is **open, not answered** — whether a
+>   **pre-contractual duty** attaches here, i.e. whether informing partners is a courtesy the team
+>   chooses or an obligation it owes; that question is for counsel, and this row is not legal advice
+>   or clearance.
 >
 > **And the corrected cost of the fix.** The row's original *"smaller than the proposal estimates"*
 > claim rested on the read side resolving identity from JWT claims. That is true **on the read side
@@ -1998,6 +2014,52 @@ pointered here so this page stays the single index.**
 > (*"before the first real order"*) a pilot restaurant handed a login the week before launch sits
 > inside an open cross-tenant window with no rule broken. **The deadline in the row below is NOT
 > changed by this entry** — it is founder-facing and moving it is a decision, not a correction.
+>
+> **THE PUBLIC RECORD IS A CONDITIONAL ASSET — THE CONDITION IS THE DATE** (added 2026-08-17, on the
+> corrected premise that **this repository is public**; the condition `legal-specialist` attached to
+> the whole public-record posture, previously written nowhere):
+>
+> > A public, dated, tracked record is a **stronger** accountability asset than a private one — it is
+> > provable against a third-party remote. But it also proves the team appreciated the severity. That
+> > is harmless while the deadline holds and toxic the day it lapses. **An open item past its own
+> > published deadline is the worst state available** — worse than having no record. The asset is
+> > conditional on the date being met, or publicly re-dated with a reason *before* it passes.
+>
+> This binds every dated row in this register, not only §39. Re-dating is legitimate and cheap;
+> re-dating **after** the date has passed is not the same act and does not restore the asset.
+>
+> **THE PUBLICATION-SPLIT CONTROL WAS THEATRE AND IS WITHDRAWN AND REPLACED** (2026-08-17).
+> The control previously recorded here, in `STATUS.md` and in the obligation map was: *"if production
+> is restored before the fix lands, the public posture page comes down until it does."* `legal-specialist`
+> **withdrew its own earlier recommendation** on the corrected premise: **holding back a summary
+> protects nothing when the source it summarises is public.** The code says everything the posture page
+> says and more, and a takedown buys zero secrecy while reading as suppression. It is replaced by the
+> control that is actually enforceable:
+>
+> > Production may be restored. **No credential is issued to anyone outside the team until the
+> > write-binding lands** — tied to the existing trigger: the earliest of a second restaurant
+> > credential, a non-team rider credential, or the first real customer order. Enforceable at the auth
+> > provider rather than by promise.
+>
+> **⚠️ THE GATE AS WRITTEN HAS A HOLE, VERIFIED THIS RUN — CUSTOMER SIGNUP IS SELF-SERVICE.** The
+> control above assumes credentials are *team-issued*. For CUSTOMER they are not: `requestPhoneVerification`
+> and `verifyPhone` both carry `roles: [PUBLIC, CUSTOMER]` (`specs/customer/api.yaml:38-46`) and
+> *"a first verified phone CREATES the Customer (CustomerRegistered)"* — **any stranger with a phone in
+> an allowlisted dialing code self-issues a CUSTOMER credential the moment the surface answers.** So
+> **the gate must be SIGNUP, not onboarding**: restoring production with signup open *is* issuing
+> credentials outside the team. Concretely, `orderConversation` accepts CUSTOMER, takes `orderId` from
+> the caller and applies **no ownership check** — a self-registered stranger reads any order's
+> conversation thread, which is exactly the unbounded free-text Art. 9(1) surface finding (i) of
+> [BRIEF-20260816-idor-obligation-map](../legal/BRIEF-20260816-idor-obligation-map.md) is about.
+> Today this is carried **only** by the surface answering 503. **Options: keep signup closed at the auth
+> provider while production runs, or close #618 before restoring.** Which one is a decision, not a
+> correction — recorded here, not taken.
+>
+> **The non-legal argument points the same way and is the stronger one: `domain_events` is immutable.**
+> A hostile write is not deleted, it is **upcast** — the event stays in the log forever and every future
+> replay must carry a rule explaining it. The **empty-log window** the team is deliberately spending is
+> the whole reason this defect currently costs nothing, and **one stranger's write ends it permanently**.
+> There is no version of "clean it up afterwards" in an event-sourced system.
 
 The L5 acceptance-walk executor ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /
 PR [#555](https://github.com/TheCaptainCompany/captain-food/pull/555)) re-traced, and this run

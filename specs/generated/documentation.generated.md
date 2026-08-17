@@ -269,7 +269,8 @@ A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}
 <a id="query-restaurantlocationsbyaccount"></a>
 #### 🔎 Query: `restaurantLocationsByAccount`
 
-All restaurant locations under an account (back-office; ownership enforced server-side).
+All restaurant locations under an account (back-office). NO ownership check exists today: `accountId` is taken from the caller's argument and passed straight to `by_account`, with nothing proving the caller holds that account — any RESTAURANT_ACCOUNT credential enumerates any other account's estate. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39).
+
 
 - **Input**: 🧩 `RestaurantLocationsByAccountQueryInput!` — `accountId`: [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid)
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
@@ -287,7 +288,7 @@ B2B prospection pipeline (admin): scored prospects, optionally filtered by minim
 <a id="query-restaurantdeliverysatisfaction"></a>
 #### 🔎 Query: `restaurantDeliverySatisfaction`
 
-A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. NO ownership check exists today: `restaurantId` is taken from the caller's argument and passed straight to `by_restaurant`, with nothing proving the caller owns that restaurant — any RESTAURANT/RESTAURANT_ACCOUNT credential reads any restaurant's satisfaction data. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Optionally filtered to a single timeliness verdict.
 
 
 - **Input**: 🧩 `RestaurantDeliverySatisfactionQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `timeliness?`: [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness)
@@ -297,7 +298,7 @@ A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed o
 <a id="query-restaurantreclamations"></a>
 #### 🔎 Query: `restaurantReclamations`
 
-The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
+The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. NO per-restaurant scoping exists today — this is a role guard and nothing more. The resolver reads `repo.list(filter)` and the filter type has no restaurant field to narrow with, so ANY caller holding a RESTAURANT/RESTAURANT_ACCOUNT credential reads EVERY restaurant's claims, and calling it with NO ARGUMENTS returns the whole platform's. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39); the EXTERNAL deliveryPartnerAvailabilities queue has the identical shape. Until #618 lands, treat this queue as unscoped.
 
 
 - **Input**: 🧩 `RestaurantReclamationsQueryInput` — `status?`: [🔤 `ReclamationStatus`](#scalar-reclamationstatus), `category?`: [🔤 `ReclamationCategory`](#scalar-reclamationcategory), `overdue?`: `boolean`
@@ -307,7 +308,7 @@ The claims queue for the restaurant's orders (#154): a manager/owner works its c
 <a id="query-pendingrefunds"></a>
 #### 🔎 Query: `pendingRefunds`
 
-The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every restaurant's refund queue — and one that supplies another restaurant's id reads that queue. Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
 
 
 - **Input**: 🧩 `PendingRefundsQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `RefundStatus`](#scalar-refundstatus)
@@ -3148,7 +3149,7 @@ _Cart selection → checkout → order lifecycle, incl. the checkout & refund sa
 <a id="query-orderconversation"></a>
 #### 🔎 Query: `orderConversation`
 
-The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
+The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). NO ownership check exists today: the resolver reads `by_order(orderId)` with the caller's argument and returns the thread to ANY caller holding any of the listed roles — including a SELF-REGISTERED customer, since signup is open (phone OTP, `verifyPhone` roles [PUBLIC, CUSTOMER]). This is the sharpest read surface in the cross-tenant IDOR (#618; write side #178, DECISIONS §39) because the thread is unbounded customer free text, which in a food business predictably carries Art. 9(1) special-category prose (BRIEF-20260816-idor-obligation-map). Null when the conversation has not been opened.
 
 
 - **Input**: 🧩 `OrderConversationQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
@@ -3158,7 +3159,7 @@ The customer-visible (PUBLIC) message thread for one order, with the order's liv
 <a id="query-orderconversationinternalnotes"></a>
 #### 🔎 Query: `orderConversationInternalNotes`
 
-The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
+The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). The role exclusion IS enforced — CUSTOMER is absent from the composed schema — but NO ownership check exists beyond it: the resolver reads `by_order(orderId)` from the caller's argument, so any RESTAURANT/RESTAURANT_ACCOUNT/RIDER credential reads any order's internal notes. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Null when the conversation has not been opened.
 
 
 - **Input**: 🧩 `OrderConversationInternalNotesQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)

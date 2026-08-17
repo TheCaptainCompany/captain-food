@@ -143,7 +143,12 @@ queries:
 
 
   restaurantLocationsByAccount:
-    description: "All restaurant locations under an account (back-office; ownership enforced server-side)."
+    description: >
+      All restaurant locations under an account (back-office). NO ownership check exists today:
+      `accountId` is taken from the caller's argument and passed straight to `by_account`, with
+      nothing proving the caller holds that account — any RESTAURANT_ACCOUNT credential enumerates
+      any other account's estate. Read-side half of the cross-tenant IDOR (#618; write side #178,
+      DECISIONS §39).
     args:
       accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', required: true }
     returns: { $ref: '#/types/Restaurant', array: true }
