@@ -91,8 +91,21 @@ su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -l $PGDATA/server.l
 # `crates/**` tests you need only initdb + `createdb cf<NN>` -- the psql migration dance below is
 # for a database you are inspecting by hand.
 
-# sqlx-cli is NOT installed (CI gets it prebuilt from taiki-e/install-action, and building it
-# here costs minutes). psql applies the migrations, but needs a per-file fallback: some
+# sqlx-cli is NOT installed -- but INSTALL IT rather than hand-rolling a runner. The prebuilt
+# cargo-quickinstall tarball takes SECONDS and needs no compile, which makes everything below
+# unnecessary for the normal case (2026-08-17, #556):
+#   curl -sSL https://github.com/cargo-bins/cargo-quickinstall/releases/download/sqlx-cli-0.8.3/sqlx-cli-0.8.3-x86_64-unknown-linux-gnu.tar.gz | tar xz
+#   install -m755 sqlx /usr/local/bin/sqlx && sqlx migrate run --database-url "$DATABASE_URL" --source migrations
+# Do this INSTEAD of writing a second migration runner: CI's db-migrate.yml uses sqlx, so a
+# hand-rolled applier is a drift generator between a local green and a CI red -- and the
+# semantics are exactly non-trivial enough to get wrong (a runner that wraps migration
+# 20260730043000's `VACUUM FULL` in a transaction dies on a migration sqlx executes happily).
+# A runner written for #556 was deleted for this reason; before deleting it, `sqlx migrate info`
+# confirmed it HAD produced a checksum-identical `_sqlx_migrations` -- so even a correct second
+# implementation buys nothing over a 10-second install.
+#
+# The psql fallback below remains for the case where the download is unreachable.
+# psql applies the migrations, but needs a per-file fallback: some
 # migrations require a transaction (LOCK TABLE) and others forbid one (VACUUM), which is why a
 # plain loop dies partway either way. Try -1 first — but ONLY fall back when the -1 failure is
 # the "cannot run inside a transaction block" class. A BLIND retry corrupts the schema
@@ -730,6 +743,17 @@ fetching a prebuilt cargo-machete, 2026-08-03). `cargo install <tool> --locked` 
 works fine (~2–3 min compile) — go straight there for Rust tooling; do not burn turns on
 prebuilt-binary URLs.
 
+**Sharpened 2026-08-17 (#556): a PINNED release-tag asset from an unrelated owner DOES download.**
+`https://github.com/cargo-bins/cargo-quickinstall/releases/download/sqlx-cli-0.8.3/sqlx-cli-0.8.3-x86_64-unknown-linux-gnu.tar.gz`
+piped straight into `tar xz` gave a working `sqlx-cli 0.8.3` in seconds — a different owner from
+the session's repo, so the blanket "scoped to the session's repositories" reading above is too
+strong. The failing case on 2026-08-03 used `releases/latest/download/<asset>`, which resolves
+through an API redirect; the working case pins an explicit tag and fetches the object directly.
+Treat **`latest` as the thing that fails, not release assets as a class** — and on a disk with a
+few GB free, a seconds-long prebuilt beats a 2–3 minute compile that also leaves build artifacts.
+Still verify: pipe to `tar` and run `<tool> --version`, since the failure mode is a tiny error body
+that only surfaces when `tar` rejects it.
+
 **GitHub 403 from executor sessions is API-only** (2026-08-13): plain `git fetch`/`git push` over
 the git transport works even when every `api.github.com` call returns 403 — push the branch
 yourself; do not hand branch pushes back to the coordinator.
@@ -793,6 +817,12 @@ it destroys the failure ENUMERATION — the per-suite detail naming which tests 
 away above the final summary line, so a red run tells you it failed but not where, and the only
 recovery is running the whole target again (cost: one full re-run of a failing target,
 2026-08-15). Redirect to a file and grep it; never window a test run through `tail`.
+**The same rule covers any SCRIPT that backgrounds a child**, not just gates: a `nohup`/`&` child
+inheriting the script's stdout holds the write end of the pipe open, so `./script.sh | tail` blocks
+forever and prints NOTHING — indistinguishable from a hang, with no partial output to diagnose from
+(cost: ~3 minutes of a bring-up script believed hung when it had already failed a check and exited,
+2026-08-17 #556). Redirect the script to a file and read the file; detach children with `setsid`
+and `</dev/null` so they cannot hold a caller's pipe.
 **The output is unreadable in BOTH directions, which is why the exit code is the only verdict.**
 A GREEN `check-drift` is SILENT — it prints no success line at all (`Makefile:74-75`: the only
 output is the failure `echo`), and the `✓ wrote <artifact>` list you see scroll past comes from its
@@ -851,6 +881,33 @@ slice (cost: a false "my move broke the boundary crate" scare and a stash/verify
 
 When wrapping up, state the handoff explicitly: what was pushed and to which branch, what remains on
 the user's side, which decisions are blocking, and what the next code slice is.
+
+## 11b. Two environment traps that cost a start cycle each (2026-08-17, #556)
+
+**`target/**` is unreadable to the agent's own tooling, so build logs written there are
+write-only.** The Read tool refuses the path outright ("directory is denied by your permission
+settings") and `tail`/`stat`/`ls -l` on paths under it are denied by the permission layer. A
+background build redirected to `target/build.log` therefore completes with an exit code you can
+see and output you cannot (cost: three denied calls and one re-run before the log moved). **Write
+every build, gate and server log to the scratchpad, never under `target/`** — and note this
+interacts badly with the never-pipe-a-gate rule, whose remedy is "redirect to a file": pick the
+file outside `target/`.
+
+**`python-cryptography` is installed but BROKEN, and it fails at import of the submodule, not the
+package.** `import cryptography` succeeds and reports `41.0.7`, so a availability check passes;
+`from cryptography.hazmat.primitives import hashes` then raises
+`pyo3_runtime.PanicException: Python API call failed` under `ModuleNotFoundError: _cffi_backend`.
+`pyjwt` fails identically (same binding). **Use the `openssl` CLI** (3.0.13, present and working)
+for keygen/signing/JWT work: `openssl genrsa`, `openssl rsa -noout -modulus` for the JWK modulus
+(exponent is F4 → `AQAB`), `openssl dgst -sha256 -sign` for the signature. It needs no install,
+which also matters on a disk with a few GB free (cost: one failed bring-up, 2026-08-17).
+
+**Long-running background processes are reaped between turns.** A `postgres` cluster, a stubbed
+HTTP server and a `cargo run` server all started and healthy were gone a few turns later, with
+Postgres's own log showing no shutdown record at all — it was killed, not stopped. Make bring-up
+scripts **idempotent and re-runnable** (check-then-start, never assume state survives) and re-run
+the bring-up before any run that depends on it, rather than debugging a "connection refused" as if
+it were new.
 
 ## 12. A workspace GLOB member cannot bootstrap itself
 

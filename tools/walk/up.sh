@@ -43,7 +43,20 @@ psql "$WALK_DATABASE_URL" -tAc 'select 1' >/dev/null 2>&1 || {
 }
 
 # --- 2. Migrations ----------------------------------------------------------------------------
-WALK_DATABASE_URL="$WALK_DATABASE_URL" "$REPO_ROOT/tools/walk/migrate.sh" >/dev/null
+# ONE migration authority: sqlx-cli, the same tool CI's db-migrate.yml runs (ADR-0043). This
+# harness deliberately does NOT carry its own runner. It had one briefly, and deleting it is the
+# point: two implementations of "apply the chain" is how a local green and a CI red diverge, and
+# the semantics are not trivial -- migration 20260730043000 is a `VACUUM FULL` carrying sqlx's
+# `-- no-transaction` directive, which a naive runner wraps in a transaction and fails on.
+#
+# sqlx-cli is not preinstalled here. Prebuilt tarball (seconds, no compile), the shape the
+# cutover-local-rehearsal runbook documents and the same version CI resolves:
+#   curl -sSL https://github.com/cargo-bins/cargo-quickinstall/releases/download/sqlx-cli-0.8.3/sqlx-cli-0.8.3-x86_64-unknown-linux-gnu.tar.gz | tar xz
+command -v sqlx >/dev/null || fail "sqlx-cli not found. Install the prebuilt binary:
+  curl -sSL https://github.com/cargo-bins/cargo-quickinstall/releases/download/sqlx-cli-0.8.3/sqlx-cli-0.8.3-x86_64-unknown-linux-gnu.tar.gz | tar xz && install -m755 sqlx /usr/local/bin/sqlx"
+say "up: applying the migration chain (sqlx-cli $(sqlx --version | awk '{print $2}'))"
+sqlx migrate run --database-url "$WALK_DATABASE_URL" --source "$REPO_ROOT/migrations" >/dev/null \
+  || fail "sqlx migrate run failed"
 
 # --- 3. JWKS stub -----------------------------------------------------------------------------
 WWW="$(python3 "$REPO_ROOT/tools/walk/jwks.py" init --dir "$WALK_STATE")"
