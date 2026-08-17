@@ -18,6 +18,20 @@
 #                      Capture happens on delivered/picked up (ADR-20260808-195315 §1.2); the
 #                      delivered-leg capture assertions belong to the FUTURE L5 fulfilment leg of
 #                      the acceptance program (ADR-20260813-191111), not to L4.
+#                      L4 RUNS ENTIRELY ON THE STOREFRONT HOST (#622) — see "WHICH HOST" below.
+#
+# WHICH HOST — L3 browses the MARKETPLACE, L4 walks a STOREFRONT (#622).
+# The two are different products on different hosts and the smoke used to mix them: it wrote the
+# guest cart on the marketplace host and read it back there too, then placed and tracked the order
+# there — a journey no client walks. `current` resolves its tenant from the `Host` (#469) and
+# correctly refuses to answer unbounded, so that read returned `{"current":null}` with NO error:
+# byte-identical to "the cart never projected", and undiagnosable from the transcript.
+#   * MARKETPLACE (live.<domain>) — L1 edge, and L3's restaurants-by-slug and catalog reads. That IS
+#     the marketplace browse: a visitor comparing restaurants before choosing one.
+#   * STOREFRONT ({slug}.<domain>) — L2 introspection, L3b the checkout shell, and ALL of L4. A guest
+#     is on the restaurant's storefront when they build a cart, and stays there through checkout.
+# The call sites cannot name a base: `marketplace*`/`storefront*`/`admin*` helpers each hardcode
+# theirs, so the mistake above is not spellable here any more. Do not add a base parameter back.
 #
 # Safe to re-run against production: TEST-mode money only (sk_test key), one dedicated tenant,
 # idempotent fixtures, fresh cart/order ids per run.
@@ -34,8 +48,12 @@
 #                         to. The Supabase URL is NOT a secret: it RIDES THE ARTIFACT (baked per-profile,
 #                         ADR-20260729-020000) and is read from the DSL, overridable via SUPABASE_URL.
 # Optional env:
-#   SMOKE_BASE_DOMAIN     default captain.food. May carry a port for a local rehearsal
-#                         (`captain.local:8080`) — host classification ignores it.
+#   SMOKE_BASE_DOMAIN     default captain.food. May carry a PORT for a local rehearsal
+#                         (`captain.food:8080`) — host classification ignores the port. It may NOT
+#                         carry a different DOMAIN: `surface_runtime::hosts::APEX` is a compile-time
+#                         constant, so under any other apex every host classifies as `Default`, no
+#                         request names a tenant, and every tenant-scoped read serves null. L4
+#                         asserts this up front rather than failing as a mystery 60s later.
 #   SMOKE_SCHEME          default https; set `http` when smoking a port-forwarded local stack.
 #   SMOKE_TENANT_SLUG     default smoke-test
 #   SMOKE_APP_PROFILE     which baked config profile the deployment runs (default production)
@@ -62,6 +80,9 @@ PUBLIC_BASE="${SMOKE_PUBLIC_BASE:-${SMOKE_SCHEME}://live.${SMOKE_BASE_DOMAIN}}"
 ADMIN_BASE="${SMOKE_ADMIN_BASE:-${SMOKE_SCHEME}://system.${SMOKE_BASE_DOMAIN}}"
 TENANT_BASE="${SMOKE_SCHEME}://${SMOKE_TENANT_SLUG}.${SMOKE_BASE_DOMAIN}"
 STRIPE_API="https://api.stripe.com"
+# `surface_runtime::hosts::APEX`, mirrored. Not configurable HERE because it is not configurable
+# THERE: the server compares the request host against this exact literal.
+SMOKE_APEX="captain.food"
 
 # Fixed fixture ids => idempotent creation (register/create-catalog replays are no-ops server-side,
 # addProduct is guarded by an existence check below).
@@ -69,6 +90,10 @@ FIX_RESTAURANT_ID="e2e50000-0000-4000-8000-000000000001"
 FIX_CATALOG_ID="e2e50000-0000-4000-8000-000000000002"
 FIX_PRODUCT_ID="e2e50000-0000-4000-8000-000000000003"
 FIX_OFFER_ID="e2e50000-0000-4000-8000-000000000004"
+# The seeded offer price, ONE constant read by BOTH the L3 seed and the L4 total assertion — so the
+# expected total cannot drift from the thing that produces it (see the L4 assertion for why the
+# comparison is `==` and must stay `==`).
+FIX_OFFER_PRICE_CENTS=1200
 SMOKE_ADMIN_EMAIL="smoke-admin@${SMOKE_BASE_DOMAIN}"
 SMOKE_CUSTOMER_EMAIL="smoke-customer@${SMOKE_BASE_DOMAIN}"
 # The BRIDGED stranger for the #433 read-guard negative: its own user, its own per-run
@@ -125,6 +150,37 @@ gql_ok() {
     fail "$layer: GraphQL errors from $endpoint: $(printf '%s' "$resp" | jq -c '.errors' | head -c 800)"
   fi
   printf '%s' "$resp"
+}
+
+# --- Base-bound call sites: the host is a PROPERTY OF THE HELPER, never an argument (#622) --------
+# The defect this closes was one token wide — `$PUBLIC_BASE` where `$TENANT_BASE` belonged — and it
+# survived review, a rewrite and twenty nights because both spellings are grammatical. A comment
+# saying "do not simplify these to $PUBLIC_BASE" survives until the next refactor; a call site that
+# CANNOT name a base does not decay. So: pick the AUDIENCE, and the audience picks the host.
+#
+#   marketplace* -> live.<domain>       the browse surface (many restaurants, no tenant)
+#   storefront*  -> {slug}.<domain>     one restaurant's shop (tenant resolved from the Host, #469)
+#   admin*       -> system.<domain>     the back office
+#
+# Each takes <role-path> (public|customer|admin) and appends /graphql. The `_ok` variants fail the
+# run on HTTP!=200 or GraphQL errors; the bare ones return the body for polling loops that tolerate
+# transient failures. Do NOT add a base parameter to any of them.
+marketplace()    { local p="$1"; shift; gql    "$PUBLIC_BASE/$p/graphql" "$@"; }
+marketplace_ok() { local l="$1" p="$2"; shift 2; gql_ok "$l" "$PUBLIC_BASE/$p/graphql" "$@"; }
+storefront()     { local p="$1"; shift; gql    "$TENANT_BASE/$p/graphql" "$@"; }
+storefront_ok()  { local l="$1" p="$2"; shift 2; gql_ok "$l" "$TENANT_BASE/$p/graphql" "$@"; }
+admin_gql()      { local p="$1"; shift; gql    "$ADMIN_BASE/$p/graphql" "$@"; }
+admin_ok()       { local l="$1" p="$2"; shift 2; gql_ok "$l" "$ADMIN_BASE/$p/graphql" "$@"; }
+
+# The storefront host must be one the SERVER can classify as a tenant, or every tenant-scoped read
+# below returns null — with no error, at every host, indistinguishable from a broken cart. That is
+# the #622 defect reachable a second way, through configuration instead of a typo, and it would be
+# blamed on the #622 fix. `classify_host` requires `<label>.captain.food` exactly (port ignored,
+# `surface_runtime::hosts::APEX` is a compile-time constant), so a base domain that is not the apex
+# makes EVERY host `HostRoute::Default`. Fail here, naming the apex, not 60s later in a poll.
+assert_tenant_host_classifiable() {
+  local domain="${SMOKE_BASE_DOMAIN%%:*}"
+  [ "$domain" = "$SMOKE_APEX" ] || fail "L4: SMOKE_BASE_DOMAIN is '${SMOKE_BASE_DOMAIN}', whose domain part '${domain}' is not the apex '${SMOKE_APEX}'. The server's host classifier (surface_runtime::hosts::APEX) is a COMPILE-TIME constant: under any other domain every host — including ${SMOKE_TENANT_SLUG}.${SMOKE_BASE_DOMAIN} — classifies as HostRoute::Default, no request names a tenant, and every tenant-scoped read (cart 'current', #469) serves null with no error. Use a PORT for a local rehearsal (${SMOKE_APEX}:8080 with --resolve or a hosts entry), never a different domain."
 }
 
 # --- Supabase role-token minting (the deployment's own auth provider) -----------------------------
@@ -264,7 +320,7 @@ l1() {
 # --- L2: public GraphQL on the tenant host --------------------------------------------------------
 l2() {
   local resp
-  resp=$(gql_ok "L2" "$TENANT_BASE/public/graphql" "" '{ __schema { queryType { name } } }')
+  resp=$(storefront_ok "L2" public "" '{ __schema { queryType { name } } }')
   [ "$(printf '%s' "$resp" | jq -r '.data.__schema.queryType.name')" = "Query" ] \
     || fail "L2: unexpected introspection payload: $resp"
   pass "L2 public API: introspection OK on $TENANT_BASE/public/graphql"
@@ -276,21 +332,32 @@ CATALOG_QUERY='query($rid: RestaurantId!){ catalog(input:{restaurantId:$rid}) { 
 
 fixture_state() { # prints: restaurant-status|offer-present (e.g. "ACTIVE|yes", "absent|no")
   local r c status offer
-  r=$(gql "$PUBLIC_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
+  # MARKETPLACE, correctly: resolving a restaurant BY SLUG and reading its catalog is the browse
+  # surface a visitor uses before choosing a restaurant. These are the reads that must NOT move to
+  # the storefront host with L4 (#622) — they are not storefront reads and never were.
+  r=$(marketplace public "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
   status=$(printf '%s' "$r" | jq -r '.data.restaurant.status // "absent"')
-  c=$(gql "$PUBLIC_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
+  c=$(marketplace public "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
   offer=$(printf '%s' "$c" | jq -r --arg o "$FIX_OFFER_ID" '[.data.catalog.products[]?.offers[]? | select(.id==$o and .availability=="AVAILABLE")] | if length>0 then "yes" else "no" end')
   printf '%s|%s' "$status" "$offer"
 }
 
-wait_for() { # wait_for <layer> <description> <deadline-secs> <cmd producing "ok" on success>
-  local layer="$1" what="$2" deadline="$3" checker="$4" t=0 last=""
+# wait_for <layer> <description> <deadline-secs> <cmd producing "ok" on success> [diagnose-fn]
+#
+# The optional DIAGNOSE function runs once, on timeout only, and its output is appended to the
+# failure. A timeout says "the state never arrived" and nothing about WHY, and the two whys need
+# opposite people: `wait_for` therefore refuses to end at "timed out" wherever a single extra read
+# can separate them (the pattern the L4 order poll already used — generalised here so the next leg
+# gets it by declaring it, not by hand-rolling a loop).
+wait_for() {
+  local layer="$1" what="$2" deadline="$3" checker="$4" diagnose="${5:-}" t=0 last="" why=""
   while [ "$t" -le "$deadline" ]; do
     last=$("$checker" 2>/dev/null || true)
     [ "$last" = "ok" ] && return 0
     sleep 3; t=$((t+3))
   done
-  fail "$layer: timed out (${deadline}s) waiting for $what — last state: $last"
+  [ -n "$diagnose" ] && why=" — $("$diagnose" 2>&1 || true)"
+  fail "$layer: timed out (${deadline}s) waiting for $what — last state: ${last}${why}"
 }
 
 l3() {
@@ -307,7 +374,7 @@ l3() {
   #    no longer part of registration (ADR-20260728-011344): it is chosen by a separate
   #    ConfigureRestaurantSlug command, issued right below. TEST mode => rules.yaml
   #    OrderTestModeIsolation applies.
-  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
+  admin_ok "L3" admin "$admin" \
     'mutation($i: RegisterRestaurantInput!){ registerRestaurant(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" '{i:{
         mode:"TEST", restaurantId:$id, displayName:"Smoke Test Restaurant",
@@ -317,38 +384,38 @@ l3() {
   # 1b. Configure the storefront slug (idempotent: re-submitting the current slug is a no-op). Same
   #     aggregate as the registration above, so the write-side ordering holds without a wait; the
   #     projection wait below then observes the slug becoming resolvable.
-  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
+  admin_ok "L3" admin "$admin" \
     'mutation($i: ConfigureRestaurantSlugInput!){ configureRestaurantSlug(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" --arg slug "$SMOKE_TENANT_SLUG" '{i:{restaurantId:$id, slug:$slug}}')" >/dev/null
 
   # The registration + slug must be projected before createCatalog (RestaurantNotFound guard reads
   # the view) and before the slug resolves the tenant host.
   check_restaurant_projected() {
-    local r; r=$(gql "$PUBLIC_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
+    local r; r=$(marketplace public "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
     [ "$(printf '%s' "$r" | jq -r '.data.restaurant.id // empty')" = "$FIX_RESTAURANT_ID" ] && echo ok || printf '%s' "$r" | jq -c '.data' 2>/dev/null
   }
   wait_for "L3" "restaurant projection" 60 check_restaurant_projected
 
   # 2. Activate (idempotent: activating an ACTIVE restaurant is a no-op).
-  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
+  admin_ok "L3" admin "$admin" \
     'mutation($i: ActivateRestaurantInput!){ activateRestaurant(input:$i){ correlationId } }' \
     "$(jq -cn --arg id "$FIX_RESTAURANT_ID" '{i:{restaurantId:$id, reason:"prod smoke fixture"}}')" >/dev/null
 
   # 3. Catalog (idempotent server-side) + one product/offer (guarded by the offer existence check).
-  gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
+  admin_ok "L3" admin "$admin" \
     'mutation($i: CreateCatalogInput!){ createCatalog(input:$i){ correlationId } }' \
     "$(jq -cn --arg c "$FIX_CATALOG_ID" --arg r "$FIX_RESTAURANT_ID" '{i:{catalogId:$c, restaurantId:$r, name:"Smoke Catalog"}}')" >/dev/null
   if [ "${state##*|}" != "yes" ]; then
     local cat offer_known
-    cat=$(gql "$PUBLIC_BASE/public/graphql" "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
+    cat=$(marketplace public "" "$CATALOG_QUERY" "$(jq -cn --arg r "$FIX_RESTAURANT_ID" '{rid:$r}')")
     offer_known=$(printf '%s' "$cat" | jq -r --arg o "$FIX_OFFER_ID" '[.data.catalog.products[]?.offers[]? | select(.id==$o)] | length')
     if [ "${offer_known:-0}" = "0" ]; then
-      gql_ok "L3" "$ADMIN_BASE/admin/graphql" "$admin" \
+      admin_ok "L3" admin "$admin" \
         'mutation($i: AddProductInput!){ addProduct(input:$i){ correlationId } }' \
-        "$(jq -cn --arg p "$FIX_PRODUCT_ID" --arg c "$FIX_CATALOG_ID" --arg r "$FIX_RESTAURANT_ID" --arg o "$FIX_OFFER_ID" '{i:{
+        "$(jq -cn --arg p "$FIX_PRODUCT_ID" --arg c "$FIX_CATALOG_ID" --arg r "$FIX_RESTAURANT_ID" --arg o "$FIX_OFFER_ID" --argjson price "$FIX_OFFER_PRICE_CENTS" '{i:{
             productId:$p, catalogId:$c, restaurantId:$r, name:"Smoke Pizza",
             taxRate:{delivery:10.0, collection:10.0},
-            offers:[{id:$o, productId:$p, name:"Default", price:{amountCents:1200, currency:"EUR"}, availability:"AVAILABLE"}]}}')" >/dev/null
+            offers:[{id:$o, productId:$p, name:"Default", price:{amountCents:$price, currency:"EUR"}, availability:"AVAILABLE"}]}}')" >/dev/null
     fi
   fi
 
@@ -386,15 +453,36 @@ l3b() {
 # probe exercises the membership EXISTS path itself (the sharper posture — #430's version proved
 # only the unbridged fail-closed-Public arm, which the DB suite already pinned).
 # (rules.yaml cannot carry read-guard coverage — #212 — so this assertion is the production gate.)
+#
+# EVERY EMPTINESS ASSERTION HERE IS PAIRED WITH A POSITIVE (#622). "The stranger's `orders` is empty"
+# is a real proof only while something guarantees the list can be non-empty at all. `orders` is
+# claim-scoped today and NOT host-bound, so it is real — but the same class of defect this issue
+# fixed for `current` (a read that returns nothing because of the HOST, silently and with no error)
+# would turn this security proof vacuous the day `orders` becomes tenant-scoped: green, because the
+# host bound everything away, on a run that proved nothing. So the OWNER's list is asserted to
+# CONTAIN the order first. If that positive ever fails, this whole probe is void, and it says so
+# rather than reporting a guard that held.
 l4_negative() {
-  local resp others stranger stranger_id
+  local resp others mine stranger stranger_id
   stranger_id=$(uuid)
   [ "$stranger_id" != "$customer_id" ] || fail "L4: stranger uuid collided with the customer id — probe would false-alarm"
+
+  # POSITIVE CONTROL, before any emptiness is required of anyone: the paying customer's own list
+  # contains this run's order. Same query, same host, same shape as the negative below — the ONLY
+  # difference is whose token asks.
+  mine=$(storefront customer "$customer" 'query{ orders { id } }' '{}')
+  [ "$(printf '%s' "$mine" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: read-guard POSITIVE CONTROL errored (the negative below would be vacuous, so the probe is void): $(printf '%s' "$mine" | head -c 300)"
+  [ "$(printf '%s' "$mine" | jq -r 'has("data")')" = "true" ] \
+    || fail "L4: read-guard POSITIVE CONTROL returned no data envelope (outage — the probe is void): $(printf '%s' "$mine" | head -c 300)"
+  [ "$(printf '%s' "$mine" | jq -r --arg id "$order_id" '[.data.orders[]? | select(.id==$id)] | length')" = "1" ] \
+    || fail "L4: read-guard POSITIVE CONTROL failed — the PAYING customer's own \`orders\` does not contain $order_id, so 'the stranger sees nothing' would prove nothing (this query answering nobody, e.g. host-bound like cart 'current' #469/#622, is exactly the vacuous-green this control exists to catch): $(printf '%s' "$mine" | head -c 300)"
+
   stranger=$(mint_token "$SMOKE_STRANGER_EMAIL" "CUSTOMER" "$stranger_id")
   # Outage-honest (post-#430 review): an errored OR malformed response must FAIL the proof — a
   # transport failure collapses to `{}` in gql(), which has no `errors` key and null-chains
   # `.data.order` to null, so has("data") is load-bearing on every probe.
-  resp=$(gql "$PUBLIC_BASE/customer/graphql" "$stranger" \
+  resp=$(storefront customer "$stranger" \
     'query($id: OrderId!){ order(input:{id:$id}) { id } }' \
     "$(jq -cn --arg id "$order_id" '{id:$id}')")
   [ "$(printf '%s' "$resp" | jq -r 'has("errors")')" = "false" ] \
@@ -403,7 +491,7 @@ l4_negative() {
     || fail "L4: read-guard probe returned no data envelope (outage, not a deny — cannot prove the guard): $(printf '%s' "$resp" | head -c 300)"
   [ "$(printf '%s' "$resp" | jq -r '.data.order')" = "null" ] \
     || fail "L4: READ GUARD BREACH — a bridged non-member customer read order $order_id: $(printf '%s' "$resp" | head -c 300)"
-  others=$(gql "$PUBLIC_BASE/customer/graphql" "$stranger" \
+  others=$(storefront customer "$stranger" \
     'query{ orders { id } }' '{}')
   [ "$(printf '%s' "$others" | jq -r 'has("errors")')" = "false" ] \
     || fail "L4: read-guard list probe ERRORED (cannot prove the guard): $(printf '%s' "$others" | head -c 300)"
@@ -411,17 +499,22 @@ l4_negative() {
     || fail "L4: read-guard list probe returned no data envelope: $(printf '%s' "$others" | head -c 300)"
   [ "$(printf '%s' "$others" | jq -r '.data.orders == []')" = "true" ] \
     || fail "L4: READ GUARD BREACH — a bridged non-member customer listed orders (the pre-#144 full-table dump): $(printf '%s' "$others" | head -c 300)"
-  say "      L4: read guard held — bridged non-member by-id resolved null, list came back empty"
+  say "      L4: read guard held — the OWNER's list carries $order_id, and a bridged non-member resolved null by id and an empty list"
 }
 
 # --- L4: full money path (TEST mode) --------------------------------------------------------------
 l4() {
-  local cart_id line_id session_id order_id customer_id customer admin resp message_id op_status pi secret confirm status pay_status deadline t last
+  local cart_id line_id session_id order_id customer_id customer resp mkt message_id op_status pi secret confirm status pay_status deadline t last
   cart_id=$(uuid); line_id=$(uuid); session_id=$(uuid); order_id=$(uuid); customer_id=$(uuid)
 
-  # 1. Build the cart (PUBLIC role — guest carts by design). Acceptance-first: the mutation only
-  #    acknowledges (MutationAcceptance); the cart-projection wait below observes the completion.
-  gql_ok "L4" "$PUBLIC_BASE/public/graphql" "" \
+  # The storefront host must be classifiable as a tenant, or every read below serves null with no
+  # error — the #622 defect reachable through configuration instead of a typo (#622).
+  assert_tenant_host_classifiable
+
+  # 1. Build the cart ON THE STOREFRONT (PUBLIC role — guest carts by design). Acceptance-first: the
+  #    mutation only acknowledges (MutationAcceptance); the cart-projection wait below observes the
+  #    completion. Written and read on the SAME host, because a cart belongs to one restaurant's shop.
+  storefront_ok "L4" public "" \
     'mutation($i: AddCartLineInput!){ addCartLine(input:$i){ messageId operationStatus } }' \
     "$(jq -cn --arg c "$cart_id" --arg r "$FIX_RESTAURANT_ID" --arg l "$line_id" --arg o "$FIX_OFFER_ID" --arg s "$session_id" \
       '{i:{cartId:$c, restaurantId:$r, sessionId:$s, line:{cartLineId:$l, offerId:$o, quantity:1}}}')" >/dev/null
@@ -436,20 +529,109 @@ l4() {
   # exercises the two-leg lookup, the live `price_cart` seam and the cart-price telemetry contract
   # in one probe, on exactly the flow a real guest walks.
   #
-  # The assertion is the WHOLE priced shape in one predicate, not just "a row exists". Before #451
-  # the projection carried a stubbed 0/NULL price, so a cart that projected but priced to nothing
-  # would have passed a status-only check while the customer saw no payable amount — the silent
-  # conversion failure this smoke exists to catch. amountCents MUST be > 0 for the seeded fixture.
+  # ONE PROBE IS NOT ENOUGH, BECAUSE `null` IS A LEGAL ANSWER FOR TWO DIFFERENT REASONS (#622): the
+  # cart never projected, OR the host names no tenant so the resolver correctly declined. The two
+  # are byte-identical on the wire and want opposite people. So the probe is a PAIR that differs in
+  # EXACTLY the input under test — the host — and the three outcomes are all attributable:
+  #   tenant non-null + marketplace null  -> correct, the only green
+  #   BOTH null                           -> the cart is genuinely broken, said in seconds
+  #   marketplace non-null                -> a cross-tenant leak: an incident, not a smoke bug
+  #
+  # The positive asserts the WHOLE priced shape — identity included — not "a row exists". Before
+  # #451 the projection carried a stubbed 0/NULL price, so a cart that projected but priced to
+  # nothing would have passed a status-only check while the customer saw no payable amount.
+  #
+  # THE TOTAL IS `==`, NOT `> 0`, AND MUST STAY `==`. That is a deliberate trade of
+  # structure-insensitivity for alarm: if a fee, tip or delivery component ever enters cart pricing,
+  # this equality goes red, and going red is the POINT — the fix is then to update the expected
+  # total here, never to weaken the predicate.
   check_cart_projected() {
-    local r; r=$(gql "$PUBLIC_BASE/public/graphql" "" \
-      'query{ current { id status totalAmount { amountCents currency } } }' '{}' "$session_id")
-    [ "$(printf '%s' "$r" | jq -r '
-        (.data.current.status == "OPEN")
-        and (.data.current.totalAmount.amountCents > 0)
+    local r; r=$(storefront public "" \
+      'query{ current { id restaurantId status totalAmount { amountCents currency } } }' '{}' "$session_id")
+    [ "$(printf '%s' "$r" | jq -r \
+        --arg cart "$cart_id" --arg rest "$FIX_RESTAURANT_ID" --argjson cents "$FIX_OFFER_PRICE_CENTS" '
+        (.data.current.id == $cart)
+        and (.data.current.restaurantId == $rest)
+        and (.data.current.status == "OPEN")
+        and (.data.current.totalAmount.amountCents == $cents)
         and (.data.current.totalAmount.currency == "EUR")
       ' 2>/dev/null)" = "true" ] && echo ok || printf '%s' "$r" | jq -c '.data // .errors' 2>/dev/null
   }
-  wait_for "L4" "cart projected and priced live" 60 check_cart_projected
+  # The diagnosis arm (#622): the wait above can only say "never arrived". ONE ADMIN read of the
+  # cart by id — a query that is claim-scoped, NOT host-bound, so it answers regardless of the
+  # tenant question — separates the two worlds the null used to merge. Its absence is why a null
+  # went undiagnosed for twenty nights.
+  #
+  # THE ARM MUST NEVER GO QUIET, AND MUST NEVER GUESS. Two rounds of this were wrong before they
+  # were right, both in the same direction — a failure of the DIAGNOSIS being reported as a finding
+  # ABOUT THE SYSTEM, which is the defect class this whole change closes, reappearing inside the
+  # thing closing it:
+  #   round 1 (seen red on the local rehearsal) — a failed ADMIN mint produced an EMPTY reading;
+  #   round 2 (review) — a failed ADMIN REQUEST produces `null`. `admin_gql` is the tolerant helper,
+  #     so a transport failure collapses to `{}`, and `{} | .data.cart // .errors` prints a bare
+  #     `null`: non-empty, so an emptiness guard waves it through, and it reads as "row absent" —
+  #     A BROKEN REQUEST REPORTED AS A BROKEN PROJECTION.
+  # Hence: check the ENVELOPE before interpreting anything, and only then is a literal `null`
+  # allowed to mean absent. And the arm STATES ITS CONCLUSION rather than printing a value plus a
+  # legend for the reader to apply — a legend is one more place to map the wrong row.
+  diagnose_cart() {
+    local a r seen
+    if ! a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN") || [ -z "$a" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: no ADMIN token could be minted (see the mint failure above) — read-path-vs-projection is UNANSWERED. Do NOT read this as "the row is absent"' "$cart_id"
+      return 0
+    fi
+    r=$(admin_gql admin "$a" 'query($id: CartId!){ cart(input:{id:$id}) { id status totalAmount { amountCents currency } } }' \
+      "$(jq -cn --arg id "$cart_id" '{id:$id}')")
+    if [ "$(printf '%s' "$r" | jq -r 'has("data")' 2>/dev/null)" != "true" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: the ADMIN read returned no data envelope, i.e. the REQUEST failed (%s) — UNANSWERED. Do NOT read this as "the row is absent": nothing was successfully asked' \
+        "$cart_id" "$(printf '%s' "$r" | head -c 160)"
+      return 0
+    fi
+    if [ "$(printf '%s' "$r" | jq -r 'has("errors")' 2>/dev/null)" = "true" ]; then
+      printf 'DIAGNOSIS UNAVAILABLE for cart %s: the ADMIN read ERRORED (%s) — UNANSWERED, not "absent"' \
+        "$cart_id" "$(printf '%s' "$r" | jq -c '.errors' 2>/dev/null | head -c 200)"
+      return 0
+    fi
+    seen=$(printf '%s' "$r" | jq -c '.data.cart' 2>/dev/null | head -c 240)
+    if [ "$seen" = "null" ]; then
+      printf 'ADMIN sees NO cart row for %s: the PROJECTION never happened (expected total %s cents). The storefront read path is NOT implicated' \
+        "$cart_id" "$FIX_OFFER_PRICE_CENTS"
+    else
+      printf 'ADMIN sees cart %s PRESENT: %s — the row projected, so the STOREFRONT READ or its host binding is the defect, NOT the projection' \
+        "$cart_id" "$seen"
+    fi
+  }
+  wait_for "L4" "the guest cart projected on the storefront and priced live to exactly ${FIX_OFFER_PRICE_CENTS} cents (== is deliberate: if cart pricing gains a component, UPDATE THIS EXPECTED TOTAL, never weaken the predicate to '> 0')" \
+    60 check_cart_projected diagnose_cart
+
+  # THE NEGATIVE CONTROL, once, AFTER the positive is green (#622). Same query, same session, same
+  # cart — only the host differs, which is what makes the pair attributable. `current` must serve
+  # null on the marketplace host: it names no tenant, and a tenant-scoped read serves nothing rather
+  # than "the newest cart anywhere" (#469, tenant.rs "Absent => no tenant rows, fail closed").
+  #
+  # has("data") IS LOAD-BEARING, NOT DECORATION. gql() collapses a transport failure to `{}`, which
+  # has no `errors` key and null-chains `.data.current` to null — so without the envelope check an
+  # OUTAGE passes this control VACUOUSLY, and the control is precisely what a future reader will
+  # trust when the positive goes red. This script has already been bitten by that exact shape once
+  # (the #430 read-guard probe); the precedent is followed, not rediscovered.
+  mkt=$(marketplace public "" 'query{ current { id status } }' '{}' "$session_id")
+  [ "$(printf '%s' "$mkt" | jq -r 'has("errors")')" = "false" ] \
+    || fail "L4: marketplace-host cart control ERRORED (cannot prove the binding): $(printf '%s' "$mkt" | head -c 300)"
+  [ "$(printf '%s' "$mkt" | jq -r 'has("data")')" = "true" ] \
+    || fail "L4: marketplace-host cart control returned no data envelope (outage, not a refusal — the control would pass vacuously): $(printf '%s' "$mkt" | head -c 300)"
+  # THE LOUDEST STRING IN THIS FILE MUST NOT CRY INCIDENT AT A TYPO. "A tenant host answered" and
+  # "the marketplace base was POINTED AT a tenant host" produce the identical non-null response —
+  # and the second is exactly how this control was proved red during development. So the two hosts
+  # are named in the message, and their coincidence is TESTED rather than left to the reader:
+  # misconfiguration is claimed only when the configuration actually says so, and a real breach
+  # keeps its full severity.
+  if [ "$(printf '%s' "$mkt" | jq -r '.data.current')" != "null" ]; then
+    if [ "$PUBLIC_BASE" = "$TENANT_BASE" ]; then
+      fail "L4: MISCONFIGURED PROBE, not a breach — the marketplace base and the storefront base are the SAME host ($PUBLIC_BASE), so the control arm asked a TENANT host and a non-null answer is the correct behaviour there. The pair has no control and proves nothing: unset/fix SMOKE_PUBLIC_BASE (marketplace is live.${SMOKE_BASE_DOMAIN}). Do NOT open an incident. Response: $(printf '%s' "$mkt" | head -c 300)"
+    fi
+    fail "L4: TENANT BINDING BREACH — the marketplace host $PUBLIC_BASE served cart $cart_id for session $session_id, while the storefront is $TENANT_BASE. That host must resolve to NO tenant (#469), and the two bases are NOT the same host, so this is not a probe misconfiguration: a storefront read answering off-tenant is a CROSS-TENANT LEAK, an incident rather than a smoke defect. Confirm what SMOKE_PUBLIC_BASE points at before escalating. Response: $(printf '%s' "$mkt" | head -c 300)"
+  fi
+  say "      L4: cart pair OK — $cart_id priced ${FIX_OFFER_PRICE_CENTS} cents on the storefront, null on the marketplace host (#622)"
 
   # 2. Checkout as the smoke CUSTOMER (TEST mode order against the TEST restaurant).
   #    Acceptance-first (ADR-20260720-015500): placeOrder returns only the acceptance envelope; the
@@ -463,7 +645,7 @@ l4() {
   #    stamp-before-issue precondition recorded on #429). The claim IS the identity: the order
   #    poll below runs as this customer, and the negative probe as a bridged stranger.
   customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER" "$customer_id")
-  resp=$(gql_ok "L4" "$PUBLIC_BASE/customer/graphql" "$customer" \
+  resp=$(storefront_ok "L4" customer "$customer" \
     'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ messageId operationStatus duplicate } }' \
     "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" --arg u "$customer_id" '{i:{
         mode:"TEST", orderId:$o, restaurantId:$r, cartId:$c, customerId:$u,
@@ -475,7 +657,7 @@ l4() {
 
   op_status=""; t=0; last="(never observed)"
   while [ "$t" -le 60 ]; do
-    resp=$(gql "$PUBLIC_BASE/customer/graphql" "$customer" \
+    resp=$(storefront customer "$customer" \
       'query($m: MessageId!){ operationStatus(input:{messageId:$m}) { status errorCode message } }' \
       "$(jq -cn --arg m "$message_id" '{m:$m}')")
     op_status=$(printf '%s' "$resp" | jq -r '.data.operationStatus.status // empty')
@@ -496,7 +678,7 @@ l4() {
   # per #31, session ownership in the resolver; strangers get null).
   pi=""; t=0
   while [ "$t" -le 30 ]; do
-    resp=$(gql "$PUBLIC_BASE/public/graphql" "" \
+    resp=$(storefront public "" \
       'query($id: OrderId!){ paymentStatus(input:{orderId:$id}) { paymentIntentId clientSecret status } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')" "$session_id")
     pi=$(printf '%s' "$resp" | jq -r '.data.paymentStatus.paymentIntentId // empty')
@@ -529,7 +711,7 @@ l4() {
   #    give: the paying customer reads their own order through the membership guard.
   t=0; last="(never observed)"
   while [ "$t" -le "$SMOKE_ORDER_TIMEOUT" ]; do
-    resp=$(gql "$PUBLIC_BASE/customer/graphql" "$customer" \
+    resp=$(storefront customer "$customer" \
       'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
       "$(jq -cn --arg id "$order_id" '{id:$id}')")
     status=$(printf '%s' "$resp" | jq -r '.data.order.status // empty')
@@ -541,22 +723,50 @@ l4() {
     if [ "$pay_status" = "AUTHORIZED" ] && [ -n "$status" ]; then
       say "      L4: customer read their authorized order — asserting the read guard before declaring victory"
       l4_negative
-      pass "L4 money path: order $order_id $last (intent $pi authorized via webhook; capture deferred to fulfilment; customer-positive + read guard held)"
+      pass "L4 money path: order $order_id $last on the storefront host (intent $pi authorized via webhook; capture deferred to fulfilment; cart pair attributable, customer-positive + read guard held)"
       return 0
     fi
     sleep 5; t=$((t+5))
   done
   # Diagnosability on timeout (farley): ONE admin read separates "authorization never happened" from
   # "authorization landed but the customer's claim scope is broken" — otherwise both are the same 90s.
-  admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
-  resp=$(gql "$ADMIN_BASE/admin/graphql" "$admin" \
-    'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
-    "$(jq -cn --arg id "$order_id" '{id:$id}')")
-  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; ADMIN sees: $(printf '%s' "$resp" | jq -c '.data.order' | head -c 200) (order present admin-side = claim/scope path broken, absent = authorization/projection broken)"
+  #
+  # SAME TREATMENT AS THE CART ARM, and this one was WORSE: it ran at function top level, so under
+  # `set -e` a failed ADMIN mint EXITED THE SCRIPT with the mint's error and the 90-second money-path
+  # wait ended with NO VERDICT AT ALL — the most expensive wait in the run, reporting nothing. It is
+  # now a function that always returns 0 and is invoked with its failure suppressed, so the verdict
+  # line below is unconditional; and it checks the ENVELOPE before interpreting, because `admin_gql`
+  # is the tolerant helper and a failed request's `null` would otherwise be read as "order absent"
+  # — a broken request reported as a broken authorization, on the money path.
+  diagnose_order() {
+    local a r seen
+    if ! a=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN") || [ -z "$a" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: no ADMIN token could be minted, so claim-scope-vs-authorization is UNANSWERED. Do NOT read this as "the order is absent"'
+      return 0
+    fi
+    r=$(admin_gql admin "$a" \
+      'query($id: OrderId!){ order(input:{id:$id}) { id status paymentStatus } }' \
+      "$(jq -cn --arg id "$order_id" '{id:$id}')")
+    if [ "$(printf '%s' "$r" | jq -r 'has("data")' 2>/dev/null)" != "true" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: no data envelope, i.e. the REQUEST failed (%s) — UNANSWERED, not "absent"' "$(printf '%s' "$r" | head -c 160)"
+      return 0
+    fi
+    if [ "$(printf '%s' "$r" | jq -r 'has("errors")' 2>/dev/null)" = "true" ]; then
+      printf 'ADMIN cross-check UNAVAILABLE: the ADMIN read ERRORED (%s) — UNANSWERED, not "absent"' "$(printf '%s' "$r" | jq -c '.errors' 2>/dev/null | head -c 200)"
+      return 0
+    fi
+    seen=$(printf '%s' "$r" | jq -c '.data.order' 2>/dev/null | head -c 200)
+    if [ "$seen" = "null" ]; then
+      printf 'ADMIN sees NO order row either: the AUTHORIZATION or the projection never happened. The customer claim/scope path is NOT implicated'
+    else
+      printf 'ADMIN sees the order PRESENT (%s): it was authorized and projected, so the CUSTOMER CLAIM/SCOPE path is the defect' "$seen"
+    fi
+  }
+  fail "L4: customer never read order $order_id after ${SMOKE_ORDER_TIMEOUT}s — last: $last; $(diagnose_order 2>&1 || true)"
 }
 
 # --- Run ------------------------------------------------------------------------------------------
-say "Captain.Food production smoke — public $PUBLIC_BASE, admin $ADMIN_BASE, tenant $TENANT_BASE — Stripe TEST mode"
+say "Captain.Food production smoke — marketplace $PUBLIC_BASE (L1 edge, L3 browse), storefront $TENANT_BASE (L2, L3b, ALL of L4 — #622), admin $ADMIN_BASE — Stripe TEST mode"
 l1
 l2
 l3

@@ -2,6 +2,81 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🛒 **2026-08-17 — THE SMOKE'S CART READ IS A PAIR ON TWO HOSTS, NOT ONE READ ON THE WRONG ONE**
+> ([#622](https://github.com/TheCaptainCompany/captain-food/issues/622), PR
+> [#633](https://github.com/TheCaptainCompany/captain-food/pull/633). Tooling + workflow only: no
+> `specs/**`, no `crates/**`, so no SPEC-LOG row and no regeneration.)
+>
+> `prod-smoke.sh` L4 wrote the guest cart on the marketplace host and read it back there too, then
+> placed and tracked the order there — a journey no client walks. `current` resolves its tenant from
+> the `Host` ([#469](https://github.com/TheCaptainCompany/captain-food/issues/469)) and correctly
+> refuses to answer unbounded, so the read returned `{"current":null}` **with no error**:
+> byte-identical to "the cart never projected". Measured both ways on the same cart and session —
+> `null` on the marketplace host, `OPEN` at 1200 EUR cents on the tenant host. **The server is
+> right**; only the smoke was wrong. This is *not* recorded as the cause of the 2026-08-04
+> `{"cart":null}` red: the defect is confirmed and deterministic, the attribution is strong but
+> **unconfirmed**, and settling it needs the run log against #469's landing date — which nobody has
+> done and nobody needs done to fix this.
+>
+> **The fix is a PAIR, because `null` is a legal answer for two different reasons.** Positive on the
+> storefront (exact cart id, `restaurantId`, `OPEN`, **`== 1200`**, `EUR`); negative control once,
+> after the positive is green, same query and session, on the marketplace host, where `current` must
+> be `null`. Three outcomes, all attributable: tenant non-null + marketplace null = correct; **both
+> null = the cart is genuinely broken**, delivered in seconds instead of never; marketplace non-null
+> = a cross-tenant leak, an incident rather than a smoke bug. The total is `==` and stays `==` — if a
+> fee component ever enters cart pricing, that red is the intended alarm, and the failure message
+> says so, so the predicate cannot be quietly weakened to `> 0`.
+>
+> **Three structural changes rather than three comments.** The whole L4 leg moved to the storefront
+> (L3's restaurants-by-slug and catalog reads stay on the marketplace — that is genuine browse); call
+> sites **cannot name a base** any more (`marketplace*` / `storefront*` / `admin*` helpers hardcode
+> theirs), because prose survives until the next refactor and a removed choice does not; and L4 fails
+> loudly up front if `SMOKE_BASE_DOMAIN` is not the apex — `surface_runtime::hosts::APEX` is a
+> compile-time constant, so under any other domain every host classifies as `Default` and the
+> identical undiagnosable null returns, one config flip away, where it would be blamed on this fix.
+> Also: the read guard's "a stranger's `orders` is empty" now runs **after** a positive control that
+> the owner's own list contains the order (real today, vacuous the day that query becomes host-bound),
+> and the cart wait carries a diagnosis arm — one ADMIN by-id read separating a read-path/host defect
+> from a projection defect. That arm's absence is why a null went undiagnosed for twenty nights.
+>
+> **Discharges the "Owed, unfiled" half recorded below**: the nightly's schedule is disabled here,
+> with the reason and the re-enable condition in the workflow header — carried **verbatim** from the
+> unmerged [#556](https://github.com/TheCaptainCompany/captain-food/issues/556) branch so the two
+> merge without conflict. Without it, `main` would keep a nightly that runs a *fixed* smoke against a
+> deliberately-suspended production every morning: a red per night carrying no information.
+>
+> **The review found the same class a THIRD time, and that is the entry's real lesson.** Every round
+> of this change had one defect where a failure of the DIAGNOSIS was reported as a finding ABOUT THE
+> SYSTEM: the original `null` (host refusal read as a broken cart); then an EMPTY reading read as
+> "row absent" (caught by the rehearsal); then a **`null` reading** read as "row absent" — the
+> tolerant helper collapses a transport failure to `{}`, and `{} | .data.cart // .errors` prints a
+> bare `null`, which is non-empty, so an emptiness guard waves it through: **a failed ADMIN request
+> reported as a broken projection**. Both lenses found that fourth state independently. The rule that
+> survives it: **check the envelope before interpreting, and have the arm state its conclusion rather
+> than print a value plus a legend** — a legend is one more place to map the wrong row. Two more:
+> the order-timeout arm sat at function top level, so a failed mint **exited the script** and the
+> 90-second money-path wait ended with **no verdict at all**; and `TENANT BINDING BREACH`, the
+> loudest string in the file, asserted a cross-tenant leak for a symptom that a mis-pointed
+> `SMOKE_PUBLIC_BASE` produces identically — which is exactly how the red was produced. It now tests
+> the two bases for coincidence and names the configuration cause when they match.
+>
+> **Executed, not asserted** — a fix to a gate that is never run is a hypothesis. Against a local
+> single-database stack (bare server, real migration chain, the walk's JWKS stub): L1→L3b PASS and
+> the cart pair green (`1200` on the storefront, `null` on the marketplace host); the negative
+> control **seen red** with its binding-breach message when the public base is pointed at a tenant
+> host; and the pre-fix state **seen red attributably** — `ADMIN sees cart …: {"status":"OPEN",
+> "totalAmount":{"amountCents":1200}} (row PRESENT = the STOREFRONT READ or its host binding is the
+> defect)` instead of a bare `{"cart":null}` timeout. **The rehearsal caught a defect in the fix
+> itself**: with the ADMIN mint unavailable the diagnosis arm emitted an EMPTY reading into a
+> sentence offering two interpretations — indistinguishable from "row absent", the same
+> mis-attribution class being fixed. Unusable token, unparseable body and a real answer are now three
+> different outputs.
+>
+> **Scope honesty**: nothing downstream of the cart leg has run green in production since 2026-07-29.
+> The rehearsal stops at `placeOrder` → `FAILED/Internal`, whose proximate cause is the placeholder
+> Stripe key (intent-create precedes any append). Further reds there are new findings, not this fix
+> failing, and this PR does not claim "L4 fixed".
+
 > 🔎 **2026-08-17 — A FAILED CHECKOUT IS ATTRIBUTABLE AGAIN, AND THE JOURNAL ROW CAN NO LONGER
 > CARRY A STRIPE KEY** ([#623](https://github.com/TheCaptainCompany/captain-food/issues/623), PR
 > [#626](https://github.com/TheCaptainCompany/captain-food/pull/626); floor of
@@ -78,7 +153,8 @@
 > nights have an unrecorded cause** — and no record in this repository called it a broken gate. The
 > "Open incident" section at the foot of this file is retitled accordingly. **Owed, unfiled**:
 > re-point the nightly at the local walk target or disable its schedule with the reason in the
-> workflow.
+> workflow — the **disable half is now landed** (see the #622 entry at the top of this file; the
+> re-point stays owed and is deliberately conditional on the walk being green end to end).
 >
 > **(2) SEQ-1 — the walk goes FIRST, on ONE database.** The acceptance criterion is **unchanged as
 > what certifies** (local, eleven databases, full enforcement, the six clauses, the auth posture, the
