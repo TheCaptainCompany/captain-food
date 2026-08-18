@@ -2,6 +2,35 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧭 **2026-08-18 — THE TEAM ASKED, THE FOUNDER ANSWERED: no human maintains this Rust**
+> ([ADR-20260818-210000](adr/ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md)).
+> He invited the asks himself, disagreed with six of seven **and gave reasons**; the reasons went back
+> to all thirteen lenses. The durable one: *"layers was just conventions now it will be compilation and
+> controlled… I'm not able to maintain rust, only the ai will be able to do it"*. Compilation-level
+> enforcement, the crate split and DB-level rejection are the deliberate **substitute for a human
+> maintainer**, chosen after the conventional layered approach shipped and produced AI errors it could
+> not catch. Working rule adopted from it: **a rule that lives only in prose is a convention, and this
+> repo has decided conventions are not enough.** Eight lenses conceded published doctrine to it; the
+> bounds they held are on the record (enforcement replaces a missing **reviewer**, never a missing
+> **user**; the database rejects **unrepresentable** states, never **wrong** ones; safety and quiet
+> arrive at the same rate; the split is drawn on **layers**, not aggregates, so it enforces the
+> dependency rule and not the rule that lost him money; and an enforcement boundary the enforced party
+> can move in the same commit is a convention with extra steps, made real only because moving it is
+> LOUD).
+>
+> **⚠️ Open money-model conflicts surfaced, and DECIDED NOWHERE — do not build on either side of them
+> yet.** (1) **`captainNet` zero versus contribution**: he says contributions arrive AS the Stripe
+> service fee, and by `specs/common/entities.yaml:22` that makes `captainNet` exactly the contribution
+> and NON-ZERO, against ADR-20260818-134500 and the "captainNet is zero at V0" line below. (2) **The
+> published margin formula**: `specs/network/scalars.yaml:81-87` scales the restaurant contribution
+> with the restaurant's margin and that description is emitted into the shipped GraphQL schema, while
+> `join.captain.food/tarifs` promises *"jamais un pourcentage sur ta marge"*. (3) **Per-head versus
+> per-order**: the public fallback is a per-head split falling as restaurants join; the repo models a
+> per-order margin-proportional deduction, and a per-period quotient is not knowable when
+> `OrderPlaced.breakdown` is appended. Each needs its own register row; the stored-shape and legal
+> surfaces are `HOLD: human`. **Ask #1 (one order end to end) is recorded as UNANSWERED** — a
+> coordinator card defect, being re-put corrected, not a founder disagreement.
+
 > ↩️ **2026-08-18 — CAPTURE ON DELIVERED DISSOLVES THE REFUND GAP**
 > ([ADR-20260818-161500](adr/ADR-20260818-161500-capture-on-delivered-dissolves-the-refund-gap.md)).
 > Asked who absorbs a refund larger than the restaurant's share, the founder answered **neither**:
