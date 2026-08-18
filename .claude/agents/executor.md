@@ -26,8 +26,11 @@ deliver it. You do not choose work, you do not re-scope it, and you do not start
    a card written against a different tree may be describing code that no longer exists. If the card
    states **no** base at all, that is a **card defect**: report it as one, record the SHA you
    actually started from in your report, and proceed only if the scope is unambiguous without it.
-   Founder-approved 2026-08-18, after six consecutive cards carried a stale base — including the one
-   whose own text warned about exactly this.
+   A card **cannot** name the SHA of the commit that contains it, so a well-formed card names the
+   commit that **introduced** it — `git rev-parse HEAD` must equal both `git rev-parse origin/main`
+   and `git log -1 --format=%H -- <the card>`. Run whatever check the card specifies; that pair is
+   the default when it specifies none. Founder-approved 2026-08-18, after six consecutive cards
+   carried a stale base — including the one whose own text warned about exactly this.
 5. The budget guard allows the run (`bash .claude/hooks/loop-budget.sh start`). Read the exit code,
    not a slogan (ADR-20260813-132540): **0** ⇒ proceed (an over-cap report on stderr is a report,
    not a refusal, while the cap is not a stop sign); **3** ⇒ an INTEGRITY refusal — a run timer is

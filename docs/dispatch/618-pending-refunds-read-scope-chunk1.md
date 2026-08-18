@@ -1,7 +1,20 @@
 # Dispatch — slice chunk 1: bind the refund queue to the caller, on the one operation that can be proved today
 
 - **Issue**: tracking [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618) · slice record [ADR-20260818-101500](../adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md) · rulings [ADR-20260818-094500](../adr/ADR-20260818-094500-staff-auth-mechanism-and-refund-approval-stays-with-the-restaurant.md) · register [DECISIONS §39 IDOR-1](../proposals/DECISIONS.md)
-- **Base**: `main` @ **`10866d6`** — verified this run: `git rev-parse HEAD` **and** `git rev-parse origin/main` both `10866d6fa2c324bedbc8e37db03f26350f933b70`, working tree clean, after `git fetch origin main`. The executor now REFUSES a run whose HEAD does not match this line (`.claude/agents/executor.md` precondition 4, founder-approved 2026-08-18): **re-verify it yourself before writing anything** — if `origin/main` has moved, stop and get the card re-based rather than branching from a different tree.
+- **Base**: `main`, at **the commit that introduces this card** — resolve it mechanically, do not copy a SHA from prose:
+
+  ```
+  git fetch origin main
+  CARD=docs/dispatch/618-pending-refunds-read-scope-chunk1.md
+  test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || exit 1
+  test "$(git rev-parse HEAD)" = "$(git log -1 --format=%H -- "$CARD")" || exit 1
+  test -z "$(git status --porcelain)" || exit 1
+  ```
+
+  That is the base check precondition 4 asks for (`.claude/agents/executor.md`, founder-approved 2026-08-18), in the only form that is not self-referentially impossible: a card cannot name the SHA of the commit that contains it, so it names **the commit that introduced it** instead. All three lines must pass. If the second fails, `main` has moved since this card landed — **stop and get the card re-based**; do not rebase, reset, or work from HEAD, because a card written against a different tree may describe code that no longer exists.
+
+  The **content** was written and verified against `10866d6fa2c324bedbc8e37db03f26350f933b70` (`git rev-parse HEAD` and `git rev-parse origin/main` both, tree clean). Every file:line and grep result below is from that tree; the only commit expected between it and your base is the one that lands this card and the correction to ADR-20260818-101500's rollback clause. If more than that has landed, the file:line references are stale — re-verify before trusting them.
+
 - **Reversibility class**: **`HOLD: human`.** Not because money moves in this diff — none does, and no event shape changes — but on two grounds that the named class covers: (a) it is the **money-path read surface** of §39, the queue whose rows are the input to `approveRefund`; and (b) the failure mode of an over-narrow predicate is an **empty queue**, which is silence, not an error. That is the same silent-skip class [ADR-20260818-004647](../adr/ADR-20260818-004647-database-level-security-lands-at-the-cutover-and-the-settlement-read-returns-to-scope.md) used to refuse a policy on `OrderTracking`: a filter removes rows, it does not raise. A restaurant that cannot see a refund cannot decide it, the money stays captured, and every dashboard is green.
 - **Roster**: **whole roster at the BRIEFING**, a lens excuses itself (ADR-20260816-134352: the `HOLD: human` axis sizes the briefing and wins when the two axes disagree). **CHECKPOINT goes only to lenses that declared a concern at briefing**, any lens may opt back in.
 - **Merge posture**: `HOLD: human` ⇒ **NOT auto-merge-on-green**. The PR stops at ready-for-review until the TEAM's independent reviewer pass over the full branch diff; after PASS + green gates the coordinator merges ([ADR-20260815-115220](../adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md), amended by [ADR-20260815-134655](../adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md)). **No founder wait.**
