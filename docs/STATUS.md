@@ -34,6 +34,7 @@
 > flood against the anonymous endpoint grounds the fleet at peak; and the ownership fact ruling B
 > needs is **already folded on the approve path** — no projection read, no new table required.
 > A and B are **one slice of three operations**, not two programmes.
+
 > 🔐 **2026-08-18 — GENERATED SECURITY SQL EXISTS, APPLIED TO NO DATABASE, SINCE 2026-08-18**
 > ([#638](https://github.com/TheCaptainCompany/captain-food/issues/638) chunk 1). This line has a
 > **visible age on purpose**: if it is still here in six weeks the chunk failed, and it will be
