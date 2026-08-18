@@ -9358,3 +9358,149 @@ mod pm_read_source {
         );
     }
 }
+
+// ─── The migrations fence for database-level security (#638 chunk 1, §0) ────────────────────────
+//
+// This is the mechanical form of the chunk's reversibility claim, and it exists because the prose
+// version of that claim was FALSE. The dispatch's first draft said nothing in this chunk can reach
+// a real database because the CloudNativePG cluster is unprovisioned. `.github/workflows/db-migrate.yml`
+// triggers on `workflow_run: [deploy] completed` and runs `sqlx migrate run` against the real
+// `DATABASE_URL` secret; `deploy` is `workflow_dispatch`-only and production is suspended BY
+// DECISION, not by physics. So anything dropped into `migrations/` reaches a real Postgres the
+// moment somebody dispatches a deploy, unattended. The class is true because of THIS TEST, not
+// because of the environment.
+
+mod security_ddl_fence {
+    /// The one migration that legitimately carries `CREATE ROLE` today: the `claude_ro`
+    /// SELECT-only diagnosis role (ADR-20260807-002705 D7, #360). It predates this fence and is
+    /// not a policy.
+    const ALLOWED_ROLE_MIGRATION: &str = "20260808070000_claude_ro_select_only.sql";
+
+    /// The three spellings that make a migration a database-level SECURITY change. Matched
+    /// case-insensitively over the whole file, comments included — a fence that a prose mention
+    /// can trip is strictly better than one an unusual capitalisation can slip past, and the
+    /// remedy is one line in this test with a reason attached.
+    const SECURITY_DDL: [&str; 3] = ["ROW LEVEL SECURITY", "CREATE POLICY", "CREATE ROLE"];
+
+    /// **The conditional that converts at the WALK with no edit.**
+    ///
+    /// Today: no `migrations/*_security.sql` exists, so the whole security emission lives in
+    /// `specs/generated/security.generated.sql`, is applied by `crates/infrastructure/tests/rls_matrix.rs`
+    /// to throwaway databases, and reaches nothing else. At the local-acceptance walk
+    /// ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556), ADR-20260817-105844 —
+    /// the flip event, which is NOT the production cutover), the same file is added to the chain and
+    /// this same test flips meaning: it then asserts the migration is BYTE-IDENTICAL to the
+    /// generated artifact.
+    ///
+    /// That is the strongest thing writable today. "CI proves what we ship" cannot be an equality
+    /// assertion while the shipped side does not exist — and writing it as a conditional removes the
+    /// temptation to hand-write the cutover migration, because a hand-written one fails the equality
+    /// the day it lands.
+    ///
+    /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips. A missing
+    /// `migrations/` directory, an empty one, or an allowlisted file that no longer contains what it
+    /// is excused for, all FAIL — a guard that silently no-ops when its target moves is worse than
+    /// no guard.
+    #[test]
+    fn migrations_carry_no_security_ddl_unless_they_are_the_generated_artifact() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.canonicalize().expect("repo root resolves");
+        let migrations = root.join("migrations");
+
+        let mut names: Vec<String> = std::fs::read_dir(&migrations)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "cannot read {} ({e}) -- if the migrations directory moved, fix this fence in \
+                     the same commit; do NOT let it silently pass",
+                    migrations.display()
+                )
+            })
+            .map(|e| e.expect("dir entry").file_name().into_string().expect("utf-8 name"))
+            .filter(|n| n.ends_with(".sql"))
+            .collect();
+        names.sort();
+        assert!(
+            !names.is_empty(),
+            "no *.sql under {} -- the fence would be vacuous",
+            migrations.display()
+        );
+        assert!(
+            names.iter().any(|n| n == ALLOWED_ROLE_MIGRATION),
+            "the allowlisted role migration {ALLOWED_ROLE_MIGRATION} is gone from migrations/ -- \
+             remove it from this fence's allowlist in the same commit, so the excuse cannot outlive \
+             the file it excuses"
+        );
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut checked_cutover = false;
+        for name in &names {
+            let body = std::fs::read_to_string(migrations.join(name))
+                .unwrap_or_else(|e| panic!("read migrations/{name}: {e}"));
+
+            // ── the converting arm: the cutover migration, whatever timestamp it is given ────────
+            if name.ends_with("_security.sql") {
+                let generated = root.join("specs/generated/security.generated.sql");
+                let want = std::fs::read_to_string(&generated).unwrap_or_else(|e| {
+                    panic!(
+                        "migrations/{name} exists but {} does not ({e}) -- the cutover migration is \
+                         GENERATED, never hand-written",
+                        generated.display()
+                    )
+                });
+                assert_eq!(
+                    body, want,
+                    "migrations/{name} is not byte-identical to specs/generated/security.generated.sql.\n\
+                     Fix: re-run `make generate` and copy the artifact verbatim; never edit the \
+                     migration.\n\
+                     Why: the artifact is what the RLS matrix suite proves. A migration that drifts \
+                     from it ships UNPROVEN policies to a real database, and a policy is subtractive \
+                     on reads -- ADR-0043's `redeploy the previous app` does not undo it (#637)."
+                );
+                checked_cutover = true;
+                continue;
+            }
+
+            if name == ALLOWED_ROLE_MIGRATION {
+                assert!(
+                    body.to_uppercase().contains("CREATE ROLE"),
+                    "migrations/{name} no longer contains CREATE ROLE -- drop it from this fence's \
+                     allowlist rather than leaving an excuse for something that is not happening"
+                );
+                continue;
+            }
+
+            let upper = body.to_uppercase();
+            for token in SECURITY_DDL {
+                if upper.contains(token) {
+                    offenders.push(format!("  migrations/{name}: contains `{token}`"));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "database-level SECURITY DDL was added to the deployed migration chain:\n{}\n\
+             Fix: it belongs in the emitter behind `specs/generated/security.generated.sql`, which \
+             `crates/infrastructure/tests/rls_matrix.rs` applies to its own throwaway databases. \
+             Nothing in this chunk enters migrations/.\n\
+             Why: `.github/workflows/db-migrate.yml` runs `sqlx migrate run` against the real \
+             DATABASE_URL on `workflow_run: [deploy] completed`. Production is suspended by a \
+             DECISION, not by physics, so a file here reaches a real Postgres the moment somebody \
+             dispatches a deploy -- unattended. A policy is subtractive on reads and the recorded \
+             rollback (ADR-0043, `redeploy the previous app`) is a no-op against it (#637).\n\
+             When the walk (#556) flips this: name the file `*_security.sql` and make it \
+             byte-identical to the generated artifact -- this same test then asserts the equality.",
+            offenders.join("\n")
+        );
+
+        // Exactly one of the two arms is live at any time, and which one is a FACT about the repo,
+        // not a mood. Saying it out loud here is what makes the flip visible in a diff.
+        assert!(
+            !checked_cutover,
+            "a migrations/*_security.sql now exists and matched the generated artifact -- the walk \
+             (#556) has happened. That is the intended end state; delete this final assertion in \
+             the same commit that lands the migration, so the fence is left asserting the equality \
+             it now can."
+        );
+    }
+}
