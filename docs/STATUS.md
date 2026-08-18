@@ -2,6 +2,25 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ↩️ **2026-08-18 — CAPTURE ON DELIVERED DISSOLVES THE REFUND GAP**
+> ([ADR-20260818-161500](adr/ADR-20260818-161500-capture-on-delivered-dissolves-the-refund-gap.md)).
+> Asked who absorbs a refund larger than the restaurant's share, the founder answered **neither**:
+> *"We capture the payment on order delivered… we will just not capture."* Applying his own 2026-08-08
+> ruling, **a failed delivery never captures, so there is no refund, no gap and no receivable** — the
+> ledger aggregate the mob had scoped as a proposal is not needed for it, and legal's set-off clause
+> narrows to the reclamation path. *"The restaurant carries it"* becomes **it loses the food it cooked
+> and receives nothing** — no debit, no surprise on a bank statement.
+>
+> **Also**: there is **no customer service fee at V0** (the voluntary contribution is the whole
+> customer money surface), which resolves the fee-versus-contribution naming contradiction by removing
+> the fee. And rider pay on a failed run **depends on the cause** — but `DeliveryCancelled.reason` is
+> **nullable free text** today, and free text cannot drive a payment rule, so a typed
+> `DeliveryFailureCause` is owed first.
+>
+> **Narrowed, not closed**: post-delivery reclamations still capture first, so the over-cap question
+> survives there; and a rider owed for a run on an uncaptured order is paid from money that exists
+> nowhere in the flow — the second bill is still unpaid.
+
 > 🧾 **2026-08-18 — THE INVOICE CHAIN IS RULED: restaurant → customer, rider → RESTAURANT, Captain
 > self-bills both**
 > ([ADR-20260818-134500](adr/ADR-20260818-134500-the-invoice-chain-restaurant-to-customer-rider-to-restaurant.md)).
