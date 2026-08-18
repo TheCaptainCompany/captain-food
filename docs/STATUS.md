@@ -16,10 +16,13 @@
 > `ScopeMembership`) plus the policy-bearing membership index. **Nothing entered `migrations/`**, and
 > that is mechanical, not prose: `tools/codegen-rs/src/tests.rs::security_ddl_fence` refuses
 > `ROW LEVEL SECURITY` / `CREATE POLICY` / `CREATE ROLE` in the deployed chain and converts at the
-> walk with no edit. `crates/infrastructure/tests/rls_matrix.rs` applies the artifacts to its own
+> walk with no edit — no tripwire the flipper has to delete.
+> `crates/infrastructure/tests/rls_matrix.rs` applies the artifacts to its own
 > throwaway databases (one per mode) and proves the matrix: 2 policied personas × 5 probes, a rider
 > default-deny arm, the projector's negative-then-positive write arms, and the two modes compared as
-> result sets. **Six semantic mutations seen red**, and two are kept as permanent tests — the
+> result sets. **Seven semantic mutations seen red** (M1, M2, M3a, M4, M5, M6, M7; M3b was not
+> applicable — chunk 1 emits no persona views, so there is no join-first path to degrade), and two
+> are kept as permanent arms — the
 > GUC-shaped policy that lets a rider read the customer's thread, and the inherited persona grant
 > that hands one login role the union. Decision:
 > [ADR-20260818-171500](adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)

@@ -116,6 +116,8 @@ A codegen test in `tools/codegen-rs/src/tests.rs`, roughly ten lines:
 
 Written as a **conditional that converts with no edit** at the cutover: *either* no `migrations/*_security.sql` exists, *or* its body is byte-identical to `specs/generated/security.generated.sql`. Today it asserts the fence; at the flip the same test asserts the two artifacts are the same bytes. That is the honest answer to "CI must prove what we ship" — the equality is not provable today because the migration does not exist, and this is the strongest thing writable now. It also removes the temptation to hand-write the cutover migration.
 
+**As landed** (review correction, 2026-08-18): the implementation accepts EITHER artifact, because the permissive one ships first. An intermediate draft also carried a `!checked_cutover` tripwire asserting the walk had not happened yet — that draft is what made "converts with no edit" false, since the flipper would have met a red gate whose message told them to delete an assertion. The tripwire was **removed**, not re-worded: the flip already adds a file to the deployed migration chain, so its visibility in the diff was never scarce, and a gate must not make its own deletion the documented way past it. The claim in this section is now true of the code.
+
 ## The flip condition is the WALK, not the cutover — `farley`'s correction
 
 I wrote "applied at the cutover". ADR-20260817-105844 puts the local acceptance harness ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)) and the six-clause walk on the enforced stack **before** any production cutover, and production stays suspended as a decided state. So:
@@ -166,6 +168,30 @@ Do **not** add a workflow-level `grep 'test result: ok'` step: it lives in YAML,
 ## Findings
 
 _(Lenses and the executor append here.)_
+
+### Executor, 2026-08-18 — post-review corrections
+
+Four corrections from the independent review (which PASSED, having stood up PG 16.13 and replanted
+five mutations itself), all landed on the branch:
+
+1. **The tripwire was removed, not re-worded.** See the "As landed" note in §0 above.
+2. **Six → seven.** The mutation count in `rls_matrix.rs` and `STATUS.md` disagreed with its own
+   table (M1, M2, M3a, M4, M5, M6, M7). Both now state seven and name the antecedents; M3b is
+   explicitly excluded as never-run rather than silently absent. ADR-20260817-105845 class, in the
+   evidence artifact itself.
+3. **`Probe` is now sealed** in an inner `probe_pair` module with private fields and pair-returning
+   accessors only, so "a single probe number is unspellable" is a fact about the compiler rather
+   than about the care of whoever writes the next arm. The four direct field reads became
+   `pair()`, `flipped()`, `seen_vs_seen()`, `seen_vs_total_of()`.
+4. **`Arm.member_type` is now actually asserted against the artifact.** `policy_set` grew into
+   `policies()`, which captures the whole USING predicate; the offline coverage gate asserts each
+   arm's literal on BOTH layers (guarded table and membership table) and re-asserts G-1 per policy.
+   Previously the field's docstring claimed an assertion that did not exist.
+
+**Card wording, for the next dispatch**: M1/M4 are described above (line 76) as a permanent
+`#[test]`. They are permanent **arms** — async helpers the mega-test awaits, so they cannot be run
+alone and a failure reports under the parent. That structure was accepted by review as a chosen
+trade given `TestDb`'s binary-wide lock, not an accident.
 
 ### Executor, 2026-08-18 — delivered on `638-rls-authorization-matrix`
 

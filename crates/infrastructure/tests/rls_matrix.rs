@@ -18,7 +18,9 @@
 //!
 //! **Every zero is therefore asserted JOINTLY with a non-zero the same connection does see, in the
 //! same assertion**: `assert_eq!((own, foreign), (2, 0), …)`, never `assert_eq!(foreign, 0)`.
-//! [`Probe`] exists so that shape is the only one available.
+//! [`Probe`] makes that shape the only one that COMPILES — its fields are private to the
+//! `probe_pair` module and every accessor returns a pair, so no expression in this file can produce
+//! a single probe number to assert on.
 //!
 //! # The two false results this suite would otherwise have produced
 //!
@@ -62,14 +64,17 @@
 //! the suite would prove only that hand-written naive SQL differs from hand-written correct SQL,
 //! which is a tautology. Every mutation went into the EMITTER and the generator was re-run.
 //!
-//! # SEEN RED — six semantic mutations, each measured on PG 16.13
+//! # SEEN RED — seven semantic mutations, each measured on PG 16.13
+//!
+//! Seven: M1, M2, M3a, M4, M5, M6, M7. The dispatch card's eighth label, **M3b, is not applicable
+//! to this chunk** (see below) — it was never run, so it is not counted here.
 //!
 //! | # | Mutation | Measured |
 //! |---|---|---|
-//! | **M1** | one policy naming four roles, member type from `current_setting('app.member_type')` | a rider connection reads the customer's **two** orders. Kept as the PERMANENT test [`the_rejected_guc_policy_hands_a_rider_the_customers_thread`] |
+//! | **M1** | one policy naming four roles, member type from `current_setting('app.member_type')` | a rider connection reads the customer's **two** orders. Kept as the PERMANENT arm [`the_rejected_guc_policy_hands_a_rider_the_customers_thread`] |
 //! | **M2** | drop `FORCE`, keep `ENABLE`, aimed at the **owner** | owner reads **4** rows and `UPDATE 4` where the artifact gives 0 and `UPDATE 0`; a persona is unaffected (2 either way), which is exactly why the mutation had to be aimed at the owner |
 //! | **M3a** | table-level `GRANT SELECT` replaces the column grants | `customer_role` reads `internal_notes` (2 rows) and `SELECT *` succeeds, where both must be SQLSTATE `42501` |
-//! | **M4** | one login role granted **both** persona roles | reads the **union** {O1,O3,O4} where each persona alone reads 2 — and the defence is the PER-GRANT option, not the role attribute. Kept as the PERMANENT test [`an_inherited_persona_grant_hands_one_login_role_the_union`] |
+//! | **M4** | one login role granted **both** persona roles | reads the **union** {O1,O3,O4} where each persona alone reads 2 — and the defence is the PER-GRANT option, not the role attribute. Kept as the PERMANENT arm [`an_inherited_persona_grant_hands_one_login_role_the_union`] |
 //! | **M5** | delete the `scopemembership` self-row policies | every persona reads **0** — the zero-row member most likely to bite at cutover |
 //! | **M6** | `set_config(…, true)` outside an explicit transaction | 2 in-transaction, **0** out of it |
 //! | **M7** | swap two member ids in the fixture | C1 sees {O2} instead of {O1,O3} — the fixture's own mutation test, and the direct answer to *"is this grading its own homework"* |
@@ -89,7 +94,7 @@
 #[path = "main/common.rs"]
 mod common;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use sqlx::postgres::PgConnectOptions;
@@ -111,7 +116,7 @@ const DB_ENFORCING: &str = "cf_rls_enforcing";
 const DB_PERMISSIVE: &str = "cf_rls_permissive";
 const DB_REJECTED: &str = "cf_rls_m1_rejected";
 
-/// Every role this suite touches, including the ones its permanent mutation tests mint. Dropped in
+/// Every role this suite touches, including the ones its permanent mutation arms mint. Dropped in
 /// setup so a previous run's LOGIN attribute or leftover grant cannot decide this run's result.
 const ALL_ROLES: [&str; 8] = [
     "admin_role",
@@ -120,7 +125,7 @@ const ALL_ROLES: [&str; 8] = [
     "projector_order",
     "restaurant_role",
     "rider_role",
-    // minted by the M4 permanent test
+    // minted by the M4 permanent arm
     "inherit_svc",
     "noinherit_svc",
 ];
@@ -166,7 +171,9 @@ const PROBES: [&str; 5] = [
 /// One policied persona's arm of the matrix.
 struct Arm {
     role: &'static str,
-    /// The `UserType` literal its policy embeds. Asserted against the artifact by [`policy_set`].
+    /// The `UserType` literal its policy embeds. Asserted against the artifact's USING text — on
+    /// both the guarded table and the membership table — by
+    /// [`rls_matrix_covers_every_generated_policy`], using [`policies`].
     member_type: &'static str,
     /// The member the connection binds into `app.member_id`.
     member: u128,
@@ -218,12 +225,17 @@ fn sql_only(sql: &str) -> String {
     sql.lines().filter(|l| !l.trim_start().starts_with("--")).collect::<Vec<_>>().join("\n")
 }
 
-/// Every `CREATE POLICY … ON <table> … FOR <cmd> TO <role>` in an artifact, as
-/// `(table, role, command)`. Parsed rather than declared, so both sides of the coverage gate below
-/// are derived.
-fn policy_set(sql: &str) -> BTreeSet<(String, String, String)> {
-    let mut out = BTreeSet::new();
-    let lines: Vec<&str> = sql.lines().collect();
+/// Every `CREATE POLICY … ON <table> FOR <cmd> TO <role> USING (…)` in an artifact, as
+/// `(table, role, command) -> the USING predicate, whitespace-normalised`.
+///
+/// Parsed rather than declared, so both sides of the coverage gate below are derived. The USING
+/// text is captured — not just the header triple — because the header alone cannot tell a correct
+/// policy from one that reads correct and **compares the wrong literal**, which is the exact defect
+/// class this chunk exists to catch.
+fn policies(sql: &str) -> BTreeMap<(String, String, String), String> {
+    let mut out = BTreeMap::new();
+    let stripped = sql_only(sql);
+    let lines: Vec<&str> = stripped.lines().collect();
     for (i, line) in lines.iter().enumerate() {
         let Some(rest) = line.trim().strip_prefix("CREATE POLICY ") else { continue };
         let mut it = rest.split_whitespace();
@@ -237,10 +249,46 @@ fn policy_set(sql: &str) -> BTreeSet<(String, String, String)> {
         let (command, role) = for_to
             .split_once(" TO ")
             .unwrap_or_else(|| panic!("expected ` TO <role>` in `{next}`"));
-        out.insert((table.to_string(), role.trim().to_string(), command.trim().to_string()));
+
+        // The statement runs from `FOR …` to the line that terminates it. Whitespace-normalised so
+        // the emitter's indentation is not part of the assertion.
+        let mut stmt = String::new();
+        for l in lines.iter().skip(i + 1) {
+            stmt.push(' ');
+            stmt.push_str(l.trim());
+            if l.trim_end().ends_with(';') {
+                break;
+            }
+        }
+        let stmt: String = stmt.split_whitespace().collect::<Vec<_>>().join(" ");
+        let using = stmt
+            .split_once(" USING ")
+            .unwrap_or_else(|| panic!("no USING clause in `{stmt}`"))
+            .1
+            .split(" WITH CHECK ")
+            .next()
+            .expect("split always yields one")
+            .trim_end_matches(';')
+            .trim()
+            .to_string();
+
+        let key = (table, role.trim().to_string(), command.trim().to_string());
+        assert!(
+            out.insert(key.clone(), using).is_none(),
+            "two policies with the same (table, role, command) {key:?} -- the coverage gate would \
+             silently compare a set that lost one of them"
+        );
     }
-    assert!(!out.is_empty(), "no CREATE POLICY parsed out of the artifact -- the gate would be vacuous");
+    assert!(
+        !out.is_empty(),
+        "no CREATE POLICY parsed out of the artifact -- the gate would be vacuous"
+    );
     out
+}
+
+/// The header triples only, for the coverage gate.
+fn policy_set(sql: &str) -> BTreeSet<(String, String, String)> {
+    policies(sql).into_keys().collect()
 }
 
 /// **`rls-matrix-covers-every-generated-policy`** — the one gate this chunk adds, and it lives
@@ -255,8 +303,8 @@ fn policy_set(sql: &str) -> BTreeSet<(String, String, String)> {
 #[test]
 fn rls_matrix_covers_every_generated_policy() {
     for (label, sql) in [("enforcing", ENFORCING_SQL), ("permissive", PERMISSIVE_SQL)] {
-        let policies = policy_set(sql);
-        let read_arms: BTreeSet<(String, String)> = policies
+        let headers = policy_set(sql);
+        let read_arms: BTreeSet<(String, String)> = headers
             .iter()
             .filter(|(t, _, cmd)| cmd == "SELECT" && t == GUARDED)
             .map(|(t, r, _)| (t.clone(), r.clone()))
@@ -276,6 +324,57 @@ fn rls_matrix_covers_every_generated_policy() {
             arms().len() * PROBES.len(),
             "matrix arms != tables x personas x probes for the {label} artifact"
         );
+
+        // The USING text, asserted per arm on BOTH layers -- and the two modes get OPPOSITE
+        // assertions, because that difference IS `mode:`.
+        //
+        // The header triple cannot tell a correct policy from one that reads correct and compares
+        // the WRONG LITERAL: `restaurant_role` guarded by `member_type = 'CUSTOMER'` has exactly
+        // the same (table, role, command) as the right one. The behavioural arms catch a swap, but
+        // only once a database is up; this catches it offline, on the bytes, naming the literal.
+        let by_key = policies(sql);
+        for arm in arms() {
+            for table in [GUARDED, MEMBERSHIP] {
+                let key = (table.to_string(), arm.role.to_string(), "SELECT".to_string());
+                let Some(using) = by_key.get(&key) else { continue };
+
+                if label == "permissive" {
+                    // Permissive ships FIRST and its whole safety claim is that it SUBTRACTS
+                    // NOTHING: the policy objects exist, the grants exist, and every read still
+                    // returns what it returned yesterday. `USING (true)` is that claim in one
+                    // token, so assert it exactly rather than merely allowing it -- a permissive
+                    // artifact that quietly acquired a real predicate would be a silent read
+                    // outage at the moment it is applied, and ADR-0043's rollback does not undo a
+                    // policy (#637).
+                    assert_eq!(
+                        using, "(true)",
+                        "the permissive artifact's READ policy {key:?} is not `(true)`. \
+                         Permissive mode exists to be non-subtractive; a real predicate here \
+                         DENIES ROWS the day the artifact is applied, which is precisely what \
+                         shipping permissive first is supposed to make impossible."
+                    );
+                    continue;
+                }
+
+                let want = format!("member_type = '{}'", arm.member_type);
+                assert!(
+                    using.contains(&want),
+                    "the {label} artifact's READ policy {key:?} does not compare `{want}`.\n\
+                     USING: {using}\n\
+                     Fix: the emitter's member-type literal, or this arm's `member_type` -- one of \
+                     the two is wrong.\n\
+                     Why: a policy that reads correct and compares the wrong literal is the defect \
+                     this chunk exists to catch, and the (table, role, command) header is identical \
+                     either way."
+                );
+                assert!(
+                    !using.contains("current_setting('app.member_type'"),
+                    "the {label} artifact's policy {key:?} takes the member type from a \
+                     caller-settable GUC. Postgres gates SET ROLE; it does not gate set_config \
+                     (M1, G-1)."
+                );
+            }
+        }
     }
 }
 
@@ -332,25 +431,69 @@ fn the_generated_artifacts_carry_no_forbidden_statement() {
 
 // ─── the harness ────────────────────────────────────────────────────────────────────────────────
 
-/// A probe result: what the connection DID see, paired with what it must NOT.
-///
-/// The type is the enforcement of `beck`'s rule. There is no constructor that yields a single
-/// number, so `assert_eq!(foreign, 0)` is not spellable: every zero arrives already paired with the
-/// non-zero the same connection saw, in the same statement, on the same fixture.
-#[derive(Debug, PartialEq, Eq)]
-struct Probe {
-    seen: i64,
-    withheld: i64,
-}
+pub use probe_pair::Probe;
 
-impl Probe {
-    fn is(&self, seen: i64, withheld: i64, why: &str) {
-        assert_eq!(
-            (self.seen, self.withheld),
-            (seen, withheld),
-            "{why}\n(left = what this connection actually saw / what it must not see; a zero on the \
-             right means nothing unless the left is non-zero on the SAME connection)"
-        );
+/// The [`Probe`] type, sealed so `beck`'s rule is a property of the COMPILER rather than of the
+/// care taken by whoever writes the next arm.
+///
+/// The fields are private to this inner module and **every** accessor returns a PAIR. There is no
+/// method anywhere that yields one number, so `assert_eq!(p.seen, 0)` and `assert_eq!(p.pair().0,
+/// 0)` are both rejected by rustc: a zero can only be asserted alongside the non-zero the same
+/// connection saw, in the same assertion, on the same fixture.
+///
+/// This module exists because the claim was audited and found FALSE of an earlier draft. `Probe`
+/// was declared at file scope in a single-module test crate, so its fields were readable
+/// throughout, and four arms read them directly. Every one of those reads happened to be paired,
+/// so nothing was unsafe — but the docstring asserted a property the type did not have, which is
+/// the same defect class as a policy that reads correct and compares the wrong literal. Under
+/// compiler-first (ADR-20260803-234035) the fix is the type, not the sentence.
+mod probe_pair {
+    /// A probe result: what the connection DID see, paired with what it must NOT.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct Probe {
+        seen: i64,
+        withheld: i64,
+    }
+
+    impl Probe {
+        /// The ONLY constructor, and it takes the two-column row `split_count` produces — so a
+        /// `Probe` cannot be conjured from a single number either.
+        pub fn from_row((seen, withheld): (i64, i64)) -> Self {
+            Self { seen, withheld }
+        }
+
+        /// The primary assertion: this connection saw exactly `seen` and exactly `withheld`.
+        pub fn is(&self, seen: i64, withheld: i64, why: &str) {
+            assert_eq!(
+                (self.seen, self.withheld),
+                (seen, withheld),
+                "{why}\n(left = what this connection actually saw / what it must not see; a zero \
+                 on the right means nothing unless the left is non-zero on the SAME connection)"
+            );
+        }
+
+        /// `(seen, withheld)` for arms that assert the pair with their own message.
+        pub fn pair(&self) -> (i64, i64) {
+            (self.seen, self.withheld)
+        }
+
+        /// `(withheld, seen)` — for a probe whose FILTER names the forbidden row, so the
+        /// filter-matching count is the one that must be zero.
+        pub fn flipped(&self) -> (i64, i64) {
+            (self.withheld, self.seen)
+        }
+
+        /// `(self.seen, other.seen)` — two probes on the SAME connection, one member each.
+        pub fn seen_vs_seen(&self, other: &Probe) -> (i64, i64) {
+            (self.seen, other.seen)
+        }
+
+        /// `(self.seen, other.seen + other.withheld)` — what this probe saw, against EVERY row
+        /// visible to `other`. Used where `other` is the same connection with no actor context: the
+        /// zero has to cover both columns, or "it saw the rows in the other column" would pass.
+        pub fn seen_vs_total_of(&self, other: &Probe) -> (i64, i64) {
+            (self.seen, other.seen + other.withheld)
+        }
     }
 }
 
@@ -363,10 +506,10 @@ impl Probe {
 /// that does not open a transaction first (probe M6).
 async fn probe(conn: &mut PgConnection, member: Option<Uuid>, sql: &str) -> Probe {
     begin_scope(conn, member).await;
-    let (seen, withheld): (i64, i64) =
+    let row: (i64, i64) =
         sqlx::query_as(sql).fetch_one(&mut *conn).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
     conn.execute("COMMIT").await.expect("commit the scoped transaction");
-    Probe { seen, withheld }
+    Probe::from_row(row)
 }
 
 /// The SQLSTATE a scoped statement fails with, or a panic naming what it returned instead. Never
@@ -666,7 +809,7 @@ async fn the_authorization_matrix_holds_in_both_modes() {
         let with_context = probe(&mut conn, Some(uid(arm.member)), &own_vs_rest).await;
         let no_context = probe(&mut conn, None, &own_vs_rest).await;
         assert_eq!(
-            (with_context.seen, no_context.seen + no_context.withheld),
+            with_context.seen_vs_total_of(&no_context),
             (2, 0),
             "{}/{}: {} -- the SAME connection sees two rows one transaction earlier and must see \
              NOTHING once app.member_id is unbound. `current_setting(…, true)` returns NULL, the \
@@ -684,7 +827,7 @@ async fn the_authorization_matrix_holds_in_both_modes() {
         let decoy = split_count(GUARDED, &format!("order_id = '{}'::uuid", uid(O4)));
         let p = probe(&mut conn, Some(uid(arm.member)), &decoy).await;
         assert_eq!(
-            (p.withheld, p.seen),
+            p.flipped(),
             (2, 0),
             "{}/{}: {} -- this member id appears in the fixture under the OTHER persona's \
              member_type, and under the wrong scope_type, both pointing at O4. The connection must \
@@ -780,7 +923,7 @@ async fn the_authorization_matrix_holds_in_both_modes() {
         let c1 = probe(&mut conn, Some(uid(C1)), &all).await;
         let c4 = probe(&mut conn, Some(uid(C4)), &all).await;
         assert_eq!(
-            (c1.seen, c4.seen),
+            c1.seen_vs_seen(&c4),
             (2, 0),
             "customer_role: C1 is a member of two orders and C4 of none -- same connection, same \
              fixture, one transaction apart"
@@ -892,10 +1035,10 @@ async fn the_authorization_matrix_holds_in_both_modes() {
     // ── The writer, negative arm FIRST ──────────────────────────────────────────────────────────
     write_arms(&url).await;
 
-    // ── M1, as a permanent test ─────────────────────────────────────────────────────────────────
+    // ── M1, as a permanent arm ──────────────────────────────────────────────────────────────────
     the_rejected_guc_policy_hands_a_rider_the_customers_thread(&url).await;
 
-    // ── M4, as a permanent test ─────────────────────────────────────────────────────────────────
+    // ── M4, as a permanent arm ──────────────────────────────────────────────────────────────────
     an_inherited_persona_grant_hands_one_login_role_the_union(&url, &admin).await;
 }
 
@@ -1018,7 +1161,12 @@ async fn write_arms(url: &str) {
     owner.close().await;
 }
 
-/// **M1, as a permanent `#[test]` rather than a PR-body claim.**
+/// **M1, as a permanent ARM rather than a PR-body claim.**
+///
+/// An arm, not a `#[test]`: it is an async helper the mega-test awaits, so it cannot be run alone
+/// and a failure reports under the parent's name. That is a consequence of `TestDb`'s binary-wide
+/// lock, chosen deliberately — one serialised database story beats several that cannot run
+/// concurrently anyway — not an accident to be tidied later.
 ///
 /// It constructs the REJECTED policy shape — one policy naming four roles, with the member type read
 /// from `current_setting('app.member_type')` — and asserts that a rider connection **does** read the
@@ -1115,7 +1263,8 @@ async fn guc_scoped_count(conn: &mut PgConnection, member_type: &str, member: Uu
     n
 }
 
-/// **M4, as a permanent test — and it came out sharper than the prediction it was written from.**
+/// **M4, as a permanent ARM (see M1 on why an arm and not a `#[test]`) — and it came out sharper
+/// than the prediction it was written from.**
 ///
 /// The prediction (`dba`, unmeasured): a login role granted BOTH persona roles with `INHERIT`, and
 /// no `SET ROLE`, reads the union of both personas' rows. **Measured on PG 16.13: it does** —
@@ -1158,7 +1307,7 @@ async fn an_inherited_persona_grant_hands_one_login_role_the_union(url: &str, ad
     )
     .await;
     assert_eq!(
-        (union.seen, union.withheld),
+        union.pair(),
         (2, 1),
         "one login role granted BOTH persona roles reads the UNION -- C1's own two orders PLUS O4, \
          which it reaches only through the decoy carrying C1's uuid under the RESTAURANT member \

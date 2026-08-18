@@ -9432,7 +9432,6 @@ mod security_ddl_fence {
         );
 
         let mut offenders: Vec<String> = Vec::new();
-        let mut checked_cutover = false;
         for name in &names {
             let body = std::fs::read_to_string(migrations.join(name))
                 .unwrap_or_else(|e| panic!("read migrations/{name}: {e}"));
@@ -9472,7 +9471,6 @@ mod security_ddl_fence {
                      subtractive on reads -- ADR-0043's `redeploy the previous app` does not undo \
                      it (#637)."
                 );
-                checked_cutover = true;
                 continue;
             }
 
@@ -9509,14 +9507,16 @@ mod security_ddl_fence {
             offenders.join("\n")
         );
 
-        // Exactly one of the two arms is live at any time, and which one is a FACT about the repo,
-        // not a mood. Saying it out loud here is what makes the flip visible in a diff.
-        assert!(
-            !checked_cutover,
-            "a migrations/*_security.sql now exists and matched the generated artifact -- the walk \
-             (#556) has happened. That is the intended end state; delete this final assertion in \
-             the same commit that lands the migration, so the fence is left asserting the equality \
-             it now can."
-        );
+        // Deliberately NO "the cutover has not happened yet" tripwire here. An earlier draft had
+        // one. It would have turned this fence RED on the very commit that lands the walk (#556),
+        // with a failure message instructing the flipper to delete an assertion -- a gate whose
+        // documented failure mode is "edit the gate", arriving at exactly the moment (a production
+        // cutover, under time pressure) when the temptation to weaken a gate is highest. CLAUDE.md
+        // forbids weakening gates; a gate should not be the thing that teaches the habit.
+        //
+        // It bought nothing scarce: the flip ADDS A FILE to the deployed migration chain, so it is
+        // already unmissable in the diff. Without the tripwire this fence converts at the walk with
+        // NO EDIT -- it asserts absence today and byte-equality the moment the file exists, and the
+        // day it converts is the day it starts asserting something strictly stronger.
     }
 }

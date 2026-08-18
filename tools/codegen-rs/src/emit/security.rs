@@ -6,7 +6,11 @@
 //! nothing else. The fence is mechanical:
 //! `tests::security_ddl_fence::migrations_carry_no_security_ddl_unless_they_are_the_generated_artifact`.
 //! It is written as the conditional that converts at the local-acceptance walk
-//! ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)) with no edit.
+//! ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)) with no edit: absence
+//! today, byte-equality with one of these artifacts the moment a `migrations/*_security.sql`
+//! exists. It deliberately carries **no "the walk has not happened yet" tripwire** — see the
+//! comment at the end of that test for why a gate must never make its own deletion the documented
+//! way past it.
 //!
 //! # Scope, and why it is one table
 //!
