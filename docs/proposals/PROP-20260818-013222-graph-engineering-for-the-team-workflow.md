@@ -4,15 +4,15 @@
   Resume condition: the work already in flight is finished. Verbatim: *"Thanks for the plan we will
   not apply it yet we will finish what we have started first."*
 - **Date**: 2026-08-18
-- **Tracking issue**: **TO BE CREATED — the number below is provisional and UNVERIFIED.**
-  [#643 "Formalise the mob workflow as explicit graph engineering"](https://github.com/TheCaptainCompany/captain-food/issues/643)
-  — this session had neither `gh` (not on PATH) nor a GitHub MCP tool in its toolset, and reaching the
-  REST API another way was explicitly fenced by the dispatch. The highest issue number referenced
-  anywhere under `docs/` at `8494e67` is **639**, so 643 is a guess. **Whoever creates the issue must
-  correct this link in the same change**; a wrong number here is a dead reference, which is the exact
-  anti-pattern [ADR-20260724-143000](../adr/ADR-20260724-143000-every-proposal-has-a-tracking-issue.md)
-  and the `proposal-tracking-issue-missing` rule exist to prevent — and note that the rule as written
-  checks the link's *shape*, not that the issue exists. That is itself an instance of §5's finding.
+- **Tracking issue**:
+  [#643 "DEFERRED — Graph engineering for the team workflow"](https://github.com/TheCaptainCompany/captain-food/issues/643)
+  — created by the coordinator after this document landed, because the authoring session had neither
+  `gh` nor a GitHub MCP tool and correctly refused to reach the REST API another way. It wrote #643 as
+  a *guess* (the highest number referenced under `docs/` was 639) and flagged it UNVERIFIED; the guess
+  happened to be right, which is luck and not a method. **The durable finding stands**: the
+  `proposal-tracking-issue-missing` rule checks the link's *shape*, not that the issue exists, so a
+  wrong number here would have passed the gate as a dead reference — an instance of §5's own argument,
+  found in the act of writing §5.
 - **Realized by**: (filled at completion)
 - **Base**: `main` @ `8494e67` — every measured figure in this document was re-derived at that SHA on
   2026-08-18 and each one names the command that produced it.
