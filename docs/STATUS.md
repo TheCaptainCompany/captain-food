@@ -2,6 +2,38 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ⚖️ **2026-08-18 — RULINGS: staff sign-in has a mechanism, refund approval stays with the
+> restaurant, and the executor now refuses a stale base**
+> ([ADR-20260818-094500](adr/ADR-20260818-094500-staff-auth-mechanism-and-refund-approval-stays-with-the-restaurant.md)).
+> Three founder rulings in one message; the whole roster was consulted before the answer, eleven
+> lenses replied, and the `Consulted:` block records what each caught.
+>
+> **A — STAFF-AUTH mechanism ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)).**
+> The rider signs in by phone, Supabase-handled, **OVH SMS** as the sender, required for V0 because
+> the phone is the rider's working tool. The restaurant starts on the **web** and self-registers by
+> finding their restaurant. Restaurant onboarding is named open by the founder; **account managers
+> were not mentioned and are therefore not ruled** — and the mob's reading is that the
+> `RESTAURANT_ACCOUNT`/`RESTAURANT` split is a story-map persona with no command, event or
+> projection behind its assignment relationship, so V0 models one person bound to one location.
+>
+> **B — `approveRefund` is NOT narrowed to `[ADMIN]`.** *"The approval of the refund must be done by
+> the restaurant by default"*; admin is the intervention. `roles: [RESTAURANT, ADMIN]` stands and the
+> back-office widget stays. The consequence is the point: the write-side hole must now close by
+> **binding**, which puts [#178](https://github.com/TheCaptainCompany/captain-food/issues/178) on the
+> critical path rather than beside it.
+>
+> **C — the executor refuses a base it was not given** (landed, `.claude/agents/executor.md`):
+> `git rev-parse HEAD` is a precondition, and a mismatch is a refusal. Six consecutive dispatch cards
+> carried a stale base, including the one whose own text warned about it.
+>
+> **What the mob found that changes the work**: restaurant onboarding is not undesigned — it is
+> designed and **anonymous** (`claimRestaurantListing` is `roles: [PUBLIC, RESTAURANT_ACCOUNT]`) and
+> it **grants a `ScopeMembership` row**, so it is the write path into the trust anchor; the model has
+> no word for the *person* (`principals.RESTAURANT` is an organisation id, so a credential against it
+> is a shared login); the rider's OTP would draw on the customer's platform-wide SMS kill switch, so a
+> flood against the anonymous endpoint grounds the fleet at peak; and the ownership fact ruling B
+> needs is **already folded on the approve path** — no projection read, no new table required.
+> A and B are **one slice of three operations**, not two programmes.
 > 🔐 **2026-08-18 — GENERATED SECURITY SQL EXISTS, APPLIED TO NO DATABASE, SINCE 2026-08-18**
 > ([#638](https://github.com/TheCaptainCompany/captain-food/issues/638) chunk 1). This line has a
 > **visible age on purpose**: if it is still here in six weeks the chunk failed, and it will be
