@@ -33,22 +33,62 @@ identifier**. The `sub → domain id` mapping is resolved from our own Postgres,
 
 ## The present state — measured, not assumed
 
-**This is a change, not a confirmation of the existing posture.** CLAUDE.md describes Supabase Auth
-as *"wrapped, identity-only — no business data"*. The code says otherwise, today, on `main`
-(`b77c487`):
+> ⚠️ **CORRECTED 2026-08-18** (records-only run, measured on `main` at `987416c`). As first written
+> this section said that **four** business identifiers are stored in the identity provider and that
+> the work is to extend the `by_auth_ref` bridge to three more roles. **Exactly one is stored**, and
+> for three of the four roles there is nothing to extend, because those roles **cannot authenticate
+> at all**. **The founder's ruling above is unchanged and still right** — only the measured premise
+> beneath it was wrong, and the ruling's **cost is correspondingly smaller than recorded: one role's
+> lookup, not four.** A third correction, below, is a security fact the original text missed
+> entirely. Records that are wrong are worse than records that are missing, because the next session
+> cites them.
 
-- **`crates/server/src/auth.rs:194-220`** — `Principal::role_path` binds the identity from the
-  token's claim object: `claims.customer_id` (:204), `claims.restaurant_id` (:207),
-  `claims.restaurant_account_id` (:211), `claims.rider_id` (:216). A missing claim yields
-  `Identity::Unbound` — fail-closed, but from the claim, not from us.
-- **`crates/server/src/auth.rs:311-333`** — `struct ProductClaims` declares those four business
-  identifiers as first-class fields beside `role`.
-- **`crates/infrastructure/src/integrations/supabase_auth.rs:424-433`** — `stamp_put_body` WRITES
-  one of them back into the provider: `app_metadata.captain_food = { role, customer_id }`, PUT by
-  the admin claim-stamp path (`stamp_customer_claim`, #437) at phone verification.
+**This is still a change, not a confirmation of the existing posture.** CLAUDE.md describes Supabase
+Auth as *"wrapped, identity-only — no business data"*, and that is false today — for **one**
+identifier, for **one** role.
 
-So a Captain Food `CustomerId` is **stored in the identity provider** and **travels in every
-token**. The posture sentence was aspirational; the ruling makes it true.
+### Correction 1 — one business identifier is stored in the provider, not four
+
+`crates/infrastructure/src/integrations/supabase_auth.rs:424-433` (`stamp_put_body`) writes
+`app_metadata.captain_food = { role, customer_id }` and nothing else; `role` is hardcoded
+`"CUSTOMER"` by construction. Grepping that same file for `restaurant_id`, `rider_id` or
+`restaurant_account_id` returns **nothing**. The CUSTOMER's `CustomerId` is the whole of the
+business data the processor holds, so **Phase C erases one key on one role's users**, not four.
+
+### Correction 2 — the other three claim fields are read by the verifier and written by nobody
+
+`struct ProductClaims` (`crates/server/src/auth.rs:311-333`) declares `restaurant_id`,
+`restaurant_account_id` and `rider_id` beside `customer_id`, and `Principal::role_path` binds them
+at `auth.rs:207`, `:211` and `:216`. **No code path in the repository populates them.** Their only
+other occurrences are that verifier's own unit tests (`auth.rs:1864`, `:1867`). They are a
+**declared-but-unfed** surface: they describe an intention (#144, #433) that was never fed, and the
+original text read the declaration as if it were a stored fact.
+
+### Correction 3 — `Identity::Unbound` does not deny on the WRITE path (a security fact)
+
+The original text called `Identity::Unbound` *"fail-closed"*. That is true of the **read** path only:
+`read_scope` maps it to `ReadScope::Public` and counts it (`crates/server/src/auth.rs:1802-1805`,
+`bridge_unresolved`). On the **write** path it is not:
+
+- `Principal::role()` returns the declared role for it — `crates/server/src/auth.rs:251` is
+  `Identity::Unbound { role, .. } => *role`.
+- The mutation guard consults the role and nothing else: `approveRefund` carries
+  `guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)"`
+  (`crates/server/src/graphql/generated/mutation.rs:6166`), `ALLOW_RESTAURANT_ADMIN` is
+  `[Restaurant, Admin]` (`crates/server/src/graphql/generated/acl.rs:112`), and `role_allows` is a
+  membership test on the request's role (`crates/server/src/graphql/acl.rs:76-78`).
+
+So a token asserting the RESTAURANT role and carrying **no business identifier** reaches
+`approveRefund` and can approve **any** pending refund — the mutation resolves its actor from the
+payload's `orderId` (`mutation.rs:6186`), never from the caller. This is the §39 **IDOR-1** surface
+seen from the identity side, and it is one more reason the ruling is right: a token that proves only
+*who authenticated* forces the binding to be resolved by us, where it can be checked.
+
+**Exposure today is nil, and dated.** `app_metadata` is writable only through the provider's
+privileged server-side path, and the only writer in this repository stamps `role: "CUSTOMER"`
+(Correction 1) — so no such token can exist unless one is hand-stamped in the provider's console,
+and none is. The exposure opens at the **first pilot sign-in for a non-CUSTOMER role**, which is
+also the IDOR-DEADLINE trigger (§45 **IDOR-DEADLINE**).
 
 ## The mechanism already exists — for exactly one role
 
@@ -61,30 +101,47 @@ The bridge this decision promotes is not new:
   calls it, **only when `message.user_type == "CUSTOMER"`**; every other role gets `domain_id: None`
   ("other roles stay None until their bridges land (#144)", its own comment).
 
-The decision **promotes that bridge to the request seam** and **extends it to the other three
-roles**. The write side already pays this lookup for CUSTOMER on every command; the change is that
-the read side pays it too, and that three more roles get one.
+The decision **promotes that bridge to the request seam**. It does **not** extend it to three more
+roles, because — see below — three of the four roles have no way to sign in, so there is no subject
+to key a mapping on.
 
-### What "extend it to the other three roles" actually costs — measured
+### There is nothing to extend: three of four roles cannot authenticate at all
 
-`auth_ref` is **not** a uniform facility. Across `specs/**` (grep `authRef`, generated output
-excluded):
+⚠️ **CORRECTED** — this subsection replaces a table that priced *"extend the bridge to the other
+three roles"* as this ruling's largest cost. That work does not exist to be done.
 
-| Role | The `sub → domain id` fact today |
-|---|---|
-| CUSTOMER | **Exists end to end** — `CustomerRegistered.authRef` (`specs/customer/events.yaml:24`), projected to `Customer.auth_ref`, indexed and nullable (`specs/database/tables/projection_tables.yaml:395-398`) |
-| RIDER | **Event only** — `RiderRegistered.authRef` (`specs/delivery/events.yaml:343-351`, required) and `RegisterRider.authRef` (`specs/delivery/commands.yaml:196`), projected into **no column**: `auth_ref` appears exactly once in the whole projection set, on `Customer` |
-| RESTAURANT | **Does not exist** — no `authRef` in `specs/network/**` at all |
-| RESTAURANT_ACCOUNT | **Does not exist** — same |
+The only authentication operations in the whole DSL are in `specs/customer/api.yaml`:
+`requestPhoneVerification` (:38, roles `[PUBLIC, CUSTOMER]`) and `verifyPhone` (:43, same), plus the
+V1 email pair (`requestEmailVerification` :50, `confirmEmailVerification`, both `[CUSTOMER]`).
+Nothing in `specs/*/api.yaml` offers a sign-in to RESTAURANT, RESTAURANT_ACCOUNT or RIDER.
 
-Two of the four roles have no mapping fact anywhere. For RIDER it is a projection column over an
-event that already carries the datum. For RESTAURANT and RESTAURANT_ACCOUNT the fact has to be
-**authored** — a new property on an existing, already-emitted event, or a new linking event. That is
-question 2 of the three-question test, per role, and it is the largest single cost of this ruling.
+| Role | Can it authenticate? | The `sub -> domain id` fact today |
+|---|---|---|
+| CUSTOMER | **Yes** — phone OTP (`specs/customer/api.yaml:38`, `:43`) | **Exists end to end** — `CustomerRegistered.authRef` (`specs/customer/events.yaml:24`), projected to `Customer.auth_ref`, indexed and nullable (`specs/database/tables/projection_tables.yaml:395-398`) |
+| RIDER | **No sign-in operation exists** | Event only — `RiderRegistered.authRef` (`specs/delivery/events.yaml:343-351`) and `RegisterRider.authRef` (`specs/delivery/commands.yaml:196`), projected into no column: `auth_ref` appears exactly once in the whole projection set, on `Customer` |
+| RESTAURANT | **No sign-in operation exists** | Does not exist — no `authRef` in `specs/network/**` |
+| RESTAURANT_ACCOUNT | **No sign-in operation exists** | Does not exist — same |
+
+**What follows, and it reshapes the chunk**: for those three roles there is no login flow, no claim
+writer and no binding fact, so **nothing to migrate and no subject to key a mapping on**. Giving
+them a `sub -> domain id` mapping is not identity plumbing that this ruling can order — it is
+**staff onboarding**, a product question about how a restaurant operator, an account manager and a
+rider come to exist as sign-in-capable people at all. It is tracked as
+[#639](https://github.com/TheCaptainCompany/captain-food/issues/639), and it is a founder-owned open
+question in the register (**STAFF-AUTH**, [DECISIONS §46](../proposals/DECISIONS.md)) — until it is
+answered, standing up any non-CUSTOMER role for a pilot means hand-stamping a claim in a third-party
+console, which is exactly the shape Correction 3 shows nothing checks.
+
+**So this ruling's implementable scope is one role**: move CUSTOMER's `sub -> domain id` resolution
+from the token to our Postgres, stop stamping, erase what is stored. That is the whole of it.
 
 ## The cost, stated honestly — `read_scope` stops being pure
 
 This is the price, and it is not softened here:
+
+⚠️ **CORRECTED scale**: the price below is real, and it is paid **for one role**. CUSTOMER is the
+only role that can authenticate (see above), so this is one indexed lookup per authenticated
+customer request — not four roles' worth of new bridges.
 
 - `crates/server/src/auth.rs:1833` — `resolve_read_scope(&Principal, RequestCorrelationId)` is
   **synchronous** and delegates to a pure `read_scope(principal)`. After this decision it needs a
@@ -143,9 +200,13 @@ versioning story is recorded here, before it lands:
    `app_metadata` of existing auth users. This is also GDPR hygiene: it is a business identifier
    held by a processor for no remaining purpose.
 4. **Stored events are untouched.** `domain_events.user_id` is the auth subject (ADR-0041), not a
-   domain id; nothing in the log changes, and there is **no upcasting** on the event side. The only
-   new *stored* shapes are the missing mapping facts for RIDER/RESTAURANT/RESTAURANT_ACCOUNT, each
-   of which re-enters this test on its own.
+   domain id; nothing in the log changes, and there is **no upcasting** on the event side. ⚠️
+   **CORRECTED**: this clause used to end *"the only new stored shapes are the missing mapping facts
+   for RIDER/RESTAURANT/RESTAURANT_ACCOUNT"*. Those facts are **not in this ruling's scope** — those
+   roles have no sign-in at all, so the mapping question does not arise until **STAFF-AUTH** is
+   answered ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)), and whatever
+   answers it re-enters this three-question test on its own. **This migration introduces no new
+   stored shape.**
 
 **(3) Otherwise it is the team's** — not reached: (1) and (2) both fire.
 
@@ -153,8 +214,15 @@ versioning story is recorded here, before it lands:
 
 Asymmetric JWKS verification and the refusal of symmetric algorithms at the `/{role}/graphql` door;
 ADR-0015's ACL wrapping of the provider; `domain_events.user_id` as the acting subject; the
-fail-closed default in every branch. The provider keeps doing the one job it is retained for —
+fail-closed default of the READ path. The provider keeps doing the one job it is retained for —
 proving that a human authenticated.
+
+It also does **not** fix Correction 3: the write-side guard consults the role and nothing else
+before and after this ruling. Resolving the binding from our Postgres is what makes a per-instance
+write check *possible*; it is not that check. That is [#178](https://github.com/TheCaptainCompany/captain-food/issues/178)
+slice 1 and the `requires:` emitter ([#636](https://github.com/TheCaptainCompany/captain-food/issues/636)).
+The narrowing of `approveRefund`'s own role set is a **founder decision, not a consequence of this
+one** — it removes the restaurant's ability to approve a refund on its own orders.
 
 ## Named residue — not decided here
 
@@ -166,9 +234,16 @@ proving that a human authenticated.
   door (`AuthContext::authorize`) currently decides on the claim before any lookup exists.
 - **The `specs/**` changes this implies are OWED and NOT APPROVED.** Named so the next session does
   not rediscover them: `specs/services.yaml:189` (`identity.stamp_customer_claim`),
-  `specs/observability.yaml:718` (the claim-stamp contract), `specs/common/configuration.yaml:221-222`
-  (the declared configuration of the admin stamp path), the RIDER `auth_ref` projection column, and the
-  RESTAURANT / RESTAURANT_ACCOUNT mapping facts. None of them is touched by this records-only change.
+  `specs/observability.yaml:718` (the claim-stamp contract) and `specs/common/configuration.yaml:221-222`
+  (the declared configuration of the admin stamp path). ⚠️ **CORRECTED**: the RIDER `auth_ref`
+  projection column and the RESTAURANT / RESTAURANT_ACCOUNT mapping facts used to be listed here as
+  owed by this ruling. They are not — they belong to **STAFF-AUTH**
+  ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)), which must be answered
+  first, because a mapping needs a subject and those roles have none. None of this is touched by a
+  records-only change.
+- **The write-side guard is untouched by this ruling** (Correction 3), and narrowing
+  `approveRefund`'s role set is a **founder decision** in its own right, deliberately not taken
+  here.
 
 ## Consulted (ADR-20260812-143619)
 
@@ -219,3 +294,19 @@ say on this ruling is recorded as such, and **no lens output is legal advice or 
   sign-out.
 - **business-specialist** — nothing in this lens beyond the timing argument already in the decision:
   doing it before any pilot costs nobody anything; doing it after costs every user a re-auth.
+
+**Appended for the 2026-08-18 correction** (the run that rewrote the present-state section; the
+ruling itself was not reopened, so the roster was not re-consulted):
+
+- **architect** — measured the premise this record had stated and found it wrong in three places:
+  the provider holds **one** business identifier, not four
+  (`crates/infrastructure/src/integrations/supabase_auth.rs:424-433`); the three other claim fields
+  are read by the verifier and **fed by nothing** (`crates/server/src/auth.rs:311-333`, bound at
+  `:207`/`:211`/`:216`, populated only in that file's tests); and `Identity::Unbound` **does not
+  deny on the write path** (`auth.rs:251` returns the declared role;
+  `crates/server/src/graphql/generated/mutation.rs:6166` guards `approveRefund` on role alone). The
+  finding that reshapes the chunk is the one underneath all three: **three of the four roles have no
+  authentication operation anywhere in the DSL**, so their "missing mapping fact" was never identity
+  plumbing — it is staff onboarding, and it belongs to the founder
+  ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639), register row
+  **STAFF-AUTH**).
