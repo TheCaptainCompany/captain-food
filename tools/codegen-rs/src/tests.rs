@@ -9438,23 +9438,39 @@ mod security_ddl_fence {
                 .unwrap_or_else(|e| panic!("read migrations/{name}: {e}"));
 
             // ── the converting arm: the cutover migration, whatever timestamp it is given ────────
+            // EITHER artifact is admissible, because the permissive one ships FIRST
+            // (PROP-20260818-010343 §11.2) and the enforcing one is the separate tightening step.
+            // Both come off one emitter, so naming both here is not a loophole: it is the same
+            // bytes-versus-bytes assertion against a two-element set.
             if name.ends_with("_security.sql") {
-                let generated = root.join("specs/generated/security.generated.sql");
-                let want = std::fs::read_to_string(&generated).unwrap_or_else(|e| {
-                    panic!(
-                        "migrations/{name} exists but {} does not ({e}) -- the cutover migration is \
-                         GENERATED, never hand-written",
-                        generated.display()
-                    )
-                });
-                assert_eq!(
-                    body, want,
-                    "migrations/{name} is not byte-identical to specs/generated/security.generated.sql.\n\
-                     Fix: re-run `make generate` and copy the artifact verbatim; never edit the \
+                const ARTIFACTS: [&str; 2] = [
+                    "specs/generated/security.permissive.generated.sql",
+                    "specs/generated/security.generated.sql",
+                ];
+                let mut matched = None;
+                for rel in ARTIFACTS {
+                    let path = root.join(rel);
+                    let want = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                        panic!(
+                            "migrations/{name} exists but {} does not ({e}) -- the cutover \
+                             migration is GENERATED, never hand-written",
+                            path.display()
+                        )
+                    });
+                    if body == want {
+                        matched = Some(rel);
+                    }
+                }
+                assert!(
+                    matched.is_some(),
+                    "migrations/{name} is byte-identical to NEITHER generated security artifact \
+                     ({ARTIFACTS:?}).\n\
+                     Fix: re-run `make generate` and copy one of them verbatim; never edit the \
                      migration.\n\
-                     Why: the artifact is what the RLS matrix suite proves. A migration that drifts \
-                     from it ships UNPROVEN policies to a real database, and a policy is subtractive \
-                     on reads -- ADR-0043's `redeploy the previous app` does not undo it (#637)."
+                     Why: the artifacts are what the RLS matrix suite proves. A migration that \
+                     drifts from them ships UNPROVEN policies to a real database, and a policy is \
+                     subtractive on reads -- ADR-0043's `redeploy the previous app` does not undo \
+                     it (#637)."
                 );
                 checked_cutover = true;
                 continue;

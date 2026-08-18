@@ -119,6 +119,19 @@ async fn reset_schema(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("recreate the public schema");
+    apply_migration_chain(pool).await;
+}
+
+/// Replay the real migration chain onto an ALREADY-EMPTY database, without dropping anything.
+///
+/// The one caller is `tests/rls_matrix.rs` (#638), which builds its own throwaway databases — one
+/// per security mode — because `DROP POLICY` and `ALTER TABLE … FORCE` take `ACCESS EXCLUSIVE`, so
+/// the two modes must not be a time-ordered mutation of one database, and because roles and
+/// database-level grants survive `reset_schema` into every later suite sharing CI's database.
+/// It replays the SAME embedded chain as [`reset_schema`], so a suite that builds its own database
+/// still runs against exactly what production runs against.
+#[allow(dead_code)] // used by tests/rls_matrix.rs; every other includer of this file uses TestDb only
+pub(crate) async fn apply_migration_chain(pool: &PgPool) {
     for (name, sql) in MIGRATIONS {
         sqlx::raw_sql(sql)
             .execute(pool)

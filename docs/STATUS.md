@@ -2,6 +2,30 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔐 **2026-08-18 — GENERATED SECURITY SQL EXISTS, APPLIED TO NO DATABASE, SINCE 2026-08-18**
+> ([#638](https://github.com/TheCaptainCompany/captain-food/issues/638) chunk 1). This line has a
+> **visible age on purpose**: if it is still here in six weeks the chunk failed, and it will be
+> legible. The flip event is the **local-acceptance walk**
+> ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556), ADR-20260817-105844) — a
+> dated, local, near thing somebody is already building — **not** the production cutover, which is a
+> cluster that does not exist and a suspension nobody has scheduled lifting.
+>
+> `specs/generated/security.{,permissive.}generated.sql` — two artifacts off one emitter
+> (`tools/codegen-rs/src/emit/security.rs`), one guarded table (`OrderConversation`, picked because
+> it has **no member-bearing column**, so the predicate cannot be short-circuited past
+> `ScopeMembership`) plus the policy-bearing membership index. **Nothing entered `migrations/`**, and
+> that is mechanical, not prose: `tools/codegen-rs/src/tests.rs::security_ddl_fence` refuses
+> `ROW LEVEL SECURITY` / `CREATE POLICY` / `CREATE ROLE` in the deployed chain and converts at the
+> walk with no edit. `crates/infrastructure/tests/rls_matrix.rs` applies the artifacts to its own
+> throwaway databases (one per mode) and proves the matrix: 2 policied personas × 5 probes, a rider
+> default-deny arm, the projector's negative-then-positive write arms, and the two modes compared as
+> result sets. **Six semantic mutations seen red**, and two are kept as permanent tests — the
+> GUC-shaped policy that lets a rider read the customer's thread, and the inherited persona grant
+> that hands one login role the union. Decision:
+> [ADR-20260818-171500](adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)
+> — `mode:` gates the whole per-table subtractive surface, **including the owner's write policy**.
+> No `specs/**` source changed (`mode:` is an emitter parameter, not yet a DSL key), so no SPEC-LOG row.
+
 > 🗂️ **2026-08-18 — RECORDS: the founder's own rationale for database-level security, plus the two
 > register rows owed since the corrupted run** (Records only: `docs/**` — no `specs/**`, no
 > `crates/**`, so no SPEC-LOG row and no regeneration.)

@@ -166,3 +166,50 @@ Do **not** add a workflow-level `grep 'test result: ok'` step: it lives in YAML,
 ## Findings
 
 _(Lenses and the executor append here.)_
+
+### Executor, 2026-08-18 — delivered on `638-rls-authorization-matrix`
+
+**Base**: the card's `779bb76` is stale but sound — `origin/main` was `42bbbe4`, whose only commit
+ahead of `779bb76` is the card itself. Branched from `42bbbe4`.
+
+**Two of the card's lens findings needed a correction to build against, and one turned out N/A.**
+
+1. **M2 and `farley`'s fence #1 are in direct tension, and the card does not resolve it.** M2 wants
+   *"drop `FORCE` → the owner reads every row instead of none"*, which requires the owner to hold **no**
+   policy. Fence #1 requires the write policy to cover today's writer identity — which **is** the
+   owner. Both cannot hold in one artifact. Resolved by making the owner's `FOR ALL` policy
+   **mode-gated**: present in `permissive`, absent in `enforcing`
+   ([ADR-20260818-171500](../adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)).
+   Permissive is then genuinely additive for today's writer (measured: owner `INSERT 1`, `UPDATE 5`),
+   and enforcing is where M2 goes red (measured: 4 rows / `UPDATE 4` without `FORCE`, 0 / `UPDATE 0`
+   with it; a persona reads 2 either way, which is exactly why the mutation had to be aimed at the
+   owner). Had I taken either lens alone, this chunk would have shipped a green matrix over a broken
+   configuration in one direction or a `FORCE` mutation that cannot go red in the other.
+2. **M3b is not applicable and that is a finding, not a gap.** Chunk 1 emits no persona views (A-6 is
+   sequenced separately), so there is no join-first access path to degrade. Nothing was skipped.
+3. **The card's "one generated file" and "`mode:` produces two files" read as a contradiction.**
+   Resolved as *one file per mode* — `security.generated.sql` and `security.permissive.generated.sql`,
+   each carrying every statement in apply order. §0's fence accepts **either** as the cutover
+   migration, because permissive is what ships first.
+4. **The rider's zero needed a non-zero to be paired with, and the fixture as drafted had none.**
+   Added a real `(ORDER, O1, RIDER, RD1)` membership — the grant `DeliveryAcceptedByRider` actually
+   writes — plus a `scopemembership` self-row policy for the rider. The rider now sees its own
+   membership row and zero conversations in one assertion, which is the product decision the card
+   fences, stated executably. Also added a third decoy, `(ORDER, O4, CUSTOMER, R1)`, so probe 4 is
+   symmetric for `restaurant_role`; the card named only the customer-side decoy.
+
+**Two measurements that were not in anybody's lens and change the next chunk** — both now in
+`PROP-20260818-010343` §5 / ADR-20260818-171500:
+
+- **`ALTER ROLE … NOINHERIT` after a `GRANT` is a no-op on PG 16.** Inheritance for policy purposes is
+  per-grant (`pg_auth_members.inherit_option`), fixed at `GRANT` time. §5's whole wall therefore
+  exists only if A-1 emits `WITH INHERIT FALSE` explicitly. M4 came out red as `dba` predicted
+  ({O1,O3,O4} where each persona alone reads 2) **and** the natural fix does not work.
+- **`has_table_privilege(role, table, 'SELECT')` is FALSE for a role holding only column grants.**
+  Under enforcing that is every persona, so a privilege gate written the obvious way reports "no
+  persona can read anything" over a correct artifact. Use `has_any_column_privilege`.
+
+**Not done, reported rather than fixed** (fence: *"every other defect becomes a reported issue"*):
+gates G-2, G-4, G-5 and G-7 of §10 are unbuilt; artifact A-6 and A-7 are unbuilt; the emitter's
+guarded-table set and the withheld-column map are declared constants in `emit/security.rs` rather than
+DSL keys, and both fail loudly at `make generate` if the DSL moves under them.
