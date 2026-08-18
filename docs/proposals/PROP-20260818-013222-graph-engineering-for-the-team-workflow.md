@@ -1,6 +1,8 @@
 # PROP-20260818-013222 — Graph engineering for the team workflow: a template, a validator, and the document as the gate's doc comment
 
-- **Status**: Proposed
+- **Status**: **Proposed — DEFERRED by founder decision, 2026-08-18. NOT dispatchable.**
+  Resume condition: the work already in flight is finished. Verbatim: *"Thanks for the plan we will
+  not apply it yet we will finish what we have started first."*
 - **Date**: 2026-08-18
 - **Tracking issue**: **TO BE CREATED — the number below is provisional and UNVERIFIED.**
   [#643 "Formalise the mob workflow as explicit graph engineering"](https://github.com/TheCaptainCompany/captain-food/issues/643)
@@ -16,6 +18,26 @@
   2026-08-18 and each one names the command that produced it.
 - **Decision that ordered it**: founder, 2026-08-18, verbatim — *"If we put in place the graph
   engineering we will improve the efficiency so make the plan now."*
+
+## Why this is deferred, and why both decisions are recorded
+
+The `holub` lens, asked whether this was worth doing now, answered: **not until one order flows end
+to end.** Its argument was that the walk is a single leg from the first end-to-end evidence this
+product has ever produced, that process artifacts already outrun code here by more than two to one,
+and that all four defects the mob caught that night were caught at the **briefing** — a rule that
+already exists and already binds — not by knowing which state a work item occupied. Real yield,
+wrong attribution.
+
+The founder decided to proceed anyway: *"If we put in place the graph engineering we will improve
+the efficiency so make the plan now."* This document is the result of that ruling.
+
+He then decided, on reading it, to **finish the started work first**. So the plan stands, complete
+and costed, and does not start.
+
+Both decisions are kept because the sequence is the useful record: a lens measured against the work,
+the founder overrode it, the plan was built, and the plan itself made the cost visible enough to
+change the timing. Erasing either half would leave a document that looks like it was never
+questioned.
 
 > **Screen mockups do not apply and are deliberately omitted.** The
 > [proposals README](README.md) requires one mockup per use case; this proposal changes a *process*
