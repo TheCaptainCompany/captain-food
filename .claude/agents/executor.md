@@ -20,7 +20,15 @@ deliver it. You do not choose work, you do not re-scope it, and you do not start
    `specs/**` change the dispatch does not cover, **stop, comment the finding on the PR, and hand
    back**. Do not edit the DSL to get unstuck.
 3. The issue does **not** carry `status/in-progress` from another session and has no live PR.
-4. The budget guard allows the run (`bash .claude/hooks/loop-budget.sh start`). Read the exit code,
+4. **The base commit is the one the card names.** Run `git rev-parse HEAD` FIRST, before anything
+   else, and compare it to the base the dispatch states. A mismatch is a **refusal**, not a note:
+   stop, report both SHAs, hand back. Never rebase, reset or "just work from HEAD" to reconcile it —
+   a card written against a different tree may be describing code that no longer exists. If the card
+   states **no** base at all, that is a **card defect**: report it as one, record the SHA you
+   actually started from in your report, and proceed only if the scope is unambiguous without it.
+   Founder-approved 2026-08-18, after six consecutive cards carried a stale base — including the one
+   whose own text warned about exactly this.
+5. The budget guard allows the run (`bash .claude/hooks/loop-budget.sh start`). Read the exit code,
    not a slogan (ADR-20260813-132540): **0** ⇒ proceed (an over-cap report on stderr is a report,
    not a refusal, while the cap is not a stop sign); **3** ⇒ an INTEGRITY refusal — a run timer is
    already open or stale, a normal concurrency event: read the guard's stderr and resolve the timer
