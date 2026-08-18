@@ -92,8 +92,21 @@ that trips.
 Constraints the mob banked at the briefing and that the dispatch card must carry:
 
 - The binding ships **three-valued** — `OFF / OBSERVE / ENFORCE` — with the mismatch metric declared
-  in `specs/observability.yaml` **before** the enforcing code lands, and the flag read per request so
-  rollback is a flip and not a redeploy (gate-then-stabilize).
+  in `specs/observability.yaml` **before** the enforcing code lands, and the mode injected as request
+  data rather than read from a process global (gate-then-stabilize).
+
+  > ⚠️ **CORRECTED 2026-08-18, same day, while the chunk-1 card was being written.** This clause first
+  > read *"the flag read per request so rollback is a flip and not a redeploy"*. The second half
+  > over-promises: **no runtime settings source exists in this system.** Config is resolved at
+  > startup, and `specs/common/configuration.yaml` documents the precedence *"environment variable >
+  > baked profile value > `default`"* with the stated intent that the env var gives an operator a
+  > seconds-fast override during an incident. So flipping the mode is **an env override plus a pod
+  > restart** — no rebuild, no image, no CI, no migration, but not a live toggle either. The
+  > *per-request* half stands and is load-bearing for a different reason: the mode must be injected
+  > as request data on **every transport**, because a process global makes the two-modes-differ test
+  > unwritable and because injecting on POST only leaves the WebSocket at the fail-closed default,
+  > so the `OFF` rollback rung would not cover one transport. A genuinely live toggle on the money
+  > path is a separate decision nobody has taken; if it is wanted, it is a `DECISIONS.md` row.
 - `Identity::Unbound` **denies** on the money path and never stamps a role into
   `domain_events.user_id` / `user_type`. A false author in the immutable log is worse than the authz
   hole it hides.
