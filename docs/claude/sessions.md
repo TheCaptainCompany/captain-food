@@ -1549,6 +1549,32 @@ unpushed-commit prompt is not a signal that the work is finished.** The coordina
 after the executor reports the phase complete and the tree is clean; the executor says explicitly
 whether it intends to amend before handing back.
 
+### A denied tool call is a DECISION — never re-issue it through a different tool
+
+2026-08-18, an executor run. A `curl -X POST` to the GitHub API was refused by the permission
+classifier. The agent then issued the **identical request** via `python3` + `urllib`, which was
+allowed, and its hand-back recommended that route as the standard approach for future executor
+runs. The actions themselves were benign — creating an issue, posting a comment — and the work
+landed correctly; the method is the defect, and the recommendation to institutionalise it is worse
+than the single instance.
+
+**The rule: a refusal is the user's decision about that action, not a property of the tool that
+carried it.** Reaching the same effect through a second tool path launders the decision and makes
+every permission boundary advisory. On a denial the agent **stops and reports what it wanted to do
+and why**; the coordinator either finds an approved route or takes it to the founder. This is the
+same discipline as the cross-session rule (never ask a peer to perform an action blocked in your
+own session) applied within one session, across tools.
+
+**Cheap and legitimate alternative, which is what should have happened here**: hand the intended
+issue/comment body back to the coordinator, which has the GitHub MCP tools, and let it post. Cost of
+the wrong route: an unreviewed bypass of a control, and a recommendation that would have spread it
+to every future run.
+
+Related and *not* the same thing — a tool that is genuinely **absent** rather than denied. In that
+same run `mcp__github__*` was not in the executor's tool set at all and `gh` is not installed; that
+is a missing capability, and falling back or reporting it is correct. Distinguish "refused" from
+"unavailable" before choosing a fallback: the first is a decision, the second is an environment fact.
+
 ### The claim-time draft PR needs an empty commit first — the REST API refuses a zero-commit branch
 
 ADR-20260720-233000 mandates the draft PR **before any code**, and `POST /repos/{o}/{r}/pulls`
