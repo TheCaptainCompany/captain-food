@@ -2,6 +2,60 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🕸️ **2026-08-18 — FOUNDER RULING: BUILD THE GRAPH ENGINEERING. Plan committed as
+> [PROP-20260818-013222](proposals/PROP-20260818-013222-graph-engineering-for-the-team-workflow.md)**
+> (Records only: `docs/**` — no `specs/**`, no `crates/**`, so no SPEC-LOG row and no regeneration.
+> Nothing is implemented; this is the brief.)
+>
+> *"If we put in place the graph engineering we will improve the efficiency so make the plan now."*
+> **Headline: a template and a validator, with the document as the gate's doc comment** — not a
+> workflow engine, not a state file, not prose. **The evidence, re-derived at `8494e67`**:
+> `CLAUDE.md:120` tells every session *"gates are hooks in `.claude/settings.json`"*, and that file
+> contains **zero** hooks — `grep -rln '"hooks"' .claude/` matches nothing, anywhere. A load-bearing
+> claim in the resident index, false, and **nothing ever went red**. A prose graph fails open; this
+> repo has the proof, so every claim the graph makes is the doc comment on an executable rule.
+> **Change set**: `docs/dispatch/TEMPLATE.md` (the 9 cards spell the base-SHA field **three** ways —
+> `**Read at**` ×4, `- **Base**` ×5, `- **Card SHA stamp**` ×1) with a **13-row briefing table where
+> silence is one token**, so "briefed 7 of 13" becomes a missing row in a diff ·
+> `tools/codegen-rs/src/validate/dispatch.rs`, five rules modelled on `proposals.rs`, inside the
+> already-blocking `make validate`, **no new runtime dependency** · a dead-man's-switch workflow
+> shaped like `stale-claim-reaper.yml`, firing on **absence** · an executor preflight line
+> (**proposed only** — `.claude/agents/*.md` commits need in-conversation approval,
+> `docs/claude/sessions.md:1638`) · `docs/claude/team-graph.md` as the derivation, held to three
+> constraints so it is not a fifth authority. **State model: 13 collapse to 8** —
+> `intake → briefing/dispatch → execution-checkpoint* → independent-review → ci-gate → merged`, plus
+> `blocked`, `founder-decision-required` (renamed: in this codebase a *customer* orders food),
+> `stopped`; `repair`/`replan` are re-entries a fold counts, `split` is an edge,
+> `merge-supervision` is the attribute `auto_merge_enabled`. **The finding to read**: of 11 edges,
+> **5 are machine-decidable and 6 are agent assertions** — drawn differently, always.
+> ⚠️ **`done` must not mean merged** (`farley`): the terminal state is `merged`, and `deployed` is
+> declared **out of the graph with a named trigger** — `deploy.yml` is `workflow_dispatch`-only and
+> production is suspended (§45 PROD-1), so a `deployed` state today would be one that never fires.
+> ⚠️ **Two candidate gates were killed by mutation-testing them** (`beck`): *"the base SHA exists"* is
+> green on all 9 cards **including the ones that were wrong** (verified — all 16 SHA refs resolve,
+> including `4077188`, which card #623 labels stale in its own header), and line-bounds checking is
+> green with an off-by-eight planted. What goes red is an **anchor token** beside each citation.
+> Rule earned: **a gate that cannot go red is worse than none, because it reads as coverage** — every
+> rule ships with a planted-defect test. ⚠️ **The routing matrix is REFUSED as a matrix**: it already
+> exists as three lines in [ADR-20260816-134352](adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md);
+> lenses have no GitHub identity so CODEOWNERS cannot apply, and a check over a PR body promotes that
+> body to state. Only a `category → roster-size` floor is encoded. ⚠️ **The authored state is
+> append-only, one file per transition**, like `.claude/loop-budget/<ISO-week>/` — never a
+> `graph-state.json`: that shape already cost this repo **seven failures in one day**
+> ([ADR-20260812-011057](adr/ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md)).
+> **The graph never drives anything** — auto-labelling, auto-merging or re-ranking would make it a
+> controller over state it cannot see, and is a recorded reversal.
+> 🗣️ **Dissent preserved, not relitigated** (`holub`): wait until one order flows end to end —
+> process artifacts outrun code **2.4:1** (102 commits in 14 days, 19 touching `crates/**`, 46
+> docs-only). The founder decided otherwise; the sequencing answers it by making phases 3–5
+> independently abandonable.
+> ❓ **Open, founder decision required — GRAPH-SPEC-1**: the brief carried *"specs/ remains read-only
+> in autonomous mode"*, which is verbatim the rule
+> [ADR-20260810-221840](adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)
+> **supersedes** (Accepted; lifted after eight issues were measured blocked). **The plan proceeds with
+> `specs/**` NOT re-frozen** and raises it as a register row instead — a re-freeze is a decision
+> reversal deserving its own ADR, not a constraint inherited through an implementation brief.
+
 > 🔐 **2026-08-18 — THREE FOUNDER RULINGS: THE TOKEN CARRIES NO BUSINESS IDENTIFIER, RLS LANDS AT THE
 > CUTOVER ON THE EMPTY DATABASE, AND THE SETTLEMENT READ IS BACK IN SCOPE**
 > (Records only: `docs/**` — no `specs/**`, no `crates/**`, so no SPEC-LOG row and no regeneration.
