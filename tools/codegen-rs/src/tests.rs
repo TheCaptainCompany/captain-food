@@ -6409,6 +6409,65 @@ Catalog:
         assert!(hit.message.contains("5 cell(s)") && hit.message.contains("declares 4"), "{}", hit.message);
     }
 
+    // ─── §13c — the register's section numbers are cited anchors (ADR-20260818-193000) ───────────
+
+    fn section_numbers(md: &str) -> Vec<Issue> {
+        validate_register_section_numbers(&[("docs/proposals/DECISIONS.md".to_string(), md.to_string())])
+    }
+
+    /// The defect that earned the rule, reproduced: the register carried two `## 37.` and two
+    /// `## 42.` for four days while four external records cited `DECISIONS §42` meaning the first
+    /// and one meaning the second. Both headings render fine, so no existing gate could see it.
+    /// Seen red before the rule existed.
+    #[test]
+    fn a_duplicate_register_section_number_is_an_error() {
+        let dup = "## 41. First\n\ntext\n\n## 42. A process manager is a write-side component\n\ntext\n\n## 43. Third\n\n## 42. Reader-set derivation carry-forwards\n";
+        let issues = section_numbers(dup);
+        assert_eq!(hygiene_rules(&issues), vec!["register-section-number-duplicated"]);
+        assert_eq!(table_locations(&issues), vec!["docs/proposals/DECISIONS.md:11"], "the SECOND use is the finding");
+        assert!(issues[0].level == Level::Error, "a duplicated cited anchor must fail the gate, not warn");
+        assert!(
+            issues[0].message.contains("already used at line 5")
+                && issues[0].message.contains("A process manager is a write-side component"),
+            "the message must name where the number was first used, so the fix is mechanical: {}",
+            issues[0].message
+        );
+    }
+
+    /// Three things the rule must NOT fire on, each a real shape in the register: unnumbered
+    /// sections, `###` sub-sections that repeat a parent's number (the committed `### 27bis`
+    /// idiom), and a fenced code block that happens to contain a heading-shaped line.
+    #[test]
+    fn the_section_number_rule_ignores_unnumbered_sub_and_fenced_headings() {
+        let ok = "## How to decide\n\n## 1. First\n\n### 27bis. A sub-section\n\n## 2. Second\n\n```\n## 1. not a heading\n```\n\n## Maintenance\n";
+        let issues = section_numbers(ok);
+        assert!(
+            issues.is_empty(),
+            "§13c must be silent on unnumbered/sub/fenced headings:\n{}",
+            issues.iter().map(|i| format!("{} at {}", i.rule, i.location)).collect::<Vec<_>>().join("\n")
+        );
+        // Only DECISIONS.md is in scope — a proposal may number sections freely.
+        let prop = validate_register_section_numbers(&[(
+            "docs/proposals/PROP-20260101-000000-x.md".to_string(),
+            "## 1. a\n\n## 1. b\n".to_string(),
+        )]);
+        assert!(prop.is_empty(), "the rule is scoped to the register, not to proposals");
+    }
+
+    /// The committed register is clean, and every number 1..=N is present exactly once. Asserted
+    /// with the joined findings rather than a bare `is_empty()`, the same discipline as §13b.
+    #[test]
+    fn the_real_register_has_unique_section_numbers() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_table_files(&root);
+        assert!(files.iter().any(|(p, _)| p.ends_with("DECISIONS.md")), "the register must be in the corpus");
+        let findings: Vec<String> = validate_register_section_numbers(&files)
+            .iter()
+            .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
+            .collect();
+        assert!(findings.is_empty(), "§13c must be silent on the committed corpus:\n{}", findings.join("\n"));
+    }
+
     #[test]
     fn actor_clients_cover_every_mailbox_actor() {
         // #284 slice 1 (PROP-20260728-152752 §2.1): the typed-client surface must span the SAME

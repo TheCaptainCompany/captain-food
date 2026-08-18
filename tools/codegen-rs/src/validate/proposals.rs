@@ -341,3 +341,72 @@ pub(crate) fn validate_markdown_tables(files: &[(String, String)]) -> Vec<Issue>
     issues
 }
 
+
+// ─── §13c — the register's section numbers are anchors (ADR-20260818-193000) ────────────────────
+//
+// `docs/proposals/DECISIONS.md` numbers its sections `## NN. Title`, and other records cite them as
+// `DECISIONS §NN` — 20 such citations across docs/** and .claude/** at the time of writing. A
+// duplicate number therefore makes a citation resolve to two different sections, which is a broken
+// reference no other gate can see: markdown has no compiler, both headings render fine, and the
+// anchors differ only in their title text. It happened twice before this rule existed (two `§37`,
+// two `§42`) and survived several reconciliation runs unnoticed.
+//
+// Scope: the register only. Proposals do not use cited section numbers this way.
+
+/// §13c: no two `## NN.` sections of the decision register may carry the same number. Pure over
+/// `(path, content)` so tests can feed fixture strings; `main` feeds the same corpus as §13b.
+pub(crate) fn validate_register_section_numbers(files: &[(String, String)]) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        if !path.ends_with("DECISIONS.md") {
+            continue;
+        }
+        // number -> (line, title) of the FIRST section carrying it
+        let mut first: std::collections::HashMap<String, (usize, String)> = std::collections::HashMap::new();
+        let mut in_fence = false;
+        for (idx, line) in content.lines().enumerate() {
+            if code_fence(line).is_some() {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
+            let Some(rest) = line.strip_prefix("## ") else {
+                continue;
+            };
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() || !rest[digits.len()..].starts_with('.') {
+                continue; // an unnumbered section ("How to decide", "Maintenance")
+            }
+            let title = rest[digits.len() + 1..].trim().to_string();
+            match first.get(&digits) {
+                None => {
+                    first.insert(digits, (idx + 1, title));
+                }
+                Some((first_line, first_title)) => issues.push(err(
+                    "register-section-number-duplicated",
+                    format!("{}:{}", path, idx + 1),
+                    format!(
+                        "section number §{} is already used at line {} (\"{}\"). Other records cite this register as `DECISIONS §{}`, so a duplicate makes that citation resolve to two different sections — a broken reference nothing else can detect, because both headings render fine. Give this section the next unused number and grep `docs/**` and `.claude/**` for `DECISIONS §{}` in the same change (ADR-20260818-193000).",
+                        digits,
+                        first_line,
+                        truncate_title(first_title),
+                        digits,
+                        digits
+                    ),
+                )),
+            }
+        }
+    }
+    issues
+}
+
+/// Keep the "already used at" hint readable — register titles run to 200+ characters.
+fn truncate_title(title: &str) -> String {
+    let mut out: String = title.chars().take(60).collect();
+    if title.chars().count() > 60 {
+        out.push('…');
+    }
+    out
+}

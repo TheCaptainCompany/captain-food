@@ -80,6 +80,10 @@ fn main() {
     // the same gate. GFM pads a short row and drops the excess of a long one without a murmur, so
     // one stray `|` silently reshapes a register row.
     issues.extend(validate_markdown_tables(&load_decision_table_files(&repo_root(&specs))));
+    // ─── §13c — the register's section numbers are anchors other records cite by number
+    // (ADR-20260818-193000). A duplicate `## NN.` makes `DECISIONS §NN` resolve to two sections;
+    // markdown has no compiler, so both render fine and nothing else can see it.
+    issues.extend(validate_register_section_numbers(&load_decision_table_files(&repo_root(&specs))));
     // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
     // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
     // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads

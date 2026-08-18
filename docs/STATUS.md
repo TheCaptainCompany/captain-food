@@ -2,6 +2,40 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-18 — THE DECISION REGISTER IS A QUEUE AGAIN: 579 KB → 216 KB, and four founder
+> rulings that never reached it are now in it**
+> ([ADR-20260818-193000](adr/ADR-20260818-193000-the-register-is-a-queue-and-a-closed-row-collapses-to-its-record.md)).
+> The founder asked whether [DECISIONS](proposals/DECISIONS.md) is still relevant, whether it can be
+> reduced, and what is still open. It is relevant — the `architect` throttles dispatch on it and 83
+> files reference it — but it had drifted from queue to archive: **1383 of 2540 lines sat in sections
+> with no open row**, the reconciliation header alone was **58.7 KB** (three stacked "Last
+> reconciled" blocks, one a single 33 KB line), and the ~24 live rows ran from line 971 to 2532.
+>
+> **The finding that mattered is staleness, not size.** Two founder-answer commits — `7bdd808`
+> (ADR-20260818-094500) and `10866d6` (ADR-20260818-101500) — landed *after* the last reconciliation
+> and never reached the page, so **STAFF-AUTH was still shown 🟠 OPEN nine hours after it was
+> answered**. A queue that misreports what is owed misinforms every session that reads it.
+>
+> **Landed**: an open-queue index table at the top (every live row, one line, linked to its section) ·
+> closed rows collapsed to their outcome + the ADR that holds the reasoning · **every open row
+> preserved BYTE-EXACT**, lifted by line number rather than retyped · the two duplicate section
+> numbers resolved (**Strix §37 → §47**, **Reader-set derivation §42 → §48**; this file's one citation
+> updated) · §16 and §18 no longer read `SUPERSEDED`/`DECIDED` above tables whose every answer cell
+> says `_(open)_` · new **§49** records the three rulings of 2026-08-18 and the cleared queue.
+>
+> **New gate**: `register_section_numbers_are_unique` (§13c, `tools/codegen-rs`) — a duplicate
+> `## NN.` is an **ERROR**. Seen red on the real register as it stood this morning (both duplicates,
+> lines 1842 and 2353), green after. Markdown has no compiler, so a cited anchor resolving to two
+> sections was invisible to every other gate.
+>
+> **Still open — one new founder-owed row**: **STAFF-AUTH-AM** (§49). Ruling A named the rider
+> (phone/SMS) and the restaurant (web, then email link); **account managers were not mentioned and
+> are not ruled**, so one of the four roles still has no authentication path — and it is the one role
+> for which ruling B's *close the hole by binding* has nothing to bind to. Lean: (a), the restaurant's
+> email-link mechanism with a different roster; (c) — no account-manager sign-in in V0 — is the
+> honest answer if they are not a V0 persona at all.
+
+
 > ✅ **2026-08-18 — DECISION QUEUE CLEARED: the restaurant signs in by EMAIL LINK, and #638 FREEZES
 > at chunk 1**
 > ([ADR-20260818-101500](adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md)).
@@ -1474,7 +1508,7 @@
 > to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode` (the code's own comment) —
 > found by the third-look review, and it is the grammar counterexample RDR-1 wants: `mode` exists on
 > NO projection table, so this read is **inexpressible** under the borrowed-projection-shape rule —
-> stronger [DECISIONS §42 RDR-1](proposals/DECISIONS.md) option-B evidence than the `balance_cents`
+> stronger [DECISIONS §48 RDR-1](proposals/DECISIONS.md) option-B evidence than the `balance_cents`
 > hole (practical grant risk today nil: the leg's Restaurant `EVENT_STREAM` step already grants
 > `captain_write`). **The derivation that consumes `source:` is NOT in this change**: nothing
 > reads the key yet, so `make generate` moved generated doc comments only.

@@ -7,39 +7,59 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-08-18 (founder rulings of the night of 2026-08-17/18 — THREE RULINGS; new §46)**. **IDENT-1: no business info is stored inside the identity provider** — a token carries the auth subject and the `sub` → domain-id mapping is resolved from our OVH Postgres. Asked V0 or post-first-order, the founder answered **"v0"**, so it sequences **before** the enforcement seam; it **reverses the read-scope half of #433/CARD-11**, it is a **MIGRATION** (tokens in the wild carry `captain_food.customer_id` today) whose phase order is recorded before it lands, and its price is stated rather than softened — `read_scope` stops being pure and the enforcement slice's *zero I/O at peak* claim dies with it. ⚠️ **Premise corrected 2026-08-18** (the ruling is unchanged): only **one** business identifier is stored in the provider, and **three of the four roles have no authentication path at all** — new open row **STAFF-AUTH**. **RLS-SEQ: database-level security lands at the CloudNativePG cutover, on the EMPTY database, starting at `OrderConversation` and NOT at `OrderTracking`** — three of the four drafted tables fail for measured reasons, the sharpest being that a policy on `OrderTracking` turns the pre-capture settlement read into a **silent** `HookOutcome::Skip` (RLS filters rows, it does not raise): food delivered, money never collected, reported green. **§32 STO-9 comes back into scope** with the same ruling and stays OPEN. Records: [ADR-20260818-004646](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) · [ADR-20260818-004647](../adr/ADR-20260818-004647-database-level-security-lands-at-the-cutover-and-the-settlement-read-returns-to-scope.md). Also closed: **AUTHZ-LOCUS** (PROP-20260726-171500 §D1 answered against its own recommendation) and **AUTHZ-GRAMMAR** (the `authorization:` block **declined** as new grammar; finish the `requires:` emitter, completeness keyed on `actors.yaml receives[]` — [#636](https://github.com/TheCaptainCompany/captain-food/issues/636)). The three externally-authored ADRs `ADR-20260817-232744/232745/232746` are **HELD, not deposited**, until corrected. Previously: **2026-08-17 (founder answer sheet — SIX ROWS ANSWERED IN ONE SITTING; new §45)**. The founder answered the whole decision queue. **PROD-1: production STAYS SUSPENDED**, as a deliberate recorded state — and the defect underneath it is not the 503 but that the nightly `prod-smoke` has been **RED for 19 consecutive scheduled runs** (last green **2026-07-29**), of which the billing suspension explains only 13, with **no record treating it as a broken gate**. **SEQ-1: the walk goes FIRST, on ONE database** — the acceptance criterion is unchanged as what *certifies* (local, eleven databases, full enforcement) and simply stops **gating** the first end-to-end reading; this resolves the 2026-08-13 ↔ 2026-08-14 contradiction in favour of the 2026-08-13 sequence and does **not** overturn final-vision-first, because the final step **cannot be built** — the split band is blocked on STO-7, STO-8, STO-9 (each independently), with STO-10 parked and RDR-1 open upstream of the grant emitter. **MOB-ANTECEDENT (§44 MOB-COST-1a, CLOSED): the roster reversion is STRUCK** and replaced by *a dispatch card may not state a derived number without naming its antecedents; any bare number is marked `UNVERIFIED input`* — banking and the verification condition are untouched, and the named residue is that a genuine roster-width MISS now has no automatic consequence and returns to the founder. **REV-1: `claude-review` comes OUT of required checks** — a knowingly-given-up mechanical guarantee whose compensating control is the mandatory independent reviewer pass; ⚠️ **not executed** (403 from the session's agent proxy on the ruleset write path — an egress block, not a GitHub denial), so it is an open action on [#593](https://github.com/TheCaptainCompany/captain-food/issues/593). **STO-10-PARK: parked until the walk lands**, reported blocked, with the #513 CONNECT prohibition intact. **IDOR-DEADLINE (§39 IDOR-1): the deadline is now the EARLIEST OF** a second restaurant credential outside the team *including demos and pilots* · a rider credential to a non-team person · the first real customer order — enacted as the two lenses proposed, and **strictly tighter** than the wording it replaces. ⚠️ **New open row IDOR-DEADLINE-GAP**: all three triggers are team acts, while CUSTOMER signup is **self-service**, so *production restored with signup open* trips none of them — carried today only by PROD-1. Records: [ADR-20260817-105844](../adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md) · [ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md). Previously: **2026-08-17 (records-correction run — TWO ROWS WERE WRONG ABOUT THEIR OWN SUBJECT)**. **§39 IDOR-1 scope-corrected**: the row described a cross-tenant **write** IDOR on the order lifecycle; the real surface is **83 of 118 operations on both sides** — 76 of 86 mutations with no proven domain binding (**37 bindable** / **39 unbindable**, where *no payload field corresponds to the caller at all*, so removing ids from payloads does nothing) plus **7 unscoped read surfaces** ([#618](https://github.com/TheCaptainCompany/captain-food/issues/618)), two returning other tenants' rows **when called with no arguments**. `approveRefund`/`denyRefund` consult no identity anywhere. The *"cheaper because claims"* premise is corrected: the **write** side resolves identity by a **database lookup in the mailbox worker, only for `CUSTOMER`** — *"we already have the identity at the handler"* is **false today** for every other role. `external_tokens` is a flat shared list with **no per-partner identity** (present tense). **Verdict, AMBER status and deadline UNCHANGED**; the two-lens argument that the trigger binds one step too late (an IDOR needs two principals and the second credential exists at **onboarding**) is **recorded, not enacted**. Rationale for spending a session on it (`legal-specialist`): **a risk record that describes a smaller defect than the real one is weaker evidence than no record**, because it invites the question of how well the team knows its own system — correcting it restores the Art. 5(2) accountability asset. Obligation map: [BRIEF-20260816-idor-obligation-map](../legal/BRIEF-20260816-idor-obligation-map.md) (**not legal advice, not clearance**), whose two findings **survive the code fix** — free-text **Art. 9(1)** special-category prose needing an ordinary-case 9(2) basis, and **blast-radius unboundability** forcing worst-case notification. **§44 MOB-COST-1a attribution corrected**: the #608 miss was **not** caused by the narrowed checkpoint — the committed claim-time card (`6d00cb3`) says **`Briefing roster: WHOLE ROSTER`**, so the wrong arithmetic was in front of every lens; the card also does **not** contain the 50 s figure it was said to originate. **n=2** with #609, whose clean attribution `vernon` rejected as his own depth miss. The shared cause is **a coordinator-authored derived number consumed as established fact with nothing verifying it**. The founder's ruling is **untouched** — the HIGH-CONSEQUENCE reversion **stands**; the replacement (**a card may not state a derived number without naming its antecedents; any bare number is marked UNVERIFIED input**) is **recommended and PENDING FOUNDER**. Previously: **2026-08-14 (founder-directive run — "FOR THE PICKUP ORDER THE PAYMENT CAPTURED MUST HAPPEN WHEN THE ORDER IS PREPARED")** — the founder refined the COLLECTION capture trigger. **New §41 records CAP-READY (✅ DECIDED): a COLLECTION order captures at `OrderMarkedReady` (READY), not at `OrderDelivered` (pickup) — READY is collection's last controlled moment, so capture-at-ready protects against cook-then-no-show and is symmetric with capture-on-delivered for delivery.** Refines [ADR-20260808-195315 §1.2](../adr/ADR-20260808-195315-customer-brief-answers.md) and the just-shipped [#544/PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545); record [ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md) with a per-lens `Consulted:` block. **Business: HOLDS. Legal: DEFENSIBLE lawful prepayment, not a blocker** — but it sharpens CAP-3 (disclosure: charged at READY, before collection) and CAP-5 (VAT tax-point decoupled from possession for collection), recorded as a collection addendum in the counsel packet and as row **CAP-READY-LEGAL** (🟠 counsel-gated build constraints on the unbuilt receipt engine + checkout copy, NOT a decision blocker). Empty log → the per-service-type capture-trigger change is additive with no migration; it is a **fast-follow to #544** (issue text drafted in the run report, issue to be created). Previously: **2026-08-14 (L5-handback + write-authz IDOR register run)** — the L5 acceptance-walk
-executor ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /
-PR [#555](https://github.com/TheCaptainCompany/captain-food/pull/555)) correctly **stopped** on two real
-problems. This run re-verified the **cross-tenant write IDOR** on `main` and opened **§39 IDOR-1** — already
-designed by [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178) /
-[PROP-20260726-171500](PROP-20260726-171500-write-side-per-instance-authorization.md) (Status: **Proposed**,
-D1–D4 unanswered since **2026-07-26** and **never surfaced in this register**, ~19 days) — with the verdict
-**deadlined fast-follow / hard V0-launch blocker** (team-decidable, founder-informed). It also re-sequenced
-the acceptance program (**harness before L5**, ADR-20260813-191111 §5 + STATUS) and re-scoped L5b. Previously: **2026-08-14 (founder-delegation run — "YOU DON'T NEED ME FOR THAT" + "GO AHEAD TEAM!!")** — the founder pasted back the decision list with its recommendations and delegated the batch to the team. **Adopted on their recommendations: STRIX-1 (GO — single gated, sandboxed, bounded, dev-only run), STRIX-2 (bounded run with hard time + token caps), D8 (bootstrap-then-flip source), D9 (Uber is merchant-of-record — informational record only), D10 (post-V0, design the aggregator shape now), D11 (option 1 — either side in test ⇒ the ORDER is test, ticket unmistakably marked / off the live kitchen flow).** [PROP-20260814-000240](PROP-20260814-000240-strix-security-audit.md) → **Approved**, three Concerns checked. **D11's adoption UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257).** **LOSS-1 (§38) is DELIBERATELY KEPT OPEN / founder-flagged** — it was added after the delegated list and commits Captain to absorbing real money, so it is out of the delegation's explicit scope (architect verdict, in-row). **Operating-model signal**: this run extends the team's delegated authority (ADR-20260810-215503 already delegates backlog priority) to **this class of product decision** — going forward the team decides + informs on onboarding/aggregator/mixed-mode/security-tooling calls of this shape, rather than queueing them; genuine money-liability, external/legal and admin-gated matters stay founder-owned (LOSS-1 is the worked example). Authority governed by [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md). Previously: **2026-08-14 (records run — PR #545 CAPTURE-ON-DELIVERED FIVE-LENS REVIEW CARRY-FORWARDS)** — **new §38 holds one founder-owed row (LOSS-1, permanent-capture-failure loss allocation + operator runbook) and pointers to four team-recorded carry-forwards** from the [PR #545 "capture on delivered"](https://github.com/TheCaptainCompany/captain-food/pull/545) five-lens review — none a code fix (those are on branch `544-capture-on-delivered`, now in a **post-review fix round**: a CRITICAL circular read dependency made capture inert, being fixed on-branch). The forward-trap the **dba lens** caught is on [PROP-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md): the decided per-service-type posture's unbuilt **at-table advance-capture arm**, dropped on top of #545's authorize-first design, would let a `PaymentCaptured` on a still-`PENDING` payment drive `PENDING→CAPTURED` (`specs/payments/actors.yaml:22`), swallow the following `PaymentAuthorized`, and never fire `PlaceOrderProcess` — **money captured, order never materialized** — so when that arm lands `PlaceOrderProcess` MUST also materialize on `PaymentCaptured`-from-`PENDING`, pinned by a test; no at-table `ServiceType` exists yet, so it has no issue to attach to. The **same-day-only** scheduling recommendation ([PROP-164500 D6](PROP-20260726-164500-order-operational-safety.md)) is reframed as a **solvency** constraint, not capacity: a ~6-day-out order meets a ~7-day auth expiry → `AUTHORIZATION_EXPIRED` on a fulfilled order, so multi-day scheduling MUST ship [#175](https://github.com/TheCaptainCompany/captain-food/issues/175) re-authorization/off-session first. The **legal lens**' seven counsel questions + two forward notes (VAT tax-point at capture/delivery on the captured amount; the `checkout.email` receipt must not fire "sale complete" at authorization) land in [BRIEF-20260814-capture-on-delivered-counsel-packet](../legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md); **no lens output is legal clearance**. A **`bam` settlement-funnel projection** (authorize→capture / release / capture-failure rates keyed by `restaurantId`, tied to a persona activity) is a recorded ADR-20260811-014129 completeness follow-up (issue to be created, related to [#484](https://github.com/TheCaptainCompany/captain-food/issues/484)) — while the alertable failure counter correctly stays OTLP. Previously: **2026-08-14 (decision-prep run — STRIX: A PRE-LAUNCH DAST PASS IS WORTH-IT-NARROWLY, AND THE RESIDUAL RISK HAS MIGRATED TO WHERE STATIC GATES DO NOT LOOK)** — **new §37 holds two founder-owed rows (STRIX-1 adoption GO/NO-GO, STRIX-2 the LLM quota posture)** behind [PROP-20260814-000240](PROP-20260814-000240-strix-security-audit.md). The founder asked whether to adopt Strix (an autonomous AI pentest agent) against our own pre-launch endpoints. **Verdict: GO-NARROWLY** — a single **gated, sandboxed, bounded** black-box DAST pass on a **dev** target, framed as a **defensive pentest evidence pack for counsel, never a PCI/RGPD certificate** (ADR-20260812-143619). The value argument is measured, not asserted: our strongest controls are **compiler- and validator-enforced** (the fail-closed JWT verifier `crates/server/src/auth.rs:362-428` where an issuer-skip state is unspellable; fail-closed tenant-by-`Host` `graphql/tenant.rs:30-95`; compiler-gated SMS spend), so the residual risk **migrated to exactly the surface static gates cannot reach** — runtime authz composition (cross-tenant/cross-role IDOR), request cost (**zero `depth`/`complexity` limiter anywhere in `crates/server/src/graphql`** — a real, independently-confirmed gap), the `X-Forwarded-Host` ingress precondition the code documents but cannot enforce (`tenant.rs:43-60`), SSRF on adapter outbound, and error-path secret leakage. **White-box Rust scanning is noise; skip it.** The durable half is that **every confirmed finding becomes a permanent deterministic CI test** — the agent is a discovery instrument, not a standing gate. `#508`/`#519`/`#520`/`#516`/`#523` are **declared inputs** so a scan cannot re-file triaged issues as new. D-A (sandbox containment), D-C (compliance framing) and D-Scope (dev target + PoC-before-treat) are **team-owned constraints recorded in the proposal**, not founder option spaces — the safe option dominates each. Previously: **2026-08-13 (founder-directive run — "I'M REPEATING MYSELF": RECORDED INTENT MUST EXECUTE ITSELF, AND THE UBER EATS ONBOARDING WEDGE)** — two founder directives, one product and one about how we work. **Product**: *"Uber Eats and later Deliveroo will be used for the sync of catalog and external orders"* + the **onboarding wedge** (*"no hubrise but already an integration with uber eats we can load the existing catalog and then be the source of uber eats"*) — refined **into the living [PROP-20260730-032306](PROP-20260730-032306-uber-eats-marketplace-and-per-surface-direct-credentials.md)** (new §3bis + Slice F + UC-6 + F5), not a parallel proposal, with **§11 gaining D8/D9/D10**: the bootstrap-then-flip source-of-truth lifecycle, the still-open money/merchant-of-record half of D4 (Uber is MoR on a pre-paid order — informational record only, recommended), and whether the wedge is V0-Tours or post-V0 (post-V0, shape-now recommended). The bootstrap is reconciled with the **recorded no-scraping constraint** (`specs/integrations/sirene.md:67`) via the licensed Menu API + the restaurant's own authorization + own-menu-only. **The higher-value output is the process directive** *"These things have been already said in the past I'm repeating myself"* — recorded as [ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md): two anti-repeat mechanisms, both trimmed to their **light** form. **(1) The unrealized-directive sweep** is a **standing architect-run step** (skill §3bis), NOT a validator rule — ~30 proposals carry an un-maintained `_(filled at completion)_` while already shipped, so the header signal is mostly false positives and the offline gate cannot see the live-PR state that separates "dropped" from "in flight". **(2) A recorded behavioral guarantee carries its enforcing `rules.yaml` entry+test** — an `Enforced by:` field on the ADR template + a cheap existence check + the review lens; the compiler-first and auto-classify-and-block forms are judged and rejected as over-engineering. The specific closure: the **capture-timing rule+test lands inside [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)**, keyed on a Captain authorization so an external order never trips a phantom capture. **Boundary finding for [PR #545]**: the `544-capture-on-delivered` branch carries **only a claim commit, no capture code yet** — the external-order guard is a reviewer check, not a current defect. **Config follow-ups + a SELF-CORRECTION (later 2026-08-13)**: two config directives folded into PROP §6.1/§6.2 — the two declared Uber apps (Captain Food Restaurant = Eats Marketplace API + `uber_direct:restaurant`; Captain Food Marketplace = `uber_direct:marketplace` only — a clarification of ambiguous ADR-Decision-1 prose, not a reversal) and test/prod keys "to test directly on production" (confirms **[#257](https://github.com/TheCaptainCompany/captain-food/issues/257)** *"Stripe mode becomes a DOMAIN property…"*, which **supersedes #254**). **§11 gains D11**, correcting a prior architect over-reach: my §6.2 first classified mixed-mode coherence a **rule** and pre-decided ≈ option 1 — but #257 presents the test-customer × live-restaurant case as a **founder decision** with a four-option table and forbids implementation before it is decided, so **D11 is founder-owed and BLOCKS #257**; only the SoT/coherence half stays a rule. Previously: **2026-08-12 (records run — THE FOUNDER ANSWER SHEET: THE FLIP IS TAKEN, THE REGISTRY IS DESTROYED, AND NOTHING IS PAID FOR UNTIL A WORKING VERSION CAN BE SEEN)** — **new §35 holds the sheet's own rows (INV-1, CUT-1, DB-HA, SIR-1/Q-L2, Q-L1, Q-L3, KEY-1); six pre-existing rows close in place** (§27 **Q7** = not now · §28 **Q1** = authenticated server-side only, **Q2** = yes after the DPIA · §31 **BND-6** = prep time labelled "ready", **BND-7** = estimate with no remedy · §32 **JRN-1**'s founder-owed leg). Record: [ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md), with a ten-lens `Consulted:` block. **The headline is not one of the twelve answers — it is what they add up to: the critical path is INVERTED.** *"I'm waiting for a working version before paying OVH"* turns **provision → deploy → walk** into **walk → provision → deploy**, and the one leg the team cannot supply is the exit condition: *"a working version"* has **no acceptance criterion**, which makes it a spend gate with no exit. The team's proposal, recorded so it can be confirmed or replaced: **smoke L1→L4 green on local k3s plus a recorded browser walk** — order placed, paid, restaurant told, tracking moving without a reload, order completing. **And the path is a MERGE, not a build**: `origin/cutover-local-rehearsal` / [PR #486](https://github.com/TheCaptainCompany/captain-food/pull/486) already carries the runbook, the k3s CNPG overlay, the monolith overlay and the smoke's `SMOKE_SCHEME`/`SMOKE_PUBLIC_BASE` overrides, with **L1+L2 passing and 45/45 migrations on an empty database**, while `main`'s `prod-smoke.sh:41,48-49` still hardcodes an unroutable `https://api.captain.food`. **DB-HA = A is recorded, not incurred** — with `podAntiAffinityType: required` on a hostname topology, `instances: 3` on one node leaves two pods `Pending` forever, so A is the **EUR 67.80** trio, its +EUR 41.20 is unpayable until the EUR 26.60 base is, and the **60 Gi of PVC it implies is unpriced anywhere in the repo** (the runbook [ADR-20260807-114122](../adr/ADR-20260807-114122-mks-starts-at-one-node.md) cites for the sizing detail **does not exist**). **CUT-1 = B gives the cutover a RULE rather than a list** — *IN = only what the empty log or a traffic pause makes cheaper* — which admits the storage split and excludes the pooler, the API tier and the runtime decomposition; **that immediately withdraws STO-4's sequencing** (the pooler is a precondition of the bin-fleet flip, not of the split: eleven databases × one monolith pod is ~55 backends of 220). **SIR-1 closes the retroactive SIRENE risk on ATTESTATION, NOT INSPECTION**, and the two neutralisations owed before any re-sync are live in the tree today (`sirene-sync.yml` keeps `workflow_dispatch`; `secrets.DATABASE_URL` still writes the staging table); **the Art. 21 blocker survives forward-looking** — `RestaurantListingOptedOut` folds into **nothing** (`generated/projectors.rs:59`). **Q-L1 partially resolves**: `join.captain.food` publishes the association, the RNA and the rights contact, and does **not** publish a postal address, a phone, a named directeur de la publication, or a consumer mediator — and its host block is GitHub Pages, so *verify, do not copy*. Also corrected on this pass, in place: **PROP-20260809-021351's gap table was stale** — G5, G6 **and G7** are fixed (#420/#451), **C1 is only HALF fixed** (the total prices live on read; the competitor comparison is still never computed, now at `cart_read.rs:187`), and **G7b, G8 and C2 are live** — G8 being *nobody is told about a paid order*, with `crates/application/src/ports.rs` declaring four traits and zero notification anything. Previous header preserved below.
-
-<details><summary>Previous reconciliation headers (2026-08-11 — the API tier is the widest app in the topology; and earlier)</summary>
-
-Last reconciled: **2026-08-11 (architect run — THE API TIER IS THE WIDEST APP IN THE TOPOLOGY, AND ITS BLOCKER IS NOT THE EVENT UNION)** — **new §34 (API-1, API-2, API-3), all three TEAM-OWNED; nothing here is a product-owner call.** Product-owner directive: *"Remove the damn server crate it's currently the purpose of what we are doing"*. Measured: each of the 8 `graphql-*` bins **declares 3 workspace crates and links 44** (14×) against 1.5× for the 7 `gateway-*` bins, and **25 of the 44 are reachable only through `server`** — `web`, `app-core`, `surface_runtime`, all five partner adapters, and 14 of the 15 actor clients. A catalog pod links the Stripe integration and the SSR renderer, and can spell `client_order::OrderClient`. **Three findings reorder work elsewhere.** (1) **REP-4 does not gate the API tier**: `EventStore` — the only port naming the all-scopes `DomainEvent` — appears in **three** resolvers (`generated/mutation.rs:4942,6384,6584`, `placeOrder`/`approveRefund`/`denyRefund`), all on the gated legacy arm; queries name it zero times and the subscription bus carries `{String,String,Uuid,i64}`. Six of eight subgraphs never name it, so the API tier is cuttable **before** the event split. (2) **The real blocker is a gate hole**: `api-nested-cross-scope` forbids cross-scope nested api types and reports 0 errors, while the generated SDL contains **ten** such edges — because the rule walks `$ref`s in the spec and the emitter *derives* the fields from FKs and `navRoles:`. Four of the ten are cycles, so per-scope API crates cannot exist; **five are permanently empty** (`types.rs:1101-1105,1230`) and deleting them makes the graph acyclic (API-2). (3) **The 8→6 reshape lands AFTER the cut, not before** — the compositions are generated, so cutting 8 costs the same as cutting 6, and the cycle set is identical either side of the merge. Previously: Last reconciled: **2026-08-11 (architect run — THE ETA, THE LOG, AND FOUR CALLS THE TEAM OWED ITSELF)** — **no new section; §31 gains BND-6 and BND-7 and closes BND-5, and four questions that had been surfaced to the product owner are answered by the team instead**, because they were answerable from doctrine plus the code and should never have been routed out. **The headline is D13, the ETA.** CLAUDE.md's lens opens with *"The ETA is the product"*, and measured: **nothing computes an ETA anywhere** (0 repo-wide hits), **no pre-order estimate exists at all** — both `estimated*` values arrive *after* payment — and **two shipped surfaces already promise one**: an `eta_bar` labelled *"Estimated arrival"/"Arrivée estimée"* bound to the kitchen **ready** time and rendering during `OUT_FOR_DELIVERY` (`specs/screens/restaurant_frontoffice.yaml:490`), and four marketplace sort options including `delivery_time_asc` over a query with **no sort argument** (`captain_frontoffice.yaml:206` vs `specs/network/api.yaml:66-83`). **A wrong ETA outranks a missing one**, and both are screen-spec defects independent of every boundary question. The design call: **the ETA is a READ-SIDE COMPOSITION owned by `order`, frozen onto `OrderPlaced` at checkout — not a projection and not a process manager.** Young's fold rule kills the projection answer outright (the estimate depends on *now*, so a replay cannot reproduce it), and the shape is the pricing pattern this repo already proved: `price_cart` live on read, authoritative freeze once at checkout. **Its durable output is naming the THIRD sanctioned cross-boundary mechanism the architecture was missing — a read-time query contract** — beside the projection fold and the PM bridge; without it, anyone facing a cross-boundary read has only "fold it" available and reaches the wrong answer. **D14 states a property nobody had written down: ONE event log, boundaries write-isolated and read-shared on it.** Two projection groups fold across boundaries on the global `position` and **no reshape removes them**, so a per-boundary log would break replay determinism. **Both D9 and D14 are places the published masters genuinely conflict** — Vernon/Evans push toward context autonomy and Evans's context-mapping instinct points `CartBindingProcess` at `customer`; Young's fold rule and Vernon's one-writer rule win, each on a checkable ground rather than a preference. **BND-5 (notification) closes with a refinement the challenge earned**: policy stays in `order` (the trigger condition is entirely order state, and the `reminders:` mechanism is **already declared on the `Order` aggregate** at `specs/ordering/actors.yaml:92-96` — used only for GDPR retention, while `OrderPlaced` schedules **nothing**), but the **recipient contract is restaurant-boundary data** and is absent entirely: three parts, not two. **Two rows are genuinely founder-owed and are new**: **BND-6**, what the customer sees pre-order when the travel leg cannot resolve (a conversion-vs-honesty call), and **BND-7**, whether the frozen ETA is a *promise with a remedy* or an *estimate* — which **must be answered before the freeze lands**, because adding a field to an already-stored event is a migration and it is nearly free before the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. ⚠️ **BND-1 remains the top of this page's leverage order and is now open across several runs** — everything above assumes a boundary set that is still unrecorded. Also corrected on this pass: §31's own §6 gains table said cross-boundary projection groups drop to *"1 of 9"*; **the true figure is 2 of 9**. Previously: **2026-08-11 (architect run — REPOSITORY CRATES, AND TWO ROWS CLOSE)** — **§33 is new** (REP-1…REP-5, [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md), [#497](https://github.com/TheCaptainCompany/captain-food/issues/497)): the **third product-owner message of the day and the third face of one idea** — §31 decides *which units exist*, §32 *what shares a recovery posture and a database role*, §33 *what a unit may link*. **It CLOSES ISO-1 and ISO-2** (§29, both as (a), recorded in §5 with the verbatim quote as origin): both (b) options end with a bin linking a crate that carries every other boundary's code, which is what *"based on what they need nothing more"* forbids. **The one phrase that needed refining, with the code arguing the refinement**: *"the write repositories generally inherit from the read repositories"* is right on the **log** — an actor cannot decide without loading its own stream, so `EventStore: EventStreamReader` is a supertrait, unqualified, and it creates the log-read port that **does not exist today** (three components read `domain_events` three different ways: `EventStore::load`, `projection/worker.rs:753` raw SQL, `deletion.rs:255,320` raw SQL) — and **wrong on the read model**, because there are TWO read contracts: the **query** port (`CartReadRepository`, 5 methods, `by_id` returns `None` for a CHECKED_OUT cart, `queries.rs:277-279`) and the **row-state** port (`cart_store::load`, unfiltered). The projection write repo inherits the **row-state** one; supertraiting it onto the query port is over-privilege **and** a correctness bug, and `persistence/cart.rs:67-70` already says why in a comment written for another reason. **The blocker nobody had named: `DomainEvent` is ONE enum over all 8 scopes** defined in the facade (`domain/src/generated/events.rs:20`) and named by `EventStore` and the projector `Envelope` — so a per-boundary repository crate that traffics in it re-imports everything, and until **REP-4** lands the split delivers module hygiene only. It is **not** an event-versioning question: storage is already `(event_type TEXT, payload jsonb)` (`event_store.rs:203`), so no stored contract moves. ⚠️ **BND-1 (§31) just became MORE urgent** — 15 of the ~28 new crates are per-boundary, and building 3 × 8 scopes to merge into 5 is the intermediate step [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) forbids. **What can start today**: the whole platform axis (the ratchet dimension, `store_core` + `eventstore` + the reader split + the ISO-3 witness, `projection_runtime`, the 7 `acl-{partner}` crates) — identically shaped at 4, 5 or 8 boundaries. **ISO-3 stays open and got cheaper**: the witness now rides the same `EventStore` signature edit, and the crate split does **not** subsume it (crate = per boundary; witness = per aggregate; `handlers-order` holds six). Previously: **2026-08-11 (dba landing — THE STORAGE SPLIT IS COSTED)** — **§32 is new** (STO-1…STO-6, [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md), [#494](https://github.com/TheCaptainCompany/captain-food/issues/494)): the **second half of the same 2026-08-11 product-owner message** — five databases plus a per-app least-privilege user — priced, and **accepted as the strong default**, with the one thing the directive must change stated plainly: **`DomainEventLogDb` cannot hold the log alone**, because `crates/actor_runtime/src/completion.rs:71-100` commits the appends, the PM state, the `inbound_messages` flip and the fenced `mailbox_partitions` advance in ONE transaction — separating log from mailbox does not weaken atomicity, it **deletes the fencing token**. Two defects fall out and are neither about the split nor decisions: the erasure engine **fails OPEN** in any database holding zero `projection_checkpoint` rows (exactly the database the split creates), and the 5 remaining `View_*` declare **8 secondary indexes emitted nowhere**, so the rider job board folds the whole log on every poll today. **§31 and §32 are the two halves of one message and do not overlap** — §31 decides **which units exist**, §32 decides **what shares a recovery posture and a buffer pool**; **BND-3** (storage deliberately does **not** follow the boundary one-to-one, plus the integration-database stop condition) and **BND-4** (the matrix omits the mailbox — read literally as a `GRANT` it makes **every mutation fail at runtime**) stay in §31 and are worked through in PROP-20260811-093000 §4.2 and §6.1.1. **§31 is unchanged and keeps the TOP of this page's leverage order.** Previously: **2026-08-11 (architect run — THE FOUR BOUNDARIES ALREADY EXIST)** — **§31 is new and sits at the TOP of this page's leverage order**, above §29, because it is upstream of it. The product owner proposed a four-boundary decomposition (customer · order · restaurant · rider) plus a storage grouping. **Measured, the proposal is already source DSL**: `specs/architecture/c4-l2.yaml:30-73` declares a `boundedContexts:` block with six contexts whose membership already answers **five of the eight ambiguous calls the same way** — `CustomerCredit` → `order` (`:50`), `Conversation` → `order` (`:48`), `Prospect` → `restaurant` (`:37`), `MailboxSupervision` → a `platform` bucket (`:55-58`), `PUBLIC` as a **role of** the customer context (`:61`) rather than a member. **The finding underneath is that `boundedContexts:` and `specs/{scope}/` are two different partitions of the same 20 actors and 6 of 20 are homed differently, with nothing reconciling them** — the only rule is `c4-actor-unmapped` (`tools/codegen-rs/src/validate/core.rs:1186-1193`), a **warning** that each actor is in *some* context. They have diverged since the 2026-08-07 reorg with every gate green. **And the fix is nearly free**: the context partition is a strict coarsening of the scope partition on **7 of 8** scopes; exactly one scope splits (`ordering`) on exactly one member (`CartBindingProcess`). Design record: [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md), [#493](https://github.com/TheCaptainCompany/captain-food/issues/493). ⚠️ **Two things must be said plainly.** (1) **This does not unblock §29 slice 1 — it blocks it, correctly**: slice 1 builds `projections-{scope}` × 7 and the recommended set is 5, so building 7 first is the intermediate step [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) forbids. **ISO-1 and ISO-2 answers are UNCHANGED** — both are `crates/**` layering questions identical at 4, 5 or 8 units — but a new row (BND-1) sits upstream of both. (2) **The window is externally timed**: ADR-20260807-183024 D7 says *"start-clean makes the storage split free — the window that does not recur"*, and [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)/[#360](https://github.com/TheCaptainCompany/captain-food/issues/360) are in flight. A boundary reshape costs nothing at the storage layer today and is a schema migration after the cutover. Measured evidence that the coarsening is right where it is right: **2 of the 3 kernel events** (`PaymentIntentCreated`, `RefundApproved`) exist ONLY as ordering↔payments bridges, so the merge drops the kernel to 1 event; the refund vocabulary is split across **three** scopes (`RefundOpened` ordering / `RefundApproved` common / `RefundDenied` payments); **3 of 5** PM bridges and **2 of the 3** cross-scope projection groups become intra-boundary. And measured evidence that one part of the request should be **declined**: `catalog`↔`network` coupling is **zero of every kind** — no `$ref`, no PM bridge, no shared kernel event, no co-checkpointed group — so folding catalog into restaurant internalizes nothing and deletes a compiler-enforced boundary; the product owner's own storage message agrees, giving catalog its **own database**. Previously: **2026-08-11 (architect run — THE APP LIST, AND WHAT A FOLDER CANNOT DO)** — **§30 is new**, from the product-owner request *"Give me the app list to be on the same page. Perhaps we should create a sub folder for each app/worker and indicate what it contains with the yaml files in it"* ([PROP-20260811-141654](PROP-20260811-141654-per-app-declaration-folders.md), [#491](https://github.com/TheCaptainCompany/captain-food/issues/491)). **The headline is a "no" inside a "yes"**: the app list already exists as source (`specs/architecture/c4-l2.yaml` `containers:`, 57 entries), and a per-app folder **cannot** make a scope boundary real — only the crate graph does, which is §29's job and is untouched. What the folder CAN carry is the per-app knowledge currently written **in Rust inside the generator** (`worker_config_consumers()` is a literal `match name { "worker-sirene-sync" => … }`, `tools/codegen-rs/src/emit/bins.rs:217-224`; `replicas: 1`/`strategy: Recreate` are string literals at `emit/deploy.rs:335-340` under a comment promising they are "a SPEC change" while **no spec key exists**) — and, measured, the **grants**: `adapter-stripe`, the pod whose stated reason to exist is *"holds ONLY this partner's secrets"*, carries **13** secrets including `AUTH_SESSION_KEY`, `SUPABASE_SECRET_KEY` and the four `OVH_*` SMS credentials; `gateway-public` (*"no DB access, no logic, no state"*) carries **10**; `bam` carries **18** including `STRIPE_SECRET_KEY`. The narrowing mechanism exists and works — `worker-erasure` carries **2** — it is applied to one family. **The one row the product owner owes is sequencing**, because this request and the 2026-08-11 enforcement directive point at the same weeks. Previously: **2026-08-11 (architect run — THE ENFORCEMENT DIRECTIVE)** — the product owner re-prioritised, verbatim: *"The enforcement is required before working on any other functional subject"*. **§29 is new and sits at the top of this page's leverage order until it clears**: three rows (ISO-1/2/3) behind [PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md), the design record [#423](https://github.com/TheCaptainCompany/captain-food/issues/423) has owed since 2026-08-09. ISO-3 is the sharpest: `EventStore::append` takes no capability witness (`crates/application/src/ports.rs:50-60`) and **no issue tracks it** — the one "❌ hole" row in PROP-20260802-130500 §5's own audit table that never became work. Earlier the same day: **(architect run — isolation end-to-end, and the pre-diagnostic health payload)** — **5 founder-owed open**; two more directives arrived and both **closed on arrival**, recorded in [ADR-20260811-120828](../adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md). **TRK-ISO**: behaviour tracking gets its own database **AND its own projector worker** — further than PROP-20260811-000946 D5 asked, and it matters more under the halt decision, because a shared worker would let a malformed behaviour event wedge a group sitting beside the order read models. **HEALTH-2**: a faulted worker reports unhealthy and is **not restarted** — *"K8s does not need to restart the worker"* is **independently the same conclusion** the team reached from the failure analysis, so the convergence is recorded; and *"it's a pre diagnostic"* makes the **payload the deliverable and the status code merely the transport** — which is [no-polling-only-pushing](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) applied one layer up: the failure pushes its own diagnosis into a watched surface instead of a human polling logs. ⚠️ **Two edges reported rather than discovered later.** **HEALTH-2a**: taken literally, *"say it in `/health`"* **would take the storefront down** — the monolith runs the API and the projector in one process (`RUN_PROJECTOR` default on), has a `Service`, and its `/health` is the ADR-0043 deploy interlock, so a halted read model would make the **API** unready and block the deploy that fixes it. The rule is restated as *"the endpoint a pod's **readiness probe** points at returns non-2xx when a component **that pod owns** is faulted"*. **HEALTH-2b**: *"any worker"* does **not** apply to the actor-mailbox workers — they **already quarantine** (poison cap, lane keeps draining, operator requeue), so halting them would turn a parked message into a **stopped order lane**. The principle: **halt is right where there is no quarantine; quarantine is better wherever it exists** — projections halt precisely because they have none. Actor workers still owe the pre-diagnostic half: poison data is admin-GraphQL-only today (**no `/mailbox` exists**), and the surface it needs must be **report-only, never gating readiness**. Previously: **the second answer sheet: four settled, one with legal** — **5 founder-owed open**, down from 8. Closed this sitting: **MET-G** (the `DbFaultPolicy` default **flips to `Halt`** — the team recommended quarantine first and was **overruled**; [ADR-20260811-105024](../adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md)), **MET-Q7** (no hosted SDK, **and behavioural data goes in a database separate from the business data**), **COOP** (all three cooperative properties designed into the first slice), **MET-W** (a named retention-window catalog, sequenced with the erasure work). **TRK-scope stays open and is with LEGAL, not with the product owner** — whether a pseudonymous journey identifier fits the audience-measurement exemption; the proposals are deliberately **not** amended until legal reports. ⚠️ **The headline is a precondition the flip does not have**: verified on `5fdc519`, under `Halt` the worker does not stop, `running` stays `true`, `/projector` returns **200 OK**, and **neither Kubernetes probe looks at projection status at all** (readiness `/health`, liveness `/ping`) — so **flipping today produces a projector that wedges permanently and reports itself completely healthy**. The ADR settles the design: **per-group halt with the process alive**, **readiness not liveness** (projector bins have **no `Service`**, so readiness is a pure signal with no side effect, while liveness would CrashLoopBackOff and take every sibling group down), a **per-group** payload naming the halted group and event, and the **missing observability contract** — `specs/observability.yaml` declares no projection contract at all. Also recorded as a **known accepted consequence** (MET-G2): `ScopeMembership` is the single read-side authorization index and is a projection, so a halted group freezes **revocations** — which touches the *"explicit and immediate"* guarantee of the §6.4 closure. Previously: **8 founder-owed open** (MET-R closed; MET-T, MET-T2, MET-S closed or dissolved on arrival; MET-W added as a dependency). Product owner, verbatim: ***"Confirm the reversal, go with the projections"*** and ***"But we need to heavily strongly typed the spec no string in it"*** — recorded as [ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md), which **supersedes ADR-20260810-234225 in part** (clauses 1–3 carried forward; clause 4 and the enforcement table reversed) and is **never a rewrite** of it. The second sentence is a separate decision with a wider blast radius, and **it landed on a real defect in the team's own grammar**: `increment: orders`, `groupBy: [day]` and `value: { sum: orders }` were bare names pointing at declarations *in the same file*, so a typo was not a broken reference the loader could catch — it was a silently wrong metric, which is the exact failure class the proposal exists to remove. [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) is the repo's own receipt for why this is structural and not stylistic. Two more things dissolved rather than needing decisions: **MET-S** — the `serviceType` problem was a **grain error, not a missing field** (every one of the 11 `Order*` events carries `orderId`, so an entity-grained fold is total and **the versioning story is withdrawn**), and **MET-T2** — the existing bare-name surface (40 + 112 sites) is all covered by bespoke rules today, so it is one issue to sequence later, not a sweep to mix in. Previously the headline was **§27bis MET-R, a DECISION REVERSAL filed rather than executed**: the product owner's independently-held design for the metrics half is **metrics as PROJECTIONS** — a declared fold over `domain_events` into the `bam` schema, read through GraphQL — and **the team evaluated it and changed its recommendation to match**. What decided it was not deference: the instrument design the team had recommended one day earlier **forfeits replay by construction** (`orders_placed_metric.rs:129` asserts the point does not fire on a rebuild, so a metric added later has zero history), **cannot express a ratio or a distinct-identity denominator at all**, and **had quietly diverged from the C4**, which already declares `bam` as a projector with a schema in read-models (`c4-l2.yaml:343,370,484`) that has **zero tables** (`grep bam specs/database/` = 0). Two clauses of [ADR-20260810-234225](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md) — *"never entity ids"* and *"generated instruments"* — are contradicted; the ADR is `Accepted` and one day old, so **nothing implements either design until MET-R closes** and the ADR is superseded rather than rewritten. Its principle (unit = persona activity, declared + emitted + asserted, states its question) is untouched. **MET-Q7 is now recommended for CLOSURE as "no"** rather than deferral, because the projection design plus §28's behaviour store together remove a hosted analytics SDK's motivation on both the order and the browse side. On the tracking half the two designs **converged independently** (§28 D10) — interaction name, declared properties, principal from the JWT, a mutation as the write path — with one measured blocker: `op-missing-command` is an ERROR and all 86 mutations bind a command, so a mutation today **cannot** be a non-command and would land behaviour events in `domain_events` by default, gate green. Previously: **9 founder-owed open** (two added), **plus a 7-row TEAM-OWNED block in §28** on top of §27's, neither counted here because nobody outside the team owes an answer to them. New this run: **§28, behaviour event tracking declared inside `specs/screens/**`** ([PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md), [#485](https://github.com/TheCaptainCompany/captain-food/issues/485)) — the **second** clause of the 2026-08-11 directive; the first clause (*"integrate the metrics in the spec"*) is an **endorsement of §27**, not a new ask, and §27 D1–D7 stand unchanged. The fact that earns §28 is not the absence of tracking, which is expected — it is that **`SetCustomerPreferences.dietaryTags` is `array<Tag>` where `Tag` is a free-form `string` with `maxLength: 80` and no enum, persisted to `View_Customer.preferences` jsonb**: `halal` and `kosher` are spellable values **today**, no screen binds it, and no review caught it because no artifact existed that would make anyone look. **Two rows are founder-owed** — **Q1** client storage (and therefore whether a consent banner exists at all; note the device identifier `X-SESSION-ID` **already exists**, so the question is whether a new *purpose* attaches to it) and **Q2** whether the restaurant sees its own storefront's behaviour data (the differentiator, and a controller-posture decision). **[#194](https://github.com/TheCaptainCompany/captain-food/issues/194) is deliberately NOT given a new row** — no DPIA, privacy notice or terms exist, it is open and unchanged, and §28 is *sequenced behind it* with validator rule R10 turning that sequencing into a build failure rather than a promise. Previously: **2026-08-11 (architect run — the Patton business-metrics directive)** — **7 founder-owed open** (one added, one closed by subsumption), **plus a 7-row TEAM-OWNED block in §27** that is deliberately *not* counted here because nobody outside the team owes an answer to it. That run added: **§27, business metrics for every feature and every persona** ([ADR-20260810-234225](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md), [PROP-20260810-234225](PROP-20260810-234225-business-metrics-for-every-persona.md), [#484](https://github.com/TheCaptainCompany/captain-food/issues/484)). It carries the fact that earns it: **`specs/observability.yaml` declares 29 `business_metrics` and 26 of them have zero occurrences anywhere in `crates/`, `tools/` or `deploy/`** — the slot the directive asks us to fill is already 90% fiction, and the gate that should have noticed covers 3 of 14 contracts and only checks that a string constant exists. D1–D7 are team-owned under the same delegation that lifted the freeze; **exactly one row (Q7, a hosted product-analytics SDK) is founder-owed**, and it is a vendor/data-residency question, not a technical one. §22's *"Business-signal observability contracts"* row is **closed by subsumption** into §27 — it named the gap, this is the mechanism. Previously: **2026-08-10 (night, architect run — the `specs/**` freeze is LIFTED)** — **7 open, and none of them blocks the [#429](https://github.com/TheCaptainCompany/captain-food/issues/429) path.** The headline of that run was not a row, it was a **constraint removal**: the product owner delegated `specs/**` to the team (*"I'm surprise that I read that the spec was untouchable now that we have the team working together we don't need to have this constraint anymore… I'm pretty sure the team will ensure the right naming and scope. Just keep me informed"*), recorded as [ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md) and logged in §5. **This page's throttle just got much narrower**: 🟠 AMBER no longer means "touches `specs/**`" — it means *a recorded decision is missing or contradicted*, or *the shape is already emitted/stored/promised*. Eight AMBER-flagged issues and four plan-mode sub-tasks are re-triaged; the "spec window" language throughout this file (§25 especially) is now **historical**. Two rows are added in **§26**: the shape of the reporting gate that replaces the freeze (**SPEC-1**, team-recommended), and a ten-second confirm-or-reverse on the `from:` rename now that measured evidence exists the product owner did not have (**SPEC-2**). Also flagged, and deliberately **not** given a row because it is decided-and-unbuilt rather than open: **`event_version` has zero occurrences across `specs/`, `crates/`, `migrations/` and `tools/`** while PROP-170000 D2 decided *"add `event_version` now (cheaper before the log grows)"* on 2026-08-08 — the freeze was silently standing in for it, and removing the freeze makes it load-bearing. Previously: **still 5 open, and none of them blocks the [#429](https://github.com/TheCaptainCompany/captain-food/issues/429) path.** Read that carefully before treating this page as a throttle: of the five, **one** is genuinely waiting on the product owner and it waits on an *external* trademark process (Solida rebrand, gating only [#411](https://github.com/TheCaptainCompany/captain-food/issues/411)); **two are team-owned work items**, not questions anyone owes an answer to (business-signal observability contracts → [#400](https://github.com/TheCaptainCompany/captain-food/issues/400); geocoding, where the team owes a *proposal*); **one is deferred by design** pending real order data (avelo37 threshold); and **one is already decided-and-deferred** by the product owner (consumer-mediator registration, to first real consumer order). All five date from the 2026-08-08 sweep — ~2 days, ~3 runs — and none is aging dangerously. **No item in the cart/checkout/order path is RED.** This run also recorded the **backlog-prioritisation delegation** (§5, [ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md)) — with the board no longer under product-owner eyes, this page's §1 ordering is now the primary surface they work from. Previously: the product owner's **six-decision answer sheet** ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)) · **5 open decisions**, down from ten (five closed). Closed in that sitting: **451-B** `currency_mismatch` (approved as recommended — the spec window is OPEN, one line of `specs/observability.yaml`, land it without re-asking) · **451-C** #451 retitled (executed) · **§6.4 claim staleness** CLOSED on the legal+business convergence · **451-A** closed by the [#460](https://github.com/TheCaptainCompany/captain-food/pull/460) merge. The **`from:` collision** is DECIDED by the second answer sheet — **(a), rename the screens key**, the product owner's own pick, not delegated; **geocoding** stays open but is now **team-owned** (recommendation (c) approved: the team analyses and returns with a proposal). What remains open: consumer-mediator registration, business-signal observability contracts, the Solida rebrand, the avelo37 threshold, geocoding. Earlier the same day: the [#451](https://github.com/TheCaptainCompany/captain-food/issues/451) Phase-2 adjudication added the §25 rows. The §22 set (consumer-mediator registration, now **deferred to first real order** per the PO 2026-08-10; the §6.4 claim-staleness policy; the `from:` naming collision; the business-signal observability contracts; the Solida rebrand waiting on trademark; the avelo37 threshold; and the geocoding row). **§1 row G is now DECIDED 2026-08-10** — PROP-20260810-231500 D1 = **Option B / LIVE** (cart priced fresh on read via `price_cart`, projection stays a money-free fold; the #429 keystone unblocked to build). **§23 and §24 closed 2026-08-09** by the customer's eight-decision answer sheet ([ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md)): the step-DSL branching set D1–D7 confirmed as recommended, and the public demo **deferred** with its production-critical remainder re-filed on its own. The register went 21 → 8 in one sitting by ANSWERING rows — the intended way for it to shrink; whoever adds a row updates this number in the same commit. **The ten-decision brief is fully answered** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) + [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the last three closed 2026-08-08 — tips via the customer's voluntary-contribution funding model (HelloAsso « pari », cascade-pricing fallback, public cagnotte), erasure two-path confirmed, admin explicit act-as confirmed (supersedes ADR-0037). **The customer answered the ten-decision brief 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): seven decided — payout posture and external orders and promo funding as recommended; capture timing per service type (delivered/picked-up/in-advance-at-table); acceptance timeout resolved by release-not-refund; entity path association→SASU→SCIC-federation; radical transparency. The 2026-08-08 five-lens sweep decided **32 rows by ensemble consent** ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md); customer veto window open on every one) and retired **7 stale blocks** (three §2 rows + §6, §9, §10, §16).
-
-</details>
+**Last reconciled: 2026-08-18** — the founder's rulings of 2026-08-18 landed (§49), STAFF-AUTH
+closed for two of three roles, and the page was **restructured from an archive back into a queue**
+([ADR-20260818-193000](../adr/ADR-20260818-193000-the-register-is-a-queue-and-a-closed-row-collapses-to-its-record.md)).
+**Closed rows now collapse to their outcome and the record that holds the reasoning** — the argument
+lives in the ADR and the proposal, the history lives in git, and this page carries what is still
+owed. Earlier reconciliation headers are in `git log docs/proposals/DECISIONS.md`.
 
 > **Customer decisions: see [BRIEF-20260808-customer-decisions.md](BRIEF-20260808-customer-decisions.md) (ten decisions).**
 > Everything only the product owner can decide — the five-decision money posture, account-level
 > erasure scope, admin act-as, the operating entity, transparency levels, and who funds promotions —
 > is argued there, lens by lens. Answers land back in this register.
 
-> **2026-07-30 — the actor-runtime set is `Approved`** (product owner, in-session:
-> *"we are at the same page, we can build it now"*; ADR-20260730-231500):
-> [PROP-20260728-135632 "Aggregate state as spec"](PROP-20260728-135632-aggregate-state-as-spec.md) (D1–D5),
-> [PROP-20260728-152752 "The write path becomes an actor mailbox"](PROP-20260728-152752-actor-mailbox-write-path.md) (D1–D7),
-> [PROP-20260730-230803 "Projection runtime"](PROP-20260730-230803-projection-runtime-batched-partitioned.md) (D1–D3)
-> — all recommended options stand. The one approved-by-default flag (`messages.yaml` as the third
-> payload catalog) was **VETOED 2026-07-31** (product owner, in-session): reminder messages are
-> typed INSIDE the actor with a validator-proven `receives` handler, and deferred until the first
-> real use case —
-> [ADR-20260731-120825](../adr/ADR-20260731-120825-actor-messages-typed-inside-the-actor.md).
-> The set is now fully decided. Build starts at
-> [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s foundation slice.
+---
+
+## The queue — everything still owed, on one screen
+
+This table is an **index, not a second home**: each row's full argument stays in its section below,
+and nothing is decided here. A row leaves this table only by being answered in its section.
+
+### Owed by the founder, or gated on counsel
+
+| Row | The question, in one line | Full row |
+|---|---|---|
+| **Q-L1** | The publishable identity block: postal address, phone, a named *directeur de la publication*, and a consumer mediator — named nowhere. A legal precondition for distance selling, not a backlog item. | [§35](#35-the-founder-answer-sheet-of-2026-08-12---all-rows-closed-on-answers) |
+| **LOSS-1** | When a post-delivery capture permanently fails, who absorbs the loss, and what does the operator do? Real money, and it commits Captain to absorbing it. | [§38](#38-capture-on-delivered-review-carry-forwards--pr-545-five-lens-review-2026-08-14) |
+| **STAFF-AUTH-AM** | How does an **account manager** sign in? The 2026-08-18 rulings answered rider (phone/SMS) and restaurant (email link); account managers were not mentioned and are not ruled. | [§49](#49-the-founder-rulings-of-2026-08-18---three-rulings-plus-a-cleared-queue) |
+| **D5** (Uber) | Menu ownership and per-channel price parity across Captain / HubRise / Uber. Open since 2026-08-08 and not in the 2026-08-14 delegated batch. | [§11](#11-uber-eats-marketplace--per-surface-uber-direct-credentials--prop-20260730-032306) |
+| **D7** (Uber) | Is the entity on the signed Uber agreement the entity that will operate the platform? Needs counsel, not a recommendation. | [§11](#11-uber-eats-marketplace--per-surface-uber-direct-credentials--prop-20260730-032306) |
+| **CAP-READY-LEGAL** | Capturing a COLLECTION order at READY takes payment before possession transfers — disclosure and VAT tax-point constraints on the unbuilt receipt engine. Counsel-gated, not a decision blocker. | [§41](#41-collection-captures-at-ready-not-at-pickup--refinement-of-12-founder-directive-2026-08-14) |
+| **TRK-scope** | Does a pseudonymous journey identifier fit the audience-measurement exemption? **With legal, not with the founder** — the proposals are deliberately not amended until legal reports. | [§27](#27-business-metrics-for-every-feature-and-every-persona--prop-20260810-234225) |
+| **PMW-3** | Actor queries as a mailbox/transport message. The founder floated it; **nothing authorises building it**. 🔴 | [§42](#42-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side-founder-directive-2026-08-15) |
+| **Consumer-mediator registration** | ⏸️ Deferred by the founder to the first real consumer order, against the recommendation. Listed so the deferral stays visible. | [§22](#22-new-rows-from-the-2026-08-08-sweep) |
+| **Solida rebrand** | Waiting on an external trademark process. Gates only [#411](https://github.com/TheCaptainCompany/captain-food/issues/411). | [§22](#22-new-rows-from-the-2026-08-08-sweep) |
+
+### Team-owned — no answer is owed from outside the team
+
+| Row | The question, in one line | Full row |
+|---|---|---|
+| **BUS-1** 🔴 | `operationStatusChanged` is a declared product subscription served by a **process-local bus**, so the client polls — the founder's own no-polling rule, already broken in shipped code, on the money path. | [§43](#43-opening-hours-and-stock-are-checked-server-side-on-place-order-and-a-big-catalog-snapshots-every-100-events-founder-directive-2026-08-15) |
+| **FEN-1** 🔴 | `expectedTotal` is **optional**, so a client can simply omit the price fence on the money path. | [§43](#43-opening-hours-and-stock-are-checked-server-side-on-place-order-and-a-big-catalog-snapshots-every-100-events-founder-directive-2026-08-15) |
+| **CHK-1** 🔴 | A shipped comment calls the restaurant fold *"authoritative, race-free"*. It is false. | [§43](#43-opening-hours-and-stock-are-checked-server-side-on-place-order-and-a-big-catalog-snapshots-every-100-events-founder-directive-2026-08-15) |
+| **RSO-1 · RSO-2** | Where *"is this restaurant open right now?"* is derived, and re-validating each line's orderability at checkout. Directed by the founder; only the mechanism is open. | [§43](#43-opening-hours-and-stock-are-checked-server-side-on-place-order-and-a-big-catalog-snapshots-every-100-events-founder-directive-2026-08-15) |
+| **STK-1 · SNAP-1 · CAT-1 · BSY-1 · DSC-1 · PAN-1 · HRS-1** | The 2026-08-15 audit's remaining rows: the oversell arbiter, snapshot residency, `restaurantId → catalogId`, `BUSY` as a word that changes nothing, seven silently-dropped discovery filters, a latent panic, and the accept branch's owed instrumentation. | [§43](#43-opening-hours-and-stock-are-checked-server-side-on-place-order-and-a-big-catalog-snapshots-every-100-events-founder-directive-2026-08-15) |
+| **STO-7 · STO-8 · STO-9** | Three questions that must be answered **before or with** the physical database split. STO-9 came back into scope on 2026-08-18. | [§32](#32-storage-boundaries-and-least-privilege-database-users--prop-20260811-093000) |
+| **STO-10** | ⏸️ Parked by founder answer until the walk lands. Reported blocked — never re-ranked to look dispatchable. | [§32](#32-storage-boundaries-and-least-privilege-database-users--prop-20260811-093000) |
+| **IDOR-1** | Per-instance authorization across 83 of 118 operations. Deadlined fast-follow / hard V0-launch blocker. | [§39](#39-per-instance-authorization--a-cross-tenant-idor-on-both-sides-83-of-118-operations--178-write-side-per-instance-authorizationhttpsgithubcomthecaptaincompanycaptain-foodissues178--618-read-surfaces-missing-readscope--the-read-half-of-the-write-path-authorization-gap-178httpsgithubcomthecaptaincompanycaptain-foodissues618--prop-20260726-171500-architect-run-2026-08-14-scope-corrected-2026-08-17) |
+| **IDOR-DEADLINE-GAP** | The three IDOR deadline triggers are all things the **team** does, while CUSTOMER signup is self-service — so *production restored with signup open* trips none of them. | [§45](#45-the-founder-answer-sheet-of-2026-08-17---all-six-rows-answered) |
+| **ISO-3** | `EventStore::append` takes no capability witness and no issue tracks it. | [§29](#29-scope-isolation-is-nominal--prop-20260811-090000-product-owner-directive-2026-08-11) |
+| **PMW-2** | Cross-aggregate activation residency, and the staleness fence it needs. | [§42](#42-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side-founder-directive-2026-08-15) |
+| **RDR-1** | What may an `EVENT_STREAM` `read:` step's `model:` point at? Wants deciding **before** the PR2 emitter, not after. | [§48](#48-reader-set-derivation-carry-forwards--564httpsgithubcomthecaptaincompanycaptain-foodissues564-nine-lens-mob-checkpoint-2026-08-15) |
+| **ENF-1** | Extend the capability allowlist to `jsonwebtoken` and `aes-gcm`. | [§40](#40-capability-allowlist-coverage--extend-the-manifest-gate-to-security-sensitive-dependencies-founder-insight-2026-08-14) |
+| **REP-1** | The read-model "inherit" refinement — recorded as a confirm-or-redirect, not a blocker. | [§33](#33-repository-crates-and-the-dissolution-of-infrastructure--prop-20260811-173223-product-owner-direction-2026-08-11--closes-iso-1-and-iso-2) |
+| **avelo37 threshold** · **Geocoding** | Deferred by design pending real order data; and the team owes a proposal. | [§22](#22-new-rows-from-the-2026-08-08-sweep) |
 
 ---
 
@@ -73,108 +93,59 @@ easy ones.
 
 ## 1. Decide these first — highest leverage
 
-Six decisions gate roughly two thirds of the backlog. Everything else can wait.
+✅ **No open row.** The six keystone decisions that gated roughly two thirds of the backlog are
+closed, and the rows below are kept for their identifiers, which other records cite.
 
-**2026-08-08 (evening)**: all six rows are now decided or in discussion — A, B, E answered by the
-customer ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); the C
-account-scope remainder is in customer discussion; D and F were ensemble-decided.
-
-**2026-08-10**: row **G** added and **DECIDED same day** — the #429 keystone cart-pricing decision
-(LIVE re-price on read vs LOCKED at add-to-cart) — **Option B / LIVE**, as recommended.
-
-**2026-08-11**: row **H** added — the boundary set (§31 BND-1) — and **ANSWERED the same day**:
-**five business boundaries + `platform` + the kernel**, verbatim *"I'm ok for the 5 / Customer /
-Order / Catalog / Restaurant / Delivery"*. It had been the top of this register across several runs
-and it was the row on an external clock (ADR-20260807-183024 D7's *"start-clean makes the storage
-split free — the window that does not recur"*, closing at the
-[#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover). **With H closed,
-§1 has no open row**: A and B remain founder-owed but were answered in
-[ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)'s scope, and the next
-thing needing an answer is the §31 BND-9 confirm-or-redirect, listed where it belongs rather than
-promoted here. **§32 JRN-1's money-path leg was ANSWERED 2026-08-12 — (A), take the flip inside the
-empty-log window with the L4 smoke as the release gate before traffic is routed** (§35,
-[ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)); the flip
-itself is taken by
-[ADR-20260812-000000](../adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md),
-which rides the journal retirement, so `command_journal` is DROPPED and the gate is deleted rather
-than defaulted ON. **What the same sheet left owed — §35 INV-1's acceptance criterion — was ANSWERED
-2026-08-13**: the founder replaced the team's proposal with his own six-clause criterion (customer
-created → payment authorised → order created → accepted → delivered → captured, walked on the local
-all-databases stack with authentication deliberately bypassed from the inside), recorded in
-[ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)
-— so the spend gate now has an exit. **§35 Q-L1** still stays partly owed (postal
-address, phone, a named directeur de la publication, and a consumer mediator named nowhere).
-
-| # | Decision | Why it is first | Recommendation |
+| # | Decision | Answer | Recorded in |
 |---|---|---|---|
-| **A** | [PROP-165000 D1](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **payout posture**: Stripe Connect vs merchant-of-record | Determines who the seller is, who invoices whom, how VAT is declared, and Captain's legal standing while holding customer funds. Gates [#173](https://github.com/TheCaptainCompany/captain-food/issues/173), [#172](https://github.com/TheCaptainCompany/captain-food/issues/172), [#174](https://github.com/TheCaptainCompany/captain-food/issues/174). **Gets more expensive with every real order.** | Connect, separate charges & transfers — ✅ **decided by the customer 2026-08-08, as recommended** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); the Connect platform account belongs to the SASU (see PROP-032306 D7) |
-| **B** | [PROP-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md) — **capture timing**: authorize-then-capture vs capture-at-checkout | Changes what a rejection costs the customer, what the acceptance timeout releases ([#167](https://github.com/TheCaptainCompany/captain-food/issues/167)), and how far ahead orders can be scheduled ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197)) | Authorize at checkout, capture on acceptance — ✅ **decided by the customer 2026-08-08, DIFFERENT choice** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): *"Authorise on checkout. Capture on delivered / picked up / paid in advance for at-table service"* — capture is per service type (DELIVERY→delivered, PICKUP→picked up, at-table→in advance); team notes (auth ~7-day life, post-fulfilment capture-failure path, tips-vs-auth ceiling) carried in the ADR |
-| **C** | [PROP-170000 D3](PROP-20260726-170000-event-log-integrity-evolution-and-erasure.md) — **GDPR erasure strategy** | **DECIDED for ORDERS 2026-07-31** ([ADR-20260731-160000](../adr/ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md), product owner, diverging from the crypto-shredding recommendation): `OrderExpired` = deletion from the system — projections tombstone the order's rows, a technical worker later deletes the streams, an `OrderErasureProcess` PM owns the journey. REMAINING open: customer-account-level erasure (identity, files, Supabase) + the per-phase retention windows. Gates [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) | Orders: tombstone + stream deletion (decided) · account scope: ✅ **decided by the customer 2026-08-08** ([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): the **two-path model confirmed** — deactivate (recover anytime, data kept, dormant sunset) + delete (Art. 17, ≤30-day grace, then real erasure; carve-outs per the retention table in [docs/legal/BRIEF-20260808-account-erasure-two-path.md](../legal/BRIEF-20260808-account-erasure-two-path.md)); counsel questions E1–E8 pending |
-| **D** | [PROP-165500 D1](PROP-20260726-165500-catalog-compliance-and-merchandising.md) — **allergen representation** | EU FIC 1169/2011 is a launch blocker, and the model must exist before imports can carry it. Gates [#184](https://github.com/TheCaptainCompany/captain-food/issues/184) | Controlled 14-category enum + explicit "not declared" state — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): Annex II enum + explicit "not declared", and NOT_DECLARED **gates orderability** in the distance-selling UI (or, strict minimum, a specific functional contact means on the product sheet) — "required before publishing" is binding (legal evidence) |
-| **E** | [PROP-164500 D1+D2](PROP-20260726-164500-order-operational-safety.md) — **acceptance timeout policy and TTL** | Decides whether a customer can be left charged for an ignored order. Gates [#167](https://github.com/TheCaptainCompany/captain-food/issues/167); pairs with B | Auto-cancel + auto-approved refund; 5 min with per-restaurant override — ✅ **resolved 2026-08-08 as a consequence of B** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): *"No need to refund because no capture"* — timeout **releases the authorization**, no refund machinery on this path; TTL tuning (5 min + override) is reversible gated config, team-owned |
-| **F** | [PROP-172000 D1](PROP-20260726-172000-spec-to-ui-contract-integrity.md) — **how a screen declares a runtime input source** | The one DSL addition needed before the write-side validator gate can fail closed. Gates the required-field half of [#169](https://github.com/TheCaptainCompany/captain-food/issues/169) and the fix for [#168](https://github.com/TheCaptainCompany/captain-food/issues/168) | Name the input source explicitly (`from:`) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), with the `from:` naming-collision row in §22 |
-| **H** ✅ **CLOSED 2026-08-11** | **§31 BND-1** ([PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)) — **the recorded boundary set**: 5 business boundaries + `platform` + kernel (recommended) vs the 4 as proposed vs keeping today's 8 scopes | It is **upstream of §29** and therefore of the whole enforcement program: slice 1 builds `projections-{scope}` × 7 and would build seven crates a later reshape merges into five. It also settles what a per-app database `GRANT` is granted *on*, so [#360](https://github.com/TheCaptainCompany/captain-food/issues/360) needs it too — **two enforcement axes, both per-boundary, and they must not disagree**. **Gets more expensive on an external clock** (the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover). Gates [#423](https://github.com/TheCaptainCompany/captain-food/issues/423), [#493](https://github.com/TheCaptainCompany/captain-food/issues/493) | ✅ **ANSWERED 2026-08-11 — (a) as recommended**, verbatim *"I'm ok for the 5 / Customer / Order / Catalog / Restaurant / Delivery"*, and the name is **`delivery`** (BND-2). **(a) 5 boundaries** (`customer` · `order` · `restaurant` · `catalog` · `delivery`) + `platform` + the `common` kernel. **Five of the eight ambiguous calls are already answered in `specs/architecture/c4-l2.yaml:30-73` the same way the request answers them**, so this is a confirm-or-redirect on most of its surface. The team differs on exactly two points, both with reasons: **catalog stays a boundary** (zero coupling to network of any kind — the merge buys nothing and deletes a compiler-enforced boundary; the product owner's own storage message gives it its own database), and the boundary is named **`delivery`, not `rider`** (it contains `DeliveryJob` and `DeliveryPartnerRegistration`, neither of which is a rider). [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md) |
-| **G** | [PROP-20260810-231500 D1](PROP-20260810-231500-cart-current-priced.md) — **cart price: LIVE (re-priced every read, option B) vs LOCKED at add-to-cart (money in events, option A)** | Unblocks the #429 keystone (`cart.current` priced) and settles whether the cart is a live estimate or a price-lock; A would reopen ADR-20260720-002217 and need event versioning. Gates [#429](https://github.com/TheCaptainCompany/captain-food/issues/429). | ✅ **DECIDED by the product owner 2026-08-10 — Option B / LIVE, as recommended**: `cart.current` priced fresh on read via the shared `price_cart`, the `Cart` projection stays a money-free fold, the authoritative freeze stays at checkout. Sub-defaults stand: claim-resolved zero-arg `cart.current` (reuses #434 `ReadScope::Customer`); "current" = most-recently-updated OPEN cart. Recorded on [PROP-20260810-231500](PROP-20260810-231500-cart-current-priced.md) (`Status: Approved`). Rationale: honors ADR-20260720-002217 (cart events carry no money), consolidates onto one pricer, no event-versioning cost. The read-side pricing observability Concern is a **build task inside #451**, not a gate. |
+| **A** | Payout posture — Stripe Connect vs merchant-of-record | **Connect, separate charges & transfers** | [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) |
+| **B** | Capture timing | **Authorize at checkout, capture on acceptance** — per service type; refined by §41 for COLLECTION | [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) |
+| **C** | GDPR erasure strategy | Orders: **tombstone + stream deletion**; account scope decided 2026-08-08 | [ADR-20260731-160000](../adr/ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md) · [ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md) |
+| **D** | Allergen representation (EU FIC 1169/2011) | **Controlled 14-category enum + explicit "not declared"** | [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) |
+| **E** | Acceptance timeout policy and TTL | **Auto-cancel + auto-approved refund**; 5 min with per-restaurant override | [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) |
+| **F** | How a screen declares a runtime input source | **Name it explicitly (`from:`)**, with the naming collision resolved by §22 | [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) |
+| **G** | Cart price — LIVE vs LOCKED at add-to-cart | **Option B / LIVE** — priced fresh on read via `price_cart`; the projection stays a money-free fold | Product owner, 2026-08-10 · unblocked [#429](https://github.com/TheCaptainCompany/captain-food/issues/429) |
+| **H** | The recorded boundary set | **Five business boundaries + `platform` + the kernel**, verbatim *"I'm ok for the 5 / Customer / Order / Catalog / Restaurant / Delivery"* | Product owner, 2026-08-11 · §31 |
 
 ---
 
 ## 2. Batch-approvable — recommendation is the standard answer
 
-These have a conventional right answer and little genuine trade-off. Reading the recommendation and
-saying "yes to all" is a reasonable use of five minutes.
-
-**2026-08-08**: every row here is now decided or retired (PROP-172500 D4 closed by the ADR addendum) —
-see the per-row notes.
-
-| Decision | Question | Recommendation |
-|---|---|---|
-| PROP-170000 D1 | Preventing skipped events ([#189](https://github.com/TheCaptainCompany/captain-food/issues/189)) | Snapshot / `xmin` guard — the only option that is correct rather than probabilistic — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +xid8 safe-head, 3 adaptations (bounded scans + oldest-write-age alert · idle gate arms on the SAFE head, never `MAX(position)` · one shared safe-head helper across all FOUR readers) |
-| PROP-170000 D2 | Event evolution policy | Additive-only + validator gate; add `event_version` now (cheaper before the log grows) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): condition — the gate must also prove generated-serde tolerance (`#[serde(default)]`-safe), not only the YAML diff |
-| PROP-170000 D4 | `$maxAge` / `expired_at` | Implement or delete — a specified-but-inert control is worse than none — ✅ IMPLEMENTED: the retention sweep is live (design: [ADR-20260731-153000](../adr/ADR-20260731-153000-gdpr-expiry-as-scheduled-actor-message.md)); stale row retired 2026-08-08 (ADR-20260808-171056) |
-| PROP-170000 D5 | Spec-vs-code divergences (`version` 0- vs 1-based, `id` as idempotency key) | Correct the spec to match the code; the code is what has been running — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): `version` + `id` legs as recommended (the mailbox owns append idempotency); the `ce_events` leg REVERSED to code-to-spec — make the function sargable (`stream_name LIKE category \|\| '-%'`) rather than enshrine a full-log seq scan |
-| PROP-170500 D3 | Where the workers run | Advisory lock now (in-process), dedicated service later — ✅ decided by the bins ADRs ([ADR-20260808-062933](../adr/ADR-20260808-062933-one-bin-per-worker.md) one bin per worker · [ADR-20260808-062432](../adr/ADR-20260808-062432-one-bin-per-adapter.md) one bin per adapter); stale row retired 2026-08-08 (ADR-20260808-171056) |
-| PROP-170500 D4 | GraphiQL / Voyager in production | Keep, gated to ADMIN — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **and self-hosted** — a no-CSP CDN bundle on the authenticated admin origin is a script-injection surface in the worst place; self-host or drop Voyager |
-| PROP-170500 D5 | Subscription fan-out at >1 instance | Postgres `LISTEN`/`NOTIFY` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +reconcile-on-reconnect (NOTIFY has no delivery guarantee); the WS transport lands first — the gateway answers upgrades 501 today |
-| PROP-171500 D1 | Where the write-side scope check runs | Dispatch layer, before journaling — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), REWORDED before consent: the dispatch check is the fast-fail **pre-filter** (no mailbox row for an obviously-forbidden attempt, denial counter); the **authority is the actor's aggregate-state check** per PROP-20260728-135632's #235 correction |
-| PROP-171500 D2 | Validate the supplied id, or derive it | Derive where the role implies one scope; validate otherwise — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): timing note — the input-field deletions are breaking-but-free only while no client ships; land before first deploy. The actor-side `requires.acting` stays the final check |
-| PROP-171500 D3 | Sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) | Immediately after it lands — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open); note: [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) has NOT landed yet (the §4 register note was stale) |
-| PROP-172000 D3 | The drifted product spec | Rewrite §4–§5 to match ADR-0034 — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) |
-| PROP-172000 D4 | Fix the four dead actions with the rule | Same PR — a rule landing red breaks "keep main green" — ✅ OVERTAKEN: the rules landed as the two screen-action warning rules and the work is tracked in [#342](https://github.com/TheCaptainCompany/captain-food/issues/342) (the 17 screen-action↔command-input findings); stale row retired 2026-08-08 (ADR-20260808-171056) |
-| PROP-172500 D4 | Job-pool filtering | Filter by city, zone and `RiderStatus` — composes with [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) slice 4's per-rider decline exclusion on the same `myDeliveries` query (the rider write surface itself moved to that proposal, §20) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056 addendum; veto open; business + ux consented, legal consented with the SUSPENDED-is-deactivation-machinery note carried in the ADR) |
-| PROP-172500 D5 | Rider↔customer contact | Route through the order conversation, not phone numbers — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): +masked/bridged call fallback and rider-side one-tap canned chips ("customer unreachable at the door" needs synchronous escalation; a keyboard on a bike violates the one-hand rule). **Customer-endorsed 2026-08-08** |
-| PROP-165500 D6 | Menu scheduling | Defer, but record it — needed when combos land — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): deferred until combos |
+✅ **CLOSED 2026-08-08.** All fifteen rows were decided by ensemble consent with the customer veto
+window open, or retired as stale. They covered skipped-event prevention (`xmin` guard), event
+evolution policy (additive-only + `event_version`), `$maxAge`/`expired_at`, the spec-vs-code
+divergences, where the workers run, GraphiQL/Voyager in production (kept, ADMIN-gated, self-hosted),
+subscription fan-out (`LISTEN`/`NOTIFY` + reconcile-on-reconnect), the write-side scope check,
+supplied-vs-derived ids, sequencing against [#144](https://github.com/TheCaptainCompany/captain-food/issues/144),
+the drifted product spec, the four dead screen actions, job-pool filtering, rider↔customer contact
+(through the order conversation, with a masked-call fallback) and menu scheduling (deferred until
+combos). Reasoning and the per-row cures: [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)
+and the proposals it names.
 
 ---
 
 ## 3. Genuine trade-offs — worth your time
 
-| Decision | Question | Recommendation | The tension |
-|---|---|---|---|
-| PROP-165000 D3 | Rounding for fee splits | Buyer total first, residual cent to `captainNet` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): buyer-total-first, residual cent to a stated leg, pinned by an odd-total test | Undefined today; any answer works, but it must be stated and tested or splits stop reconciling |
-| PROP-165000 D4 | Delivery-fee dimension | Per-zone — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business CONFIRM, fee LEVELS priced from rider economics upward | Pairs with PROP-172500 D1; distance-banded is fairer but needs geocoding you do not have |
-| PROP-165000 D5 | Do tips move money? | ✅ **decided by the customer 2026-08-08** ([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): rider tips as the team recommended ([BRIEF-20260808-tips-discussion.md](BRIEF-20260808-tips-discussion.md)); restaurant tip **per-restaurant opt-in**; platform **voluntary contribution, HelloAsso model** — public « pari » that contributions cover platform costs, declared cascade-pricing fallback (`fixed cost ÷ restaurant count`, 0 € when covered), public cagnotte with per-contribution name consent | Tips are recorded and displayed today but reach nobody; the transfer-leg gate stands |
-| PROP-165500 D2 | Does Captain own stock consumption? | Re-validate at checkout; decrement only Captain-managed offers — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business emphatic (POS double-decrement manufactures phantom oversell); rejection copy names the item, one-tap remove-and-continue | HubRise restaurants have a POS as stock authority — double-counting is worse than not counting |
-| PROP-165500 D3 | Per-service-type pricing | Optional price override on `Offer` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): resolve the `catalog(restaurantId)` ambiguity in the same change; watch the delta drift as a coaching signal | French practice prices delivery above counter; the model allows per-mode VAT but not per-mode price |
-| PROP-165500 D4 | Catalog images on the [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) framework | Confirm a **public** audience now, while it is on paper — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) | #134 is designed around private per-order attachments; retrofitting public access later is the expensive version |
-| PROP-165500 D5 | Merchandising order | Promo codes first — ✅ **decided by the customer 2026-08-08, as recommended** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): restaurant-funded first; platform codes deferred; loyalty next on [#158](https://github.com/TheCaptainCompany/captain-food/issues/158)'s balance | Highest acquisition value for a single-city launch; loyalty must reuse [#158](https://github.com/TheCaptainCompany/captain-food/issues/158)'s balance, not a second one |
-| PROP-164500 D3 | V0 notification channel | In-app + sound, then SMS — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **+SMS in the same V0 slice** (never "then"), escalation SMS at ~60–90 s unacknowledged, visible sound-armed/blocked state on `orders_queue`; two lenses converged independently; **customer-endorsed 2026-08-08**. The supervised pilot on [#166](https://github.com/TheCaptainCompany/captain-food/issues/166) alone stays acceptable only while a human watches every order | Waiting for [#127](https://github.com/TheCaptainCompany/captain-food/issues/127)'s full cascade blocks the entire operational loop behind a post-V0 epic |
-| PROP-164500 D4/D5 | Timed pause; opening-hours exception days | Yes to both — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) | Weekly recurrence alone is wrong on all eleven French public holidays |
-| PROP-164500 D6/D7 | Scheduling window; order modification scope | Same-day slots; address correction before `PREPARING` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): D6 sequenced behind §1 B (authorization life bounds the window) | Bounded by B — card authorizations expire in ~7 days |
-| PROP-171500 D4 | ADMIN acting on behalf of a tenant | Explicit, logged bypass — ✅ **decided by the customer 2026-08-08, as recommended** ([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md)): explicit act-as (admin acts as admin on a named restaurant scope, distinct logged authorization path); **supersedes ADR-0037's impersonation-only stance**, reversed by its own author | — |
-| PROP-172000 D2 | Rejection reasons: enum or free text | Controlled enum + optional note — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), cures folded: `OTHER` ships day one; the free-text note is declared in the erasure scope (restaurant-authored PII) | Rejection reasons are the analytics that tell you which restaurants to coach |
-| PROP-172500 D1 | Delivery-area model | Postal-code sets now, geocoding next — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): business note — Tours river crossings make zones unusually truthful | Geocoding unlocks distance fees and honest ETAs — sequence it deliberately |
-| PROP-172500 D2 | Proof of delivery | Handover photo over [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), legal evidence: legitimate-interest basis with a recorded LIA; **dispute hold** (open reclamation/chargeback suspends expiry — card windows outrun 90 days); rider UI guidance: package/door, never a person | `NOT_DELIVERED` claims are unadjudicable today, and [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) is already routing them |
-| PROP-172500 D3 | Reclaiming an abandoned run | Rider release + stall sweep | A stalled `PICKED_UP` job means the food is with the rider — re-offering is wrong, it needs re-cooking. **Dependency**: the sweep's release must emit the SAME event as the manual release, so this now depends on [PROP-20260808-141817 D3](PROP-20260808-141817-rider-delivery-write-surface.md)'s naming decision (§20) — never a twin event. ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): the stall sweep emits `DeliveryAssignmentReleased` — the dependency is resolved by §20's D3 rename |
+✅ **CLOSED 2026-08-08.** Fourteen rows: fee-split rounding (buyer total first, residual cent to a
+stated leg, pinned by an odd-total test), the per-zone delivery-fee dimension, tips
+([ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md) —
+rider tips as recommended, restaurant tip per-restaurant opt-in, platform contribution on the
+HelloAsso model), stock ownership (re-validate at checkout, decrement only Captain-managed offers),
+per-service-type pricing, catalog images on a public audience, promo codes first, the V0 notification
+channel (in-app + sound **and** SMS in the same slice, escalation at ~60–90 s), timed pause and
+opening-hours exception days, the scheduling window and order-modification scope, ADMIN explicit
+act-as (superseding ADR-0037's impersonation-only stance), rejection reasons as a controlled enum +
+note, the postal-code delivery-area model, proof of delivery, and reclaiming an abandoned run.
+Records: [ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) ·
+[ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) ·
+[ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md).
 
 ---
 
 ## 4. Inherited — ✅ swept 2026-08-08 (what remains open moved to §22)
 
-| Proposal | Decisions | Note |
-|---|---|---|
-| [PROP-20260725-185140](PROP-20260725-185140-read-side-per-instance-authorization.md) read-side authz | **D1–D11** | ✅ decided WITH the graphql restatements 2026-08-08 (ADR-20260808-171056; veto open): intent stands end to end — scope predicates EMITTED into every generated subgraph resolver's SQL (unscoped resolver unspellable), `ScopeMembership` its own consumer-schema projector with one checkpoint and a declared cross-scope GRANT exception, the account-wide snapshot folds network events from the single log (event-carried), the guard mounts in each `graphql-{scope}` service and NEVER in the no-auth gateway, §3.3.4/§3.3.5 struck as moot. **§6.4 claim staleness STAYS OPEN** and the identity-bridge home is genuinely open — two new rows in §22. (Earlier register note was stale: [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) has NOT landed) |
-| [PROP-20260725-120055](PROP-20260725-120055-generic-file-attachment-framework.md) file framework | **D1–D5** (D2b decided) | ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open): **D1 RE-PREMISED** — object store = OVH Object Storage (EU), presigned S3 URLs (Supabase Storage references are historical); the `files` registry is IRREPLACEABLE state riding `captain-core`'s backup/PITR, never replay-restorable views; the weekly restore drill gains a bucket↔registry orphan reconciliation. **D2** per-kind retention windows with the dispute hold, tombstone `uploaded_by` anonymized after a stated horizon, and ZERO KYC documents under Connect. **D3/D4/D5** as proposed — dedupe must never share `storage_key` across rows |
-| [PROP-20260724-133700](PROP-20260724-133700-runtime-screen-and-translation-delivery.md) · [PROP-20260724-144500](PROP-20260724-144500-admin-flag-translation-keys.md) | — | ✅ 2026-08-08 (ADR-20260808-171056; veto open): PROP-133700 marked **Deferred (post-V0)**, [#96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing"](https://github.com/TheCaptainCompany/captain-food/issues/96) stays; PROP-144500 **Deferred** until live-translation work starts |
+✅ **CLOSED.** The inherited backlog of undated rows was swept on 2026-08-08; everything still live
+moved to §22, where it is tracked with an owner.
 
 ---
 
@@ -199,1498 +170,496 @@ see the per-row notes.
 | 2026-07-28 | **PROP-004616 D1–D6** — slug lifecycle + SIRENE inbound events | **All six answered.** D1 `RestaurantSlugConfigured` + `RestaurantSlugReconfigured` (in session) · D2 slug chosen **between claim and activation**, gated by "no activation without a configured slug" · D3 **write-side reservation table** with a real `UNIQUE` (also holds released slugs) · D4 the ACL stages **`RestaurantRegistered` only** — *against the recommendation*, and stricter: no registry-fact event, no ACL branching, the **aggregate** decides record/ignore/update · D5 **null the slug on `NON_PARTNER` rows** · D6 **both** `IGNORED` and `DUPLICATE`. Partially supersedes ADR-0045. | Product owner, this register + [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) |
 | 2026-07-26 | **PROP-193000 D1–D4** — continuous development loop | **Deferred.** The daily architecture-review routine is sufficient for now; the dev loop stays off until the proposals are under control. `dev-loop.yml` remains `workflow_dispatch`-only with `dry_run` defaulting true. | Product owner, this register |
 
+---
+
 ## 6. The daily decision cycle — ⚠️ SUPERSEDED 2026-08-08
 
-> **Superseded by [ADR-20260808-144738](../adr/ADR-20260808-144738-product-ownership-lives-in-the-team-no-pm-agent.md)**
-> (product ownership lives in the team; consent-based ensemble decisions replace the daily ask
-> ritual) — recorded in the 2026-08-08 register sweep (ADR-20260808-171056). D1–D5 below stay as
-> the option-space record; none is owed an answer. The proposal's Status is `Superseded`.
-
-[PROP-20260726-201500](PROP-20260726-201500-daily-decision-cycle.md) ([#211](https://github.com/TheCaptainCompany/captain-food/issues/211))
-proposes closing the loop: audit → ask → record → implement, daily. Its **D5 is the one that decides
-whether the cycle works at all** — whether DSL diffs join the daily approval ritual. Verified finding
-behind it: all six §1 decisions above unblock work that needs `specs/**` changes, so answering them
-moves items from 🔴 RED to 🟠 AMBER, **not** to 🟢 GREEN. Without D5 the cycle would ask the important
-questions and still be unable to act on the answers.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| D1 | Where the ask lands | One standing pinned GitHub issue, rewritten daily |
-| D2 | What counts as an answer | Free prose, re-stated by the next run before use (24h interpretation window) |
-| D3 | How many questions per day | Up to 3, plus one batch block |
-| D4 | When nothing is answered for days | Keep implementing GREEN; escalate the ask with its age |
-| **D5** | **Do DSL diffs join the ritual?** | **Yes — it is what makes the cycle reach the work, and it keeps a human approving every DSL change** |
-| — | Start with a week of ask-only? | Recommended |
+⚠️ **SUPERSEDED.** The five-row daily-cycle design (a standing pinned issue, free-prose asks, up to
+three questions plus a batch block, keep-implementing-green, and a human approving every DSL change)
+was overtaken by the mob operating model and by the lifting of the `specs/**` freeze
+([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)).
+Design record: [PROP-20260726-201500](PROP-20260726-201500-daily-decision-cycle.md).
 
 ---
 
 ## 7. Slug lifecycle + SIRENE inbound events — ✅ DECIDED 2026-07-28
 
-[PROP-20260728-004616](PROP-20260728-004616-slug-lifecycle-and-sirene-inbound-events.md)
-([#220](https://github.com/TheCaptainCompany/captain-food/issues/220)) came out of a Supabase disk-IO
-alert that turned out to be a symptom. Three defects underneath it: a **failed INSERT is the
-idempotency mechanism** for six creation handlers, **INSEE updates are silently dropped** (no
-`UpdateRestaurant` exists in the SIRENE worker at all), and the write path resolves identity through an
-**unindexed JSONB scan of the read model** once per staged SIRET. All three trace to deriving the slug
-at seeding time.
-
-**✅ CLOSED 2026-07-28 — all six answered, proposal `Approved`, implementation under way.** Kept here for
-the audit trail; the answers are in §5 and in
+✅ **DECIDED**, D1–D6, recorded in
 [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md).
-
-| # | Decision | Recommendation | **Answer** |
-|---|---|---|---|
-| D1 | Naming of the rename event | `Configured` + `Reconfigured` | ✅ as recommended (in session) |
-| D2 | When is the slug chosen? | Between claim and activation, gated by "no activation without a configured slug" | ✅ as recommended |
-| D3 | How slug uniqueness is enforced on the write side | Write-side reservation table with a real `UNIQUE` | ✅ as recommended |
-| D4 | What the ACL stages as the inbound event | A registry fact (`RestaurantObservedInRegistry`) plus a policy | ⚠️ **against the recommendation** — `RestaurantRegistered` **only**, unconditionally, with the **aggregate** deciding record/ignore/update. Stricter than either option offered: no new event, no ACL branching, no domain decision in the adapter |
-| D5 | Migration of the ~200k existing derived slugs | Null them on `NON_PARTNER` rows | ✅ as recommended |
-| D6 | Is the `IGNORED` / `DUPLICATE` split worth two statuses? | Both | ✅ as recommended |
-
-**Sequencing (binding):** the slug change lands *before* the SIRENE update path, or an INSEE rename
-becomes a live-storefront rename. SIRENE stays paused at both halves until the whole chain is complete.
-
-Reverses part of **ADR-0045** (SIRENE → `RegisterRestaurant` via the command path), so the realizing
-change needs an ADR. The `ImportCatalog`-stays-a-command contrast in CLAUDE.md survives intact: the test
-is whether the originator can be told no.
+Five rows went as recommended; **D4 went against the recommendation** — `RestaurantRegistered`
+**only**, unconditionally, with the aggregate deciding record/ignore/update. Design record:
+[PROP-20260728-004616](PROP-20260728-004616-slug-lifecycle-and-sirene-inbound-events.md).
 
 ---
 
 ## 8. SIRENE mirror storage — ✅ DECIDED 2026-07-28
 
-[PROP-20260728-120931](PROP-20260728-120931-sirene-mirror-payload-is-transient.md)
-([#231](https://github.com/TheCaptainCompany/captain-food/issues/231)). Measured on production
-2026-07-28: `external_sirene_restaurants` is **655 MB — 77% of the database** — at department 37 of 101,
-on a **2 GB disk with ~580 MB free** (Free plan, already flagged *exceeding usage limits*). Full France
-is ~2 GB for that one table. [#218](https://github.com/TheCaptainCompany/captain-food/issues/218) paced
-the sweep correctly, but pacing does not create disk, so this is what actually gates national coverage.
-
-The proposal: the payload is an input to translation with a **lifetime**, the hash is the
-change-detection key that persists. Keep the payload only while a row is pending, drop it once
-translated. ~1.8 kB/row → ~200 B/row; ~655 MB → ~90 MB today, ~250 MB at full France.
-
-**D5 is the one that needs real thought** — everything else has a clear answer. It asks whether losing
-replay/backfill from the mirror is acceptable, given INSEE is the system of record and (since #218) a
-full re-fetch is a normal paced operation rather than a special one.
-
-**✅ CLOSED 2026-07-28 — all five answered, proposal `Approved`, implemented in PR #234.** Kept here for
-the audit trail; the reasoning is in
-[ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md).
-
-| # | Decision | Recommendation | **Answer** |
-|---|---|---|---|
-| D1 | What the mirror retains | Payload transient (NULL after successful processing), hash permanent | ✅ as recommended |
-| D2 | Hash algorithm + encoding | Keep SHA-256, store as `bytea` not hex text. Keep the column named `payload_hash`, never `payload_md5` — naming a column after an algorithm pins the schema to it | ✅ as recommended, **sequenced after compaction**: `ALTER … TYPE` rewrites the whole table and needs ~655 MB free against ~580 MB. Cheap once live data is ~90 MB |
-| D3 | Unmappable / failed rows | KEEP their payload — it is the only evidence of why the record was unusable | ✅ as recommended, with a limit: the CI compaction has no ACL, so **historical** ACL-unmappable payloads are dropped. Holds going forward via the worker |
-| D4 | Migration on ~580 MB free | Batched `UPDATE … SET payload = NULL` with `VACUUM` interleaved; a single whole-table UPDATE would likely hit `No space left on device` again | ✅ as recommended |
-| **D5** | **Replay/backfill posture** | **Accept re-fetch from INSEE when a new field is needed** — the mirror is a cache, INSEE is the system of record | ✅ accepted, and **cheaper than the proposal argued**: the hash covers the TYPED projection, so adding a field to the wire types invalidates every digest and the next ordinary paced sweep re-translates the whole mirror by itself. The backfill is not an operation to build |
-| — | Where the compaction runs | Server-side (it has the ACL, so D3 holds for historical rows too) | ⚠️ **against the recommendation** — the **CI `sirene_ingest` job**. Cost recorded under D3 |
+✅ **DECIDED**, D1–D5, all as recommended, with two conditions worth keeping: D2 is **sequenced after
+compaction** (`ALTER … TYPE` rewrites the whole table and needs ~655 MB against ~580 MB free), and
+D3 holds only going forward — the CI compaction has no ACL, so historical ACL-unmappable payloads are
+dropped. Design record: [PROP-20260728-120931](PROP-20260728-120931-sirene-mirror-payload-is-transient.md).
 
 ---
 
 ## 9. Configuration is declared and validated at startup — PROP-20260729-004500 — ✅ DECIDED (D1–D3/D5 2026-07-29 · D4 2026-08-08)
 
-> **This block had gone stale**: D1/D2/D3/D5 were approved 2026-07-29 and realized
-> ([ADR-20260729-010500](../adr/ADR-20260729-010500-configuration-is-declared-and-fails-fast.md));
-> only D4 was still genuinely open, and it was ✅ decided by ensemble consent 2026-08-08
-> (ADR-20260808-171056; veto open): presence-only `/config` readiness endpoint, as a post-cutover
-> follow-up. Rows kept for the audit trail.
-
-Tracking issue: [#246 "Declare the app's configuration in specs/, validate it at startup, and refuse to boot when a required key is missing"](https://github.com/TheCaptainCompany/captain-food/issues/246).
-Product-owner directive of 2026-07-29 (the *what* is decided; these are the *how* questions it raises).
-
-Context in one line: configuration is the only part of the system with no source of truth — which is
-why `RUN_SIRENE_WORKER` had no home, `API_SECRET` is configured and read by nothing, and a missing
-`STRIPE_WEBHOOK_SECRET` would silently produce the worst failure mode in the product.
-
-| Decision | Question | Recommendation |
-|---|---|---|
-| PROP-004500 D1 | Required-ness model | **Per-profile** (`required: [production, staging]`) — production cannot boot misconfigured, dev/CI still start on a partial secret set |
-| PROP-004500 D2 | Which currently-degrading keys become HARD requirements in production | `STRIPE_WEBHOOK_SECRET`, `AUTH_SESSION_KEY`, `DATABASE_URL`, `SUPABASE_URL`/`SUPABASE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`. **Behavioural change** — see D5 for sequencing |
-| PROP-004500 D3 | Where the profile comes from | An explicit `APP_PROFILE` key defaulting to `development` — not inferred from the host or from key prefixes |
-| PROP-004500 D4 | A `/config` readiness endpoint | Yes, **presence-only** (never values) — the same one-curl answer `/sirene` just proved worth having |
-| PROP-004500 D5 | Rollout sequencing | **Warn-only for one deploy, then enforce** — the first deploy reports what production is missing without taking anything down |
+✅ **DECIDED.** Configuration is declared in the DSL and validated at process start, so a missing or
+malformed key fails the boot rather than the first request that needs it. Design record:
+[PROP-20260729-004500](PROP-20260729-004500-configuration-is-declared-and-validated-at-startup.md).
 
 ---
 
 ## 10. CI owns the Render service configuration — PROP-20260729-014500 — ⚠️ SUPERSEDED 2026-08-08
 
-> **Superseded**: Render is no longer the target —
-> [ADR-20260805-070138](../adr/ADR-20260805-070138-render-status-reflects-service-suspension.md)
-> suspended the service, and
-> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) moved
-> configuration ownership to GitOps + generated manifests on OVH MKS. Recorded in the 2026-08-08
-> register sweep (ADR-20260808-171056). Rows kept as the option-space record; the proposal's
-> Status is `Superseded`.
-
-Tracking issue: [#248 "CI owns the Render service configuration: sync specs/configuration.yaml + repo secrets to the service, never the dashboard"](https://github.com/TheCaptainCompany/captain-food/issues/248).
-Product-owner directive of 2026-07-29 (*"the settings must be done by the CI itself not by my manual
-configuration on render"*) — the *what* is decided; these are the *how*.
-
-[#246](https://github.com/TheCaptainCompany/captain-food/issues/246) gave configuration a declaration;
-this gives it an owner. Until it lands, `RUN_SIRENE_WORKER=true` remains a dashboard field nobody can
-see from the repo — and the production boot log confirms it was never set, which is why 6,649
-department-37 rows are still `PENDING`.
-
-| Decision | Question | Recommendation |
-|---|---|---|
-| PROP-014500 D1 | Write mode | **Upsert only** to start (never deletes); revisit replace-all once the drift report has been empty for several deploys |
-| PROP-014500 D2 | Dry-run first? | **Yes** — the workflow cannot be tested outside CI (no local `RENDER_API_KEY`), so its first real run would otherwise rewrite production config untested |
-| PROP-014500 D3 | Secret bootstrap ordering | **Non-secrets first** — unblocks `RUN_SIRENE_WORKER` immediately with zero secret-handling risk |
-| PROP-014500 D4 | `RENDER_API_KEY` as a write credential | **Reuse the existing account key** — the exposure already exists; Render issues no narrower token |
-| PROP-014500 D5 | Where non-secret values live: **baked into the image** or service env? | **Hybrid — bake non-secrets, sync secrets.** Render has no per-deploy env override (the deploy API takes only `clearCache`/`commitId`/`imageUrl`/`deployMode`), so baking is the only way to attach config to the artifact. It makes the digest determine behaviour, so a rollback restores the config that shipped with that build. Secrets can never be baked — the GHCR image is public |
+⚠️ **SUPERSEDED** by the move off Render to Kubernetes on OVH MKS (§17,
+[ADR-20260806-223656](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md) and the GitOps
+decision D7). The row is kept because the *principle* survived the platform change: the deployment
+substrate's configuration is owned by a pipeline over committed manifests, never by a console.
 
 ---
 
 ## 11. Uber Eats Marketplace + per-surface Uber Direct credentials — PROP-20260730-032306
 
-Tracking issue [#260 "Epic: Uber Eats Marketplace integration (order centralization + menu sync) and per-surface Uber Direct credentials"](https://github.com/TheCaptainCompany/captain-food/issues/260).
-**Partially approved**: D2 and D6 were decided in the 2026-07-30 session and are recorded by
-[ADR-20260730-032306](../adr/ADR-20260730-032306-uber-integration-topology-two-orgs-and-asymmetric-app-auth.md).
-Three remain, and **D7 is not an engineering decision** — it needs whoever advises on company/tax law.
+Design record: [PROP-20260730-032306](PROP-20260730-032306-uber-eats-marketplace-and-per-surface-direct-credentials.md) ·
+Tracking issue [#260 "Epic: Uber Eats Marketplace integration (order centralization + menu sync) and per-surface Uber Direct credentials"](https://github.com/TheCaptainCompany/captain-food/issues/260) ·
+Record: [ADR-20260730-032306](../adr/ADR-20260730-032306-uber-integration-topology-two-orgs-and-asymmetric-app-auth.md).
 
-**2026-08-08**: D1 ratified and D3 decided by ensemble consent (ADR-20260808-171056; veto open);
-D4 and D7 were answered by the customer 2026-08-08
-([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)); **D5 remains open**.
+**Nine of eleven rows are closed. Two remain open: D5 and D7.**
 
-**2026-08-13 (founder directive)**: *"Uber Eats and later Deliveroo will be used for the sync of
-catalog and external orders"* and *"Will be used also for the onboarding in case there is no hubrise
-but already an integration with uber eats we can load the existing catalog and then be the source of
-uber eats."* Refined into PROP-20260730-032306 §3bis (the **onboarding wedge**: consented one-time
-pull → recorded flip → Captain-as-source push) and the **aggregator shape** (Uber Eats instance 1,
-Deliveroo instance 2, data-driven like `DeliveryChannelKey` — not Uber-specific code). Opens **D8/D9/D10**
-below; the bootstrap is reconciled with the recorded no-scraping constraint (`sirene.md:67`) via the
-licensed Menu API + restaurant's own authorization + own-menu-only (PROP §3bis.3). Consulted block:
-PROP §9.
-
-**2026-08-13 (config follow-ups + a self-correction)**: two config-structure directives folded into
-PROP §6.1/§6.2 — the two declared apps (Captain Food Restaurant = Eats Marketplace API + `uber_direct:restaurant`;
-Captain Food Marketplace = `uber_direct:marketplace` only; a clarification, not a reversal), and
-test/prod keys "to test directly on production" (confirms **#257**, which supersedes **#254**). **Opens
-**D11** and corrects a prior architect over-reach**: PROP §6.2 first classified mixed-mode coherence a
-rule and pre-decided ≈ option 1 — but #257 presents the mixed-mode case (test customer × live
-restaurant) as a **founder decision** with a four-option table and states implementation must not start
-before it is decided. D11 reopened it founder-owed and blocked #257; the SoT/coherence half
-(Guardrail 1(a)) remains a rule.
-
-**2026-08-14 (founder-delegated adoption)**: the founder delegated this batch to the team — *"You
-don't need me for that"* + *"Go ahead team!!"*, pasting back the decision list with its
-recommendations. **D8, D9, D10 and D11 are ADOPTED on their recommendations** (D8 = bootstrap-then-flip
-source; D9 = Uber is merchant-of-record, informational record only; D10 = post-V0, design the
-aggregator SHAPE now; **D11 = option 1 — either side in test ⇒ the ORDER is test, ticket unmistakably
-marked / off the live kitchen flow**). **D11's adoption UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257) implementation.** Authority governed by
+✅ **Closed:** **D1** build the Eats integration directly rather than layering on HubRise · **D2** two
+Uber orgs, split by acquisition surface, storefront first (against the recommendation) · **D3** the
+acquisition surface is a field on `OrderPlaced`, because acceptance-first means the saga runs long
+after the `Host` header is gone · **D4** a marketplace order is a distinct `ExternalOrderReceived`
+event, never nullable payment fields on `OrderPlaced` · **D8** the onboarding wedge is
+**bootstrap-then-flip** · **D9** Uber is merchant-of-record on a pre-paid external order,
+informational record only · **D10** the wedge is **post-V0**, with the aggregator *shape* designed now ·
+**D11** either side in test ⇒ the ORDER is test, ticket unmistakably marked and off the live kitchen
+flow — which **unblocked [#257](https://github.com/TheCaptainCompany/captain-food/issues/257)**.
+D8–D11 were adopted on their recommendations under the founder's 2026-08-14 delegation (*"You don't
+need me for that"* / *"Go ahead team!!"*), governed by
 [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md).
 
 | Decision | Question | Recommendation |
 |---|---|---|
-| PROP-032306 D1 | Build the Eats integration directly, or layer on HubRise (which already syncs menus to Uber Eats and Deliveroo)? | **Direct** — effectively chosen by registering the app. Reaches restaurants with no POS at all, which is the segment Captain targets; and allergen relay is contractually ours whether or not we own the pipe — ✅ RATIFIED by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open) |
-| PROP-032306 D2 | Which Uber org is billed for a Direct dispatch? | ✅ **DECIDED 2026-07-30: two orgs, split by acquisition surface, storefront first.** (C — one org plus internal attribution — was recommended; A was chosen) |
-| PROP-032306 D3 | Where does the acquisition surface live? | **A field on `OrderPlaced`.** Not derivable at dispatch: acceptance-first (ADR-20260720-015500) means the saga runs long after the `Host` header is gone — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056; veto open), cure folded: the acquisition scalar is declared ONCE in `specs/common` so a future `ExternalOrderReceived` shares it |
-| **PROP-032306 D4** | How is a marketplace-originated order represented, given it carries **no Captain PaymentIntent**? | **A distinct `ExternalOrderReceived` event.** Making the payment fields nullable on `OrderPlaced` would weaken a money invariant for every order to accommodate a minority. **Pairs with §1 A/B (payout posture, capture timing) — decide together** — ✅ **decided by the customer 2026-08-08, as recommended** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): distinct `ExternalOrderReceived`, provenance visible |
 | **PROP-032306 D5** | Menu ownership across Captain / HubRise / Uber, and per-channel price parity | **HubRise authoritative when connected, else Captain**, one-way push. Parity is the sharp edge: restaurants mark Uber prices up to absorb Uber's commission, and ADR-0024's comparison coefficients are calibrated on that — pushing Captain prices unchanged undercuts the restaurant *and* invalidates `basis: REAL` — ✅ decided by ensemble consent 2026-08-08 (ADR-20260808-171056 addendum; veto open; business CONFIRM: uplift preserved as a RATIO, push never defaults to overwrite, pinned by spec test) |
 | **PROP-032306 D7** | Is the Provider entity on the signed Uber agreement (**Caring Hope Foundation**, RNA W372020229 — a loi-1901 association) the entity that will operate the platform? | **Needs legal input, not a recommendation.** An Uber API licence follows the entity; if the association holds it while another entity operates and earns commission, access sits outside the licence. Also interacts with the payout posture in §1 A — ✅ **decided by the customer 2026-08-08** ([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): *"association (now) → SASU (operations, brand pending) → SCIC per area + federation, like CoopCycle"*; Connect onboarding waits for the SASU; the Uber agreement's entity questions become transfer-to-SASU questions in the counsel packet |
-| **PROP-032306 D8** ✅ **ADOPTED (A) — founder-delegated 2026-08-14** | The **onboarding wedge** lifecycle (no HubRise, existing Uber Eats): how is "load the existing catalog, then be the source of Uber Eats" modelled? | **A — bootstrap-then-flip**: one-time consented pull (`CatalogImported{source: UBER_EATS}` via the licensed Menu API + restaurant authorization, own-menu-only, honouring `sirene.md:67`) → an explicit **recorded flip** ("Captain is now source for channel X") → Slice C pushes forward. One writer at every instant; slots *under* D5's steady state, does not re-open it. Rejected: continuous two-way sync (two writers, divergence) and Uber-stays-authoritative (defeats the wedge). Team-owned once decided: the `source` inline enum → `CatalogSource` scalar + additive stored-event upcast. ✅ **ADOPTED (A), founder-delegated 2026-08-14** (*"You don't need me for that … Go ahead team!!"*): bootstrap-then-flip source-of-truth — consented one-time pull → recorded flip → Captain pushes forward. One writer at every instant |
-| **PROP-032306 D9** ✅ **ADOPTED (A) — founder-delegated 2026-08-14** | Money / merchant-of-record / VAT-receipt posture for a **pre-paid external order** (already accepted & paid on Uber's rails, no Captain PaymentIntent). D4's 2026-08-08 answer fixed only the event *shape*; this half was left open in D4's own text | **A — informational record only**: Uber is merchant of record; no Captain receipt, no Captain settlement, excluded from Captain GMV/commission; the restaurant's consolidated P&L comes from a read projection labelled "settled by Uber". Keeps external orders off the payment-agent posture (§1 / SASU Connect). Rejected: nullable payment fields / synthetic payment (fabricates a financial record — D4 already refused), and a Captain fee on external orders (defer). ✅ **ADOPTED (A), founder-delegated 2026-08-14**: informational record only — **Uber is merchant-of-record** for pre-paid external orders, no Captain receipt/settlement, consolidated P&L via a "settled by Uber" projection. **Obligation map, not legal clearance — counsel still confirms the MoR posture** (no lens output is legal clearance) |
-| **PROP-032306 D10** ✅ **ADOPTED (B) — founder-delegated 2026-08-14** | Is the onboarding wedge (Slice F) in **V0-Tours** scope, or post-V0? | **B — post-V0**: prove storefront + HubRise first; **design the aggregator shape now** (data-driven `source`, one ACL) so Deliveroo and the wedge are rows not rewrites, but ship the wedge only after D7 (licence/SASU), D9 (money) and Uber Marketplace certification clear — none clearable this side of the §35 deploy keystone. ✅ **ADOPTED (B), founder-delegated 2026-08-14**: **post-V0**, and **design the aggregator SHAPE now** (Deliveroo / the wedge land as rows, not rewrites). NOT a re-rank of #260 — the shape work sits below the acceptance keystone on the value stack |
-| **PROP-032306 D11** ✅ **ADOPTED (1) — founder-delegated 2026-08-14 · UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257)** | **Mixed-mode resolution: when the two sides DISAGREE (a test customer ordering from a LIVE restaurant, or the reverse), which mode wins?** Per-order mode is one order-fact driving **both** Stripe and Uber Direct identically — [#257 "Stripe mode becomes a DOMAIN property, not a deployment one: hold both key pairs and select per order"](https://github.com/TheCaptainCompany/captain-food/issues/257) is Stripe-first; the Uber Direct config comment extends the same pattern (`specs/delivery/configuration.yaml:106-107`). #257 **supersedes [#254](https://github.com/TheCaptainCompany/captain-food/issues/254)**. #257's own words: *"implementation should not start before the mixed-mode rule is decided — it is the one that can cost a restaurant real food."* **This corrects a prior architect over-reach**: PROP §6.2 first classified mode-coherence a rule, pre-deciding ≈ option 1 — the mixed-mode leg is a **FOUNDER decision**, not a rule (the SoT/coherence half, Guardrail 1(a), remains a rule). | **Four options (verbatim intent from #257):** **(1) Either side in test ⇒ the ORDER is test** — money-safe; a live restaurant can receive a test ticket, which **must be unmistakably marked and kept off the real kitchen/ticket flow**. **(2) Restaurant decides, customer flag ignored** — simplest; a tester cannot rehearse against a live restaurant. **(3) Both must be test, else live** — a test customer charged for real at a live restaurant: the **worst**, reject. **(4) Mixed mode REFUSED at checkout** — safest/most explicit; costs a customer-visible rejection. ✅ **ADOPTED (1), founder-delegated 2026-08-14** (*"You don't need me for that … Go ahead team!!"*): **either side in test ⇒ the ORDER is test**, with the test ticket **unmistakably marked and kept off the real kitchen / live-ticket flow** — the only option both money-safe **and** able to rehearse on a live restaurant. **This UNBLOCKS [#257](https://github.com/TheCaptainCompany/captain-food/issues/257) implementation** (the mixed-mode rule #257 required decided before code); PROP Guardrail 1(a) is confirmed. The test-ticket marking + live-kitchen-exclusion is the load-bearing build constraint and must be pinned by a test |
-
 
 ---
 
 ## 12. The batched send's signature — ✅ DECIDED 2026-08-02 (deferred)
 
-[PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) is `Approved`, but the
-product owner raised ONE new decision while reaffirming §2.1 (typed actor clients — realization
-tracked by [#284 "Typed actor clients (PROP-20260728-152752 §2.1): one generated client per actor"](https://github.com/TheCaptainCompany/captain-food/issues/284)):
-what the TYPED form of the batched send looks like. The interim untyped
-`enqueue_inbound_facts` ([#283 "batch the SIRENE drain"](https://github.com/TheCaptainCompany/captain-food/pull/283))
-fixed a 6x producer bottleneck and must be absorbed, not kept. Blocks only `send_many` — the
-singular typed client can land first.
-
-| # | Decision | Recommendation | **Answer** |
-|---|---|---|---|
-| **D8** | `send_many` signature + compile-time checks | (a) Homogeneous generic batch | ⚠️ **Deferred — no `send_many` for now** (product owner, 2026-08-02). Build the client as §2.1 always specified it first — per-actor, `send` + `schedule`, compile-time checked — then discuss parallelisation separately. The #283 batching stays infrastructure-internal (`enqueue_inbound_facts`), outside the client's public surface, until that discussion |
-
+⚠️ **Deferred — no `send_many` for now** (product owner, 2026-08-02). The actor client is built as
+`PROP-20260728-152752` §2.1 always specified it: per-actor, `send` + `schedule`, one message at a
+time. A batched send is revisited when a real use case asks for one.
 
 ---
 
 ## 13. Client isolation by crate — ✅ DECIDED 2026-08-02
 
-[PROP-20260728-152752 D9](PROP-20260728-152752-actor-mailbox-write-path.md): make the typed-client
-door COMPILER-enforced. Product owner: **Option B** — a dedicated `actor-client` crate between
-`application` and `infrastructure` (private-field `MailboxEntry` + constructors + generated clients
-in one crate, so bypassing the client does not compile), with **per-actor crates as the target
-topology** ("improve the isolation with crates everywhere" — the C# assembly-per-client /
-assembly-per-actor practice, crate as the boundary). Phased: one client crate first (the payoff),
-per-actor client crates second, per-actor implementation crates gated separately. Tracked by
-[#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290).
-
+✅ **DECIDED.** Actor clients live in their own crates so a caller links the clients it needs and
+nothing more. Realized by [#290 "Actor-client crate split"](https://github.com/TheCaptainCompany/captain-food/issues/290);
+the capability-allowlist gate that keeps it honest is §40.
 
 ---
 
 ## 14. Isolation by construction — PROP-20260802-130500 — ✅ DECIDED 2026-08-02
 
-[PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md)
-([#290](https://github.com/TheCaptainCompany/captain-food/issues/290)). The product owner's threat
-model, first-class: most code here is written by AI sessions, and a rule an agent can violate
-silently is a review burden forever — so buy compile-time enforcement wherever it is for sale.
-Measured finding behind it: the typed-client door is level-4 enforced while **nine crates hold
-`sqlx`** and can bypass every door with one query. Scope (product-owner directive, 2026-08-02):
-**"per actor" includes the process managers** — one crate per PM and one per PM client at every
-phase, symmetric with aggregates (16 actors = 14 aggregates + `PlaceOrderProcess` +
-`RefundProcess`). All six decisions answered:
-
-| # | Decision | Answer |
-|---|---|---|
-| D1 | The client door becomes a crate | Dedicated `actor-client` crate (decided as PROP-20260728-152752 D9) |
-| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor — aggregates AND process managers; domain types stay one crate — ✅ as recommended |
-| D3 | `Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`) | Adopt in phase 1 — ✅ as recommended |
-| D4 | The read door | One generic `ActorClient` with `get_operation_status(message_id)` — status is generic to all operations, so neither a per-actor client method nor a separate `OperationStatusClient` type; in the client crate, phase 1 |
-| D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check that no release artifact enables it — ✅ as recommended |
-| D6 | Lint floor | **Later, separately — against the recommendation**: lands as its own change after phase 1, tracked on #290's checklist |
+✅ **DECIDED**, D1–D6. Handler crates per actor (aggregates and process managers), domain types stay
+one crate, adopted in phase 1; one generic `ActorClient` with `get_operation_status(message_id)`; a
+`test-fixtures` cargo feature with a CI check that no release artifact enables it. **D6 went against
+the recommendation** — it lands as its own change after phase 1. Design record:
+[PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md); §1 of it ranks the
+compiler-first levels that [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)
+made binding. **ISO-3, the one row of its own audit table that never became work, is still open — §29.**
 
 ---
 
 ## 15. Push-driven mailbox — PROP-20260802-223522 — ✅ DECIDED 2026-08-02
 
-[PROP-20260802-223522](PROP-20260802-223522-push-driven-mailbox.md)
-([#313 "Push-driven mailbox: pg_notify on inbound_messages, idle lane gate, poison policy (PROP-20260802-223522)"](https://github.com/TheCaptainCompany/captain-food/issues/313)).
-Extends [#301](https://github.com/TheCaptainCompany/captain-food/pull/301)'s NOTIFY approach to the
-last polling surface: the actor mailbox (post-audit: it out-polled what #301 removed, ~8×; interim
-width-5 mitigation merged as ADR-20260802-220402). Also closes the up-to-10 s adapter→worker wake
-gap on the money path, and bounds the silent infinite-retry poison mode found 2026-08-02.
-**Approved as recommended, D1–D5** (product owner, in-session, 2026-08-02; ADR-20260802-224532);
-unresolved questions live on the tracking issue's checklist.
-
-| # | Decision | Recommended | Answer |
-|---|---|---|---|
-| D1 | Wake transport | `pg_notify` in the enqueue transaction (one door: `PgMailbox`) | ✅ as recommended (2026-08-02) |
-| D2 | Channel topology | One channel, payload = `actor_type` (per-type coalescing) | ✅ as recommended (2026-08-02) |
-| D3 | Idle gate | One lanes-with-work query per pass (partial index exists) | ✅ as recommended (2026-08-02) |
-| D4 | Poison policy | `attempts` cap (default 5) → terminal `FAILED` + error on the row | ✅ as recommended (2026-08-02) |
-| D5 | Gating | Own toggle (worker-toggle pattern) + `MAILBOX_MAX_DELIVERY_ATTEMPTS` (0 = today) | ✅ as recommended (2026-08-02) |
-
-Unresolved questions — **all four decided 2026-08-03**
-([ADR-20260803-002712](../adr/20260803-002712-mailbox-poison-follow-ups-decided.md)): admin
-requeue mutation ([#315](https://github.com/TheCaptainCompany/captain-food/issues/315)) ·
-exponential backoff ([#316](https://github.com/TheCaptainCompany/captain-food/issues/316)) ·
-page on EVERY poison ([#317](https://github.com/TheCaptainCompany/captain-food/issues/317)) ·
-fleets default-off until DB-persisted posture ([#318](https://github.com/TheCaptainCompany/captain-food/issues/318)).
+✅ **DECIDED**, D1–D5, all as recommended: the mailbox is driven by push, and a poll is a declared,
+observable, exit-having degraded mode. Generalised into the founder directive
+[ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md).
+Design records: [PROP-20260802-223522](PROP-20260802-223522-push-driven-mailbox.md) ·
+[PROP-20260802-200416](PROP-20260802-200416-push-driven-drain-loops.md).
 
 ---
 
 ## 16. Who owns the OVH host — PROP-20260805-181926 — ⚠️ SUPERSEDED 2026-08-08
 
-> **The destination changed to Clever Cloud** ([ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md),
-> product owner: *"Instead of OVH"*). A PaaS means **no host OS of ours**, so **D1–D6 below have no
-> subject** — they stay as the costed record of the option space, not as decisions anyone owes an
-> answer to. **Only D7 is still open**, in reduced form. **D3 (SaltStack) is settled by construction**:
-> there is no machine for it to configure. The one live question moved to the ADR's follow-up —
-> **whether Clever Cloud meters egress the way Render did**, which gates any spend, because egress
-> exhaustion is one of the incidents that started this migration.
->
-> **2026-08-08 — fully superseded**: D7, the one surviving question, is answered by
-> [PROP-20260806-223656 D5](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md) /
-> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) (manifests
-> generated from the specs, on OVH MKS — the destination moved again, from Clever Cloud to MKS,
-> per §17). Nothing here remains open; recorded in the 2026-08-08 register sweep
-> (ADR-20260808-171056). The proposal's Status is `Superseded`.
-
-[PROP-20260805-181926](PROP-20260805-181926-host-provisioning-and-configuration-ownership.md)
-([#349 "Who owns the OVH host: provisioning IaC + host configuration (SaltStack evaluated)"](https://github.com/TheCaptainCompany/captain-food/issues/349)).
-Raised by the product owner as *"SaltStack seems to be an interesting solution"*. It is live because
-the OVH cutover ([#271](https://github.com/TheCaptainCompany/captain-food/issues/271),
-ADR-20260731-061609) gives us a **host OS of our own for the first time** — on Render nothing about
-the machine was ours. Today no file says which OVH resources exist or what is installed on the box,
-which is the Render-dashboard failure mode (`RUN_SIRENE_WORKER` set in no file, `API_SECRET` read by
-no code) one layer deeper. The proposal splits the question into **provisioning** (what resources
-exist — Salt does not address this at all) and **host configuration** (what runs on the box), and
-notes that **application** configuration is already owned by `specs/configuration.yaml` and must stay
-that way.
-
-| # | Decision | Recommended | Answer |
-|---|---|---|---|
-| D1 | Layer A — provisioning | OpenTofu + the official `ovh/ovh` provider — the instance, network, firewall, managed PG plan and DNS become reviewed files | _(open)_ |
-| D2 | Layer B — host configuration | cloud-init `user_data` from the repo (~80 lines, no agent, no daemon); **Ansible named as the escape hatch** at 3+ hosts. NixOS deferred on **bootstrap risk** (OVH has no first-class NixOS image) and D7 — no longer on authoring cost | _(open)_ |
-| D3 | **SaltStack: adopt or reject** | **Reject** — its advantage needs ~1,000 nodes and we have one, it adds a listening root-equivalent control plane to the box terminating payment traffic, its pillars become a second config store, its convergence model contradicts the immutable-artifact doctrine, and its stewardship is consolidating into Broadcom's VMware suite. Revisit only for restaurant-side hardware fleets | _(open)_ |
-| D4 | Host posture | Disposable — rebuild, never converge (affordable only because the managed PG is a separate resource, PROP-20260731-061609 D2) | _(open)_ |
-| D5 | OpenTofu state | OVH Object Storage S3 backend + committed `.terraform.lock.hcl`; **never** the repo (public — it would leak the PG credential) | _(open)_ |
-| D6 | Sequencing | cloud-init now, cut over, **then** `tofu import` the live resources — IaC must not block restoring production | _(open)_ |
-| D7 | **Is host config generated from the DSL?** (product owner, 2026-08-05: *"based on the spec in YAML you can generate it… encapsulated in the codegen"*) | **Derive from the specs that ALREADY exist** — compose file, firewall ports and collector config from `configuration.yaml` / `observability.yaml` / `services.yaml` / C4 — **not** a new `specs/host.yaml`, which would be a single-target passthrough with none of the fan-out that earns the repo's other emitters. Target-independent, so it works for cloud-init now and NixOS later | _(open)_ |
-
-Concern registered and unchecked, so this cannot be approved as-is: **cutover-not-blocked** — prod is
-down today and nothing here may delay [#271](https://github.com/TheCaptainCompany/captain-food/issues/271).
-D6 is the mechanism; checking the concern means confirming that ordering.
+⚠️ **SUPERSEDED** by §17: the question was who owns a single host's configuration, and the answer
+became "no single host" — the substrate is Kubernetes on OVH MKS, operated GitOps-only over generated
+manifests. D1–D7 were never answered and are not owed; the ownership question they asked is answered
+by §17 D7. Design record: [PROP-20260805-181926](PROP-20260805-181926-host-provisioning-and-configuration-ownership.md).
 
 ---
 
 ## 17. Kubernetes as the deployment substrate — PROP-20260806-223656 — ✅ DECIDED 2026-08-07
 
-> **Fully approved** (product owner, D1–D7 across 2026-08-06/07, closed with *"D3 and D5 yes, start
-> clean, move the NS to OVH"*), recorded by
-> [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md): **OVH MKS +
-> in-cluster CNPG + GitOps-only operations + generated manifests + `Recreate` until #242 + straight
-> to the cluster, starting from an EMPTY schema (no dump restore) + NS hosting → OVH DNS (Dynadot
-> stays registrar)**. All four concerns checked. The rows below record the option space as decided.
-
-[PROP-20260806-223656](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md)
-([#271](https://github.com/TheCaptainCompany/captain-food/issues/271)). Reopens
-[ADR-20260806-151122](../adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md)
-(Clever Cloud), which is **no longer in force**, at the product owner's direction.
-
-**Why**: that ADR's decisive argument was *"a team of one product owner plus agents should not be
-operating a PostgreSQL server"* — a premise about the OPERATOR that was **wrong**. The product owner
-has run Kubernetes professionally, so the heaviest weight in the decision was mis-specified. Three
-further arguments were raised and none appeared in the ADR: **ingress as a light API gateway**
-(wildcard TLS is needed on every destination anyway), **lock-in** (previously dismissed as "a
-Dockerfile and env vars", which under-weighted Tasks/Cellar/add-ons compounding), and **manifests as a
-codegen target** — a cluster can consume generated deployment descriptors, a PaaS cannot, which makes
-this the best available home for PROP-20260805-181926's surviving D7.
-
-| # | Decision | Recommended | Answer |
-|---|---|---|---|
-| D1 | Kubernetes, or the PaaS decided yesterday? | **OVH MKS** if k8s (free control plane, **free egress**, GA — vs CKE still in public beta); Clever Cloud PaaS retained as the costed fallback | ✅ **OVH MKS** (product owner, 2026-08-07: *"MKS of course"*) |
-| D2 | **Where does PostgreSQL live?** — the hard one | Managed alongside the cluster was recommended; the option table also carries a vRack-instance shape and in-cluster CNPG | ✅ **In-cluster CNPG** (product owner, 2026-08-06: *"Postgres on Kubernetes"*) — with the operability conditions as part of the answer: ≥3 nodes, required anti-affinity, WAL archiving to object storage, scheduled executed restore drills |
-| D3 | Deploy strategy while [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) caps us at one instance | **`Recreate`** — a RollingUpdate runs two write paths at once, exactly what [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s leases and fencing exist to prevent | ✅ As recommended (2026-08-07) |
-| D4 | Ingress + wildcard TLS | ingress-nginx + cert-manager, DNS-01 for `*.captain.food` | ✅ **As recommended** (product owner, 2026-08-07: *"Ingress yes!"*) — with a zone-host correction: **DNS is at DYNADOT, which has NO cert-manager solver**. Sub-decision open: move zone hosting to OVH DNS (NS change only, Dynadot stays registrar — recommended), CNAME-delegate just the ACME challenge, or write a custom webhook |
-| D5 | Manifests generated from the specs? | **Yes** — the strongest argument for a cluster, and PROP-20260805-181926 D7 with a target that fits | ✅ As recommended (2026-08-07) |
-| D6 | Sequencing, with prod DOWN | Restore service on the simplest path first, build the cluster deliberately after — the digest-pinned image runs unchanged on either, so it is a redeploy, not a second migration | ✅ **Build the cluster now, cut over once** — AGAINST the recommendation (product owner, 2026-08-07: *"I don't care about prod on Render and Supabase, it was a crash test"*). Opens the data question: restore the dump into CNPG, or start clean? |
-| D7 | How does the agent operate the cluster? | GitOps as the only change path + read-mostly RBAC + per-incident break-glass; PVC/StatefulSet/namespace deletes outside every standing role | ✅ **GitOps** (product owner, 2026-08-06: *"Of course gitops"* — diagnostics via cluster + Postgres read access, fixes as repo changes). Practices in the proposal's §2b |
-
-All four concerns ✅ checked. D6's data question is answered — **start clean, no dump restore** — and
-D4's zone-host sub-decision is answered — **NS hosting moves to OVH DNS**. Realization proceeds under
-[#271](https://github.com/TheCaptainCompany/captain-food/issues/271) per the ADR's consequences.
+✅ **DECIDED**, D1–D7. **OVH MKS** (*"MKS of course"*) · **in-cluster CloudNativePG** (*"Postgres on
+Kubernetes"*), with the operability conditions as part of the answer — ≥3 instances, WAL archiving,
+executed restore drills · ingress **yes**, with the correction that DNS is at Dynadot, which has no
+cert-manager solver · **D6 went against the recommendation**: build the cluster now and cut over
+once (*"I don't care about prod on Render and Supabase"*) · **GitOps** (*"Of course gitops"*) —
+diagnostics via cluster and Postgres read access, fixes as repo changes. Records:
+[ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) ·
+[PROP-20260806-223656](PROP-20260806-223656-kubernetes-as-the-deployment-substrate.md) ·
+[PROP-20260731-061609](PROP-20260731-061609-ovh-migration.md). The money and sizing consequences are
+tracked as §35 **DB-HA**; the cutover itself is [#358](https://github.com/TheCaptainCompany/captain-food/issues/358).
 
 ---
 
 ## 18. One decomposition axis: spec folders, schemas, projectors — PROP-20260807-174246 — ✅ DECIDED 2026-08-07
 
-> **Approved as recommended** (product owner, 2026-08-07 — D1–D8, with D2 and D8 in their revised
-> forms; the critical-path-growth concern explicitly accepted), recorded by
-> [ADR-20260807-183024](../adr/ADR-20260807-183024-one-decomposition-axis.md). The rows below stand
-> as the record of the option space; every `_(open)_` cell reads **✅ as recommended (2026-08-07)**.
-> Realization order is the ADR's consequences list; unresolved questions live on
-> [#374](https://github.com/TheCaptainCompany/captain-food/issues/374)'s checklist.
-
-[PROP-20260807-174246](PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md)
-([#374](https://github.com/TheCaptainCompany/captain-food/issues/374)). Product-owner directive
-(screaming architecture): spec folders per business domain + common, per-domain storage, per-domain
-`configuration.yaml`, per-domain projectors, admin cross-scope queries preserved. Completes the
-one-axis chain begun in §17: `specs/{scope}/` → `domain-{scope}` crate → `actor-{scope}` image →
-`{scope}` schema → `projector-{scope}`.
-
-| # | Decision | Recommended | Answer |
-|---|---|---|---|
-| D1 | Spec folders per scope + `common/` | Yes — with placement, cross-scope-DAG and kernel-purity validator rules | _(open)_ |
-| D2 | **Storage level** | **REVISED after product-owner pushback** (*"I don't like too many responsibilities on one database"* — the integration-database antipattern): split by RESPONSIBILITY — **`captain-core`** (event log + mailbox only; all backup/PITR budget) and **`captain-views`** (per-scope schemas of projections; rebuildable by replay, EXCLUDED from backups) in the one CNPG cluster. No native cross-DB join is ever needed; cross-scope exposure via projections/GraphQL; per-scope lifts later are connection-string changes | _(open)_ |
-| D3 | The event log | Stays SINGLE in a `core` schema — global ordering, PM causality, one PITR timeline, the GDPR erasure path | _(open)_ |
-| D4 | Projectors | Per scope over the single log, independent checkpoints; admin/BAM are consumer schemas — scope views never join across schemas | _(open)_ |
-| D5 | Configuration | Splits per scope + common; each bin's generated `Config` reads only its own keys | _(open)_ |
-| D6 | Admin cross-scope queries | Via **projections + GraphQL composition** (the admin surface reads its own consumer schema); `admin_ro` cross-schema SQL demoted to INCIDENT tooling, never an application path | _(open)_ |
-| D7 | Sequencing | Everything pre-cutover — **start-clean makes the storage split FREE** (schemas created, nothing migrated); this window does not recur | _(open)_ |
-| D8 | GraphQL per domain (product owner: *"merge them in one graphql"* — closest name: **schema stitching**) | **REVISED after product-owner pushback** (an over-responsible graph = the integration-DB antipattern at the API layer): **`graphql-{scope}` services** (one domain, one graph, one GRANT) + a **thin generated gateway per role** — no DB access, no logic, top-level-field routing from a codegen-emitted composition table (static stitching, no query planner). Cheap here because CQRS denormalization puts composition in the PROJECTOR, so entity resolution/N+1 never arise; a validator rule keeps nested types intra-scope | _(open)_ |
-
-Concern registered and unchecked: **critical-path-growth** — prod is down and this grows the
-pre-cutover program again; approving accepts that explicitly.
+✅ **DECIDED**, recorded as [ADR-20260807-183024](../adr/ADR-20260807-183024-one-decomposition-axis.md):
+`specs/{scope}/{kind}.yaml`, `$ref`s stay kind-logical so moving an item between scopes rewrites no
+refs, and `specs/common/` is the kernel. Its **D7** is the sentence the whole cutover window rests on
+— *"start-clean makes the storage split free — the window that does not recur"*. Design record:
+[PROP-20260807-174246](PROP-20260807-174246-one-decomposition-axis-specs-schemas-projectors.md).
 
 ---
 
 ## 19. Build in public — PROP-20260807-190936
 
-[PROP-20260807-190936](PROP-20260807-190936-build-in-public-transparency.md)
-([#377](https://github.com/TheCaptainCompany/captain-food/issues/377)). Product-owner directive:
-platform transparency — *"Kubernetes completely open"* — for recruitment, press, marketing, branding.
-**The line: transparency exposes INFORMATION, never CONTROL** — "Kubernetes open" is a generated,
-sanitized public view OF the cluster (from the already-public GitOps state), never network reach INTO
-it. Most of L1 already exists as a side effect of the operating model (public repo, ADRs, the git
-deploy ledger, public CI). Decisions D1–D4 open (levels · initial aggregate-only metric set · L4 as a
-static generated page · L2–L4 after cutover); concerns **pii-and-gdpr** and **attack-surface**
-registered. Related, no decision needed: [#378](https://github.com/TheCaptainCompany/captain-food/issues/378)
-emits JSON Schemas FROM the validator model (generated, never hand-written) for authoring-time
-feedback — the validator stays the semantic authority (`REF_CONTRACT` already gates
-$ref-kind-appropriateness).
-
-**2026-08-08** (ADR-20260808-171056; veto open): **D2 decided** — platform-wide aggregates ONLY, no
-per-restaurant/per-postcode/per-rider dimension ever without consent (sole-trader metrics are
-personal data; a partner's published volume is an adoption killer), k ≥ 10 per cell when slicing
-ever starts. **D3 decided** — static generated status page, cure folded: the page renders its own
-generation timestamp and goes visibly stale (a frozen "all green" during the outage that killed its
-publisher is worse than no page). **D4 decided** — L2–L4 after cutover. **D1 ✅ decided by the customer 2026-08-08, DIFFERENT choice**
-([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)): **radical
-transparency** — public accounting on Open Collective, public Kubernetes/technical usage, public
-incidents + postmortems on GitHub, public status page. The D2 aggregates-only and
-information-never-control guardrails stand and compose.
+✅ **FULLY DECIDED 2026-08-08.** **D1 went to the customer and came back a DIFFERENT choice —
+radical transparency**: public accounting on Open Collective, public Kubernetes and technical usage,
+public incidents and postmortems on GitHub, a public status page
+([ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md)). Two guardrails stand
+and compose with it: **transparency exposes INFORMATION, never CONTROL** — a generated, sanitized
+public view *of* the cluster, never network reach *into* it — and **D2, platform-wide aggregates
+only**, no per-restaurant / per-postcode / per-rider dimension without consent (a sole trader's
+metrics are personal data, and a partner's published volume is an adoption killer), k ≥ 10 per cell
+if slicing ever starts. **D3**: a static generated status page that **renders its own generation
+timestamp and goes visibly stale** — a frozen "all green" during the outage that killed its publisher
+is worse than no page. **D4**: levels L2–L4 after the cutover. Design record:
+[PROP-20260807-190936](PROP-20260807-190936-build-in-public-transparency.md),
+[#377](https://github.com/TheCaptainCompany/captain-food/issues/377).
 
 ---
 
 ## 20. The rider/delivery write surface — PROP-20260808-141817 — ✅ FULLY DECIDED 2026-08-08
 
-[PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md)
-([#348 "Epic: the rider/delivery write surface does not exist"](https://github.com/TheCaptainCompany/captain-food/issues/348)).
-**`Approved` 2026-08-08 — fully decided, all six.** **D1, D2, D4, D6 decided by ensemble consent** —
-[ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
-customer veto window open. **D5 decided by the customer, 2026-08-08: as recommended**
-(`PlaceOrder` payload flag + PM step). **D3 DECIDED by the architect lens, 2026-08-08** (customer
-delegation — "if we start with specialisation we finish with specialisation"): rename now, while
-zero events are emitted — event `DeliveryAssignmentReleased`, command `ReleaseDeliveryAssignment`,
-mutation `releaseDeliveryAssignment` (the verdict OVERRIDES the proposal's `unassignDelivery`
-mutation name: an `unassign`-named mutation over a release-named event reintroduces the second
-vocabulary the rename kills). Actor-neutral by design — manual board action, future rider
-self-release and the PROP-172500 stall sweep share ONE fact, releaser on the envelope (ADR-0041);
-the ASSIGNED→PENDING-only scope is part of the name's meaning (PICKED_UP is a different journey).
-Proposal-text reconciliation to `releaseDeliveryAssignment` rides the next docs batch. Derives the four delivery persona journeys and answers the
-epic's vocabulary question (the wired offer/accept vocabulary is canonical); decomposes into 8 V0
-slices (+3 V1). Absorbs the rider-write-surface half of PROP-20260726-172500 (whose D1/D2/D3/D4/D5
-rows above remain that proposal's). **Both Concerns are checked**: the D3 rename (resolved by the
-architect verdict above) and the slice-2 validator-credit semantics (SATISFIED by the D6 decision —
-a declared `sends:` is checkable both ways: the ref resolves AND the target inbox accepts; never
-an annotation alone). Realization via the 8 V0 slices remains plan-mode/backlog work.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| D1 | `AssignDeliveryToPartner` family: retire vs keep for manual dispatch | **Retire** — no journey pushes a job at a partner; an assignment no courier agreed to carry is the oversell failure mode as an event type |
-| D2 | `UpdateDeliveryPartnerStatus`: retire vs keep as a command-wrapped fact | **Retire** — a command wrapping an external fact (ADR-0004); the ACL already records it as inbound `DeliveryStatusUpdated` |
-| D3 | `Unassign…` naming: keep as-is vs generalize to `DeliveryAssignmentReleased` | **Generalize/rename** — one release step for both courier kinds; cheapest now, before production events exist (held as an unchecked Concern; decide before slice 6) |
-| D4 | Issue model | **One open issue per job** (V0) — the honest model for `issueId`-less commands; history stays in the log |
-| D5 | `ConsumeCustomerCredit` shape | **`PlaceOrder` payload flag + PM step** — consume atomic with payment (ADR-20260726-163737 §checkout-consume) |
-| D6 | How does `PlaceReplacementOrder` get spec-checkable dispatch coverage? (no PM step sends it — wrapper-seam dispatch) | **A declared `sends:` on the wrapper-seam receive** — parallel to the existing declared `emits:` precedent (`ordering/processmanager.yaml:194-199`), checkable both ways; alternatives: extend the step DSL (bigger), or leave it in the warning baseline (erodes the diff discipline) |
+✅ **FULLY DECIDED**, D1–D6. Two commands **retired** — no journey pushes a job at a partner (an
+assignment no courier agreed to carry is the oversell failure mode as an event type), and a command
+wrapping an external fact is an inbound ACL event, not a command (ADR-0004). The release step is
+**generalized across both courier kinds**, one open issue per job in V0, a `PlaceOrder` payload flag
+plus a PM step for atomic consume, and a **declared `sends:`** on the wrapper-seam receive. Design
+record: [PROP-20260808-141817](PROP-20260808-141817-rider-delivery-write-surface.md) ·
+[PROP-20260808-221424](PROP-20260808-221424-rider-delivery-slices-1-2-spec-diff.md).
 
 ---
 
 ## 21. Disappearance is a designed state — PROP-20260808-142532 — ✅ FULLY DECIDED 2026-08-08
 
-[PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md)
-([#398 "Decide the API contract for tombstoned rows before the #194 projection sweep"](https://github.com/TheCaptainCompany/captain-food/issues/398)
-+ [#347 "Decide the last annotated read-model hole: Restaurant fed by RestaurantListingOptedOut"](https://github.com/TheCaptainCompany/captain-food/issues/347)).
-**`Approved` 2026-08-08 — fully decided, all five.** **D1 and D5 decided by ensemble consent** —
-[ADR-20260808-155656](../adr/ADR-20260808-155656-first-consent-based-ensemble-decisions.md),
-customer veto window open. **D2 DECIDED by the customer, 2026-08-08: yes — and WIDENED into a
-principle**: the order copies ALL context needed to autonomously build the customer invoice
-(customer directive: "the order must copy all information about the context of the order to be
-autonomous to build invoice to be sent/displayed to the customer"). Restaurant name/phone are the
-floor, not the scope — the frozen checkout snapshot must carry the full invoicing context
-(restaurant legal identity incl. invoicing fields, per-line VAT context per the split French
-rates, fees, totals); the exact field inventory is enumerated in plan mode at realization, and the
-compliant-receipt legal precondition (CLAUDE.md) now binds the snapshot design. **D3 DECIDED by
-the customer, 2026-08-08: FOLD to a hidden listing status** — grounded by the legal-specialist's
-obligation brief ([docs/legal/BRIEF-20260808-listing-opt-out-objections.md](../legal/BRIEF-20260808-listing-opt-out-objections.md),
-exposures in [#401](https://github.com/TheCaptainCompany/captain-food/issues/401)): the fold's
-suppression-list shape is legally REQUIRED. **D4 DECIDED by the customer, 2026-08-08: the
-ORTHOGONAL `delisted` BOOLEAN** (only opt-out sets it; only the proven re-claim path clears it) —
-the brief's audit-defensibility asymmetry tips it (a bypassed guard clears the objection
-irreversibly; a forgotten filter is recoverable with the refusal intact), and the founder's
-Google-parity directive
-([#402](https://github.com/TheCaptainCompany/captain-food/issues/402)) independently requires the
-same orthogonality. One
-principle, two faces: disappearance is always a designed
-state; physical row removal is reserved for legal erasure. **All three Concerns are checked** (see
-the proposal header): D2's THREE artifacts (`OrderPlaced` + `CheckoutSnapshot`/`PaymentIntentCreated`
-+ the replacement-order emitter) got their event sign-off via the customer's widened D2 decision;
-the resolver-policy change stands as a standing realization constraint — emitter-landed, the
-`Option<_>` type flip + one shared hydration helper, never a source-text scanner; and under D4 the
-`OPTED_OUT` enum value never exists, so the second-door guard is structurally unnecessary — the
-remaining `OptOutRestaurantListing` ACTIVE_PARTNER guard error keeps its ADR-0032 completeness
-duty (behaviour test + `rules:` link) at realization.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| D1 | API contract for dangling/tombstoned references | **The scoped mix** — projector-/event-carried composition for money-history surfaces + a thin pinned dangling policy (silent drop and join hard-errors banned) |
-| D2 | `OrderTracking` restaurant name/phone | **Event-carried on `OrderPlaced`** — survives projection rebuild after restaurant stream deletion; three artifacts, per the header Concern |
-| D3 | [#347](https://github.com/TheCaptainCompany/captain-food/issues/347): tombstone vs `listing_status` fold vs vestigial removal | **Fold to a new `OPTED_OUT` value** — a tombstone is self-defeating under SIRENE re-import; also closes the live cold-email exposure (`ProspectionPipeline` does not fold the opt-out today) |
-| D4 | `OPTED_OUT` shape | **Enum value + BOTH write-side guards** (`OptOutRestaurantListing` rejected for ACTIVE_PARTNER, AND `ChangeRestaurantListingStatus` rejecting `OPTED_OUT` as source and target — the guard closes two doors, not one); the orthogonal `delisted` boolean is materially strengthened by the two-door finding and stands ready if the PO prefers unspellable over guarded |
-| D5 | Erased-restaurant storefront host | **Parked "closed" page** — never the claim-landing fall-through (invites resurrection of a dead business's address), better than a bare 404 |
+✅ **FULLY DECIDED**, D1–D5. Money-history surfaces use projector- and event-carried composition with
+a thin pinned dangling policy; the restaurant is **event-carried on `OrderPlaced`** so it survives a
+projection rebuild after stream deletion; opt-out folds to a new **`OPTED_OUT`** value rather than a
+tombstone (a tombstone is self-defeating under SIRENE re-import, and this closes the live cold-email
+exposure); **both** write-side guards; and a parked "closed" page rather than a bare 404 or a
+claim-landing fall-through. Design record:
+[PROP-20260808-142532](PROP-20260808-142532-disappearance-terminal-states.md).
 
 ---
 
 ## 22. New rows from the 2026-08-08 sweep
 
-Surfaced by the five-lens register sweep
-([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md)) — added
-here instead of being improvised at realization.
+Four rows of the nine are still live; the other five closed. ✅ **Closed**: the identity-bridge home
+(**JWT claims**, [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md)
+CARD-11 — **note that §46 IDENT-1 reverses its read-scope half**) · the PROP-185140 §6.4
+**claim-staleness** policy ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)) ·
+the **`from:` naming collision** (the product owner picked (a), rename the screens input-source key) ·
+**business-signal observability contracts**, closed by subsumption into §27 · the **D6 endpoint**
+([ADR-20260809-002500](../adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md)).
 
 | Decision | Question | Status / owner |
 |---|---|---|
 | **Consumer-mediator registration** | France mandates médiation de la consommation registration before trading with consumers — a **launch precondition** that sat on no register row until now | ⏸️ **DEFERRED to first real order** (product owner, 2026-08-10) — the PO chose to register at the first real consumer order rather than now, **against the team's "start now" recommendation**. Recorded as the PO's decision. Still a tracked launch precondition (must complete before the first real consumer order clears); pairs with the entity/counsel packet |
-| **Identity-bridge home** | Where the role↔domain-id bridge lives: JWT claims for all roles vs common-schema bridge tables — must NOT invent a third mechanism beside `Actor.domain_id` | ✅ **DECIDED by the customer 2026-08-09** ([ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md) CARD-11): **JWT claims**, per-person accounts for every rider and every restaurant staff member; unblocks [#415 "Rider identity: View_Rider, register/update/profile surface, onboarding screens (#348 slice 3)"](https://github.com/TheCaptainCompany/captain-food/issues/415). The #144 port honoured it: no Rider bridge table landed ([ADR-20260809-160000](../adr/ADR-20260809-160000-read-authorization-lands-ported-from-152.md)) |
-| **PROP-185140 §6.4 claim staleness** | How long a scope claim may be trusted before re-derivation — the one real policy question the authorization set leaves open | ✅ **CLOSED 2026-08-10** ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)). The PO sent it back — *"The legal should have an answer and the business expert should know what competitors is doing so I'm surprised there no recommendation"* — and both lenses converged. **Keep the ~1h Supabase default** (the window exists whether or not we decide: Supabase mints 1h access tokens with claims stamped at mint), **make revocation explicit and immediate** for rider deactivation and staff removal, and make [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) erasure scrub `app_metadata` **and** revoke refresh tokens in the same act. Legal's frame: TTL is not the legal object — Art. 32(1)(d) testing + Art. 5(2) accountability, Art. 12(3)'s one-month bound; **riders are a separate regime** (Platform Work Directive (EU) 2024/2831 Arts. 7–11, transposition ~Dec 2026 — **VERIFY-FIRST**): explicit revocation with a reason code, a log and human review, never TTL drift. Access logs 6–12 months (CNIL délib. 2021-122) and owed an Art. 30 entry. Business: the split is **device vs person**, not role vs role, and churn asymmetry decides it — a forced re-auth on the acceptance terminal at 19:45 Friday blocks the only surface that accepts orders. **Do not reopen this on the storage note**: the product owner's *"We will not use Supabase for the business data / Supabase will be used for identify / Postgres will be in Kubernetes on OVH"* confirms the exact split the closure rests on — business data is CNPG-in-cluster (ADR-20260807-002705), and the 1h-token fact is about IDENTITY, which stays Supabase. The reasoning is untouched |
-| **`from:` naming collision** | `from:` is about to mean two things — the screens input-source key (§1 F) and api.yaml scope-binding; rename one before both DSLs ship the key | ✅ **DECIDED 2026-08-10 (second answer sheet) — "Different choice", note: "A"**: the product owner picked **(a), rename the SCREENS input-source key**, and did NOT delegate the pick ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md) §Revision). (An earlier sheet had answered "Approve as recommended" = (c) team picks; the second sheet supersedes it.) api.yaml keeps `from:` for scope-binding. **Still owed: the rename itself**, which must land BEFORE both DSLs ship the key — after that it stops being a rename and becomes a migration. Tracked by [#476 "Rename the screens input-source key"](https://github.com/TheCaptainCompany/captain-food/issues/476) |
-| **Business-signal observability contracts** | Every "revisit with production data" clause (funnel conversion, cohort repeat rates, rider decline/utilization, baskets, notification-acknowledgement latency) has NO observability contract | ✅ **CLOSED 2026-08-10 by SUBSUMPTION into §27** — this row named the gap and pointed at [#400](https://github.com/TheCaptainCompany/captain-food/issues/400); [PROP-20260810-234225](PROP-20260810-234225-business-metrics-for-every-persona.md) is the mechanism it was waiting for (a `specs/business_metrics.yaml` catalog keyed persona × activity, bidirectional coverage rules, generated instruments). Not answered — replaced by a design with a tracking issue, [#484](https://github.com/TheCaptainCompany/captain-food/issues/484) |
 | **Rebrand Captain → Solida** | Class-42 trademark opposition on "Solida" — external, only the customer/opposer resolves it; rename sweep pre-scoped in [#411 "Rebrand Captain → Solida (solida.food): rename sweep, BLOCKED on class-42 trademark confirmation"](https://github.com/TheCaptainCompany/captain-food/issues/411) | Waiting on external — **customer** ([ADR-20260808-212741](../adr/ADR-20260808-212741-solida-studio-strategic-frame.md) §4). **2026-08-10 — still PENDING**: the PO confirms the class-42 trademark is unresolved and **no company/entity name is chosen yet**, so [#411](https://github.com/TheCaptainCompany/captain-food/issues/411) stays blocked. "No entity name yet" **also gates the entity-path/rebrand work** (SASU naming per [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) ch. 4 — brand and entity land together) |
 | **avelo37 partnership threshold** | At what orders-per-week does the avelo37 partnership conversation start — a number to set from real order data, not a guess | Open — needs the #400 order-volume contract; decision deferred by design ([ADR-20260808-212741](../adr/ADR-20260808-212741-solida-studio-strategic-frame.md) §1) |
-| **D6 endpoint** (final-vision audit A3) | Whether the declared `sends:` is the final mechanism or staging toward an expressible step DSL | ✅ **DECIDED by the customer 2026-08-09** ([ADR-20260809-002500](../adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md)): option (iii) — **build the step-DSL conditional-branching extension now**; the wrapper seam retires and `sends:` is NOT implemented. Design first: the architect prepares the DSL-extension proposal as the discussion surface |
 | **Geocoding vs postal-code zones** (final-vision audit A6) | PROP-172500 D1 recorded "postal-code sets now, geocoding next — sequence it deliberately"; zones may BE the Tours final (river-crossing note) or geocoding needs an owner ("geocoding unlocks distance fees and honest ETAs — and the ETA is the product") | **Open — now TEAM-OWNED** (PO 2026-08-10, "Approve as recommended" on recommendation (c): team first, bring a proposal). No longer an unowned row waiting on a product-owner answer it never needed — the team owns the analysis and returns with a proposal |
 
 ---
 
 ## 23. Process-manager step-DSL conditional branching — PROP-20260809-003000 — ✅ FULLY DECIDED 2026-08-09
 
-> **DECIDED 2026-08-09 (product owner, answer sheet):** *"Confirm all seven as recommended."*
-> D1–D7 stand as proposed; the proposal moves to `Approved`.
-> Record: [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md).
-
-
-Seven decisions from [PROP-20260809-003000 "Conditional branching in the process-manager step DSL:
-the saga branch becomes spec, not wrapper"](PROP-20260809-003000-process-manager-step-dsl-conditional-branching.md)
-(tracking [#426 "Conditional branching in the process-manager step DSL: the saga branch becomes spec, not wrapper"](https://github.com/TheCaptainCompany/captain-food/issues/426)),
-the design the customer ordered in place of the declared `sends:` (card 10,
-[ADR-20260809-002500](../adr/ADR-20260809-002500-quick-wins-approved-d6-dsl-extension-chosen.md)).
-All seven are OPEN and gate slice 1.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| **D1** | The branching construct's shape | `match:` on an enum discriminant (over `when:` arms or per-step `when:`) — the only shape where "is every case handled?" is machine-answered, and answered TWICE (validator, then `rustc` on the arm-complete emitted match) |
-| **D2** | Is a `default:`/catch-all allowed? | **No** — every enum member gets an arm; an intentionally empty arm carries a `note:`. A catch-all is how a new member silently does nothing |
-| **D3** | Where the REFUND arms live | Move them to `RefundProcess`, which receives `ReclamationResolved` directly — retires the cross-saga call on a **synthesized, never-recorded** `RefundRequested` |
-| **D4** | How a computed discriminant is declared | A typed `from_resolver` returning a DECLARED enum — never a raw value an effect consumes |
-| **D5** | Nullable discriminants | `present:`/`absent:` conditions (also deletes a generated panic path) |
-| **D6** | Sharing steps between arms | Accept duplication in v1 — no aliasing mechanism until a second real case asks for one |
-| **D7** | Deterministic derived ids | A `derived_id:` value form — **slice 1 cannot retire the wrapper without it** |
-
-Related finding, deliberately NOT folded in: `call:` has no `with:`, so the Stripe refund **amount**
-is entirely hook-built and stays invisible to the validator even after all six slices — its own
-proposal, named in §2.1/§9 of PROP-20260809-003000.
+✅ **FULLY DECIDED**, D1–D7, confirmed as recommended by the customer's eight-decision answer sheet
+([ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md)). `match:` on an
+enum discriminant — the only shape where *"is every case handled?"* is machine-answered — with **no
+catch-all** (every member gets an arm; an intentionally empty one carries a `note:`, because a
+catch-all is how a new member silently does nothing), a typed `from_resolver` returning a declared
+enum, `present:`/`absent:` conditions, accepted duplication in v1, and a `derived_id:` value form
+that slice 1 cannot retire the wrapper without. Design record:
+[PROP-20260809-003000](PROP-20260809-003000-process-manager-step-dsl-conditional-branching.md).
+Extended by [PROP-20260815-142349](PROP-20260815-142349-actor-answers-block-and-the-ask-step.md)
+(§42 PMW-1).
 
 ---
 
 ## 24. The public demo — PROP-20260809-021351 — ⏸️ DEFERRED 2026-08-09
 
-> **DEFERRED 2026-08-09 (product owner, answer sheet).** The demo is not next; its
-> production-critical remainder is **re-filed on its own** rather than shipped under a marketing
-> epic — the outcome two lenses independently recommended. The three customer-owned rows were
-> answered on the way out, so the design is complete when it returns:
->
-> - **D1 → (c) nothing hosted yet.** *"Same production environment with test data in it for testing
->   production on production with test data."* One environment, so the D1⊕D2 contradiction (two
->   namespaces over one database, with a checkpoint-overwriting projector and a true accumulator)
->   never arises.
-> - **D3 → (a) pre-identified demo session**, no SMS OTP. Still blocked by the unscoped order reads
->   on [#144](https://github.com/TheCaptainCompany/captain-food/issues/144), which is a live defect,
->   not a decision.
-> - **D4 → (b) one deployment, Stripe keys chosen per order mode.** Safe while everything is test
->   mode; **due a type-level form before any live key exists** (compiler-first,
->   [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)).
->
-> **D2, D5 and D6 lapse with the deferral** — except D2's substance (`mode` carried onto the
-> projection tables + a validator rule), which is production correctness and travels with the
-> re-filed work.
->
-> The target that replaces this epic: **test customers placing test orders against test restaurants
-> with Stripe test payments, on the production deployment** — [#429 "Production with test data: a test customer places a real order against a test restaurant, paid with Stripe test mode"](https://github.com/TheCaptainCompany/captain-food/issues/429).
-> Record: [ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md).
+⏸️ **DEFERRED** (product owner, answer sheet). The demo is not next, and its production-critical
+remainder was **re-filed on its own** rather than shipped under a marketing epic — the outcome two
+lenses independently recommended. The three customer-owned rows were answered on the way out, so the
+design is complete when it returns. Design record:
+[PROP-20260809-021351](PROP-20260809-021351-public-demo-one-continuous-walk.md).
 
-
-Six decisions from [PROP-20260809-021351 "The public demo: one continuous walk, on production's own
-pipeline"](PROP-20260809-021351-public-demo-one-continuous-walk.md) (tracking
-[#410 "Epic: public try-before-committing demo — seeded test restaurant/customer/order/rider on the marketing site"](https://github.com/TheCaptainCompany/captain-food/issues/410)),
-from the four-lens mob briefing of 2026-08-09 (farley lead · ux-designer · beck · dba).
-**D1, D3 and D4 are the customer's** — D1 would reverse a recorded decision or spend console time,
-D3 and D4 sit on the money path and the abuse surface. D2, D5 and D6 are team-decidable and are
-recorded as recommendations pending the veto window.
-
-| # | Decision | Recommendation | Owner |
-|---|---|---|---|
-| **D1** | Where the demo runs | **MKS demo namespace, same digest and manifests, `staging` profile** — no spec diff, and the demo namespace becomes the canary every production digest passes through. Cost: ~75–100 customer console-minutes across ≥2 sittings, no URL this week. Resuming Render buys a same-day URL by reversing ADR-20260731-061609 and applying 15 pending migrations to a database nobody intends to keep | **customer** |
-| **D2** | Demo data isolation | TEST-mode data in the production database + `mode` carried onto the `Restaurant`/`OrderTracking` projection tables + a validator rule that any projection table fed by a mode-carrying event must carry the column. Today `mode` is enforced in ONE runtime location and NO read model carries it | team |
-| **D3** | How a stranger is identified | `startDemo` mints a pre-identified demo session — real SMS OTP costs money, exposes an unauthenticated SMS-send surface on a public page, and dead-ends at 503 if the hook is unconfigured | **customer** |
-| **D4** | Stripe mode | Demo namespace carries `sk_test_`, production carries the live key, same image. **One deployment is one Stripe mode today**: a live key means the demo charges strangers' cards; a test key means production cannot take money | **customer** |
-| **D5** | Demo world lifetime | Fresh streams per visitor, never a reset — the Order projector is ONE checkpoint over `Order-`/`Payment-`/`DeliveryJob-`, so "replay the demo" resets every real customer's tracking screen. Reclamation is retention, and the `$maxAge` sweeper **does not exist**: demo data is unbounded (~375 MB/month at 500 runs/day) | team |
-| **D6** | Who drives the counterparties | The visitor wears all three hats in one walk, with labelled auto-accept as fallback | team |
-
-**Six more lenses were invited on the committed proposal the same night** (legal, business,
-graphql-architect, holub, observability, architect — the first briefing had four, chosen by
-coordinator taste, which the mob ADR bans; recorded as its first measurement). They did not refine
-the design, they **contested its place in the queue** — see §10 of the proposal. Consequences for
-this register:
-
-- **D1 and D2 are not independent** and must be answered together: two namespaces sharing one
-  database is not a supported configuration of this codebase (the projector takes no lock and
-  overwrites its checkpoint unconditionally; one projector is a true accumulator, so a re-fold
-  doubles a customer's credit balance).
-- **D3 is blocked** by a live read-authorization hole, not by anything in this proposal — recorded
-  with evidence on [#144 "Read-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/144).
-- **Two lenses independently say the demo should not be next**, and that the ~80% of its work which
-  is production-critical should be re-filed out from under a marketing epic. That re-filing is the
-  customer's, not the team's.
-
-**Not decisions — live defects the briefing surfaced**, none blocked on any row above: the customer
-path is inert on `main`; nobody is told about a paid order (no notification port — though the OVH
-SMS adapter already exists with only the auth hook calling it); the cart's total and the competitor
-comparison **never compute**; `orders`/`order`/`carts` apply no ownership filter; and
-`orders_placed_total` — the metric that says a stranger paid us — has zero emission sites, so the
-alert that would have caught the inert checkout could never have fired.
+⚠️ **The gap table in that proposal was corrected 2026-08-12** and the correction is the part worth
+carrying: G5, G6 and G7 are fixed; **C1 is only half fixed** (totals live on read, the competitor
+comparison is still never computed); and **G7b, G8 and C2 are live** — G8 being *nobody is told about
+a paid order*, with `crates/application/src/ports.rs` declaring four traits and zero notification
+anything. That is the domain lens's worst failure mode, still open, tracked outside this register.
 
 ---
 
 ## 25. New rows from the 2026-08-10 #451 keystone adjudication
 
-Surfaced by the architect's adjudication of the ten-lens mob output on
-[#451 "cart.current returns the authenticated customer's priced cart"](https://github.com/TheCaptainCompany/captain-food/issues/451)
-/ [PR #460](https://github.com/TheCaptainCompany/captain-food/pull/460). Everything else that
-adjudication produced was either dispatched to the executor or filed as an issue; **these three are
-the only genuine product-owner decisions in it** — two because they need a `specs/**` edit (frozen
-for execution loops, CLAUDE.md), one because only the product owner owns issue titles and scope.
-⚠️ **The `specs/**`-freeze half of that reasoning is HISTORICAL** as of 2026-08-10 night
-([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)):
-451-A and 451-B were rows because the DSL was untouchable, and it no longer is. Both were already
-answered, so nothing changes for them — but **do not use this preamble as precedent** for filing a
-future row on "it needs a spec edit". That is no longer a reason. (Row ids are `451-A/B/C`; the
-adjudication that produced them numbered the same three E1/E3/E2 respectively — the ids here are
-the stable ones.)
-
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **451-A** | **The cart screen's summary bindings** — `specs/screens/restaurant_frontoffice.yaml:367-371` binds `cart.subtotal`, `cart.deliveryFee`, `cart.serviceFee`, `cart.discount`, `cart.total`, `cart.minimumOrderMet`; the `Cart` API type has `totalAmount` + `breakdown.{articles,delivery,serviceFee,total}` (`specs/ordering/api.yaml:25-26`) and **not one of those six names exists**. So #451 computes the price correctly and the customer cannot see it. Tracked by [#468 "The cart screen cannot render a price"](https://github.com/TheCaptainCompany/captain-food/issues/468) | **(a) Merge #451 as scoped, file the frontend slice.** The seam, the money-free fold, the migration and the `cart-price` contract are real, tested, load-bearing artifacts the frontend slice depends on; the cost is that the delivered value stays invisible until the next slice. **(b) Grow #451 to include rendering.** Not autonomously dispatchable — the binding fix is a `specs/**` edit needing plan mode + approval — and it doubles a diff that already carries a schema migration. Neither option is cheap-and-dirty; (b) is *slower*, not more final-vision, because the final shape of the binding fix is a spec change either way | ✅ **CLOSED 2026-08-10 by the [#460](https://github.com/TheCaptainCompany/captain-food/pull/460) merge.** Standing position **(a)** held, as recommended by the architect and adopted by the coordinator, **with a hard condition**: PR #460's body must state plainly that the price is computed correctly and **cannot yet be displayed**. The reversibility window has now closed: **(b) is off the table** and [#468](https://github.com/TheCaptainCompany/captain-food/issues/468) is simply the next slice |
-| **451-B** | **The `currency_mismatch` reason** in the `cart-price` contract's canonical reason set (`specs/observability.yaml:271-273`) — a currency clash is folded into `PriceUnresolvable` at `crates/application/src/pricing.rs:44` and then labelled `offer_gone` at `crates/server/src/graphql/cart_read.rs:136`, so an on-call responder is sent to the catalog for a **monetary** defect | **(a) Add `currency_mismatch` to the canonical set** — one line of `specs/observability.yaml`, needs a spec window; the reason set is what an alert routes on, so a wrong label is a wrong page at 20:00 on a Friday. **(b) Leave it folded** — cheaper, but the contract keeps a documented lie and every future currency defect mis-routes. There is no third option: the set is closed by design (that is what makes it alertable) | ✅ **APPROVED 2026-08-10 — (a), verbatim "Approve as recommended"** ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)). **The spec window is OPEN**: the next session lands it under this recorded approval without re-asking — one line in `specs/observability.yaml:271-273` adding `currency_mismatch`, plus the label selection at `cart_read.rs:136`. Was recommended as: Not urgent — EUR-only in V0 makes the clash currently unreachable in practice — but it is a *contract honesty* item, and those compound. Interim, already dispatched to the executor: make the misleading comment at `cart_read.rs:133-136` state the mis-label instead of claiming coverage. Owner: product owner (spec window) |
-| **451-C** | **Does [#451](https://github.com/TheCaptainCompany/captain-food/issues/451) keep its title?** It reads *"cart.current returns the **authenticated customer's** priced cart"*, but the claim leg it names **cannot fire on the surface that calls it**: `crates/server/src/auth.rs:195-197` returns `Principal::anonymous()` on `/public` without reading the `captain_auth` cookie, and the storefront is pinned to `Role::Public` (`crates/web/src/router.rs:57`). What ships is the session leg plus the seam. Tracked by [#469 "`current` leg 1 is dead on the web AND is not tenant-scoped"](https://github.com/TheCaptainCompany/captain-food/issues/469) | **(a) Retitle #451** to what it delivers (the priced cart read seam, session leg live), leaving the authenticated leg to #469. Honest record; costs a title edit and a body note. **(b) Keep the title and grow the scope** until leg 1 works — but leg 1 without Host-scoping ships a live cross-tenant cart, so this pulls #469's *whole* pair into #451. **(c) Keep the title as aspirational** — rejected on principle: an issue title that describes something the merge does not do is the same class of defect as a doc comment claiming enforcement that is not there | ✅ **DONE 2026-08-10 — (a), verbatim "Approve as recommended"**, and already executed: the issue now reads *"cart.current returns the session's priced cart: the read seam + money-free Cart fold (#429 keystone; authenticated leg deferred to #469)"*. The title now describes what merged |
-
-**Deliberately NOT given a row**: the #469 fix itself (public path reads `captain_auth`, leg 1 is
-Host-scoped). It is code-only, GREEN, and has one recommended shape with no genuine arbitration —
-per this file's own rule, *if a decision is not here, it is not blocking anything*, and padding the
-register lowers the odds the real rows get read. It is an issue, not a decision.
+✅ **ALL THREE CLOSED 2026-08-10.** **451-A** closed by the
+[#460](https://github.com/TheCaptainCompany/captain-food/pull/460) merge, standing position (a) held ·
+**451-B** approved as recommended — the `currency_mismatch` reason joins the `cart-price` contract's
+canonical reason set · **451-C** executed — [#451](https://github.com/TheCaptainCompany/captain-food/issues/451)
+retitled. Record: [ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md).
 
 ---
 
 ## 26. New rows from the lifted `specs/**` freeze — 2026-08-10
 
-The delegation itself is **decided** and recorded in §5 / [ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md).
-These two are what it leaves open. Neither blocks any work.
-
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **SPEC-1** | **The shape of the reporting gate** that discharges *"Just keep me informed"*. The obligation is real and has no mechanism; an obligation with no mechanism decays. [docs/SPEC-LOG.md](../SPEC-LOG.md) exists as of today, but nothing yet **keeps** it current | **(a) Generated `specs/CHANGELOG.md` from the spec diff.** Mechanical, unforgettable — but a diff summary is still a diff (*"field `x` added to `Y`"*), which is exactly the thing that cannot be read. Answers "what changed", never "what do we now promise". **(b) A validator-enforced "spec delta" section in every PR body.** Zero new cadence — but GitHub is never the record (CLAUDE.md), it fragments across dozens of PRs, and the product owner asked for one place. **(c) A hand-maintained `docs/SPEC-LOG.md`, no gate.** Cheapest to start; decays within a fortnight, like every prose obligation this repo has recorded. **(d) HYBRID — the page, plus a gate**: if a commit range touches `specs/**` and `docs/SPEC-LOG.md` is unchanged, fail. The executor writes ONE sentence in product language; the mechanical half (touched kinds, `specs/common/` fan-out count, `make validate` delta) is computed. Costs one small check in `make rust`/the Stop hook | ✅ **Recommended: (d)** — it is the only option that is both *readable by a non-engineer* and *cannot be forgotten*, and CLAUDE.md's own rule (*prefer executable over prose*, `makefile_recipe_lines_are_ascii` as the model) points at it directly. **Deliberately no cadence**: no weekly digest, no report to send. A pull surface kept current by a gate beats a push ritual nobody runs — that is the design judgement, and it is why this should not become the fifth abandoned process. **The tier column is the boundary's tripwire**: an executor about to write "this reverses a recorded decision" has, by writing it, discovered the change is not theirs. Answering this is ~30 seconds; until then the page is prose and exactly as reliable as CLAUDE.md says prose is |
-| **SPEC-2** | **Confirm or reverse the `from:` rename** ([#476](https://github.com/TheCaptainCompany/captain-food/issues/476)). The product owner picked **(a) rename the SCREENS key**, api.yaml keeps `from:` (second answer sheet, 2026-08-10), and did not delegate the pick. **New measured evidence he did not have**: `from:` already appears **178 times** in `specs/`, and in every one of them it means *"the source that populates this value"* — projection-column lineage (`specs/database/tables/projection_tables.yaml`), actor-state lineage (`actors.yaml`), and process-manager step property extraction (`tools/codegen-rs/src/emit/pm_orchestrators.rs:10`). The screens input-source key means **exactly that same thing**; api.yaml's scope-binding means something different (which principal field scopes the query) | **This is an inform-and-confirm, not a re-litigation** — a recorded decision is not the team's to reverse (the boundary's own test 1), so #476 will execute **(a) as decided** unless this row is answered. But the evidence inverts the argument: option (a) renames the key that is *semantically consistent* with all 178 existing uses and lets the *divergent* one keep the name — an Evans ubiquitous-language finding, cited as such. **The reversal is free right now**: verified 2026-08-10, `from:` has **0 occurrences in `specs/screens/**` and 0 in `specs/*/api.yaml`** — neither key has shipped, so either direction is a pre-realization rename. Once either ships it becomes a migration. |✅ **Recommended: reverse to (b) — rename the api.yaml scope-binding key instead.** If you prefer to stand by (a), say so and it lands unchanged; both are cheap, but only today |
+✅ **BOTH CLOSED.** **SPEC-1** — the reporting gate that replaces the freeze is
+[docs/SPEC-LOG.md](../SPEC-LOG.md): one sentence per landed spec change, in the same commit, saying
+what the product now promises differently. It was chosen as the only option both readable by a
+non-engineer and impossible to forget. **SPEC-2** — the `from:` rename stands as decided; a recorded
+decision is not the team's to reverse. Record:
+[ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md).
 
 ---
 
 ## 27. Business metrics for every feature and every persona — PROP-20260810-234225
 
-Product-owner directive, 2026-08-10: *"Follow Jeff Patton about the business metrics during the
-analysis must be developed with the test and the code, we must have business metrics for all
-features for each persona. It's the only way that will allow us to know the usage of the product."*
-— *"I let you define and implement them all the business metrics for every features for every
-persona."* The principle is recorded and **not open**:
-[ADR-20260810-234225](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
-— **superseded in part 2026-08-11** by [ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md):
-its clauses 1–3 stand, its clause 4 and enforcement table are reversed (§27bis MET-R). Read the D4/D6
-rows below alongside that reversal — they record what was recommended on 2026-08-10, not what is now
-decided.
+Design records: [PROP-20260810-234225](PROP-20260810-234225-business-metrics-for-every-persona.md) ·
+[#484](https://github.com/TheCaptainCompany/captain-food/issues/484) ·
+**[ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)**
+(which supersedes [ADR-20260810-234225](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md)
+**in part** — clauses 1–3 carried forward, clause 4 and the enforcement table reversed).
 
-**This block SUBSUMES the §22 row "Business-signal observability contracts"** — that row named the
-gap and pointed at [#400](https://github.com/TheCaptainCompany/captain-food/issues/400); this is the
-mechanism it was waiting for. §22's row is closed by subsumption, not by an answer.
+**The fact that earned the section**: `specs/observability.yaml` declared 29 `business_metrics` and
+**26 had zero occurrences anywhere** in `crates/`, `tools/` or `deploy/` — the slot the directive
+asked us to fill was already 90% fiction, and the gate that should have noticed covered 3 of 14
+contracts and only checked that a string constant existed.
 
-**D1–D7 are TEAM-OWNED under the 2026-08-10 delegation** (*"I let you define and implement them
-all"*, plus [ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)
-and [ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md)).
-They are listed here for visibility and for the ensemble-consent + veto-window pattern of
-[ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md) — **they are
-not counted in the founder-owed total**, because nobody outside the team owes an answer to
-them. **Exactly one row below was ever genuinely founder-owed — Q7 — and it is ✅ CLOSED 2026-08-12
-as (A), "not now"** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)
-Decision 9; §35). **§27 now has no open founder-owed row.**
-
-The fact that earns the whole block, verified on `168fd77`: **`specs/observability.yaml` declares 29
-`business_metrics`; 26 of them have zero occurrences anywhere in `crates/`, `tools/` or `deploy/`.**
-Three are emitted. The gate that should have noticed covers 3 of 14 contracts and only checks that a
-string constant exists.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| **D1** | Where a business metric is declared: a new root catalog vs extending `observability.yaml` vs inline in `stories.yaml` | **New root `specs/business_metrics.yaml`**; the 29 entries move; `observability.yaml` keeps only technical `metrics`. Extending `observability.yaml` would force a full contract (spans, `run_identity`, `status_rules`, budgets) onto activities with no critical workflow — `FavoriteRestaurant`, `ConfigureProfile`, admin screens — or leave them permanently unmeasurable |
-| **D2** | The unit of obligation: persona **ACTIVITY** (25) vs story STEP (144) vs persona (8) | **Activity.** Patton's backbone; two steps `$ref` the same query (`stories.yaml:57-58`) and one is a ~30x-per-checkout poll loop ([#482](https://github.com/TheCaptainCompany/captain-food/issues/482)) — a per-step rule would mint a metric for a retry mechanism |
-| **D3** | The validator rules and their severity | Four **ERROR** rules — `activity-unmeasured`, `metric-story-unknown`, `metric-question-empty`, `metric-name-collision` — plus an enumerated, monotone-shrinking `unmeasured:` waiver list. **Not warnings** — though no longer for the reason first given: since [ADR-20260811-170559](../adr/ADR-20260811-170559-the-validator-owns-the-warning-baseline.md) the warning surface is a committed ratchet and a NEW warning kind fails the gate outright, so "a warning changes no behaviour" is false. What still separates the two is what each one RECORDS: a warning is cleared by refreshing the ratchet artifact, which banks a count and never says *which* activity went unmeasured, while the ERROR plus the enumerated `unmeasured:` waiver list names every exemption in the spec and shrinks monotonically. The recommendation stands on that ground — but it is weaker than when it was written |
-| **D4** | What binds declaration to emission | **Generate the instruments** (compiler catches renames, attribute names, types, arity at every call site) **+ a behaviour test** with the `InMemoryMetricExporter` spy. **Not** an extended source-text scanner — it would pass on all 26 dead metrics after a 20-line constants change, and it is the class ADR-20260803-234035 rules out. Link-time registration was evaluated and **does not work**: a `pub` fn in a library links whether or not anything calls it (reasoning kept in the proposal so it is not re-proposed) |
-| **D5** | Backfill posture: gate-forward with a shrinking waiver list vs one sweep vs defer | **Gate forward now, backfill one activity per slice** in value-stream order (`customer/OrderFood` → restaurant-manager order ops → `public_user/BrowseForFood` → rider → admin → `restaurant_sync`). The one-sweep option was **already run at this scale, and the 26 dead declarations are its receipt**; with no production and no users, most new declarations would be unfalsifiable for weeks |
-| **D6** | What a metric attribute may be | **Bounded sets only** — a `scalars.yaml` enum `$ref` or an enumerated list. **Never an entity id**: ids belong on spans (`business.order_id`, `business.correlation_id`), which is where high-cardinality correlation already lives. Keeps the Honeycomb bill and the GDPR minimisation argument off the table |
-| **D7** | One piece of work with [#483](https://github.com/TheCaptainCompany/captain-food/issues/483) (`alerts` is not expressible), or two? | **Two, with one shape constraint**: #483 builds `alerts:` as a **top-level block whose entries `$ref` a metric by name**, not as a per-contract key. That costs #483 nothing, keeps it unblocked (it is Urgent tier-1), and is the only shape that can still alert on a business metric after D1 moves them out. Merging them would park an Urgent observability fix behind a 25-activity backfill plan |
-| **Q7** ✅ **CLOSED 2026-08-12 — (A), not now** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 9; §35). **The same answer reached twice, one day apart, from two directions** — §27bis **MET-Q7** already answered *"no hosted analytics SDK, ours server-side"* on 2026-08-11 and added the separate behaviour database; this row was still formally open and closes on the founder's own repeat. Revisit after the first real orders, i.e. after Q-L3 stops being *no*. | Do we ever want a **hosted product-analytics SDK** on the front end *in addition* to this? It would answer browsing-funnel questions faster | **Recommended: not now** — revisit after the first real orders. It is asked rather than assumed because it is a **vendor and data-residency** decision, not a technical one: it puts customer behaviour in a third-party (US-default) tenancy, reopens the posture settled by [ADR-20260729-183000](../adr/ADR-20260729-183000-telemetry-is-honeycomb-eu-and-degrades-never-gates.md) and ADR-0042 (Frankfurt), and splits "what happened to this order" across two systems that do not share `correlation_id` |
-
-### 27bis. ✅ MET-R — CLOSED 2026-08-11: the reversal is confirmed, and a second decision arrived with it
-
-**Added 2026-08-11.** The product owner had a design in mind and deliberately withheld it until the
-proposal existed, so the two would be independent. Verbatim:
-
-> *"For the metrics I have in mind the approach of the projection but I don't know how we can define
-> the properties and increment/decrement to do for each event and how we can define the grouping by
-> perhaps if we indicate the properties to group with. We will have to create a query in the graphql
-> to allow access to these metrics."*
-
-**The team evaluated it and CHANGED ITS RECOMMENDATION.** `PROP-20260810-234225` D4, D6, D8 and D9 now
-recommend the projection approach; the generated-instrument option is recorded there as rejected, with
-its reasons. What decided it, in order:
-
-1. **Replay.** A metric is current state, and current state is a left fold of the event stream. The
-   instrument design forfeited that *by design* — `crates/infrastructure/tests/orders_placed_metric.rs:129`
-   asserts the point does **not** fire on a replay — so a metric added later would have **zero
-   history**. Under a fold, adding a metric and replaying gives full history from the first event.
-   With no production yet, that is the difference between metrics we can add later and metrics we must
-   guess right now. **The team's own audit standard rejects the design the team recommended**: *"a
-   `View_*` whose restore path is not replay is a finding regardless of whether it works today."*
-2. **The awkward case becomes the normal case.** Ratios, distinct-identity denominators and cohorts are
-   ordinary queries over a read model and are *structurally inexpressible* as monotonic pre-aggregated
-   counters. A design whose escape hatch covers the most interesting questions has its default backwards.
-3. **It is already the declared architecture.** `specs/architecture/c4-l2.yaml:343,370,484` and
-   `c4-l3.yaml:102-105` declare `bam` as a **projector** consuming the event stream with a **schema in
-   read-models** — and `bam` has **zero hits across `specs/database/`**. The projection design builds
-   what the C4 already claims; the instrument design quietly diverged from it.
-4. **Erasure.** Metrics needing identity (`CustomerOrderCounts`) are personal data either way. In our
-   Postgres they are inside the deletion engine's path; in a vendor telemetry store they are in a
-   system with no per-subject deletion API — the erasure problem does not disappear when the metric
-   leaves the building, it stops being solvable.
-5. **It makes the co-op differentiator free.** A queryable read model is one GraphQL query from a
-   restaurant seeing aggregates about its own storefront. Over a telemetry backend that is not merely
-   hard, it is the wrong kind of system.
-
-**What is contradicted, precisely** — this is why it is filed and not executed:
-
-| [ADR-20260810-234225](../adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md) | Status under the amendment |
-|---|---|
-| Decision 1 — the unit is the persona ACTIVITY | **Unchanged** |
-| Decision 2 — declaration enforced like ADR-0032, emission is not | **Strengthened, not reversed** — under a fold the gap largely closes: the declaration *is* what runs |
-| Decision 3 — a metric declares the QUESTION it answers | **Unchanged** |
-| **Decision 4 — "attributes are bounded sets, never entity ids"** | ⚠️ **CONTRADICTED.** D6 relaxes it to *bounded, declared population*, which **permits `restaurantId`** — a Postgres row is not a time series. Without this, `groupBy: [restaurantId]` is unspellable and the restaurant-facing panel cannot exist. The strict rule survives for the `alertable:` OTLP subset |
-| **§"How the three properties are enforced" — "instruments generated into `crates/telemetry/src/generated/`"** | ⚠️ **CONTRADICTED.** Replaced by a generated projector + a generated tenant-scoped query. The *compiler-first* principle is unchanged — it now applies to the projector and query types. The source-text scanner is still deleted, for a stronger reason: a fold has no call site to scan |
+✅ **ALL ROWS CLOSED EXCEPT TRK-scope.** The design: a business metric **is a projection** — a
+declared `fold:` over `domain_events` maintained by the `bam` projector, read through a
+tenant-scoped GraphQL query, never a counter at a call site, because a fold **replays** and ratios
+and distinct-identity denominators are inexpressible as counters. The unit is the **persona
+ACTIVITY**, never the step. Attributes are **bounded declared populations**; ids belong on spans.
+**MET-R** was a decision reversal the team filed rather than executed, and the product owner
+confirmed it (*"Confirm the reversal, go with the projections"*) — what decided it was not deference
+but that the earlier instrument design **forfeited replay by construction**. **MET-T** made
+*"no strings in the spec"* precise as three categories. **MET-S dissolved** — a grain error, not a
+missing field, so the versioning story was withdrawn. **MET-G**: the `DbFaultPolicy` default **flips
+to `Halt`** — the team recommended quarantine first and was **overruled**
+([ADR-20260811-105024](../adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md)),
+with **MET-G2** recorded as a known accepted consequence: `ScopeMembership` is the single read-side
+authorization index and is a projection, so a halted group freezes **revocations**. **MET-Q7 / Q7**:
+no hosted analytics SDK, ours and server-side, and behavioural data lives in a database separate
+from the business data. **COOP**: all three cooperative properties designed into the first slice.
+**MET-W**: a named catalog of approved retention windows, `$ref`'d. **TRK-ISO**: behaviour tracking
+gets its own database **and** its own projector worker. **HEALTH-2**: a faulted worker reports
+unhealthy and is **not** restarted — with two edges recorded rather than discovered later, that
+*readiness*, not liveness, is the probe (**HEALTH-2a**: a literal reading would take the storefront
+down, because the monolith runs API and projector in one process), and that **actor-mailbox workers
+are excluded** (**HEALTH-2b**: they already quarantine, so halting them would turn a parked message
+into a stopped order lane). The principle: **halt is right where there is no quarantine; quarantine
+is better wherever it exists.**
 
 | # | Decision | Recommendation |
 |---|---|---|
-| **MET-R** | Confirm the reversal. The ADR is `Accepted` and one day old; two of its clauses no longer hold | ✅ **CLOSED 2026-08-11 — CONFIRMED.** Product owner, verbatim: *"Confirm the reversal, go with the projections"*. Recorded as [ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md); ADR-20260810-234225 is **superseded in part, never rewritten** — clauses 1–3 carried forward, clause 4 and the enforcement table reversed. The CLAUDE.md bullet drops its "under reversal" flag and states the projection design |
-| **MET-T** | ⚠️ **NEW, and it arrived in the same breath**: *"But we need to heavily strongly typed the spec no string in it"* | ✅ **DECIDED 2026-08-11** — same ADR, Decision 2. Made precise as **three categories**, because "no strings" read literally would also forbid `description:`, which would be theatre: a **DECLARATION** may introduce a bare name; a **REFERENCE** to something declared elsewhere must be a `$ref` the loader resolves — including same-file, which the repo already does (`specs/ordering/actors.yaml:102`); a **VALUE from a closed set** stays a bare token *provided the set is closed in the loader schema*, **except** where a domain scalar already declares it, where the `$ref` is mandatory. **It landed on a real defect in the team's own grammar**: `increment: orders`, `groupBy: [day]` and `value: { sum: orders }` were bare names pointing at declarations in the same file, so a typo was a *silently wrong metric* — the exact failure class the proposal exists to remove, sitting in the proposal. The product owner spotted it before the team did. **Binding on NEW surface only** — see MET-T2 |
-| **MET-T2** | How big is the existing bare-name surface, and does "no string in it" warrant a sweep? | **Measured; recommended: one issue, no sweep.** `data_requirements:`/`actions_used:` = **40 sites** across 5 screen files; `roles:` = **112 sites** across 8 api fragments. **All are checked today** — by *bespoke* rules (`screen-unknown-resolver`, `screen-unknown-role`, `core.rs:1482,1495`) rather than structurally by the loader. `fedBy:`, `emits:`, `throws:`, `command:` are already `$ref`s. So the risk is not "unchecked", it is that **every bare-name key needs someone to remember to write its rule** — and [#413](https://github.com/TheCaptainCompany/captain-food/issues/413) is the recorded case where nobody did: a plain-string `tombstone:` is *"silently invisible everywhere"*, including to the rule written for that key. Sequence the conversion after the new surfaces land; do not mix it with them |
-| **MET-S** | The `serviceType` question the product owner asked about | ✅ **DISSOLVED 2026-08-11 — no decision needed and no event changes.** It was a **grain error**, not a missing field. Measured: **every one of the 11 `Order*` events carries `orderId`** (`OrderExpired` carries it and nothing else), so a projection at `grain: ENTITY` keyed by `orderId` is **total over the whole lifecycle** — a cancellation becomes `set: status → CANCELLED` on the order's own row, and the grouping moves to read time where every field is available. **The versioning story is withdrawn.** The review-proposed order-id→key index projection also works, and is provably total because `OrderPlaced` precedes the cancellation *in the same `Order-{id}` stream* — it is kept as the documented answer for when volume demands an aggregate rollup, but it costs two projections and a materially harder totality proof for a compaction nobody needs at V0. **The rule earned its place twice**: `fold-key-not-on-every-event` was written to catch a missing field and what it actually catches is a wrong grain. See [PROP-20260810-234225](PROP-20260810-234225-business-metrics-for-every-persona.md) §3 D8a |
-| **MET-S2** | ⬅️ **Product-owner follow-up, answered**: *"For the case if service type this kind of counter must be computed once the order is completed so a process manager can handle it"* | **Half right, and the right half is already built. NO DESIGN CHANGE.** ① *"Computed once the order is completed"* — **correct as a principle and sharper than either earlier answer**: neither the proposal nor its review had questioned *when* the count happens, and "do not count a thing that has not finished" removes the decrement instead of solving it. It is **already what D8a does**: the fold `set`s status, the metric asks `countRows where status equals DELIVERED`, so the count comes from the terminal event and nothing else. ② But **taken literally as a fold shape it does not work** — measured: **no terminal event carries `serviceType`** (`OrderDelivered` = `[orderId, restaurantId]`; the cancels add only `reason`; `OrderExpired` is `orderId` alone), so completion-only hits the same wall. The **entity grain** is what solves it and the completion principle rides on top. ③ **Terminal-only would also be strictly weaker**: no row exists until the order finishes, so *"which orders are placed and still unaccepted right now"* — the platform's worst failure mode — becomes unanswerable. The design is **one projection read two ways**: outcome counts filter on terminal status, in-flight counts on non-terminal. ④ ⚠️ **"so a process manager can handle it" is the WRONG TOOL** — recorded so nobody builds it. PMs here are *"state-table orchestrators"* in the actor mailbox with leases, fencing and head-of-line (`specs/ordering/processmanager.yaml:9-16`): a counter there could **stall an order lane** (a *metric* causing the paid-order-nobody-was-told-about failure), and a PM **is not replayable** — it carries a live state row and issues commands, so "rebuild the metric" would re-drive Stripe. Replayability is the single property the whole reversal chose projections for. The `bam` projector is the read-side tool and it already replays. ⑤ **The valuable reading — "should completion emit a business fact?" — answered NO for the metric's sake**: `OrderDelivered` already IS the completion fact for both service types (`stories.yaml:187`), so a new `OrderCompleted` would be two events for one fact; and adding `serviceType` to it would denormalise the log so a projection need not do its job, when the projection already holds it from `OrderPlaced`. **But the instinct brushes a real gap**: `OrderCompleted`, `Receipt` and `Invoice` are **zero hits across every `specs/*/events.yaml`**, and a compliant receipt is a French legal precondition. That is [#200](https://github.com/TheCaptainCompany/captain-food/issues/200) + legal work with its own decision — deliberately **not** folded in here, because adding an event because a read model finds it handy is how an event log rots |
-| **MET-F** | ⬅️ **Product-owner design fork: projection "state" as a JSON blob, and Rust-fold vs generated SQL stored procedure.** *"We need to put in place a concept of state in the projection… a simple json save in database and loaded once and saved with the checkpoint transactionally… The risk is we going to have a big state with all the order incomplete in memory."* — *"What I'm considering is to do this computation directly in SQL with a stored procedure… The problem is that it's not testable… We can still declare the metrics projection in the spec and let the generator do the stored procedure."* | ✅ **A DECISION DELIBERATELY NOT TAKEN, with reasons — recorded so it is not reopened.** ① **The state already exists and is already transactional with the checkpoint.** Measured in `crates/infrastructure/src/projection/worker.rs`: the projector holds **no fold state at all** — every event is load → project → upsert, so the state **is** the projection row and the process is stateless between events; `drain_group` opens **one transaction**, folds up to 500 events with read-your-writes, and writes `projection_checkpoint` **in that same transaction**. So *"loaded once and saved with the checkpoint transactionally"* is **not something to build — it is what the projector does today**. No JSON blob, no state table. **The "big state in memory" risk does not arise**: an incomplete order is a row, and **100k of them is 12 MB**. The precedent for the JSON idea exists and was deliberately **not** JSON — process-manager runs are typed columns in real tables. ② **The SQL option is not new here — it is built and it is the V0 default**: [ADR-0039](../adr/0039-projection-views-generated-from-lineage.md) generates a `CREATE OR REPLACE VIEW` **state-fold over `domain_events`** from column lineage (`specs/generated/views.generated.sql`, `emit/sql.rs:547,561`), and the criterion for the other target is already recorded — expressible from lineage → VIEW; COMPUTED → materialized table + projector. `OrderFacts` is the same shape as the shipped `View_DeliveryJob`. ③ **The grammar is runtime-agnostic**, and the one construct that binds a runtime is **`alertable:`** (a view cannot emit an OTLP counter) — and even that binds at the *tap*, not the fold. ④ **Measured** (200k events / 100k orders): set-based SQL **2.15 s** · row-at-a-time plpgsql **4.92 s** · Rust projector **≈65–70 s**. SQL is ~30× on rebuild, but **only 2.3× is set-versus-row** — the other ~13× is round trips, which [#267](https://github.com/TheCaptainCompany/captain-food/issues/267)'s identity map attacks without leaving Rust. 70 s to rebuild every metric from 100k orders is **~500 days of Tours trading**; read-time grouping is **27 ms**, confirming the entity grain needs no daily rollup. ⑤ **The argument that survives any volume assumption**: testing a generated procedure means golden comparison against a Rust reference fold, so **SQL does not remove the Rust fold — it adds a second one**, and that cost recurs on every fold change. **RECORDED RECOMMENDATION: hybrid, deferred** — keep the vocabulary a **total `(state, event) -> state`** over `set`/`inc`/`max` with **no host-language escape hatch** (which is what makes it both runtime-agnostic *and* replay-deterministic), **emit Rust today**, add an optional per-projection `emit: sql` only if a rebuild ever hurts. Cost of deferring ≈ zero, same DSL; cost of building SQL now = a second fold, expand/contract migrations instead of a deploy, and the loss of `event.consume.projection` spans inside a procedure. ⑥ **Testability objection substantially weakened the same day**: [#478](https://github.com/TheCaptainCompany/captain-food/pull/478) made `make test-crates` run DB tests **required by default**. Real remaining gap: **no test loads `views.generated.sql` into a database and asserts fold behaviour at all** — which is the exact bug class ADR-0039 exists for |
-| **MET-G** | ⚠️ **Not about the fork, and must not be lost inside it**: the projector's per-event failure handling is **log-and-skip**, which is correct for a read model and **wrong for a money-adjacent metric** — a skipped event leaves the count permanently wrong with only an ERROR log | ✅ **CLOSED 2026-08-11 — the default FLIPS to `Halt`.** Product owner, verbatim: *"A. The projector has to stop and indicates it in the health. So k8s will detect it and we will be informed."* The team recommended quarantine first and was **overruled**; recorded as a choice, not a concession — `Skip` leaves a read model permanently and silently wrong, which for a money- or authorization-bearing projection is worse than stuck. Recorded in [ADR-20260811-105024](../adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md) (the gate-then-stabilize default flip; the gated form shipped inert in [#478](https://github.com/TheCaptainCompany/captain-food/pull/478)). ⚠️ **But the flip cannot land alone, and this is a precondition rather than a caveat** — verified on `5fdc519`: under `Halt` the worker does **not** stop (the slice rolls back, the loop keeps ticking, `worker.rs:800-816,688-700`), so `running` stays `true` (`:688`), so `/projector` returns **`200 OK`** (`server/src/lib.rs:1377-1392`) — **and neither Kubernetes probe looks at projection status at all**: projector bins probe `readinessProbe: /health` (the DB+schema gate) and `livenessProbe: /ping` (*"process is up; touches nothing"*) (`deploy/generated/manifests/bins/projector-ordering.yaml:102-111`). **Flipping today produces a projector that wedges permanently and reports itself completely healthy.** Design settled in the ADR: **per-group halt, process stays alive** (process-level would turn one poisoned read model into a scope-wide outage); **readiness, NOT liveness** — projector bins have **no `Service`**, so readiness is a pure signal channel with no side effect, whereas liveness kills and restarts, the restart cannot fix a deterministic schema fault, and the resulting **CrashLoopBackOff stops every sibling group**; re-point readiness to `/projector`; the payload gains a **per-group** breakdown naming the halted group, position, `eventType` and error (today `ProjectionStatus` is per-worker, `projection/mod.rs:13-28`, so it structurally cannot say which group halted); and the missing signal is declared — **`specs/observability.yaml` has no projection contract at all** (`:11`, prose only) |
-| **MET-G2** | ⚠️ **Known consequence accepted by flipping now — recorded so nobody rediscovers it**: the role-revocation wedge | `ScopeMembership` is *"the single index every read-side authorization question resolves against, for every role and every surface"* (`specs/database/tables/projection_tables.yaml:801-810`) — **and it is a projection**. If its group halts, read-side authorization freezes: grants stop arriving and **revocations stop applying**, so a removed staff member or deactivated rider keeps access until a human clears the fault. That touches a guarantee already recorded — the §6.4 closure ([ADR-20260810-194548](../adr/ADR-20260810-194548-six-decision-answer-sheet-claim-staleness-closed.md)) decided revocation must be *"explicit and immediate"*. **Accepted, not solved**: under `Skip` the same event is skipped and the index left permanently *wrong*, which is worse in kind for an authorization index. **Quarantine remains the real fix** and stays a tracked follow-up; until then a halted `ScopeMembership` is an **incident, not a ticket**, and its alert must say so |
-| **MET-Q7** | The hosted product-analytics SDK row above | ✅ **CLOSED 2026-08-11 — APPROVED AS RECOMMENDED: no hosted SDK.** Ours, server-side. **Plus an addition that matters architecturally**, product owner verbatim: *"We will use a different database from the business database to isolate the activity."* Behavioural data goes in a **separate database from the business data** — which independently lands on the legal lens's instruction and **confirms [PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md) D5** (its own store, time-partitioned, so erasure is a partition drop rather than an immutability problem). **Two implications to carry, and one distinction not to conflate**: (a) this is the **behaviour store**, not the metrics store — business metrics stay a fold over `domain_events` in the `bam` schema, because they are business data derived from business facts; (b) the **C4 needs a new container** for the behaviour database plus its edges, and `specs/architecture/*.yaml` is **source DSL, not generated**, so that is an executor spec change when the work lands, not a regeneration |
-| **COOP** | The three cooperative properties surfaced unprompted in [PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md) D9 | ✅ **CLOSED 2026-08-11 — APPROVED AS RECOMMENDED.** All three are designed in **now**, in the first slice, not deferred to a later project: **(1)** the customer can read their own trail as a screen rendered from the catalog's own `question:` fields; **(2)** the **restaurant** is the beneficiary of the aggregate, not the platform; **(3)** the taxonomy **refuses** things checkably, so it can be published ([#377](https://github.com/TheCaptainCompany/captain-food/issues/377)). The reason they belong in slice 1 is the reason they were raised: each is a property of the **declaration mechanism**, so retrofitting any of them onto an undeclared firehose is a project, while on a declared taxonomy it is a rendering |
-| **MET-W** | ⚠️ **A dependency this surfaced, not a question**: `retention:` as a free duration string (`P90D`) contradicts a **recorded legal position** — *"This table IS the written retention schedule CNIL expects — windows declared **once, in the DSL**, feeding both the sweep and the DPIA"* ([legal brief:82](../legal/BRIEF-20260808-account-erasure-two-path.md)). No duration scalar exists (`Duration`/`Retention`/`interval` = zero hits in `specs/common/scalars.yaml`) | ✅ **CLOSED 2026-08-11 — APPROVED AS RECOMMENDED**: a **named catalog of approved retention windows**, `$ref`'d — not a `Duration` scalar with a pattern (a pattern catches `P90DD` but not a well-formed window nobody approved). **Sequenced with the erasure work rather than ahead of it**, so it lands with [#194](https://github.com/TheCaptainCompany/captain-food/issues/194) and the tracking catalog depends on it rather than building it |
-| **TRK-ISO** | **Behaviour tracking isolation — decided, and it goes further than the proposal asked** | ✅ **CLOSED 2026-08-11.** Product owner, verbatim: *"The behaviour event tracking will be stored in another database not the business databases the behaviour event tracking will be completely isolated and projected by another projector worker to avoid dependencies between the behaviour event tracking and the business events."* Recorded in [ADR-20260811-120828](../adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md) Decision 1. **Beyond [PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md) D5**, which asked only for a separate store: the isolation is now **end to end — separate database AND separate projector worker**. That matters *more* under the halt decision than it did before it: now that a rejected fold halts its group, a shared worker would let a malformed behaviour event wedge a group sitting in the same process as the order read models. Separate workers make it unspellable rather than unlikely. **Settles the distinction**: behaviour events = own database + own worker, written by the UI through a `sink:` mutation, never `domain_events`; **business metrics = the `bam` schema + the `bam` projector**, a fold over `domain_events`, because they are business data derived from business facts. **C4 consequence**: a new container plus edges — and `specs/architecture/*.yaml` is **source DSL, not generated**, so it is an executor spec change when the work lands |
-| **HEALTH-2** | **"Any worker must stop and say it in `/health` with a 500; k8s does not need to restart it… we don't need to go on the pods logs. It's a pre diagnostic."** | ✅ **CLOSED 2026-08-11** — [ADR-20260811-120828](../adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md) Decision 2, extending [ADR-20260811-105024](../adr/ADR-20260811-105024-projection-halt-default-and-health-visibility.md). **① Convergence recorded**: *"K8s does not need to restart the worker"* is independently the same conclusion the team reached from the failure analysis — a deterministic fault re-fails after a restart, so liveness gives CrashLoopBackOff and takes sibling groups down. Readiness reports, liveness restarts; the decision says report and do not restart. **② The payload is the deliverable, the status code is the transport** — *"it's a pre diagnostic"* is a constraint on the **body**: a health endpoint returning `{"status":"unhealthy"}` satisfies the code and fails the requirement. The per-group breakdown (group, `haltedSince`, position, `eventType`, stream, error) is therefore the point of the feature. **This is [ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) "no polling, only pushing" applied one layer up**: the failure pushes its own diagnosis into a watched surface instead of a human polling logs. **On `500`**: k8s treats any non-2xx as a failed probe, so 500 and 503 are identical to the cluster; keep the existing **`503`**, which is also semantically right — nobody should "fix" it to 500 for literal compliance |
-| **HEALTH-2a** | ⚠️ **Edge the directive has as stated — it would take the storefront down** | **Verified on `37642cd`**: the monolith runs the API **and** the projection worker in **one process** (`RUN_PROJECTOR`, **default on**, `crates/server/src/lib.rs:641-648`), serves `/{role}/graphql`, **has a `Service`**, and its `/health` is the **deploy interlock** knowing only DB reachability + schema version (`:1503-1526`, ADR-0043). So *"say it in `/health`"* in the monolith would take the **API** unready when a **read model** halts — a degraded projection becomes a **customer-facing outage**, and it would also block deploys of the fix. **The rule is restated so the edge cannot occur**: *"the endpoint a pod's **readiness probe points at** returns non-2xx when a component **that pod is responsible for** is faulted"* — not "`/health` returns 500". Projector bins probe `/projector`; the monolith keeps `/health` on API components only, with its in-process projector observable at `/projector` **which is not its probe**. **Final shape once the cutover lands**: which components a deployable hosts is already declared, so both the probe path and the health composition can be **generated from that declaration** — a process then cannot fail readiness for a component it does not own |
-| **HEALTH-2b** | ⚠️ **"Any worker" does not apply unchanged — and the reason is a genuine asymmetry** | **The actor-mailbox workers already solved this the other way.** The mailbox **quarantines**: a repeatedly-failing message hits the delivery-attempts cap and is parked as poison (`specs/database/tables/journals.yaml:69`), **the lane keeps draining**, and an operator requeues it (`specs/common/api.yaml:158,170,202`). Making an actor worker *stop* would remove that and turn a parked message into a **stopped order lane** — the platform's worst failure mode. **The principle worth keeping**: halt is right **where there is no quarantine**, and quarantine is better wherever it exists — projections halt *because* they have none, which is exactly why quarantine stays their tracked follow-up. **What actor workers DO owe** is the pre-diagnostic half: poison data is reachable only through the **admin GraphQL API** today (**no `/mailbox`, no `MailboxStatus` — verified absent**), so the monitoring app cannot see a poisoned lane without admin auth. A `/mailbox` surface is owed, **report-only — it must not gate readiness**, because a poisoned message is a normal recoverable state, not an unhealthy pod |
 | **TRK-scope** | ⬅️ **OPEN — with legal, not with the product owner.** Product owner: *"we don't care the person info, just the behaviour"*, and the substantive part — *"using a generated identifier uncorrelated to the person so we will have the tracking without the need to know the person is doing what but a persona."* Plus a clarification that **changes an earlier legal finding**: the "help AI agents" sentence was **internal**, explaining to the team why the data is wanted — **not** a user-facing personalisation feature | **Do not design against this yet.** Legal is working out whether a pseudonymous journey identifier fits the **audience-measurement exemption**, or whether per-journey continuity exceeds it. **The mechanical half, thought about but NOT committed**: if the answer is *"lawful provided the join never happens"*, then **"never joined" must be structural rather than promised** — a pseudonym and a customer id in one database with correlatable timestamps is not a guarantee. Candidate constructions, compiler-first: the **separate database is already decided** (MET-Q7) and does most of the work; **no foreign key** to any business table; **no shared column name** the validator would refuse; and an **`identifierClass` that cannot be `CUSTOMER`** for an anonymous-funnel event — i.e. the join is *unspellable in the DSL* rather than *forbidden in review*. Note this pulls against D8 option A (authenticated, `identifierClass: CUSTOMER`), so the two are alternatives per event kind, not a single answer. **The proposals are deliberately NOT amended until legal reports** |
-
-**What it costs, stated plainly so the confirmation is informed.** Storage grows with grouping-key
-cardinality; a projection per metric family means more projectors and checkpoints; a new GraphQL read
-surface needs tenant scoping (`metric-query-unscoped`, an ERROR rule — one un-scoped metrics resolver
-hands every restaurant's revenue to every other); and **backfill is only as good as the events**.
-Measured: `serviceType` appears on `OrderPlaced` and on **no other Order event**, and `OrderExpired`
-carries `orderId` alone (`specs/ordering/events.yaml:114-533`). So a projection keyed by `serviceType`
-**cannot be decremented by a cancellation** — the new `fold-key-not-on-every-event` rule fails on a
-realistic declaration **today**, which is what earns it. Fixing that by adding a field to an event is a
-payload shape change, i.e. a **versioning story, not an edit** — free only while the log is empty,
-which is the same window `event_version` is waiting in.
-
-Tracking: [#484 "26 of the 29 declared `business_metrics` emit nothing: give business metrics their own catalog, keyed persona x activity, with a bidirectional coverage gate"](https://github.com/TheCaptainCompany/captain-food/issues/484).
-Known dependency, stated so slice 1 is not misread as closing the loop: the `asserted_by:` link
-cannot point into `specs/tests.yaml` until
-[#212 "ADR-0032 completeness cannot reach projectors or read guards"](https://github.com/TheCaptainCompany/captain-food/issues/212)
-lands (decided 2026-07-28, unbuilt) — until then the emission test is a convention with two working
-examples, not a gate.
 
 ---
 
 ## 28. Behaviour event tracking declared inside the screens spec — PROP-20260811-000946
 
-Product-owner directive, 2026-08-11: *"We need to integrate the metrics in the spec. And integrate
-the behaviour event tracking inside the screens spec."* The **first clause is an endorsement of §27**,
-not a new ask — D1–D7 there stand unchanged. This block is the **second** clause, and it is a
-different shape: a business metric measures whether a persona achieved an outcome (a fold over
-`domain_events`); a behaviour event records what a persona did in the UI, is authored by nobody, can
-be rejected by nothing, and is **personal data under a lawful basis**.
+✅ **ALL ROWS CLOSED.** Design record:
+[PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md),
+[#485](https://github.com/TheCaptainCompany/captain-food/issues/485).
 
-Design: [PROP-20260811-000946](PROP-20260811-000946-behaviour-event-tracking-in-the-screens-spec.md).
-Tracking: [#485 "Behaviour event tracking has no declaration site, and the one place that knows a component is an allergen filter is the only place that can refuse it"](https://github.com/TheCaptainCompany/captain-food/issues/485).
+**The fact that earned it** is not the absence of tracking, which is expected — it is that
+`SetCustomerPreferences.dietaryTags` was `array<Tag>` with `Tag` a free-form string, `maxLength: 80`,
+no enum, persisted to `View_Customer.preferences` jsonb: **`halal` and `kosher` were spellable values
+today**, no screen bound it, and no review caught it because no artifact existed that would make
+anyone look.
 
-**The fact that earns the block, verified on `8ee073b`.** Not the absence of tracking — that is
-expected. It is this: **`SetCustomerPreferences.dietaryTags` is `array<Tag>`, `Tag` is a free-form
-`string` with `maxLength: 80` and no enum, and it is persisted to `View_Customer.preferences` jsonb**
-(`specs/customer/commands.yaml:179-182`, `specs/common/scalars.yaml:145-148`,
-`specs/database/tables/projection_tables.yaml:337`). `halal` and `kosher` are spellable values
-**today**. No screen binds it (zero hits in `specs/screens/`), so nothing is running and nobody did
-anything wrong — but the Article 9 exposure this proposal is about is **already declared and already
-stored**, and no review caught it because no artifact existed that would make anyone look.
-
-**The two founder-owed rows below — Q1 and Q2 — are ✅ BOTH CLOSED 2026-08-12** ((A) authenticated
-server-side only, and (A) yes-in-principle after the DPIA;
-[ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)
-Decision 9; §35), **so §28 has no open founder-owed row and the sequencing is the whole of what
-remains**: mechanism + zero live events → DPIA → the first three events, kept executable by rule R10.
-**D1–D7 are TEAM-OWNED** under the same delegation as §27
-([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)),
-listed for visibility and the ensemble-consent + veto pattern, and **not counted in the
-founder-owed total**.
-
-| # | Decision | Recommendation |
-|---|---|---|
-| **Q1** ✅ **CLOSED 2026-08-12 — (A), authenticated server-side only** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 9; §35). **Recorded GRADED, because A is not a blanket exemption** (legal lens, and no lens output is clearance — ADR-20260812-143619): it **plausibly removes the Art. 82 / consent-banner obligation**, since no terminal-equipment access happens for an analytics purpose, and it removes **neither Art. 13 transparency nor the need for a lawful basis** for the processing itself. Consistent with what `join.captain.food/confidentialite` already publishes (*"La mesure d'audience éventuelle est réalisée de façon anonyme et sans cookie"*) — which is corroboration, not a substitute for either duty. The recorded cost is accepted as stated below: the pre-cart funnel is unattributable, and **(C)** remains the recorded upgrade path. Validator rule R8 (refusing `PSEUDONYMOUS_DEVICE`) now has an answer behind it rather than an open row. | **Client storage — and therefore whether a consent banner exists at all.** The framing matters: the device identifier **already exists** (`X-SESSION-ID`, *"a client-generated UUID, kept in a cookie / app cache; identifies anonymous users end-to-end"*, `crates/server/src/graphql/session.rs:1-15`). The question is whether a **new purpose** is attached to storage that currently has exactly one | **(A) Authenticated, server-side only** — no new client identifier and no analytics read of the existing one. Plausibly avoids Art. 82 entirely, so **no banner exists**, which is also a conversion saving on the first screen of the funnel. **What we lose**: the pre-cart funnel — `public_user/BrowseForFood` (8 steps) is unattributable, so browse-to-cart conversion is not computable; four discovery screens are `roles: [PUBLIC, CUSTOMER]`. **What softens it**: `CustomerIdentified` already carries `sessionId` so guest carts bind to the customer on identification (`specs/customer/events.yaml:50-70`) — everything from cart onward is attributable with **no** analytics identifier. **(C)** a dedicated analytics device id + banner is the recorded upgrade path. **(B) reusing the cart cookie is the worst option, not the cheapest** — it forfeits the strictly-necessary exemption *for the cart cookie too*, since the exemption attaches to the purpose of the storage. Validator rule R8 refuses `PSEUDONYMOUS_DEVICE` while this row is open, so it cannot be answered by accident in a PR. **VERIFY-FIRST: no counsel review has taken place** |
-| **Q2** ✅ **CLOSED 2026-08-12 — (A), yes in principle, built after the DPIA** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 9; §35) — exactly as recommended, so the taxonomy is designed for it now and instrumented later. **The tail is recorded, not waved through**: it makes the restaurant a controller or joint controller of that processing, needing a controller/processor arrangement that does not exist today. Sequencing unchanged and executable: mechanism + zero live events → DPIA → first three events, with rule R10 keeping the order a build failure rather than a promise. | **Does the restaurant see its own storefront's behaviour data?** *"23 people opened your menu at 19:40, 4 ordered; these three items are opened most and ordered least."* This is the differentiator, and it is product scope, not plumbing | **Recommended: yes in principle, decided now so the taxonomy is designed for it, built after the DPIA.** Same data, beneficiary changed — and it is the *easier* legal position (the restaurant is controller of its own storefront's traffic, a far simpler legitimate-interest balancing than a platform building cross-restaurant profiles). It is also a thing an independent restaurant cannot buy from Uber Eats at any price. **The tail**: it makes the restaurant a controller or joint controller, needing a controller/processor arrangement that does not exist |
-| **D1** | Where a behaviour event is declared | **Split**: a root `specs/behaviour_events.yaml` for the definition (legal fields in ONE place, so a DPIA reads one file), plus a `tracking:` `$ref` binding on screen/action nodes. This is the screens DSL's own idiom — `resolvers`/`actions` are already allowlists that `$ref` definitions living in `api.yaml`. Fully-inline was rejected because a lawful basis is a property of a *processing*, not a widget, and would sit in a file that is *"runtime-editable via Supabase `screen_specs`"* |
-| **D2** | **Derived from screen structure, or authored per event?** — the question put to the `ux-designer` lens | **Authored**, with the *binding* proven complete both ways. Derivation fails on measurement: **61 of 121 api operations are screen-bound and 6 of 25 persona activities have no screen-bound operation at all** — `restaurant_owner/ManageCatalog` is 14 steps with zero screens (`grep -c catalog specs/screens/restaurant_backoffice.yaml` = 0), `admin` is 7 activities with 1 screen. It also **over-attributes**: four discovery screens are `roles: [PUBLIC, CUSTOMER]`, and the one operation `ManageCatalog` shares with a screen is `queries/catalog` read by *customers*. And opt-out is the wrong default for personal data — a new screen would start collecting on merge |
-| **D3** | What a declaration carries, and which kinds exist | `kind:` is **`VIEW \| INTERACTION` and nothing else**. `IMPRESSION` and session replay are **not values and not concepts** — absent from the grammar, not discouraged in a comment (compiler-first, ADR-20260803-234035). Impression tracking over a *menu* is the mechanism that turns a food catalogue into a health-and-religion inference engine with nobody intending it. Legal fields `purpose`/`lawfulBasis`/`retention`/`identifierClass`/`specialCategoryRisk`/`dpia` are **required with no defaults**; attributes are bounded sets only (§27 D6 parity) |
-| **D4** | How it binds to the metrics catalog | **Separate catalogs sharing exactly one thing** — the `activity:` `$ref` into `stories.yaml` — plus one global name-uniqueness namespace (the same constraint §27 D7 gives [#483](https://github.com/TheCaptainCompany/captain-food/issues/483)). That join is the payoff: *"of the 210 who opened the menu, 31 placed an order"* becomes one row of the persona × activity grid. One merged catalog was rejected — half the fields would be meaningless for half the entries, and Evans' one-name-one-meaning rule says *metric* and *event* are two concepts |
-| **D5** | Where the records GO | **Their own database, RANGE-partitioned by day; retention is a partition DROP.** **Never `domain_events`** — every row there is a fact an aggregate *decided* in response to a message it could have *rejected*; a behaviour event is neither, so Young's left-fold invariant stops holding (a replay would have to skip rows, and a fold that skips rows is not a fold). Operationally it would size PITR by clickstream, dominate every projection checkpoint, and multiply [#473](https://github.com/TheCaptainCompany/captain-food/issues/473)'s deletion-engine scan bound by ~1000. Not the order path's instance either — that is [#443](https://github.com/TheCaptainCompany/captain-food/issues/443). Not Honeycomb — a trace store has no per-subject erasure API, so Art. 17 has no answer there |
-| **D6** | What the validator enforces | **Ten ERROR rules.** Two are load-bearing: **R5 `tracking-on-sensitive-node`** — no `tracking:` binding anywhere under a node marked `sensitivity: SPECIAL_CATEGORY`, unconditional, no override — and **R10 `behaviour-tracking-without-dpia`** — the *emitter* produces nothing while `docs/legal/DPIA-*.md` does not exist. R5 is why the screens spec is the right location: it is the **only** artifact in the repo that knows a `filter_bar` is an allergen filter (the api layer sees an argument, the store sees a string, an SDK sees a payload). R7 encodes *two purposes, two bases*; R9 makes rider productivity-scoring and nudging **unspellable** |
-| **D7** | What is the first slice | **The mechanism plus ZERO live events**, then the DPIA, then the first three events (server-side, authenticated). Instrumentation before a DPIA is **processing that should not have started** — the DPIA is a precondition of beginning, not a follow-up. The dated reason to land the mechanism now anyway: **`allergen` has zero occurrences in `specs/catalog/*.yaml`** while the model is decided-and-unbuilt ([ADR-20260808-171056](../adr/ADR-20260808-171056-register-sweep-consent-decisions.md), [#184](https://github.com/TheCaptainCompany/captain-food/issues/184)) — so R5 can be built **before** the control it refuses exists. That window closes when #184 ships |
-| **D10** | **The write path — the product owner's own design, evaluated** | ✅ **CONVERGED, and recorded as such.** Their design (withheld until the proposal existed, so the two would be independent) — *"we can name the interaction name and the properties we want to share inside the event, of course the principal context will be sent with the jwt. A mutation should be exposed to send these events"* — matches D1/D3 on the name and properties, and the JWT clause **is D8 option A reached from the other direction**: an authenticated mutation carrying principal context is server-side capture with no analytics identifier and no terminal-equipment read for an analytics purpose. It is also ADR-0041's envelope doctrine (*the acting user is envelope metadata, never a payload field*) applied to a non-domain write **without being asked**. Two independent routes to one answer is the strongest evidence available that A is right, and it narrows Q1 below from *"which option"* to *"do we ever want C's anonymous funnel badly enough to accept a banner"*. **The mutation is also a BETTER answer than the proposal's original "BFF tracking boundary"** — it inherits role-path routing, the ACL and the `op-uncovered-by-story` gate. ⚠️ **One measured blocker**: `op-missing-command` is an **ERROR** (*"mutation declares no command"*) and all **86** mutations bind a command handled by an actor (`tools/codegen-rs/src/validate/core.rs:292,295,301`). So today a mutation **cannot** be a non-command: declaring `recordBehaviourEvent` the only way the validator accepts would enqueue it on the actor mailbox and append it to `domain_events` — exactly what D5 refuses — **silently, with the gate green**. The fix is a small new api.yaml shape: a mutation that declares **`sink:`** where a command declares `command:`, meaning *this write is recorded, not decided* (a command can be rejected; a sink write cannot). Team-owned, but it must land before this half is buildable |
-
-**Not a new row: [#194 "GDPR Article 17 has no technical answer… no DPIA/privacy policy/terms exist"](https://github.com/TheCaptainCompany/captain-food/issues/194)
-is open and unchanged.** It is named here only because this work is *sequenced behind it*, and R10
-turns that sequencing into a build failure rather than a promise. Filing a duplicate DPIA-ownership
-row would inflate the register without adding a question.
-
-**On the "same technique as LinkedIn" framing.** The honest answer is that the pipeline design is
-neutral and the purposes are what differ. But three things are design rather than purpose, are only
-reachable if decided now, and are properties of the *declaration mechanism*: **(1)** the customer can
-read their own trail as a **screen** rendered from the catalog's own `question:` fields, not a GDPR
-export ZIP; **(2)** the beneficiary of the aggregate is the **restaurant**, not the platform (Q2);
-**(3)** the taxonomy **refuses** things, checkably — and publishing it (adjacent to
-[#377 "Build in public"](https://github.com/TheCaptainCompany/captain-food/issues/377)) turns *"we do
-not surveil you"* from a claim into a file anyone can read and a gate anyone can run. Retrofitting any
-of the three onto an undeclared firehose is a project; on a declared taxonomy it is a rendering.
+The design: a root `specs/behaviour_events.yaml` holds the definition so a DPIA reads one file, with
+a `tracking:` `$ref` binding in the screens; events are **authored, not derived**; `kind:` is
+**`VIEW | INTERACTION` and nothing else** — `IMPRESSION` and session replay are absent from the
+grammar, not merely unused; separate catalogs share exactly one thing, the `activity:` `$ref` into
+`stories.yaml`; the store is **its own database, RANGE-partitioned by day, retention is a partition
+DROP**, and **never `domain_events`**; ten ERROR rules, of which **R5 `tracking-on-sensitive-node`**
+is load-bearing. Sequencing: **the mechanism plus ZERO live events**, then the DPIA, then the first
+three events — instrumentation before a DPIA is the wrong order, and validator rule R10 makes that
+sequencing a build failure rather than a promise. **Q1** closed as authenticated **server-side only**
+— no new client identifier and no analytics read of the existing one; **Q2** closed as yes in
+principle, built after the DPIA. Both by
+[ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md).
+**D10** records that the founder's own tracking design and the team's **converged independently**.
 
 ---
 
 ## 29. Scope isolation is nominal — PROP-20260811-090000 (product-owner directive, 2026-08-11)
 
-Product-owner directive, 2026-08-11, verbatim: *"The enforcement is required before working on any
-other functional subject"* — re-prioritised under
-[ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md).
-The design record is [PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md),
-which is also the deliverable [#423 "Design record for the per-scope infrastructure split"](https://github.com/TheCaptainCompany/captain-food/issues/423)
-has been asking for since 2026-08-09. **Measured, all 57 bins enumerated**: **50 of 57** carry all 8
-domain scopes, by three separate paths — `bin_runtime` (37 bins), `server` (8 subgraphs) and
-`surface_runtime → web → app-core` (**5 `fo-*`/`bo-*` surfaces**) — and only the 7 `gateway-*` bins
-are domain-free (`cargo tree -e normal`). The declared scope crate is imported as
-`use domain_catalog as _;` (`crates/bins/projector-catalog/src/main.rs:16`) purely to appease
-`cargo machete` — the manifest's "SCOPE ASSERTION" is not used by the bin at all. ⚠️ **The first
-reading of this said 45**, counting the surfaces as clean because their manifest note *"DELIBERATELY
-no database, no server, no infrastructure"* is **true** — and reads as isolation while SSR still
-folds domain rows through `app-core`. That is a 5-row resize of the ledger and it adds a **slice 5**
-to the program: no amount of `bin_runtime` or `server` decomposition removes those five, so the
-proposal's exit condition was unreachable as first written. The mechanism ranking (D1) and the first
-family (D2) are the proposal's; the rows below are what the proposal cannot decide for itself.
+Product-owner directive, verbatim: *"The enforcement is required before working on any other
+functional subject"*. Design record:
+[PROP-20260811-090000](PROP-20260811-090000-scope-isolation-runtime-decomposition.md),
+[#423](https://github.com/TheCaptainCompany/captain-food/issues/423).
+
+✅ **ISO-1 and ISO-2 are CLOSED as (a)** by the product-owner direction of 2026-08-11 (*"The
+infrastructure has to be split in multiple crates to be able to regulate permissions based on what
+they need nothing more"*), recorded in §5 and worked through in §33: both (b) options ended with a
+bin linking a crate that carries every other boundary's code, which is exactly what the directive
+forbids. **ISO-3 is still open**, and it is the sharpest row here — the point of it is that it
+stopped being a *decision* and became a *silence*.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
-| **ISO-1** | ✅ **CLOSED 2026-08-11 — (a).** **Does `projection_runtime` own the LISTEN/`EventWaiter` plumbing, or receive it?** This is the row that decides whether slice 1 delivers its promise: if a projector bin still links `infrastructure` for the waiter, its closure is unchanged and the slice buys image size only | **(a) `projection_runtime` owns it** (moves `EventWaiter` + the LISTEN loop into the scope-agnostic runtime crate, whose floor is `sqlx` + `domain-common`). The projector bin then links **zero** of `application`/`infrastructure`/`domain` — the closure claim becomes true. Cost: a second home for LISTEN while the monolith still uses `infrastructure`'s, until the cutover retires it. **(b) Stay in `infrastructure`, pass the waiter in.** Smallest diff, one LISTEN implementation — but the bin keeps linking `infrastructure`, so `use domain_ordering::…` in a catalog projector still compiles and slice 1 delivers a smaller binary rather than a boundary | ✅ **CLOSED as (a)** by the product-owner direction of 2026-08-11: *"The infrastructure has to be split in multiple crates to be able to regulate permissions of apps based on what they need nothing more."* Option (b)'s own wording is *"the bin keeps linking `infrastructure`"* — a projector pod linking the crate that also holds the event-append path, 7 partner ACLs and the deletion engine is the definition of more than it needs. Under [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) D3 there is no `infrastructure` to stay in. **Caveat, recorded not hidden**: this does not by itself make slice 1 deliverable — see **REP-4** (§33), the coupling ISO-1 did not name |
-| **ISO-2** | ✅ **CLOSED 2026-08-11 — (a).** **Do `View_*` write repositories move into `projections-{scope}`, or stay shared?** A shared write repo re-imports the facade through the back door | **(a) Move per scope** — the fold and the write it produces live together; a projector physically cannot write another scope's view. **(b) Keep shared** — one repo layer, no duplication of upsert plumbing; but the shared crate must link every scope's view types, so every projector links every scope again | ✅ **CLOSED as (a)** by the same direction, with the generic upsert plumbing (not the typed writes) staying in `projection_runtime`/`store_core`. (b) is a single crate every projector links, so every projector gains every boundary's write access — the exact opposite of *"nothing more"* |
 | **ISO-3** | ⏳ **STILL OPEN — and now cheaper.** **`EventStore::append` has no capability witness** and is untracked — the one row in PROP-20260802-130500 §5's audit table marked "❌ hole (phase-3 territory)" that nobody has filed. `crates/application/src/ports.rs:50-60`: anyone holding `Arc<dyn EventStore>` may append any event to any stream. The mailbox got `MailboxAccess` ([ADR-20260803-172654](../adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md)); the event log — the actual system of record — did not | **(a) File and cost it now, as part of the enforcement program** the directive just prioritised: it is the same class and arguably the more consequential door. **(b) Ride slice 3 / [#307](https://github.com/TheCaptainCompany/captain-food/issues/307)** — it is genuinely adjacent to per-actor handler crates, so folding it in avoids touching `ports.rs` twice. **(c) Leave it** — the current position, which is an unrecorded acceptance rather than a decision | ✅ **Recommended: (a) file now, sequence with (b).** The point of this row is that it stopped being a *decision* and became a *silence*: the audit table names it, no issue tracks it, and the directive says this class comes first. **2026-08-11 update**: [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md) D1 splits `EventStore` into `EventStreamReader` + `EventStore: EventStreamReader` in its slice 1 — the witness rides the **same signature edit** instead of touching `ports.rs` twice, which is option (b)'s efficiency without waiting for slice 3. The crate split **does not subsume it** (D6): the crate boundary is per-*boundary* ("which apps may hold an appending type at all"), the witness is per-*aggregate* ("which streams that type may append to"), and under BND-1(a) `handlers-order` holds six aggregates |
 
 ---
 
 ## 30. One folder per app — PROP-20260811-141654 (product-owner request, 2026-08-11)
 
-Product-owner request, 2026-08-11, verbatim: *"Give me the app list to be on the same page. Perhaps
-we should create a sub folder for each app/worker and indicate what it contains with the yaml files
-in it. Build me proposal for that."* The design record is
-[PROP-20260811-141654](PROP-20260811-141654-per-app-declaration-folders.md), tracked by
-[#491 "Per-app declaration folders"](https://github.com/TheCaptainCompany/captain-food/issues/491).
-**The 57-app list, grouped by family with what each family contains, is §1 of the proposal** — that
-half of the request is delivered and needs no decision.
+✅ **ALL THREE ROWS CLOSED** (recommended options, team-owned by delegation). Design record:
+[PROP-20260811-141654](PROP-20260811-141654-per-app-declaration-folders.md),
+[#491](https://github.com/TheCaptainCompany/captain-food/issues/491).
 
-**Measured, and load-bearing for the rows below**: 49 of 57 bins' transitive `domain-*` closure ≠
-their declared set (recomputed over the workspace manifests; §29's territory, unchanged by this) —
-and, separately, the *grant* derivation is wrong in both directions: `adapter-stripe` gets **13**
-secrets under a comment saying it holds only Stripe's, while `worker-sirene-sync`'s pod env contains
-**no `INSEE_API_TOKEN`** and `SireneClient::from_env` returns `Err` without it
-(`crates/sirene_ingest/src/client.rs:100-102`) — correct today, a live trap at the
-[#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover.
-
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **APP-1** | **Sequencing: does the per-app folder work run before, after, or interleaved with the §29 enforcement slices?** This is the only row that genuinely needs the product owner, because the request and the 2026-08-11 directive (*"The enforcement is required before working on any other functional subject"*) point at the same weeks, and the folder work is the more *visible* of the two while being the less consequential | **(a) After §29 slice 1** — enforcement first, exactly as directed; the app folders land once the closure is real, so the generated index tells the truth on arrival. Cost: the "same page" ask waits. **(b) Slice A1 now (generated 57-app index only, no source moved), the rest after §29 slice 1** — the request is answered in one commit and nothing is displaced; A1 is a permanent part of the final shape, not a shim. **(c) Full per-app folders first** — satisfies the request completely and pushes the enforcement program back by its own duration | ✅ **Recommended: (b).** It honours the directive literally (no enforcement work is displaced), delivers the readable app list immediately, and defers every slice that competes for the same reviewers. (c) is the option to refuse: 57 folders would *read* as isolation progress without moving the link graph one inch |
-| **APP-2** | **Is the folder SOURCE or a rendered view?** The request implies "declare what it contains"; the team's answer modifies it — **source for deploy-owned facts only, generated for everything derivable, and the `c4-l2.yaml` `containers:` block MOVED rather than copied**. Flagging it because it is a modification of a shape the product owner named, under *"just keep me informed"* ([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)) | **(a) Source for deploy-owned facts + generated index** (PROP D1-A): one fact, one home; gives the Rust-embedded per-app knowledge a reviewable home. **(b) Fully generated read-only view**: zero drift, zero enforcement value — it documents the problem without moving it. **(c) Hand-authored source for everything incl. scopes/lanes/api**: reads best in one file, and is the drift surface — 57 files restating derivable facts with a validator arbitrating between two truths | ✅ **Recommended: (a)**, team-owned by delegation; recorded here as a **confirm-or-redirect**, not a blocker. (c) is declined with reasons: it manufactures exactly the asserted-but-unenforced claim [#475](https://github.com/TheCaptainCompany/captain-food/issues/475) spent a PR deleting |
-| **APP-3** | **Do apps declare their secret `grants:`, replacing scope-granularity routing?** The fix for the 13-secret "isolated" Stripe pod. Team-owned mechanism; listed because the *flip* changes deploy behaviour and a wrong declaration is a boot failure, not a review comment | **(a) Declare per app; the scope derivation becomes the UPPER BOUND; ship report-only, flip as a separate recorded decision** (gate-then-stabilize). Reaches level 5 on the one axis where it is reachable — the generated typed `Config` has no field for an undeclared key. **(b) Extend the Rust family narrowings** (`projector_key_allowed`, `gateway_key_allowed`, …): smallest diff, one `if` per family forever, in the least reviewable language available. **(c) Leave it**: an unrecorded acceptance | ✅ **Recommended: (a).** Note it is **independent** of §29 — that fixes a code boundary, this fixes a credential boundary; neither blocks the other. Complements [#446](https://github.com/TheCaptainCompany/captain-food/issues/446) (derives the *bound* from screens) and [#452](https://github.com/TheCaptainCompany/captain-food/issues/452) (presence vs authority) |
-
-**Explicitly NOT a row, recorded so it is not re-opened**: whether
-[#490](https://github.com/TheCaptainCompany/captain-food/issues/490)'s `PENDING_DECOMPOSITION`
-ledger moves into the app folders. **No** — the closure is *measured*, not declared, and a
-hand-written row makes a stale entry indistinguishable from a true one. The per-app index renders
-it. **#490 is unaffected and stays dispatchable today**, which matters because it is the only §29
-slice dispatchable while that proposal is `Proposed`.
+**The headline is a "no" inside a "yes"**: the app list already exists as source
+(`specs/architecture/c4-l2.yaml` `containers:`), and a per-app folder **cannot** make a scope
+boundary real — only the crate graph does, which is §29's job. What the folder **can** carry is the
+per-app knowledge currently written in Rust inside the generator, and the **grants** — the measured
+finding being that `adapter-stripe`, the pod whose stated reason to exist is *"holds ONLY this
+partner's secrets"*, carried **13** secrets including `AUTH_SESSION_KEY`, `SUPABASE_SECRET_KEY` and
+the four `OVH_*` SMS credentials, while `gateway-public` (*"no DB access, no logic, no state"*)
+carried **10**. The narrowing mechanism exists and works — `worker-erasure` carries **2** — it was
+applied to one family. **APP-3 is independent of §29**: that fixes a code boundary, this fixes a
+credential boundary; neither blocks the other.
 
 ---
 
 ## 31. The domain boundaries — PROP-20260811-150242 (product-owner proposal, 2026-08-11) · **upstream of §29**
 
-Product-owner proposal, 2026-08-11, verbatim: *"We have to have domain boundaries that potentially
-contains multiple actors process managers and workers I propose: customer <== public and customer
-management will be handle there · order <== cart, order management payment reclamation refund ·
-restaurant <== catalog management restaurant management restaurant account management · rider <==
-rider, rider partner"*, and, the same day: *"We should have one database for DomainEventLogDb <==
-domain_events · DomainCommonDb <== customer, restaurant, rider · CatalogDb · OrderDb ·
-BehaviorEventTrackingDb <== events table … Every app/worker that need to access a database must have
-a dedicated user in the database with the most restricted access based on the spec."*
-Design record: [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md),
-tracked by [#493](https://github.com/TheCaptainCompany/captain-food/issues/493).
+✅ **ALL NINE ROWS CLOSED.** Design record:
+[PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md),
+[#493](https://github.com/TheCaptainCompany/captain-food/issues/493).
 
-**Five of the eight ambiguous calls the request raises are ALREADY ANSWERED in
-`specs/architecture/c4-l2.yaml:30-73`, the same way the request answers them**, and are recorded here
-as **confirm-or-redirect**, not as open questions: `CustomerCredit` → `order`, `Conversation` →
-`order` (so `comms` dissolves as a boundary), `Prospect` → `restaurant`, `MailboxSupervision` → a
-`platform` bucket (the `common` kernel stays a kernel and is NOT a fifth business boundary), and
-`PUBLIC` as a **role of** the customer boundary, not a member of it — anonymous browsing reads
-catalog and network data through a customer-side path, so "public belongs to customer" is true of the
-surface and false of the data. `DeliveryJob` → `delivery` is the team's call and is decided by
-writers: **no order-side aggregate or process manager ever sends it a command.** Measured over its
-five mutations (`specs/delivery/api.yaml:91-114`), three are `[RIDER]` and two are
-`[RESTAURANT, …, ADMIN]` — none is `[CUSTOMER]`, and the restaurant-issued ones reach a
-delivery-boundary aggregate through a **role path**, which is what gateways are for. All 57 apps are
-homed in the proposal's §5 — 39 to boundaries, 18 to `platform` — with no app left unassigned.
+**BND-1** — the recorded boundary set is **five business boundaries + `platform` + the kernel**
+(§1 H), verbatim *"I'm ok for the 5 / Customer / Order / Catalog / Restaurant / Delivery"*, with
+**BND-2** naming the fifth `delivery` rather than `rider`. The finding underneath: `boundedContexts:`
+in `c4-l2.yaml` and `specs/{scope}/` were **two different partitions of the same 20 actors**, 6 of 20
+homed differently, with nothing reconciling them — they had diverged since the 2026-08-07 reorg with
+every gate green. The fix was nearly free: the context partition is a strict coarsening of the scope
+partition on 7 of 8 scopes; exactly one scope splits, on exactly one member. One part of the request
+was **declined with measured reasons**: `catalog`↔`network` coupling is **zero of every kind**, so
+folding catalog into restaurant internalizes nothing and deletes a compiler-enforced boundary.
 
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **BND-1** ✅ **CLOSED 2026-08-11 — (a)** | **What is the recorded boundary set?** This is the row §29 slice 1 now waits on, and the only one that is genuinely urgent, because ADR-20260807-183024 D7's zero-cost window closes at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover | **(a) 5 business boundaries + `platform` + the kernel** — `customer` · `order` · `restaurant` · `catalog` · `delivery`. Catalog stays a boundary because `catalog`↔`network` coupling is **zero of every kind**, so the merge internalizes nothing and deletes a compiler-enforced boundary; the product owner's own storage message gives catalog its **own database**. **(b) 4 boundaries exactly as proposed** (catalog folded into restaurant) — matches the request literally and reads naturally (one persona, one surface, one tenant), at the cost of a boundary deletion with no compensating gain. **(c) Keep the 8 scopes and delete the `boundedContexts:` block** — one partition, zero migration, but it keeps 2 of 3 kernel events as ordering↔payments bridges, 5 PM bridges and 3 cross-scope projection groups, and discards a product-owner-authored model | ✅ **Recommended: (a).** It IS the C4's set, with `catalog` kept and the boundary named `delivery` rather than `rider`. Whatever is chosen lands as a **superseding ADR** on ADR-20260807-183024 D1's named scope list — a recorded-decision reversal, never a silent spec edit |
-| **BND-2** ✅ **CLOSED 2026-08-11 — (a) `delivery`** | **Is the boundary called `delivery` or `rider`?** The product owner named the word; a name is a legitimate product-owner call, so the reasoning is offered rather than imposed | **(a) `delivery`** — the boundary contains `DeliveryJob`, which a *partner* may fulfil with no rider involved at all, and `DeliveryPartnerRegistration`, which is not a rider either. `RIDER` is its role and `c4-l2.yaml:68` already writes it that way. **(b) `rider`** — the request's own word, matching the persona and the `bo-rider` surface, at the cost of repeating for delivery exactly the surface-vs-domain conflation the request correctly avoids for `public` | ✅ **Recommended: (a)**, as a ten-second confirm-or-overrule |
-| **BND-3** | **Does storage follow the domain boundary one-to-one?** The proposed grouping does not — `DomainCommonDb` holds three boundaries while `CatalogDb` stands alone — and the deviation must be *stated as a decision* rather than inherited | **(a) No: storage groups by operational profile; the BOUNDARY is the SCHEMA + the per-app ROLE, not the database.** Answers "what still makes it a boundary?" concretely — three boundaries share a database and still cannot read each other, because no app's role is granted another's schema. This is ADR-20260807-183024 D2 refined one level down (truth-vs-serving kept; the serving side subdivided by read profile), and it matches the second half of the product owner's own message. **(b) One database per boundary** — legible at a glance, but kills cross-boundary admin SQL (no cross-database join in Postgres) and multiplies backup timelines whose cross-restore is not mutually consistent; already weighed and declined in D2. **(c) One database, schemas only** — simplest, and puts the money path and analytics in one buffer pool, the resource form of the integration-database antipattern the product owner named on 2026-08-07 | ✅ **Recommended: (a)**, with a **stop condition that should be a validator rule**: if any app's `GRANT` spans two boundaries' schemas outside the declared exceptions (`admin_ro`/`claude_ro` incident tooling, `bam`, `worker-erasure`), the shared database has silently become an integration database |
-| **BND-4** ✅ **(i) CONFIRMED 2026-08-11 — the WRITE side; (ii) corrected in §6.1.1, and a THIRD correction found — see JRN-1** | **Two corrections the permission matrix needs before it becomes a `GRANT`.** Flagged rather than assumed, because an ambiguous line in a permission matrix becomes a wrong `GRANT`, and a wrong `GRANT` is a boot failure or a silent breach | **(i)** The fourth bullet reads *"the reading of the **read** side is done by actors to load the events"* — loading events is reading the **write** side. Almost certainly a transcription slip for *"the reading of the **write** side is done by actors and by the projectors"*. **(ii)** The matrix omits the mailbox, and the omission is load-bearing: `inbound_messages` lives in `captain-core` (D2: *"event log + mailbox only"*) and **GraphQL mutation resolvers write it** (`crates/server/src/graphql/generated/mutation.rs:42,56-57`), so *"the writing of the write side is done only by the actors"*, taken literally as a `GRANT`, **makes every mutation fail at runtime**. Process-manager state tables are a third row the matrix has no line for | ✅ **Recommended: confirm (i) and add the two missing rows.** Not a design choice — a correctness check on a matrix that is about to become a `GRANT` |
-| **BND-5** | **Where does the notification port live?** It **does not exist**: `crates/application/src/ports.rs` declares exactly 4 traits and none is a notifier; `specs/services.yaml` declares exactly 3 services (`payment`, `delivery`, `identity`); zero repo hits for `NotificationPort`/`trait Notifier`/`SendNotification`. This regrouping decides its home, and *"a paid order nobody is told about"* is this domain's named worst failure mode | **(a) Transport in `platform` (a `notification:` service + one adapter-shaped sender bin, the shape `payment`/`delivery`/`identity` already use); POLICY — who is told, when, what happens if nobody acts — in the `order` boundary's process managers.** Makes the failure an order-boundary defect with a named owner. **(b) Everything in `platform`** — one home, but *"nobody is told"* becomes a platform bug no boundary owns, and the service would have to import order semantics. **(c) An adapter per boundary** — four copies of vendor plumbing, contradicting ADR-20260808-062432 | ✅ **CLOSED BY THE TEAM 2026-08-11 — (a), REFINED into THREE parts.** The challenge *"the recipient is a restaurant, so should policy not live with the party being notified?"* conflates **recipient** with **owner**: the trigger condition (`Order.status == PLACED ∧ now − placedAt > deadline`) is entirely order state. **And the mechanism already exists, in `order`, one line short**: `specs/ordering/actors.yaml:92-96` declares a first-class `reminders:` block **on the `Order` aggregate** — a durable, config-driven, reschedule-in-place timer whose firing is **recorded as a foldable business event** — used today only for the GDPR retention window, while `OrderPlaced` (`:105-107`) declares **no `schedules:` at all** (every `schedules:` in the file hangs off a *terminal* transition). The challenge's real contribution is the third part: **the recipient contract — channel, phone, staff, quiet hours, escalation — is restaurant-boundary data published to `order` as a read contract** (Evans: open host service, **not** a shared kernel), and it is **absent entirely** today. Final shape: **policy → `order` · recipient contract → `restaurant` · transport → `platform`.** Missing observability contract unchanged: nothing in `specs/observability.yaml` covers notification delivery |
-| **BND-6** ✅ **CLOSED 2026-08-12 — (B) prep time only, LABELLED "ready"** (raised 2026-08-11; the team's lean is now the founder's answer) | **What does the customer see before ordering when the ETA cannot be fully computed?** New 2026-08-11 (proposal D13). **Measured: nothing computes an ETA anywhere** (0 repo-wide hits for an ETA function), **no pre-order estimate exists at all** — the two `estimated*` values the system holds both arrive *after* payment (`estimatedReadyAt` ← `OrderAcceptedByRestaurant`; `estimatedDropoffAt` ← `DeliveryAcceptedByPartner`). The team has decided the **mechanism** (D13: a read-side composition owned by `order`, prep-time published by `restaurant`, travel-time by `delivery`, frozen onto `OrderPlaced` at checkout). **What remains is a product call with a conversion trade-off**, because the travel leg will be unavailable long before the prep leg is | **(a) Show nothing** until both legs resolve — fail-closed, matching the `PriceUnresolvable` precedent (*"the honest no-price state, never a stale or client number"*, `projection_tables.yaml:419`). Never wrong; but CLAUDE.md's own lens says the missing estimate is *"a conversion problem, not a polish item"*, so this ships the conversion problem deliberately. **(b) Show a prep-time-only estimate** (*"ready in ~25 min"*) labelled as **ready**, not arrival — buildable **today** from `preparationTimeMinutes`, which already exists (`specs/network/entities.yaml:198-202`) and is rendered on **zero** customer screens; honest if and only if the label is honest, which is exactly the defect D13 found shipped. **(c) Show a wide range** (*"30–50 min"*) with a conservative travel allowance — feels like a real ETA and converts best; it is a **guess presented as a computation**, and the first late order is the one that teaches the customer that | ✅ **ANSWERED BY THE FOUNDER 2026-08-12 — (B), the kitchen time labelled "ready"** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 8; §35). The team's lean was confirmed as put. **The label IS the decision, not a detail** (ux lens): option (b) shipped with an *arrival* label is option (c) in disguise, and that is precisely the defect D13 found already live. Previously ⚠️ FOUNDER-OWED, team leaning **(b) for delivery-mode-agnostic V0, with the label saying "ready", moving to a true arrival ETA when the travel contract lands**. Sequenced behind the two shipped defects D13.5 step 1 names, which are **not** decisions and should just be fixed: the `eta_bar` labelled *"Estimated arrival"/"Arrivée estimée"* is bound to the kitchen **ready** time and renders during `OUT_FOR_DELIVERY` (`specs/screens/restaurant_frontoffice.yaml:490` + `restaurant_frontoffice.translations.yaml:146`), and the marketplace offers **four** sort options including `delivery_time_asc` over a query with **no sort argument** (`captain_frontoffice.yaml:206` vs `specs/network/api.yaml:66-83`) |
-| **BND-7** ✅ **CLOSED 2026-08-12 — (A) estimate, no remedy** (raised 2026-08-11; answered before the freeze lands, as the row required) | **Is the displayed ETA a PROMISE with a remedy, or an ESTIMATE?** New 2026-08-11 (proposal D13.5 step 4). D13 recommends freezing the shown estimate onto `OrderPlaced` so lateness is measurable against what the customer was actually told (Young: the estimate you *showed* is a fact that happened; the estimate you would *compute* is not). **Whether that frozen number carries a commercial consequence is not a technical call** | **(a) Estimate only** — no remedy; the frozen value exists purely as an internal quality signal (promised-vs-actual) and is never shown as a commitment. Cheapest, no legal surface. **(b) Promise with a soft remedy** — e.g. goodwill credit past a threshold, which `CustomerCredit` already supports as an aggregate. Strong differentiator; creates an obligation the dispatch side must be able to meet at Friday peak. **(c) Promise with a hard remedy** (refund/free delivery) — strongest signal, largest exposure, and it makes the ETA a contractual term with the consumer-law surface that implies in France | ✅ **ANSWERED BY THE FOUNDER 2026-08-12 — (A), estimate only, no remedy** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 8; §35), and **answered before D13.5 step 4 lands, which is what this row asked for**: the frozen value is an internal promised-vs-actual quality signal, never presented as a commitment, so no goodwill credit and no refund obligation attaches. The freeze remains an `events.yaml` payload change on an **already-emitted, already-stored** event — a **migration** needing an upcasting story (CLAUDE.md question 2), nearly free before the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover and a real migration after, so the window it is cheap in is the same one JRN-1 and CUT-1 spend. Previously ⚠️ FOUNDER-OWED with the team recommending **(a) for V0** — freeze the number, measure promised-vs-actual, and decide the remedy on evidence rather than before any exists (ADR-20260808-144738) |
-| **BND-8** ✅ **CLOSED BY THE TEAM 2026-08-11 — the `CONNECT` test** | **When does a translating process manager get its own IN-BETWEEN unit, rather than living in one of the two boundaries?** New 2026-08-11, from the product owner's concession (*"I'm ok if we create in between boundaries for process managers that are making the translation between 2 boundaries thanks to the fact that we have one crate per actor client type"*). It needed designing rather than filing: an unbounded licence here recreates the *a-boundary-per-awkward-thing* failure the whole exercise exists to avoid | **(a) The `CONNECT` test — a PM earns an in-between unit only when it WRITES two boundaries' aggregates and READS at most one boundary's read models** ✅ **recommended and adopted.** The two directions cost different things: every PM write lands in ONE database (`domain_events` + `inbound_messages` + PM state are all inside `captain-write`, **STO-1(a)**), so widening write reach widens an *enumeration* — one more `actor_type` in the RLS `WITH CHECK`, one more stream prefix — while a second READ is a second `CONNECT` through the strongest wall in the matrix, which is precisely **BND-3**'s stop condition. **(b) Any PM naming two boundaries may be in-between** — matches the concession literally and is the unbounded version: `PlaceOrderProcess` would qualify on a *read*, and the exception list becomes the design. **(c) No in-between units; every PM lives in the boundary it writes** — simplest, and it forces `DeliveryDispatchProcess` (a genuine two-boundary writer) into a boundary whose deploy then restarts the other's drain at peak | ✅ **Adopted (a), with three mechanical brakes and a measured classification** — [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md) **§D15**. Brakes: the test is a **validator rule** over `processmanager.yaml` (`distinct_read_boundaries(pm) <= 1` and `distinct_write_boundaries(pm) == 2`), in-between is a property only a **PM** can have (a closed, declared catalog of 5), and **two boundaries, never three** — a three-boundary PM is a signal the boundary set is wrong, not a licence to widen. **Classified today: `CartBindingProcess`, `ReclamationProcess`, `RefundProcess` are single-boundary `order` PMs (no unit); `PlaceOrderProcess` writes ONE boundary and is therefore not in-between at all; `DeliveryDispatchProcess` is the ONLY two-boundary writer and is still ineligible until BND-9 lands.** So the concession creates **zero** units today and reserves **one** candidate — which is the reassuring answer, not the disappointing one |
-| **BND-9** ⚠️ **TEAM-OWNED, confirm-or-redirect — the concession's premise is not true yet, and the stop condition already fires** | **Two findings that arrived with BND-8 and change what it costs.** (1) *"One crate per actor client type"* is real for resolvers and adapters (17 sealed crates, `crates/clients/{actor}`) but **no process manager uses it**: `deliver:` is a direct append to the target's stream (`crates/application/src/generated/process_managers.rs:118-122`) and `send:` runs the target's command handler **in-line** (`:786`) — both bypassing the client crate, the target's mailbox lane and its lease. **The DSL's own doctrine header says the opposite verbatim** (`specs/common/processmanager.yaml:7-9`: *"a process manager never appends to `domain_events` itself"*). (2) **BND-3's stop condition already fires**: `PlaceOrderProcess` reads the **restaurant** boundary's `Restaurant` read model on the CHECKOUT path (`specs/ordering/processmanager.yaml:38-41`, feeding four guards) and `DeliveryDispatchProcess` reads it for the pickup address (`specs/delivery/processmanager.yaml:42-46`). D9's claim that a `customer`-homed `CartBindingProcess` *"would be the first such grant"* is **wrong** — two exist today | **Premise:** route `deliver:`/`send:` through the client crates so the PM bin's `Cargo.toml` becomes its declared reach (and close **ISO-3**'s bare `&str`), OR accept that an in-between unit's two-boundary permission is a formatted string. **Cross-boundary read:** **(a) the `restaurant` boundary publishes the five slow-moving fields and each consumer's projector folds a slim snapshot into its OWN read database** — the same *composition-in-the-projector* answer **STO-2(a)** already gave for `ScopeMembership`; cost is one projection lag on the pause guard. **(b) a read-time query contract** (D13.4's third mechanism) — no copy, no staleness, and a synchronous cross-boundary hop **inside the checkout saga at peak**. **(c) a permanent declared exception** — zero work, and two exceptions on the two hottest paths is not an exception list, it is the design | ✅ **Recommended: fix the premise (it is a correctness fix regardless of boundaries — a PM appending to `Cart-{id}` in its own transaction is a SECOND WRITER on an aggregate whose entire runtime discipline exists to guarantee one), and take (a) for the read.** Team-owned; recorded as confirm-or-redirect because (2) contradicts a claim already written in an approved-direction proposal. **Exceptions get a mechanism, not a habit**: an exception is granted only by a register row with a named owner and a stated removal condition, emitted into the grant script from the app's own declaration folder ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491) / REP-5(a)) so adding one is a visible diff in the file whose entire purpose is permissions. The standing list stays the three cross-cutting-by-definition ones — `admin_ro`/`claude_ro`, `bam`, `worker-erasure`. **A business app is never on it** |
+**BND-3** storage deliberately does **not** follow the boundary one-to-one, with a stop condition
+that should be a validator rule · **BND-4** the write side confirmed and the two missing rows added
+(read literally as a `GRANT`, the original matrix made **every mutation fail at runtime**) ·
+**BND-5** notification policy stays in `order`, **refined into three parts** — the recipient contract
+is restaurant-boundary data and was absent entirely · **BND-8** the `CONNECT` classification adopted
+with three mechanical brakes · **BND-9** the premise fixed as a correctness matter.
 
-**Explicitly NOT rows, recorded so they are not re-opened.** **ISO-1 and ISO-2 answers are
-unchanged** — both are `crates/**` layering questions whose answer is identical at 4, 5 or 8 units;
-"per scope" simply reads "per boundary". **ISO-3 is unchanged in content but NO LONGER ORTHOGONAL,
-and its priority rises** — see D14 below: under a single shared log, **write-exclusivity per stream
-category IS the write-side boundary**, and `EventStore::append` taking a bare `stream_name: &str`
-(`crates/application/src/ports.rs:54-60`) means any holder of `Arc<dyn EventStore>` may append to any
-boundary's streams. It is now the mechanism that makes the boundary real on the write side, not a
-side quest.
+**BND-6 and BND-7 are the ETA rows, both answered by the founder 2026-08-12**
+([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)):
+**(B)** what the customer sees pre-order is **prep time only, labelled "ready"**, and **(A)** the
+frozen ETA is an **estimate with no remedy**. The design behind them, worth keeping because it named
+a mechanism the architecture was missing: **the ETA is a READ-SIDE COMPOSITION owned by `order`,
+frozen onto `OrderPlaced` at checkout — not a projection and not a process manager.** Young's fold
+rule kills the projection answer outright, since the estimate depends on *now* and a replay cannot
+reproduce it. That makes a **read-time query contract** the THIRD sanctioned cross-boundary
+mechanism, beside the projection fold and the PM bridge. **D14** states a property nobody had written
+down: **ONE event log, boundaries write-isolated and read-shared on it** — two projection groups fold
+across boundaries on the global `position`, so a per-boundary log would break replay determinism.
 
-**Four calls CLOSED BY THE TEAM on the 2026-08-11 D13/D14 pass**, recorded here so they are not
-re-raised as product-owner questions:
-
-- **`CartBindingProcess` → `order`** (proposal **D9**). The one member whose home makes the two
-  partitions identical. Decided by Vernon's rule that coordination belongs with the aggregate whose
-  transaction it drives: the PM reads the `Cart` read model and sends `BindCartToCustomer` **to
-  `actors.yaml#/Cart`** (`specs/ordering/processmanager.yaml:128-138`) — **it never commands
-  `Customer`**. **This is the one row where the masters genuinely conflict**: Evans's context-mapping
-  instinct can honestly place a translating concept on the upstream (customer) side. Vernon wins
-  because his rule is the one this runtime *enforces* — the mailbox gives one writer per aggregate,
-  and a boundary owning a policy it cannot serialize owns nothing. **The losing side has a concrete
-  price**: a `customer`-boundary `pm-cart-binding` would need `SELECT` on the order boundary's `Cart`
-  table **and** `INSERT` into the order boundary's mailbox lane — the system's **first** app whose
-  `GRANT` spans two boundaries, which is exactly BND-3's integration-database stop condition, issued
-  on day one by choice. Artifact: a one-line `c4-l2.yaml:65` edit in B2.
-- **The ETA is a READ-SIDE COMPOSITION, not a projection and not a process manager** (proposal
-  **D13**). Young's fold rule decides it: current state is a left fold of the event stream, and the
-  pre-order estimate depends on **now** (queue depth, rider supply, an address typed thirty seconds
-  ago and in no stream), so a replay cannot reproduce it — folding it stores a number that is wrong
-  the moment it is written. A process manager is a category error: a PM's output is *commands*, and
-  the ETA changes nothing. It follows the **pricing pattern this repo already chose and proved** —
-  `price_cart` live on every read, the authoritative freeze once at checkout. **The durable output is
-  that D13 names the THIRD sanctioned cross-boundary mechanism the architecture was missing — a
-  read-time query contract** — alongside the projection fold and the PM bridge; without it a reader
-  facing a cross-boundary read has only "fold it" available and reaches the wrong answer. **It does
-  not argue for merging `delivery` into `order`.** The founder-owed remainders are BND-6 and
-  BND-7 above.
-- **ONE event log; boundaries are write-isolated and read-shared on it** (proposal **D14**).
-  `domain_events.position` is the global total order and **two** projection groups fold across
-  boundaries on it — `Order` (`Order-`/`Payment-`/`DeliveryJob-`, `worker.rs:447-450`) and
-  `ScopeMembership` (`:507-510`) — and **no boundary reshape removes them**. Two logs are two
-  independent sequences with no defined interleaving, so the fold stops being a deterministic
-  function of stored data and a rebuild produces a different answer than the live projection. **This
-  is the second place the masters conflict**: Vernon and Evans both push toward context autonomy
-  (a context owning its store), Young's fold requirement pushes back, and Young wins on a checkable
-  ground — the folds already exist and already require the total order. The Evans objection is
-  answered by *where* the isolation lives instead: **write-exclusivity per stream category**, which
-  gives a boundary the thing autonomy is for (nobody else writes my facts) without a private
-  sequence. Read-sharing is **not** an integration database — that pattern is defined by shared
-  *write*. **Consequence for the `GRANT` shape** (PROP-20260811-093000 §6.1.1 must state it):
-  narrow-write / **wide-read** on the log, so a reviewer does not read a cross-boundary `SELECT` on
-  `domain_events` as the BND-3 stop condition firing when it is the design.
-- **REP-4 (§33) neither forces nor forbids a per-boundary log** — the storage format is already
-  untyped (`event_type` TEXT + `payload` jsonb), so the type split is a Rust change over an unchanged
-  contract. What it must absorb: after the reshape, exactly **two** projection groups plus `bam` and
-  `pm-delivery-dispatch` need an explicit multi-boundary union — smaller than the "3 cross-boundary
-  groups" REP-4 assumed, and **permanent**.
-
-**One measured correction to this proposal's own §6 gains table, made on the same pass**: it claimed
-cross-boundary projection groups drop from *"3 of 9 to 1 of 9 (`ScopeMembership` only)"*. That
-overlooked the `Order` group's `DeliveryJob-` prefix, which still crosses into `delivery` under the
-recommended set. **The true figure is 2 of 9.** The gain is real but smaller, and the residue is
-permanent — which is precisely what makes D14's single-log property load-bearing rather than a
-migration convenience.
-**[#490](https://github.com/TheCaptainCompany/captain-food/issues/490) is unaffected and stays
-dispatchable today** — it measures declared-vs-honest closure per bin and its ledger is regenerated,
-not hand-written. **[#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A1 is
-unaffected**; A2 onward should follow BND-1, since an `app.yaml` names the boundary its pod serves.
-**The API tier follows and is NOT a row** — *does a bounded context own a GraphQL subgraph one-to-one?* is
-answered in the proposal's **§5.1**: not a law, but the freedom runs one way only (a subgraph may serve
-PART of a boundary and may never span two, because a spanning pod would need CONNECT to two read
-databases and STO-2's wall would be gone), and the recommended set is one subgraph per boundary plus the
-platform graph — **6 bins**. The composed schema is unchanged by any of it (one generated SDL; a subgraph
-is an execution filter, not a schema unit), the ACL is derived from `roles:` and never from the scope, and
-the seven role gateways are untouched (0 domain crates each; only the embedded table's third column
-changes). Two team-owned follow-ups, no arbitration: the folder merge **deletes** the
-`api-nested-cross-scope` ERROR for `ordering`|`payments`|`comms`, so its view-based restatement lands with
-B2/B3; and **§32 owes `graphql_platform` a SELECT on `command_journal`** in `captain-core` — without it
-every acceptance poll in the product returns null at peak while the writes succeed.
-
-**And one consequence worth carrying forward** (proposal D5): `RestaurantListingOptedOut` is the
-Art. 21 objection register and is retained **indefinitely**, so the `restaurant` boundary holds both
-an indefinite-retention accountability record and ordinary erasable data — **retention is a property
-of a stream category, never of a boundary**, and no per-boundary erasure worker may be designed on
-the assumption that a boundary erases uniformly.
+⚠️ **The ETA is still not computed anywhere.** CLAUDE.md's lens opens with *"The ETA is the
+product"*, and at the time of the audit nothing computed one, no pre-order estimate existed at all,
+and **two shipped surfaces already promised one** — an `eta_bar` labelled *"Estimated arrival"* bound
+to the kitchen ready time, and a `delivery_time_asc` sort option over a query with no sort argument.
+A wrong ETA outranks a missing one. Tracked outside this register as screen-spec defects.
 
 ---
 
 ## 32. Storage boundaries and least-privilege database users — PROP-20260811-093000
 
-[PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md)
-([#494 "Storage boundaries and least-privilege database users: the write-side transactional unit, the five-database split, and the last five View_*"](https://github.com/TheCaptainCompany/captain-food/issues/494)).
-The product owner's 2026-08-11 directive — five databases plus a per-app least-privilege user derived
-from the spec — evaluated as the strong default. **The access model is accepted and is correct**; six
-things it leaves open are below. **STO-1 is not really an option space** (the alternative is a
-cross-database 2PC on the money path) but it changes his stated list, so it is a row rather than a
-silent correction.
+Design record: [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md),
+[#494](https://github.com/TheCaptainCompany/captain-food/issues/494). §31 decides **which units
+exist**; this section decides **what shares a recovery posture and a database role**.
 
-**This section pairs with §31 (the domain boundaries, [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md),
-[#493](https://github.com/TheCaptainCompany/captain-food/issues/493)), and the two do not overlap**: §31 decides **which units exist**, this decides **what shares a
-recovery posture and a buffer pool**. Nothing here changes if the boundary set turns out to be 4, 5 or
-8. Two rows are held in common and are recorded in one place each rather than twice: **BND-3** (does
-storage follow the boundary one-to-one — **no**, plus the stop condition *"if any app's `GRANT` spans
-two boundaries' schemas outside the declared exceptions, the shared database has silently become an
-integration database"*) stays in §31 and is worked through in **proposal §4.2**; **BND-4**'s
-permission-matrix corrections — the unconfirmed fourth bullet, and the **mailbox omission that makes
-every mutation fail** if the matrix is read literally as a `GRANT` — stay in §31 and become actual
-grants in **proposal §6.1.1**.
+**Five databases plus a per-app least-privilege user, priced and accepted as the strong default** —
+with the one thing the directive had to change stated plainly: **`DomainEventLogDb` cannot hold the
+log alone**, because `crates/actor_runtime/src/completion.rs` commits the appends, the PM state, the
+`inbound_messages` flip and the fenced `mailbox_partitions` advance in ONE transaction. Separating
+log from mailbox does not weaken atomicity — it **deletes the fencing token**.
 
-Two findings sit outside the register because they are defects, not decisions, and are dispatched on
-[#494](https://github.com/TheCaptainCompany/captain-food/issues/494): the deletion engine's scan bound
-**fails OPEN** the moment a database holds zero `projection_checkpoint` rows (which the split creates —
-proposal §5.3), and the 5 remaining `View_*` declare 8 secondary indexes that are **emitted nowhere**,
-so the rider job board is an unindexed full-slice fold of the log today, split or no split (§2.1).
+Two defects fell out that are neither about the split nor decisions: the erasure engine **fails
+OPEN** in any database holding zero `projection_checkpoint` rows (exactly the database the split
+creates), and the five remaining `View_*` declared **8 secondary indexes emitted nowhere**, so the
+rider job board folded the whole log on every poll.
+
+✅ **Closed rows.** **STO-1** (a), with a rename so the contents are not surprising — the hardest
+constraint in the proposal · **STO-2** (a) for `ScopeMembership` and the `ref_*` tables —
+*"composition happens in the projector, not the query"*, applied to authorization; **closed
+2026-08-14, the remainder being a 17-table placement map now held in the proposal** · **STO-3** (a)
+now, (c) when tracking ships, on a concrete written trigger · **STO-4** (a), with its **sequencing
+WITHDRAWN and re-targeted** by the DBA lens rather than silently edited — the pooler is a
+precondition of the bin-fleet flip, not of the split · **STO-5** (a), with RLS **gated and
+benchmarked** (≥ 200 appends/s with and without) before its default flips · **STO-6** (a), with the
+caveat said out loud that CNPG's `barmanObjectStore` backup is **physical**, so a single database
+cannot be restored from it in isolation · **JRN-1** resolved as (b), its founder-owed leg answered
+2026-08-12 — take the flip inside the empty-log window with the L4 smoke as the release gate, so
+`command_journal` is DROPPED and the gate deleted rather than defaulted ON · **ADP-1** fully decided
+2026-08-12, leg 1 (a) and leg 2 (b), on the one-app test every row of the set passes.
+
+⚠️ **Four rows are still open**, and three of them **must be decided before or with the physical
+split**. **STO-9 came back into scope on 2026-08-18** with the RLS-SEQ ruling (§46).
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
-| **STO-1** | **`DomainEventLogDb` must be widened.** The directive names it `<== domain_events`, i.e. the log alone. But `crates/actor_runtime/src/completion.rs:71-100` commits — in ONE transaction — the handler's appends to `domain_events`, PM state, scheduled reminders, the `inbound_messages` terminal flip (guard 1) **and** the fenced `mailbox_partitions` checkpoint advance (guard 2). Separating the log from the mailbox does not weaken atomicity; it **deletes the fencing token**: a paused actor pod waking at 20:40 with a stolen lease would have its appends commit, because the guard that rolls them back lives in another database | **(a) Widen it to `captain-write`** — log + `domain_stream` + `inbound_messages` + `mailbox_partitions` + `command_journal` + the 4 `*_process_manager` tables + `slug_reservations`. The transaction is unchanged; nothing is lost. **(b) Keep the log alone and use two-phase commit** — a `PREPARE TRANSACTION` holding locks on `domain_events` across a network stall during Friday checkout is an outage, and an orphaned prepared xact blocks vacuum on the one table that must never bloat. **(c) Keep the log alone and drop the fence** — re-imports the duplicate-write anomaly the mailbox exists to prevent | ✅ **Recommended: (a)**, and the name should change so the contents are not surprising. This is the hardest constraint in the proposal. Note the compensation: the transaction the product owner *asked* about — projector fold + checkpoint — **survives the split untouched** (proposal §5.2), because a checkpoint co-located with its read models plus an idempotent fold is at-least-once + idempotence, not 2PC. **Two amendments since this was written**: option (a)'s table list no longer contains `command_journal` — [#500](https://github.com/TheCaptainCompany/captain-food/issues/500) dropped it, so `captain-write` is one table smaller than the option describes; and splitting into eleven databases needs **eleven migration chains and a `REQUIRED_SCHEMA_VERSION` map** where there is one chain and one scalar constant today (`crates/server/src/lib.rs:170`) — [#514](https://github.com/TheCaptainCompany/captain-food/issues/514) |
-| **STO-2** ✅ **CLOSED 2026-08-14 — the remainder was 17 tables, not ~65, and every placement is a mechanical consequence of a decision this register already records; full map in "STO-2 closure" below this table** | **Where do the ~65 unassigned objects go?** The five-database list is stated in domain nouns and assigns **one** of ~65 tables by name. Genuinely open: `Cart`, `OrderConversation` (comms scope, order-keyed), `CustomerCreditBalance`, `SlugAlias`/`slug_reservations` (which must NOT be co-located — the reservation is write-side), the SIRENE mirror (655 MB once, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231)), the Stripe/HubRise staging tables, and the ~30 `ref_*` enum tables | The shape is decided by **`ScopeMembership`**, read on every authenticated query in every scope. **(a) Projected into EVERY read database** by each scope's projector — each subgraph stays self-sufficient, one database one grant; it is derived data, so N copies are re-derivable and cost nothing conceptually. **(b) One shared database every subgraph also connects to** — every `graphql_{scope}` role gains CONNECT to a second database and the wall the split is being bought for is gone. **(c) Baked into the JWT** — membership changes would not take effect until token refresh, i.e. an authorization stale-window, which is the wrong thing to make eventually-consistent | ✅ **Recommended: (a)** for `ScopeMembership` and the `ref_*` tables — "composition happens in the projector, not the query", applied to authorization. Full placement recommendation in proposal §11; the rest of the map is a working recommendation, not a decision, and needs a yes. **The staging + connection-table leg is ANSWERED 2026-08-12 by directive — see ADP-1 below**: per-adapter isolated databases, not `DomainCommonDb`. ✅ **CLOSED 2026-08-14 by [#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562) (PR [#563](https://github.com/TheCaptainCompany/captain-food/pull/563))**: the rest of the map is DECIDED and DECLARED in the spec — the 17-table map with per-table port evidence, the erasure-reach classes, the recorded tripwires and the Consulted block are in **"STO-2 closure"** directly below this table; the validator's refusal arm flips to a requirement in the same change (the declarations and the flip cannot be split: the old validator refuses the declarations, the new one refuses their absence) |
-| **STO-3** | **One cluster or two?** `deploy/platform/cnpg/cluster.yaml` is `instances: 1`, 1 Gi, on a node with ~0.8 Gi spare. Behaviour tracking's growth arithmetic: 3,000 sessions/day × 40 interactions × 400 B ≈ **17.5 GB/yr, ~13× the business log's ~1.3 GB/yr**, on a 20 Gi volume | **(a) One cluster, five databases** — one WAL timeline, one PITR, one drill; a restore to time T brings all five to the SAME point. **(b) Five clusters** — not affordable (5 × 512 Mi the node does not have) and five timelines whose cross-restore is not mutually consistent. **(c) Two clusters: business (4 databases) + tracking (1), when tracking ships** — CNPG base backups are PHYSICAL, so a database **cannot** be excluded from one; putting the 17 GB/yr database in its own cluster is the only way the "backup the log, replay the views" posture is real rather than aspirational | ✅ **Recommended: (a) now, (c) when tracking ships.** The trigger is concrete and can be written down: when the tracking database exceeds the business databases combined (≈ month 3 on the arithmetic above) |
-| **STO-4** ⚠️ **SEQUENCING WITHDRAWN 2026-08-12 by the DBA lens — substance unchanged, target moved** | **The pooler is a prerequisite, not a follow-up.** Post-cutover budget in the manifest's own comment is ~37 bins × 5 = 185 of `max_connections: 220`. The split doubles projector pools (they read `captain-write` and write their read DB): 8 × 2 × 5 = 80 instead of 40 → **~235 against a 220 ceiling**, before anything else grows | **(a) Session-mode PgBouncer** — the only option that survives the next growth step. **Session mode, not transaction mode**: transaction mode registers `LISTEN` and silently delivers nothing, which breaks the push-driven mailbox and `event_wake` (`specs/common/configuration.yaml:513` records this exact trap). Cost: one more component. **(b) Raise `max_connections` to 300** — 300 backends on a **1 Gi** instance with 256 MB `shared_buffers`; this is how the pod OOMs at 20:30. **(c) Cut subgraph pools to 4** — buys ~29 connections and lowers headroom for exactly the burst it must absorb | ✅ **Recommended: (a)** — **and its SEQUENCING IS WITHDRAWN and RE-TARGETED, recorded as a correction rather than a silent edit** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) §5.1; **CUT-1 = B**, §35). The option is unchanged; *"sequenced before the split"* is wrong. **The arithmetic in this row's own Decision column belongs to the 57-pod RUNTIME SPLIT, which CUT-1 = B leaves OUT of the cutover** — `~37 bins × 5` is a post-cutover bin-fleet figure, not a property of the storage split. **With the deployed MONOLITH, eleven databases × ONE pod is ~55 backends of 220** (`DATABASE_POOL_MAX_CONNECTIONS` default **5**, `specs/common/configuration.yaml:121-123`) — comfortable, so the split does not need the pooler and the pooler does not gate the split. **Re-targeted: the pooler is a BLOCKING PRECONDITION of the bin-fleet flip** ([#358](https://github.com/TheCaptainCompany/captain-food/issues/358)), which is where 37+ pods reconnecting after a `Recreate` deploy actually becomes a connection storm. **One recommendation added while re-reading it**: **cap the monolith's per-database pool**, so eleven pools in one process cannot quietly become the next ceiling problem before the fleet ever exists. Session mode, not transaction mode, is unchanged and non-negotiable — transaction mode accepts `LISTEN` and delivers nothing |
-| **STO-5** | **Row-level append boundary: RLS, or the type-level capability witness, or both?** `crates/application/src/ports.rs:54-60` — `EventStore::append` takes no capability witness, so any holder of `&dyn EventStore` may append any event to any stream. A per-actor DB role with an RLS `WITH CHECK (stream_name LIKE 'Order-%')` would enforce this at the storage layer. (The brief cited *"ISO-3, DECISIONS §29"* and it resolves — **§29 ISO-3**, filed from the same audit-table hole; an earlier reading called it dangling from a stale tree. §31 confirms ISO-3 is unchanged and orthogonal to the boundary set) | **(a) Both, witness first** — the witness catches at `cargo build`; the DB role catches at runtime, in production, as `permission denied` inside a handler at 20:40 Friday. ADR-20260803-234035 ranks the type-level answer above the gate, and here it is also the *cheaper* one (a `pub(crate)` constructor in the per-actor handler crates §14/D2 already creates). They catch different classes: the witness stops *our* code; the role stops a migration script, an ad-hoc `psql`, a future bin, an agent-written one-off. **(b) RLS only** — turns a compile error into a Friday-evening runtime error; strictly worse where they overlap. **(c) `SECURITY DEFINER` append function instead of RLS** — forks the multi-event transaction, `pg_notify` and version-conflict semantics into PL/pgSQL, which then has to stay in step with `PgEventStore::append` forever | ✅ **Recommended: (a)**, with RLS **gated and benchmarked** (≥ 200 appends/s with and without) before its default flips — gate-then-stabilize, because this is a row policy on the hottest table in the system. **Explicitly: this proposal must NOT be read as closing the capability-witness item** — and the same audit found the ADP-1 grant wall has neither an emitter nor a **negative-path** test (nothing proves a pod is REFUSED a database it must not reach), filed as [#513](https://github.com/TheCaptainCompany/captain-food/issues/513); a witness or a role with only positive tests is a claim, not an enforcement |
-| **STO-6** | **The read side's backup posture.** The whole design case is that the log is irreplaceable (PITR, rehearsed restores) and read models are rebuildable (recovery = replay). That is a *decision*, and it is currently untested: `deploy/platform/restore-drill/` proves `app` restores, and nothing anywhere proves a read database can be **rebuilt by replay** | **(a) Exclude read databases from logical backup; recovery is replay; the drill grows a second leg** — restore `captain-write` → run projectors from checkpoint 0 → assert known row counts per read database. It is also the cheapest possible test of the claim the entire derived-data design rests on: that every fold is deterministic. **(b) Back up read databases too** — spends recovery budget on state that regenerates, and still does not prove replay works. **(c) Neither: assume replay works** — a backup that has never been restored is a hope; a replay that has never been run is a rumour | ✅ **Recommended: (a).** Caveat that must be said out loud (proposal §8.2): CNPG's `barmanObjectStore` backup is **physical**, so a database cannot be excluded from the base backup regardless — the logical posture is honoured by retention and drill design, and fully only once STO-3 (c) lands. **And the drill's coverage is now measured, not assumed**: it verifies **1 of the 11** databases the split creates, so ten restores are unproven the day the split lands — [#509](https://github.com/TheCaptainCompany/captain-food/issues/509) |
 | **STO-7** ⚠️ **OPEN — must be decided BEFORE OR WITH the physical split of `read_order`/`read_catalog`** (raised 2026-08-14 by the STO-2 closure's mob checkpoint; **WIDENED the same day by the post-ready independent review**, which found the CHECKOUT WRITE PATH crossing the same wall — a path option (a) does not reach) | **Who is the catalog's pricing-and-orderability AUTHORITY once the walls are physical?** TWO paths cross this wall, and a decision answering one while leaving the other fail-closed is not a decision. **(i) The cart READ path** (`read_order` → `read_catalog`): `Cart` is a deliberately MONEY-FREE fold (ADR-20260810-112836) — names and prices resolve AT QUERY TIME via `price_cart` against the LIVE `Catalog` projection, which the STO-2 closure places in `read_catalog` while `Cart` sits in `read_order`. Post-split as mapped, the order boundary's read path holds no CONNECT on `read_catalog`, so the cart screen cannot resolve names or prices at all — the [#424 "post-hoc UX pass found the built checkout state could not render"](https://github.com/TheCaptainCompany/captain-food/issues/424) defect class, on the CHECKOUT path, at Friday peak. **(ii) The checkout WRITE path** (`captain_write` → `read_catalog`): the mailbox worker's GENERATED composition root declares `CommandDeps.catalogs: CatalogReadRepository` (`crates/infrastructure/src/generated/command_router.rs`), backing `require_orderable_line` (`commands.rs:796,1006` — the availability+stock **OVERSELL GUARD** on every add-to-cart, fail-closed `OfferNotFound`/`OfferUnavailable`/`InsufficientStock`), `pricing::price_cart` from `place_order` (`commands.rs:2458` → `pricing.rs:56` — the `ServerPriceAuthority` repricing on every checkout, fail-closed `PriceUnresolvable`) and `configure_catalog_slug`'s `slug_taken` (`:2799`). Post-split as mapped, **every add-to-cart and every checkout dies the moment the wall becomes physical, and the oversell guard never runs** — losing both sides of the marketplace at once. (i) was found at the mob checkpoint and (ii) only after ready, neither by the closure's own hand-enumeration of readers (which also missed `Restaurant.cuisine_category` twice) — the empirical case for the declared-reads⇒CONNECT follow-up | **(a) Fold-local price snapshot** — the Cart projector folds names/prices into its own database. No cross-wall read, replay-correct; but it REVERSES the recorded money-free-cart decision — stale prices are exactly what ADR-20260810-112836 removed, and the fold would re-couple to catalog events. **AND, post-widening, it is INCOMPLETE ON ITS OWN**: it repairs the cart SCREEN in `read_order` and does nothing for `captain_write`, so taking (a) alone would unblock the physical split while add-to-cart and checkout still fail closed — precisely the trap this widening exists to prevent. **(b) A catalog-boundary pricing/orderability PORT** — D13's third sanctioned cross-boundary mechanism (a read-time query contract): the asking side (the order read path AND the mailbox worker) asks the catalog boundary to price and validate the lines. No copy, no staleness, `Cart` stays money-free, and it is the only option that answers both paths with ONE authority — the shared authority (b) previously only gestured at, now explicit. Cost: a synchronous cross-boundary hop on the cart read at peak (the cost BND-9 declined for a PM — a cart READ is not inside the checkout saga, but `place_order`'s repricing IS, so the write leg pays exactly the cost BND-9 refused, and that trade must be made with eyes open). **(c) Replicate `Catalog` into every read database** — mechanically available (the STO-2(a) grammar); destroys the isolation the split buys (catalog-import bursts land in `read_order`'s buffer pool, the exact head-of-line coupling `OrderTracking`'s placement exists to prevent) and **does not reach `captain_write` at all**, since replication targets `recovery: replay` databases only. **(d) A recorded cross-wall CONNECT grant for the write app** — zero design work, honest about today's code; and it hands the write role CONNECT on a read database on the hottest path, i.e. removes the wall the split is bought for (BND-9: *"two exceptions on the two hottest paths is not an exception list, it is the design"*) | ⚠️ **OPEN, deliberately NOT resolved by the STO-2 closure** — a placement slice must not silently decide a pricing-architecture question. The ux lens LEANS **(b)** ((a) reverses a recorded decision and is now known incomplete, (c) re-imports the coupling and misses the write path, (d) removes the wall) — recorded as a lean, not a decision. **The widening adds one binding constraint before any option is chosen: whatever is decided must cover BOTH the cart read path and the checkout write path, and a decision recorded for only one of them does not unblock the split.** Until decided: OPEN comments on `Cart`'s AND `Catalog`'s declarations (`projection_tables.yaml`) plus `read_catalog`'s (`databases.yaml`), and the physical split of `read_order`/`read_catalog` is BLOCKED on this row |
 | **STO-8** ⚠️ **OPEN — must be decided BEFORE OR WITH the physical split of `read_common`** (raised 2026-08-14 by the post-ready independent review of the STO-2 closure) | **May a `captain_write` app read `read_common`, or does each write-side invariant get a source inside its own wall?** Same DIRECTION as STO-7(ii) (`captain_write` → a read database), different target and a genuinely different option space — which is why this is its own row rather than a leg of STO-7. Nine handlers use three read ports into `read_common` (`CommandDeps.customers` / `.restaurants` / `.prospection`). **Head of the row, and why it is not "lower stakes": `verify_phone` `by_phone` (`commands.rs:3257`) resolves NEW-vs-RETURNING on the LOGIN PATH** from the `Customer` projection. Post-split as mapped it fails — or, if that read were ever degraded to a "not found" fallback, it SILENTLY RE-REGISTERS a returning customer as new: a second `Customer` stream, an orphaned order history, and a customer who signs in to an empty account. Riding the same wall: `request_email_verification` / `request_phone_change` / `confirm_phone_change` (`:3363`, `:3414`, `:3453` — the `EmailAlreadyInUse`/`PhoneAlreadyInUse` identity-collision guards); `Restaurant` reads by `create_catalog` / `add_product` / `update_product` / `mark_restaurant_as_favorite` (`:2763`, `:2737`, `:3491` — `RestaurantNotFound` and the ADR-0016 `CurrencyMismatch` guard); and `ProspectionPipeline.last_contacted_at` by `record_prospect_contact` (`:2626` — the ≥ 7-day B2B anti-spam interval, whose ONLY possible source is the projection, because the contact TIME is envelope metadata invisible to the fold). **What forecloses the cheap answer: `Customer` cannot simply move to `captain_write`** — it is a genuine read model with subgraph readers (`specs/customer/api.yaml:15`, the `me` query), so moving it would park a replay-rebuildable projection on the `pitr` write database AND hand the customer subgraph CONNECT on `captain_write` | **(a) A fold-local write-side index per invariant** — the write side maintains its OWN minimal lookup inside `captain_write`, folded from the same events (`phone`/`email` → `customerId` from `CustomerRegistered`/`CustomerPhoneChanged`/`CustomerEmailVerified`; `restaurantId` → `{exists, default_currency}` from `RestaurantRegistered`/`RestaurantUpdated`; `restaurantId` → `last_contacted_at` from `ProspectContacted`). No cross-wall CONNECT, replay-correct, and the SAME shape this closure already chose for `Restaurant.cuisine_category` — *composition happens in the projector*, STO-2(a) applied to the write side. For the identity guards it is strictly stronger than what exists today: a uniqueness invariant read from an EVENTUALLY-CONSISTENT projection is already a race (two concurrent `VerifyPhone`s on one phone can both read "not found"), whereas a `captain_write`-local index can carry a UNIQUE constraint in the same transaction as the append — compiler-first applied to storage, an invariant made unspellable rather than checked. Cost: several folds plus a migration — the final-vision answer, not the cheap one. **(b) A recorded cross-wall CONNECT grant** — `captain_write` apps hold `CONNECT`+`SELECT` on `read_common`, emitted from a declaration folder with a named owner and a removal condition ([#491](https://github.com/TheCaptainCompany/captain-food/issues/491)/REP-5(a)'s exception mechanism). Zero design work; but the grant sits on the LOGIN path and the wall stops being a wall for the app class it most needs to exclude. **(c) A customer-boundary identity PORT** — STO-7(b)'s shape applied here; consistent if (b)-of-STO-7 is chosen, but it puts a synchronous cross-boundary hop on sign-in and does not fix the uniqueness race, it relocates it | ⚠️ **OPEN, deliberately NOT resolved by the STO-2 closure** — same discipline as STO-7: a placement slice must not silently decide an identity-architecture question. **Lean, recorded as a lean and not a decision: (a)**, on two grounds — it is the class this register already chose for the identical cross-wall shape (`Restaurant.cuisine_category`), and for the identity guards it is strictly BETTER than today rather than merely wall-compatible, because a `captain_write`-local unique index closes a duplicate-identity race the current projection read cannot. **The `ProspectionPipeline` leg may be settled separately and cheaply** (B2B outreach; no money, no customer-visible failure) but is recorded here rather than in a row of its own because it is the SAME wall with the SAME option set — a third row would fragment one decision. Until decided: OPEN comments on the `Customer`, `Restaurant` and `ProspectionPipeline` declarations (`projection_tables.yaml`) and on `read_common` (`databases.yaml`), and the physical split of `read_common` is BLOCKED on this row |
 | **STO-9** ⚠️ **OPEN — must be decided BEFORE OR WITH the physical split of `read_order`, INDEPENDENTLY of STO-7** (raised 2026-08-14 by ROUND 2 of the post-ready independent review of the STO-2 closure) | **May a `captain_write` app read `read_order` — and what settles a Stripe capture when it cannot?** The THIRD wall direction (`captain_write` → `read_order`), and the one that touches money directly. Four write-side process managers read the order boundary's read models while running on the mailbox worker, through `OrderReadRepository` (`SELECT ... FROM ordertracking`, `crates/infrastructure/src/persistence/order.rs:28`) and `CartReadRepository`. **Head of the row: `SettlementHooks` reads `OrderTracking` for `payment_intent_id` on ALL FOUR legs, immediately BEFORE every Stripe capture and every release** (`crates/application/src/process_managers/payment_settlement.rs:53-99`; its own doc comment already says *"the intent of the row `read_order` admitted"*, so the code knew it crossed the wall before the map did). Post-split as mapped that read ERRORS rather than skipping — the `HookOutcome::Skip` arm covers a genuinely absent row, not an unreachable table — so the settlement lane stalls in mailbox retry: **capture-at-DELIVERED never runs and the authorization ages out (food delivered, money never collected — the worst-failure class CLAUDE.md names), and release-on-reject never runs, so a rejected customer's hold stays held**. Riding the same wall at lower stakes: `DispatchOpenHooks.orders` (`delivery_dispatch.rs:83`, the `OrderMarkedReady` birth leg), `on_reclamation_resolved`'s `orders` (`reclamation.rs:91`), and `CartBindingHooks.carts::open_by_session` (`cart_binding.rs:17-37`) — whose failure loses a guest's cart at the moment he signs in to pay. **Why its own row and not a leg of STO-8**: same DIRECTION, different target database and a different option set — the settlement datum is a payment fact the write side itself authored, which is exactly what makes the cheap answer here different from `read_common`'s identity guards | **(a) Fold the datum into `captain_write`** — a write-side `order → payment_intent_id` (+ status) index folded from the payment events the write side already appends; no cross-wall CONNECT, replay-correct, and the same class the register chose for `Restaurant.cuisine_category` and leans to in STO-8. Strongest version of the argument: settlement reads a PAYMENT fact out of an ORDER read model built for customer tracking — the read model was never the right source, so this is a correction rather than a workaround. Cost: one fold + a migration, per PM datum (dispatch and reclamation need their own, and the cart-binding leg needs a session→open-carts index, so it is four folds, not one). **(b) A recorded cross-wall CONNECT grant** for the mailbox worker on `read_order` — zero design work, honest about today's code, and it puts the write role on a read database for the settlement path, i.e. removes the wall on the money lane (BND-9's objection, in its sharpest form). **(c) An order-boundary read PORT** (STO-7(b)'s shape applied here) — consistent if STO-7 goes that way; but it puts a synchronous cross-boundary hop INSIDE the settlement saga, between the delivery fact and the capture, adding a failure mode to the money path to remove a grant. **(d) Carry the datum on the trigger events** (`OrderDelivered` & co. gain `paymentIntentId`) — no read at all, the PM becomes pure; but these events are **already emitted and stored**, so it is an event-shape MIGRATION with an upcasting story (CLAUDE.md question 2), not a spec edit, and it widens payment identifiers across every consumer of an order event. **(e) ASK THE ACTOR — added 2026-08-15 by the founder's write-side-PM directive ([ADR-20260815-030206](../adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md), §42 below), and this row never enumerated it.** The PM folds the aggregate streams in-process through the `EventStore` port it already holds: **zero new tables** — `domain_events` is already inside `captain_write`, `OrderPlaced` already carries `paymentIntentId`, and `domain::payment::fold` already exists and returns a TYPED `PaymentStatus` where the projection hands back a `String`. Cheapest closure sequence (dba): fold `payment_intent_id` onto `OrderState` from the `OrderPlaced` the Order aggregate already owns — no event migration, one fold field — then the leg is *ask Order → intent, ask Payment → status*, two by-key folds on terminating streams. Under **final-vision-first** ([ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)) it **displaces the recorded lean (a)**, because (a) builds a **new write-side index folded from the log for query** — that is a projection wearing a write-side badge, and it would be the second authority on payment state alongside `domain::payment::fold` (the exact defect this row's own CRITICAL-1 history is made of). Cost: 2 folds where there was 1 read on the money path, and the residency cache does not serve cross-aggregate loads today (§42 PMW-2) | ⚠️ **OPEN, deliberately NOT resolved by the STO-2 closure** — the placement of `OrderTracking`/`Cart` is unchanged and correct; what is open is which mechanism feeds the write side once the wall is physical. **Lean, recorded as a lean and not a decision: (a)** — ⚠️ **the lean is DISPLACED by (e) as of 2026-08-15, on the founder's write-side-PM directive**; the original reasoning stands and now argues for (e) rather than for (a), on the register's own precedent (fold-local is the class already chosen for the identical shape) and on the observation that a settlement PM reading a customer-facing tracking projection is a source-of-truth mismatch independent of any wall — (e) is the same argument taken one step further, to the stream instead of to a second index over it. **Closing this row is the ONE grant this rule buys**: all of `read_order`'s `captain_write` readers are PM legs, so `captain_write` drops CONNECT on `read_order` entirely — while STO-7 and STO-8 are untouched, because their readers are aggregate command handlers, not process managers (§42). **BINDING CONSTRAINT, the reason this row exists separately: deciding STO-7 and STO-8 — even both, even well — does NOT unblock the physical split of `read_order` while this row is open**, because settlement's pre-capture read still fail-closes. Until decided: OPEN comments on the `OrderTracking` and `Cart` declarations (`projection_tables.yaml`) and on `read_order` (`databases.yaml`) |
 | **STO-10** ⏸️ **PARKED 2026-08-17 BY FOUNDER ANSWER — until the walk lands** (§45 **STO-10-PARK**; the walk now runs on ONE database per §45 **SEQ-1**, so the split band this row belongs to is not on the path to the first reading). It stays **OPEN and BLOCKED, and is reported blocked** — never re-ranked to look dispatchable — and the standing prohibition below is unaffected: **#513 must not emit the CONNECT that would decide option (c) by default.** ⚠️ **OPEN — and it is NOT an open question of STO-7/STO-8's kind: it CONTRADICTS A CLOSED ROW.** The HubRise adapter already reads `read_common` in shipped code, which **reopens ADP-1** (decided 2026-08-12 BY DIRECTIVE, this table above). Under CLAUDE.md's question (1) — *does it contradict a recorded decision?* — that makes it AMBER: founder-owned, not a team call, and it is filed as its own row rather than absorbed into STO-7 or STO-8 precisely so the reopening is visible | **The HubRise adapter bin reads `read_common` today, and ADP-1 says it holds exactly ONE outward grant.** ADP-1 ([ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)): each adapter owns a completely isolated database, and its one outward grant is INSERT into `inbound_messages`. A CONNECT+SELECT on `read_common` is a SECOND outward grant. The code: `crates/adapters/hubrise/src/main.rs:54` constructs its own `PgRestaurantRepository`, and `connect.rs:314-325`'s `await_restaurant_projection` polls `restaurants.by_id` **40× at 250 ms** before `create_catalog`, because that command's `RestaurantNotFound` guard reads the projection. This is also a FIFTH reader class — not a resolver, not `CommandDeps`, not a PM hook port, not gateway middleware, but a repository **the bin constructs for itself** — which is why no formula caught it. Post-split as mapped, HubRise onboarding stalls **silently, as a ten-second timeout on a poll that can never resolve**. **Adjacent violation, recorded with it**: that poll also breaches [ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) — the projector KNOWS it folded `RestaurantRegistered` before the clock does, so this is state-change PROPAGATION and must be pushed; as written it is a poll with no declared degraded mode, no observability contract and no detected path back, i.e. none of the three conditions that make a fallback legitimate. **Recorded alongside, for [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) rather than for this row**: with `RUN_MAILBOX_WORKERS` on, the same bin spawns standalone mailbox workers for `RestaurantAccount`/`Restaurant`/`Catalog` (`main.rs:43-52`), so the adapter pod ALSO hosts the `CommandDeps` reads of STO-7(ii)/STO-8 — the app↔database CONNECT model cannot assume one app class per bin | **(a) Delete the wait; let the durable path do the retrying** — `create_catalog`'s own `RestaurantNotFound` guard is the real gate, and the adapter enqueues on `inbound_messages`, so the mailbox ALREADY provides the retry this loop hand-rolls in-process. Needs no new grant and no new channel; it is the only option that leaves ADP-1 standing exactly as decided, and it deletes a poll rather than dressing one up. **(b) Make the visibility a PUSH** — the adapter learns of projection visibility from a signal instead of polling (ADR-20260810-231300's primary transport); correct in principle, but it invents a channel from a read database's projector to an adapter, which is coupling ADP-1 removes. **(c) Grant the adapter CONNECT + SELECT on `read_common`** — zero design work, matches today's code; it is a **DECISION REVERSAL of a founder directive**, so it cannot be taken by the team and must never be quietly emitted by #513's grant emitter as a fait accompli | ⚠️ **OPEN / AMBER — founder-owned, because whichever way it goes, ADP-1 is the row being answered.** Team lean, recorded as a lean and not a decision: **(a)**, with (b) as the shape if a signal is wanted later — the retry the poll hand-rolls already exists durably, so (a) both honours ADP-1 and removes an undeclared poll, and it is the only option needing no new grant. **What must NOT happen in the meantime**: #513 emitting the CONNECT that makes (c) true by default — an isolation directive reversed by a grant emitter nobody read is exactly the failure this register exists to prevent. Until decided: OPEN comments on the `Restaurant` declaration (`projection_tables.yaml`) and on `read_common` (`databases.yaml`) |
-| **JRN-1** ✅ **CLOSED 2026-08-12 — its founder-owed leg ANSWERED (A) ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 1, §35), its team-owned half retired the table outright ([ADR-20260812-000000](../adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md))** — raised 2026-08-11 from the founder's own concern. **Kept, not deleted: this row is where both halves stay visible — the flip was TAKEN, then ANSWERED, in that order. See the Recommendation column.** | **"Make sure we don't do both" — resolved at the source.** Verbatim: *"Ok for the event log, but I'm concerned about the word « journal », we have replace journal with unified mailbox inbound messages make sure we don't do both."* **Verified correct when raised, and now ANSWERED**: `command_journal` is DROPPED (migration `20260812000000`, [#242 "Write path becomes an actor mailbox"](https://github.com/TheCaptainCompany/captain-food/issues/242) Runtime D) and `inbound_messages` is the only write-path journal. Deleted with it: the legacy arm of `placeOrder`/`approveRefund`/`denyRefund`, the unconditional `operationStatus` / `operationStatusChanged` journal reads, the cross-arm duplicate-identity read, the `worker-journal-sweep` bin, and `sweep_retention()`'s `command_journal` section. **The line ranges this row used to cite for those reads are gone with the code and are not reproduced.** **What SURVIVES the closure, unchanged**: §6.1's *query*-path row grants the write database **no `CONNECT` at all**, so the matrix as written breaks the acceptance poll on the **mailbox** read too — not merely on the journal fallback. Up to 30 polls at 1 s per action (`crates/web/src/actions.rs:30-40`), i.e. every checkout, acceptance and rider transition. That residue is now the whole of the open finding | ~~**(a) The matrix gains BOTH reads now** — `SELECT` on `inbound_messages`, `mailbox_partitions` **and `command_journal`**~~ — **OBSOLETE, DO NOT IMPLEMENT.** The table no longer exists; a permission script derived from the old ✅ would emit a `GRANT` on a dropped relation and fail. **(b) Retire `command_journal` first** — recorded here as the final-vision answer and judged *"not near"* because it rode a money-path flip gated on a staging smoke downstream of the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover. **This is what happened, sooner than this row predicted.** ~~**(c) Grant it permanently**~~ — moot | ✅ **RESOLVED AS (b).** The matrix requirement is now just **`CONNECT captain-write` + `SELECT` on `inbound_messages` and `mailbox_partitions`** for the platform graph — no third table, and no grant-removal line owed to a later flip. **THE FOUNDER-OWED LEG WAS TAKEN, AND THEN ANSWERED — in that order — and this row exists so both are visible rather than quietly dropped.** It reserved: *"flipping `PM_MAILBOX_DELIVERY` to true is a money-path posture change … it needs a staging smoke and a one-line ADR."* The one-line ADR exists ([ADR-20260812-000000](../adr/ADR-20260812-000000-the-pm-mailbox-flip-rides-the-journal-retirement.md)). **The staging smoke does not, and was not performed.** The flip was taken instead inside the **empty-log / production-down window**, on the standing direction *"Remove inbound events and command journal from the dsl, the only tables that must remain is inbound messages"* (2026-08-11) — and the gate was **DELETED rather than defaulted ON**, because with the table dropped its OFF position would restore the saga runner's Stripe-fact triggers while the Payment lane stopped B2-chaining: two deliverers racing, or none, both paid-order failures. **The founder ANSWERED it the same day — (A), take the flip inside the empty-log window, with the L4 smoke on the deployed cluster as the RELEASE GATE BEFORE TRAFFIC IS ROUTED** ([ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md) Decision 1; recorded in §35 as well, so the closure survives however this row is rewritten). **The gate MOVES rather than being waived**, which is also why this is the externally-forced clause of [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) and not a waiver of gate-then-stabilize: a staging smoke of the GATED form has nothing to smoke against on an empty log — no PM deliveries exist to observe — so L4 smokes the UNGATED form with a real Stripe test PaymentIntent instead, and the window closes the moment the first real order lands. **What is left is therefore a release precondition, not a backlog item**; while the log is still empty the reversal is still a `git revert` plus a down-migration, and it gets more expensive with every real order. Full analysis in [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md) **§6.1.2**. **Standing rule this earned, unchanged by the closure**: every table a resolver touches is derived from the resolver's ports, never from the architecture diagram — the same matrix omitted `inbound_messages` (BND-4(ii)) and `command_journal` (here) |
-| **ADP-1** ✅ **FULLY DECIDED 2026-08-12 — directive + both legs closed (leg 1 (a), leg 2 (b)); the first record of it was WRONG and is corrected** | **Each adapter owns its own, completely isolated database.** Verbatim: *"Each adapter must have there own database completely isolated."* ([ADR-20260812-115930](../adr/ADR-20260812-115930-each-adapter-owns-its-own-completely-isolated-database.md)). Supersedes §11's placement of *"integration staging"* in `DomainCommonDb` and answers STO-2's staging/connections leg. **The set is SIX adapter databases, and the first version of this row had the WRONG MEMBERSHIP at the right count**: it listed `adapter-identity` in and `adapter-avelo37` out, claiming avelo37 *"owns no table yet"*. **Verified false**: `specs/database/tables/integration_staging.yaml:178` declares `external_avelo37_events` and `specs/database/functions/sweep_retention.sql:60` already sweeps it (90 d from `processed_at`). Left uncorrected, **avelo37 would have been the ONE partner mirror still holding `CONNECT` on the write database while every sibling moved out** — verbatim partner payloads carrying courier names and phones, next to `domain_events`: exactly the hole the directive closes, surviving in the one adapter nobody re-checked. The set: `adapter-stripe` (`external_stripe_events`) · `adapter-hubrise` (`external_hubrise_callbacks` · `hubrise_connections` · `hubrise_connection_locations`) · `adapter-uber-direct` · `adapter-coopcycle` · **`adapter-avelo37`** · `adapter-sirene` (`external_sirene_restaurants`, 655 MB mirror, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231)). Total databases: **eleven** (5 business + 6 adapter) — the count did not move, the membership did, so anyone reading only the total concludes nothing changed. Databases in the shared business cluster, isolation = per-adapter role + `CONNECT` (BND-3's mechanism; STO-3 already priced per-thing clusters out) | **Leg 1 — the door: CLOSED as (a).** The adapter keeps exactly one outward grant, `INSERT` into `inbound_messages`. The strict outbox+relay reading (b) is **rejected for two reasons stronger than "one fewer component"**: **(i) it inverts the isolation** — an outbox inside the adapter database must be `SELECT`ed and `UPDATE`d by a PLATFORM relay, trading a one-way outward `INSERT` for a **bidirectional** grant held INSIDE every adapter database by the one class of component the wall exists to exclude (DBA lens); **(ii) `LISTEN`/`NOTIFY` is per-database in Postgres**, so a push-driven relay needs a live connection INTO each adapter database — an inward hole six times over — and the only alternative is a permanent poll with no detected path back, forbidden by [ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md) (observability lens). **Leg 2 — the set: CLOSED as (b)**, the five partner adapters plus sirene; **`auth_sessions` stays platform on `captain-write`**. The previous recommendation of (a) rested on *"`auth_sessions` carries the same credentials-at-rest posture as `hubrise_connections`"* — **that rationale is INVERTED and the option is unimplementable**: `auth_sessions.ciphertext` is **AES-256-GCM** under `AUTH_SESSION_KEY` (`crates/infrastructure/src/persistence/auth_sessions.rs:10,44,72`) while `hubrise_connections.access_token` is **plaintext `text`** (`integration_connections.yaml:46`), i.e. the encrypted table was to be moved for the posture of the plaintext one; **there is no `adapter-identity` crate or bin** (`crates/adapters/` = avelo37 · coopcycle · hubrise · stripe · uber_direct, and `crates/bins/adapter-*` matches one-for-one); and the table's real users are **not adapters** — the park is in the actor/mailbox path (`VerifyPhone` on `Customer`, `crates/application/src/commands.rs` ~3300), the claim is in the BFF route (`crates/server/src/auth_routes.rs:63-83`), and the retention sweep deletes unclaimed rows — so 2(a) would create a database named for a non-existent adapter whose `CONNECT` list is two-to-three non-adapter apps **on the login hot path**, the inverse of BND-3's own stop condition | ✅ **Leg 1 (a), leg 2 (b).** The one-app test is what every row of the set passes: `adapter-sirene` is in despite having no `crates/adapters/sirene` crate, because its sole reader/writer is `sync_sirene_worker` in the `worker-sirene-sync` CronJob — exactly one app connects, and it owns the mirror; `adapter-identity` is out because two-to-three would. **DISSENT recorded, not footnoted** (GraphQL lens): the final-vision answer is not "the table stays platform" but an **identity bin that genuinely owns it** — owning `auth_sessions` AND `/auth/session` + `/auth/refresh` + `/auth/logout`, which would also home the recorded [#385](https://github.com/TheCaptainCompany/captain-food/issues/385) precondition routes that have **no per-surface bin home today**. That is a larger slice (HTTP routes, cookies and a session-key grant into a new app on the sign-in path) and is **not taken now**, nor foreclosed. **And the finding that reframes what isolation is worth here**: `AUTH_SESSION_KEY` is granted to **53 of 56 pods** (`specs/generated/apps.generated.md` §5 — every group but the **three** periodic workers, which the `worker_key_allowed` narrowing at `tools/codegen-rs/src/emit/deploy.rs:187-189` cuts to the DB + telemetry floor) while exactly **two** components decrypt a session. **Corrected after [#500](https://github.com/TheCaptainCompany/captain-food/issues/500), and the correction makes it WORSE**: the first record said *"53 of 57, every group but the four periodic workers"*; retiring `command_journal` deleted `worker-journal-sweep`, one of the four EXCLUDED workers, so the denominator fell (57 -> 56) while the numerator did not — the share of pods carrying a key only two need went UP, from 53/57 to 53/56. A smaller denominator is not progress here. Isolating a table while broadcasting its decryption key to 53 pods buys much less than it looks; the cheap large win is narrowing the grant, tracked as [#491](https://github.com/TheCaptainCompany/captain-food/issues/491) slice A4 and now with an emitter + negative-path test of its own in [#513](https://github.com/TheCaptainCompany/captain-food/issues/513). **Sequencing** (the only thing still open): lands inside the #494 storage-split program (the grant emitter gains six one-line blocks); **STO-4's pooler-first sequencing hardens** — each adapter bin now holds two pools. **The one non-rederivable adapter state**: `hubrise_connections` is a NON-expiring token only a human re-connect can replace — the single adapter table that must be inside a backup story while staging mirrors take the refetch posture. **And it is stored in PLAINTEXT** (`integration_connections.yaml:46`, `access_token: { type: text }`, next to the comment that says the token never expires), so the backup story it needs is simultaneously a *leak* story — the plaintext token is copied into the physical WAL archives, tracked as [#508](https://github.com/TheCaptainCompany/captain-food/issues/508). The grant emitter that makes this row's isolation executable, plus the negative-path test it lacks, is [#513](https://github.com/TheCaptainCompany/captain-food/issues/513). **Retention forks per adapter database, including the `external_avelo37_events` leg the first record did not know existed.** **Consulted** (ADR-20260812-143619): architect, dba, observability, graphql-architect, holub, farley, beck, business-specialist, legal-specialist, ux-designer |
-
-### STO-2 closure — the 17-table placement map (2026-08-14)
-
-Closed by [#562 "Close STO-2's placement remainder: place the 17 unplaced tables and make placement a validator requirement"](https://github.com/TheCaptainCompany/captain-food/issues/562)
-(PR [#563](https://github.com/TheCaptainCompany/captain-food/pull/563)). **The row's arithmetic was
-stale from the day it was written**: the `ref_*` enum family it counted (~30 of the "~65 unassigned
-objects") had been deleted two weeks earlier by
-[ADR-20260728-170000](../adr/ADR-20260728-170000-enums-stored-as-text-drop-ref-tables.md) (enums
-stored as text), and ADP-1 answered the staging/connection leg — so the real remainder was **17
-tables**: 9 projection read models + 8 seeded referentials. **None of the 17 turned out to be a
-genuine option space**: every placement below is the mechanical consequence of a decision this
-register already records — **STO-1(a)** (the write unit's footprint), **STO-2(a)** (the replicated
-class = every `recovery: replay` database), **BND-1(a)/§31** (the boundary set: `Conversation →
-order`, `CustomerCredit → order` — comms and payments scopes serve inside the order boundary),
-**BND-3(a)** (storage groups by operational profile; the wall is the ROLE, so the reader's PORT
-decides the home — JRN-1's standing rule: *every table a resolver touches is derived from the
-resolver's ports, never from the architecture diagram*), and **ADP-1** (no adapter state remained
-in the 17). The declarations land as `database:` `$ref`s / `replicated:` keys in
-`specs/database/tables/{projection_tables,referential}.yaml`; the LIVE resolution is
-[`specs/generated/databases.generated.md`](../../specs/generated/databases.generated.md).
-
-**The port derivation had a HOLE, found by the post-ready independent review — AFTER the mob
-checkpoint — and corrected here rather than quietly.** The first version of this map derived each
-table's readers from `api.yaml` **resolvers** plus two hand-added special cases (the gateway
-tenant-host-router, the dispatch PM). That misses a whole class: **`captain_write` command handlers
-running on the mailbox worker consume READ-repository ports of the very read models this map
-places.** The evidence is not an enumeration anyone has to trust — it is GENERATED and sits in one
-struct: `CommandDeps` in `crates/infrastructure/src/generated/command_router.rs` is the write
-worker's composition root, and it declares `catalogs: CatalogReadRepository`,
-`customers: CustomerReadRepository`, `restaurants: RestaurantReadRepository` and
-`prospection: ProspectionReadRepository` alongside the event store. **Thirteen handlers across four
-placed tables read across a wall post-split**, two of them fail-closed on the checkout path and one
-on the login path (enumerated at each declaration and in the two open rows below). The placements
-themselves are UNCHANGED — every one still follows from a recorded decision — but *"sole reader"*
-was written four times and was wrong four times, so those words are now corrected at source.
-**Then the same class recurred once more, in a COUNTING claim rather than a reader claim**: after
-three rounds spent retiring *"sole reader"*, the post-ready review found the pricing trio's
-justification asserting *"declared readers span THREE read databases"* when they span **two**
-(`read_order` + `read_catalog`) — four reader SITES had slid into three DATABASES, in the one
-sentence that earns the STO-2(a) class extension. Corrected at all five sites; the conclusion is
-unchanged, because ≥ 2 is what the argument needs.
-
-**THE METHOD FINDING — the headline of this closure, and it outranks the map.** The strongest
-sentence first, because it changes what the failure WAS: **these crossings were already DECLARED, in
-typed DSL, in the very file this closure was editing.** Thirteen `read:` steps across
-`specs/*/processmanager.yaml` carry `model: { $ref: 'database/tables/projection_tables.yaml#/X' }` —
-eight on `OrderTracking` (the settlement legs, `specs/payments/processmanager.yaml:52,68,83,97,127,154,181,210`),
-two in `specs/delivery/processmanager.yaml:35,43`, three in `specs/ordering/processmanager.yaml:31,41,136`
-(`:136` is the cart-binding read) — each a `$ref` into the same table the closure was giving a
-`database:` key to. The runtime says so out loud: `crates/infrastructure/src/process_manager/runner.rs:141`,
-*"The read models the DSL `read` steps declare."* So the four rounds of hand-sweeping were
-**rediscovering by hand what the loader can already resolve**. The finding is not "we were careless";
-it is **"we read prose where a typed declaration existed"**, which is the same defect
-[ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)
-records for plain-string refs — invisible to the walker, therefore invisible to review.
-
-**The completeness claim is WITHDRAWN as a class, with its reason.** Hand-enumeration failed **four
-consecutive times on this one map**, and every miss was found by a READER, never by the sweep that
-produced it: the mob checkpoint found two projector-fold crossings and stopped, missing the write-path
-class entirely; the independent third look passed without catching it; round 1 found **thirteen
-handlers** across four tables via `CommandDeps`; round 2 found **three more process managers** on a
-wall nobody had looked at (`captain_write` → `read_order`, headed by the pre-capture settlement read)
-**plus a reader class no formula contained** — a bin constructing its own repository. Decisive detail:
-**round 4 found crossings that round 3's OWN stated formula already covered**, so the method fails even
-when it is written down and followed. A fifth hand-sweep would therefore have exactly the epistemic
-standing of the fourth, and this closure deliberately does not attempt one. **Reader sets recorded in
-this section, on the table declarations and in `databases.yaml` are a LOWER BOUND, and completeness is
-withdrawn until it is DERIVED** — including for this paragraph. Three known limits of any hand-walk,
-recorded so the next reader knows what it cannot see: **(1) five reader classes are known today**
-(subgraph resolvers · `CommandDeps` write-path handlers · PM hook ports · gateway middleware · a
-repository a BIN CONSTRUCTS FOR ITSELF, adapters included and per gated mode — `RUN_MAILBOX_WORKERS`
-makes one bin host two app classes); **(2) SCOPE granularity is not GRANT granularity** — CONNECT is
-held by an APP/role, so *"only the ordering scope reads it"* is silent about `pm-cart-binding` being a
-different bin from `graphql-ordering`, which is precisely how a true-sounding sentence hid a real
-crossing; **(3) hand-written wrapper seams escape the DSL walker**, and the ONE known instance is named
-rather than left to be discovered: **`ReclamationProcess` declares `ports: payment` and NO `read:`
-step**, while `crates/application/src/process_managers/reclamation.rs:91` takes
-`orders: &dyn OrderReadRepository` — its cross-aggregate read lives in a `description:` string
-(`specs/ordering/processmanager.yaml:177`) because the branch is a *"hand-written wrapper seam"*
-(`:182`) the step DSL cannot express. A bounded, named hole is what makes a mechanical derivation
-honest; an unnamed one makes it another completeness claim.
-
-**And the fourth limit is the INVERSE of the other three — it belongs to the DERIVATION, not to the
-hand-walk, so it sits alongside them rather than replacing them: a `read:` step declares the model
-SHAPE a leg consumes, not the physical SOURCE.** THREE of the thirteen are implemented as stream
-folds inside `captain_write`, never touching the projection they name: `specs/delivery/processmanager.yaml:43`
-(`Restaurant` — `crates/application/src/process_managers/delivery_dispatch.rs:122-127` loads
-`restaurant_stream` and the doc comment says so out loud), and BOTH declared reads of the PlaceOrder
-leg, `specs/ordering/processmanager.yaml:41` (`Restaurant` — `commands.rs:2391-2394`, *"folded from
-ITS stream (authoritative, race-free)"*) and `:31` (`Cart` — `commands.rs:2419` `require_cart` →
-`load_cart`, a fold of the cart's own stream, under a `note:` that still says *"projection-priced
-lines"*). The predictor is visible: that leg is a hand-written COMMAND handler, not a generated PM
-pipeline. A verbatim derivation would therefore hand `pm-delivery-dispatch` and the ordering write
-app CONNECT on `read_common` — the exact STO-8 wall three open rows exist to keep narrow — and on
-`read_order`, for paths no code takes. **The symmetry is the durable lesson: the hand method failed by
-MISSING crossings (under-grant, four rounds); the naive mechanical derivation fails by INVENTING them
-(over-grant); the derivation is right only when the declaration distinguishes SOURCE from SHAPE.**
-Until the grammar can (a declared source, or an explicit exception list — #513 sub-step (a)'s design,
-not this closure's), the derivation must carry that distinction rather than consume the steps verbatim.
-
-**The binding consequence for [#513](https://github.com/TheCaptainCompany/captain-food/issues/513):
-its grant emitter must derive each app's CONNECT set MECHANICALLY — from the declared `read:` steps
-plus the generated composition roots — and must NOT be built from this prose or from any hand-walk of
-it.** A grant list assembled the way these reader sets were assembled would be wrong on the day it
-shipped, and its failure mode is `permission denied` inside a settlement handler at 20:40 on a Friday.
-**With limit (4) above as a binding caveat, not a footnote**: a `read:` step declares the model SHAPE a
-leg consumes, not the physical SOURCE, and three of the thirteen are `captain_write` stream folds, so
-consuming the steps VERBATIM over-grants `read_common` and `read_order` for paths no code takes. The
-derivation must distinguish projection-read from stream-fold — a declared source, or an explicit
-exception list — before it emits a grant.
-*(Whether the declared-reads mechanism becomes a BLOCKING prerequisite of #513 rather than a follow-up
-to it is under separate architect judgement; the requirement on the emitter holds either way, and that
-judgement's conclusion attaches here.)*
-
-**Projection read models (9):**
-
-- **`Cart` → `read_order`** — its SUBGRAPH reader is the ordering scope (`specs/ordering/api.yaml:18`);
-  the order boundary's read database (BND-1(a)). **Not its only reader**: `CartBindingProcess`, a
-  `captain_write` PM, reads it via `open_by_session` to bind a guest's open carts at sign-in — row
-  **STO-9**.
-- **`OrderTracking` → `read_order`** — its SUBGRAPH reader is `specs/ordering/api.yaml:32`. The
-  isolation is the point and is recorded at the declaration: catalog-import and prospection bursts
-  must never head-of-line-block the customer anxiety-curve projector at Friday 19:00–21:30 peak.
-  **Not its only reader**: three write-side PMs read it through `OrderReadRepository`, headed by the
-  settlement hooks' `payment_intent_id` read before every Stripe capture and release — row **STO-9**.
-- **`OrderConversation` → `read_order`** — the one lens divergence, resolved by the wall's own
-  semantics (whose APP role must hold CONNECT). Ports: written only by the projection worker's fold
-  (`order_conversation_store::upsert`), read only by `OrderConversationReadRepository` behind
-  comms-scope types (`specs/comms/api.yaml:15,31`). The losing argument (graphql lens): `read_order`
-  declares *"read by its subgraph role; no other subgraph holds CONNECT"*, and no ordering-scope
-  type touches this table — placement there would break the wall IF the comms scope were another
-  boundary's subgraph. It is not: **BND-1(a)/§31 records `Conversation → order` ("comms dissolves
-  as a boundary")**, so the subgraph serving comms-scope types IS the order boundary's role and the
-  wall holds. GDPR flag (legal lens): the conversation's free text will incidentally carry allergy
-  statements — **Art. 9 special-category data** — so the future PII inventory must NOT classify
-  this table as ordinary contact data.
-- **`CustomerCreditBalance` → `read_order`** — §11 had it in `OrderDb` and the mob briefing
-  corrected it to `read_common`; **the closure returns it to `read_order`, because the briefing's
-  premise dissolves under its own deeper finding**: the read_common rationale was *"graphql-payments
-  already needs read_common for the pricing referentials"*, and the pricing referentials are
-  `replicated:` (below), so no such CONNECT exists. What the register records decides it: §31/BND-1
-  places `CustomerCredit → order`; the only reader is the payments-scope `customerCredit` query
-  (`specs/payments/api.yaml:28`), served by the order boundary's subgraph — `read_common` would hand
-  that subgraph a SECOND database, which is STO-2(b), the rejected option. The back-office
-  credit-grant surface (business lens check) writes through the mailbox and reads back through the
-  same `customerCredit` query — one table, one database, no second surface to strand. Recovery:
-  replay is correct (the balance is Σ over the ledger stream).
-- **`Catalog` → `read_catalog`** — BND-1(a) keeps catalog its own boundary and database. Readers:
-  the catalog scope (`specs/catalog/api.yaml:11,28`) **AND the `captain_write` mailbox worker** —
-  `CommandDeps.catalogs`, four handlers: `add_cart_line` + `change_cart_line_quantity` via
-  `require_orderable_line` (`commands.rs:796,1006` — the availability+stock **oversell guard**,
-  fail-closed `OfferNotFound`/`OfferUnavailable`/`InsufficientStock`/`InvalidOptionSelection`),
-  `place_order` via `pricing::price_cart` (`commands.rs:2458` → `pricing.rs:56` — the
-  `ServerPriceAuthority` repricing, fail-closed `PriceUnresolvable`) and `configure_catalog_slug`
-  via `slug_taken` (`commands.rs:2799`). `offer_by_id`/`slug_taken` are DEFAULT trait methods over
-  `by_restaurant` (`queries.rs:231,249`), i.e. literally `SELECT ... FROM catalog`. The first
-  version of this line said *"sole reader `specs/catalog/api.yaml:11,28`"* — **false**. The
-  placement stands; the cross-wall consequence is **STO-7, widened to name this write path**.
-- **`Restaurant` → `read_common`** — read by the network scope (`specs/network/api.yaml:12`) AND
-  **THREE** non-subgraph reader classes (the first version of this line named two): the gateway
-  **tenant-host-router** reads it on EVERY request's hot path
-  (`specs/architecture/c4-l3.yaml:33-35`) — recorded in `read_common`'s reader set; the rider job
-  screen (ux lens) — `specs/screens/rider.yaml:106` renders `restaurantName`/`restaurantPhone` via a
-  join against `Restaurant`, so moving either side of that join breaks one-tap call-restaurant at
-  pickup, a stranded-order exception; and the **`captain_write` mailbox worker** —
-  `CommandDeps.restaurants`, four handlers: `create_catalog` (`commands.rs:2763`,
-  `RestaurantNotFound`), `add_product`/`update_product` via
-  `ensure_prices_use_restaurant_currency` (`:2737`, the `CurrencyMismatch` guard reading
-  `default_currency`, ADR-0016) and `mark_restaurant_as_favorite` (`:3491`). Lower stakes than
-  `Customer`'s and off the checkout path — and worth stating explicitly because it is easy to
-  assume the opposite: **`place_order` does NOT read this table**, it folds `RestaurantState` from
-  the restaurant's own stream (`commands.rs:2394`), `captain_write`-local, crossing no wall. Rides
-  **STO-8**.
-- **`SlugAlias` → `read_common`** — read by ZERO api.yaml types; its reader is the gateway 301
-  path (`hosts.rs`, same c4-l3 declaration). Kept apart from `slug_reservations` (write-side,
-  `captain_write`) exactly as this row originally required.
-- **`Customer` → `read_common`** — BND-3(a) grouping. Readers: the customer scope
-  (`specs/customer/api.yaml:15`) **AND the `captain_write` mailbox worker** —
-  `CommandDeps.customers`, four handlers: **`verify_phone` `by_phone` (`commands.rs:3257`) resolves
-  new-vs-returning ON THE LOGIN PATH**, plus `request_email_verification` `by_email` (`:3363`,
-  `EmailAlreadyInUse`) and `request_phone_change`/`confirm_phone_change` `by_phone` (`:3414`,
-  `:3453`, `PhoneAlreadyInUse`). The first version of this line said *"sole reader
-  `specs/customer/api.yaml:15`"* — **false, and the table's OWN `note` in `projection_tables.yaml`
-  contradicted it four lines below by naming `VerifyPhone`**, which is what makes this a method
-  hole rather than a lookup slip: the evidence was already in the file being edited. Cross-wall
-  consequence: **STO-8** (a different wall from STO-7's).
-- **`ProspectionPipeline` → `read_common`** — read by the admin `prospectionPipeline` query
-  (`specs/network/api.yaml:48`) **AND the `captain_write` mailbox worker** —
-  `CommandDeps.prospection`, one handler: `record_prospect_contact` reads `last_contacted_at`
-  (`commands.rs:2626`) for the ≥ 7-day anti-spam invariant, and the projection is the ONLY source
-  because the contact TIME is envelope metadata (`occurred_at`) invisible to the fold. *"Sole
-  reader"* in the first version was **false**. Rides **STO-8** — same wall, lower stakes.
-
-**Seeded referentials (8):**
-
-- **`PricingPolicy` / `UberEstimationPolicy` / `UberSplitPolicy` → `replicated: read-databases`** —
-  the STO-2(a) class, not read_common-with-a-tripwire, because the declared read-side consumers span
-  **TWO** read databases — `read_order` and `read_catalog` — across **FOUR reader sites**:
-  `OrderTracking`'s rules compute the `uber_*` Captain-vs-Uber receipt
-  (ADR-0025) at FOLD time from `UberEstimationPolicy` + `UberSplitPolicy` (+
-  `Restaurant.cuisine_category`) inside `read_order`'s projector; `Catalog`'s rules derive each
-  offer's `uberPrice` (ADR-0022/0024) in `read_catalog`; `Cart`'s rules compute the estimated
-  `PaymentBreakdown`/comparison at READ time from `PricingPolicy` + `Uber*Policy` (ADR-0018) on the
-  order boundary's read path; and the admin policy queries (`specs/payments/api.yaml:53-72`,
-  `crates/application/src/queries.rs:658-696`) read from the order boundary's database (BND-1(a)/§31,
-  *"payments dissolves into order"*). **Resolve the four sites and they land in two databases** —
-  three in `read_order`, one in `read_catalog` — and **two is exactly what the argument needs**: any
-  reader set spanning ≥ 2 read databases rules out a single home. The third copy the class grammar
-  gives them, in `read_common`, arrives by REPLICATION into every `recovery: replay` database, not
-  because anything reads them there. Single-home
-  `read_common` would leave the `read_order` projector unable to read its declared inputs and the
-  ADR-0025 receipt would degrade SILENTLY — indistinguishable from the legitimate no-cuisine null
-  (ux lens). **Recorded tripwire, not solved here**: `crates/application/src/commands.rs:2525`
-  names a FUTURE write-path reader (the ADR-0016/0017 fee/split policy *"plugs into pricing when it
-  lands"*) — replication reaches only `recovery: replay` databases, never `captain_write`, so that
-  slice owes its own decision (freeze the policy onto the event, or a `captain_write` seed). All
-  three are migrator-seeded-only — no subgraph role writes them; changes go by migration with
-  `effective_from` (`fee_rate` IS the take rate; the `uber_*` values are published
-  comparative-advertising claims). **Owned in the open (holub lens): this EXTENDS STO-2(a)'s class
-  grammar rather than citing it** — "projected into every read database" becomes "projected, or for
-  a seeded referential, SEEDED, into every read database". A conscious extension earned by the
-  two-database reader evidence above (four reader sites resolving to `read_order` + `read_catalog`),
-  not a mechanical consequence of the original row.
-- **`City` → `read_common`** — the §11 map's home, uncontested; zero runtime readers today (only
-  `city_id` keys elsewhere); the read-side admin/city surface reads it when it lands.
-- **`DeliveryChannelCatalog` / `CityDeliveryRanking` / `RestaurantDispatchConfig` →
-  `captain_write`** — **corrects §11's `DomainCommonDb`**: their ONLY port is
-  `DispatchStrategyRepository` (`crates/application/src/dispatch_strategy.rs:35`), consumed
-  exclusively write-side — `DeliveryDispatchProcess` (PM) and `DeliveryOfferTimeoutWorker`,
-  `captain_write` apps joining against PM state rows. NO read-side port exists; `read_common` would
-  hand a write-path app a cross-wall CONNECT for tables no read app reads (dba lens).
-  `crates/infrastructure/src/persistence/referential.rs:136`'s *"later API-writable via partner
-  self-registration"* ([#61](https://github.com/TheCaptainCompany/captain-food/issues/61)) is a
-  recorded future decision, not solved here.
-- **`RuntimePosture` → `captain_write`** — **corrects §11**: the recovery posture alone decides it.
-  `RuntimePosture` is seeded and UPDATEd, never folded, so in a `recovery: replay` database a restore
-  would silently revert an admin-flipped posture to seed — the documented worst failure for a
-  fleet-consistency table on a money path. Its reader set is NOT a second argument, and the earlier
-  *"write-side by nature"* reading was an inference from today's zero tenants: the design contract is
-  a startup read by EVERY process the posture governs, restricted to no side, and the only tenant the
-  mechanism ever had (PM_MAILBOX_DELIVERY, retired with `command_journal` in #242) merely happened to
-  be write-side. **Recorded tripwire on the declaration**: a future posture whose governed set
-  includes any non-`captain_write` app (a projector, a subgraph bin, the gateway, an adapter) puts a
-  FAIL-CLOSED startup read across the wall — that posture's slice owes its own decision (replicate
-  the row, push the value, or a recorded CONNECT).
-
-**FIVE cross-wall reads the map does NOT resolve — and FIVE is a lower bound, not a count** (see
-"the method finding" above; they are numbered in the order they were FOUND, which is itself the
-evidence). **(1) and (2) came from the mob checkpoint (2026-08-14); (3) from the post-ready
-independent review; (4) and (5) from ROUND 2 of that review, after (3)'s corrected formula had been
-written down — which is why the formula, and not the map, is what this section now warns about.**
-
-**(1) `Restaurant.cuisine_category`**: the `uber_*`/`uberPrice` folds also read it, and `Restaurant`
-is single-home in `read_common` (`OrderPlaced` does not carry `cuisineCategory`, and nothing
-denormalizes it into the consuming databases). **CHOSEN DIRECTION, recorded here and on the
-declarations**: each consuming projector (`OrderTracking` in `read_order`, `Catalog` in
-`read_catalog`) keeps a FOLD-LOCAL restaurant→cuisine_category lookup in its OWN database, folded
-from `RestaurantRegistered`/`RestaurantUpdated` — replay-correct, no cross-wall CONNECT; `Restaurant`
-itself is deliberately NOT replicated, which would widen the `margin_rate` exposure recorded below.
-Implementation belongs to the physical-split slice, not to this closure. **(2) `Cart`'s read-time
-pricing reads the LIVE `Catalog` across the wall at query time** — register row **STO-7**, which
-blocks the physical split of `read_order`/`read_catalog` until decided. **(3) The `captain_write`
-mailbox worker reads FOUR placed read models across TWO walls** — `Catalog` in `read_catalog` (the
-oversell guard and the checkout repricing, both fail-closed) and
-`Customer`/`Restaurant`/`ProspectionPipeline` in `read_common` (the login path's new-vs-returning
-decision, plus write-side guards): two DIFFERENT questions, two rows — the `Catalog` leg widens
-**STO-7**, the `read_common` leg is **STO-8**.
-
-**(4) A THIRD wall direction nobody had looked at — `captain_write` → `read_order`, and it is the
-money one.** Four process managers read the order boundary's read models while running on the mailbox
-worker. **`SettlementHooks` reads `OrderTracking` for `payment_intent_id` on all four legs,
-immediately before every Stripe capture and every release**
-(`crates/application/src/process_managers/payment_settlement.rs:53-99`) — post-split that read errors
-rather than skipping, so **capture never runs, the authorization expires, and the food is delivered
-while the money is never collected**; release-on-reject never runs either, leaving a rejected
-customer's hold in place. With it: the dispatch birth leg (`delivery_dispatch.rs:83`), reclamation
-resolution (`reclamation.rs:91`) and `CartBindingHooks::open_by_session` (`cart_binding.rs:17-37`),
-which loses a guest's cart at the moment he signs in to pay. New register row **STO-9** — its own row
-because **deciding STO-7 and STO-8, even both and even well, does not unblock the physical split of
-`read_order` while settlement's pre-capture read fail-closes**. All four of these reads are DECLARED
-in the PM DSL (the thirteen `read:` steps cited above), so nothing about this crossing required
-discovery — only resolution of a `$ref`.
-
-**(5) `adapter_hubrise` → `read_common`, which is not an open question but a CLOSED ROW REOPENED.**
-The HubRise adapter bin constructs its own restaurant repository and polls `Restaurant` for projection
-visibility during onboarding (`adapters/hubrise/src/main.rs:54`, `connect.rs:314-325`) — a second
-outward grant where **ADP-1** allows exactly one, and a poll that
-[ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)
-forbids in that form. Register row **STO-10**, filed as **AMBER/founder-owned** rather than absorbed
-into STO-7 or STO-8, because whichever way it goes it answers ADP-1.
-
-**Seed scripts are part of recovery** (recorded per declaration): a seeded referential in a replay
-database comes back EMPTY from a replay-only restore — a silent misprice or a dead checkout — so the
-seed script is part of that database's recovery path, and
-[#509](https://github.com/TheCaptainCompany/captain-food/issues/509)'s drill must assert seeded row
-counts per database (per read database for the replicated trio).
-
-**Erasure-reach per placement class** (legal lens; *"placed" never means "erasure-covered"*):
-`captain_write` = direct stream deletion gated by the `projection_watermark` fail-closed bound;
-`read_*` (replay) = the tombstone folded by that projector, and a REBUILT read database cannot
-resurrect erased data — the property that justifies STO-6(a)'s no-backup posture; `adapter_*` = the
-90-day sweep only, an OPEN counsel leg, never to be folded into "erasure covered"; `tracking` = no
-tombstone path by construction. Replay legitimately doubles as erasure-reach; refetch and
-backup-required do NOT. The placement grammar keeps room for a per-table PII/erasure-reach sibling
-key (a sibling of `database:`/`replicated:` in the same table mapping) — nothing in this closure
-precludes it.
-
-**One recorded deferral, said out loud**: `Restaurant.margin_rate` is a commercial secret
-("back-office only"), and `read_common` placement makes it physically READABLE by the marketplace
-subgraph role — a recorded deferral (column-level narrowing belongs to
-[#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s grant emitter), not an
-accident.
-
-**The reads⇒CONNECT follow-up, restated with its real scope and its real price.** The rule
-graphql-architect proposed — *derive each app's `CONNECT` set from its DECLARED reads rather than
-from a hand-walk* — was first scoped to **subgraph roles**. That scope is too narrow and this
-closure is the proof: **it must cover WRITE-PATH apps too**, deriving from `CommandDeps` (and the
-process managers' and workers' port sets) exactly as it derives from resolvers' ports, because the
-`captain_write` mailbox worker is an app that holds four read-repository ports and nothing in the
-subgraph-shaped rule would ever look at it. **Its empirical price tag is no longer "two missed
-reads"**: the hand-walk missed `Restaurant.cuisine_category` twice at the mob checkpoint, and then
-a FOURTH port class entirely — **thirteen handlers over four tables across two walls**, including
-the add-to-cart oversell guard, the checkout repricing and the login path's new-vs-returning
-decision, all fail-closed. Three successive reviews each found more of the same class, which is the
-signature of a method that cannot be fixed by looking harder. It is [#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s
-grant emitter that consumes this: **the emitter must not derive CONNECT sets from this section's
-prose**, which is why the write-path readers are now named per table above rather than left implied.
-**Nor may it consume the declared steps VERBATIM, which is the same error in the other direction**: a
-`read:` step declares the model SHAPE a leg consumes, not the physical SOURCE, and three of the
-thirteen are stream folds inside `captain_write` (limit (4) above), so a literal derivation invents
-CONNECT on `read_common`/`read_order` that no code path uses. Deriving is right only once the
-declaration distinguishes source — a declared source key or an explicit exception list, which is
-#513's own sub-step (a) and not a detail it may skip.
-
-**Consulted** (ADR-20260812-143619): dba — traced every port; corrected the dispatch-config trio and
-`RuntimePosture` to `captain_write` · graphql-architect — the CONNECT-wall analysis; raised the
-`OrderConversation` divergence; proposed the reads⇒CONNECT validator rule (named follow-up, scope
-widened above to write-path apps) ·
-ux-designer — the fold-time `uber_*` dependency (the silent ADR-0025 degradation) and the rider
-co-location constraint · business-specialist — the OrderTracking peak-isolation rationale; the
-credit-grant surface check · legal-specialist — the erasure-reach classes; the Art. 9 conversation
-flag; the `margin_rate` sentence · observability — the replay-vs-seed recovery consequences
-(the `RuntimePosture` revert; seeded row counts in the drill) · farley — the validate/emit
-split-walk trap; the ADP-1 wall hoist; the expected footprint · beck — RED-first tests; the
-inverted direction-2 witness; declarations+flip atomicity · holub — proportionality: per-rule
-mutants, no per-table matrix.
 
 ---
 
 ## 33. Repository crates and the dissolution of `infrastructure` — PROP-20260811-173223 (product-owner direction, 2026-08-11) · **closes ISO-1 and ISO-2**
 
-Product-owner direction, 2026-08-11, verbatim: *"We also have to create crates for repositories.
-There is read repositories and writes repositories, the write repositories generally inherit from the
-read repositories"* / *"The infrastructure has to be split in multiple crates to be able to regulate
-permissions of apps based on what they need nothing more."* Design record:
-[PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
-tracked by [#497](https://github.com/TheCaptainCompany/captain-food/issues/497).
+Design record: [PROP-20260811-173223](PROP-20260811-173223-repository-crates-and-the-infrastructure-split.md),
+[#497](https://github.com/TheCaptainCompany/captain-food/issues/497). The third product-owner message
+of that day and the third face of one idea — §31 decides *which units exist*, §32 *what shares a
+recovery posture and a database role*, §33 *what a unit may link*.
 
-**Third message of the same day and the third face of one idea** — §31 decides *which units exist*,
-§32 decides *what shares a recovery posture and a database role*, this decides *what a unit may
-link*. **It closes ISO-1 and ISO-2 (§29)**, both as (a), because both (b) options end with a bin
-linking a crate that carries every other boundary's code — which is what *"nothing more"* forbids.
-Recorded in §5 with the verbatim quote as origin.
+✅ **REP-2 … REP-5 closed** on their recommendations, team-owned. The cost is honest: ~28 net-new
+crates on a workspace near 90, mitigated by each being small and independently rebuildable. **REP-5**
+restates the ranking so it is not lost: **the crate graph is load-bearing for the stated threat
+model**, because a `GRANT` is invisible to the compiler and a dependency edge is not.
 
-**The direction is accepted as the strong default. One phrase is refined, and the code argues the
-refinement.** *"Write repositories generally inherit from read repositories"* has no OO equivalent in
-Rust; the candidates are a supertrait bound and composition, and they are not interchangeable for a
-least-privilege purpose. The measured answer is that **there are TWO read contracts on every read
-model**: the **query** contract (`CartReadRepository`, 5 methods, narrowed — `by_id` returns `None`
-for a CHECKED_OUT cart, `queries.rs:277-279`) and the **row-state** contract (`cart_store::load`, one
-method, deliberately unfiltered). The projector's write repository **inherits the row-state contract
-— that is the product owner's "generally inherit" and it is correct**. It must **not** inherit the
-query contract: `crates/infrastructure/src/persistence/cart.rs:67-70` already records why, in a
-comment written for another reason — *"an OPEN predicate there would stop a CHECKED_OUT cart from
-ever folding another event onto itself"*. So supertraiting write onto the query port is over-privilege
-**and** a correctness bug. **On the write side "inherit" is right without qualification**: an actor
-cannot decide without loading its own stream, so `EventStore: EventStreamReader` is the honest shape
-— and it creates the log-read port that **does not exist today**, where three components read
-`domain_events` three different ways (`EventStore::load`; `projection/worker.rs:753` raw SQL;
-`deletion.rs:255,320` raw SQL).
+**The blocker nobody had named, recorded as REP-4**: `DomainEvent` is ONE enum over all 8 scopes,
+defined in the facade and named by `EventStore` and the projector `Envelope` — so a per-boundary
+repository crate that traffics in it re-imports everything, and until REP-4 lands the split delivers
+module hygiene only. It is **not** an event-versioning question: storage is already
+`(event_type TEXT, payload jsonb)`, so no stored contract moves.
 
-**The measurement that decides how much this is worth**: `crates/infrastructure` is **one crate of
-~13,200 lines** (persistence 4,590 · integrations 2,847 · mailbox 2,188 · generated 1,311 ·
-projection 1,140 · process_manager 588 · deletion 544) holding the event store, 17 read adapters, 10
-projection write repositories, 7 partner ACLs, the mailbox SQL, the deletion engine and the
-projection worker — and every bin that needs one of them links all of them.
+**The one phrase that needed refining, with the code arguing the refinement** — *"the write
+repositories generally inherit from the read repositories"* is right on the **log** (an actor cannot
+decide without loading its own stream, so `EventStore: EventStreamReader` is a supertrait) and
+**wrong on the read model**, because there are TWO read contracts: a **query** port (narrowed,
+GraphQL-shaped, where `by_id` returns `None` for a CHECKED_OUT cart) and a **row-state** port
+(unfiltered `load(id)`). The projection write repo inherits the row-state one; supertraiting it onto
+the query port is over-privilege **and** a correctness bug.
 
-**Two facts that would otherwise waste the work, both verified**: (1) the read ports live in
-`application`, which depends on the `domain` facade (`application/Cargo.toml:8`,
-`queries.rs:7-19`), so **moving the adapters into crates while the ports stay put buys nothing**;
-(2) **`DomainEvent` is ONE enum over all 8 scopes**, defined in the facade
-(`domain/src/generated/events.rs:20`) and named by `EventStore` and the projector `Envelope` — so a
-per-boundary repository crate that traffics in it re-imports everything. That is **REP-4**, it is
-new, and ISO-1 did not name it: the `EventWaiter` was never the hardest coupling.
+**REP-1 stays as a confirm-or-redirect, not a blocker** — it modifies a shape the product owner
+named, under *"just keep me informed"*.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
 | **REP-1** | **The "inherit" refinement.** Recorded as a **confirm-or-redirect**, not a blocker, because it modifies a shape the product owner named — under *"just keep me informed"* ([ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md)) | **(a) Two read contracts; the projection write repo supertraits the ROW-STATE port only** — "write inherits read" stays literally true and the inherited method is exactly the one the direction describes (*"projectors … to know the current state of the rows to update them"*), while the 5-method GraphQL query surface stays out of the projector's reach. **(b) One supertrait `Write: Read` over the query port** — matches the phrase literally, and hands every projector the whole query surface *and* the OPEN narrowing that would silently stop CHECKED_OUT carts folding. **(c) Composition (write holds a read)** — buys nothing over the module-level codec sharing that already exists (`cart.rs:10,44,52`) and still exposes the narrowed port at runtime | ✅ **Recommended: (a).** The rule in one sentence: *a read model has a QUERY port (narrowed, GraphQL-shaped) and a ROW-STATE port (unnarrowed `load(id)`); the projection write repository supertraits the ROW-STATE port and nothing else; no crate holds both the query adapter and the write repository.* On the **log**, `EventStore: EventStreamReader` — supertrait, unqualified, and the reader half is what the projector, `bam` and the deletion engine need without `append` |
-| **REP-2** | **Crate granularity: how many crates per boundary?** The row that decides whether the access model is a link edge or a comment | **(a) 3 per boundary — `ports-{B}` (traits + Row DTOs, **no `sqlx`**) · `read-{B}` (SELECT adapters) · `projections-{B}` (folds + row codec + load/upsert)**, plus 13 platform crates (`store_core`, `eventstore`, `mailbox_pg`, `projection_runtime`, `read-platform`, `erasure`, 7 `acl-{partner}`). ~33 total at 5 boundaries. It is the only granularity where *"the writing of the read side is done only by the projectors"* is a link edge: `graphql-{B}` links `read-{B}` and not `projections-{B}`; `projector-{B}` links `projections-{B}` and not `read-{B}`. **(b) 2 per boundary** (ports folded into `read-{B}`) — then `projections-{B}` must link `read-{B}` for the Row types and gains the query adapters plus `sqlx`; the matrix collapses. **(c) 1 per boundary (`store-{B}`)** — a GraphQL bin gains `upsert`; enforces the boundary axis and abandons the side axis, i.e. half the sentence. **(d) Split by side only, not by boundary** — every subgraph links every boundary's queries and the two enforcement axes disagree | ✅ **Recommended: (a)**, team-owned. The cost is honest: ~28 net-new crates on a workspace near 90. Mitigated by each being small and independently rebuilt (`cargo test -p application` = 324 tests in 0.04 s linking 9 crates, ADR-20260810-194548) |
-| **REP-3** | **What is left in `infrastructure`?** An `infrastructure` that keeps the fat facade defeats the exercise even after the repositories move out | **(a) Dissolve it entirely.** Every module has a home (proposal §4 D3 places all of them). During the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) window it survives ONLY as a monolith-only composition crate, guarded by a codegen test that no per-surface/per-actor bin links it, and is deleted at cutover — gate-then-stabilize, with the transitional form's audience **checkable** rather than open-ended. **(b) Keep it as the permanent facade** — smallest disruption; any bin linking it links everything, so [#490](https://github.com/TheCaptainCompany/captain-food/issues/490)'s ledger never reaches zero and the manifest header stays a wish, which is the claim [#475](https://github.com/TheCaptainCompany/captain-food/issues/475) spent a PR deleting. **(c) Delete it now** — breaks the deployed monolith before the cutover is rehearsed | ✅ **Recommended: (a).** Note the drawback plainly: a transitional crate outlives its window unless something forces the issue, and the guard test is that something |
-| **REP-4** | **The `DomainEvent` union — the split's actual blocker, and new.** One enum over all 8 scopes, defined in the crate that depends on all 8 (`domain/src/generated/events.rs:20`), named by `EventStore::append`/`load` (`ports.rs:54-65`), the projector `Envelope`, and 95 arms of `generated/projectors.rs`. **Until this is answered, a per-boundary repository crate re-imports the facade and the split delivers module hygiene only** | **(a) Generate a per-boundary union in each `domains/{B}` crate; keep the all-boundaries `DomainEvent` in the facade for the monolith and `bam`; ports become per-boundary-typed or generic.** **This is NOT an event-versioning change**: the storage format is already `(event_type TEXT, payload jsonb)` (`event_store.rs:203`), so no stored contract moves and no upcaster is owed — say so in the change, because it will read like a migration. Cross-boundary consumers (5 PM bridges, 3 cross-boundary projection groups) take an explicit declared union, derivable from `processmanager.yaml`. **(b) Untyped port** `append(stream, version, &[(event_type, payload)])` — smallest port, matches storage exactly, and makes `append("Order-x", 0, [("Nonsense", json!({}))])` compile; rejected on compiler-first grounds. **(c) Leave it** — every per-boundary crate links all 8 domain crates. **(d) One union per side** — both still span all boundaries; solves nothing | ✅ **Recommended: (a)**, team-owned, and it should land in slice 4 with `ports-{B}`. Flagged here because it is the row most likely to be discovered late and mistaken for a versioning question |
-| **REP-5** | **Crate graph vs per-app database role: which axis is authoritative, and how do we stop them disagreeing?** [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md)'s AXIS-DISAGREEMENT concern, now answerable | **(a) One declaration per app feeds BOTH** — the app declares its boundary and its side(s); the emitter derives the allowed crate families AND the `GRANT` (`read-{B}` ⇒ SELECT-only role; `projections-{B}` ⇒ INSERT/UPDATE on that boundary's read models; `handlers-{B}` ⇒ INSERT on `domain_events` for its streams). The two axes **cannot** disagree because there is one source, and this is exactly what [#491](https://github.com/TheCaptainCompany/captain-food/issues/491)'s `specs/apps/{app}/` (APP-2(a)/APP-3(a)) was proposed to hold — so this direction **raises #491's A2 value** rather than competing with it. **(b) Keep them independent, reconcile by review** — reproduces [#493](https://github.com/TheCaptainCompany/captain-food/issues/493)'s two-unreconciled-partitions defect one layer down. **(c) Crate graph only** — loses everything that never issues a Rust import (a migration, `psql`, a future bin); STO-5 already rules it out | ✅ **Recommended: (a).** Ranking restated so it is not lost: **the crate graph is load-bearing for the stated threat model** (a `GRANT` is invisible to `cargo build`, and the easy-path mistake is an import), while the role axis catches everything outside our code and lands sooner |
-
-**And the sequencing consequence, which is the one thing this changes for someone else's work.**
-**BND-1 (§31) just became more urgent.** The per-boundary half of this topology is 15 of ~28 crates;
-building 3 crates × 8 scopes and merging to 5 is precisely the intermediate step
-[ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)
-forbids. **What can start before BND-1 closes**: the whole platform axis — the ratchet extension
-(slice 0), `store_core` + `eventstore` + the reader split + the ISO-3 witness (slice 1),
-`projection_runtime` (slice 2), the 7 `acl-{partner}` crates + `mailbox_pg` + `erasure` (slice 3).
-Every one of those is shaped identically at 4, 5 or 8 boundaries, so none is a forbidden
-intermediate, and slices 0–2 are the half that makes the next half verifiable.
 
 ---
 
@@ -1698,455 +667,162 @@ intermediate, and slices 0–2 are the half that makes the next half verifiable.
 
 **Origin**: product-owner directive, 2026-08-11 — *"Remove the damn server crate it's currently the
 purpose of what we are doing"*, and the measurement that triggered it: each of the 8 `graphql-*`
-subgraph bins **declares 3 workspace crates and links 44** (14×), against 1.5× for the 7
-`gateway-*` bins. 25 of the 44 are reachable only through `server`, including `web`, `app-core`,
-`surface_runtime`, all five partner adapters and 14 of the 15 actor-client crates.
+subgraph bins **declared 3 workspace crates and linked 44** (14x), against 1.5x for the 7
+`gateway-*` bins, with 25 of the 44 reachable only through `server`. A catalog pod linked the Stripe
+integration and the SSR renderer.
 
-**All three rows below are TEAM-OWNED**, and are recorded here rather than decided in a commit
-because each either reverses text already written down or changes a shape the generated schema
-already promises — CLAUDE.md's first two questions under
-[ADR-20260810-221840](../adr/ADR-20260810-221840-specs-are-the-teams-work-the-freeze-is-lifted.md).
-**None of them is a product-owner call.** They are here so the reversal is visible and a later
-reviewer does not have to re-derive it.
+✅ **ALL THREE ROWS CLOSED on their recommendations**, all TEAM-OWNED — recorded here rather than in
+a commit because each either reverses written text or changes a shape the generated schema already
+promises. **API-1** (a): a cross-boundary FK navigation field is resolved by projector-side
+composition, with (c) for `Restaurant` specifically if the column duplication proves too heavy.
+**API-2** (a): the five permanently-empty cross-scope nav fields are **deleted** — a breaking SDL
+change whose free window closes at the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
+cutover; deleting them makes the api graph acyclic, which is what lets per-scope API crates exist at
+all. **API-3** (a): introspection gets an explicit home — a **hard precondition of slice A3**, because
+the day per-scope roots land, introspection silently narrows and nothing fails.
 
-**Sequencing note, so this section is not read as a blocker:** slice **A1** — extract `api_runtime`
-+ `api_graph` and drop `server` from the eight manifests — is gated on **none** of these rows. It is
-a pure crate move whose acceptance test is a byte-identical `specs/generated/schema.generated.graphql`.
-A2 needs API-2; A3 needs API-1 and API-3.
+**Sequencing, so this section is not read as a blocker**: slice **A1** — extract `api_runtime` +
+`api_graph` and drop `server` from the eight manifests — is gated on **none** of these rows. It is a
+pure crate move whose acceptance test is a byte-identical
+`specs/generated/schema.generated.graphql`. A2 needs API-2; A3 needs API-1 and API-3.
 
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **API-1** | **What resolves a cross-boundary FK navigation field?** Five GraphQL fields are live cross-boundary joins inside a resolver — `Catalog.restaurant`, `Cart.restaurant`, `Order.restaurant`, `DeliveryJob.order`, `DeliveryJob.restaurant` (`crates/server/src/graphql/generated/query.rs:21,124-125,311-312,418-419`). They make **five of eight** subgraphs hold another boundary's read model at *boundary* granularity, contradicting [PROP-20260811-150242](PROP-20260811-150242-domain-boundaries-the-four-and-the-two-partitions.md) §5.1.2's *"coarser is forbidden"* CONNECT argument and §5.1.7's closure invariant. It also decides whether `graphql-order` links 1 boundary or 4 | **(a) Pre-join into the owning projector's view** — `View_Catalog` carries the restaurant columns its `restaurant` nav needs, and the resolver builds the nested type from ONE boundary's rows. **The SDL does not change**, the CONNECT wall holds, and it is literally what `api-nested-cross-scope`'s own text already prescribes (*"pre-joined in a projector-owned view"*, `tools/codegen-rs/src/validate/scopes.rs:21-24`). Cost: foreign columns duplicated into up to four views, and B's projector folds a second boundary's events — which D14's one-log property permits by construction. **(b) The subgraph links the foreign `read-{B}`** — today's shape, zero work, and it deletes the wall: `graphql_catalog`'s role needs CONNECT + SELECT on the restaurant read database, so §32's matrix stops meaning anything and the two enforcement axes disagree (REP-5). **(c) Narrow the nav field to a slim published snapshot type** (`RestaurantSummary`) — least duplication, matches D16's *"project a slim published snapshot"*; **client-visible narrowing of five fields**, so it needs its own migration story. **(d) Read-time query contract between boundaries** (D13's third sanctioned mechanism — the subgraph calls the owning subgraph over HTTP) — no duplication, correct by construction; adds a synchronous hop on `order`/`catalog` reads at Friday peak and re-introduces the fan-out D8 exists to avoid | ✅ **Recommended: (a)**, with **(c) for `Restaurant` specifically** if the 30-column duplication proves too heavy — (c) second, because it is the only option that changes what a client sees. Not needed for A1 or A2; **hard-gates A3** |
-| **API-2** | **Deleting the five permanently-empty cross-scope nav fields is a schema REMOVAL.** `Restaurant.deliveryJobs`, `Restaurant.catalogs`, `Restaurant.carts`, `Restaurant.orders` and `Order.deliveryJobs` resolve `Vec::new()` unconditionally at the only construction sites that exist (`crates/server/src/graphql/generated/types.rs:1101-1105,1230`). They are also **every cycle** in the API type graph, so per-scope API crates cannot exist while they do. The shape is promised in `specs/generated/schema.generated.graphql`, so the versioning story is recorded before the change lands | **(a) Delete now, in slice A2, with the story recorded** — evidence: provably always `[]`; **zero** first-party selections (no hits in `specs/screens/**` or `crates/web/src/**`; the only `specs/**` hits are the two `navRoles:` blocks that create them); no third-party client exists; production is down with an empty event log. The replacements are already top-level operations (`restaurantDeliveries`, `orders`, `carts`, `catalog`) — exactly what D8's *"cross-scope data appears at TOP LEVEL"* means. **(b) Deprecate now, delete after a cycle** — the versionless-evolution default; costs a client nothing (none selects them) and blocks A3 for the length of the cycle, i.e. past the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover, after which it stops being free. **(c) Keep them and make them real** — resolve the reverse edges from the foreign read model; multiplies API-1 by five and ships an unbounded list on a PUBLIC-reachable type (`Restaurant.orders` is `[ADMIN]`; `catalogs` is ungated). **(d) Keep them empty** — a live control that does nothing, which CLAUDE.md names as worse than no control | ✅ **Recommended: (a).** The cost, plainly, once: a breaking SDL change to five fields, whose free window closes at the #358 cutover. Lands with one `docs/SPEC-LOG.md` sentence and a one-line ADR |
-| **API-3** | **Where does introspection live once composition is per-scope?** `crates/gateway_runtime/src/lib.rs:121-122` skips `__`-prefixed fields on the comment *"introspection — any subgraph answers the role-filtered shape"* and routes an introspection-only document to `table.kernel_scope`. True only because every subgraph currently holds the MASTER schema; under per-scope roots `graphql-platform` would answer with **5 operations instead of 121** | **(a) The gateway answers introspection from the generated SDL it embeds** — it already embeds the composition table, so this is one more `&'static str`; role filtering stays at the gateway's own ACL; retires the `kernel_scope` default, which exists only to serve this case. **(b) Every subgraph embeds the full generated SDL for introspection only** — keeps introspection at the schema boundary where auth is, at the cost of shipping the whole SDL into every pod and of a subgraph advertising fields it cannot execute. **(c) `graphql-platform` links every `api-{B}`** — makes the kernel graph the fat one (the defect moved, not fixed), and makes the highest-QPS pod in the API tier (§5.1.4) the widest | ✅ **Recommended: (a).** Not a follow-up — a **hard precondition of A3**, because the day per-scope roots land, introspection silently narrows and nothing fails |
+⚠️ **The gate hole this run found is the durable part**: `api-nested-cross-scope` forbids cross-scope
+nested api types and reported 0 errors, while the generated SDL contained **ten** such edges —
+because the rule walks `$ref`s in the spec and the emitter *derives* the fields from FKs and
+`navRoles:`.
 
 ---
 
 ## 35. The founder answer sheet of 2026-08-12 — ✅ ALL ROWS CLOSED ON ANSWERS
 
-Twelve answers arrived in one sitting and a full ten-lens mob read them before anything was recorded.
-The record is [ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md)
-(`Consulted:` block per [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md));
-this section holds the queue rows. **Rows that already existed close in place** — §27 Q7, §28 Q1/Q2,
-§31 BND-6/BND-7, §32 JRN-1's founder-owed leg. **The rows below were raised on the queue page rather
-than in this register and are created here**, so an answer is not the only trace of the question.
+Record: [ADR-20260812-214021](../adr/ADR-20260812-214021-the-founder-answer-sheet-of-2026-08-12.md),
+with a ten-lens `Consulted:` block. Six pre-existing rows closed in place with it (§27 Q7 · §28 Q1/Q2 ·
+§31 BND-6/BND-7 · §32 JRN-1's founder-owed leg).
 
-**The headline is INV-1, and it is not one of the twelve answers — it is what they add up to.** *"I'm
-waiting for a working version before paying OVH"* inverts the critical path from **provision → deploy
-→ walk** to **walk → provision → deploy**. Everything ranked against a provisioned cluster is now
-ranked against a local one, and the one leg the team cannot supply is the exit condition. **That leg
-was ANSWERED 2026-08-13** — the founder's own six-clause criterion, superseding the team's two-half
-proposal; record:
-[ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md).
+**The headline is not one of the answers — it is what they add up to: the critical path is
+INVERTED.** *"I'm waiting for a working version before paying OVH"* turns **provision → deploy →
+walk** into **walk → provision → deploy**, and the one leg the team could not supply was the exit
+condition: *"a working version"* had **no acceptance criterion**, which made it a spend gate with no
+exit.
+
+✅ **INV-1 — closed in full.** The acceptance criterion was **answered by the founder on 2026-08-13**,
+replacing the team's proposal with his own six clauses — customer created → payment authorised →
+order created → accepted → delivered → captured, walked on the local all-databases stack with
+authentication deliberately bypassed from the inside
+([ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md)).
+So the spend gate has an exit. **And the path was a MERGE, not a build** — `cutover-local-rehearsal` /
+[PR #486](https://github.com/TheCaptainCompany/captain-food/pull/486) already carried the runbook, the
+k3s CNPG overlay and the smoke overrides. Re-sequenced again by §45 **SEQ-1**.
+
+✅ **CUT-1 — (B), the rule.** The cutover gets a **rule** rather than a list: *IN = only what the empty
+log or a traffic pause makes cheaper*. That admits the storage split and excludes the pooler, the API
+tier and the runtime decomposition — and it **immediately withdrew STO-4's sequencing**.
+
+✅ **DB-HA — (A), three instances — recorded, NOT incurred.** With `podAntiAffinityType: required` on
+a hostname topology, `instances: 3` on one node leaves two pods `Pending` forever. A is the EUR 67.80
+trio; its +EUR 41.20 is unpayable until the EUR 26.60 base is, and **the 60 Gi of PVC it implies is
+unpriced anywhere in the repo**. ⚠️ The runbook cited for the sizing detail **does not exist**.
+
+✅ **SIR-1 (= Q-L2) — all NO, and the closure is on ATTESTATION, NOT INSPECTION** (legal lens; **not
+clearance**). The two neutralisations owed before any re-sync are live in the tree. ⚠️ **The Art. 21
+blocker survives forward-looking** — `RestaurantListingOptedOut` folds into **nothing**.
+
+✅ **Q-L3 — no.** Load-bearing in two directions: it supports the empty-log window that JRN-1 and
+CUT-1 both spend, and it dates the trigger the legal brief keys on.
+
+✅ **KEY-1 — delete it now**, as instructed. ⚠️ The key's identity appears nowhere in the repo and
+this record does not invent one.
+
+⚠️ **Q-L1 is the one row still open**, and it is a legal precondition rather than a backlog item.
 
 | # | Decision | Options & the trade-off | Answer / status |
 |---|---|---|---|
-| **INV-1** ✅ **CLOSED IN FULL — the acceptance criterion was ANSWERED 2026-08-13** | **No infrastructure spend until a working version can be seen.** Verbatim: *"I'm waiting for a working version before paying OVH"*. Recorded as its own row because it re-points work that was already ranked and creates a **spend gate with no stated exit**. *"A working version"* carries no acceptance criterion, so it can be argued satisfied and argued unsatisfied on the same evidence | **The team's proposed criterion, offered to be confirmed or replaced: smoke L1→L4 green on local k3s, PLUS a recorded browser walk — order placed, paid, restaurant told, tracking moves without a reload, order completes.** Both halves are load-bearing and neither substitutes: `prod-smoke.sh` never opens a browser (it is *structurally* incapable of seeing an unmounted page — the defect class PROP-20260809-021351 §2 was written about), and a browser walk cannot assert a Stripe capture. **Rejected fallbacks, with reasons**: **(i) a cheap interim host (Render + Supabase)** — a recorded crash-test rejection, so re-adopting it is a **decision reversal**, and it is a second deploy path to run at the exact moment the first is being proved; **(ii) a recorded-walkthrough-only artifact** — satisfies the letter of the gate and proves nothing about the pipeline, which is what the gate is for | ✅ **CLOSED 2026-08-12 as the inversion; the acceptance criterion ANSWERED 2026-08-13 — see the resolution at the end of this cell.** **The path is a MERGE, not a build** (farley, verified): `origin/cutover-local-rehearsal` / draft [PR #486](https://github.com/TheCaptainCompany/captain-food/pull/486) already carries the local-rehearsal runbook, the k3s CNPG overlay (`local-path` for `captain-db-retain`, OVH `backup:`/`managed:` dropped), the generated monolith overlay and the `SMOKE_SCHEME` / `SMOKE_PUBLIC_BASE` / `SMOKE_ADMIN_BASE` overrides — with **L1+L2 passing and 45/45 migrations on an empty database**. On `main`, `tools/smoke/prod-smoke.sh:41,48-49` hardcodes `https://api.${SMOKE_BASE_DOMAIN}` with the domain defaulting to `captain.food` and **no scheme or base override**, i.e. an unroutable base URL with production down. **Two gaps outside the merge**: `SUPABASE_SECRET_KEY` as its own repository secret (hard-stops L3, and L4 is downstream of L3 — #486 already switches the workflow off `RENDER_API_KEY`, whose lookup read the key *off the Render service* and so could never verify a non-Render target; ⚠️ presence is a **confirmation**, not necessarily an action — STATUS records a secret of that name existing on 2026-08-09, `render-config-sync` run 31335187939), and **a webhook ingress for L4's `CAPTURED` assertion** (the overlay applies the Ingress object and nothing serves it). **LOCAL IS DEMO, NEVER EVIDENCE** (farley): the overlay strips `barmanObjectStore`, so WAL archiving, base backups and the restore drill are untested and at `instances: 1` that is the only recovery path — **the restore drill is the first post-provisioning act**, and no recovery claim may cite the rehearsal. **⇒ RESOLVED 2026-08-13** ([ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md), ten-lens `Consulted:` block): the founder replaced the team's two-half proposal with his own criterion, verbatim *"For the acceptance, i need to have all the dbs, apps deployed locally and working without considering the authentication contraints with supabase from the creation of the customer, payment authorisation, order creation order accepted delivered payment captured"* — **six observable clauses** (customer created → payment authorised → order created → accepted → delivered → captured) asserted through the deployed local stack's own API and read models, **plus a browser walk of storefront + backoffice queue** (the rider leg may be a labeled script). **The browser-walk-with-login half drops from gating to demo artifact**: login ([#529](https://github.com/TheCaptainCompany/captain-food/issues/529)/[#532](https://github.com/TheCaptainCompany/captain-food/issues/532)) is OUT of acceptance and is the named first lane after it, with [#533](https://github.com/TheCaptainCompany/captain-food/issues/533) opening the first-real-order gate. **Two stated assumptions** (correctable at zero cost): *all the apps* = the monolith until the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358) cutover (CUT-1 = B excluded the fleet), and *creation of the customer* = the real `verifyPhone` via Supabase's test-phone/static-OTP facility. **The criterion's biggest finding is a D2 record↔code drift**: his clause order restates [ADR-20260808-195315](../adr/ADR-20260808-195315-customer-brief-answers.md) §1.2 (*"Authorise on checkout. Capture on delivered / picked up"*) while the implementation captures at confirm and materializes the Order on `PaymentCaptured` (`rules.yaml#/OrderMaterializedOnPaymentCapture`; no `AUTHORIZED` state; `capture_method` unset in the Stripe adapter) — implementing D2 joins the acceptance path as its own GREEN slice, cheap inside the empty-log window. The program of record and the honesty sentence (*the walk certifies the machine, never that a customer can use it*) live in the ADR |
-| **CUT-1** ✅ **CLOSED 2026-08-12 — (B), the rule** | **What is IN the cutover?** A list would need re-opening for every later candidate | **(A) An enumerated list** of admitted work. **(B) A rule: IN = only what the empty log or a traffic pause makes cheaper.** A change is IN if doing it later means a data migration or a paused checkout, and OUT if it is the same work at any time | ✅ **(B).** Ticked explicitly **IN**: **the storage split — per-boundary + per-adapter databases** (§32 + ADP-1's six adapter databases; **eleven** total). **NOT ticked, therefore OUT**: the **pooler** (STO-4), the **API-tier split** (§34), the **runtime decomposition** into the **56**-bin fleet (57 until [#500](https://github.com/TheCaptainCompany/captain-food/issues/500) retired `worker-journal-sweep`). Run through the rule: eleven databases created empty vs created by migration under load — IN; a deployment-topology component whose cost is identical whenever it lands — OUT; crate and manifest work unaffected by log contents — OUT. **The rule is the durable output**: it decides the next candidate without another sitting. **What the rule admits that nothing yet builds**: eleven databases mean eleven migration chains and eleven schema-version expectations, where today there is one chain and one `REQUIRED_SCHEMA_VERSION` — [#514](https://github.com/TheCaptainCompany/captain-food/issues/514), a precondition of the split being IN rather than a follow-up to it |
-| **DB-HA** ✅ **CLOSED 2026-08-12 — (A), three instances, inside the cutover** | **Does the database go to three instances, and when?** `deploy/platform/cnpg/cluster.yaml` is `instances: 1` today, with the 3-instance quorum-synchronous ladder fully written and unreferenced in `deploy/platform/cnpg/ha/` | **(A) Three instances, inside the cutover** — one climb, no second maintenance event, and the ladder is already written. **(B) Stay at one and climb later** — ADR-20260807-114122's own sequencing (*"when #242 lands or the first paying restaurants arrive"*), cheaper today and a supervised event later | ✅ **(A)** — and **three money facts, because an answer is not a payment.** (1) **A is RECORDED, NOT INCURRED**: the +EUR 41.20/mo it implies is unpayable until the EUR 26.60/mo base is, and INV-1 says the base is not paid until a working version is seen. (2) **Three instances imply three NODES, and that is inside his answer**: `cluster.yaml` sets `enablePodAntiAffinity: true` + `podAntiAffinityType: required` + `topologyKey: kubernetes.io/hostname`, so on ONE node `instances: 3` leaves **two pods `Pending` forever** and quorum-sync would block every write — A is the **EUR 67.80/mo** trio (3 × d2-8 + LB S), not EUR 26.60 plus a flag. (3) **The volume leg is UNPRICED**: the cluster requests **20 Gi** on a `Retain` `cinder.csi.openstack.org` `type: high-speed` class, so three instances is **60 Gi**, and **no per-GB price appears anywhere in the repo** — [ADR-20260807-114122](../adr/ADR-20260807-114122-mks-starts-at-one-node.md) cites `docs/runbooks/mks-bootstrap.md §2` for the sizing detail and **that file does not exist** (`docs/runbooks/` is absent from `main` entirely; it exists only on the #486 branch, as the rehearsal runbook). The recorded trio price is a compute+LB figure with a storage line missing |
-| **SIR-1** (= **Q-L2**) ✅ **CLOSED 2026-08-12 — all NO; *delete and record the destruction*** | **The retroactive SIRENE exposure.** Did the paused registry sync leave real INSEE rows, streams, outreach or a recorded refusal behind? | Answers, verbatim in kind: **the database no longer exists** · **no registry rows** · **no `Restaurant-*` streams** · **no outreach was ever sent** · **no refusal was ever recorded**. Instruction: *delete and record the destruction* | ✅ **CLOSED — and the closure is on ATTESTATION, NOT INSPECTION** (legal lens; **not clearance** — ADR-20260812-143619). Nothing can now be inspected: the store that would evidence absence is the store that is gone. **Four things make the attestation evidential** and are the ADR's follow-ups: (1) state **how and when** the rows ceased (which store, deleted how — project deletion, not row deletion); (2) **capture the current project list while absence is still inspectable** — after the next provisioning it is unobtainable; (3) state whether **any backup/PITR window survives**, because a surviving window means the rows are offline rather than ceased; (4) **name who attested, and on what date**. **Two neutralisations owed BEFORE any re-sync, both live in the tree**: `.github/workflows/sirene-sync.yml` is paused only by a commented-out `cron` and **deliberately keeps `workflow_dispatch`**, writing `external_sirene_restaurants` from `secrets.DATABASE_URL` — one dispatch against a new store re-creates ~200k real INSEE rows with every gate green; and that **`DATABASE_URL` secret must be revoked and the revocation LOGGED** as part of (1). **The Art. 21 blocker SURVIVES forward-looking** ([#505](https://github.com/TheCaptainCompany/captain-food/issues/505)): verified, `RestaurantListingOptedOut` folds into **nothing** (`crates/application/src/generated/projectors.rs:59` is `DomainEvent::RestaurantListingOptedOut(_) => state`), so unpausing the sync stays blocked — the retroactive question is closed, the prospective one is not |
 | **Q-L1** ⚠️ **PARTIALLY CLOSED 2026-08-12 — three fields + a mediator STILL FOUNDER-OWED** | **The publishable identity block** (mentions légales / privacy notice) for the application, not the landing page | Remark, verbatim: *"Use the same info from join.captain.food"* — no fields supplied | ⚠️ **Partially resolves.** **Published today** (fetched 2026-08-12, `join.captain.food/mentions-legales` + `/confidentialite`): éditeur **and** controller = *association Caring Hope Foundation*, loi 1901, déclarée à Tours, RNA **W372020229**; rights contact **miam@captain.food**; host block **GitHub Pages / GitHub, Inc.**; pilot lawful basis = consent; retention ≤ 24 months; CNIL route named. **STILL FOUNDER-OWED, because the pages do not carry it**: a **postal address** (the page says *"Siège social : Tours (Centre-Val de Loire), France"* — a city, not the siège social as filed) · **a publishable phone** (absent from both pages) · **a named directeur de la publication + its statutory title** (the page says *"le·la représentant·e légal·e de l'association"* — a description, not a name). **Legal's instruction is VERIFY, DO NOT COPY, and two of its reasons are checkable**: the **host block is wrong for the app** (landing = GitHub Pages; the app host becomes OVH/CNPG, so copying publishes a false hosting declaration), and **no consumer mediator is named anywhere on either page** — a launch blocker in its own right, and not something the landing page can be mined for. Tracked as [#515](https://github.com/TheCaptainCompany/captain-food/issues/515) (the three missing fields + the mediator), so the owed items have an issue and not only a register row |
-| **Q-L3** ✅ **CLOSED 2026-08-12 — no** | **Is there a real phone-verified end user?** Asked because several windows the team is spending depend on the answer | **(yes)** — the empty-log window is already gone and the DPIA/erasure/mediator deadlines have passed. **(no)** — the window is real | ✅ **No.** Load-bearing in two directions: it **supports the empty-log window** JRN-1 and CUT-1 both spend, and it **dates the trigger** the legal briefs already fix — the **first real customer order**, simultaneously the Art. 35 DPIA deadline, the Art. 17 erasure trigger and the médiation-de-la-consommation registration deadline. **It is true today and stops being true at the first walk that is not the team's own** — which INV-1's criterion deliberately keeps synthetic |
-| **KEY-1** ✅ **CLOSED 2026-08-12 — delete it now; ⚠️ the referent is not recorded** | **A stray key.** Raised on the queue page | — | ✅ **Delete now**, as instructed. ⚠️ **The key's identity appears nowhere in the repo and this record does not invent one** — the identification is owed by whoever raised the row. The adjacent revocation that *is* identified is **SIR-1's `DATABASE_URL`**, a different credential that does not discharge this one |
-
-**Two recorded corrections landed with this sheet and are NOT rows** — they are substance already
-decided, whose *sequencing* or *evidence* was wrong. Both are recorded as corrections rather than
-silent edits: **STO-4's sequencing is WITHDRAWN by the DBA lens** (§32, in place — the pooler is a
-precondition of the **bin-fleet flip**, not of the storage split), and **PROP-20260809-021351's gap
-table was STALE and is corrected in place** (G5/G6/G7 fixed; C1 half-fixed; G7b/G8/C2 live).
-
-**And the re-ranking, with the method clause that justifies it** (architect, under
-[ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md) and
-[docs/BACKLOG.md](../BACKLOG.md)): **[#429 "Production with test data"](https://github.com/TheCaptainCompany/captain-food/issues/429)
-is re-pointed off OVH onto local k3s WITHOUT re-scoping** —
-[ADR-20260809-050000](../adr/ADR-20260809-050000-morning-brief-eight-decisions.md) fixed its target as
-the **production deployment**, and the inversion changes the host, not the target; under *"local is
-demo, never evidence"* a local walk satisfies INV-1's spend gate and does **not** close #429, which
-closes on the provisioned cluster. **The [#494](https://github.com/TheCaptainCompany/captain-food/issues/494)
-storage chain drops below it** on the method clause *value-first: foundations first, then features in
-value-stream order* — a foundation that cannot be applied is not first, and #494 lands **at** a cutover
-that is now downstream of a payment decision it cannot itself unblock. **Nothing was re-ranked to make
-it dispatchable**, and no `Priority` bucket was moved to legitimise a recommendation.
 
 ---
 
 ## 36. Supabase Auth for V0 — ✅ CLOSED 2026-08-13 ON A FOUNDER ANSWER
 
-One answer, a full ten-lens mob read before it was recorded, and a **correction** underneath it. The
-record is [ADR-20260813-004634](../adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md)
-(`Consulted:` block per [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md));
-this row is the queue trace, so the answer is not the only evidence the question was asked.
-
-**The correction is the reason the row exists.** The question was opened by *"Don't care about the
-Supabase keys because we going to use our own Postgres hosted on Kubernetes"* — **the premise was
-already true and the inference was not**. The database has been self-hosted CloudNativePG in-cluster
-since [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md); Supabase is
-the **identity provider only** and holds no business data (`specs/services.yaml`, the `identity`
-capability wrapped by `supabase-acl` per ADR-0015); and `SUPABASE_SECRET_KEY` gates **authentication,
-not storage** — unset, it fails closed and login degrades to a fresh-OTP retry
-(`specs/common/configuration.yaml`). Hosting our own Postgres therefore does not retire that key, and
-it stays the hard stop §35 INV-1 already recorded against smoke L3/L4.
-
-| # | Decision | Options & the trade-off | Answer / status |
-|---|---|---|---|
-| **IDP-1** ✅ **CLOSED 2026-08-13 — retain, with a DATED reversal window** | **Do we own identity, or keep the provider for V0?** Raised by the key question above; the answer decides whether the token verification path is touched before the demo | **(A) Retain Supabase Auth.** EUR 0 delta at V0 volumes; **the SMS bill is identical either way** because OTP already goes out on **our own OVHcloud account** through the Supabase Send-SMS hook (`crates/infrastructure/src/integrations/ovh_sms.rs`, [ADR-20260722-174500](../adr/20260722-174500-identity-federation-cross-tenant-personalization.md)) — so nothing per-message moves. Cost: a vendor on the auth path, and a reversal price that grows with every appended event. **(B) Self-host GoTrue now** — the cheapest moment there will ever be, but it requires editing `crates/server/src/auth.rs`'s `asymmetric_alg`, which accepts **asymmetric JWKS only, deliberately**, to kill `alg`-confusion forgery; GoTrue's default is symmetric. **(C) Build our own issuer** — rejected outright at V0 | ✅ **(A)**, verbatim: *"For the auth/identify we will use Supabase because it's free and easier"*. **All ten lenses recommended not self-hosting now** — unanimous. **⚠️ THE DEADLINE IS THE DURABLE OUTPUT, not the choice.** Two windows, both closing at the **first real order**: (i) **technical** — `domain_events.user_id` holds the **provider's subject** (`Principal::user_id()` = the Supabase `sub`, parsed into the envelope by `request_envelope()`), so a different issuer on an **immutable** log is an **upcasting migration**, free only while the log is empty; (ii) **legal** — with **Q-L3 = no real phone-verified end user** (dated **2026-08-12**, §35) a switch today is not a personal-data migration and triggers **no processor-exit obligations**. Recorded plainly: **if we ever intend to own identity, it lands before the first real order or it becomes materially more expensive.** That instant now carries a **fourth** trigger alongside the Art. 35 DPIA, Art. 17 erasure and médiation deadlines |
-
-**Four things stay true regardless of the answer, and are NOT closed by it** — listed here because
-they were surfaced by this review and would otherwise be lost with the question. (1) The **claim
-contract** `captain_customer_id` + `captain_role` is an invariant of **any** issuer: a replacement
-must emit exactly those or the authorization boundary moves while the schema does not. (2) The **SMS
-provider is our own Art. 28 processor** either way. (3) **SMS-pumping fraud** on an unguarded OTP
-endpoint is a real money risk (hundreds in a night) and **no rate limit or `+33` allowlist exists
-anywhere** in `crates/server` or `crates/application`. (4) The **auth-session handoff has no
-observability contract at all** — `specs/observability.yaml`'s `customer-identification` covers the
-command path and stops there, while `crates/server/src/auth_routes.rs` collapses `absent | expired |
-wrong_owner | decrypt_failed | not_configured` into status codes and **discards the cause**, so an
-operator cannot distinguish a misconfigured `AUTH_SESSION_KEY` from a user who waited too long. Plus
-one UX defect: the **OTP rejection message has no translation key**
-(`specs/screens/captain_frontoffice.yaml:166` and `restaurant_frontoffice.yaml:213` bind
-`{{ otp_error_message }}` rather than `$ref`-ing the catalog), so the worst moment of the login flow
-is the one un-localized string on the sheet.
-
-**What this un-blocks for the demo leg, concretely**: identity needs **two** things, not one — the
-existing key **and pod egress to `SUPABASE_JWKS_URL`** (blocked egress fails exactly like an absent
-key: every token unverifiable, every request anonymous), and egress is checkable in minutes. The
-**payment leg needs no ingress**: `stripe listen --forward-to` reaches the local stack outbound
-through the hosts entry the rehearsal runbook already writes, and the CLI's own signing secret
-satisfies the fail-closed `STRIPE_WEBHOOK_SECRET` boot gate — real Stripe, real signature, not a shim.
-
-**One stale-spec correction is NAMED, not made** (records-only change): `specs/architecture/c4-l3.yaml`
-still describes the `supabase-acl` as sending OTP via *"Twilio; mock in dev"*, and the generated C4 +
-documentation carry it forward. `specs/services.yaml` is already correct (OVHcloud). It is a
-`specs/**` edit owing a SPEC-LOG row and is deliberately out of scope here.
+✅ **IDP-1 closed as (A)** — retain Supabase, with a **dated reversal condition**. Verbatim: *"For the
+auth/identify we will use Supabase because it's free and easier"*. **All ten lenses recommended not
+self-hosting now**, so the answer and the advice agreed. The wrapper stays identity-only — no business
+data in the identity provider, which §46 **IDENT-1** later made an explicit ruling.
 
 ---
 
 ## 37. Recorded intent must execute itself — ✅ CLOSED 2026-08-13 ON A FOUNDER DIRECTIVE
 
-Founder, verbatim: *"These things have been already said in the past I'm repeating myself."* A process
-defect, not a queue item — recorded and answered in the same turn by
-[ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md)
-(`Consulted:` block per [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)).
-This row is the queue trace so the directive is not invisible here. Two mechanisms, both light:
+Founder directive, verbatim: *"These things have been already said in the past I'm repeating
+myself"*. Record:
+[ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md).
 
-| # | Mechanism | Form (judged) | Status |
-|---|---|---|---|
-| **AR-1** | **Unrealized-directive sweep** — a ✅ DECIDED/Approved decision whose realizing work is neither merged nor in-progress surfaces at the top of every architect run | **Standing review step** (skill §3bis), **not** a validator rule: ~30 proposals carry an un-maintained `_(filled at completion)_` while already shipped, and the offline gate cannot see the live-PR state that separates "dropped" from "in flight". Validator hardening is conditional on a header-hygiene pass and named as lower-leverage | ✅ CLOSED — skill edited this change |
-| **AR-2** | **A recorded behavioral guarantee carries its enforcing `rules.yaml` entry+test, or is flagged** — closes the gap ADR-0032 does not reach (prose in an ADR) | ADR template `Enforced by:` field + a cheap existence check + the review lens. Compiler-first has no purchase (an ADR is prose); auto-classify-and-block is NLP-hard and over-engineering — both rejected. Concrete closure: the capture-timing rule+test lands **inside #544**, keyed on a Captain authorization | ✅ CLOSED — template edited this change; the #544 rule is named work |
-
-Nothing here is founder-owed; it is team-owned under the lifted freeze but changes the operating
-model, so it carries an ADR's weight.
-
----
-
-## 37. Strix autonomous pentest — a first gated, sandboxed, defensive run — PROP-20260814-000240 (founder interest, 2026-08-14)
-
-Design record: [PROP-20260814-000240](PROP-20260814-000240-strix-security-audit.md), tracking issue
-[#548 "Evaluate Strix for a gated pre-launch DAST pass against our own endpoints (authorized defensive)"](https://github.com/TheCaptainCompany/captain-food/issues/548).
-**Authorized defensive** testing of our own pre-launch product.
-The proposal carries the six items the founder asked to settle, per-option pros/cons, a run-flow
-sequence diagram, and a `Consulted:` block (architect · farley · legal · beck · observability · dba ·
-business · ux). **Verdict: WORTH-IT-NARROWLY / GO-NARROWLY.**
-
-Two rows are **founder-owed**; the rest are team-owned engineering/legal-posture constraints recorded
-in the proposal (D-A sandbox containment, D-C compliance framing, D-Scope dev target + PoC-before-treat)
-because in each the safe option strictly dominates.
-
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **STRIX-1** ✅ **ADOPTED (A) — founder-delegated 2026-08-14** | **Adopt Strix for a single gated, sandboxed, bounded DAST pass against a DEV target, as a defensive pentest evidence pack for counsel?** It runs third-party exploit code and draws on our LLM quota, so adoption is an external-tooling/security-posture call | **(A) GO-NARROWLY** — one-off black-box pass on the running per-role endpoints; confirmed findings migrate to permanent CI tests; no white-box Rust scan, no standing scanner. **(B) GO-BROADLY** — adopt as recurring incl. source scanning (rejected: Rust heuristics = noise, ongoing quota bill, duplicates CI). **(C) NOT-WORTH-IT** — gates + a hand-written authz/cost suite only (rejected as *sole* posture: leaves the unenumerated adversarial surface — SSRF steering, error-path leakage, chained exploits — unprobed before launch) | ✅ **ADOPTED (A), founder-delegated 2026-08-14** (*"You don't need me for that … Go ahead team!!"*, the founder pasting back the decision list with its recommendations; authority [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)): GO for a **single gated, sandboxed, bounded, DEV-only** run; confirmed findings migrate to permanent CI tests; no white-box Rust scan, no standing scanner. **[PROP-20260814-000240](PROP-20260814-000240-strix-security-audit.md) → Approved, three Concerns checked** (sandbox-containment, quota-safety, compliance-framing). **GO authorizes proceeding to BUILD the D-A containment harness and RUN under the plan — NOT a raw run: the run stays gated behind the harness landing.** The real added signal is on runtime authz composition, the confirmed **no-GraphQL-cost-limit** gap, the ingress-dependent `X-Forwarded-Host` tenant precondition, SSRF on adapter outbound, and error-path secret leakage — all places our compiler/validator gates by construction cannot look |
-| **STRIX-2** ✅ **ADOPTED (A) — founder-delegated 2026-08-14** | **STRIX_LLM provider + quota**: an autonomous *looping* agent on the shared Claude proxy is a real cost/rate risk — we exhausted the account usage limit tonight with our own agents (reset 22:40 UTC) | **(A) Bounded run** — explicit scope + hard time cap + hard token cap on the shared proxy. **(B) Separate budget/key** — isolates the spend but is admin-gated provisioning, overkill for one run. **(C) Defer** until quota pressure clears — delays the pre-launch evidence pack | ✅ **ADOPTED (A), founder-delegated 2026-08-14**: bounded run with explicit scope + **hard time cap + hard token cap** on the shared proxy, the cap low enough that a runaway loop cannot starve the team's own loop; escalate to (B) a separate budget/key only if a first bounded run shows the cap is too tight to finish |
-
-**Both STRIX rows are ANSWERED (founder-delegated 2026-08-14) and the proposal is `Approved` with its
-three `Concerns` checked.** Dispatch is still **GATED**, not open: STRIX-1's GO authorizes *building the
-D-A containment harness and running under the plan*, so the dispatchable unit is the containment
-harness + bounded run — **it does not license a raw scan**, and it ranks **below the acceptance
-keystone** (INV-1 / [ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md))
-on the value stack. **The higher-leverage durable half the founder flagged is separable and does not
-depend on the Strix run**: the **GraphQL request cost/depth limiter** + its **cost-limit CI test** (the
-gap is confirmed independently of any scan — zero `depth`/`complexity` hits in
-`crates/server/src/graphql`), a matching **`specs/observability.yaml` request-cost contract** (none
-exists), and a permanent **authz-matrix CI suite** (cross-tenant / cross-role negatives). The cost/depth
-limiter is filed as its own peak-readiness issue (2026-08-14 architect run) and ranks HIGH near the
-acceptance work — the founder called it higher-leverage than Strix.
+✅ **AR-1 and AR-2 both CLOSED**, both trimmed to their **light** form. **(1) The unrealized-directive
+sweep** is a standing `architect`-run step, **not** a validator rule — ~30 proposals carry an
+un-maintained `_(filled at completion)_` while already shipped, so the header signal is mostly false
+positives and an offline gate cannot see the live-PR state that separates "dropped" from "in flight".
+**(2) A recorded behavioural guarantee carries its enforcing `rules.yaml` entry and test** — an
+`Enforced by:` field on the ADR template, a cheap existence check, and the review lens. The
+compiler-first and auto-classify-and-block forms were judged and **rejected as over-engineering**.
 
 ---
 
 ## 38. Capture-on-delivered review carry-forwards — PR #545 five-lens review (2026-08-14)
 
-The five-lens review of [PR #545 "capture on delivered"](https://github.com/TheCaptainCompany/captain-food/pull/545)
-(tracking issue [#544](https://github.com/TheCaptainCompany/captain-food/issues/544)) surfaced items
-that are **not code fixes** — those are with the executor on branch `544-capture-on-delivered`, now in
-a **post-review fix round** (a CRITICAL circular read dependency made capture inert; being fixed
-on-branch) — but that must be recorded so they are not lost, the anti-repeat discipline of §37 /
-[ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md).
-**One row is founder-owed (LOSS-1); the other four are team-recorded in their proper homes and
-pointered here so this page stays the single index.**
+Four of the five carry-forwards from the [PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545)
+five-lens review are team-recorded in their proper homes. **One row is founder-owed and is
+deliberately kept open**: it was added *after* the 2026-08-14 delegated list and commits Captain to
+absorbing real money, so it is outside that delegation's explicit scope.
+
+**The forward-trap the `dba` lens caught**, recorded here because it has no issue to attach to yet:
+the decided per-service-type posture's unbuilt **at-table advance-capture arm**, dropped on top of
+#545's authorize-first design, would let a `PaymentCaptured` on a still-`PENDING` payment drive
+`PENDING→CAPTURED`, swallow the following `PaymentAuthorized`, and never fire `PlaceOrderProcess` —
+**money captured, order never materialized**. When that arm lands, `PlaceOrderProcess` MUST also
+materialize on `PaymentCaptured`-from-`PENDING`, pinned by a test.
+
+**The `business` lens reframed same-day-only scheduling as a SOLVENCY constraint, not capacity**: a
+~6-day-out order meets a ~7-day authorization expiry → `AUTHORIZATION_EXPIRED` on a fulfilled order,
+so multi-day scheduling MUST ship [#175](https://github.com/TheCaptainCompany/captain-food/issues/175)
+re-authorization first. The `legal` lens's seven counsel questions and two forward notes are in
+[BRIEF-20260814-capture-on-delivered-counsel-packet](../legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md);
+**no lens output is legal clearance**.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
 | **LOSS-1** 🟠 **FOUNDER-OWED — open 2026-08-14** | **Permanent-capture-failure loss allocation + operator runbook.** When a post-delivery capture ultimately fails (authorization dead, card permanently declined) on a **fulfilled** order, the food COGS and rider payout are already sunk — an **unbounded per-incident loss**. Under Connect separate charges & transfers the mechanical split is *restaurant eats COGS / Captain eats rider payout*. There is **no recorded write-off threshold, retry SLA, or comp-vs-pursue owner**; the current plan pages an operator, which is a fine V0 stopgap **only if a runbook exists**. Sets platform financial liability and the supply-side promise, so it is founder-owed | **(A) Captain absorbs** up to a recorded per-incident write-off threshold and makes the restaurant whole; above the threshold, escalate to recovery. Pros: protects the supply side (restaurant made whole), simplest consumer story. Cons: platform liability needs a funded reserve. **(B) Loss falls where the transfer would have** — restaurant eats COGS, Captain eats rider payout (the mechanical split). Pros: no cross-subsidy, matches money movement. Cons: the restaurant bears a loss for a card/consumer failure it did not cause — corrosive to the supply side Captain is trying to win. **(C) Pursue the consumer** for the fulfilled order (recovery posture). Pros: the consumer received the food. Cons: consumer recovery in France is legally/operationally heavy (legal packet CAP-7) and likely uneconomic per incident. |✅ **recommend bounded (A) for V0** — absorb up to a recorded threshold + make the restaurant whole, with a documented retry SLA (N attempts over M days before declaring permanent) and a **named operator owner** for the comp-vs-pursue call; escalate to (C) only above the threshold and only after counsel confirms the recovery framing (CAP-7). **Not dispatchable until answered — the paging stopgap is acceptable ONLY once the runbook (threshold, SLA, owner) exists.** **⚠️ ARCHITECT VERDICT 2026-08-14 — KEPT OPEN / FOUNDER-FLAGGED, deliberately NOT closed under the 2026-08-14 delegation.** LOSS-1 was added to this page **after** the decision list the founder pasted back with *"You don't need me for that … Go ahead team!!"*, so it is **not within the explicit scope** of that delegation. Three reasons it stays founder-owned despite the general delegation spirit: **(1)** it commits Captain to **absorbing real money** and standing up a **funded reserve** — a platform financial-liability policy, a different class from the product-shape choices (STRIX / D8–D11) the delegation covered; **(2)** over-reaching on a money-absorption policy is the **worse error** — the register's own rule is to default to OPEN in genuine doubt, and there is genuine doubt here; **(3)** it has a **legal leg** (CAP-7 recovery framing) that no lens output can clear (ADR-20260812-143619). The team's recommendation — bounded (A), absorb-to-threshold + make the restaurant whole + documented retry SLA + named operator owner — **stands as the recommendation awaiting founder sign-off**; the operator runbook may be drafted, but the write-off threshold, the reserve and the absorb-vs-pursue policy need the founder |
 
-**Team-recorded carry-forwards (pointers, not decisions):**
-
-- **Forward-trap hazard (dba lens)** -> recorded on
-  [PROP-20260726-165000 D2](PROP-20260726-165000-marketplace-economics-and-money-movement.md)'s
-  decision note. The decided per-service-type posture's **unbuilt at-table advance-capture arm**,
-  dropped on top of #545's authorize-first design, would let a `PaymentCaptured` on a still-`PENDING`
-  payment drive `PENDING→CAPTURED` (`specs/payments/actors.yaml:22`), swallow the following
-  `PaymentAuthorized`, and never fire `PlaceOrderProcess` — **money captured, order never
-  materialized**. Not reachable today (manual-capture DELIVERY/COLLECTION closes the ordering). Build
-  constraint when the arm lands: `PlaceOrderProcess` MUST also materialize on
-  `PaymentCaptured`-from-`PENDING`, pinned by a test. No at-table `ServiceType` exists yet
-  (`specs/common/scalars.yaml:271-276`), so it has no issue to attach to — attach when one is opened.
-- **Solvency coupling (business/dba)** -> recorded on
-  [PROP-20260726-164500 D6](PROP-20260726-164500-order-operational-safety.md). Same-day-only
-  scheduling is now a **solvency** constraint, not capacity: a ~6-day-out order meets a ~7-day auth
-  expiry → `AUTHORIZATION_EXPIRED` on a fulfilled order. Any future multi-day scheduling MUST ship
-  [#175](https://github.com/TheCaptainCompany/captain-food/issues/175) re-authorization/off-session
-  charging **first** (hard dependency).
-- **Legal counsel packet (legal lens)** -> [docs/legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md](../legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md):
-  seven counsel questions for a French avocat (CAP-1 agent status; CAP-2 hold lifecycle; CAP-3 L221-5
-  disclosure floor; CAP-4 refund-vs-release wording; CAP-5 VAT tax-point at capture/delivery on the
-  captured amount; CAP-6 post-void hold visibility; CAP-7 recovery posture on
-  capture-failure-after-fulfilment — the legal half of LOSS-1) plus two forward notes (the unbuilt
-  VAT-receipt engine must key the tax-point to capture/delivery on the captured amount, never
-  authorization/order; the `checkout.email "for receipt"` promise must not fire a "sale complete"
-  receipt at authorization). **No lens output is legal clearance** (ADR-20260812-143619).
-- **Observability completeness (ADR-20260811-014129)** -> a **`bam` settlement-funnel projection** is
-  owed: authorize→capture rate, release rate and capture-failure rate as a declared `fold:` over
-  `domain_events` (`PaymentAuthorized/Captured/Released/CaptureFailed`) keyed by `restaurantId`, read
-  through a tenant-scoped GraphQL query and tied to a persona activity in `specs/stories.yaml` — NOT
-  only OTLP counters (the *alertable* failure counter correctly stays OTLP). Team-owned completeness
-  follow-up under the business-metrics program ([#484](https://github.com/TheCaptainCompany/captain-food/issues/484));
-  tracking-issue text drafted in the 2026-08-14 architect run report, issue to be created.
-
 ---
 
 ## 39. Per-instance authorization — a cross-tenant IDOR on BOTH sides, 83 of 118 operations — [#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178) + [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618) / PROP-20260726-171500 (architect run, 2026-08-14; **SCOPE CORRECTED 2026-08-17**)
 
-> ⚠️ **SCOPE CORRECTION, 2026-08-17 — this row understated the defect, and that is itself the finding.**
-> As first written (2026-08-14) this row described a cross-tenant **write** IDOR on the order
-> lifecycle. The real surface is **both sides and most of the API**. The correction is recorded here
-> rather than in a new row because a second row would leave the smaller claim standing; `#618` remains
-> the work item for the read half. **The verdict, the AMBER lane status and the deadline are
-> UNCHANGED** — only the scope of what the deadline covers.
->
-> **Why correcting it is worth a session** (`legal-specialist`, 2026-08-16): a risk record that
-> describes a **smaller** defect than the one that exists is **weaker evidence than no record at all**.
-> A regulator or an acquirer reading an accurate register sees a team that knows its own system; one
-> reading an understated register learns instead that the team's self-assessment is unreliable, and
-> every other row inherits that discount. Corrected, this row goes back to being the **Art. 5(2)
-> accountability asset** it was meant to be. The obligation map behind that judgment is
-> [BRIEF-20260816-idor-obligation-map](../legal/BRIEF-20260816-idor-obligation-map.md) — **not legal
-> advice and not clearance**.
->
-> **The corrected scope** (`graphql-architect`, verified against `origin/main` 2026-08-16 by reading
-> port signatures and the SQL behind them; the counts below were re-derived independently on
-> 2026-08-17 where cheaply reproducible, and each is marked):
->
-> - **76 of 86 mutations** carry a role with **no proven domain binding** — *re-derived*: 73 declare a
->   non-`ADMIN`/`SYSTEM`/`PUBLIC`/`EXTERNAL` role, plus the 3 role-less cart mutations. They fall in
->   **two classes with different fixes, which is why "strip the ids from the payload" is not the fix**:
->   - **37 BINDABLE** — a payload field *is* the caller's own scope (`cmd.restaurant_id`, `cmd.rider_id`).
->     Fix: prove `field == the verified claim`. No read required.
->   - **39 UNBINDABLE** — ***no payload field corresponds to the caller at all***, so removing ids from
->     the payload changes nothing. Fix: a **participant check against folded state the handler already
->     loads**. `approveRefund`/`denyRefund` are the worked example — *verified*: roles
->     `[RESTAURANT, ADMIN]` (`specs/payments/api.yaml:159`), payload `{orderId, amount, reason}`
->     (`ApproveRefundInput`, `inputs.rs:1147`), **no identity consulted anywhere on the path**. A
->     refund is money movement decided by a caller nothing proves is a party to the order.
-> - **7 read surfaces with no `ReadScope`** — filed as
->   [#618 "Read surfaces missing `ReadScope` — the read half of the write-path authorization gap (#178)"](https://github.com/TheCaptainCompany/captain-food/issues/618)
->   (`type/bug`, `area/gdpr`, `area/security`; open, verified 2026-08-17).
->   **Two of them return other tenants' data when called with NO ARGUMENTS**, because the filter is
->   `Option<…>` and the query carries no tenant predicate — *verified*: `restaurant_reclamations`
->   (`query.rs`, `input: Option<RestaurantReclamationsQueryInput>` → `unwrap_or_default()` →
->   `repo.list(filter)`, and the filter type has no restaurant field to narrow with). At least one more
->   surface has the **identical** shape — `deliveryPartnerAvailabilities`, whose spec records the gap in
->   so many words (`specs/delivery/api.yaml:75`, *"no per-owner narrowing in this slice (a recorded
->   gap)"*). **Correction 2026-08-17: #618 does NOT own that list.** This row previously said *"#618
->   owns the authoritative list of which two the title counts"*; the issue body carries no enumeration
->   of surfaces at all, and its title is *"Read surfaces missing `ReadScope` — the read half of the
->   write-path authorization gap (#178)"* — the *"Seven read surfaces … and two return the whole
->   platform"* wording quoted in four records was a **proposed** title that was never applied. Both
->   errors are the same shape as the defect this section is about: **a record asserting that a control
->   or an artifact exists somewhere else, which nobody re-checked.** The enumeration now lives here,
->   verified resolver-by-resolver: the **six** corrected sites above, plus **`reclamation`** (`by_id`
->   with no scope, roles include CUSTOMER — see the note below) and **`deliveryPartnerAvailabilities`**
->   (which already documented its own gap honestly). Whoever works #618 should paste this list into it.
->   **The specs asserted a control the code does not have — ✅ CORRECTED 2026-08-17**, and the sweep
->   found **SIX sites, not the two named here**. The two known (`specs/ordering/api.yaml:207`
->   *"Restaurant/ownership scoping is enforced server-side"*, which contradicted its own next sentence,
->   and `specs/comms/api.yaml:58` *"Ownership enforced server-side"*) plus **four the register did not
->   know about**, each verified against its resolver: `restaurantDeliverySatisfaction`
->   (`specs/ordering/api.yaml`), `orderConversation` (`specs/comms/api.yaml`), **`pendingRefunds`**
->   (`specs/payments/api.yaml` — the *money-path* one: `restaurantId` is an OPTIONAL caller filter, so a
->   RESTAURANT credential that OMITS it reads every restaurant's refund queue) and
->   `restaurantLocationsByAccount` (`specs/network/api.yaml`). All six now state what is actually
->   enforced and point at #618/#178. **Nine sibling sites carrying the same phrasing were verified TRUE
->   and left alone** (`carts`, `cart`, `orders`, `order`, `delivery`, `restaurantDeliveries`,
->   `orderStatusChanged`, `operationStatus`, `paymentStatus` — all genuinely `ReadScope`- or
->   ownership-checked), so the phrasing is *not* uniformly false and each site had to be read against
->   its resolver individually. SPEC-LOG row landed in the same commit.
-> - **⚠️ `reclamation` — an unscoped surface the prose fix did NOT reach, and it is the one that matters
->   most** (found 2026-08-17, **not fixed, no issue of its own yet**). The resolver is
->   `repo.by_id(input.reclamation_id)` with **no scope argument**, and `roles:` includes **CUSTOMER**.
->   It was left out of the prose sweep on a defensible but narrow rule — its description asserts no
->   control, so there was no false claim to correct — yet the *exposure* is the sharpest on the read
->   side. Combine three facts already in this register: **(1)** customer signup is **self-service**, so
->   anyone can hold a CUSTOMER credential; **(2)** `reclamation` returns any claim **by id** to any
->   customer; **(3)** finding (i) of the obligation map names **reclamation descriptions** — alongside
->   conversation threads — as the unbounded free-text prose that predictably carries **Art. 9(1)**
->   special-category data. So a stranger who registers with a phone number reads other customers'
->   complaint text. `orderConversation` has the identical shape and is corrected in prose only — **the
->   prose fix changes nothing about the exposure of either.** Whoever works #618 owns both.
-> - **Headline: 83 of 118 operations** (76 + 7). *Re-derived*: the denominator is 86 mutations + 32
->   queries across `specs/*/api.yaml`; the **3 subscriptions are excluded** from it (121 operations
->   in total), so quote "118" only with that qualifier.
-> - **Partner authentication carries no per-partner identity, so a partner action cannot be attributed
->   to a partner** — *verified* in `crates/server/src/auth.rs`. This is **present tense**; it is not
->   gated on the first order, and it means the `EXTERNAL` role's audit trail is unusable for
->   repudiation today. **The storage detail is deliberately omitted from this public record**
->   (2026-08-17): unlike every other item in §39, this one describes the shape of a control protecting
->   **third parties'** access, and publishing that shape says something about *their* exposure before
->   *they* have been told. The specifics stay in the code, which is where a reader who needs them
->   already has them. **Action owed: the affected partners should be informed directly, before or as
->   this is published.** `legal-specialist` has raised — and it is **open, not answered** — whether a
->   **pre-contractual duty** attaches here, i.e. whether informing partners is a courtesy the team
->   chooses or an obligation it owes; that question is for counsel, and this row is not legal advice
->   or clearance.
->
-> **And the corrected cost of the fix.** The row's original *"smaller than the proposal estimates"*
-> claim rested on the read side resolving identity from JWT claims. That is true **on the read side
-> only**. On the **write** side the identity is resolved by a **database lookup in the mailbox worker**
-> — `MailboxCommandHandler::resolve_actor`, `crates/infrastructure/src/mailbox/handler.rs:244-257` —
-> and **only for `CUSTOMER`** (`customers.by_auth_ref(...)`); every other role takes the `else` branch
-> and gets `domain_id: None`. **Any claim of the form "we already have the identity at the handler" is
-> false today** for `RESTAURANT`, `RIDER`, `RESTAURANT_ACCOUNT` and `EXTERNAL`. The 39 unbindable
-> mutations need that bridge built before a participant check can run at all, and it is a read per
-> command on the write path — a peak-hours cost that has to be designed, not assumed away.
->
-> ✅ **THE DEADLINE IS NOW THE EARLIEST OF THREE TRIGGERS — FOUNDER ANSWER, 2026-08-17** (§45
-> **IDOR-DEADLINE**). Two lenses had argued the trigger bound one step too late — an IDOR needs **two
-> principals**, and the second credential exists at **onboarding**, not at the first order — and the
-> founder **enacted their proposal**. The deadline for closing the cross-tenant authorization gap is
-> the **earliest of**:
->
-> > **(i)** a second **restaurant** credential issued to anyone outside the team, ***including demos
-> > and pilots***; **(ii)** a **rider** credential issued to a non-team person; **(iii)** the **first
-> > real customer order**.
->
-> Under the superseded wording (*"before the first real order"*) a pilot restaurant handed a login
-> the week before launch sat inside an open cross-tenant window with no rule broken. That is closed.
-> [#178](https://github.com/TheCaptainCompany/captain-food/issues/178) and
-> [#618](https://github.com/TheCaptainCompany/captain-food/issues/618) carry the same wording as of
-> this run: #178 gained a `## Deadline` block with the three triggers and the published-deadline
-> condition, and **#618 already had it** — it was written to the lenses' proposal on 2026-08-16 while
-> this register still said *"recorded, not enacted"*, so the issue was ahead of the register and the
-> register has now caught up.
->
-> ⚠️ **AND THE TRIGGER SET HAS A HOLE, RAISED WHILE LANDING IT** — §45 **IDOR-DEADLINE-GAP**: all
-> three triggers are things the **team** does, and for `CUSTOMER` nobody issues anything (signup is
-> self-service, verified below). *Production restored with signup open* issues credentials outside the
-> team, reaches `orderConversation` and `reclamation` — the two unscoped free-text stores — and trips
-> **none** of (i), (ii) or (iii). It is carried today **only** by PROD-1 keeping production down.
->
-> **THE PUBLIC RECORD IS A CONDITIONAL ASSET — THE CONDITION IS THE DATE** (added 2026-08-17, on the
-> corrected premise that **this repository is public**; the condition `legal-specialist` attached to
-> the whole public-record posture, previously written nowhere):
->
-> > A public, dated, tracked record is a **stronger** accountability asset than a private one — it is
-> > provable against a third-party remote. But it also proves the team appreciated the severity. That
-> > is harmless while the deadline holds and toxic the day it lapses. **An open item past its own
-> > published deadline is the worst state available** — worse than having no record. The asset is
-> > conditional on the date being met, or publicly re-dated with a reason *before* it passes.
->
-> This binds every dated row in this register, not only §39. Re-dating is legitimate and cheap;
-> re-dating **after** the date has passed is not the same act and does not restore the asset.
->
-> **THE PUBLICATION-SPLIT CONTROL WAS THEATRE AND IS WITHDRAWN AND REPLACED** (2026-08-17).
-> The control previously recorded here, in `STATUS.md` and in the obligation map was: *"if production
-> is restored before the fix lands, the public posture page comes down until it does."* `legal-specialist`
-> **withdrew its own earlier recommendation** on the corrected premise: **holding back a summary
-> protects nothing when the source it summarises is public.** The code says everything the posture page
-> says and more, and a takedown buys zero secrecy while reading as suppression. It is replaced by the
-> control that is actually enforceable:
->
-> > Production may be restored. **No credential is issued to anyone outside the team until the
-> > write-binding lands** — tied to the existing trigger: the earliest of a second restaurant
-> > credential, a non-team rider credential, or the first real customer order. Enforceable at the auth
-> > provider rather than by promise.
->
-> **⚠️ THE GATE AS WRITTEN HAS A HOLE, VERIFIED THIS RUN — CUSTOMER SIGNUP IS SELF-SERVICE.** The
-> control above assumes credentials are *team-issued*. For CUSTOMER they are not: `requestPhoneVerification`
-> and `verifyPhone` both carry `roles: [PUBLIC, CUSTOMER]` (`specs/customer/api.yaml:38-46`) and
-> *"a first verified phone CREATES the Customer (CustomerRegistered)"* — **any stranger with a phone in
-> an allowlisted dialing code self-issues a CUSTOMER credential the moment the surface answers.** So
-> **the gate must be SIGNUP, not onboarding**: restoring production with signup open *is* issuing
-> credentials outside the team. Concretely, `orderConversation` accepts CUSTOMER, takes `orderId` from
-> the caller and applies **no ownership check** — a self-registered stranger reads any order's
-> conversation thread, which is exactly the unbounded free-text Art. 9(1) surface finding (i) of
-> [BRIEF-20260816-idor-obligation-map](../legal/BRIEF-20260816-idor-obligation-map.md) is about.
-> Today this is carried **only** by the surface answering 503. **Options: keep signup closed at the auth
-> provider while production runs, or close #618 before restoring.** Which one is a decision, not a
-> correction — recorded here, not taken.
->
-> **The non-legal argument points the same way and is the stronger one: `domain_events` is immutable.**
-> A hostile write is not deleted, it is **upcast** — the event stays in the log forever and every future
-> replay must carry a rule explaining it. The **empty-log window** the team is deliberately spending is
-> the whole reason this defect currently costs nothing, and **one stranger's write ends it permanently**.
-> There is no version of "clean it up afterwards" in an event-sourced system.
+Design record: [PROP-20260726-171500](PROP-20260726-171500-write-side-per-instance-authorization.md)
+(D1–D4 unanswered since 2026-07-26 and never surfaced in this register until 2026-08-14).
+Obligation map: [BRIEF-20260816-idor-obligation-map](../legal/BRIEF-20260816-idor-obligation-map.md)
+(**not legal advice, not clearance**).
 
-The L5 acceptance-walk executor ([#554 "Smoke L5 — acceptance lifecycle legs"](https://github.com/TheCaptainCompany/captain-food/issues/554) /
-PR [#555](https://github.com/TheCaptainCompany/captain-food/pull/555)) re-traced, and this run
-re-verified on `main`, a **cross-tenant write IDOR** already designed against by
-[#178 "Write-side per-instance authorization"](https://github.com/TheCaptainCompany/captain-food/issues/178) /
-[PROP-20260726-171500](PROP-20260726-171500-write-side-per-instance-authorization.md) (Status:
-**Proposed**, unapproved since **2026-07-26**). **Confirmed at every layer** (architect holds the
-security judgment; no subagent fan-out was available in this environment, so the trace was verified
-personally, file:line):
+⚠️ **This row was WRONG ABOUT ITS OWN SUBJECT until 2026-08-17, and the correction is the record.**
+It described a cross-tenant **write** IDOR on the order lifecycle. The real surface is **83 of 118
+operations on both sides**: 76 of 86 mutations with no proven domain binding (**37 bindable** /
+**39 unbindable**, where *no payload field corresponds to the caller at all*, so removing ids from
+payloads does nothing), plus **7 unscoped read surfaces**
+([#618](https://github.com/TheCaptainCompany/captain-food/issues/618)), two of which return other
+tenants' rows **when called with no arguments**. `approveRefund`/`denyRefund` consult no identity
+anywhere. The *"cheaper because claims"* premise is corrected too: the **write** side resolves
+identity by a database lookup in the mailbox worker, **only for `CUSTOMER`** — *"we already have the
+identity at the handler"* is **false today** for every other role, and `external_tokens` is a flat
+shared list with no per-partner identity.
 
-- `crates/server/src/graphql/acl.rs:98-106` — `RoleGuard::check` authorizes on the **URL PATH role**
-  only; it never consults the token's binding. A `RESTAURANT` token with **no** `restaurant_id` claim
-  becomes `Identity::Unbound { role: Restaurant }` (`crates/server/src/auth.rs:194-217`) and still
-  passes the `acceptOrder` guard.
-- `crates/server/src/graphql/generated/mutation.rs:6368` — `request_envelope` carries **only**
-  `user_id` (the JWT `sub`) and `user_type` (the role text) onto the mailbox `Envelope`; the verified
-  `Identity::Restaurant { restaurant_id }` / `Identity::Rider { rider_id }` binding is **dropped**,
-  never sent to the handler.
-- `crates/application/src/generated/handlers.rs:28-40` — `accept_order` authorizes via
-  `require_order(store, cmd.order_id, cmd.restaurant_id)`, both from the **client payload**
-  (`AcceptOrderInput`, `crates/server/src/graphql/generated/inputs.rs:940-944`).
-- `crates/application/src/commands.rs:1084-1094` — `require_order` matches the order's stored
-  `restaurant_id` against the **client-supplied** `cmd.restaurant_id` (internal consistency, trivially
-  satisfiable by an attacker who supplies the victim's pair), **never** the token binding.
-- `crates/application/src/commands.rs:1278-1303` — `accept_delivery` uses `cmd.rider_id` from the
-  payload, guarded only by delivery-job status; same class for `confirmPickup`/`completeDelivery`.
-- No `WriteScope` exists repo-wide; `ReadScope` (`crates/application/src/queries.rs:787`) is
-  read-only; `TenantScope` is read by **0** mutations (`grep` in `mutation.rs`).
+The rationale for spending a session on the correction, from `legal-specialist`: **a risk record that
+describes a smaller defect than the real one is weaker evidence than no record**, because it invites
+the question of how well the team knows its own system. The obligation map's two findings **survive
+the code fix** — free-text **Art. 9(1)** special-category prose needing an ordinary-case 9(2) basis,
+and **blast-radius unboundability** forcing worst-case notification.
 
-So a valid `RESTAURANT` token can accept/reject/ready/deliver/tip/refund **another restaurant's**
-order, and a `RIDER` token can claim any job as any rider, by naming the victim's ids in the payload.
-This is the exact runtime-authz IDOR the GraphQL/security review neighbourhood named; the
-**authz-matrix CI suite** (a negative test per (role × instance) that must fail on `main` today) is
-what catches it and what PROP §7's verification plan already describes.
-
-**One material change since the proposal**: the read-side ([#144](https://github.com/TheCaptainCompany/captain-food/issues/144))
-landed as **JWT claims** carrying the verified domain id inside `Identity`
-(`crates/server/src/auth.rs`, ADR-20260809-050000 CARD-11) — **not** the `ScopeMembership` projection
-PROP §2 assumed. ~~So the WriteScope fix is **smaller than the proposal estimates**: the binding is
-already verified and in `Identity`; it needs only to be envelope-carried and compared/derived in
-dispatch.~~ **CORRECTED 2026-08-17 — see the scope-correction block at the top of this section.** The
-claims-not-projection change is real, but it makes the fix smaller for the **37 bindable** mutations
-only. For the **39 unbindable** ones there is no payload field to compare against, and the write-side
-identity bridge exists for `CUSTOMER` alone (`mailbox/handler.rs:244-257`), so those need the bridge
-plus a participant check against folded state. The compiler-first shape is unchanged (a `WriteScope`
-witness constructed only from `Identity`, consumed before journaling); the estimate is not.
-**PROP-20260726-171500 needs that refresh**, and its D1–D4 (§8) — reject-before-journal;
-derive `riderId`/`restaurantId` from the principal; sequence after #144; explicit logged ADMIN bypass
-— are all **team-decidable now** (their recommendations stand; none is money/legal). They sat in the
-proposal for ~19 days and were never in this register until now.
+**Two founder rulings of 2026-08-18 land on this section** (§49): `approveRefund` is **not** narrowed
+to `[ADMIN]` — the restaurant approves by default and the admin intervenes by exception — so the
+cheap fix is off the table and the hole **must** close by **binding**, which moves the write-side
+seam onto the critical path. And staff sign-in now has a mechanism, which is what makes binding
+implementable for a non-CUSTOMER role at all.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
@@ -2156,73 +832,44 @@ proposal for ~19 days and were never in this register until now.
 
 ## 40. Capability-allowlist coverage — extend the manifest gate to security-sensitive dependencies (founder insight, 2026-08-14)
 
-Founder insight, 2026-08-14, verbatim: *"In .net the reference for the assembly of SQL controllable
-and we can decide that only repositories related to SQL are referring it no one else. Can we do the
-same? Otherwise we can put a unit test that will browse the source code to check that. I learn this
-solution thanks to you, it should be used for another purpose somewhere perhaps you can see it."*
+Founder insight, verbatim: *"In .net the reference for the assembly of SQL controllable and we can
+decide that only repositories related to SQL are referring it no one else. Can we do the same?
+Otherwise we can put a unit test that will browse the source code to check that."*
 
-**The pattern is already realized, and the founder named it after the fact.** The .NET
-assembly-reference control maps exactly to the Cargo **crate dependency graph**: a crate can spell
-`sqlx::query!` only if its manifest declares `sqlx`, so restricting *which crates depend on `sqlx`* is
-a compiler-adjacent (level-1-ish) control, stronger than a source-text scan because it checks the
-structured edge, not a string. Cargo has **no** native `InternalsVisibleTo` / per-crate-allow, and
-`cargo-deny` `[bans]` cannot express a per-crate grant of a workspace-wide dep and is not in the CI
-image — so the enforcement is a **manifest-scanning unit test**, exactly the founder's fallback. That
-test **exists**: `capability_dependencies_are_allowlisted` (`tools/codegen-rs/src/tests.rs:3446`) walks
-every `Cargo.toml`, fails a non-allowlisted crate that grants `sqlx` or `reqwest`, and fails
-bidirectionally on a stale excuse (#290/PROP-20260802-130500 D3). Two sibling manifest gates predate
-it: `domain_and_application_never_depend_on_the_telemetry_sdk` (`tests.rs:1396` — the telemetry-SDK
-independence is a **manifest test**, not merely the c4-l3 `instrumented` flag) and
-`actor_runtime_depends_on_no_captain_food_crate` (`crates/actor_runtime/tests/dependency_rule.rs`). And
-the domain-scope crate graph is not even hand-maintained — `domain_scopes.rs:79` **derives** each
-`domain-{scope}` crate's `[dependencies]` from its spec `$ref` reach. The founder's "somewhere else"
-is therefore mostly *already there*; the genuine residue is the row below.
+**The pattern was already realized, and the founder named it after the fact.** The .NET
+assembly-reference control maps exactly onto the Cargo **crate dependency graph**: a crate can spell
+`sqlx::query!` only if its manifest declares `sqlx`, so restricting *which crates depend on `sqlx`*
+is a compiler-adjacent control — stronger than a source-text scan, because it checks the structured
+edge rather than a string. Cargo has **no** native `InternalsVisibleTo`, and `cargo-deny` `[bans]`
+cannot express a per-crate grant of a workspace-wide dep, so the enforcement is a
+**manifest-scanning unit test** — exactly the founder's own fallback. That test exists:
+`capability_dependencies_are_allowlisted` walks every `Cargo.toml`, fails a non-allowlisted crate
+that grants `sqlx` or `reqwest`, and **fails bidirectionally on a stale excuse**. Two sibling
+manifest gates predate it, including `domain_and_application_never_depend_on_the_telemetry_sdk`.
 
-**The gate controls two capabilities (`sqlx`, `reqwest`); two more security-sensitive ones are held by
-exactly one crate today, by convention only, ungated:** `jsonwebtoken` (identity / token verification,
-`crates/server/Cargo.toml:91`) and `aes-gcm` (secret-at-rest crypto for `auth_sessions`,
-`crates/infrastructure/Cargo.toml:67`). Nothing stops a business crate adding either — the exact hole
-the `sqlx` gate closes for SQL. `jsonwebtoken`-in-`server`-only **is** the "Supabase identity-only,
-wrapped" posture; it is real today and enforced by nobody.
+**What is open is coverage**: two more capabilities are not yet in the allowlist.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
 | **ENF-1** 🟢 **TEAM-DECIDABLE — open 2026-08-14** | **Extend `capability_dependencies_are_allowlisted` to cover `jsonwebtoken` and `aes-gcm` (and name any other security-sensitive capability that should be crate-gated)?** The mechanism is proven and the change is one allowlist entry + one capability name in the scan loop per capability. The only real wrinkle is the **final home of identity verification**: §33 ADP-1's leg-2 dissent (GraphQL lens) wants a future **identity bin** owning `auth_sessions` + `/auth/session`·`/refresh`·`/logout`, which would move `jsonwebtoken`/`aes-gcm` out of `server`/`infrastructure`. A gate written as "server only / infrastructure only" now must be updated in the same change that stands up an identity bin — the gate is bidirectional, so it will *fail loudly* and force the update rather than drift silently, which is the desired behaviour | **(a) Add both capabilities now, allowlisted to their present single holders** (`jsonwebtoken`→`server`, `aes-gcm`→`infrastructure`), each with its WHY. Pros: closes two uncontrolled security capabilities with a proven, zero-risk mechanism; the bidirectional check makes the future identity-bin move safe (it cannot land without updating the grant). Cons: one more line to move when the identity bin lands — a feature of the gate, not a cost. **(b) Add `jsonwebtoken` only** — crypto-at-rest is arguably lower blast radius than token verification. Pros: smallest. Cons: leaves the secret-decryption capability ungated for no principled reason once you accept the mechanism. **(c) Do nothing / rely on review** — reproduces exactly the side-door the `sqlx` gate exists to remove, for the two most security-sensitive deps in the tree. |✅ **Recommended: (a).** GREEN once decided — touches only `tools/codegen-rs/src/tests.rs`, reverses no recorded decision, adds no spec surface. Kept as an open row (not self-closed) because it is a **new enforcement-coverage decision** the founder explicitly invited (*"it should be used for another purpose somewhere"*) and it brushes the contested identity-bin home; tracking-issue text drafted in the 2026-08-14 architect run report |
 
-**The founder's #557 note (inbound_messages side-door) resolves under the same lens — as sequencing,
-not a new decision.** The manifest/dependency-graph gate is the right final mechanism, but it is
-**crate-granular** and `INSERT INTO inbound_messages` lives in **three** files inside one already-`sqlx`
-crate (`crates/infrastructure/src/persistence/mailbox_store.rs`, `.../mailbox/pm_delivery.rs:253,380`,
-`.../mailbox/mod.rs:137`) — so a crate-level gate cannot single out that table until the mailbox SQL is
-its own crate. That crate is already the recorded plan: §33 REP-2's platform crate **`mailbox_pg`**
-(slice 3, [#497](https://github.com/TheCaptainCompany/captain-food/issues/497)). Once it is the sole
-holder of the `inbound_messages` write adapter, the capability-allowlist/crate-link boundary makes the
-raw INSERT unspellable elsewhere and #557's source-text gate is **deleted** (compiler-first subsumes it,
-[ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md) — deleting a
-subsumed gate is a correct outcome). **#557 is therefore a slice of / sequenced with #497, not a
-standalone final gate**; its interim source-text scope must be "the mailbox module," not "outside
-`mailbox_store.rs`," and its DB half is the `inbound_messages` INSERT-only grant already specified in
-PROP-20260811-093000 (the `graphql_{scope}` mutation-path row) + [#513](https://github.com/TheCaptainCompany/captain-food/issues/513).
-Refinement recorded on #557 in the 2026-08-14 architect run report; no separate register row is owed.
-
 ---
 
 ## 41. Collection captures at READY, not at pickup — refinement of §1.2 (founder directive, 2026-08-14)
 
-Record: [ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md),
-refining [ADR-20260808-195315 §1.2](../adr/ADR-20260808-195315-customer-brief-answers.md) and the
-just-shipped [#544/PR #545](https://github.com/TheCaptainCompany/captain-food/pull/545) behaviour.
-Founder directive, verbatim: *"For the pickup order the payment captured must happen when the order is
-prepared don't you think?"*
+Founder directive, verbatim: *"for the pickup order the payment captured must happen when the order
+is prepared"*. Record:
+[ADR-20260814-141350](../adr/ADR-20260814-141350-collection-captures-at-ready-not-at-pickup.md), with
+a per-lens `Consulted:` block.
 
-**This is a refinement of a recorded decision, not a silent spec edit** — §1.2 recorded capture on
-"delivered / **picked up** / paid in advance for at-table," and the founder refines the collection leg
-from "picked up" to "prepared / ready." Recorded per CLAUDE.md's decision-reversal rule (question 1:
-does it change a recorded decision → yes → register row + dated ADR before any spec touches).
+✅ **CAP-READY — DECIDED.** A COLLECTION order captures at `OrderMarkedReady`, not at
+`OrderDelivered`: **READY is collection's last controlled moment**, so capture-at-ready protects
+against cook-then-no-show and is symmetric with capture-on-delivered for delivery. Empty log →
+additive, no migration. **Business: HOLDS. Legal: DEFENSIBLE lawful prepayment, not a blocker** —
+but it sharpens the disclosure and VAT tax-point questions, which is the open row below.
 
 | # | Decision | Verdict | Status |
 |---|---|---|---|
-| **CAP-READY** ✅ **DECIDED (founder directive) 2026-08-14** | **For a COLLECTION order, capture at `OrderMarkedReady` (READY) instead of at `OrderDelivered` (pickup).** DELIVERY (capture on `OrderDelivered`) and at-table (advance) are unchanged. The pinned COLLECTION event is **`OrderMarkedReady`** — there is no distinct "prepared" event; `OrderPreparationStarted` is prep START (→PREPARING, `specs/ordering/events.yaml:199`), `OrderMarkedReady` is prep FINISH (→READY, `specs/ordering/events.yaml:229`). Rationale: READY is collection's last controlled moment (collection is the customer's action, not a platform step), so capture-at-ready protects the restaurant against cook-then-no-show and is MORE symmetric with capture-on-delivered for delivery, not a special case. |**Business verdict: HOLDS** (net positive; collection no-show is materially higher than delivery, and the food was made for the customer). **Legal verdict: DEFENSIBLE lawful prepayment, not a blocker** — recorded as decided | ✅ **DECIDED.** Empty log → additive, no migration. Fast-follow to #544 (per-service-type capture trigger); tracking-issue text drafted in the 2026-08-14 architect run report, **issue to be created — NOT dispatchable until the issue exists**. **Behaviour change to pin in a test**: a READY collection order cancelled by the restaurant is now CAPTURED, so it routes to REFUND (`RefundProcess`) not release (`PaymentSettlementProcess` AUTHORIZED arm). GREEN once the issue is filed: touches `specs/payments/**` + `specs/common/rules.yaml` + `specs/tests.yaml`, reverses no recorded decision (it *implements* this one) |
 | **CAP-READY-LEGAL** 🟠 **COUNSEL-GATED (open) — sharpened 2026-08-14** | Capturing a COLLECTION order at READY takes payment **before possession transfers** (collection). Lawful prepayment, but it sharpens two already-open counsel questions for collection specifically: **CAP-3** (L221-5 disclosure must state the charge occurs at READY, before you collect) and **CAP-5** (VAT tax-point — fait générateur / exigibilité now decoupled from the physical handover for collection). Recorded as a CAP-3/CAP-5 collection addendum in [BRIEF-20260814-capture-on-delivered-counsel-packet](../legal/BRIEF-20260814-capture-on-delivered-counsel-packet.md). **No lens output is legal clearance** (ADR-20260812-143619) | — no verdict yet; counsel-gated | 🟠 **Build constraints on the unbuilt receipt engine ([#174](https://github.com/TheCaptainCompany/captain-food/issues/174)) and the checkout disclosure copy — NOT a blocker to the CAP-READY capture-trigger decision.** Neither clears without a French avocat |
 
 ---
@@ -2245,9 +892,11 @@ command handlers, not PMs). Its STO-9 consequence is annotated on that row above
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
-| **PMW-1** ✅ **CLOSED 2026-08-15 — (a) + additive §8 grammar ([PROP-20260815-142349](PROP-20260815-142349-actor-answers-block-and-the-ask-step.md) Approved)** | **What is the final `read:`-step grammar for `specs/*/processmanager.yaml` — how do you SPELL "fold the aggregate's stream"?** Today you cannot: **all thirteen declared `read:` steps `$ref` `database/tables/projection_tables.yaml#/X`**, including the three that are already stream folds in code, which is exactly the spec↔code drift the ADR records at the head of the checkout path (`specs/ordering/processmanager.yaml:30-43` declares `PlaceOrderProcess` reading the Cart and Restaurant PROJECTIONS; `commands.rs:2391-2394,2419` folds both streams). A `read:` step declares the model SHAPE a leg consumes, not the physical SOURCE — the same limit §32 limit (4) records for [#513](https://github.com/TheCaptainCompany/captain-food/issues/513)'s grant emitter | **(a) The enumeration already in flight**: `source: PROJECTION \| EVENT_STREAM`, REQUIRED on every PM `read:` step, added by [#564](https://github.com/TheCaptainCompany/captain-food/issues/564)'s PR1 (on branch `564-mechanical-reader-derivation`, **not yet on `main`**) plus a **~20-line validator rule**: *a PM read step's `source` is `EVENT_STREAM` unless it carries an exemption `$ref`*. Pros: compiler-first-shaped (the mistake becomes unspellable in the DSL, ADR-20260803-234035); rides an enumeration that is landing anyway; the exemption `$ref` makes each carve-out a NAMED, reviewable declaration rather than an absence. Cons: `source:` describes physical origin in a file that otherwise describes shape. **(b) A richer grammar** — a distinct `ask:`/`fold:` step kind naming the aggregate + key, so the step is self-describing and a future transport (PMW-3) has somewhere to bind. Pros: the final-vision shape if actor queries ever ship; makes the routing key explicit, which is the thing `OrderDelivered` lacks. Cons: new node kind, new emitters, and it presupposes PMW-3 — building grammar for a mechanism that is not adopted. **(c) Prose in the doctrine header only.** Cons: reproduces exactly the class CLAUDE.md says prose reproduces; thirteen sites drifted with the compiler silent | ✅ **CLOSED 2026-08-15 by [PROP-20260815-142349 "Actor `answers:` + the PM `ask:`/`branch:` decision grammar"](PROP-20260815-142349-actor-answers-block-and-the-ask-step.md), Approved (founder, verbatim: *"I'm ok for the dsl for process manager"*): decided (a) + the additive §8 decision grammar.** The (a)-vs-(b) tension is resolved by taking both halves without overlap: `read:` stays exactly as [PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566) lands it, and (b)'s richer grammar arrives not as a lone `ask:` step but as the **additive `ask:`/`branch:` step kinds + the `from_ask` value form**, with replies typed by the answering actor's declared state (`answers:`/`state:`). Build tracked in [#582 "Actor `answers:` block + PM `ask:` step — typed request/reply for actor queries, transport stays parked"](https://github.com/TheCaptainCompany/captain-food/issues/582), sequenced strictly behind #566's merge. Also recorded in §5 |
 | **PMW-2** 🟠 **AMBER — open 2026-08-15** | **Cross-aggregate activation residency, and the staleness fence it needs.** The founder's *"actors are kept in memory for a small amount of time to avoid reloading the stream uselessly"* is the design intent; **the code does not do it for the loads this rule creates.** `crates/infrastructure/src/mailbox/activation.rs:237-240` routes any `stream_name != self.scoped` straight past the cache, and says so in its header. Lifting that scoped-only restriction needs a fence that generalises, and `guard_freshness_in_tx` (`activation.rs:127-148`) does not — it compares ONE held version against `MAX(version)` for ONE stream. Two further findings make this a build item, not a given: **Payment activations never engage at all** (`surrogate_actor_id` keys the lane on a UUIDv5 of `"Payment:<intentId>"`, `actor_client/src/enqueue.rs:478`, while the stream is `Payment-pi_xxx`, `domain/src/payment.rs:26`, so `scoped` never matches — the one aggregate the settlement query needs), and **Catalog makes residency actively worse**: `put_locked` (`actor_runtime/src/activation.rs:142-181`) inserts THEN evicts LRU, so a large Catalog fill evicts every resident Order/Cart/Payment first (and, above the bound, itself) — a HubRise import burst at peak makes every subsequent order delivery pay a cold refold | **(a) Key residency on the STREAM the handler asks for** (fixing the Payment mismatch) **+ a multi-stream fence** — hold `(stream, served_version)` per held stream and re-assert all of them in the completion transaction. Pros: generalises the existing mechanism rather than inventing one; `(stream_name, served_version)` is sufficient — stream version is monotonic under append, and the one non-monotonic mover (GDPR stream deletion) moves it DOWN and still trips equality, so **no `lane.ownership_version` is needed** (dba, retracting his own earlier formulation: the lane read is a wasted round trip). Cons: the fence's cost scales with held streams; and it **cannot close for legs with external effects** (see PMW-3). **(b) Give Catalog its own answer and leave the rest** — a snapshot at the last full-replace event, or content-hash no-op suppression in `import_catalog` (`commands.rs:3155` appends unconditionally today). Pros: removes the one pathological actor; sizing says the money actors are tiny — Order/Payment/Cart at Tours V0 peak ≈ **under 5 MB against a 64 MB bound**, over-provisioned by two orders of magnitude. Cons: does not by itself make cross-aggregate loads resident. **(c) Do nothing** — the rule still holds, folds just always hit Postgres. Pros: correct today, zero risk. Cons: leaves the founder's stated efficiency intent unrealised, and the money path pays a stream load per decision | ⏳ **OPEN.** **Lean: (b) then (a)** — Catalog first (it is a live peak hazard whether or not this rule lands), residency generalisation second. **Owed regardless of which way this goes**: activation hit-ratio / bytes / eviction counters in `specs/observability.yaml` — there are NONE today, so the eviction storm above is invisible, and "is residency helping?" is currently unanswerable from telemetry |
 | **PMW-3** 🔴 **OPEN — NOT adopted; nothing authorises building it** | **Actor queries as a mailbox/transport message — the founder's *"the actors can be queryable ... we just have to put in place the grpc transport"*.** This is the SECOND reading of "ask the actor", and it is a different mechanism from the adopted one (an in-process stream fold). Three objections stand, plus one absence: **(i) FENCING** — the lease fence is built from a message's `message_id`/`position`; a query has NEITHER, so there is nowhere to put the guard, and an unfenced read served by a lease holder can be served by a lane whose lease has already moved. **(ii) HEAD-OF-LINE** — a query queued behind commands on the settlement lane puts a Stripe capture behind whatever the actor is doing. **(iii) NO ACTOR DIRECTORY** — lanes are claimed by a **lease race**, not assigned, so "which process holds `Order-123`?" has no answer today; routing a query to a live activation is a **grain-directory** problem, not a transport problem, and gRPC solves the transport half only. **(iv)** The founder's own *"I don't think we should involve inbound messages table for queries to actors"* rules out the one addressing mechanism that exists | **(a) Do not build it** — the adopted in-process fold answers every read this rule creates, with no transport, no lease and no fencing question. Pros: closes STO-9 with zero new infrastructure. Cons: does not realise the founder's queryable-actor vision, and gives up residency-served reads that a live activation could serve. **(b) Build it, with dba's MINIMUM if it proceeds**: the reply carries **`(stream_name, served_version)`** and the caller **re-asserts that version inside its own fenced completion transaction**. Pros: makes a stale answer detectable rather than silent. Cons: **it cannot close for any leg with an external effect** — `complete_fenced` runs `handler.prepare()` BEFORE `pool.begin()` (`actor_runtime/src/completion.rs:69`) and `pm_delivery.rs:61-89` runs the whole `place_order` handler, **Stripe intent creation included**, inside `prepare`; so the order is read → irreversible money movement → open transaction → re-assert → abort, which turns a silent wrong capture into a loud one plus a stuck `RECEIVED` row. Plus a grain directory has to be designed first (iii) | ⏳ **OPEN, and explicitly NOT adopted by [ADR-20260815-030206](../adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md).** **Lean: (a) for now.** **One compiler-first item is recordable and cheap TODAY, independent of this row**: a validator rule **refusing an actor-sourced `read:` step in any leg that also contains a `call:` step** — both node kinds already exist in the step DSL, so the "read-then-external-effect" shape becomes unspellable rather than reviewed. It rides PMW-1's rule. **2026-08-15 — the transport remains PARKED**: [PROP-20260815-142349](PROP-20260815-142349-actor-answers-block-and-the-ask-step.md) (Approved) consumes only this row's two buildable items — the dba minimum `(stream_name, served_version)` on every reply envelope, recorded as PM decision evidence, and the compiler-first `ask:`+`call:` refusal rule (V3) — and does not reopen or even name the transport; introducing a transport key is itself the future gate (D6) |
+
+✅ **PMW-1 CLOSED 2026-08-15** as (a) plus additive §8 grammar, by
+[PROP-20260815-142349 "Actor `answers:` + the PM `ask:`/`branch:` decision grammar"](PROP-20260815-142349-actor-answers-block-and-the-ask-step.md).
 
 ---
 
@@ -2260,78 +909,48 @@ These kind of checks will be also done on the screens but it must be also done o
 catalog is too big > 100 events we will use snapshots to avoid reloading of the events from the stream we
 should snapshot every 100 events to avoid too long actor loading delay <5sec"*.
 
-**All three parts were verified against `main` and all three are real gaps — none is already done.**
-The principle behind the first two is one sentence and outlives V0: **a client-side check is a UX
-affordance, the server is the guarantee.** RSO-1 and RSO-2 are **team-decidable** — the founder has
-directed the outcome, only the mechanism is open. SNAP-1's *policy* is the founder's (100 events, < 5 s)
-but *where a snapshot lives and how it meets upcasting and GDPR erasure* is a genuine option space.
-**BUS-1 is not from the directive** — it surfaced while verifying the peak-time window for RSO-2, and it
-is the founder's own no-polling principle already violated in shipped code.
+**All three parts were verified against `main` and all three are real gaps.** The principle behind the
+first two is one sentence and outlives V0: **a client-side check is a UX affordance, the server is the
+guarantee.** RSO-1 and RSO-2 are **team-decidable** — the founder directed the outcome, only the
+mechanism is open. SNAP-1's *policy* is the founder's (100 events, < 5 s) but *where a snapshot lives
+and how it meets upcasting and GDPR erasure* is a genuine option space. **BUS-1 is not from the
+directive** — it surfaced while verifying the peak-time window, and it is the founder's own no-polling
+principle already violated in shipped code.
 
-**⚠️ AMENDED 2026-08-15, before any code was dispatched.** The `young` and `vernon` lenses, asked
-independently, both disproved the implicit premise of RSO-2 as first written: a checkout re-check
-**cannot deliver what it appears to deliver**, because **nothing in the tree decrements stock when an
-order is placed**. Young's words are the record: *"it narrows the window and creates the appearance of a
-guarantee that the write model cannot deliver."* RSO-2 is therefore narrowed rather than cancelled (the
-single-customer staleness case it catches is real and is caught by nothing today), and the oversell
-half moves to a new AMBER row **STK-1** — an *arbiter*, not a read. The same pass produced two
-amendments to RSO-1 and three new rows (**CHK-1**, **CAT-1**, **FEN-1**), all verified by both lenses
-against `main`. **Framing correction that governs all of them**: `place_order` is a **command handler**
-(`crates/application/src/commands.rs:2380`), *not* a PM leg — `crates/application/src/process_managers/place_order.rs:13`
-says so verbatim (*"The COMMAND leg (`commands.yaml#/PlaceOrder`) stays `commands::place_order`"*), and
-the PM legs are `on_payment_authorized` / `on_payment_failed`. So the restaurant fold, the cart fold and
-the catalog read on the checkout path are **not governed by
-[ADR-20260815-030206](../adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md)**,
-which is a rule about process managers; that ADR carries a dated scope note recording the same thing.
+**The rows below carry four rounds of amendment, all made before any code was dispatched.** What
+each round changed, in current terms rather than as an append log:
 
-**⚠️ AMENDED A THIRD TIME 2026-08-15 — `evans`, in mob briefing, before any code.** The ubiquitous-language
-lens found **one blocker in RSO-1 as recorded, five design corrections, one factual error in the row's own
-text, and one new row**. The blocker in one sentence: **RSO-1 as written would introduce a new way to take
-live restaurants offline, shipped as a safety fix.** `opening_hours` is a `Vec` updated through
-`replaced_vec` (`crates/domain/src/restaurant.rs:83,95`) whose own doc says *"an omitted array and an
-explicitly-empty one arrive identically … a non-empty array replaces, an empty one means 'not provided'"*,
-and the read side does `unwrap_or_default()` on a JSONB parse failure
-(`crates/server/src/graphql/generated/types.rs:1095`) — so `[]` means **three indistinguishable things**:
-hours never declared (every Sirene/Google-seeded prospect), hours cleared, hours unparseable. A boolean
-`f(opening_hours, timezone, now)` maps all three to **closed forever**, and `orderable` reads no hours at
-all today, so the regression would be net-new. `timezone` is nullable with an undocumented account-level
-fallback (`restaurant.rs:79`, `specs/network/api.yaml:42`) and has the same shape. **The verdict must
-therefore be three-valued, and what the guard does with the third value is an explicit recorded decision,
-not a default** — details on the RSO-1 row. Two of the five corrections **dissent from what the row
-recorded** (the error's name, and folding hours into `orderable`); both dissents are recorded with their
-reason rather than silently applied. The row's claim that `RestaurantState` holds *"no opening hours"*
-is **false** and is corrected below — it originated in a previous executor's report and was relayed
-unverified, which is why the correction is traceable here rather than quietly edited away.
-
-**✅ AMENDED A FOURTH TIME 2026-08-15 — RSO-1's three blocking sub-questions are ANSWERED by their
-owners, and the row is now DISPATCHABLE.** Every `file:line` in this amendment was re-verified against
-`main` before it was written. The headline is that **three of the answers say the row's own recorded
-text is wrong**, not merely incomplete: **(1)** amendment (1) put `ServiceWindowVerdict` in
-`specs/network/scalars.yaml` while amendment (6) puts the verdict on `CheckoutSnapshot` in
-`specs/common/entities.yaml:167` — a `common/` → `network/` reference that `scope-kernel-purity`
-(`tools/codegen-rs/src/validate/scopes.rs:358`) rejects as a **hard validator error**, so the row as
-recorded **could not pass `make validate`**; both new scalars belong in `specs/common/scalars.yaml`.
-**(2)** Correction 5's premise is **false** — the renderer computes nothing to replace:
-`crates/web/src/renderer.rs:346-349` folds `OpeningHoursRow` into the `InfoRow` arm and reads
-`label`/`value`, which that node does not carry (`crates/web/src/generated/screens.rs:423`), so it
-renders an **empty div**; RSO-1 **implements** the row for the first time. **(3)** Correction 4's
-emitter claim was wrong in both directions: a hand-written file under a declared scope **survives**
-regeneration, while `src/lib.rs` and `Cargo.toml` are clobbered — **the real trap is silent
-unreachability, not deletion, and it produces no compile error**. Two further findings change who can
-do the work and what it costs: RSO-1 is an **emitter change**, because the read-side call site is
-GENERATED and **has no clock** (`crates/server/src/graphql/generated/types.rs:1070`), and it forces a
-**net-new `chrono-tz` workspace dependency** whose DST behaviour must be tested or the dependency is
-decoration. On the guard's third value the answer is **accept**, on a reasoning that **replaces**
-`evans`'s: the Sirene/Google-seeded population never reaches the guard at all
-(`crates/application/src/commands.rs:2398` rejects `RestaurantNotActive` first), so the branch governs
-**deliberately activated** restaurants — **100% of which are `HOURS_UNDECLARED`, because no screen can
-set hours** (`specs/screens/restaurant_backoffice.yaml:484`) — and refusing would break the L4 smoke
-gate (`tools/smoke/prod-smoke.sh:310-315`). The decisive argument is **which failure announces
-itself**: accept produces a complaint, refuse produces silence, and a zero-order graph is
-indistinguishable from *"Tours has no demand"*. Three new rows were opened from findings made while
-answering, all **out of RSO-1's scope**: **DSC-1** (seven declared discovery filters silently
-dropped), **PAN-1** (a latent `.expect` panic on the public discovery list), **HRS-1** (the third
-meaning of `[]` is a defect nothing counts, plus the observability contract the accept branch owes).
+- **`young` + `vernon`** disproved RSO-2's implicit premise: a checkout re-check **cannot deliver what
+  it appears to deliver**, because **nothing in the tree decrements stock when an order is placed**.
+  Young's words are the record: *"it narrows the window and creates the appearance of a guarantee that
+  the write model cannot deliver."* RSO-2 was **narrowed, not cancelled**, and the oversell half moved
+  to **STK-1** — an *arbiter*, not a read. Three new rows came out of the same pass: **CHK-1**,
+  **CAT-1**, **FEN-1**.
+- **The framing correction that governs all of them**: `place_order` is a **command handler**, *not* a
+  PM leg, so the restaurant fold, the cart fold and the catalog read on the checkout path are **not**
+  governed by [ADR-20260815-030206](../adr/ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md).
+- **`evans`** found a blocker in RSO-1 as recorded: **it would have introduced a new way to take live
+  restaurants offline, shipped as a safety fix.** `opening_hours` is a `Vec` updated through
+  `replaced_vec`, and the read side does `unwrap_or_default()` on a JSONB parse failure — so `[]` means
+  **three indistinguishable things**: never declared, cleared, or unparseable. A boolean
+  `f(opening_hours, timezone, now)` maps all three to **closed forever**. **The verdict is therefore
+  three-valued, and what the guard does with the third value is an explicit recorded decision, not a
+  default.** The row's claim that `RestaurantState` holds *"no opening hours"* was **false**; it came
+  from a previous executor's report relayed unverified, which is why the correction is traceable here.
+- **RSO-1's three blocking sub-questions are ANSWERED and the row is DISPATCHABLE.** Three of the
+  answers say the row's own recorded text was wrong: both new scalars belong in
+  `specs/common/scalars.yaml` (as recorded it **could not pass `make validate`**); the renderer computes
+  nothing to replace, so RSO-1 **implements** the row for the first time; and the real emitter trap is
+  **silent unreachability, not deletion, and it produces no compile error**. RSO-1 is an **emitter
+  change** — the read-side call site is GENERATED and **has no clock** — and it forces a net-new
+  `chrono-tz` dependency whose DST behaviour must be tested or the dependency is decoration. On the
+  guard's third value the answer is **accept**, on a reasoning that **replaces** `evans`'s: the
+  Sirene/Google-seeded population never reaches the guard (`RestaurantNotActive` rejects first), so the
+  branch governs **deliberately activated** restaurants — **100% of which are `HOURS_UNDECLARED`,
+  because no screen can set hours**. The decisive argument is **which failure announces itself**:
+  accept produces a complaint, refuse produces silence, and a zero-order graph is indistinguishable
+  from *"Tours has no demand"*. Three further rows were opened out of RSO-1's scope: **DSC-1**,
+  **PAN-1**, **HRS-1**.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
@@ -2350,126 +969,38 @@ meaning of `[]` is a defect nothing counts, plus the observability contract the 
 
 ---
 
-## 42. Reader-set derivation carry-forwards — [#564](https://github.com/TheCaptainCompany/captain-food/issues/564) nine-lens mob checkpoint (2026-08-15)
-
-The mob checkpoint of PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566) (issue
-[#564 "Derive reader sets mechanically: a declared, walkable `reads:` grammar that distinguishes
-source from shape"](https://github.com/TheCaptainCompany/captain-food/issues/564)) stopped nothing,
-and surfaced **one genuine option space that a test is currently foreclosing**, plus a set of build
-constraints for PR2 that must not evaporate with the session (the anti-repeat discipline of §37 /
-[ADR-20260813-233418](../adr/ADR-20260813-233418-recorded-intent-must-execute-itself-the-anti-repeat-mechanisms.md)).
-**PR1 (the grammar + its gates) and PR2 (the derivation that consumes it) are deliberately split**:
-the declaration is provably incomplete today — the carried reads below cannot be declared without
-code changes or a grammar decision — so a derivation built on it now would be honest about the wrong
-set, and a money-path runtime narrowing does not belong under a doc-comment diff.
-
-**Carried undeclared reads (a NON-EXHAUSTIVE list — PR2's independent derivation is what closes it).**
-The branch originally enumerated exactly two; the independent third-look review of PR
-[#566](https://github.com/TheCaptainCompany/captain-food/pull/566) found a third it never named:
-**(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` with no `read:` step
-(`reclamation.rs:141`, wired `runner.rs:488-490`); **(2)** `PlaceOrderProcess`/`PaymentAuthorized`
-loads `Payment-<intentId>` for the frozen `CheckoutSnapshot` (`place_order.rs:47`); **(3)**
-`DeliveryDispatchProcess`/`OrderMarkedReady`'s `build_delivery_requested`
-(`crates/application/src/process_managers/delivery_dispatch.rs:150`) folds the Order aggregate's own
-stream to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode` (the code's own
-comment). (3) is also the grammar counterexample RDR-1 below wants: `mode` exists on **no**
-projection table, so this read is *inexpressible* under the borrowed-projection-shape rule — stronger
-option-B evidence than the `balance_cents` hole. Practical grant risk today nil: the leg's Restaurant
-`EVENT_STREAM` step already grants `captain_write` — hence carried, not blocking.
-
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **RDR-1** 🟡 **TEAM-OWNED — open 2026-08-15** | **What may an `EVENT_STREAM` `read:` step's `model:` point at?** Today it borrows a PROJECTION TABLE's shape while the leg folds the aggregate and never reads that table — `model:` is documented as "borrowed SHAPE only". That is not merely the status quo: it is **GATED**. `either_source_is_legal_on_a_projection_shaped_model` (`tools/codegen-rs/src/tests.rs`, cited by name because line numbers do not survive) asserts both sources are legal on a projection-shaped model *and its doc comment says so on purpose* — "a future tightening that demanded a stream-shaped model for `EVENT_STREAM` would break every hand-written leg, and this is the test that would stop it". A design commitment with a gate on it is a register row, not a rustdoc | **(A) Keep the borrowed projection shape** (status quo + its gate). Pros: no churn; the projection table genuinely IS the field set the fold produces for these legs; one vocabulary for every `read:` step. Cons: the spec says a leg reads a table it never reads, which is the exact conflation #564 exists to remove — solved one level up (`source:`) and left standing one level down (`model:`). **(B) An `EVENT_STREAM` step's `model:` `$ref`s the AGGREGATE** (`actors.yaml#/Cart`), the entity the fold actually produces. Pros: this is the **final-vision** shape under [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) — the declaration stops naming a thing it does not touch, and a derivation can then ignore `model:` entirely for stream steps rather than filtering it out. Cons: an aggregate has no column list, so every downstream consumer of `read.model` columns (`where:` checking, the C4 sequence emitter, the generated hook signatures) needs a second resolution path; breaks all four committed stream steps at once. **(C) A third `model:` form per source** — refused on sight as (A) and (B) at the same cost. | ✅ **recommend deciding this BEFORE PR2's emitter, not after**: PR2 derives reader sets from `source:` and will encode an assumption about `model:` either way, and reversing it afterwards means re-deriving grants that will by then be in generated manifests. **Unguarded hole to close whichever way it goes**: nothing checks that a borrowed projection shape is INHABITABLE by the fold, so a guard could reference a projector-COMPUTED column (a SUM, a denormalized join) on an `EVENT_STREAM` step and validate green — `CustomerCreditBalance.balance_cents` is exactly such a column and is now borrowed by a committed step |
-
-**PR2 build constraints (pointers, not decisions — each earned by a named lens at the checkpoint):**
-
-- **Derive the set TWICE and diff it** — once from the `source:` declarations, once from the ports
-  the composition roots actually construct. Agreement validates the tokens cheaply; **disagreement IS
-  the reader-set bug list, found mechanically** rather than by a fifth hand-sweep (holub).
-- **Assert every PM app's derived set contains `captain_write`.** `pm-payment-settlement`,
-  `pm-refund` and `pm-cart-binding` have ZERO `EVENT_STREAM` steps, so a read-only walk gives them no
-  write access at all — they could read the order and then be unable to append the settlement fact
-  (dba).
-- **Resolve a PM's boundary through `boundary_map()`'s `of_actor`, never `of_scope`.** `of_scope` is
-  aggregates-only, and `CartBindingProcess` (ordering folder, customer C4 home) lands in the wrong
-  database's reader set otherwise (graphql).
-- **Scope the `source:` walk to `read:` bodies explicitly.** `source` is now the FOURTH meaning of
-  that token in the DSL (`specs/observability.yaml`, `specs/database/tables/journals.yaml`,
-  `specs/catalog/events.yaml`); a naive collector picks up all four (architect).
-- **Key the port catalog by `(bin, app-class)`, not by bin.** `RUN_MAILBOX_WORKERS`
-  (`specs/common/configuration.yaml`, default false) makes one bin host two app classes (farley).
-- **Generate the deps struct in `application` with `pub(crate)` fields and `#![deny(dead_code)]` on
-  the generated module.** Without it only UNDER-declaration breaks the build; over-declaration — the
-  over-grant direction — stays invisible, and when a narrowing breaks a build the cheapest edit is to
-  add `PROJECTION`, which makes the wrong answer the easy one (farley).
-- **Acceptance test for the narrowing**: flip the checkout leg's `Catalog` step to `EVENT_STREAM`,
-  regenerate, and `cargo build` MUST fail. If the tree still builds, the narrowing is decorative
-  (beck).
-- **A port-agreement rule** (`PROJECTION` ⇒ a read repository over that table; `EVENT_STREAM` ⇒ the
-  event-store port), or the derivation just restates an unverified claim in a second vocabulary
-  (beck).
-- **`_sqlx_migrations` + `projection_checkpoint` need a declared `machinery:` floor in the tables
-  catalog BEFORE the emitter** — not a hand-maintained "always add these two" list inside it, which is
-  the hand-sweep that already failed four times. `specs/database/databases.yaml` currently calls
-  `projection_checkpoint` *"runtime machinery, not spec-declared"*; PR2 contradicts that sentence and
-  amends it in the same change (dba).
-- **`provenance[]` needs a KIND discriminator** (`pm-read-step` | `machinery-floor` |
-  `mailbox-append` | `migration`). Removal works by *"no remaining provenance row justifies this
-  grant"*, and the machinery floor has no `read:` step behind it — so without the discriminator the
-  first cleanup pass deletes the health probe's SELECT. **Unrecoverable to add after the first removal
-  pass.** Reuse the validator's own step path as the provenance atom (dba).
-- **The deletion engine must be fenced out of the walk or given its own declaration.** It is not a
-  PM, has no `read:` steps, and a narrowing does not fail it with `permission denied` — it returns a
-  WRONG NUMBER, legally (architect).
-- **Post-reshape sweep**: `specs/database/databases.yaml` still says *"until the grammar can
-  distinguish projection-read from stream-fold…"* in two places. The grammar exists as of PR1; the
-  DERIVATION does not, so the sentences stay accurate-in-spirit today and are updated in the same
-  change as PR2's derivation (graphql).
-- **Do not infer lag-tolerance from `source:`.** `PROJECTION` spans the benign case
-  (`CartBindingProcess`) and the fatal one (`PaymentSettlementProcess`, the #544 class: an unprojected
-  `payment_status` skips the capture and the hold expires). Only the step's prose separates them
-  (architect) — recorded at both step notes and on `READ_SOURCE_PROJECTION`'s doc comment.
-- **PR2's "independent" reader list must be built from `crates/**` only** (or from
-  `git show main:specs/...` taken before PR1's notes landed). PR1's `note:` fields import call-site
-  answers into the spec, and PR1 already performed one comparison — see the correction in
-  `docs/STATUS.md` (architect).
-- **The `DispatchStrategyRepository` referential-table reads (`dispatch_strategy.rs:35-57`) are a
-  read class outside both the grammar and this list** — name them in PR2's sweep so the derivation
-  does not silently drop their grant (third-look review of
-  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
-- **The C4 sequence emitter is a `read.model` consumer RDR-1 must sweep**: today it still renders the
-  `CustomerCreditBalance` `EVENT_STREAM` step as a read-model SELECT, i.e. it draws the read the leg
-  never performs (third-look review of
-  [#566](https://github.com/TheCaptainCompany/captain-food/pull/566)).
-
-
----
-
 ## 44. How the mob's fan-out is priced (founder question, 2026-08-16) — ✅ DECIDED 2026-08-16
 
 Records: [ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md)
-(the question) · **[ADR-20260816-134352 "The mob's checkpoint goes to declared concerns, and review is priced by reversibility"](../adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)
-(the ruling)**.
-Founder question, verbatim: *"Do you have recommendations to optimise tokens consumption?"*
-**Founder ruling, verbatim (2026-08-16)**: *"Go for the Recommendation: (b)+(c), with holub's
-verification condition."*
+(the question) ·
+**[ADR-20260816-134352 "The mob's checkpoint goes to declared concerns, and review is priced by reversibility"](../adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)**
+(the ruling) · **[ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)**
+(the amendment).
 
-**Six of the seven answers are technique and are the team's — they are Accepted in that ADR.** This
-row is the ONE item that is not: narrowing who is invited to a mob checkpoint **amends a founder
-directive** ([ADR-20260809-013142](../adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md):
-*"the roster is invited by default and a lens excuses itself"*), so it is a **decision reversal, not
-a technique change**, whatever the diff size.
+Founder question, verbatim: *"Do you have recommendations to optimise tokens consumption?"* Founder
+ruling, verbatim: *"Go for the Recommendation: (b)+(c), with holub's verification condition."*
 
-**Measured baseline, honestly**: **~2.5M tokens for one merged work item** (2026-08-15), of which the
-mob fan-out is **~1.2M per chunk** — and **no per-item instrument exists**; that figure is a
-reconstruction, not a reading (the ADR's decision 7 is what fixes that). **The dispatch card (ADR
-decision 2) cuts the per-lens cost ~10× whichever way this row goes**, so this decision is about
-**detection policy, not about the bill.**
+✅ **MOB-COST-1 — DECIDED as (b)+(c).** Six of the seven answers were technique and are the team's;
+this row was the one that **amends a founder directive**, so it was treated as a decision reversal
+whatever the diff size. The outcome: **the CHECKPOINT goes only to lenses that DECLARED a concern at
+briefing** (any lens may opt back in), and the chunk's **reversibility class** sizes the briefing
+roster — full mob for money movement, stored event shapes, legal surfaces and anything Tours-facing;
+2–3 lenses for reversible refactors, generated artifacts and doc sweeps.
 
-| # | Decision | Options & the trade-off | Recommendation / status |
-|---|---|---|---|
-| **MOB-COST-1** ✅ **DECIDED 2026-08-16 (founder)** | **Is the whole roster invited at BOTH the briefing and the checkpoint, or is the checkpoint priced differently?** The directive says invited-by-default at every phase; the checkpoint is the expensive half, and today's evidence about what it catches is real but thin (n=1) | **(a) Status quo — whole roster at briefing AND checkpoint.** Pros: maximal detection, and not theoretical — today's checkpoint caught **a false UI banner** (a state the built checkout could show but never render) and **a GDPR-clock hazard**, neither of which any gate catches. Cons: **~1.2M tokens per chunk, of which the second pass is ~500k**. **(b) holub — whole roster at BRIEFING, checkpoint only to lenses that DECLARED a concern in the briefing.** Pros: the briefing is where the catches originate, and there is **empirical support, n=1**: both of today's checkpoint STOPs (**ux**'s false banner, **legal**'s tense) came from lenses that **had** declared a concern at briefing, so a narrowed checkpoint would have lost neither. Cons: **a lens silent at briefing might still catch something in the actual diff** — the diff is the first time a lens sees what was really built — and **n=1 is not a law**. **(c) business — price review by REVERSIBILITY, not by chunk**: full mob for **money movement, stored event shapes, legal surfaces, anything Tours-facing**; **2-3 lenses** for reversible internal refactors, generated artifacts, doc sweeps. Pros: spends detection where a mistake is expensive to undo, the same axis the `HOLD: human` class already uses ([ADR-20260815-115220](../adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)) — one vocabulary, two uses. Cons: needs a call on which side a chunk falls, made **before** the diff exists. **(b) and (c) COMPOSE** — (c) sets the size of the briefing roster, (b) sets who returns for the checkpoint | ✅ **DECIDED by the founder, 2026-08-16 — (b)+(c) with the verification condition**, verbatim: *"Go for the Recommendation: (b)+(c), with holub's verification condition."* Recorded in **[ADR-20260816-134352](../adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md)**, which amends the founder directive [ADR-20260809-013142](../adr/ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md). **The BRIEFING half is untouched** (whole roster, before any code, cheap silence, no coordinator excusal); what changes is the **checkpoint fan-out** (only lenses that declared a concern at briefing — a lens may always opt back in) and the **roster-sizing rule** (the chunk's **reversibility class**, `HOLD: human`-wide when the two disagree). The third look — the independent full-diff review — does not move. **Open sub-obligation: MOB-COST-1a below** |
-| **MOB-COST-1a** ✅ **CLOSED 2026-08-17 ON A FOUNDER ANSWER — the roster reversion is STRUCK and the antecedent rule replaces it** ([ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md), §45 **MOB-ANTECEDENT** below). HIGH-CONSEQUENCE returns to (b)+(c) as originally ruled; the verification condition and its banking are UNTOUCHED — only what a MISS triggers changed. History below is kept verbatim because it is the evidence the answer rests on; every "PENDING FOUNDER" and "STANDS" in it is now historical | **Did the narrowed checkpoint miss anything the full roster would have caught?** Answered on the FIRST chunk run under [ADR-20260816-134352](../adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md), and on every chunk until the answer stops being interesting | Not an option space — an obligation with a named home. **Where**: a `Checkpoint verification:` line in the dispatch card's `## Findings` block ([ADR-20260816-020752](../adr/ADR-20260816-020752-the-loops-context-budget-a-dispatch-card-snapshot-semantics-and-phase-commits.md) decision 2), surfaced in the **architect's run report**. **What "banked" means**: a line in the card **and** a sentence in the change's record (`STATUS.md` or the chunk's ADR) — **either way it lands**, because an unrecorded clean run is indistinguishable from a run nobody checked. **The concrete question**: did the independent full-diff review, CI, the merge, or a later chunk surface a finding that a lens excluded from the checkpoint would have named? | ⛔ **MISS, n=1, on the first chunk run under the ruling** — [#608 "Nothing detects an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/issues/608), class **HIGH-CONSEQUENCE**. **The evidence**: the dispatch card derived the birth-gap threshold as `max_delivery_attempts × retry_spacing_seconds` ≈ **50 s**, but the mailbox backoff is EXPONENTIAL (`base · 2^(N−1)` = `10+20+40+80+160` = **310 s**; the correct landing is **600 s**). A 50 s threshold pages on every healthy retry — the "threshold that lies" class the chunk existed to remove — on a MONEY-PATH dead-man's switch. It was caught by the executor while implementing, not by the checkpoint. ~~The `dba` lens was named at briefing for exactly this surface and was NOT returned to at the checkpoint … so the narrowed checkpoint demonstrably lost a catch the full roster was sized to make.~~ **ATTRIBUTION CORRECTED 2026-08-17 — the reviewer checked the artifacts and the causal claim above is WRONG.** **(i) The #608 briefing was never narrowed.** The committed claim-time card (`6d00cb3`, `docs/dispatch/608-authorized-payment-no-birth-detection.md`) states **`Briefing roster: WHOLE ROSTER`**, and the claim commit message says *"Reversibility class HIGH-CONSEQUENCE => whole-roster briefing"*. Only the **checkpoint** was narrowed. So the wrong arithmetic was in front of **every lens including `dba`**, and none challenged it. For the narrowing to be the cause you would have to assert that a lens would have caught at the checkpoint what it had already been handed at briefing. **(ii) The card's self-attribution *"originated in THIS CARD"* is imprecise.** The committed card at `6d00cb3` does **not** contain the 50 s figure — it says only *"a threshold justified against the ~7-day Stripe hold expiry"*. The number entered through the briefing message or the issue body, neither of which is a committed artifact. This does not change the conclusion, but the register must not rest on a locatable-artifact claim the artifact does not support. **(iii) n=2, and the second miss points the same way.** The [#609 "Lane addressing residue after #596"](https://github.com/TheCaptainCompany/captain-food/issues/609) checkpoint banked a second MISS (`docs/dispatch/609-lane-addressing-residue.md` §"Checkpoint verification", on `main` since PR [#613 "Seal `stable_partition` behind the declaration"](https://github.com/TheCaptainCompany/captain-food/pull/613) squash-merged #609): the converted assertion sites were **incidentally pinning their actors' declared widths**, a contract over stored rows. It first read as a roster-width failure (`young` absent) and **`vernon` rejected that clean attribution** — his own briefing finding named those exact literals and observed they were coupled to the declaration; he was on the surface he claimed, with the fact in hand, and read the coupling as a **liability** without taking the one further step to reading it as a **pin**. Banked **SHARED, weighted to `vernon`**, with only the **escalation** (that removing the pin is a *gate weakening*, hence a stop rather than a follow-up) attributed to the absent `young`. So the roster width cost the SEVERITY; an **invited** lens missed the FACT. **What the two data points actually expose is not a roster defect**: *a coordinator-authored derived number is consumed by every lens as established fact, and nothing verifies it.* **RECOMMENDED REPLACEMENT CONSEQUENCE — NOT ENACTED, PENDING FOUNDER.** §44 is the founder's own ruling, so this row corrects **facts and attribution** only: **the recorded reversion of HIGH-CONSEQUENCE to (a) remains in force**, and no class is declared un-reverted. The recommendation put to him is to **replace the roster reversion with an antecedent rule**: **a dispatch card may not state a derived number without naming its antecedents, and any bare number it does state is marked UNVERIFIED input.** A gate, not a roster — it costs nothing per chunk, it addresses the cause both data points share, and PR [#610 "Detect an authorized payment with no order birth"](https://github.com/TheCaptainCompany/captain-food/pull/610) already built the spec-side half (`derived_from` → `ConfigKey` as a `REF_CONTRACT` site). **Still open for the other classes**: the next reversible-refactor / generated-artifact / doc-sweep chunk supplies their first data point (#609 is REVERSIBLE INTERNAL and has now supplied one — see (iii); its own banked recommendation was likewise *not* to revert the class). A second HIGH-CONSEQUENCE data point cannot be collected while the class is reverted, which is the intended cost of the standing reversion. **✅ ANSWERED BY THE FOUNDER, 2026-08-17: the recommendation is TAKEN.** The reversion of HIGH-CONSEQUENCE is **struck** — (b)+(c) stand for every class exactly as ruled on 2026-08-16 — and the **antecedent rule** replaces it: *a dispatch card may not state a derived number without naming its antecedents, and any bare number it does state is marked `UNVERIFIED input`*. **Banking is untouched**: every card still carries `Checkpoint verification:` either way, and the architect still surfaces it; what changed is only what a MISS *triggers*. **Residue, named not smoothed** ([ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md) §4): with the automatic reversion gone, a **genuine roster-width miss has no automatic consequence** — n=2 says neither miss so far was one, not that none will be. The standing shape: a MISS is banked **with an explicit attribution** (card defect / invited-lens depth miss / roster width), and one attributed to roster width goes **back to the founder** with its evidence, because reverting a class amends his ruling. A second HIGH-CONSEQUENCE data point can now be collected again, which the struck reversion was blocking |
+**Measured baseline, honestly**: ~2.5M tokens for one merged work item, of which the mob fan-out was
+~1.2M per chunk — and **no per-item instrument exists**, so that figure is a reconstruction, not a
+reading. The dispatch card cuts the per-lens cost ~10x whichever way the row went, so the decision
+was about **detection policy, not the bill**.
+
+✅ **MOB-COST-1a — CLOSED 2026-08-17, and the automatic reversion was STRUCK.** The rule that a MISS
+reverts the class was struck on n=2, where **neither miss was a roster-width miss** — the committed
+claim-time card for the first said *"Briefing roster: WHOLE ROSTER"*, so the wrong arithmetic was in
+front of every lens, and the second was rejected by `vernon` as his own depth miss. The shared cause
+was **a coordinator-authored derived number consumed as established fact with nothing verifying it**,
+and the replacement rule is the one that earned it: **a dispatch card may not state a derived number
+without naming its antecedents, and any bare number it does state is marked `UNVERIFIED input`.**
+The named residue: a genuine roster-width miss now has no automatic consequence and returns to the
+founder.
 
 ---
 
@@ -2477,24 +1008,40 @@ decision 2) cuts the per-lens cost ~10× whichever way this row goes**, so this 
 
 Six rows went to the founder as one decision queue and came back answered the same day. Records:
 **[ADR-20260817-105844 "The walk goes first, on ONE database, and production stays suspended on purpose"](../adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)**
-(rows PROD-1 + SEQ-1) ·
+(PROD-1 + SEQ-1) ·
 **[ADR-20260817-105845 "A dispatch card may not state a derived number without its antecedents"](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)**
-(row MOB-ANTECEDENT, amending §44). The other three are answered **in place** in the rows they
-already had — §32 **STO-10**, §39 **IDOR-1** — and in **REV-1** below.
+(MOB-ANTECEDENT, amending §44).
 
 **Two of the six went against the team's own recommendation** (PROD-1 and REV-1). They are recorded
-with the reasoning that supports what he chose, not with the reasoning that argued against it — the
-counter-arguments are in the rows' option columns, where they belong, and neither is softened into a
-half-answer.
+with the reasoning that supports what he chose; the counter-arguments live in the rows' option
+columns, and neither is softened into a half-answer.
 
-| # | Decision | Options & the trade-off | Answer, 2026-08-17 |
+✅ **PROD-1 — production STAYS SUSPENDED, as a deliberate recorded state.** The point is that the
+state is now **decided, not merely persisting**. ⚠️ The defect underneath it is not the 503: the
+nightly `prod-smoke` had been **RED for 19 consecutive scheduled runs** (last green 2026-07-29), of
+which the billing suspension explains only 13, with **no record treating it as a broken gate**.
+
+✅ **SEQ-1 — the walk goes FIRST, on ONE database.** The acceptance criterion is unchanged as what
+*certifies* (local, eleven databases, full enforcement) and simply stops **gating** the first
+end-to-end reading. This resolves the 2026-08-13 ↔ 2026-08-14 contradiction in favour of the
+2026-08-13 sequence, and does **not** overturn final-vision-first, because the final step **cannot be
+built**: the split band is blocked on STO-7, STO-8 and STO-9 independently, with STO-10 parked and
+RDR-1 open upstream of the grant emitter.
+
+✅ **MOB-ANTECEDENT** — see §44. ✅ **STO-10-PARK** — parked until the walk lands, **reported blocked**,
+with the [#513](https://github.com/TheCaptainCompany/captain-food/issues/513) CONNECT prohibition
+intact. ✅ **IDOR-DEADLINE** — the deadline becomes the **EARLIEST OF** a second restaurant credential
+outside the team *including demos and pilots* · a rider credential to a non-team person · the first
+real customer order; strictly tighter than the wording it replaced.
+
+✅ **REV-1 — `claude-review` comes OUT of required checks**, recorded as a knowingly-given-up
+mechanical guarantee whose compensating control is the mandatory independent reviewer pass.
+⚠️ **NOT EXECUTED**: a 403 from the session's agent proxy on the ruleset write path — an egress
+block, not a GitHub denial — so it remains an open **action** (not a decision) on
+[#593](https://github.com/TheCaptainCompany/captain-food/issues/593).
+
+| # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
-| **PROD-1** ✅ **ANSWERED — production STAYS SUSPENDED, as a deliberate recorded state** (against the team's recommendation) | **Restore `captain-food.onrender.com`, or leave it down and walk locally?** Suspended for billing since ~2026-08-04 12:26 UTC. The team recommended restoring **with signup closed at the auth provider**, on the corrected finding that customer signup is SELF-SERVICE (`requestPhoneVerification`/`verifyPhone` are `roles: [PUBLIC, CUSTOMER]`; a first verified phone CREATES the Customer), so restoring with signup open *is* issuing credentials outside the team while §39's IDOR is open | **(a) Restore, signup closed at the auth provider.** Pros: the storefront exists again; the deploy path, TLS and the real image get exercised. Cons: it spends money on a target the walk does not need, and the "signup closed" control is **unbuilt** — a promise, not a setting anyone has made. **(b) Leave it down, walk locally.** Pros: the walk needs nothing production has — `stripe listen --forward-to` is outbound-only and its own signing secret satisfies the fail-closed boot gate (§36 IDP-1 above, [ADR-20260813-004634](../adr/ADR-20260813-004634-supabase-auth-is-retained-for-v0-and-the-window-closes-at-the-first-real-order.md)), so the money path walks locally with no cluster ingress; and it keeps the §39 exposure carried by there being no live surface. Cons: nothing exercises hosting; the 503 persists | ✅ **(b) — the founder chose to leave it down and walk locally.** **The point of this row is that the state is now DECIDED, not merely persisting.** ⚠️ **And the real defect was never the 503**: verified against the Actions API this run, the nightly `prod-smoke` has been **RED for 19 consecutive scheduled runs** (last green **2026-07-29**; 2026-07-30 → 2026-08-17 with no gaps), of which the billing suspension explains only **13** — **6 earlier red nights (2026-07-28, 2026-07-30 → 2026-08-04) have an unrecorded cause** — and no record in this repository treated it as a broken gate. A scheduled gate whose red is expected trains the team to ignore the one signal that would say something new. **Owed, and NOT filed by this run**: re-point the nightly at the local walk target or disable its schedule with the reason recorded in the workflow itself. The records run that landed this answer was dispatched to file exactly one issue and did not widen its own scope; the drafted text is in its run report, and the `architect` owns filing it. **Carried forward unchanged**: local remains **demo, never evidence** (§35 INV-1); [#429](https://github.com/TheCaptainCompany/captain-food/issues/429) still closes only on the provisioned cluster; and §39's *"keep signup closed, or close #618 first"* is **answered by circumstance, not by rule** — it becomes owed again, unchanged, the day restoration is on the table |
-| **SEQ-1** ✅ **ANSWERED — WALK FIRST, ON ONE DATABASE; the criterion still certifies on eleven** | **Does the eleven-database physical split gate the FIRST end-to-end reading?** The live contradiction: **2026-08-13** put the harness ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)) + L5 on a single-DB stack; **2026-08-14** (*"The acceptance include the full enforcement and full split"*) pulled the split INTO the keystone ahead of the walk. `STATUS.md` had marked which reading won without being able to say which was right | **(a) Restore-and-walk-on-prod** — see PROD-1, declined. **(b) Hold the walk until the split band clears.** Pros: final-vision-first, no stack rebuilt. Cons: **the band cannot start** — it is blocked on **STO-7**, **STO-8** and **STO-9** (each independently; STO-9 binds even if 7 and 8 are both answered well), with **STO-10** AMBER and now parked and **RDR-1** open upstream of #513's grant emitter. A schedule with no start date, for the one artifact the spend gate (INV-1) is waiting on. **(c) Walk on one database now, certify on eleven later.** Pros: separates *reading* from *certificate*, which is what the two records were conflating; the target already stood up once (2026-08-11 single-node k3s: CNPG healthy, full chain applied, monolith overlay, `/health` 200, L1+L2 PASS; schema line re-verified 2026-08-13). Cons: the reading passes things the split stack will fail — STO-7's cart read, STO-8's `verify_phone`, STO-9's pre-capture settlement read all work **because** the wall is not physical | ✅ **(c).** **The acceptance criterion is UNCHANGED as what CERTIFIES** — six clauses, local, eleven databases, full enforcement including the write-auth fix, the §3 auth posture, the §4 D2 semantics, the §6 honesty sentence. It simply **stops gating the first end-to-end reading**. **This does NOT overturn final-vision-first** ([ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)): that directive forbids an intermediate *where the final step can be built*, and here it cannot — four open decisions sit in front of it, so "build the final step first" means the first reading arrives **never**, not sooner. Its own carve-out applies verbatim (*the intermediate ships only with the final step already designed and recorded* — it is: `databases.yaml`, the §18 gate, #513 → #514 → #509). **Mandatory label**: anything the one-database walk produces is a **reading**, never *accepted*; the word *accepted* is reserved for the eleven-database, fully-enforced walk. Amends the **gating half only** of ADR-20260813-191111's 2026-08-14 scope clarification |
-| **MOB-ANTECEDENT** ✅ **ANSWERED — the antecedent rule REPLACES the roster reversion** (§44 **MOB-COST-1a**, closed in place) | **What is the consequence of a banked checkpoint MISS?** ADR-20260816-134352 §4 said a MISS reverts that reversibility class to whole-roster-at-briefing-and-checkpoint. It fired once, on #608, and the 2026-08-17 records-correction run found the causal claim **wrong** — n=2, and **neither miss is a roster-width miss** | **(a) Keep the automatic reversion.** Cons: applied once, on the artifacts, for a cause that did not exist — an indefinite whole-roster tax on every HIGH-CONSEQUENCE chunk, for a defect widening does not touch. **(b) Strike it and add the antecedent rule.** Pros: it sits on the cause both data points share, costs nothing per chunk, and **half of it is already executable** (PR [#610](https://github.com/TheCaptainCompany/captain-food/pull/610) landed `derived_from` → `ConfigKey` as a `REF_CONTRACT` site). **(c) Both.** Rejected: they address different causes and only one is the cause the evidence names | ✅ **(b).** **Struck**: the HIGH-CONSEQUENCE reversion. **Standing, unchanged**: (b)+(c) for every class, the third look, and holub's verification condition **with its banking** — every card still carries `Checkpoint verification:` either way. **New rule**: *a dispatch card may not state a derived number without naming its antecedents, and any bare number it does state is marked `UNVERIFIED input`.* **Residue, named**: a genuine roster-width MISS now has **no automatic consequence** — it is banked with an explicit attribution and, if attributed to roster width, goes **back to the founder**, because reverting a class amends his ruling. **Owed and FILED**: [#619 "Make the antecedent rule executable: a dispatch card may not state a derived number without naming its antecedents"](https://github.com/TheCaptainCompany/captain-food/issues/619) carries the dispatch-side check (the spec-side half already exists; the card-side half is prose until #619 lands). Record: [ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md) |
-| **REV-1** ✅ **ANSWERED — `claude-review` comes OUT of the required checks** (against the team's recommendation, and recorded as a knowing trade, not an erosion) | **Does the `claude-review` bot check stay a required status check on `main`?** [#593 "The claude-review bot gate blocks every merge when it cannot run — it fails red instead of skipping, with no review performed"](https://github.com/TheCaptainCompany/captain-food/issues/593): on PR #586 it concluded red twice inside 25 s with `ANTHROPIC_API_KEY` empty and **no diff evaluated** — an authentication failure wearing a finding's clothes, and while it persists every PR in the repo is unmergeable regardless of code quality | **(a) Keep it required, fix the credential.** Pros: preserves the *mechanical* guarantee ADR-20260807-235930 bought — nothing merges without a review having RUN, whatever any agent does. Cons: the credential is admin-gated, and the failure mode is a repo-wide merge stop with no review performed. **(b) Make it non-blocking / report-only.** Pros: keeps the signal. Cons: a check nobody must satisfy is a check nobody reads. **(c) Remove it from required checks.** Pros: **the team's own reviewer is the real gate and has been doing the work** — it FAILED PR #610's first head on three blockers including a money-path one (a declared-but-unproven gauge on the settlement path), which is a class the bot check has never produced. Cons: the guarantee stops being mechanical | ✅ **(c) — remove it.** Recorded as a **deliberate acknowledgement, not an erosion**: the mechanical guarantee of ADR-20260807-235930 is being **given up knowingly**, and the **compensating control is that the independent reviewer pass stays MANDATORY before ready-for-review** (founder directive 2026-08-01) — a process obligation where there was a mechanism, which is exactly the trade being made. `codegen`, `build-test` and `db-test` stay required and untouched. ⚠️ **NOT EXECUTED — the branch-protection change did not land.** The `PATCH /repos/.../rulesets/19179892` was attempted this run and returned **403 from the session's agent proxy** (*"Write access to this GitHub API path is not permitted through this proxy"*) — an egress-policy block, **not** a GitHub permission denial, and the proxy's own README forbids routing around it. The token additionally reports `admin: false` on the repo, so admin sufficiency is untested either way. **The ruleset still requires `claude-review` today**; the change is an open action on [#593](https://github.com/TheCaptainCompany/captain-food/issues/593) needing a founder or an admin-capable session. ADR-20260807-235930 carries an amendment note pointing here |
-| **STO-10-PARK** ✅ **ANSWERED — STO-10 is PARKED until the walk lands** (§32 **STO-10**, updated in place) | **Does the HubRise adapter's `read_common` read (which reopens ADP-1) get decided now?** | Not re-opened here: the row's own three options (a)/(b)/(c) stand unchanged | ✅ **Parked.** It is **blocked, and reported blocked** — never re-ranked to look dispatchable, and never quietly decided by #513's grant emitter, which remains forbidden from emitting the CONNECT that would make option (c) true by default. Consistent with **SEQ-1**: the split band it belongs to is not on the path to the first reading |
-| **IDOR-DEADLINE** ✅ **ANSWERED — the deadline becomes the EARLIEST OF three triggers** (§39 **IDOR-1**, updated in place) | **When must the cross-tenant authorization fix land?** The recorded deadline was *"before the first real order"*; two lenses argued on 2026-08-17 that it binds one step too late, since an IDOR needs **two principals** and the second credential exists at **onboarding** | The lenses' proposal, verbatim in effect: the **earliest of** (i) a second restaurant credential issued to anyone outside the team **including demos and pilots**, (ii) a rider credential issued to a non-team person, (iii) the first real customer order | ✅ **Enacted as proposed, and the issues match** — §39 IDOR-1 updated in place; [#178](https://github.com/TheCaptainCompany/captain-food/issues/178) gained a `## Deadline` block with the three triggers and the published-deadline condition; [#618](https://github.com/TheCaptainCompany/captain-food/issues/618) **already carried the correct wording** (it was written to the lenses' proposal while the register still said "recorded, not enacted" — the issue was ahead of the register, and the register has now caught up), and its stale *"whole roster at briefing and checkpoint"* line was corrected in the same pass under **MOB-ANTECEDENT**. **The condition travels with it**: *an open item past its own published deadline is the worst state available — worse than having no record*, so the date is met **or publicly re-dated with a reason BEFORE it passes**; re-dating afterwards is a different act and does not restore the asset. ⚠️ **GAP FOUND WHILE LANDING IT, named not silently smoothed — see IDOR-DEADLINE-GAP below** |
 | **IDOR-DEADLINE-GAP** 🟠 **OPEN — raised 2026-08-17 by the executor landing IDOR-DEADLINE; the trigger set omits the one credential nobody issues** | **The three triggers are all things the TEAM does. For `CUSTOMER`, nobody issues anything** — `requestPhoneVerification`/`verifyPhone` are `roles: [PUBLIC, CUSTOMER]` and a first verified phone CREATES the Customer, so a stranger self-issues a CUSTOMER credential the moment the surface answers (verified 2026-08-17, §39). And **two CUSTOMER-reachable reads take a caller-supplied id with no ownership check** — `orderConversation` and `reclamation` — which are exactly the two unbounded free-text stores the Art. 9(1) finding is about. So *"production restored with signup open"* is an event that issues credentials outside the team, reaches other customers' complaint text and message threads, and **trips none of (i), (ii) or (iii)** | Not an option space yet — a completeness question about a deadline just published. The candidate fourth trigger is *production restored while self-service signup is open*, which is the same event §39's replacement control already names (*"the gate must be SIGNUP, not onboarding"*) | 🟠 **OPEN, deliberately NOT enacted by the executor.** **It is not a contradiction of the answer**: the new trigger set is strictly TIGHTER than the *"before the first real order"* wording it replaces, and the gap it leaves existed identically under the old one — so landing IDOR-DEADLINE improved the record and creating this row is the honest residue, where stopping would have left the weaker deadline standing. **It is closed by circumstance today and only by circumstance**: PROD-1 keeps production down, so no surface answers. **The ask**: confirm the fourth trigger, or record why signup-open is covered by (iii). Circumstance changes without a record; a deadline should not depend on one |
 
 ---
@@ -2504,37 +1051,175 @@ half-answer.
 Three rulings came back in one sitting, after the whole roster of thirteen lenses was consulted.
 Records:
 **[ADR-20260818-004646 "No business identifier lives in the identity provider"](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md)**
-(row IDENT-1) ·
+(IDENT-1) ·
 **[ADR-20260818-004647 "Database-level security lands at the CloudNativePG cutover, on the empty database; and the settlement read comes back into scope"](../adr/ADR-20260818-004647-database-level-security-lands-at-the-cutover-and-the-settlement-read-returns-to-scope.md)**
-(row RLS-SEQ, and §32 **STO-9** back in scope). Both carry a per-lens `Consulted:` block
+(RLS-SEQ, and §32 **STO-9** back in scope). Both carry a per-lens `Consulted:` block
 (ADR-20260812-143619).
 
-**The three externally-authored ADRs are HELD, not deposited.** `ADR-20260817-232744`,
+✅ **IDENT-1 — no business info is stored inside the identity provider, and it is V0.** A token
+carries the auth subject; the `sub` → domain-id mapping is resolved from our own Postgres. Asked V0
+or post-first-order, the founder answered **"v0"**, so it sequences **before** the write-side
+enforcement seam. It **reverses the read-scope half of §22's identity-bridge row / CARD-11**, it is a
+**MIGRATION** (tokens in the wild carry `captain_food.customer_id` today) whose phase order is
+recorded before it lands, and its price is stated rather than softened: `read_scope` stops being pure
+and the enforcement slice's *zero I/O at peak* claim dies with it. ⚠️ **Premise corrected 2026-08-18**
+(the ruling unchanged): only **one** business identifier was stored, and **three of the four roles had
+no authentication path at all** — which raised STAFF-AUTH, answered in §49.
+
+✅ **RLS-SEQ — database-level security lands at the CloudNativePG cutover, on the EMPTY database,
+starting at `OrderConversation` and NOT at `OrderTracking`.** Three of the four drafted tables fail
+for measured reasons, the sharpest being that a policy on `OrderTracking` turns the pre-capture
+settlement read into a **silent** `HookOutcome::Skip` — RLS **filters** rows, it does not raise:
+food delivered, money never collected, reported green. What is emitted was settled separately by
+[ADR-20260818-171500](../adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)
+(`mode:` gates the whole per-table subtractive surface), and the measured design is
+[PROP-20260818-010343](PROP-20260818-010343-database-level-security-the-measured-design.md),
+[#638](https://github.com/TheCaptainCompany/captain-food/issues/638).
+
+✅ **AUTHZ-LOCUS** — PROP-20260726-171500 §D1 is closed **against the proposal's own recommendation**,
+recorded here because a proposal's recommendation may not be overturned silently. ✅ **AUTHZ-GRAMMAR**
+— the `authorization:` block is **declined as new grammar**; the corrected design is
+[#636](https://github.com/TheCaptainCompany/captain-food/issues/636): finish the `requires:` emitter,
+with completeness keyed on `actors.yaml receives[]`.
+
+⚠️ **The three externally-authored ADRs are HELD, not deposited.** `ADR-20260817-232744`,
 `ADR-20260817-232745` and `ADR-20260817-232746` (authored outside the team, 2026-08-17) are held
 until corrected and are **not** in `docs/adr/`. What of theirs survives is carried, corrected, by
-rows **AUTHZ-LOCUS** and **AUTHZ-GRAMMAR** below, by
+AUTHZ-LOCUS and AUTHZ-GRAMMAR above, by
 [#635](https://github.com/TheCaptainCompany/captain-food/issues/635) and
-[#636](https://github.com/TheCaptainCompany/captain-food/issues/636), and by ADR-20260818-004647 for
-the `access:` / RLS half.
+[#636](https://github.com/TheCaptainCompany/captain-food/issues/636), and by ADR-20260818-004647.
 
-**One row was RAISED while landing these, not answered in the sitting**: **STAFF-AUTH** — restaurant
-staff, account managers and riders have no way to sign in at all. It is the premise IDENT-1's
-correction rests on, it bounds that ruling's implementable scope to one role, and it is a
-founder-owned product question rather than identity plumbing
-([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)).
+---
 
-| # | Decision | Options & the trade-off | Answer, 2026-08-17/18 |
+## 47. Strix autonomous pentest — a first gated, sandboxed, defensive run — PROP-20260814-000240 (founder interest, 2026-08-14)
+
+> **Numbering note.** This section was published as a second "§37" from 2026-08-14 to 2026-08-18,
+> colliding with §37 "Recorded intent must execute itself". It is **§47** as of 2026-08-18; no
+> record outside this file cited it by number.
+
+Design record: [PROP-20260814-000240](PROP-20260814-000240-strix-security-audit.md), tracking issue
+[#548 "Evaluate Strix for a gated pre-launch DAST pass against our own endpoints (authorized defensive)"](https://github.com/TheCaptainCompany/captain-food/issues/548).
+**Authorized defensive** testing of our own pre-launch product. **Verdict: GO-NARROWLY.**
+
+✅ **STRIX-1 and STRIX-2 both ADOPTED (A), founder-delegated 2026-08-14** (*"You don't need me for
+that … Go ahead team!!"*). The proposal is `Approved` with its three `Concerns` checked. A single
+**gated, sandboxed, bounded** black-box DAST pass on a **dev** target, framed as a defensive pentest
+evidence pack for counsel — **never a PCI/RGPD certificate** — with hard time and token caps on the
+shared proxy.
+
+**The value argument is measured, not asserted**: our strongest controls are compiler- and
+validator-enforced, so the residual risk **migrated to exactly the surface static gates cannot
+reach** — runtime authz composition (cross-tenant/cross-role IDOR), request cost (**zero
+`depth`/`complexity` limiter anywhere in `crates/server/src/graphql`**), the `X-Forwarded-Host`
+ingress precondition the code documents but cannot enforce, SSRF on adapter outbound, and error-path
+secret leakage. **White-box Rust scanning is noise; skip it.** The durable half: **every confirmed
+finding becomes a permanent deterministic CI test** — the agent is a discovery instrument, not a
+standing gate.
+
+⚠️ **Dispatch is GATED, not open.** STRIX-1's GO authorizes *building the containment harness and
+running under the plan*; **it does not license a raw scan**, and it ranks **below the acceptance
+keystone**. **The higher-leverage durable half the founder flagged is separable and does not depend
+on the Strix run**: the GraphQL request cost/depth limiter with its cost-limit CI test, a matching
+`specs/observability.yaml` request-cost contract (none exists), and a permanent authz-matrix CI
+suite.
+
+---
+
+## 48. Reader-set derivation carry-forwards — [#564](https://github.com/TheCaptainCompany/captain-food/issues/564) nine-lens mob checkpoint (2026-08-15)
+
+> **Numbering note.** This section was published as a second "§42" from 2026-08-15 to 2026-08-18,
+> colliding with §42 "A process manager is a write-side component". It is **§48** as of 2026-08-18;
+> `docs/STATUS.md` was updated in the same change.
+
+The mob checkpoint of PR [#566](https://github.com/TheCaptainCompany/captain-food/pull/566) stopped
+nothing, and surfaced **one genuine option space that a test is currently foreclosing**, plus build
+constraints for PR2 that must not evaporate with the session (the anti-repeat discipline of §37).
+**PR1 (the grammar + its gates) and PR2 (the derivation that consumes it) are deliberately split**:
+the declaration is provably incomplete today, so a derivation built on it now would be honest about
+the wrong set, and a money-path runtime narrowing does not belong under a doc-comment diff.
+
+**Carried undeclared reads — a NON-EXHAUSTIVE list; PR2's independent derivation is what closes it.**
+The branch originally enumerated exactly two; the independent third look found a third it never
+named. **(1)** `ReclamationProcess`/`ReclamationResolved` reads `OrderTracking` with no `read:` step.
+**(2)** `PlaceOrderProcess`/`PaymentAuthorized` loads `Payment-<intentId>` for the frozen
+`CheckoutSnapshot`. **(3)** `DeliveryDispatchProcess`/`OrderMarkedReady` folds the Order aggregate's
+own stream to read `OrderPlaced.mode`, because `OrderTracking` does not carry `mode`. **(3) is also
+the grammar counterexample RDR-1 wants**: `mode` exists on **no** projection table, so this read is
+*inexpressible* under the borrowed-projection-shape rule — stronger option-B evidence than the
+`balance_cents` hole. Practical grant risk today is nil, hence carried rather than blocking.
+
+| # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
-| **IDENT-1** ✅ **ANSWERED — no business info is stored inside the identity provider; the mapping lives in our Postgres** | **Do Captain Food identifiers travel in the token, or does the token carry only the auth subject?** Verbatim: *"No business info stored inside Supabase; the mapping with business identifiers will be done in the OVH Postgres."* Asked whether this was V0 or post-first-order, the founder answered **"v0"**. ⚠️ **It is a CHANGE, not a confirmation**: CLAUDE.md calls the provider *"identity-only — no business data"*, and the code disagrees — `crates/server/src/auth.rs:194-220` binds `claims.customer_id` (:204), `claims.restaurant_id` (:207), `claims.restaurant_account_id` (:211) and `claims.rider_id` (:216); `ProductClaims` declares all four (:311-333) — but **only `customer_id` is ever written**, the other three being declared-but-unfed (ADR-20260818-004646 Correction 2); and `crates/infrastructure/src/integrations/supabase_auth.rs:424-433` WRITES `app_metadata.captain_food = { role, customer_id }` back into the provider | **(a) Keep the claims** — free at request time, and it is what #433/CARD-11 deliberately built. Cons: a business identifier is stored in, and issued by, a third-party identity store. **(b) Resolve the mapping from our Postgres** — the mechanism already exists for ONE role: `CustomerReadRepository::by_auth_ref` (`crates/application/src/queries.rs:341`, impl `crates/infrastructure/src/persistence/customer.rs:53-55`), called today only from the mailbox worker and only for `CUSTOMER` (`crates/infrastructure/src/mailbox/handler.rs:244-258`). Cons, stated honestly: `read_scope` stops being pure — `resolve_read_scope` (`auth.rs:1833`) is **synchronous** today and runs once per GraphQL request (`crates/server/src/graphql/routes.rs:166`) plus once per WS connection (:285), and the comment justifying it (*"no lookup, no dependency that could be missing"*, `routes.rs:162-165`) becomes false. **The enforcement slice's "zero I/O at peak" claim dies with it**, and peak is Friday/Saturday 19:00-21:30 | ✅ **(b), and it is V0** — so it sequences **BEFORE** the write-side enforcement seam ([#178](https://github.com/TheCaptainCompany/captain-food/issues/178) slice 1), not after. **It reverses the read-scope half of #433 / CARD-11**, which is why it is a founder ruling with a register row rather than a refactor. **It is a MIGRATION** (CLAUDE.md question 2): tokens in the wild carry the claim, so the phase order is recorded before anything lands — resolve-and-ignore first (no token invalidated, no re-auth), then stop stamping, then erase the stored `app_metadata` identifier; `domain_events.user_id` is the auth subject (ADR-0041) and does not move. **Why now**: production is suspended (§45 PROD-1) and Q-L3 = no real end user, so no issued credential is stranded; after a pilot the same change forces a re-auth of every credential. ⚠️ **PREMISE CORRECTED 2026-08-18 — the ruling itself is unchanged and correct; only the measurement beneath it was wrong.** The corrected premise is carried in full by [ADR-20260818-004646](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) (Correction 1 and *"There is nothing to extend"*) and is not restated at length here. In short: **one** business identifier is stored in the provider, not four — `stamp_put_body` writes `{ role, customer_id }` and nothing else — so Phase C erases one key on one role's users; and the earlier *"two of four roles have no mapping fact at all"* **understated it** — **three of the four roles have no authentication path at all**, so for those three there is no subject to key a mapping on and **nothing for this ruling to extend**. Giving them one is staff onboarding, not identity plumbing: new open row **STAFF-AUTH** below. Named residue: whether `role` also leaves the token — recorded as YES on the founder's framing, and a one-line correction if he meant otherwise |
-| **AUTHZ-LOCUS** ✅ **ANSWERED — the write check's locus is settled, against PROP-20260726-171500's own recommendation** | **Where does the write-side per-instance check run?** [PROP-20260726-171500 §D1](PROP-20260726-171500-write-side-per-instance-authorization.md) recommended **in the dispatch layer, before journaling** (*"a forbidden command never enters `command_journal`"*) and explicitly rejected the per-handler form (*"82 mutations to touch and keep correct forever; an omission is invisible; the pure-handler layer would gain an authorization concern it should not own"*). The held `ADR-20260817-232744` answers D1 the other way | The proposal's own three options stand as written: dispatch-layer-before-journaling (its recommendation), in each handler, or an async-graphql `Guard` per mutation. The compare-vs-inject question (does the seam VALIDATE a payload-supplied id, or DERIVE it from the principal) rode on top of D1 and had never been closed | ✅ **Settled by the held ADR, and recorded here because a proposal's recommendation may not be overturned silently.** §D1 is **closed against the proposal's recommendation**, and **compare-vs-inject is closed with it**. The proposal's cons are not withdrawn — they are the price: an omission in a per-handler form is invisible, which is exactly why the completeness rule in **AUTHZ-GRAMMAR** is the load-bearing half of the design and not a nicety. ⚠️ **`PROP-20260726-171500` still reads as if D1 were open and recommends the other option**: proposals are LIVING (ADR-20260801-020000), so it is owed a rewrite to the CURRENT design in the same change as the first implementing slice — this records the debt rather than editing a proposal from a records-only run |
-| **AUTHZ-GRAMMAR** ✅ **ANSWERED — the `authorization:` block is DECLINED as new grammar; finish the `requires:` emitter instead** | **Does the write-side rule get a new declarative `authorization:` block on commands, or does it finish the grammar the DSL already has?** `evans` found the answer in the tree: `requires.acting` **already exists and is already validated** — declared at `specs/comms/actors.yaml:65-72` (`PostMessage`: CUSTOMER/RESTAURANT bound to fold state, ADMIN `any`, RIDER deliberately absent), walked by `tools/codegen-rs/src/refs.rs:453-455` as a `StateField` ref, with rules `requires-acting-untyped` and `req-state-unknown`. Its own comment says ENFORCEMENT arrives *"when slice 2 generates the precondition"* — the grammar is declared and unemitted, not missing | **(a) Add `authorization:` as new grammar** — what the held `ADR-20260817-232745` specifies; three of its premises are false against `main` ([#636](https://github.com/TheCaptainCompany/captain-food/issues/636): no command declares `aggregate:`; a rule keyed on aggregates cannot fire on the three PM-received commands `PlaceOrder`/`ApproveRefund`/`DenyRefund`; and `actorSource: jwt.sub->customerId` hand-encodes a reference the refs walker cannot see, violating ADR-20260811-014129). **(b) Finish `requires:`** — one grammar, already walkable, already tested. Cons: it binds to declared fold state, and only 3 of the 15 `type: aggregate` actors declare a `state:` block at all (antecedents: `grep -rn '^  state:' specs/*/actors.yaml` = 3 vs `grep -rn '^  type: aggregate' specs/*/actors.yaml` = 15, at `b77c487`) — `Restaurant.accountId` is declared on the entity and its events but **unfolded** (`vernon`), so the restaurant roles have nothing to bind to until it is | ✅ **(b) — declined as new grammar.** The corrected design is **[#636](https://github.com/TheCaptainCompany/captain-food/issues/636)**: finish the `requires:` emitter, and key **completeness on `actors.yaml receives[]`** — the receiving ACTOR, which is the join the loader already has and the only form that sees process-manager receipts, i.e. the refund door ([#635](https://github.com/TheCaptainCompany/captain-food/issues/635)). Carried over from #636 unchanged: the rule lands at **error** level with a `$ref`ed exemption list rather than warn-only (warnings are a ratchet the validator owns, and `holub` notes warn-only was already rejected once on the record for the configuration gate, ADR-20260729-010500 — a reported second rejection is `UNVERIFIED input`), and `actorSource` resolves through `specs/common/actors.yaml:112-116` `principals`, so a payload field is unspellable there. ✅ **The owed re-pointing has landed** (2026-08-18): [#636](https://github.com/TheCaptainCompany/captain-food/issues/636) is now pointed at *"finish the `requires:` emitter"*, so its title no longer describes the `authorization:` grammar it was filed to correct and the issue now matches this row. Reported by the session that performed it; this records-only run has no GitHub read, so the wording above is **UNVERIFIED input** against the live issue |
-| **RLS-SEQ** ✅ **ANSWERED — database-level security lands at the CloudNativePG cutover, on the EMPTY database, starting at `OrderConversation`** | **When does row-level security land, and on which tables?** Put as a form; the drafted table set was `OrderTracking`, `View_DeliveryJob`, `CustomerCreditBalance`, `OrderConversation` | **(a) `OrderTracking` only, behind a flag, after the walk.** **(b) Now, as written.** **(c) At the cutover, on the empty database.** The trade-off is that enabling a policy on a populated table is a lock event on live data and a policy nobody has exercised, while at the cutover the read databases are being CREATED by the `migrator` credential that owns them (PROP-20260811-093000 §6.1) with no data to lock | ✅ **(c) — at the cutover, on the empty database.** **Three of the four drafted tables do not survive, each for a measured reason**: **(1)** a policy on `OrderTracking` breaks the settlement read *silently* — `SettlementHooks::load_order` (`crates/application/src/process_managers/payment_settlement.rs:83-84`) reads it under `ReadScope::System` on all four legs before every capture and release, and **RLS filters rows rather than raising**, so zero rows lands in the existing `HookOutcome::Skip` arm (*"nothing to settle"*): food delivered, money never collected, reported as a green log line — strictly worse than the physical wall §32 **STO-9** describes, which at least errors. **(2)** `View_DeliveryJob` is a **VIEW** (`specs/generated/views.generated.sql:6`, `CREATE OR REPLACE VIEW … FROM domain_events`): `CREATE POLICY` and `FORCE ROW LEVEL SECURITY` name tables only, and `security_barrier` (an optimizer fence) is **not** `security_invoker`; any row filtering would have to be a policy on the event log itself. The rider's own-jobs guarantee is served by this view (`specs/database/projection_views.yaml:93-95`), so it stays an application guarantee (`legal-specialist`). **(3)** `CustomerCreditBalance` is per-customer and **`ScopeType` has no matching member** — `specs/common/scalars.yaml:721-729` is `ORDER` and `RESTAURANT` only, so the predicate cannot be spelled; widening the scalar is an unapproved `specs/**` change with an unmeasured blast radius. **(4)** `FORCE` as drafted gives the **projector's writer role no policy slot** (RLS is default-deny for non-owner roles; `projector_{scope}` does the INSERT/UPDATE per PROP-20260811-093000 §6.1, so the projection stops on the first event after cutover), and a `WITH CHECK` inherited from a predicate over `ScopeMembership` — a **separate** projection with its own checkpoint (`specs/database/tables/projection_tables.yaml:1012-1017`) — makes a read-model rebuild **order-dependent**, which is the property that stops a projection being disposable (`young`). **Start at `OrderConversation`**: a TABLE (`projection_tables.yaml:873`), identity = its `orderId` (ADR-20260725-015921) so it maps onto `ScopeType.ORDER` with no new vocabulary, and the highest-value surface to guard (Art. 9 free text, `projection_tables.yaml:879-880`; one of the two id-taking CUSTOMER reads in §45 **IDOR-DEADLINE-GAP**). **Gate-then-stabilize is untouched**: PROP-20260811-093000 §6.3 (RLS on `domain_events` behind a flag, benchmarked, default flip its own ADR) still governs the event log. **Ruling B, same sitting**: §32 **STO-9** *"comes back into scope"* — verbatim, *"now that we know how to deal with security at the database level we can integrate it now"* — and it stays **OPEN** with its options (a)-(e) and the 2026-08-15 lean on (e) unchanged; what changed is that reason (1) makes it a precondition of any policy on `OrderTracking`, not a separable row |
-| **STAFF-AUTH** 🟠 **OPEN — FOUNDER-OWNED; raised 2026-08-18 while landing IDENT-1: restaurant staff, account managers and riders have NO WAY TO SIGN IN AT ALL** | **How does a restaurant operator, an account manager or a rider come to exist as a sign-in-capable person?** Verified at HEAD: the only authentication operations in the whole DSL are in `specs/customer/api.yaml` — `requestPhoneVerification` (:38) and `verifyPhone` (:43), both `roles: [PUBLIC, CUSTOMER]`, plus the V1 email pair `requestEmailVerification` (:50) and `confirmEmailVerification` (:55), both `roles: [CUSTOMER]`. No api fragment in any scope offers a sign-in to RESTAURANT, RESTAURANT_ACCOUNT or RIDER, and **nothing in the repository writes a RESTAURANT, RESTAURANT_ACCOUNT or RIDER claim anywhere**: the sole claim writer, `stamp_put_body` (`crates/infrastructure/src/integrations/supabase_auth.rs:424-433`), hardcodes `role: "CUSTOMER"`. This is the premise beneath IDENT-1's correction, and it is a **product** question, not identity plumbing | Not an option space the team may close: it decides who may act inside a restaurant's account and on what evidence, and it is upstream of every non-CUSTOMER credential the product will ever issue. Shapes only, none costed — **(a)** reuse phone OTP with an invite/claim step binding the verified subject to an existing `Restaurant` / `RestaurantAccount` / `Rider`; **(b)** an operator back-office where an ADMIN provisions staff; **(c)** a separate email/password path for staff, phone OTP kept for customers. Each implies a different `authRef` fact to author, and the facts are not there today: RIDER has it in the event (`specs/delivery/events.yaml:343-351`) and in `RegisterRider` (`specs/delivery/commands.yaml:196`) but **no projection column** — `auth_ref` is one column in the whole projection set, on `Customer` (`specs/database/tables/projection_tables.yaml:395`) — while RESTAURANT and RESTAURANT_ACCOUNT have no `authRef` declared anywhere, `specs/network/` included | 🟠 **OPEN — awaiting the founder.** **The cost of leaving it open is present tense.** Until it is answered, standing up any non-CUSTOMER role for a pilot or a demo means **hand-stamping a claim in a third-party console** — a credential with no repository-side origin, no event and no review. ADR-20260818-004646 Correction 3 shows what such a token then reaches: `Principal::role()` returns the declared role for `Identity::Unbound` (`crates/server/src/auth.rs:251`) and the mutation guard is a membership test on that role alone, so a hand-stamped RESTAURANT token can approve **any** pending refund. Two consequences that are not optional: it **bounds IDENT-1's implementable scope to one role** (there is no subject to key a mapping on for the other three), and it sits directly under the §45 **IDOR-DEADLINE** triggers *(i) a second restaurant credential outside the team* and *(ii) a rider credential to a non-team person* — both of which, today, can only be met by that hand-stamp. Tracked as [#639](https://github.com/TheCaptainCompany/captain-food/issues/639), the number [ADR-20260818-004646](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) records; this records-only run has no GitHub read, so the issue's live title and state are **UNVERIFIED input** |
+| **RDR-1** 🟡 **TEAM-OWNED — open 2026-08-15** | **What may an `EVENT_STREAM` `read:` step's `model:` point at?** Today it borrows a PROJECTION TABLE's shape while the leg folds the aggregate and never reads that table — `model:` is documented as "borrowed SHAPE only". That is not merely the status quo: it is **GATED**. `either_source_is_legal_on_a_projection_shaped_model` (`tools/codegen-rs/src/tests.rs`, cited by name because line numbers do not survive) asserts both sources are legal on a projection-shaped model *and its doc comment says so on purpose* — "a future tightening that demanded a stream-shaped model for `EVENT_STREAM` would break every hand-written leg, and this is the test that would stop it". A design commitment with a gate on it is a register row, not a rustdoc | **(A) Keep the borrowed projection shape** (status quo + its gate). Pros: no churn; the projection table genuinely IS the field set the fold produces for these legs; one vocabulary for every `read:` step. Cons: the spec says a leg reads a table it never reads, which is the exact conflation #564 exists to remove — solved one level up (`source:`) and left standing one level down (`model:`). **(B) An `EVENT_STREAM` step's `model:` `$ref`s the AGGREGATE** (`actors.yaml#/Cart`), the entity the fold actually produces. Pros: this is the **final-vision** shape under [ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md) — the declaration stops naming a thing it does not touch, and a derivation can then ignore `model:` entirely for stream steps rather than filtering it out. Cons: an aggregate has no column list, so every downstream consumer of `read.model` columns (`where:` checking, the C4 sequence emitter, the generated hook signatures) needs a second resolution path; breaks all four committed stream steps at once. **(C) A third `model:` form per source** — refused on sight as (A) and (B) at the same cost. | ✅ **recommend deciding this BEFORE PR2's emitter, not after**: PR2 derives reader sets from `source:` and will encode an assumption about `model:` either way, and reversing it afterwards means re-deriving grants that will by then be in generated manifests. **Unguarded hole to close whichever way it goes**: nothing checks that a borrowed projection shape is INHABITABLE by the fold, so a guard could reference a projector-COMPUTED column (a SUM, a denormalized join) on an `EVENT_STREAM` step and validate green — `CustomerCreditBalance.balance_cents` is exactly such a column and is now borrowed by a committed step |
+
+---
+
+## 49. The founder rulings of 2026-08-18 — ✅ THREE RULINGS PLUS A CLEARED QUEUE
+
+Records:
+**[ADR-20260818-094500 "Staff sign-in has a mechanism; refund approval stays with the restaurant; the executor refuses a stale base"](../adr/ADR-20260818-094500-staff-auth-mechanism-and-refund-approval-stays-with-the-restaurant.md)**
+(rulings A, B, C — eleven lenses replied, and the `Consulted:` block records what each caught) ·
+**[ADR-20260818-101500 "The restaurant signs in by email link, and #638 freezes at chunk 1"](../adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md)**
+(the cleared queue).
+
+✅ **STAFF-AUTH — ANSWERED for two of the three roles.** Ruling A, verbatim: *"For the rider the
+mobile app will ask the phone number handled by Supabase with OVH sms is required because it's their
+tool for working. For the restaurant, they have an app but they will not download it yet they will
+start with the web."* The **rider** signs in by phone, Supabase-handled, OVH SMS as the sender —
+required for V0 because the phone is the rider's working tool. The **restaurant** starts on the web,
+and its mechanism was settled the same day as an **email link, not a phone OTP**: the deciding
+argument is that `SMS_MAX_SENDS_PER_DAY_GLOBAL` is platform-wide and is described in its own
+declaration as the only ceiling on the bill, so putting the restaurant on that bucket would make a
+restaurant-side surge and a **rider lockout at Friday peak** the same number. It does **not** license
+cloning `verifyPhone`, which is register-or-identify and creates the Customer; staff sign-in is
+**identify-only against a pre-provisioned roster**. Restaurant onboarding is named open by the
+founder.
+
+✅ **Ruling B — `approveRefund` is NOT narrowed to `[ADMIN]`.** Verbatim: *"this is an exception where
+the admin makes an intervention. The approval of the refund must be done by the restaurant by
+default."* `roles: [RESTAURANT, ADMIN]` stands and the live widget stays on the restaurant back
+office. **The consequence is not neutral, and it is why this is a ruling and not a comment**: the
+cheap fix for the write-side hole is off the table, so the hole **must** close by **binding** — an
+identity actually bound to the restaurant that owns the order — which moves the write-side
+authorization seam from *beside* the critical path to *on* it. Lands on §39.
+
+✅ **Ruling C — the executor refuses a base it was not given.** Landed in `.claude/agents/executor.md`
+in the same change: a run whose base commit is not the one its dispatch card names is refused rather
+than rebased silently.
+
+✅ **#638 freezes at chunk 1** (merged, PR [#644](https://github.com/TheCaptainCompany/captain-food/pull/644));
+chunk 2 is **not dispatched**. The reason is **ordering, not correctness**: a second authorization
+layer under a first that does not exist defends nothing, every restaurant caller is
+`Identity::Unbound` today, and row security **structurally cannot** close the refund hole, because
+`approveRefund` is a participant check against folded state. This is the founder exercising the
+override he reserved in
+[ADR-20260810-215503](../adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md),
+recorded so a concurrent session cannot read the frozen chunk as available work.
+
+⚠️ **One role is still unruled.**
+
+| # | Decision | Options & the trade-off | Recommendation / status |
+|---|---|---|---|
+| **STAFF-AUTH-AM** 🟠 **OPEN — FOUNDER-OWNED; raised 2026-08-18 as the residue of ruling A** | **How does an ACCOUNT MANAGER sign in?** Ruling A named the rider (phone/SMS) and the restaurant (web, then email link). **Account managers were not mentioned and are not ruled** ([ADR-20260818-094500](../adr/ADR-20260818-094500-staff-auth-mechanism-and-refund-approval-stays-with-the-restaurant.md) says so in terms), so one of the four roles still has **no authentication path at all**. | **(a)** Email link, same mechanism as the restaurant — one staff sign-in path, identify-only against a pre-provisioned roster, no second surface to build or attack. **(b)** Phone/SMS like the rider — consistent with a field role, but puts a second population on the `SMS_MAX_SENDS_PER_DAY_GLOBAL` bucket the restaurant was deliberately kept off. **(c)** No account-manager sign-in in V0 — account managers work through an ADMIN acting as, under the explicit logged act-as path of §3. | 🟠 **OPEN. Lean: (a)**, and it is cheap because it is the restaurant's mechanism with a different roster. The cost of leaving it open is present tense but bounded: it blocks standing up an account manager for a pilot, and it is the one remaining role for which **binding** (ruling B's consequence on §39) has nothing to bind to. **(c) is the honest V0 answer if account managers are not a V0 persona at all** — which is itself the question. |
 
 ---
 
 ## Maintenance
 
-The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
-move to §5, and a decision open for many runs gets flagged in the report with its age. A decision
-nobody is making is the most expensive thing in the backlog, and it will never surface on its own.
+The `architect` reconciles this file on each run: new proposals add rows, answered decisions collapse
+to their outcome and the record that holds them, and a decision open for many runs gets flagged in
+the report with its age. **A decision nobody is making is the most expensive thing in the backlog,
+and it will never surface on its own.**
+
+**The shape is a rule, not a preference**
+([ADR-20260818-193000](../adr/ADR-20260818-193000-the-register-is-a-queue-and-a-closed-row-collapses-to-its-record.md)):
+
+- **The queue table at the top is the product of this page.** A row is added there the moment it is
+  opened anywhere below, and removed only when it is answered.
+- **A closed row collapses to its outcome plus the record that holds the reasoning.** The argument
+  belongs in the ADR and the proposal; the history belongs in git. Do not append a "previously"
+  block, and do not append a new reconciliation header — amend in place.
+- **Section numbers are anchors other records cite.** Never reuse one, and never renumber a section
+  without grepping `docs/**` and `.claude/**` for `DECISIONS §NN` in the same change. Uniqueness is
+  enforced by `register_section_numbers_are_unique` in `tools/codegen-rs`; a duplicate fails
+  `make validate`.
