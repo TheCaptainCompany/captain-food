@@ -2,6 +2,72 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🔐 **2026-08-18 — THREE FOUNDER RULINGS: THE TOKEN CARRIES NO BUSINESS IDENTIFIER, RLS LANDS AT THE
+> CUTOVER ON THE EMPTY DATABASE, AND THE SETTLEMENT READ IS BACK IN SCOPE**
+> (Records only: `docs/**` — no `specs/**`, no `crates/**`, so no SPEC-LOG row and no regeneration.
+> Records: [ADR-20260818-004646](adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) ·
+> [ADR-20260818-004647](adr/ADR-20260818-004647-database-level-security-lands-at-the-cutover-and-the-settlement-read-returns-to-scope.md) ·
+> [DECISIONS §46](proposals/DECISIONS.md) rows **IDENT-1**, **AUTHZ-LOCUS**, **AUTHZ-GRAMMAR**, **RLS-SEQ**.
+> Whole roster consulted first; both ADRs carry a per-lens `Consulted:` block.)
+>
+> **1. No business info is stored inside the identity provider** — *"the mapping with business
+> identifiers will be done in the OVH Postgres."* Asked V0 or post-first-order: **"v0"**, so it
+> sequences **before** the write-side enforcement seam ([#178](https://github.com/TheCaptainCompany/captain-food/issues/178)
+> slice 1). **This is a change, not a confirmation of the posture**: `crates/server/src/auth.rs:194-220`
+> binds `claims.customer_id`/`restaurant_id`/`restaurant_account_id`/`rider_id` today, and
+> `crates/infrastructure/src/integrations/supabase_auth.rs:424-433` writes
+> `app_metadata.captain_food = { role, customer_id }` **back into** the provider. The bridge that
+> replaces them already exists for one role — `by_auth_ref` (`crates/application/src/queries.rs:341`),
+> called only from the mailbox worker and only for CUSTOMER
+> (`crates/infrastructure/src/mailbox/handler.rs:244-258`) — and is promoted to the request seam and
+> extended to the other three. **The price, not softened**: `resolve_read_scope` (`auth.rs:1833`) is
+> synchronous today and runs once per request (`crates/server/src/graphql/routes.rs:166`, plus :285 per
+> WS connection); it becomes a lookup, and the enforcement slice's *zero I/O at peak* claim dies with
+> it — peak being Friday/Saturday 19:00–21:30. **Cheapest moment there will ever be**: production is
+> suspended (§45 PROD-1) and Q-L3 = no real end user, so dropping the claims strands **no issued
+> credential**; after a pilot the same change forces a re-auth of every credential. It is a
+> **MIGRATION** — resolve-and-ignore first (no token invalidated), then stop stamping, then erase the
+> stored identifier; `domain_events.user_id` is the auth subject (ADR-0041) and does not move.
+> ⚠️ **Measured residue**: only CUSTOMER has the mapping end to end. RIDER has the fact in the event
+> (`specs/delivery/events.yaml:343-351`) but **no projection column**; **RESTAURANT and
+> RESTAURANT_ACCOUNT have no `authRef` anywhere in `specs/**`**. Those facts must be authored, and the
+> `specs/**` changes this implies are **owed and unapproved** — nothing in `specs/**` was touched.
+>
+> **2. RLS lands at the CloudNativePG cutover, on the empty database — starting at
+> `OrderConversation`, not `OrderTracking`.** Three of the four drafted tables do not survive, each
+> for a reason measured against the tree: a policy on `OrderTracking` breaks the settlement read
+> **silently** (`payment_settlement.rs:83-84` reads it under `ReadScope::System` on all four legs
+> before every capture and release, and **RLS filters rows rather than raising**, so zero rows lands
+> in the existing `HookOutcome::Skip` arm — *"nothing to settle"*: food delivered, money never
+> collected, reported as a green log line, strictly worse than the wall STO-9 describes);
+> `View_DeliveryJob` is a **VIEW** (`specs/generated/views.generated.sql:6`) and Postgres has no
+> `CREATE POLICY` for views, with `security_barrier` an optimizer fence rather than
+> `security_invoker`; `CustomerCreditBalance` is per-customer and **`ScopeType` has no member for it**
+> (`specs/common/scalars.yaml:721-729` is `ORDER`/`RESTAURANT`); and `FORCE` as drafted leaves the
+> `projector_{scope}` writer **no policy slot** (RLS is default-deny for non-owner roles — the
+> projection stops on the first event after cutover) while a `WITH CHECK` over `ScopeMembership`, a
+> separate projection with its own checkpoint, makes a read-model rebuild **order-dependent**.
+> `OrderConversation` is the right first table: a TABLE, identity = its `orderId`, and the Art. 9
+> free-text surface named in §45 IDOR-DEADLINE-GAP. **Gate-then-stabilize is untouched** —
+> PROP-20260811-093000 §6.3 still governs RLS on `domain_events`.
+>
+> **3. The `OrderTracking` settlement read (§32 STO-9) is back in scope** — *"now that we know how to
+> deal with security at the database level we can integrate it now."* The row stays **OPEN**, options
+> (a)–(e) and the 2026-08-15 lean on (e) unchanged; what changed is that it is a **precondition** of
+> any policy on that table rather than a separable row.
+>
+> **The three externally-authored ADRs are HELD, not deposited.** `ADR-20260817-232744/232745/232746`
+> are not in `docs/adr/`; their surviving content is carried, corrected, by
+> [#635](https://github.com/TheCaptainCompany/captain-food/issues/635),
+> [#636](https://github.com/TheCaptainCompany/captain-food/issues/636) and ADR-20260818-004647.
+> **AUTHZ-GRAMMAR**: the `authorization:` block is **declined as new grammar** — `requires.acting`
+> already exists and is validated (`specs/comms/actors.yaml:65-72`,
+> `tools/codegen-rs/src/refs.rs:453-455`), so the corrected design is to finish its emitter with
+> completeness keyed on `actors.yaml receives[]` (the receiving actor — the only join that sees the
+> three PM-received commands, i.e. the refund door). **Owed to the `architect`**: #636's body still
+> describes the grammar it was filed to correct, and `PROP-20260726-171500` still reads as if §D1 were
+> open — both need re-pointing in the same change as the first implementing slice.
+
 > 🛒 **2026-08-17 — THE SMOKE'S CART READ IS A PAIR ON TWO HOSTS, NOT ONE READ ON THE WRONG ONE**
 > ([#622](https://github.com/TheCaptainCompany/captain-food/issues/622), PR
 > [#633](https://github.com/TheCaptainCompany/captain-food/pull/633). Tooling + workflow only: no
