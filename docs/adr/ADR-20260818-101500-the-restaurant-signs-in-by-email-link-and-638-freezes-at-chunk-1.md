@@ -110,10 +110,42 @@ Constraints the mob banked at the briefing and that the dispatch card must carry
 - `Identity::Unbound` **denies** on the money path and never stamps a role into
   `domain_events.user_id` / `user_type`. A false author in the immutable log is worse than the authz
   hole it hides.
-- The ownership comparison uses the fact **already folded on the approve path**
-  (`PaymentState.restaurant_id`, `crates/domain/src/payment.rs:47`) — never a `View_*` read, which
-  would make projector lag an authorization oracle on the money path at exactly the hour the queue is
-  longest.
+- The ownership comparison reads **folded state, never a `View_*`**. The *source* of that folded
+  state is **open** — `PaymentState.restaurant_id` (`crates/domain/src/payment.rs:47`, already folded
+  on the approve leg) or a new `restaurant_id` persisted on the `RefundProcess` run row from
+  `RefundOpened`, which carries it as required. #635 picks one; this record does not.
+
+  > ⚠️ **CORRECTED 2026-08-18, same day, during the chunk-1 mob briefing.** This clause first read
+  > *"never a `View_*` read, which would make projector lag an authorization oracle on the money path
+  > at exactly the hour the queue is longest"*, and it named `PaymentState` as settled rather than as
+  > one of two options. **Both halves were wrong, and the prohibition is right anyway.**
+  >
+  > **There is no projector.** `View_PendingRefunds` is a plain `CREATE OR REPLACE VIEW` folding on
+  > read over `domain_events` (`migrations/20260730043600_enum_text_recreate_views.sql:139`), and
+  > `crates/infrastructure/src/projections/` does not exist. Lag is zero by construction, so the
+  > reason given was invented — the exact defect
+  > [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
+  > was written for, one day after it was ratified, in a record its own author wrote. The true reason
+  > needs no antecedent: **a read model is not an authorization oracle.** Keeping the false one was
+  > the live danger, because #635 would have checked it, found no lag, and read it as licence.
+  >
+  > It also **named the wrong decoy**. Nobody was going to authorize off `View_PendingRefunds`. The
+  > reachable wrong answer is that the approve leg **already reads a read model** —
+  > `self.orders.by_id(order_id, &ReadScope::System)` in
+  > `crates/application/src/process_managers/refund.rs` — so adding `restaurant_id` to that leg's
+  > `read:` columns is a one-column edit that looks like plumbing and is a first-order violation on
+  > the money path. That is the thing to forbid by name.
+  >
+  > And an ordering fact neither half accounted for: in
+  > `crates/application/src/generated/process_managers.rs` the **Stripe refund fires before the
+  > `Payment-<intentId>` stream is loaded**. An ownership check against folded Payment state, as the
+  > leg stands today, would happen *after the money has already moved* — the same
+  > prepare-before-the-fence shape as `crates/actor_runtime/src/completion.rs:69`. Fixing it needs
+  > either a second load before the external effect or the run-row field, which is why the source is
+  > recorded as open rather than decided.
+  >
+  > Found at briefing by **dba** (no projector), **young** (the wrong decoy) and **vernon** (the
+  > ordering), independently.
 - The companion test matters more than the obvious one: `unbound ⇒ denied`, not only
   `other-restaurant ⇒ denied`. Without it, `domain_id: None` gets coded as "unknown ⇒ allow", the
   cross-tenant test passes, and the hole is untouched.
