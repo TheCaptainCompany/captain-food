@@ -2,6 +2,34 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-18 — DECISION QUEUE CLEARED: the restaurant signs in by EMAIL LINK, and #638 FREEZES
+> at chunk 1**
+> ([ADR-20260818-101500](adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md)).
+> Both answers *"Agreed"*, to the two items put with a recommendation.
+>
+> **1. Email link, not phone OTP, for the restaurant.** The deciding argument is that
+> `SMS_MAX_SENDS_PER_DAY_GLOBAL` is platform-wide and is described in its own declaration as the only
+> ceiling on the bill: the rider's working tool is already on that bucket, and putting the restaurant
+> there too makes a restaurant-side surge and a **rider lockout at Friday peak** the same number. The
+> rider population is bounded; the restaurant one is not. This does **not** license cloning
+> `verifyPhone` — that command is register-or-identify and creates the Customer; staff sign-in is
+> **identify-only against a pre-provisioned roster**, whatever the factor.
+>
+> **2. `#638` freezes at chunk 1 (merged, PR #644); chunk 2 is not dispatched.** Ordering, not
+> correctness — the founder's own "avoid AI errors" rationale is untouched. A second authorization
+> layer under a first that does not exist defends nothing: every restaurant caller is
+> `Identity::Unbound` today, so `ReadScope::Restaurant` is unreachable and there is no bound identity
+> for a policy to resolve against. Row security also **cannot** close the refund hole —
+> `approveRefund` is a participant check against folded state, the UNBINDABLE class in §39.
+> Recorded so a concurrent session cannot read the frozen chunk as available work.
+>
+> **What starts instead — the slice, one sentence**: *one real Tours restaurateur finds their own
+> restaurant on their phone browser, proves it, signs in, and can see and act on only their own
+> orders and only their own refunds.* Three operations (`approveRefund`, `denyRefund`,
+> `pendingRefunds`), not the 83 in the §39 scope. It discharges both rulings of
+> ADR-20260818-094500, the V0 sequencing of ADR-20260818-004646, and §39 IDOR trigger (i) — which
+> ruling A is itself the event that trips.
+
 > ⚖️ **2026-08-18 — RULINGS: staff sign-in has a mechanism, refund approval stays with the
 > restaurant, and the executor now refuses a stale base**
 > ([ADR-20260818-094500](adr/ADR-20260818-094500-staff-auth-mechanism-and-refund-approval-stays-with-the-restaurant.md)).
