@@ -452,6 +452,13 @@ pub mod read_authorization {
         })
     }
 
+    fn scope_mismatch_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| {
+            meter().u64_counter(metric::READ_AUTHORIZATION_SCOPE_MISMATCH_TOTAL).build()
+        })
+    }
+
     fn check_histogram() -> &'static Histogram<f64> {
         static H: OnceLock<Histogram<f64>> = OnceLock::new();
         H.get_or_init(|| {
@@ -499,6 +506,29 @@ pub mod read_authorization {
     /// burst inside a provisioning-gap alarm — on every storefront request.
     pub fn public_credential_degraded(reason: &str) {
         public_degraded_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// A BOUND caller asked for a tenant that is not the one its credential resolves to (#618).
+    /// One increment per REQUEST, never per row — the read is bound by INTERSECTION, so the whole
+    /// list is affected by one comparison.
+    ///
+    /// `mode` is required, not optional: under `observe` the caller was still SERVED the rows it
+    /// asked for and only the mismatch was recorded, while under `enforce` it was served nothing.
+    /// A count without the mode in force cannot tell those two apart, and they are the entire
+    /// difference between an observation and a refusal.
+    ///
+    /// Never fires for an UNBOUND caller: there is no bound scope to conflict with, that denial is
+    /// [`bridge_unresolved`]'s population, and counting it here would put an expected pre-claim
+    /// population inside a cross-tenant-attempt signal.
+    pub fn scope_mismatch(operation: &str, role: &str, mode: &str) {
+        scope_mismatch_counter().add(
+            1,
+            &[
+                KeyValue::new("operation", operation.to_string()),
+                KeyValue::new("role", role.to_string()),
+                KeyValue::new("mode", mode.to_string()),
+            ],
+        );
     }
 
     /// BAM gauge: projection lag on the ACL index, in log positions. While it lags, a just-placed

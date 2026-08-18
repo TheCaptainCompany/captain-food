@@ -86,6 +86,7 @@ mod hosts;
 /// The role-as-path ACL seam (RequestRole/RoleGuard, ADR-0006), re-exported so integration tests can
 /// execute the schema under a specific role (the HTTP layer injects it from the URL path).
 pub use graphql::acl as graphql_acl;
+pub use graphql::read_binding as graphql_read_binding;
 pub use graphql::session as graphql_session;
 /// The request's TENANT seam (#469), re-exported for the same reason as the session seam: a test
 /// that executes the schema directly must supply the datum the HTTP edge resolves from the `Host`.
@@ -1329,7 +1330,13 @@ pub async fn router() -> Router {
         ),
     };
 
-    base.merge(graphql::routes::graphql_routes(schema, tenant_lookup.clone()))
+    base.merge(graphql::routes::graphql_routes(
+        schema,
+        tenant_lookup.clone(),
+        // #618: the read-surface binding mode, from the DECLARED key. Required and
+        // non-Option, so a mount that forgot it does not compile.
+        graphql::read_binding::ReadScopeBindingMode::from_declared(&config.read_scope_binding_mode),
+    ))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.

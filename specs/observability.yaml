@@ -1468,6 +1468,28 @@ read-authorization:
     #                          decays toward zero; a floor that does NOT decay is a claim-stamping
     #                          failure, and customer_claim_stamp_failed_total is where that lives.
     - { name: "public_credential_degraded_total", type: counter, attributes: ["reason"] }
+    # The #618 read-surface binding: a BOUND caller asked for a tenant that is not the one its
+    # credential resolves to. A discrete PER-REQUEST fact, not a per-row decision — which is why it
+    # is legitimately emittable on a list path where `read_authorization_denied_total` is not, and
+    # why it needs its own name rather than joining that counter (see the note above it: list
+    # denials are structurally invisible, and this is not one of them).
+    #
+    # It is a DEFECT counter, on the same footing as read_authorization_bridge_unresolved_total, and
+    # deliberately NOT a business metric: a read that returned the wrong rows writes no event, so
+    # there is nothing in `domain_events` to fold. Not as a matter of effort — as a matter of what
+    # the log contains (ADR-20260811-014129).
+    #
+    # PROSPECTIVE and BOUND-CALLER-ONLY. It counts nothing about the unbound population, which is
+    # the only RESTAURANT population that exists today, and it did not exist before the binding
+    # landed. It must therefore NEVER be read as "no mismatches, therefore no cross-tenant read
+    # occurred" — the historical exposure is recorded in DECISIONS §39, not here.
+    #
+    # All three attributes are bounded populations: `operation` is an api.yaml query name, `role` is
+    # a UserType, `mode` is READ_SCOPE_BINDING_MODE's declared value set (off | observe | enforce).
+    # `mode` is on the series on purpose: under `observe` the caller was STILL SERVED the rows it
+    # asked for, so a count with no mode cannot tell a counted-and-served event from a
+    # counted-and-refused one.
+    - { name: "read_authorization_scope_mismatch_total", type: counter, attributes: ["operation", "role", "mode"] }
     - { name: "read_authorization_check_ms", type: histogram, attributes: ["scope_type"] }
 
   business_metrics:

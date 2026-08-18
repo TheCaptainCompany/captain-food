@@ -8,6 +8,10 @@ pub mod acl;
 /// the generated resolver literals only call it.
 pub mod cart_read;
 pub mod generated;
+/// The read-surface scope binding mode (#618): `READ_SCOPE_BINDING_MODE` as per-request data,
+/// absent ⇒ `Enforce`. The generated resolvers read it through
+/// [`ReadScopeBindingMode::from_context`](read_binding::ReadScopeBindingMode::from_context).
+pub mod read_binding;
 pub mod routes;
 pub mod schema;
 /// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the

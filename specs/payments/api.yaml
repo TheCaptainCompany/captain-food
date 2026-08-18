@@ -101,12 +101,26 @@ queries:
   pendingRefunds:
     description: >
       The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status
-      (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across
-      restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied
-      filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every
-      restaurant's refund queue — and one that supplies another restaurant's id reads that queue.
-      Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is
-      approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
+      (status = REQUESTED is the pending, awaiting-decision queue). An ADMIN arbitrates across
+      restaurants and reads the whole queue.
+
+      `restaurantId` is a SELECTOR WITHIN THE CALLER'S SCOPE, NEVER A GRANT. For a RESTAURANT caller
+      the server binds the queue to the restaurant the caller's verified claim resolves to, and the
+      argument may only narrow within it: no argument returns the caller's own queue, the caller's own
+      id returns the same queue, and any OTHER restaurant's id returns an EMPTY list (bound scope
+      INTERSECT requested filter) and increments read_authorization_scope_mismatch_total. A RESTAURANT
+      caller whose token carries no restaurant binding reads nothing.
+
+      MODE-CONDITIONAL, and this is the shipped default: the binding above applies in full only under
+      READ_SCOPE_BINDING_MODE=ENFORCE. Under the default OBSERVE the unbound caller is already denied,
+      but a BOUND caller supplying another restaurant's id is still served that restaurant's rows and
+      the mismatch is only counted. Under OFF -- the incident rollback rung -- every RESTAURANT
+      credential reads the whole platform's queue again.
+
+      NOT YET CLOSED, present tense: the matching WRITE half is unbound (approveRefund / denyRefund,
+      #635 / #178), and this is ONE of the seven unscoped read surfaces of #618 -- the others are
+      unchanged. The dated record of what this operation exposed, from when, and how far it is
+      remediated is DECISIONS.md section 39 (IDOR-1).
     args:
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
       status: { $ref: 'scalars.yaml#/RefundStatus' }
@@ -162,12 +176,16 @@ mutations:
 
   approveRefund:
     command: { $ref: 'commands.yaml#/ApproveRefund' }
-    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    roles: [RESTAURANT, ADMIN]   # NOT bound to the caller: neither command consults any identity
+                                 # (#635 / #178, DECISIONS §39). The role list is a membership test
+                                 # only -- any RESTAURANT credential can decide any restaurant's refund.
     slice: V0
 
   denyRefund:
     command: { $ref: 'commands.yaml#/DenyRefund' }
-    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    roles: [RESTAURANT, ADMIN]   # NOT bound to the caller: neither command consults any identity
+                                 # (#635 / #178, DECISIONS §39). The role list is a membership test
+                                 # only -- any RESTAURANT credential can decide any restaurant's refund.
     slice: V0
 
 subscriptions:

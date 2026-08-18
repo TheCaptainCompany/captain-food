@@ -202,6 +202,8 @@ pub struct Config {
     pub otel_traces_sample_ratio: String,
     /// Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default.
     pub log_level: String,
+    /// Whether a tenant-scoped READ is bound to the caller's own ReadScope, on the two axes the three tokens encode: (a) does the caller's scope apply when the request supplied no filter, and (b) who wins when the request's filter and the caller's scope conflict — the caller's scope always, by INTERSECTION, so a filter may narrow within the scope and never move it. Governs the binding COMPARISON only, never the absence of an identity: an unbound caller is denied under `observe` and `enforce` alike. The four-row table above this key is the definition. Read per request from the injected value; the value's SOURCE is resolved at startup, so flipping it is an env override plus a pod restart -- no rebuild, no image, no CI, no migration -- and NOT a live toggle. Absent from a request context entirely, the binding treats it as `enforce`: fail closed.
+    pub read_scope_binding_mode: String,
     /// How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -332,6 +334,8 @@ impl Config {
         let otel_traces_sample_ratio = otel_traces_sample_ratio.unwrap_or_else(|| "1.0".to_string());
         let log_level = raw("LOG_LEVEL").or_else(|| baked("LOG_LEVEL", profile).map(str::to_string));
         let log_level = log_level.unwrap_or_else(|| "info".to_string());
+        let read_scope_binding_mode = raw("READ_SCOPE_BINDING_MODE");
+        let read_scope_binding_mode = read_scope_binding_mode.unwrap_or_else(|| "observe".to_string());
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -451,6 +455,7 @@ impl Config {
                 honeycomb_dataset,
                 otel_traces_sample_ratio,
                 log_level,
+                read_scope_binding_mode,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
@@ -511,6 +516,7 @@ impl Config {
         out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
         out.push_str(&format!("  OTEL_TRACES_SAMPLE_RATIO   = {}\n", self.otel_traces_sample_ratio));
         out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
+        out.push_str(&format!("  READ_SCOPE_BINDING_MODE    = {}\n", self.read_scope_binding_mode));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
@@ -545,7 +551,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 39;
+pub const KEY_COUNT: usize = 40;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -560,6 +566,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "HONEYCOMB_DATASET",
     "OTEL_TRACES_SAMPLE_RATIO",
     "LOG_LEVEL",
+    "READ_SCOPE_BINDING_MODE",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",

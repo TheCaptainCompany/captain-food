@@ -27,8 +27,13 @@ supported_locales: [en, fr]
 app_types: [web, windows]   # staff dashboard: web first; the counter tablet/till build follows (ADR-0037)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# DATA LAYER — RESOLVERS (reads). All bound to EXISTING api.yaml queries; the restaurant scope
-# (restaurantId) is caller-supplied at runtime from the staff session's restaurant binding.
+# DATA LAYER — RESOLVERS (reads). All bound to EXISTING api.yaml queries.
+#
+# The restaurant scope (restaurantId) is caller-supplied at runtime from the staff session's
+# restaurant binding — EXCEPT `refunds.pending`, which is SERVER-BOUND since #618: the server binds
+# the queue to the restaurant the caller's verified claim resolves to and the argument may only
+# narrow within it. This widget passes no arguments at all, which is why it read the whole
+# platform's refund queue before that change.
 # ──────────────────────────────────────────────────────────────────────────────
 resolvers:
   orders.byRestaurant:       { query: { $ref: 'api.yaml#/queries/orders' } }
@@ -192,6 +197,9 @@ screens:
     requires_auth: true
     data_requirements: [refunds.pending]
     actions_used: [approve_refund, deny_refund]
+    gaps:
+      - "NOT-BOUND is indistinguishable from GENUINELY-EMPTY on this screen, and no copy can fix it (#618 chunk 1). Since the queue is server-bound, a RESTAURANT credential carrying no restaurant binding reads NOTHING — and the empty state then asserts `No pending refunds` / `Aucun remboursement en attente`, which is a statement about the world and is false for the only RESTAURANT population that exists today. `staff_topbar` renders a static title and never the restaurant's name, so there is no second signifier either. The missing thing is a DISCRIMINATING STATE the client can render (`the session resolves to no restaurant` vs `this restaurant has no pending refunds`), which needs the claim path that mints a bound credential: #639. Rewording the French would be theatre — it would state a different falsehood with more confidence."
+      - "The `approve_refund` / `deny_refund` buttons below are as authorized as they were before #618, which is: NOT AT ALL. `approveRefund` / `denyRefund` consult no identity anywhere (#635 / #178, DECISIONS §39), so a restaurant now sees only its own refunds and can still decide anybody's. Binding the read also removed the only place a co-op member could NOTICE an out-of-tenant decision."
     components:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.title' } }

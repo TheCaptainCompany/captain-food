@@ -1907,7 +1907,15 @@ mod read_scope_tests {
             ReadScope::Public,
             "sub is never an identity (rider — #430's placeholder must stay dead)"
         );
-        assert_eq!(read_scope(&principal(RequestRole::Restaurant, "s", None)), ReadScope::Public);
+        assert_eq!(
+            read_scope(&principal(RequestRole::Restaurant, "s", None)),
+            ReadScope::Public,
+            "pendingRefunds' P1 probe hardcodes Public on the strength of this line (#618): \
+             `crates/server/tests/graphql_pending_refunds_scope.rs` cannot call read_scope (this \
+             module is private and every Identity constructor is pub(crate)), so the day a claim \
+             path changes THIS arm, THIS assertion must go red first -- or that probe stays green \
+             over a reopened hole"
+        );
         assert_eq!(
             read_scope(&principal(RequestRole::RestaurantAccount, "s", None)),
             ReadScope::Public

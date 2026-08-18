@@ -42,18 +42,87 @@ use super::schema::CaptainSchema;
 pub struct GraphqlState {
     schema: CaptainSchema,
     tenants: crate::hosts::TenantLookup,
+    binding_mode: crate::graphql::read_binding::ReadScopeBindingMode,
+}
+
+/// The per-request GraphQL context datums — built in ONE place so no transport can carry a
+/// different set (#618 trap 1).
+///
+/// The two transports inject independently: the POST handler chains `Request::data(..)`, the WS
+/// `on_connection_init` closure fills an `async_graphql::Data`. Nothing but memory connected them,
+/// and the WS closure's own comment states the property that has to hold — *"a subscription must
+/// not widen what a query would refuse"*. Injecting the binding mode on POST only would leave the
+/// socket on the absent-default `Enforce`: safe, but the `Off` rollback rung would then not cover
+/// the socket, i.e. the escape hatch fails on one transport.
+///
+/// **Compiler-first repair, not a remembered one** (ADR-20260803-234035): a datum is added by
+/// adding a FIELD here, which breaks both construction sites at once. One-transport injection is
+/// not a discipline — it is a compile error.
+pub(crate) struct RequestDatums {
+    pub role: RequestRole,
+    pub principal: crate::auth::Principal,
+    pub session: crate::graphql::session::SessionHeader,
+    pub trace: crate::graphql::session::TraceContext,
+    pub correlation: crate::graphql::session::RequestCorrelationId,
+    pub scope: application::queries::ReadScope,
+    pub tenant: crate::graphql::tenant::TenantScope,
+    pub binding_mode: crate::graphql::read_binding::ReadScopeBindingMode,
+    /// RSO-1: the POST path mints ONE clock for the request; a WS connection deliberately does
+    /// NOT — a socket lives for hours, so a connection-scoped clock would serve every later
+    /// operation a stale "now", and `service_clock::evaluation` reads it per execution instead.
+    /// The single legitimate per-transport difference, stated as a field rather than left implicit
+    /// in one site's omission.
+    pub request_now: Option<crate::graphql::service_clock::RequestNow>,
+}
+
+impl RequestDatums {
+    /// Every datum, inserted. The ONLY way either transport populates a context.
+    pub(crate) fn into_data(self) -> async_graphql::Data {
+        let RequestDatums {
+            role,
+            principal,
+            session,
+            trace,
+            correlation,
+            scope,
+            tenant,
+            binding_mode,
+            request_now,
+        } = self;
+        let mut data = async_graphql::Data::default();
+        data.insert(role);
+        data.insert(principal);
+        data.insert(session);
+        data.insert(trace);
+        data.insert(correlation);
+        data.insert(scope);
+        data.insert(tenant);
+        data.insert(binding_mode);
+        if let Some(now) = request_now {
+            data.insert(now);
+        }
+        data
+    }
 }
 
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
 /// schema + tenant lookup are applied as state) so it can be merged into the main router.
-pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup) -> Router {
+///
+/// `binding_mode` is likewise a **required, non-`Option`** argument (#618): an `Option` defaulted
+/// inside would make "forgot to wire it" indistinguishable from "chose `Enforce`", which is trap 1
+/// in a new costume. Every mount site resolves it from the typed `Config`.
+pub fn graphql_routes(
+    schema: CaptainSchema,
+    tenants: crate::hosts::TenantLookup,
+    binding_mode: crate::graphql::read_binding::ReadScopeBindingMode,
+) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
         .route("/{role}/voyager", get(voyager))
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
-        .with_state(GraphqlState { schema, tenants })
+        .with_state(GraphqlState { schema, tenants, binding_mode })
         .layer(axum::middleware::map_response(private_no_store))
 }
 
@@ -130,7 +199,7 @@ async fn graphql_handler(
     headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
-    let GraphqlState { schema, tenants } = state;
+    let GraphqlState { schema, tenants, binding_mode } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -169,20 +238,22 @@ async fn graphql_handler(
     // absent on the marketplace). Tenant-scoped reads take it from the context, so no operation can
     // accept the tenant as a client argument and none can forget to be bounded by it.
     let tenant = crate::graphql::tenant::resolve_tenant(&headers, &tenants).await;
-    let resp: GraphQLResponse = schema
-        .execute(
-            req.into_inner()
-                .data(role)
-                .data(principal)
-                .data(session)
-                .data(trace)
-                .data(correlation)
-                .data(request_now)
-                .data(scope)
-                .data(tenant),
-        )
-        .await
-        .into();
+    // ONE datum set, shared with the WS transport (#618 trap 1): the struct, not this call site, is
+    // what decides what a request context carries.
+    let mut request = req.into_inner();
+    request.data = RequestDatums {
+        role,
+        principal,
+        session,
+        trace,
+        correlation,
+        scope,
+        tenant,
+        binding_mode,
+        request_now: Some(request_now),
+    }
+    .into_data();
+    let resp: GraphQLResponse = schema.execute(request).await.into();
     resp.into_response()
 }
 
@@ -232,7 +303,7 @@ async fn graphql_get(
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
-    let GraphqlState { schema, tenants } = state;
+    let GraphqlState { schema, tenants, binding_mode } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -269,31 +340,35 @@ async fn graphql_get(
                         crate::auth::AuthError::Unavailable => "auth unavailable",
                     })
                 })?;
-                let mut data = async_graphql::Data::default();
-                data.insert(role);
                 // One correlation id per CONNECTION here (the socket is the request): every
                 // read-path span served over it shares the id, same posture as POST.
                 let correlation = crate::graphql::session::RequestCorrelationId::mint();
-                data.insert(correlation);
-                // Deliberately NO `RequestNow` here (RSO-1): a socket lives for hours, so a
-                // connection-scoped clock would serve every later operation a stale "now". On
-                // this transport "the request" is each operation, and `service_clock::evaluation`
-                // reads the clock once per execution — the correct per-operation clock.
-                // The socket resolves its ReadScope ONCE at connection init, from the same pure
-                // claims function the POST path uses — a subscription must not widen what a query
-                // would refuse (#144/#433).
-                data.insert(crate::auth::resolve_read_scope(&principal, correlation));
-                // The socket's TENANT, resolved ONCE at init from the UPGRADE request's Host —
-                // same posture as the ReadScope beside it (#469). A live cart or tracking socket
-                // must not read wider than the POST that opened the page could.
-                data.insert(crate::graphql::tenant::resolve_tenant(&headers, &tenants).await);
-                data.insert(principal);
                 // A malformed session id rejects the connection (fail-visible, like a bad token).
                 let session = crate::graphql::session::session_header(&headers)
                     .map_err(|_| async_graphql::Error::new("invalid X-SESSION-ID (must be a UUID)"))?;
-                data.insert(session);
-                data.insert(crate::graphql::session::trace_context(&headers));
-                Ok(data)
+                // The SAME datum set the POST path builds (#618 trap 1) — including the binding
+                // mode, so the `Off` rollback rung covers the socket too and a subscription can
+                // never widen what a query would refuse (#144/#433). The socket resolves its
+                // ReadScope ONCE at connection init, from the same pure claims function.
+                Ok(RequestDatums {
+                    role,
+                    scope: crate::auth::resolve_read_scope(&principal, correlation),
+                    // The socket's TENANT, resolved ONCE at init from the UPGRADE request's Host.
+                    // A live cart or tracking socket must not read wider than the POST that opened
+                    // the page could (#469).
+                    tenant: crate::graphql::tenant::resolve_tenant(&headers, &tenants).await,
+                    principal,
+                    session,
+                    trace: crate::graphql::session::trace_context(&headers),
+                    correlation,
+                    binding_mode,
+                    // Deliberately NONE here (RSO-1): a socket lives for hours, so a
+                    // connection-scoped clock would serve every later operation a stale "now". On
+                    // this transport "the request" is each operation, and
+                    // `service_clock::evaluation` reads the clock once per execution.
+                    request_now: None,
+                }
+                .into_data())
             })
             .serve()
             .await
@@ -413,6 +488,7 @@ mod tests {
         let router = graphql_routes(
             crate::graphql::schema::build_schema(None, None, None),
             crate::hosts::TenantLookup(None),
+            crate::graphql::read_binding::ReadScopeBindingMode::Observe,
         )
         .layer(Extension(crate::auth::AuthContext::from_config(
             String::new(),
