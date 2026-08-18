@@ -2,6 +2,40 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗂️ **2026-08-18 — RECORDS: the founder's own rationale for database-level security, plus the two
+> register rows owed since the corrupted run** (Records only: `docs/**` — no `specs/**`, no
+> `crates/**`, so no SPEC-LOG row and no regeneration.)
+>
+> **1. `PROP-20260818-010343` §1.1 now carries the argument no lens produced.** The founder,
+> 2026-08-18: *"This will help us to avoid AI errors and unauthorised access."* Every lens in the mob
+> pass argued row security as defence in depth against an **attacker**. The first clause names a
+> different failure, and for this repository a likelier one — **a resolver written by an agent forgets
+> its filter, and the policy holds anyway**. In a largely agent-authored codebase an omitted `WHERE`
+> is the failure application-layer review is worst at catching, **because the code looks correct**.
+> Recorded as the rationale that best justifies **building and proving** the layer early while
+> production is suspended — and explicitly **not** as a reason to apply a policy to a database that
+> does not exist yet (ADR-20260818-004647's cutover sequencing is untouched), nor as a property that
+> survives the proposal's §2 defects: it holds only while the member type is bound to the **database
+> role** (C-1) and the persona view stays **join-first** (C-2).
+>
+> **2. New register row `STAFF-AUTH` ([DECISIONS §46](proposals/DECISIONS.md)), founder-owned, OPEN.**
+> Restaurant staff, account managers and riders **have no way to sign in at all**. Verified at HEAD:
+> the only authentication operations in the whole DSL are `specs/customer/api.yaml`'s
+> `requestPhoneVerification` (:38) and `verifyPhone` (:43), both `roles: [PUBLIC, CUSTOMER]`, plus the
+> V1 email pair (:50, :55), both `roles: [CUSTOMER]`; and the sole claim writer, `stamp_put_body`,
+> hardcodes `role: "CUSTOMER"`, so nothing writes a RESTAURANT, RESTAURANT_ACCOUNT or RIDER claim
+> anywhere. Until it is answered, every pilot credential for a non-CUSTOMER role is a hand-stamp in a
+> third-party console — and per ADR-20260818-004646 Correction 3 such a token approves **any** pending
+> refund. Tracked as [#639](https://github.com/TheCaptainCompany/captain-food/issues/639) (the number
+> the ADR records; its live title and state are UNVERIFIED — this run had no GitHub read).
+>
+> **3. `IDENT-1` premise corrected, ruling untouched; `AUTHZ-GRAMMAR` updated.** *"Two of four roles
+> have no mapping fact at all"* understated it — **three of four have no authentication path**, and
+> only **one** business identifier is actually stored in the provider. The row now defers to
+> ADR-20260818-004646 rather than restating the correction. And
+> [#636](https://github.com/TheCaptainCompany/captain-food/issues/636) has been re-pointed to *"finish
+> the `requires:` emitter"*, so AUTHZ-GRAMMAR's owed re-pointing is no longer outstanding.
+
 > 🕸️ **2026-08-18 — FOUNDER RULING: BUILD THE GRAPH ENGINEERING. Plan committed as
 > [PROP-20260818-013222](proposals/PROP-20260818-013222-graph-engineering-for-the-team-workflow.md)**
 > (Records only: `docs/**` — no `specs/**`, no `crates/**`, so no SPEC-LOG row and no regeneration.

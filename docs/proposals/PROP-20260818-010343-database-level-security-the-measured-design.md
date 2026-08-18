@@ -41,6 +41,44 @@ Two conventions this design leans on, both already in the repo and neither intro
   (`specs/database/tables/projection_tables.yaml`). Every predicate in this design resolves against
   it, in the caller's own database. No cross-database predicate is proposed anywhere.
 
+### 1.1 The founder's own rationale — and it is not the one any lens gave
+
+Stated by the founder on **2026-08-18**, verbatim:
+
+> **"This will help us to avoid AI errors and unauthorised access."**
+
+It gets its own subsection because **no lens in the mob pass produced the first clause**. Every lens
+argued this subject as *defence in depth against an attacker* — a forged token, a stolen session, a
+hostile tenant. The founder's argument is different, and for this repository it is the stronger of
+the two: **row security still holds when a resolver written by an agent forgets its filter.**
+
+That is not a hypothetical failure here. This codebase is largely agent-authored, so an omitted
+`WHERE` clause in new code is a likelier event than a forged credential — and it is the failure
+mode application-layer review is worst at catching, **because the code looks correct**. There is
+nothing to notice: it compiles, the test written alongside it passes, and the diff reads as
+intended. The register's own §39 IDOR-1 surface is the same observation counted from the other end
+(antecedent: [DECISIONS §39](DECISIONS.md), which states that count with its antecedents) — that is
+what *"the filter is something a human has to remember"* looks like at scale. A policy is applied by
+the engine, once, to every statement any code will ever send.
+
+**This is the rationale that best justifies building the layer EARLY**, while production is
+suspended ([DECISIONS §45](DECISIONS.md) PROD-1) and the guarded databases do not exist yet. The
+other rationales price the mechanism against attackers who are not attacking anything today; this
+one prices it against a mistake the team makes in the ordinary course of every session.
+
+**Two limits, so it is not overstated:**
+
+- **It argues for BUILDING and PROVING the layer, not for applying it to a database that does not
+  exist.** The sequencing ruling is untouched (ADR-20260818-004647): policies land at the
+  CloudNativePG cutover, on the empty database. A property that catches forgotten filters catches
+  nothing where there are no rows, and nothing here is a reason to rush a policy onto a populated
+  table.
+- **The property is conditional on §2 staying fixed.** If the member type comes from a caller-set
+  GUC (**C-1**), the forgotten filter is joined by a settable string and the layer holds nothing. If
+  the persona view is not **join-first** (**C-2**), the layer keeps correctness and loses the
+  service at peak — its own kind of forgotten filter. The founder's argument is a reason to build
+  *this* design, not row security in general.
+
 ---
 
 ## 2. The two blocking findings
