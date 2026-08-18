@@ -21,6 +21,30 @@
 > survives there; and a rider owed for a run on an uncaptured order is paid from money that exists
 > nowhere in the flow — the second bill is still unpaid.
 
+> 📸 **2026-08-18 — TWO PHOTOS, and the labels are OPTIONAL**
+> ([ADR-20260818-174500](adr/ADR-20260818-174500-two-photos-the-packing-check-and-the-drop-off-record.md),
+> amended). The founder wants the restaurant to photograph the order and the rider to photograph the
+> drop-off. Twelve lenses reviewed it. **The constraint that rewrites it**: the drop-off photo is
+> necessary only for UNATTENDED delivery — where the customer takes the bag, their own act proves it,
+> and a photo there fails minimisation. Two modes, two proofs. **The photo never gates the transition**
+> (completion triggers capture, so a blocked photo blocks payment for food already delivered) — the
+> shape is a closed sum `Captured(ref) | Waived(reason)`, and the waiver reason is the typed
+> delivery-failure cause ADR-20260818-161500 already owes.
+>
+> **The reference image clarified it**: per-item **labels are OPTIONAL** (app-generated if the
+> restaurant wants), the **photo is mandatory**. Coordinator correction on the record — the labels
+> were overstated as answering the objections; they answer them only for adopters. The **bare photo's
+> real value is a completion/handoff proof** — against a paid order nobody acted on and against the
+> wrong bag handed over — independent of labels. **The privacy floor does not improve and slightly
+> worsens** (a non-adopter photographs its own POS ticket with customer name/phone/address); the six
+> preconditions stand, and the balancing test and DPIA must be written to that worst input.
+>
+> **Team recommendation (founder may overrule)**: land a nullable attachment ref on the two existing
+> command/event pairs as content on a scheduled chunk; reach "avoid errors" today with a zero-byte
+> per-line packing confirmation; let the drop-off photo wait on the #134 upload framework. **First
+> fix**: `PROP-20260725-120055` still says Supabase Storage against a decision for OVH — rewrite
+> before any dispatch.
+
 > 🧾 **2026-08-18 — THE INVOICE CHAIN IS RULED: restaurant → customer, rider → RESTAURANT, Captain
 > self-bills both**
 > ([ADR-20260818-134500](adr/ADR-20260818-134500-the-invoice-chain-restaurant-to-customer-rider-to-restaurant.md)).

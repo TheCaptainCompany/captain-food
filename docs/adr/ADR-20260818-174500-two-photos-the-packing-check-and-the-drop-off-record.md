@@ -193,3 +193,57 @@ adopted; the founder decides.
 **And the line that should govern the framing whichever way it goes**: *if the restaurant cannot see
 and use the photo, it is surveillance, and it will be read as surveillance no matter how it is
 described.*
+
+---
+
+## Amendment 2026-08-18 — the founder's reference image: labels are OPTIONAL, the photo is mandatory
+
+The founder supplied a reference (a tray where every item carried a printed label — order number,
+service mode, item name, a position count `1/3` `2/3` — plus a manifest slip) and then clarified,
+verbatim:
+
+> *"For the label it's not required for restaurant just a recommendation and yes the app on the
+> restaurant side can provide this kind of label if the restaurant want it. The most important thing
+> is the fact that the restaurant made a picture of the order."*
+
+**Coordinator correction, on the record.** The coordinator initially told the founder the per-item
+labels "answer the objections almost completely." **That was overstated**, and both consulted lenses
+said so. The labels answer the objections only *for a restaurant that adopts them*; adoption is
+optional, app-generated, and self-selecting. The mandatory element is the **photo of the order**
+alone.
+
+**What this settles:**
+
+1. **No label printer is a precondition** — the hardware dependency the packing analysis flagged is
+   removed. Labels are an app-offered convenience; a restaurant prints nothing unless it chooses to.
+2. **The bare photo's primary value is a completion / handoff proof, not a dispute artifact**
+   (business-specialist). It guards the two failures the domain lens ranks highest — **a paid order
+   nobody acted on**, and **handing the rider the wrong bag** — and that value does **not** depend on
+   labels. As a *dispute* artifact its value is largely contingent on the optional label layer, and a
+   busy Friday-19:30 kitchen is the least likely to adopt it, so **the design plans for the
+   low-adoption case, never the reference tray**.
+3. **Two values, one photo, mandatory half stands alone**: mandatory photo = completion/handoff
+   proof; optional labels = a dispute-resolution upgrade on top, for restaurants that choose it.
+
+**The privacy floor does NOT improve, and slightly worsens** (legal-specialist). With the pseudonymous
+label optional, a non-adopting restaurant photographs what it has — plausibly its own **POS ticket,
+routinely carrying customer name, phone, delivery address and the itemised basket** (Art. 4(1); a
+special-category risk where diet or religion is inferable from items). *"The subject is the food, the
+label is incidental"* **does not change the grade** — GDPR has no incidental-capture exemption where
+the data is legible and the controller **mandates** the capture; Art. 5(1)(c) minimisation is judged
+against what the mandate foreseeably ingests, not the photographer's intent. Therefore:
+
+- **The §3 six preconditions are UNCHANGED in number** — the optional label subtracts none of them; it
+  only offers a non-adopter a mitigation it may decline.
+- **§3.3 (Art. 6(1)(f) balancing) and §3.6 (DPIA) are REINFORCED**: both must now be written to the
+  **worst realistic input — the bare POS ticket with customer-identifying data — never to the
+  pseudonymous label.**
+- **§3.5 (retention clock) is unchanged in shape but its stakes rise**: the 3650-day default would now
+  retain name/phone/address imagery, not an order number.
+
+`VERIFY-FIRST` (legal): the actual French POS-ticket fields, with an avocat, before build. No
+clearance.
+
+**A still-missing signal both lenses named**: no `specs/observability.yaml` fold on reclamation rate
+and missing-item dispute cost **split by whether the order carried a label**. Until it exists, both
+the label ROI and the bare-photo ROI are asserted, not measured.
