@@ -2,6 +2,38 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧾 **2026-08-18 — THE INVOICE CHAIN IS RULED: restaurant → customer, rider → RESTAURANT, Captain
+> self-bills both**
+> ([ADR-20260818-134500](adr/ADR-20260818-134500-the-invoice-chain-restaurant-to-customer-rider-to-restaurant.md)).
+> Six answers on the decision form. **The load-bearing half was not on the form**: the founder chose
+> *"neither exactly"* and wrote that the **rider invoices the RESTAURANT** — so delivery is a supply
+> to the restaurant, the restaurant sells a delivered meal, and **Captain is a party to neither
+> supply**.
+>
+> **This resolves the contradiction** BRIEF-20260818 §2 found: the adopted proposal describes the
+> **sale** (restaurant is its own merchant of record) and the five other records describe the
+> **payment mechanism** — they were never talking about the same thing. Still open and NOT resolved:
+> ADR-0017's *"merchant of record → no PSP licence"* clause, which remains a non-sequitur needing a
+> real instrument.
+>
+> **Money keeps resting on Captain's Stripe balance, knowingly.** Captain collects on the
+> restaurant's behalf and pays the rider on the restaurant's behalf — a payment-agent posture whose
+> characterisation no research retires. **Recorded as a decision taken with the exposure in front of
+> him, not as a gap.**
+>
+> **Also**: rider self-billing is a **separate** decision — V0 self-bills partner companies only,
+> never an individual rider. The team is **authorised to draft the self-billing mandate and the terms
+> structure** for founder review (no contract artifact exists in the repo at all today). The customer
+> receipt carries the **restaurant's** name. `captainNet` is **zero at V0** — the company is funded by
+> voluntary contributions per ADR-20260808-203443, and **two new elements** landed with that answer:
+> a public **open expense-and-income platform** (a product surface nothing carries), and a
+> **shortfall split across all restaurants** — a contingent liability that must be in the terms
+> before the first restaurant signs.
+>
+> **Reusable now**: [`docs/templates/decision-form.html`](templates/decision-form.html) — founder
+> directive, *"make this format a template for the next times"*. Rule and the register-check lesson in
+> [docs/claude/sessions.md](claude/sessions.md).
+
 > ✅ **2026-08-18 — DECISION QUEUE CLEARED: the restaurant signs in by EMAIL LINK, and #638 FREEZES
 > at chunk 1**
 > ([ADR-20260818-101500](adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md)).

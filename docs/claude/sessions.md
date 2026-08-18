@@ -1674,3 +1674,32 @@ question; the review caught it post-merge, and the fix ([#453](https://github.co
 was to extract the gate to a serde-only crate whose cold build is seconds. **The durable proof of
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
+
+## Asking the founder a decision — use the form template
+
+**Founder directive 2026-08-18**: *"Make this format of questions as a template for the next times."*
+
+`docs/templates/decision-form.html` renders a decision form from one `FORM` object at the top of the
+file. Copy it to your scratchpad, edit **only** that object, publish the copy as an Artifact, and give
+him the link. He picks, comments, presses Copy, and pastes a plain-text block back. **Do not edit the
+template in place.**
+
+Prefer it over `AskUserQuestion` when there is more than one decision, when an option needs its
+trade-off spelled out at more than a phrase, or when his answer is likely to be a comment rather than
+a pick — which, on the evidence so far, it usually is. The form's most valuable answers have all
+arrived through the comment box and through the *"neither exactly"* option, so **always offer that
+option and always leave a comment box**. The first use proved why: the invoice-chain question was
+answered *"neither exactly"*, and the comment supplied a third shape (**rider invoices the
+restaurant**) that neither drafted option contained and that no lens had proposed.
+
+**The rule that cost the most to learn, on that same first use**: *check the register before you ask.*
+One of the six questions asked which funding model applied, and
+[ADR-20260808-203443](../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md) had
+decided it ten days earlier. His answer began *"We already discussed about that."* A question about a
+settled decision spends his attention and reads as the team not knowing its own records — grep
+`docs/adr/`, `docs/proposals/DECISIONS.md` and `docs/STATUS.md` for the subject of every question
+before the form is published.
+
+Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
+knows. Order the questions by dependency and say so with the `gates` field. Never make a field
+required, and always end with a free-text question.

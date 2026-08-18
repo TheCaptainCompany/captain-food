@@ -1,0 +1,218 @@
+<!--
+  DECISION FORM — reusable template (founder directive 2026-08-18: "make this format a template")
+
+  HOW TO USE IT
+  1. Copy this file to your scratchpad. Do NOT edit it in place; this file is the template.
+  2. Edit ONLY the FORM object below — the title, the intro, and the questions array.
+     Everything under "DO NOT EDIT BELOW" renders from that data and needs no changes.
+  3. Publish the copy as an Artifact and give the founder the link.
+  4. He picks, comments, presses Copy, and pastes the block back into the conversation.
+
+  THE RULES THAT MAKE IT WORTH USING — these are the format, not decoration:
+  - Ask ONLY what is genuinely his: a real option space, an external or legal action, or a
+    fact only he knows. A question the team can answer is waste and he will say so.
+  - CHECK THE REGISTER FIRST. A question about something already decided reads as the team
+    not knowing its own records. (Learned the hard way: a funding-model question was asked
+    on 2026-08-18 that ADR-20260808-203443 had already answered.)
+  - Every option states its TRADE-OFF, not just its label. "What it costs" is the useful half.
+  - Order the questions by dependency and SAY SO with the `gates` field. If question 1
+    changes the meaning of question 5, he needs to see that before answering 5.
+  - Always leave a comment box. An option that is nearly right plus a comment beats a clean
+    pick that is not what he meant — his most useful answers have all been comments.
+  - Always end with a free-text question, and never make any field required.
+-->
+<script>
+const FORM = {
+  title: "The Money Questions",          // becomes the <title> and the H1 — a real name, not a label
+  subtitle: "Six decisions the team cannot take for you. Pick an option, add a comment if the option is not quite right, then copy the whole thing back to me.",
+  stamp: "18 Aug 2026 · Captain.Food · nothing here is legal advice",
+  notes: [                                // short framing blocks above the questions; [] for none
+    "<strong>Why these.</strong> Say here what makes these questions his rather than the team's, and what is blocked until he answers.",
+    "<strong>An option that is nearly right is worth a comment.</strong> Writing “b, but only for partner companies” in the box is more useful than a clean pick that is not quite what you mean."
+  ],
+  questions: [
+    {
+      title: "The question, as a question",
+      why: "One or two sentences on why it is being asked and what it is blocking. Name the file or the record if there is one.",
+      gates: "Gates 2 · 5",              // optional; omit when nothing downstream depends on it
+      options: [
+        { value: "A — the answer as it should appear in the pasted text",
+          label: "The short label he clicks",
+          detail: "What this option means AND what it costs. The trade-off is the point." },
+        { value: "B — …", label: "…", detail: "…" },
+        { value: "C — Neither exactly; see my comment",
+          label: "Neither exactly — see my comment",
+          detail: "Always offer this. His most valuable answers arrive through it." }
+      ]
+    },
+    {
+      title: "Anything else",
+      why: "Corrections, things I have wrong, or something you want the team to stop doing.",
+      free: true                          // free:true renders a big text box and no options
+    }
+  ]
+};
+</script>
+
+<!-- ============================ DO NOT EDIT BELOW ============================ -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ground:#EFF1EE; --surface:#FBFCFA; --sunk:#E4E7E2; --line:#D2D7D0; --line-firm:#B4BBB3;
+  --ink:#15191B; --ink-2:#39423F; --muted:#5F6A65;
+  --accent:#1F4A63; --accent-soft:#DFE9EE; --accent-ink:#12313F;
+  --open:#8A5A12; --open-soft:#F5EAD6; --set:#2F6238;
+  --display:"Newsreader",Georgia,"Times New Roman",serif;
+  --body:"Archivo",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#101413; --surface:#171D1C; --sunk:#1F2725; --line:#2B3533; --line-firm:#41504C;
+  --ink:#E9EEEB; --ink-2:#C3CCC8; --muted:#8B9793;
+  --accent:#6FB3D2; --accent-soft:#132A36; --accent-ink:#A9D4E8;
+  --open:#DFAE5E; --open-soft:#2E2410; --set:#8CC494;
+}}
+:root[data-theme="dark"]{
+  --ground:#101413; --surface:#171D1C; --sunk:#1F2725; --line:#2B3533; --line-firm:#41504C;
+  --ink:#E9EEEB; --ink-2:#C3CCC8; --muted:#8B9793;
+  --accent:#6FB3D2; --accent-soft:#132A36; --accent-ink:#A9D4E8;
+  --open:#DFAE5E; --open-soft:#2E2410; --set:#8CC494;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:780px;margin:0 auto;padding:40px 20px 200px;display:flex;flex-direction:column;gap:30px}
+.mast{display:flex;flex-direction:column;gap:12px;padding-bottom:22px;border-bottom:2px solid var(--ink)}
+.mast h1{font-family:var(--display);font-weight:600;font-size:clamp(31px,6vw,46px);margin:0;letter-spacing:-.02em;line-height:1.03;text-wrap:balance}
+.mast .sub{margin:0;color:var(--ink-2);font-size:15.5px;max-width:60ch}
+.stamp{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.note{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);padding:14px 17px}
+.note p{margin:0;font-size:14.5px;color:var(--ink-2)}
+.note strong{color:var(--ink)}
+.q{background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column}
+.q header{display:flex;gap:14px;align-items:flex-start;padding:18px 20px 14px;border-bottom:1px solid var(--line)}
+.num{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--surface);background:var(--accent);min-width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px}
+.qh{display:flex;flex-direction:column;gap:6px}
+.qh h2{font-family:var(--display);font-weight:600;font-size:21px;margin:0;line-height:1.24;letter-spacing:-.01em;text-wrap:balance}
+.qh .why{margin:0;font-size:14px;color:var(--muted)}
+.gates{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--open);background:var(--open-soft);padding:2px 7px;align-self:flex-start;border-radius:2px}
+label.opt{display:flex;gap:12px;align-items:flex-start;padding:13px 20px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+label.opt:hover{background:var(--sunk)}
+label.opt input{margin:4px 0 0;accent-color:var(--accent);width:16px;height:16px;flex:none;cursor:pointer}
+label.opt input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.opt-b{display:flex;flex-direction:column;gap:3px}
+.opt-t{font-size:15px;font-weight:500;color:var(--ink);line-height:1.35}
+.opt-d{font-size:13.5px;color:var(--muted);line-height:1.5}
+label.opt:has(input:checked){background:var(--accent-soft)}
+label.opt:has(input:checked) .opt-t{color:var(--accent-ink)}
+.cbox{padding:14px 20px 17px;display:flex;flex-direction:column;gap:7px}
+.cbox span{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+textarea{width:100%;font-family:var(--body);font-size:14.5px;line-height:1.55;color:var(--ink);background:var(--sunk);border:1px solid var(--line);padding:10px 12px;resize:vertical;min-height:62px}
+textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--line-firm)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:2px solid var(--ink);padding:14px 20px;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;z-index:10}
+.bar .count{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+button{font-family:var(--body);font-size:15px;font-weight:600;color:var(--surface);background:var(--accent);border:none;padding:11px 22px;cursor:pointer;transition:filter .12s}
+button:hover{filter:brightness(1.14)}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button.done{background:var(--set)}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line-firm);font-weight:500}
+.out{display:flex;flex-direction:column;gap:8px}
+.out h3{font-family:var(--display);font-size:19px;font-weight:600;margin:0}
+.out p{margin:0;font-size:14px;color:var(--muted)}
+#outbox{font-family:var(--mono);font-size:12.5px;line-height:1.62;min-height:200px;white-space:pre;overflow-x:auto}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap" id="root"></div>
+<div class="bar">
+  <span class="count" id="count">0 answered</span>
+  <button id="copy" type="button">Copy my answers</button>
+  <button id="clear" type="button" class="ghost">Clear</button>
+</div>
+
+<script>
+(function(){
+  var esc=function(s){var d=document.createElement('div');d.textContent=s==null?"":s;return d.innerHTML;};
+  var root=document.getElementById('root'),html="";
+
+  document.title=FORM.title;
+  html+='<header class="mast"><h1>'+esc(FORM.title)+'</h1>'+
+        '<p class="sub">'+esc(FORM.subtitle)+'</p>'+
+        '<div class="stamp">'+esc(FORM.stamp)+'</div></header>';
+  (FORM.notes||[]).forEach(function(n){html+='<div class="note"><p>'+n+'</p></div>';});
+
+  FORM.questions.forEach(function(q,i){
+    var n=i+1;
+    html+='<section class="q"><header><div class="num">'+n+'</div><div class="qh">'+
+          '<h2>'+esc(q.title)+'</h2>'+
+          (q.why?'<p class="why">'+esc(q.why)+'</p>':'')+
+          (q.gates?'<span class="gates">'+esc(q.gates)+'</span>':'')+
+          '</div></header>';
+    if(!q.free){
+      (q.options||[]).forEach(function(o){
+        html+='<label class="opt"><input type="radio" name="q'+n+'" value="'+esc(o.value)+'">'+
+              '<span class="opt-b"><span class="opt-t">'+esc(o.label)+'</span>'+
+              '<span class="opt-d">'+esc(o.detail)+'</span></span></label>';
+      });
+    }
+    html+='<div class="cbox"><span>'+(q.free?'Free text':'Comment')+'</span>'+
+          '<textarea data-c="'+n+'"'+(q.free?' style="min-height:96px"':'')+'></textarea></div></section>';
+  });
+
+  html+='<section class="out"><h3>Your answers</h3>'+
+        '<p>This fills in as you choose. Press the button to copy it, or select it and copy by hand.</p>'+
+        '<textarea id="outbox" readonly></textarea></section>';
+  root.innerHTML=html;
+
+  var out=document.getElementById('outbox'),count=document.getElementById('count'),
+      copyBtn=document.getElementById('copy'),clearBtn=document.getElementById('clear'),
+      scored=FORM.questions.filter(function(q){return !q.free;}).length;
+
+  function build(){
+    var lines=["ANSWERS — "+FORM.title+" ("+FORM.stamp.split(" · ")[0]+")",""],answered=0;
+    FORM.questions.forEach(function(q,i){
+      var n=i+1,
+          picked=document.querySelector('input[name="q'+n+'"]:checked'),
+          note=document.querySelector('textarea[data-c="'+n+'"]'),
+          c=note?note.value.trim():"";
+      if(q.free){ if(c){lines.push(n+". "+q.title,"   "+c.replace(/\n/g,"\n   "),"");} return; }
+      if(picked||c){
+        lines.push(n+". "+q.title);
+        lines.push(picked?("   → "+picked.value):"   → (no option picked)");
+        if(picked)answered++;
+        if(c)lines.push("   comment: "+c.replace(/\n/g,"\n   "));
+        lines.push("");
+      }
+    });
+    if(lines.length===2)lines.push("(nothing answered yet)");
+    out.value=lines.join("\n");
+    count.textContent=answered+" of "+scored+" answered";
+  }
+
+  document.addEventListener('input',build);
+  document.addEventListener('change',build);
+
+  copyBtn.addEventListener('click',function(){
+    var ok=function(){copyBtn.textContent="Copied — paste it back to me";copyBtn.classList.add('done');
+      setTimeout(function(){copyBtn.textContent="Copy my answers";copyBtn.classList.remove('done');},2600);};
+    var manual=function(){out.focus();out.select();
+      try{document.execCommand('copy');ok();}
+      catch(e){copyBtn.textContent="Select the text above and copy";
+        setTimeout(function(){copyBtn.textContent="Copy my answers";},2600);}};
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(out.value).then(ok).catch(manual);
+    }else{manual();}
+  });
+
+  clearBtn.addEventListener('click',function(){
+    document.querySelectorAll('input[type="radio"]').forEach(function(r){r.checked=false;});
+    document.querySelectorAll('textarea[data-c]').forEach(function(t){t.value="";});
+    build();
+  });
+
+  build();
+})();
+</script>
