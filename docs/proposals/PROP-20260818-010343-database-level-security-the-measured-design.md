@@ -3,7 +3,11 @@
 - **Status**: Proposed
 - **Date**: 2026-08-18
 - **Tracking issue**: [#638 "Database-level security: the measured RLS design — role-bound member type, join-first persona views, seven generated artifacts and seven gates"](https://github.com/TheCaptainCompany/captain-food/issues/638)
-- **Realized by**: _(filled at completion)_
+- **Realized by**: chunk 1 (the authorization matrix, `OrderConversation`) — branch
+  `638-rls-authorization-matrix`, dispatch `docs/dispatch/638-rls-authorization-matrix-chunk1.md`,
+  decision [ADR-20260818-171500](../adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md).
+  Chunks 2+ (persona views A-6, `identity_binding` A-7, the remaining tables, gates G-2/G-4/G-5/G-7)
+  are unstarted.
 - **Decided already, and NOT reopened here**: [ADR-20260818-004647](../adr/ADR-20260818-004647-database-level-security-lands-at-the-cutover-and-the-settlement-read-returns-to-scope.md) — database-level security lands **at the CloudNativePG cutover, on the empty database**, starting at `OrderConversation` and **not** at `OrderTracking`. This proposal answers *what is built*, never *when*.
 - **Sequenced after**: [ADR-20260818-004646](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) — the identity ruling that creates `identity_binding` and makes §7 of this file necessary.
 - **Composes with, does NOT replace**: [PROP-20260811-093000](PROP-20260811-093000-storage-boundaries-and-least-privilege-database-users.md) §6.1 — the **per-actor / per-app** role model. See **§5**, which states the composition as an explicit product of two axes rather than leaving two role models in the repo pointing at each other.
@@ -250,6 +254,19 @@ transaction (§8). A login role is `GRANT`ed **only** the persona roles its role
 what makes the C-1 measurement bind: `rider_svc` is not granted `customer_role`, so `SET ROLE
 customer_role` is `permission denied to set role`, from Postgres, not from us.
 
+> **A-1 MUST spell `WITH INHERIT FALSE` on every one of those edges.** *Measured (executor, PG 16.13,
+> #638 chunk 1; the M4 arm `dba` predicted and had not measured):* a login role granted **both**
+> `customer_role` and `restaurant_role` reads the **union** of both personas' rows **with no
+> `SET ROLE` at all** — three rows for a member id that legitimately reaches two, the third arriving
+> through a decoy carrying the customer's uuid under the `RESTAURANT` member type. **And the obvious
+> hardening does nothing**: inheritance for policy purposes is a **per-grant** property
+> (`pg_auth_members.inherit_option`), fixed at `GRANT` time from the member's `INHERIT` attribute, so
+> `ALTER ROLE … NOINHERIT` issued afterwards is a **no-op** and the role keeps inheriting, silently.
+> With the option actually set, the login role gets `permission denied` (SQLSTATE `42501`) until it
+> `SET ROLE`s — a loud refusal, which is the right failure shape. So the wall above is real only when
+> the emitter writes the option; written the natural way it does not exist. Kept executable:
+> `crates/infrastructure/tests/rls_matrix.rs::an_inherited_persona_grant_hands_one_login_role_the_union`.
+
 **Stated honestly, because it is the residual.** That wall is per **login role**, so it is only a hard
 wall where a login role serves **exactly one** role path. The repository convention is already
 **role = path** (one composed schema per role at `/{role}/graphql`), so the decomposition can make the
@@ -449,11 +466,19 @@ hand-written policy is the defect this whole file is about.
 
 | # | Artifact | Contents | Closes |
 |---|---|---|---|
-| **A-1** | `roles.generated.sql` | `CREATE ROLE` for every per-app role and every persona role. Persona roles are `NOLOGIN NOBYPASSRLS`. The `GRANT <persona_role> TO <app_login_role>` edges, derived from role paths | §5 |
+| **A-1** | `roles.generated.sql` | `CREATE ROLE` for every per-app role and every persona role. Persona roles are `NOLOGIN NOBYPASSRLS`. The `GRANT <persona_role> TO <app_login_role> ` **`WITH INHERIT FALSE`** edges, derived from role paths — the option is not optional, see §5 | §5 |
 | **A-2** | `grants.generated.sql` | `REVOKE CONNECT, TEMPORARY … FROM PUBLIC` per database, then the explicit per-role `GRANT CONNECT`, then table and **native column** grants (`GRANT SELECT (cols)`) | §10, §11.3 |
 | **A-3** | `rls.generated.sql` | `ENABLE` **and** `FORCE ROW LEVEL SECURITY`, emitted as a **set operation over every table in every `recovery: replay` database** — never per-table by hand | §4 |
 | **A-4** | `policies_read.generated.sql` | One policy per (table × persona role), member type a **literal**, carrying the `mode:` of §11 | §2.1 |
-| **A-5** | `policies_write.generated.sql` | One `FOR ALL TO projector_{scope} USING (true) WITH CHECK (true)` per table | §6 |
+| **A-5** | `policies_write.generated.sql` | One `FOR ALL TO projector_{scope} USING (true) WITH CHECK (true)` per table — **plus the same policy `TO` the database's declared OWNER in `permissive` mode only** (ADR-20260818-171500) | §6 |
+
+> **A-1…A-5 are ONE FILE PER MODE in the shipped emitter, not five files.** #638 chunk 1 emits
+> `specs/generated/security.{,permissive.}generated.sql`, each containing every statement in apply
+> order, because an ordered set of files means the order lives somewhere else and drifts. The A-n
+> numbering above stays as the *contents* inventory. `mode:` is an **emitter parameter** producing the
+> two artifacts, not yet a DSL key — it lands with the first table that actually ships enforcing —
+> and it gates the **whole** per-table subtractive surface: predicate, column-grant narrowing, and the
+> owner's write policy ([ADR-20260818-171500](../adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)).
 | **A-6** | `views_persona.generated.sql` | The **join-first** persona views, `security_invoker = true`, one per (table × persona), each selecting that persona's column list | §2.2, §3.1, §3.2 |
 | **A-7** | `identity_binding.generated.sql` | The table, both partial unique indexes, both CHECKs, the column-restricting trigger and the three-way grant split | §7 |
 

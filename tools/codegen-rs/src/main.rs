@@ -238,7 +238,7 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 12] = [
+    let artifacts: [(&str, String); 14] = [
         // The CI env-sync manifest (PROP-20260729-014500): which repo secret supplies which service
         // env key, per profile. Baked values are NOT here — they ride the image (D5).
         ("render-config-sync.json", emit_render_sync_manifest(&model)),
@@ -253,6 +253,17 @@ fn main() {
         ("databases.generated.md", emit_databases_md(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
         ("schema.generated.sql", emit_schema_sql(&model, &specs)),
+        // Database-level security (#638 chunk 1, PROP-20260818-010343). TWO artifacts off ONE
+        // emitter: `mode:` is an emitter PARAMETER here, not a DSL key. The permissive one is what
+        // ships first and what the tightening step reverts TO — #637's only rollback, regenerated
+        // deterministically rather than hand-authored under incident pressure. NEITHER enters
+        // `migrations/`: `crates/infrastructure/tests/rls_matrix.rs` applies them to its own
+        // throwaway databases, and `tests::security_ddl_fence` keeps the chain clean.
+        ("security.generated.sql", emit_security_sql(&model, SecurityMode::Enforcing)),
+        (
+            "security.permissive.generated.sql",
+            emit_security_sql(&model, SecurityMode::Permissive),
+        ),
         ("c4.generated.dsl", emit_structurizr(&model)),
         ("c4.generated.md", emit_mermaid(&model)),
         ("schema.generated.graphql", emit_schema(&model)),

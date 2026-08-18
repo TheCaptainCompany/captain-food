@@ -116,6 +116,8 @@ A codegen test in `tools/codegen-rs/src/tests.rs`, roughly ten lines:
 
 Written as a **conditional that converts with no edit** at the cutover: *either* no `migrations/*_security.sql` exists, *or* its body is byte-identical to `specs/generated/security.generated.sql`. Today it asserts the fence; at the flip the same test asserts the two artifacts are the same bytes. That is the honest answer to "CI must prove what we ship" — the equality is not provable today because the migration does not exist, and this is the strongest thing writable now. It also removes the temptation to hand-write the cutover migration.
 
+**As landed** (review correction, 2026-08-18): the implementation accepts EITHER artifact, because the permissive one ships first. An intermediate draft also carried a `!checked_cutover` tripwire asserting the walk had not happened yet — that draft is what made "converts with no edit" false, since the flipper would have met a red gate whose message told them to delete an assertion. The tripwire was **removed**, not re-worded: the flip already adds a file to the deployed migration chain, so its visibility in the diff was never scarce, and a gate must not make its own deletion the documented way past it. The claim in this section is now true of the code.
+
 ## The flip condition is the WALK, not the cutover — `farley`'s correction
 
 I wrote "applied at the cutover". ADR-20260817-105844 puts the local acceptance harness ([#556](https://github.com/TheCaptainCompany/captain-food/issues/556)) and the six-clause walk on the enforced stack **before** any production cutover, and production stays suspended as a decided state. So:
@@ -166,3 +168,74 @@ Do **not** add a workflow-level `grep 'test result: ok'` step: it lives in YAML,
 ## Findings
 
 _(Lenses and the executor append here.)_
+
+### Executor, 2026-08-18 — post-review corrections
+
+Four corrections from the independent review (which PASSED, having stood up PG 16.13 and replanted
+five mutations itself), all landed on the branch:
+
+1. **The tripwire was removed, not re-worded.** See the "As landed" note in §0 above.
+2. **Six → seven.** The mutation count in `rls_matrix.rs` and `STATUS.md` disagreed with its own
+   table (M1, M2, M3a, M4, M5, M6, M7). Both now state seven and name the antecedents; M3b is
+   explicitly excluded as never-run rather than silently absent. ADR-20260817-105845 class, in the
+   evidence artifact itself.
+3. **`Probe` is now sealed** in an inner `probe_pair` module with private fields and pair-returning
+   accessors only, so "a single probe number is unspellable" is a fact about the compiler rather
+   than about the care of whoever writes the next arm. The four direct field reads became
+   `pair()`, `flipped()`, `seen_vs_seen()`, `seen_vs_total_of()`.
+4. **`Arm.member_type` is now actually asserted against the artifact.** `policy_set` grew into
+   `policies()`, which captures the whole USING predicate; the offline coverage gate asserts each
+   arm's literal on BOTH layers (guarded table and membership table) and re-asserts G-1 per policy.
+   Previously the field's docstring claimed an assertion that did not exist.
+
+**Card wording, for the next dispatch**: M1/M4 are described above (line 76) as a permanent
+`#[test]`. They are permanent **arms** — async helpers the mega-test awaits, so they cannot be run
+alone and a failure reports under the parent. That structure was accepted by review as a chosen
+trade given `TestDb`'s binary-wide lock, not an accident.
+
+### Executor, 2026-08-18 — delivered on `638-rls-authorization-matrix`
+
+**Base**: the card's `779bb76` is stale but sound — `origin/main` was `42bbbe4`, whose only commit
+ahead of `779bb76` is the card itself. Branched from `42bbbe4`.
+
+**Two of the card's lens findings needed a correction to build against, and one turned out N/A.**
+
+1. **M2 and `farley`'s fence #1 are in direct tension, and the card does not resolve it.** M2 wants
+   *"drop `FORCE` → the owner reads every row instead of none"*, which requires the owner to hold **no**
+   policy. Fence #1 requires the write policy to cover today's writer identity — which **is** the
+   owner. Both cannot hold in one artifact. Resolved by making the owner's `FOR ALL` policy
+   **mode-gated**: present in `permissive`, absent in `enforcing`
+   ([ADR-20260818-171500](../adr/ADR-20260818-171500-mode-gates-the-whole-per-table-subtractive-surface-including-the-owners-write-policy.md)).
+   Permissive is then genuinely additive for today's writer (measured: owner `INSERT 1`, `UPDATE 5`),
+   and enforcing is where M2 goes red (measured: 4 rows / `UPDATE 4` without `FORCE`, 0 / `UPDATE 0`
+   with it; a persona reads 2 either way, which is exactly why the mutation had to be aimed at the
+   owner). Had I taken either lens alone, this chunk would have shipped a green matrix over a broken
+   configuration in one direction or a `FORCE` mutation that cannot go red in the other.
+2. **M3b is not applicable and that is a finding, not a gap.** Chunk 1 emits no persona views (A-6 is
+   sequenced separately), so there is no join-first access path to degrade. Nothing was skipped.
+3. **The card's "one generated file" and "`mode:` produces two files" read as a contradiction.**
+   Resolved as *one file per mode* — `security.generated.sql` and `security.permissive.generated.sql`,
+   each carrying every statement in apply order. §0's fence accepts **either** as the cutover
+   migration, because permissive is what ships first.
+4. **The rider's zero needed a non-zero to be paired with, and the fixture as drafted had none.**
+   Added a real `(ORDER, O1, RIDER, RD1)` membership — the grant `DeliveryAcceptedByRider` actually
+   writes — plus a `scopemembership` self-row policy for the rider. The rider now sees its own
+   membership row and zero conversations in one assertion, which is the product decision the card
+   fences, stated executably. Also added a third decoy, `(ORDER, O4, CUSTOMER, R1)`, so probe 4 is
+   symmetric for `restaurant_role`; the card named only the customer-side decoy.
+
+**Two measurements that were not in anybody's lens and change the next chunk** — both now in
+`PROP-20260818-010343` §5 / ADR-20260818-171500:
+
+- **`ALTER ROLE … NOINHERIT` after a `GRANT` is a no-op on PG 16.** Inheritance for policy purposes is
+  per-grant (`pg_auth_members.inherit_option`), fixed at `GRANT` time. §5's whole wall therefore
+  exists only if A-1 emits `WITH INHERIT FALSE` explicitly. M4 came out red as `dba` predicted
+  ({O1,O3,O4} where each persona alone reads 2) **and** the natural fix does not work.
+- **`has_table_privilege(role, table, 'SELECT')` is FALSE for a role holding only column grants.**
+  Under enforcing that is every persona, so a privilege gate written the obvious way reports "no
+  persona can read anything" over a correct artifact. Use `has_any_column_privilege`.
+
+**Not done, reported rather than fixed** (fence: *"every other defect becomes a reported issue"*):
+gates G-2, G-4, G-5 and G-7 of §10 are unbuilt; artifact A-6 and A-7 are unbuilt; the emitter's
+guarded-table set and the withheld-column map are declared constants in `emit/security.rs` rather than
+DSL keys, and both fail loudly at `make generate` if the DSL moves under them.
