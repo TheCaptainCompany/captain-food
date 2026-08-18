@@ -928,7 +928,11 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
         None,
         None,
     );
-    server::graphql_routes(schema, server::TenantLookup(Some(restaurants)))
+    server::graphql_routes(
+        schema,
+        server::TenantLookup(Some(restaurants)),
+        server::graphql_read_binding::ReadScopeBindingMode::Observe,
+    )
         .layer(axum::Extension(server::AuthContext::from_config(
             jwks_endpoint().await,
             TEST_SUPABASE_URL.into(),

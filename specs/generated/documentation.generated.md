@@ -308,7 +308,10 @@ The claims queue for the restaurant's orders (#154): a manager/owner works its c
 <a id="query-pendingrefunds"></a>
 #### 🔎 Query: `pendingRefunds`
 
-The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every restaurant's refund queue — and one that supplies another restaurant's id reads that queue. Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
+The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An ADMIN arbitrates across restaurants and reads the whole queue.
+`restaurantId` is a SELECTOR WITHIN THE CALLER'S SCOPE, NEVER A GRANT. For a RESTAURANT caller the server binds the queue to the restaurant the caller's verified claim resolves to, and the argument may only narrow within it: no argument returns the caller's own queue, the caller's own id returns the same queue, and any OTHER restaurant's id returns an EMPTY list (bound scope INTERSECT requested filter) and increments read_authorization_scope_mismatch_total. A RESTAURANT caller whose token carries no restaurant binding reads nothing.
+MODE-CONDITIONAL, and this is the shipped default: the binding above applies in full only under READ_SCOPE_BINDING_MODE=ENFORCE. Under the default OBSERVE the unbound caller is already denied, but a BOUND caller supplying another restaurant's id is still served that restaurant's rows and the mismatch is only counted. Under OFF -- the incident rollback rung -- every RESTAURANT credential reads the whole platform's queue again.
+NOT YET CLOSED, present tense: the matching WRITE half is unbound (approveRefund / denyRefund, #635 / #178), and this is ONE of the seven unscoped read surfaces of #618 -- the others are unchanged. The dated record of what this operation exposed, from when, and how far it is remediated is DECISIONS.md section 39 (IDOR-1).
 
 
 - **Input**: 🧩 `PendingRefundsQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `RefundStatus`](#scalar-refundstatus)
@@ -11132,7 +11135,7 @@ _criticality: **high**_
 | `auth.read_scope` | `INTERNAL` | ✅ | — | `business.role`*, `business.bridge_resolved`* |
 | `auth.scope_membership` | `INTERNAL` | ✅ | — | `business.scope_type`*, `business.role`*, `business.authorized`* |
 
-- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `public_credential_degraded_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
+- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `public_credential_degraded_total` _(counter)_, `read_authorization_scope_mismatch_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
 - **Status rules**: success ⇐ spans [`auth.read_scope`, `auth.scope_membership`]
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
@@ -11312,6 +11315,10 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | read | `refunds.pending` | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 | write | `approve_refund` | [✏️ `approveRefund`](#mutation-approverefund) |
 | write | `deny_refund` | [✏️ `denyRefund`](#mutation-denyrefund) |
+
+**Gaps**
+- ⚠️ NOT-BOUND is indistinguishable from GENUINELY-EMPTY on this screen, and no copy can fix it (#618 chunk 1). Since the queue is server-bound, a RESTAURANT credential carrying no restaurant binding reads NOTHING — and the empty state then asserts `No pending refunds` / `Aucun remboursement en attente`, which is a statement about the world and is false for the only RESTAURANT population that exists today. `staff_topbar` renders a static title and never the restaurant's name, so there is no second signifier either. The missing thing is a DISCRIMINATING STATE the client can render (`the session resolves to no restaurant` vs `this restaurant has no pending refunds`), which needs the claim path that mints a bound credential: #639. Rewording the French would be theatre — it would state a different falsehood with more confidence.
+- ⚠️ The `approve_refund` / `deny_refund` buttons below are as authorized as they were before #618, which is: NOT AT ALL. `approveRefund` / `denyRefund` consult no identity anywhere (#635 / #178, DECISIONS §39), so a restaurant now sees only its own refunds and can still decide anybody's. Binding the read also removed the only place a co-op member could NOTICE an out-of-tenant decision.
 
 <a id="screen-satisfaction"></a>
 ### 📱 `satisfaction` · `/satisfaction` · 📱 SDUI · 🔒 auth

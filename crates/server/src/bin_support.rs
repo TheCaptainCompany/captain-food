@@ -70,7 +70,13 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
         Some(event_bus),
         Some(settings.scope),
     );
-    crate::graphql::routes::graphql_routes(schema, di.tenant_lookup)
+    crate::graphql::routes::graphql_routes(
+        schema,
+        di.tenant_lookup,
+        // #618: the same declared key the monolith reads -- a subgraph bin serving the same
+        // operations must not serve them under a different binding posture.
+        crate::graphql::read_binding::ReadScopeBindingMode::from_declared(&config.read_scope_binding_mode),
+    )
         // API auth (ADR-0047): the same Supabase-JWT verifier the monolith layers — the subgraph
         // IS the schema boundary, so authn/authz live here, never in the (stateless) gateway.
         .layer(Extension(crate::auth::AuthContext::from_config(

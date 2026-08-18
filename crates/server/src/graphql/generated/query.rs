@@ -503,9 +503,8 @@ impl QueryRoot {
     /// The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row); an anonymous caller sees an empty list.
     #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
     async fn my_reclamations(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<Reclamation>> {
-        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.
+        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read. Absent => Public -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
-        // "Which customer am I" is exactly what the claim answers -- no bridge row, no lookup.
         let application::queries::ReadScope::Customer(customer_id) = scope else {
             return Ok(Vec::new());
         };
@@ -566,25 +565,67 @@ impl QueryRoot {
             status: row.payment_status.into(),
         }))
     }
-    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every restaurant's refund queue — and one that supplies another restaurant's id reads that queue. Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
+    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An ADMIN arbitrates across restaurants and reads the whole queue.
+    /// `restaurantId` is a SELECTOR WITHIN THE CALLER'S SCOPE, NEVER A GRANT. For a RESTAURANT caller the server binds the queue to the restaurant the caller's verified claim resolves to, and the argument may only narrow within it: no argument returns the caller's own queue, the caller's own id returns the same queue, and any OTHER restaurant's id returns an EMPTY list (bound scope INTERSECT requested filter) and increments read_authorization_scope_mismatch_total. A RESTAURANT caller whose token carries no restaurant binding reads nothing.
+    /// MODE-CONDITIONAL, and this is the shipped default: the binding above applies in full only under READ_SCOPE_BINDING_MODE=ENFORCE. Under the default OBSERVE the unbound caller is already denied, but a BOUND caller supplying another restaurant's id is still served that restaurant's rows and the mismatch is only counted. Under OFF -- the incident rollback rung -- every RESTAURANT credential reads the whole platform's queue again.
+    /// NOT YET CLOSED, present tense: the matching WRITE half is unbound (approveRefund / denyRefund, #635 / #178), and this is ONE of the seven unscoped read surfaces of #618 -- the others are unchanged. The dated record of what this operation exposed, from when, and how far it is remediated is DECISIONS.md section 39 (IDOR-1).
     #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
     async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
+        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read. Absent => Public -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
+        // The binding MODE, per request (#618). Absent from the context => ENFORCE: "forgot to wire it" must never be indistinguishable from "chose the permissive value".
+        let binding_mode = crate::graphql::read_binding::ReadScopeBindingMode::from_context(ctx);
+        let (requested_restaurant, requested_status): (Option<domain::generated::scalars::RestaurantId>, Option<domain::generated::scalars::RefundStatus>) = match input {
+            Some(i) => (i.restaurant_id.map(Into::into), i.status.map(Into::into)),
+            None => (None, None),
+        };
+        // BOUND SCOPE INTERSECT REQUESTED FILTER (#618, DECISIONS ss39 IDOR-1). `restaurantId` is a
+        // SELECTOR WITHIN the caller's scope, never a grant: no filter => the caller's own queue,
+        // the caller's own id => the same queue, any OTHER id => EMPTY. Substitution -- serving the
+        // caller its own rows when it asked for another tenant's -- is a DEFECT, not a kindness: the
+        // client asked for R2, got HTTP 200 with R1's rows, no error, and no way to tell.
+        let bound_restaurant = match (&scope, binding_mode) {
+            // OFF -- the incident rollback rung. Today's behaviour restored EXACTLY: the
+            // caller-supplied filter, whatever the caller's scope, including none at all. This is the
+            // one value of the three that re-opens the only hole production can reach today. It is
+            // PROBED, deliberately: an untested rollback rung is a rollback that fails at 20:00 on a
+            // Friday with the operator holding the flag.
+            (_, crate::graphql::read_binding::ReadScopeBindingMode::Off) => requested_restaurant,
+            // The ADMIN arbitrates ACROSS restaurants (stories.yaml, ArbitrateRefunds: "the
+            // cross-restaurant refund queue"). Unchanged in every mode -- and unbounded: the view
+            // folds every RefundOpened ever recorded and the query has no LIMIT.
+            (application::queries::ReadScope::Admin | application::queries::ReadScope::System, _) => requested_restaurant,
+            (application::queries::ReadScope::Restaurant(bound), _) => match requested_restaurant {
+                None => Some(*bound),
+                Some(want) if want == *bound => Some(*bound),
+                Some(_) => {
+                    // ONE execution. The comparison is Option<RestaurantId> against RestaurantId, in
+                    // memory, BEFORE the repository is called -- never two reads diffed, which would
+                    // double the most expensive read on the money path at the hour the queue is longest.
+                    telemetry::meters::read_authorization::scope_mismatch("pendingRefunds", "RESTAURANT", binding_mode.as_str());
+                    if binding_mode.is_enforcing() {
+                        // The intersection is EMPTY, and the repository is never touched.
+                        return Ok(Vec::new());
+                    }
+                    requested_restaurant
+                }
+            },
+            // No bound scope at all -- an unbound RESTAURANT credential, which is the ONLY RESTAURANT
+            // credential that can exist today. This is not a binding, it is the ABSENCE of one, and the
+            // system has a recorded answer for that: a missing claim fails closed inside read_scope.
+            // NOT gated between OBSERVE and ENFORCE -- only OFF restores it.
+            _ => return Ok(Vec::new()),
+        };
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;
-        let filter = input
-            .map(|i| application::queries::RefundFilter {
-                restaurant_id: i.restaurant_id.map(Into::into),
-                status: i.status.map(Into::into),
-            })
-            .unwrap_or_default();
+        let filter = application::queries::RefundFilter { restaurant_id: bound_restaurant, status: requested_status };
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(Refund::from).collect())
     }
     /// The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row, the same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees null (no credit).
     #[graphql(name = "customerCredit", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
     async fn customer_credit(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerCredit>> {
-        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.
+        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read. Absent => Public -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
-        // "Which customer am I" is exactly what the claim answers -- no bridge row, no lookup.
         let application::queries::ReadScope::Customer(customer_id) = scope else {
             return Ok(None);
         };
