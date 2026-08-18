@@ -56,6 +56,26 @@
 > (a)–(e) and the 2026-08-15 lean on (e) unchanged; what changed is that it is a **precondition** of
 > any policy on that table rather than a separable row.
 >
+> **The DESIGN those rulings sequence is now on the table** (2026-08-18):
+> [PROP-20260818-010343](proposals/PROP-20260818-010343-database-level-security-the-measured-design.md),
+> tracking issue
+> [#638 "Database-level security: the measured RLS design"](https://github.com/TheCaptainCompany/captain-food/issues/638).
+> It is `dba`'s work, **built and measured on a throwaway PostgreSQL 16.13 cluster** against the real
+> generated identifiers, and almost none of the held draft survived it. Two blocking findings: the
+> persona split is **decorative** while the member type comes from `current_setting('app.member_type')`
+> (a rider connection read 2 customer orders — the fix binds the member type to the **database role**
+> as a policy literal), and an **RLS predicate cannot drive a scan** (200k orders: 180.569 ms `Seq Scan`
+> through an `EXISTS`-policy view vs 0.263 ms through a view that **joins from `scopemembership`
+> first** — RLS is the backstop, the query carries its own selective predicate). Plus the **zero-row
+> family** (four measured ways this design silently returns nothing), the counterfactual that `FORCE`
+> is the single flag between an empty screen and a **total cross-order leak**, silent projector
+> `UPDATE 0` under a `FOR SELECT`-only policy set, and the `identity_binding` **placement** correction
+> (projected into every `recovery: replay` database, not parked in `captain_write`). Rollout adopts
+> [#637](https://github.com/TheCaptainCompany/captain-food/issues/637): every policy ships
+> `USING (true)` first, one `mode:` key, `permissive` → `enforcing` per table. **Two open FOUNDER
+> decisions** are named in it and block approval — the rider's own payout/tip/rating columns, and
+> `View_DeliveryJob`'s placement.
+>
 > **The three externally-authored ADRs are HELD, not deposited.** `ADR-20260817-232744/232745/232746`
 > are not in `docs/adr/`; their surviving content is carried, corrected, by
 > [#635](https://github.com/TheCaptainCompany/captain-food/issues/635),
