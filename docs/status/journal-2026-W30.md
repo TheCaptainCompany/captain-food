@@ -1,0 +1,1226 @@
+# Status journal — 2026-W30
+
+Journal entries dated **2026-07-20 → 2026-07-26** (ISO week 2026-W30, 2026-07-20 to 2026-07-26). **60 entries**, newest first, in the order they were written.
+
+Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> ✅ **2026-07-26 — [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) reclamation
+> (claim/dispute) epic — 7 of 8 slices done (ADR-20260726-124204).** A first-class `Reclamation`
+> aggregate (keyed by `reclamationId`, multiple per order) tying the order conversation (discussion),
+> the refund path (money), and the attachment framework (evidence) into one lifecycle — built out V0 per
+> the product-owner decisions (PROP-20260726-013207 §9). Merged: **#153** aggregate core (open/resolve/
+> reject/reopen, live mutations) · **#154** read model + queries (my-claims / claims-queue / detail;
+> customerId/restaurantId scoping; the 14-day window flagged — no domain clock seam) · **#155** claim
+> lifecycle woven into the order conversation timeline (`claim_events`) · **#156** evidence (opaque ref,
+> storage deferred to #134) · **#157** the full SDUI (customer open-claim/my-claims/detail; staff
+> claims-queue/resolve-panel) · **#159** replacement-order automation (the saga's REPLACEMENT arm places
+> a genuine no-charge `replacementOf` order; deterministic-id idempotency, no double-placement) ·
+> **#160** SLA (read-time `overdue` flag + staff-queue filter/badge + the `reclamation-sla` observability
+> contract). **#158** landed the FOUNDATION (the `CustomerCredit` ledger — grant/consume/balance fold,
+> over-spend rejected, grant idempotent per claim — + the `ReclamationProcess` saga's goodwill-credit
+> arm); its three harder integrations (**refund-resolution binding**, **checkout-consume / spend credit**,
+> **credit read-model query**) are flagged and tracked in
+> [#207](https://github.com/TheCaptainCompany/captain-food/issues/207), so #158 stays open. Each slice:
+> full ADR-0032 completeness, `make rust` green, supervised auto-merge; the two automations carry their
+> own ADRs (ADR-20260726-163737 credit-saga, ADR-20260726-171736 replacement) with sequence diagrams +
+> mockups + per-option pros/cons per the 2026-07-26 proposal convention. **Money paths verified:** refund
+> reuses the one existing path (deferred binding), credit grant is idempotent, replacement is genuinely $0
+> (no Stripe) with double-placement prevented.
+
+> 🔎 **2026-07-26 — full functional + technical architecture review; 32 issues + 5 epics + 5 proposals
+> filed.** A critical review of the whole system (domain, money, authorization, catalog, delivery,
+> event store, runtime) against `main` at `835da95`. The engineering substrate reviewed **well** —
+> event log, typed rejections, command-journal idempotency, webhook signature verification (all six
+> adapters, fail-closed), server-side price authority, 560 tests, a real prod smoke moving Stripe test
+> money end to end. The gaps cluster in three places, and they are structural rather than unpolished:
+> **(1) the operational loop does not close** — no notification of any kind exists, so a paid order
+> produces no signal anywhere and the back office declares no subscription; nothing times out an
+> unaccepted order; there is no order detail screen and no catalog UI. **(2) the money model is a
+> placeholder** — `pricing.rs` hard-zeroes every fee/split leg (0% take, no delivery fee), there is no
+> Stripe Connect or payout destination of any kind, VAT is stored and never computed, and no invoice
+> exists. **(3) authorization is per-role but not per-instance or per-tenant** — already tracked
+> read-side by [#144](https://github.com/TheCaptainCompany/captain-food/issues/144); the **write** half
+> ([#178](https://github.com/TheCaptainCompany/captain-food/issues/178)) was untracked, and restaurant
+> A can accept restaurant B's orders today. Plus three runtime bugs: the projection/saga drains can
+> **permanently skip events** (`position` is allocated before commit, no visibility guard,
+> [#189](https://github.com/TheCaptainCompany/captain-food/issues/189)); `/projector` lag is computed
+> as `head - head` so it is **structurally always 0** ([#190](https://github.com/TheCaptainCompany/captain-food/issues/190));
+> and poison events advance the checkpoint with **no reprojection tooling** to repair them. Two
+> compliance blockers with no owner: **allergens do not exist** anywhere in the model (EU FIC
+> 1169/2011 governs distance selling, [#184](https://github.com/TheCaptainCompany/captain-food/issues/184))
+> and **GDPR erasure has no technical answer** for PII in the immutable log
+> ([#194](https://github.com/TheCaptainCompany/captain-food/issues/194) — [#18](https://github.com/TheCaptainCompany/captain-food/issues/18)
+> deliberately excluded it). One **meta-finding worth acting on first**: `make validate` proves the API
+> answers the UI on the read side, but never checks that a screen action's `variables` satisfy the
+> mutation's `required` fields — which is exactly why four back-office buttons cannot submit
+> (reject/cancel omit `reason`; both refund buttons send a `refundId` neither command accepts) while
+> the gate reports 0 errors ([#168](https://github.com/TheCaptainCompany/captain-food/issues/168),
+> [#169](https://github.com/TheCaptainCompany/captain-food/issues/169)). Filed as
+> [#166](https://github.com/TheCaptainCompany/captain-food/issues/166)–[#197](https://github.com/TheCaptainCompany/captain-food/issues/197)
+> with five epics ([#198](https://github.com/TheCaptainCompany/captain-food/issues/198) operational
+> safety · [#199](https://github.com/TheCaptainCompany/captain-food/issues/199) economics ·
+> [#200](https://github.com/TheCaptainCompany/captain-food/issues/200) catalog ·
+> [#201](https://github.com/TheCaptainCompany/captain-food/issues/201) event log ·
+> [#202](https://github.com/TheCaptainCompany/captain-food/issues/202) observability/scale) and five
+> proposals in [docs/proposals/](../proposals/) carrying the option analysis. **Prioritisation is a
+> product-owner decision in the GitHub Project — nothing here is self-started.** Recurring check: a
+> daily 07:00 Europe/Paris routine re-runs this review against `main` and reports only *new* drift.
+
+> 🔁 **2026-07-26 (follow-up) — the review is now a repeatable capability, not a one-off.** Three
+> more proposals close the findings that had no proposal home: **PROP-20260726-171500** write-side
+> per-instance authorization (extends PROP-20260725-185140 / [#144](https://github.com/TheCaptainCompany/captain-food/issues/144)
+> to commands — [#178](https://github.com/TheCaptainCompany/captain-food/issues/178), tracking
+> [#205](https://github.com/TheCaptainCompany/captain-food/issues/205)); **PROP-20260726-172000**
+> spec-to-UI contract integrity ([#203](https://github.com/TheCaptainCompany/captain-food/issues/203));
+> **PROP-20260726-172500** delivery execution ([#204](https://github.com/TheCaptainCompany/captain-food/issues/204)).
+> Scheduling + order modification ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197))
+> folded into PROP-20260726-164500 §5bis. **All 40 issues (#166–#205) now carry the full triage set** —
+> Type, `impact/*` label, and the org fields Priority + Value Size + Impact + Effort per
+> [docs/BACKLOG.md](../BACKLOG.md) (Effort projected from Impact: XS/S→Low, M→Medium, L/XL→High; Priority
+> is the documented default value bucket — **row order in the Project stays a product-owner decision**).
+> New skill **`.claude/skills/architecture-review/`** encodes the whole procedure — dedup table against
+> #144/#151/#127/#134 and the epics, a probe checklist recording the 2026-07-26 baseline for every
+> check, the triage rules, and the proposal template — so the review is reproducible by any session and
+> the daily run needs no prompt engineering. The loop itself is a **scheduled GitHub Action**
+> (`.github/workflows/architecture-review.yml`) rather than a session-bound routine: it runs at
+> **07:00 Europe/Paris year-round** (two UTC cron entries plus a timezone guard, since GH cron has no
+> DST), reuses the `CLAUDE_CODE_OAUTH_TOKEN` secret the repo already has, and is version-controlled —
+> so it survives sessions and needs nothing from an operator. It is fenced: no `specs/**` edits, no
+> issue claims, no implementation work, and a two-line report on a quiet day.
+
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging:
+> functional customer send + the restaurant staff screen.** Two more green PRs finish the usable loop.
+> **[#147](https://github.com/TheCaptainCompany/captain-food/issues/147) (PR #148) — functional send:**
+> the customer compose couldn't produce a valid `postMessage` (missing the client-minted `messageId`
+> and `originalLocale`). Added two **dispatch-time synthesized tokens** to the SDUI executor —
+> `{{ $uuid }}` (a fresh UUIDv7 minted at dispatch, `executor::fill_mint_tokens`, persisted with the
+> pending write so a retry reuses it — idempotent, like checkout's `orderId`) and `{{ $locale }}` (the
+> client locale from the #110 `<html lang>`, `fill_locale_tokens`). The compose now sends all six
+> required fields; a native completeness test proves it. **[#149](https://github.com/TheCaptainCompany/captain-food/issues/149)
+> (PR #150) — restaurant back-office thread screen:** staff read BOTH the PUBLIC timeline and the
+> INTERNAL notes (two resolvers merged under `conversation`), post to either visibility (a PUBLIC/
+> INTERNAL `chip_multi_select` toggle → `postMessage`), and moderate — `escalateToAdmin` (reason) and
+> `muteParticipant` (target role + required reason). No new component kinds/story steps. Both PRs: web
+> 88 tests, wasm compiles, validate 0 errors, `check-drift` clean. **Messaging is now usable end to end
+> on the customer + restaurant surfaces.** Remaining niceties: mute-duration picker, richer muted-list
+> row, rider thread screen; and #133 refund-binding / #137 quick-reply catalog (now unblocked by the
+> screens).
+
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging is
+> now REAL end-to-end (runtime + UI over the domain slices).** On top of the three domain slices
+> (below), the runtime + a customer UI landed as three more green PRs, so a conversation now works
+> through the live stack. **[#141](https://github.com/TheCaptainCompany/captain-food/issues/141)
+> (PR #142) — write path live:** the 6 conversation mutations were auto-stubbed; adding them to the
+> codegen `wired_mutation_dispatch` allowlist (all `Extra::None`) makes the regenerated resolvers
+> journal (acceptance-first) + spawn the real handlers, so commands are accepted and events land in
+> `domain_events`. **[#131](https://github.com/TheCaptainCompany/captain-food/issues/131) (PR #143) —
+> read path live:** the full `OrderConversation` projection-table pipeline mirroring `OrderTracking` —
+> a forward migration (`20260725000000`, `REQUIRED_SCHEMA_VERSION` bumped, **applied cleanly on `main`
+> — `db-migrate` green**), the hand `OrderConversationProjector` (PUBLIC/INTERNAL split, translation
+> merge, cross-aggregate order-status fold, admin/mute state), the Pg store + read repo, a projection-
+> worker group slicing **both** `Conversation-` and `Order-` streams (keyed by orderId), schema
+> injection, and the wired query bodies + emitted `From<OrderConversationRow>` — so `orderConversation`
+> / `orderConversationInternalNotes` return live data. **[#145](https://github.com/TheCaptainCompany/captain-food/issues/145)
+> (PR #146) — customer chat screen:** a `sdui` `order_conversation` screen (`/orders/:orderId/chat`)
+> rendering the PUBLIC timeline bound to the live query with the order status woven in, `message_bubble`
+> + `quick_reply_chips` component kinds (bespoke renderer arms), and a compose row. Each PR green
+> (`make rust` / web 84 tests / wasm / `check-drift`), supervised auto-merge. **The one remaining gap
+> to a working customer SEND:** `postMessage`'s client-minted `messageId` idempotency key isn't
+> injected yet (the generic SDUI executor doesn't mint business UUIDs — only the bespoke checkout
+> `place_order` flow does); a `checkout.rs`-style driver hook is the top follow-up (documented as a
+> screen `gap` on #145). **Cross-cutting dependency:** per-instance read authorization (a customer may
+> read only their own order's thread) is the parallel-track concern in
+> [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) / PROP-20260725-185140 — the
+> conversation queries' "ownership enforced server-side" note relies on it. Still deferred: restaurant/
+> rider thread screens; [#133](https://github.com/TheCaptainCompany/captain-food/issues/133) in-thread
+> refund binding + [#137](https://github.com/TheCaptainCompany/captain-food/issues/137) quick-reply
+> catalog (need the screens); [#132](https://github.com/TheCaptainCompany/captain-food/issues/132) push
+> (needs [#127](https://github.com/TheCaptainCompany/captain-food/issues/127));
+> [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) attachments (framework).
+
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging epic:
+> the three spec-able DOMAIN slices are built + merged (`Conversation` aggregate).** After the epic
+> approval (below), the whole spec-able domain surface landed as three green PRs, each with its full
+> ADR-0032 completeness set and real domain + application Rust (the `crates/` workspace exists — the
+> CLAUDE.md "deferred" note is stale). **[#130](https://github.com/TheCaptainCompany/captain-food/issues/130)
+> (PR #138) — text messaging + visibility ACL:** the event-sourced `Conversation` aggregate (id =
+> orderId), `OpenConversation`/`PostMessage`, PUBLIC/INTERNAL visibility as **two role-pathed query ops**
+> (`orderConversation` incl. CUSTOMER; `orderConversationInternalNotes` staff-only, absent from the
+> customer schema = the privacy guarantee), customer-chat **opt-out default**, and the `OrderConversation`
+> projection table that folds order-status events into the thread (cross-aggregate; the
+> [#131](https://github.com/TheCaptainCompany/captain-food/issues/131) status-fold, projector deferred).
+> **[#136](https://github.com/TheCaptainCompany/captain-food/issues/136) (PR #139) — escalation + mute:**
+> `EscalateToAdmin`→`AdminInvitedToConversation`, `MuteParticipant`→`ParticipantMuted` with the reason
+> **required by the write model** (`MuteReasonRequired`, reason held out of the schema `required` on
+> purpose), `UnmuteParticipant` guarded by `ParticipantNotMuted`; mute authz at the API-role level
+> (CUSTOMER/RIDER excluded), the restaurant-can't-mute-admin refinement a noted resolver follow-up; mute
+> state on the staff read type only. **[#135](https://github.com/TheCaptainCompany/captain-food/issues/135)
+> (PR #140) — translation cache:** `RecordMessageTranslation`→`MessageTranslationAdded`, idempotent per
+> (message, locale) (`MessageNotFoundInConversation`/`TranslationAlreadyRecorded`), the cached
+> `MessageTranslation` riding on each `ConversationMessage`. Each PR: `make validate` 0 errors (25
+> baseline warnings, none new), `make rust` green (domain 42 + application 247 tests at the tip),
+> `check-drift` clean, supervised auto-merge. **Deferred/blocked (not spec-able now):** the SDUI thread
+> screens; GraphQL resolver wiring + the app projector (auto-stubbed, the accepted deferred state);
+> [#133](https://github.com/TheCaptainCompany/captain-food/issues/133) in-thread refund binding + [#137](https://github.com/TheCaptainCompany/captain-food/issues/137)
+> quick replies (need the thread screens — no standalone domain DSL);
+> [#132](https://github.com/TheCaptainCompany/captain-food/issues/132) push (needs
+> [#127](https://github.com/TheCaptainCompany/captain-food/issues/127));
+> [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) images (via the framework).
+
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129): epic
+> APPROVED + reserve slice landed — in-app order conversations (messaging)
+> (PROP-20260725-013008, ADR-20260725-015921).** The product owner approved the messaging epic ("do
+> this completely"). This is **post-V0** and the Rust runtime doesn't exist yet, so the only *buildable*
+> slice now is the one the proposal marks "shippable now" (§5/§9.1): **reserve the data model**. Landed
+> spec-narrative only — a comment in `specs/entities.yaml` beside `Order` reserving the future
+> `Conversation` aggregate as **keyed by `orderId`** (a conversation's identity IS its order) and the
+> principle that `View_OrderConversation` folds BOTH the order's status events AND the conversation's
+> message events for that `orderId` (so "order status participates in the thread" is free, no retrofit).
+> No validated DSL added (would trip ADR-0032 completeness before the §8 decisions are made), so no
+> generated drift. The ADR adopts the mechanism reuse (event-sourced aggregate, role-pathed ACL for
+> PUBLIC/INTERNAL visibility, acceptance-first posting, the EXISTING refund path for in-thread refunds,
+> the #127 cascade for push) and resolves the decidable §8 decisions (translation on-demand+cache via a
+> BFF proxy; in-thread refund triggers the existing refund command; mute matrix restaurant→customer/
+> rider, admin→anyone, customer→none; post-V0 phasing). **Two decisions left OPEN on their slices**:
+> image retention window (GDPR, with [#18](https://github.com/TheCaptainCompany/captain-food/issues/18))
+> and rider-participation default. The rest of the epic is decomposed into **8 sub-issues** (§9), each
+> independently shippable behind the acceptance-first write model and carrying its own ADR-0032
+> completeness set. Spec/docs-only → straight to `main`; `make validate`/`generate` 0 errors, no drift.
+
+> ✅ **2026-07-25 — [#110](https://github.com/TheCaptainCompany/captain-food/issues/110): translation
+> hygiene gates + the runtime locale-resolution chain (PROP-20260724-133700 §1c,
+> ADR-20260725-013315).** The catalog had no gate against rot and the runtime hard-coded `fr`. Now two
+> blocking `make validate` rules — **`translation-locale-missing`** (every key carries every
+> `SUPPORTED_LOCALES` message; one centralized locale list replaces three hard-coded `["en","fr"]`)
+> and **`translation-key-unused`** (a key referenced by no screen `$ref` and no `code_refs` entry is a
+> hard error) — plus **`specs/translations.code_refs.yaml`**, the declared manifest of keys consumed
+> by hand-written Rust (`order.status.*` via tracking.rs), guarded by `translation-code-ref-unknown`
+> and a companion codegen test that greps `crates/**/*.rs` so a stale entry is itself caught. The
+> gates caught two real drifts on landing (`order.not_found` referenced by tracking.rs but absent from
+> the catalog — added; `order.tracking_title` over-declared in code_refs when it is screen-`$ref`'d —
+> removed). **Runtime:** `resolve_locale(Customer.locale → cookie → Accept-Language/device → fr)` with
+> `normalize_locale` reducing `fr-FR`/`EN`/`en_US` to a bare SUPPORTED tag; SSR (`hosts.rs`) reads the
+> `captain_locale` cookie + `Accept-Language` and threads the resolved locale through every render
+> site — no more hard-coded `fr`; `<html lang>` carries it and hydrate reads it back from the DOM so
+> the client can't disagree with the shell. Follow-ups (noted): a visible language switcher
+> (`changeLanguage` is unreferenced by any screen today — cookie contract + SSR read are in place) and
+> a per-request JWT→`Customer.locale` SSR read. 49 codegen tests + web/server suites green; wasm
+> hydrate compiles.
+
+> 🚧 **2026-07-25 — [#118](https://github.com/TheCaptainCompany/captain-food/issues/118): OVH SMS
+> delivery for phone OTP (PROP-20260724-233605).** The #117 adapter can ask Supabase to send a phone
+> OTP, but Supabase has no SMS transport wired — so phone verification silently never delivered. Now
+> the Supabase Auth **Send-SMS hook** is fulfilled by OVHcloud (ADR-20260722-174500: OVH over Twilio
+> for FR price + EU residency): `OvhSmsClient` (crates/infrastructure/integrations/ovh_sms.rs) signs
+> OVH API v1 requests (`X-Ovh-Signature = "$1$"+sha1_hex(AS+CK+METHOD+URL+BODY+TS)`) and POSTs
+> `/sms/{service}/jobs` with `noStopClause:true` (transactional OTP, no STOP footer); the hook
+> boundary (integrations/supabase_sms_hook.rs) verifies Supabase's **standard-webhooks** signature
+> (`webhook-signature` HMAC-SHA256, ±5-min replay window) and extracts `(phone, otp)`. The server
+> route `POST /auth/sms-hook` (crates/server/auth_routes.rs) wires them: verify → 401 on bad sig,
+> parse → 400, deliver → 204 / 502 on OVH failure, **503 when SMS is unconfigured** (no OVH client /
+> no secret — fail-closed, never a half-open delivery path; the Stripe/identity env-gate pattern).
+> Env: `OVH_APPLICATION_KEY/SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME` (+ optional
+> `OVH_ENDPOINT`/`OVH_SMS_SENDER`) + `SUPABASE_SMS_HOOK_SECRET`. 7 unit tests (OVH signature vector +
+> env gating, hook verify/tamper/replay/parse, route fail-closed). **Not verifiable live until an OVH
+> account exists** (user provisions credentials + the Supabase Send-SMS hook URL later; 20 free SMS
+> credits noted); the code/build/deploy-health path is verified. SMS-only for V0 — WhatsApp OTP
+> deferred as a post-V0 UX choice ([#125](https://github.com/TheCaptainCompany/captain-food/issues/125)).
+
+> ✅ **2026-07-24 — #117: the real Supabase Auth adapter — login machinery is functional (PR #124,
+> PROP-20260724-225804).** The only `IdentityService` was the fail-closed stub, so no login worked.
+> New `SupabaseIdentityService` (crates/infrastructure/integrations/supabase_auth.rs, beside the
+> stub) over the Supabase Auth REST API: `send_phone_otp`/`send_email_magic_link` →
+> `POST /auth/v1/otp`, `verify_*` → `POST /auth/v1/verify` (phone: `{type:sms,phone,token}`; email:
+> `{type:email,token_hash}`), `refresh_session` → `POST /auth/v1/token?grant_type=refresh_token`;
+> `authRef` = the Supabase `user.id`, and the verify responses' access/refresh/expires flow into the
+> #112 parked-session trio. Typed rejections mapped from Supabase 4xx (expired→`VerificationCodeExpired`,
+> else `InvalidVerificationCode`/`InvalidVerificationToken`). Env-gated `from_env()` on
+> `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`; the composition root (`identity_service_impl`) uses it
+> when set, else the fail-closed stand-in — the Stripe pattern; unconfigured = anonymous-only, never
+> half-configured. Project-agnostic (reads `SUPABASE_URL`), so the ADR-20260722-174500 repoint from
+> the DATA project to `captain-identity` is a pure env change (verified finding: it currently points
+> at the data project `zcshlzhiinwmpzujuiep`; repoint deferred to the captain-identity migration). 3
+> adapter unit tests (env gating, 4xx classification, verify-response parsing); wasm + workspace
+> tests green. **Email magic-link is verifiable live now (native Supabase email, no OVH);** phone OTP
+> verify is the same code path, awaiting SMS delivery via [#118](https://github.com/TheCaptainCompany/captain-food/issues/118).
+
+> 🚧 **2026-07-24 — Captain ID: a shared auth SERVICE for all products (new repo
+> [TheCaptainCompany/captain-identity](https://github.com/TheCaptainCompany/captain-identity),
+> product-owner directive).** Auth is company-wide, not per-product — the "Captain ID" concept
+> reserved by ADR-20260722-225945 / ADR-20260722-174500 is now a real repo. Decision (its own
+> ADR-20260724-172808, recorded in the `captain-identity` repo and NOT resolvable in this one, +
+> AskUserQuestion): a **deployable auth service** at `id.thecaptaincompany.com`
+> owning identity (phone `authRef`), the Supabase wrapper (ADR-0015), OTP verify/send, httpOnly
+> session-cookie minting (the #112 design generalized), the Supabase→OVHcloud SMS hook, and the
+> JWKS/`captain_role` contract; products keep their own role paths + `@auth` ACL + domain data (the
+> ADR-20260722-174500 controller split). Rollout = **scaffold + reserve**: the repo is
+> established structure-first (README, ADR, proposal, tracking issue, operating-model conventions),
+> but Captain.Food's LIVE #112 auth code STAYS here and migrates once the service shape is proven —
+> nothing in-flight moved. #117 (Supabase adapter) + #122 (OVH SMS hook) stay in captain-food for
+> now, cross-linked to their permanent home [captain-identity #1](https://github.com/TheCaptainCompany/captain-identity/issues/1).
+> **Repo visibility: created PRIVATE** (auth service default) — revisit vs the public-repo/free-GHA
+> operating model before CI/image-build is added there.
+
+> ✅ **2026-07-24 — #114: sheet input dispatch — OTP auto-submit + chip on_change fires the #62
+> survey (PR #121).** The #93 delegated driver covered BUTTONS only; two sheet interactions were
+> dead. The executor's action parsing generalized to a PREFIX (`ActionSpec::from_node_prefixed`) so
+> `on_complete`/`on_change` reuse the entire variable-resolution machinery; `trigger_attrs` stamps
+> the DOM contract + `data-trigger`. Renderer: `otp_input` carries its `on_complete` action +
+> `data-complete-len` on the `<input>`; `chip_multi_select` renders option chips + a hidden input
+> (id = field id) holding the selected value, so the existing form-field binding fill reads it with
+> zero new resolution. interact.rs: an `input` listener auto-dispatches when an OTP field reaches
+> its length (6th digit → `verify_otp`, the #94 flow), and the click listener stashes a picked
+> chip's value into the group's hidden input before dispatching. **This fires the #62
+> delivery-satisfaction survey from the UI for the first time** (the timeliness chips carry
+> `record_delivery_satisfaction`). Code-only, no spec change. 79 web tests (2 new); wasm green.
+
+> ✅ **2026-07-24 — #113: first-class pagination on `queries/restaurants` (PR #120,
+> PROP-20260724-164102).** The #107/#108 OOM hotfix's `LIMIT 200` was an invisible adapter guard —
+> the marketplace silently showed ≤200 and couldn't page. Now a contract: new `PageLimit`/
+> `PageOffset` scalars, `restaurants` gains optional `limit`/`offset`, and
+> `PgRestaurantRepository::list()` applies `LIMIT least(limit ?? 24, 200) OFFSET offset` — the 200
+> is a NAMED clamp ceiling (`RESTAURANT_PAGE_MAX`), an over-max request returns the max (never an
+> error, never an unbounded scan), default page 24 (`RESTAURANT_PAGE_DEFAULT`). `RestaurantFilter`
+> carries the two; the generated resolver maps them off the input (the #97 generated-name
+> machinery). No new op ⇒ ADR-0032 unaffected (optional args). Offset/limit chosen over cursor for
+> V0's single-`ORDER BY` read model (cursor kept as the deferred alternative in the proposal). Pg
+> pagination test (clamp/offset/default). `make rust` green, no drift. Follow-up (client): per-rail
+> limits + "load more" offset wiring.
+
+> ✅ **2026-07-24 — #112: client auth-token wiring — the BFF-minted httpOnly session cookie (PR #116,
+> PROP-20260724-150500).** Identity stopped at the server: `VerifyPhone` SUCCEEDed but the client
+> stayed anonymous (CUSTOMER path unreachable, staff surfaces unusable, WS/SSR tokenless,
+> `sign_out` dead). Fixed WITHOUT ever exposing a token to JS. (1) **Spec**: `identity.verify_phone_otp`
+> + `verify_email_token` outputs gain `accessToken`/`refreshToken`/`expiresIn` (the #50
+> output-extension precedent) + a new `refresh_session` op; new `auth_sessions` transport table
+> (integration_connections.yaml — never event-sourced/api.yaml/projected), migration `20260724150500`
+> + `sweep_retention()` extension, `REQUIRED_SCHEMA_VERSION` bumped; the codegen `table_sql_type`
+> learned `bytea`. (2) **Park**: `application::auth_sessions` port (+ mem/noop doubles); the async
+> `verify_phone` handler parks the provider session keyed by the acceptance messageId
+> (`actor.cause_id`), owned by the journaling `session_id` — a parking failure never fails the
+> verification. (3) **Encrypt at rest**: `PgAuthSessionStore` (aes-gcm) — AES-256-GCM under
+> `AUTH_SESSION_KEY`, `claim` is a single-read `DELETE…RETURNING` scoped by owner + unexpired
+> (NULL-safe), no oracle. (4) **Exchange**: `POST /auth/session { messageId }` + matching
+> `X-SESSION-ID` → `Set-Cookie: captain_auth` (httpOnly/Secure/SameSite=Lax) + `/auth`-scoped
+> refresh; `/auth/refresh`, `/auth/logout`. (5) **The one seam**: `AuthContext` gained a cookie
+> fallback beside the `Authorization` header — lighting authenticated HTTP, the WS handshake
+> (browsers send cookies on upgrade), and #92's SSR 302 in a single change. (6) **Web**:
+> `verify_otp` surfaces the messageId; `pickup_session` POSTs it credentials-included. Fail-closed:
+> no key/DB ⇒ noop store ⇒ anonymous still works, no plaintext ever. Tokens never in GraphQL, the
+> event log, the journal, or client storage. 231 application + 24 server + web/infra tests; wasm
+> green. Twilio→OVHcloud SMS spec wording corrected (the launch decision, ADR-20260722-174500).
+> **Follow-up [#117](https://github.com/TheCaptainCompany/captain-food/issues/117)**: the real
+> Supabase Auth adapter (only the fail-closed `IdentityService` stand-in exists — the machinery is
+> built against the port, verify responses will carry the real session then).
+
+> ✅ **2026-07-24 — #95: rider availability EXPOSED — `changeRiderStatus` closes the
+> `rider_toggle_online` gap (PR #104; plan-approved spec change).** The domain machinery was
+> complete (ChangeRiderStatus command + Rider actor inbox + lifecycle machine (#23) + generated
+> handler + TestRiderStatusChanged/TestRiderStatusChangeIsRejected) — only the API surface was
+> missing. Landed: api.yaml `changeRiderStatus` (roles [RIDER, ADMIN], the rider's own toggle +
+> admin lifecycle), a rider `SetAvailability` story step (op-uncovered-by-story gate), the
+> `rider_toggle_online` gap flipped to a mutation binding in `rider.yaml` (+ `actions_used`), and
+> ONE codegen arm in the generated-handler dispatch table (`changeRiderStatus →
+> change_rider_status`). Regeneration flips `ActionKey::RiderToggleOnline` gap→mutation with
+> `ChangeRiderStatusInput` (#97's generated name), so the rider topbar toggle becomes dispatchable
+> through the #93 wiring with zero client code. **The known-warning baseline drops 26 → 25**: the
+> standing `command-no-mutation commands.yaml/ChangeRiderStatus` warning is RESOLVED by the
+> exposure. Tests updated to the new reality (the gap-disabling proof moved to the auth sheet's
+> passkey button; a new executor test pins the toggle to `changeRiderStatus`/its input type).
+> 77 web + 36 codegen tests, wasm green, `make rust` 0 errors/no drift. `RiderStatusChanged` still
+> feeds no `View_*` (dispatch targeting by availability = the deferred read-model decision, noted
+> in the issue).
+
+> ✅ **2026-07-24 — #92: SSR pages ship LIVE data via an in-process transport + the hydrate-side
+> auth guard (PR #103; ADR-20260723-172013 residuals 1+2).** Split 4 served SSR SHELLS; the screens
+> spec contracts `rendering_strategy: SSR_first` / TTFB <= 500ms. (1) **`SchemaTransport`**
+> (`crates/server/src/web_ssr.rs`) — the in-process `Transport` impl the seam was DESIGNED for
+> (graphql.rs: "an in-process transport for SSR could bypass HTTP entirely"): executes resolver
+> documents directly against the role-filtered schema with the PUBLIC role + anonymous Principal +
+> no session — SSR can never see more than an anonymous first request (the per-field ACL applies
+> identically). Schema built once, shared by the GraphQL routes and the host fallback
+> (`SsrExec` Extension). (2) **`render_path_with`** — resolves the matched screen's
+> `data_requirements` (route `:params` feeding args exactly like hydrate; gap resolvers refused
+> before any call; a resolver error degrades that one slot, never 500s) before rendering:
+> marketplace/storefront pages now carry restaurants/catalog in the initial HTML, the #82 pinned
+> arg exercised server-side. `requires_auth` screens SKIP the fetch (a document GET carries no
+> credentials — their session-scoped reads could only answer empty) and ship as shells.
+> (3) **Trait fix en route**: futures holding `&dyn Transport` across awaits weren't `Send` (the
+> axum handler requirement) — new platform-conditional `MaybeSync` supertrait (native transports
+> must be `Sync`; the browser's reqwest client is not and carries no bound). (4) **Auth guard
+> (client-side)** — `requires_auth` screens open the auth sheet OVER the content (the DSL's
+> if_guest pattern) or bounce to the surface root; the DoD's server-side 302 is EXPLICITLY
+> deferred: auth state lives in browser localStorage, no auth cookie exists yet — recorded on the
+> issue as the follow-up landing with the auth-token wiring. 76 web + 23 server-lib tests
+> (in-process introspection, error envelope parity, live-data SSR with call-count + shell-no-fetch
+> assertions); wasm green; `make rust` 0 errors/no drift.
+
+> ✅ **2026-07-24 — #94: bottom sheets — generated sheet trees, the sheet host, form-field bindings
+> + the OTP identity flow (PR #102; ADR-20260723-172013 residual 4 + #17's identity item).** The
+> DSL's `bottom_sheets:` (location picker, auth/OTP, item detail, rating — the #62 survey carrier)
+> now compile and render. (1) **Emitter**: each surface's `bottom_sheets:` emits a generated
+> `SHEETS` table (`Sheet { id, node }`, same Node trees; `sections` joined the child-key
+> whitelist); fail-closed vocabulary check caught `type: list` used unregistered by the location
+> picker — registered (content group), the same corrective class as #87's `cta_section`.
+> (2) **Renderer**: every SDUI screen mounts its surface's sheets HIDDEN after the content
+> (`data-sheet-id`; SSR + hydrate identical); real `bottom_sheet`/`list` markup; input fields carry
+> their DSL `id` on the `<input>` (the binding target). (3) **Executor**: action variables now
+> accept the sheets' BARE spelling (`action.phone`) alongside `action.variables.*`; an unresolved
+> `{{ <field>.value }}` binding travels as null AND is reported in a `data-var-bindings` map —
+> interact.rs fills those from the LIVE inputs by element id at dispatch time, and
+> `open_bottom_sheet`/`close_sheet` toggle the sheet DOM (one sheet at a time). (4) **`auth.rs`** —
+> the OTP identity flow with the COMMAND payloads as authority (split `dialingCode`/
+> `nationalNumber`, minted `customerId`, the SESSION id in the payload — the CartBindingProcess
+> contract): `request_otp` → `verify_otp` → on SUCCEEDED the `me` read is the proof; a wrong code
+> is the anticipated `InvalidOtp` rejection, native-tested end-to-end against a fake transport.
+> 36 codegen + 75 web tests, wasm32 green, `make rust` 0 errors/no drift. Residuals: `otp_input`
+> on_complete auto-submit + chip `on_change` dispatch (click wiring covers buttons only),
+> item-sheet option state, passkeys (declared gap).
+
+> ✅ **2026-07-24 — #98: tenant root serves the storefront; unclaimed slugs get the join landing
+> (PR #101; production bug found by the owner: `chezmarco.captain.food` answered 404).** The
+> storefront surface has no screen at `/` (the restaurant screen is `/r/:slug`; discovery moved to
+> the marketplace in #75), so every tenant front door was a dead end. (1) **Tenant-root rule** —
+> new `web::router::resolve(host, path)`: on a `{slug}.captain.food` storefront, `/` IS the
+> restaurant screen with the slug taken from the HOST (ADR-0036: the host is the tenant selector);
+> both the SSR entry (`render_path`) and the hydrate entry go through it so the two paths cannot
+> disagree. (2) **Claim landing** — the host fallback now checks a tenant slug against the
+> restaurant read model (`hosts::TenantLookup`, the `restaurants` repo Arc shared into an
+> Extension): registered → storefront; POSITIVELY absent → a claim-your-subdomain landing
+> ("{slug}.captain.food est disponible pour votre restaurant", CTA →
+> https://join.captain.food/#rejoindre — every unclaimed subdomain is an acquisition surface,
+> product-owner directive) served on EVERY path of the host; lookup error or no database →
+> **FAIL OPEN to the storefront shell** (a DB hiccup must never show "available" for a real
+> restaurant). Slug reflection is injection-safe (`is_valid_slug` gates `Tenant()`).
+> Tests: web tenant-root resolution matrix + 3 server tests over a stub read model (registered /
+> unclaimed-on-every-path / fail-open incl. no-DB). 71 web + 21 server-lib tests green; `make rust`
+> 0 errors/no drift. Residual: the storefront root still hydrate-fetches its data (#92 pre-fills).
+
+> ✅ **2026-07-24 — #93: SDUI buttons DISPATCH — action wiring + pending UX + push-first verdicts +
+> boot resume (PR #100; the #17 UX tail + ADR-20260723-172013 residual 3).** The renderer rendered
+> every button's `action.*` props as inert data; now the screens WORK. (1) **`executor.rs`** (pure,
+> native-tested against the REAL generated trees): `ActionSpec::from_node` parses a node's dotted
+> `action.*` props, resolving `{{ … }}` variable bindings against the screen data AT RENDER TIME
+> (what the user saw is what dispatches; unresolved bindings travel as null — the server judges);
+> `ActionPlan` = Mutation (key + resolved input) | Client(`ClientEffect`) | Disabled(reason) —
+> gap/unknown/unwired actions render DISABLED with the reason as tooltip, never a silent no-op;
+> `on_success.route` substitutes `{{ variables.* }}` from the resolved input (the checkout
+> confirmation pattern). (2) **DOM contract**: `button_attrs` stamps the plan onto data attributes
+> (`data-action`/`data-vars` JSON/`data-loading`/`data-on-success`/route/sheet/number) — SSR'd and
+> hydrated DOM identical, so ONE delegated listener drives every button, zero per-button closures.
+> (3) **`interact.rs`** (hydrate-only glue): the delegated click listener; mutation clicks freeze
+> the button (loading label + `data-busy` double-tap guard) → `pending::dispatch_persisted` →
+> **push-first verdict** (`operationStatusChanged` on a shared reconnecting socket, interpreted by
+> the SAME pure operation→outcome authority as the poll — extracted `outcome_from_operation`, used
+> by `pending::settle_from_push` which clears the record on a terminal frame with zero reads) with
+> the bounded poll as fallback after a 2 s push head-start; REJECTED/FAILED → toast
+> (server-localized message, errors.yaml code fallback); pre-acceptance transport failure stamps
+> `data-retry` = the persisted messageId so the NEXT click goes through `pending::retry` (same id —
+> duplicate-proof); boot runs `pending::resume_pending` and toasts settled intents.
+> `navigate`/`phone_call` execute; sheet/clipboard/share re-emit as a `captain:action` CustomEvent
+> for the #94 sheet host (inspectable, not swallowed). WS `Handle` became Clone + `unsubscribe`.
+> 70 web tests (7 new — executor specs against the generated backoffice accept button and the rider
+> gap toggle, push-settle, SSR DOM-contract) + wasm32 green; `make rust` 0 errors/no drift.
+> Residual to #94: sheet host, auth actions, authenticated WS (staff surfaces' push needs the JWT).
+
+> ✅ **2026-07-24 — #97: GraphQL input-type names are GENERATED, not convention-derived (PR #99;
+> closes the #80 honesty residual; prioritized ahead of #93 by product-owner directive).** The
+> client built documents with convention-derived input types (`<Pascal>QueryInput`,
+> `<PascalMutation>Input`, `<Pascal>SubscriptionInput`). The convention was WRONG for mutations: the
+> SDL names a mutation's input after its **COMMAND** (`<Command>Input`), which only coincides with
+> the mutation name for most ops — `configureGbpOrderLink` →
+> `ConfigureGoogleBusinessProfileOrderLinkInput` and `verifyGbpOrderLink` are live divergences
+> (outside today's allowlist, so nothing had broken YET). Now the data-layer emitter also emits
+> `ResolverKey::input_type()` (Some iff the bound query takes args), `ActionKey::input_type()`
+> (the command-derived name for mutation kinds) and `subscription_input_type(op)`; the web document
+> builders (`query_document`/`mutation_document`/`SubscriptionKey::document`) READ them —
+> `pascal()` derivation deleted from the crate. Same lesson as #82, one level up: a name the client
+> sends is read from the source of truth, never re-derived. Documents byte-identical (existing
+> string assertions prove parity); new codegen divergence test + a web totality test (every
+> mutation-kind action has an input type, gaps never do). codegen 35 tests, web 63, wasm green,
+> `make rust` 0 errors/no drift.
+
+> ✅ **2026-07-24 — #17: two-step writes survive reloads — persisted pending-operation store +
+> same-messageId retry (PR #91; realizes ADR-20260720-015500's client rule).** Splits 2-4 of #21
+> built the dispatcher/checkout/subscriptions, but the contract's durability half — **persist the
+> minted `messageId` until a terminal status is observed** — was unimplemented: a reload mid-flight
+> lost the handle (the exact V0 mobile failure). New `crates/web/src/pending.rs`: `PendingWrite`
+> (messageId + action + FULL input — for `place_order` the input carries the client-minted
+> `orderId`, so a reload recovers BOTH the idempotency id and the confirmation route),
+> `PendingStore` seam (localStorage `captain.pending-writes` on hydrate, mirroring session.rs;
+> injectable memory double), `dispatch_persisted` (recorded BEFORE the send — a network failure in
+> the crash window keeps the id), `settle` (clears ONLY on terminal SUCCEEDED/REJECTED/FAILED;
+> poll exhaustion keeps the record), `retry` (re-send under the ORIGINAL id → `duplicate: true`,
+> converges on the first outcome — no double order), `resume_pending` (boot-time: re-resolve every
+> stored id via the idempotent `operationStatus` read, tight caller-set bounds). Non-dispatchable
+> kinds (client/auth/gap) never pin the queue. `actions.rs` gained `dispatch_with_id` (dispatch =
+> mint + that); `checkout.rs` gained `submit_persisted`. 62 web tests (9 new incl. the
+> record-before-send crash test and the checkout-continuity round trip); wasm32 green; `make rust`
+> 0 errors/no drift. Issue #17's remaining UX items (PENDING spinners, generic-button dispatch
+> wiring, subscription-push resolve as the poll's fast path) stay in the ADR-20260723-172013
+> residual set.
+
+> ✅ **2026-07-23 — #21 frontend renderer split 4/4 (#87 "Frontend split 4/4 - per-component markup,
+> customer polish + restaurant/rider screen adoption", PR #89, ADR-20260723-172013) — #21 COMPLETE.**
+> The renderer goes GENERIC and the platform SERVES it. (1) New codegen emitter `emit_web_screens`:
+> every `screens/*.yaml` surface compiles to `crates/web/src/generated/screens.rs` — static `Screen`
+> tables (route/roles/`requires_auth`/`sdui`/`data_requirements` bound to `ResolverKey`) + the
+> component tree as `Node` data (translation refs → `I18n(key)`, `{{ … }}` → `Binding(path)`, nested
+> config → dotted props; `{ component: topbar }` chrome expands at emit time; children only under
+> `components`/`content`/`fields`/`slots`). FAIL-CLOSED on unregistered component types — which
+> immediately caught two live spec drifts: `cta_section` used unregistered by the partner landing
+> (now the split's ONE registry addition) and `filter_bar.filters[].type: dropdown` being config
+> vocabulary, not a component. `sdui:false` screens emit an empty tree but register their route.
+> (2) **Two NEW surfaces** (plan-approved DSL): `restaurant_backoffice.yaml` (orders queue/
+> deliveries board/refunds queue/#62 satisfaction; RESTAURANT+RESTAURANT_ACCOUNT) and `rider.yaml`
+> (job list/detail; RIDER) + en/fr sidecars — ZERO new API ops, existing component vocabulary;
+> `rider_toggle_online` is an explicit gap (no rider-status mutation exists). (3) **Generic
+> renderer** (`renderer.rs` rewrite): walks the generated trees with real markup for the
+> load-bearing kinds (chrome/nav, lists+cards with per-row templates, sections, tab bars, text,
+> buttons, inputs, menu sections; the rest render tagged auditable containers), `{{ path | filter }}`
+> bindings into resolved resolver data (`format_currency` fr-style), i18n from the EMBEDDED generated
+> catalog (fr default/en fallback, missing key renders `[key]` — fail-visible), and the
+> `restaurants.featured → featured_restaurants` template-alias convention. (4) **Router**
+> (`router.rs`): host→surface per ADR-0036's RESERVED subdomains (`restos.`/`riders.` — mirrored
+> with the server's `classify_host`, NOT new `back.`/`rider.` labels), path→screen with `:param`
+> capture feeding resolver args (`:orderId`→`order.byId#id` bridge); route-aware `hydrate()` fetches
+> `data_requirements` and re-renders. (5) **Full pipeline** (user-approved scope): the server's host
+> fallback SSRs matched screens (`web::router::render_path`, SSR-shell + hydrate-fetch model;
+> unknown path 404s; non-app hosts keep text landings), `/assets` serves `WEB_ASSETS_DIR`
+> (tower-http); the Docker build gains wasm32 + `wasm-bindgen-cli` PINNED to the crate's `=0.2.126`
+> (CLI refuses mismatch; bump together) + a second chef cook for the wasm tree, emitting
+> `web.js`/`web_bg.wasm` into the image; `ci.yml` adds the cheap `make wasm` compile-check INSIDE the
+> required `codegen` job (a separate workflow would not be a required check). Verified: codegen 34
+> tests (2 new emitter tests incl. the fail-closed abort), `web` 54 tests (surface-wide SSR sweep,
+> fr/en i18n, binding lists, alias convention, router matrix, render_path × 4 surfaces), workspace +
+> wasm32 builds green, `make rust` 0 errors/no drift. Honest residuals (in the ADR): server-side
+> data resolution for SSR, screen-level auth redirects, generic-button → `ActionKey` dispatch
+> wiring, sheets/overlays, runtime JSON screen delivery (ADR-0033's deferred contract), the
+> rider-status op. **Post-merge:** the FIRST image build failed — `rustup target add` in an early
+> Docker layer targeted the BASE image's toolchain, while cargo-chef's skeleton carries
+> `rust-toolchain.toml` so the cook-time toolchain was the file's, freshly installed WITHOUT the
+> wasm target. Fixed at the root in PR #90 "🐛 Fix the image build: wasm32 target belongs to the
+> toolchain file's toolchain" (`targets = ["wasm32-unknown-unknown"]` in `rust-toolchain.toml` +
+> the explicit add moved into the wasm-cook RUN). **VERIFIED LIVE at `255bdc8`**: `/health`
+> `X-VERSION: 255bdc8`; `live.captain.food/` SSRs the marketplace home (generated tree, `data-c`
+> tags); `restos.` serves `orders_queue` ("File des commandes"), `riders.` serves `jobs`
+> ("Mes courses"), a tenant `/checkout` serves the Stripe shell; `/assets/web.js` (36 KB) +
+> `web_bg.wasm` (707 KB) serve 200; an unknown path 404s.
+
+> ✅ **2026-07-23 — #21 frontend renderer split 3/4 (#86 "Frontend split 3/4 - checkout + order
+> tracking (non-SDUI: Stripe element, subscriptions)", PR #88).** The NON-SDUI MONEY PATH lands in
+> `crates/web`, on the #80 data layer. (1) **`subscriptions.rs`** — the graphql-transport-ws client,
+> split sans-IO: `WsClient` is a pure text-in/reactions-out protocol state machine (init→ack
+> handshake, subscribe QUEUED until ack then flushed, `next`/`error`/`complete` routing with
+> unknown-id frames dissolving, `ping`→`pong`), natively unit-tested with zero network; the
+> `hydrate`-only browser driver owns one `web_sys::WebSocket` (subprotocol `graphql-transport-ws`)
+> and reconnects through bounded exponential backoff (1s→30s cap). Auth + `X-SESSION-ID` ride the
+> `connection_init` payload (browsers cannot set WS headers — mirrors the server's
+> `on_connection_init`). Subscription selections REUSE the generated resolver selection for the same
+> api.yaml type (`orderStatusChanged` ↔ `order.byId` etc.), so push and pull cannot drift; the
+> consumer contract is SUBSCRIBE + RE-SYNC on every (re)connect (free-tier sockets die on restarts —
+> push is an accelerator, never the only truth). (2) **`checkout.rs`** — the acceptance-first flow:
+> the client MINTS `orderId` (spec: client-generated), dispatches `place_order` two-step, and awaits
+> the intent by READING `paymentStatus.byOrder` until `clientSecret` exists (bounded poll;
+> `paymentStatusChanged` is the push accelerator); `expectedTotal` travels for the server's
+> `PriceMismatch` guard; a REJECTED checkout resolves as a normal business outcome. (3)
+> **`stripe.rs`** — the element seam: client holds ONLY `clientSecret` + publishable key (card data
+> stays in Stripe's iframe); `confirmPayment`'s result is UX-only — the capture verdict is the
+> inbound webhook fact read back from our own API. Minimal wasm-bindgen surface (Stripe/elements/
+> create/mount/confirmPayment). (4) **`tracking.rs`** — pull-then-push over one `TrackingState`:
+> `load` then `apply` with REPLACE semantics + a `statusChangedAt` stale-frame guard (a late
+> out-of-order frame never regresses the screen; a null re-read keeps last known state); the status
+> hero mirrors the spec's `status_config` (all 9 OrderStatus values); post-delivery `rating_sheet`
+> actions (rider thumb, #62 timeliness survey, ADR-012 tips array) dispatch through the two-step
+> layer. Both screens render SSR with the renderer's `data-c` tagging from the same tree the
+> hydrate build shares. `cargo test -p web` 41 green (21 new); the wasm32 `hydrate` build verified;
+> `make rust` green (0 errors, no drift). Deferred to split 4 (#87): router/mount plumbing (live
+> form state, interactive sheets), per-component markup, restaurant/rider adoption.
+
+> ✅ **2026-07-23 — #82: pinned SDUI resolver args are validated against the bound query
+> (ADR-20260723-145959).** A `screens/*.yaml` resolver may pin static args on its query binding; both
+> customer front offices pinned `restaurants.featured` with the key **`listKey`**, but
+> `api.yaml#/queries/restaurants` declares it as **`list`** — so the home screen's featured rail would
+> have sent an unknown input field and been rejected by the server rather than showing the RECOMMENDED
+> shelf. The validator never caught it: §1 proves a `$ref` RESOLVES and §1b (ADR-20260722-152201)
+> proves WHAT KIND it resolves to, but neither looks INSIDE `args:` — and this was the only `args:` pin
+> in the whole spec, so the typo survived until #80 "Frontend split 2/4" became the first code to
+> consume a pin. Both parts landed: the pin is corrected on both surfaces, and (ADR-0032 — the fix for
+> a CLASS of error is a new check) new `validate_resolver_args` in validator §11 adds two fail-closed
+> rules — **`resolver-unknown-arg`** (pinned key is not an argument of the bound query; the message
+> lists the real ones, and an arg-less query rejects every pin rather than skipping the check) and
+> **`resolver-invalid-arg-value`** (declared enum-typed arg, pinned literal not a member; `array: true`
+> pins check each item). Errors, not warnings. Explicit non-goals: required-arg COVERAGE is not checked
+> (a pin is a static default — `execute_resolver` merges caller variables OVER it, caller winning), and
+> scope is `resolvers` only (`actions:` has no `args:` pin in the DSL or in `ActionDef`). No
+> `REF_CONTRACT` entry — pinned values are plain scalars, not refs. **The rule was proven against the
+> live bug before the fix**: with the check in place and the pin uncorrected, `make validate` reported
+> `resolver-unknown-arg` on BOTH surfaces. Ripple: `crates/web/src/generated/data_layer.rs`
+> regenerates, and the hand-written `crates/web/src/graphql.rs` doc comment + two pin-merge tests move
+> to `list` (the override test's `NEARBY` — never a `RestaurantListKey` member — becomes `TOP_DEALS`).
+> 4 new codegen tests incl. the #82 regression; `make rust` green (0 errors, no drift).
+
+> 🚧 **2026-07-23 — #21 frontend renderer split 2/4 (#80 "Frontend split 2/4 — resolver/action wiring
+> + session layer (#12) + two-step mutations (#17)", PR #81 "Frontend split 2/4: resolver/action wiring
+> + session layer + two-step mutations").** The SDUI DATA LAYER lands, following #68 "Frontend split
+> 1/4 — Leptos renderer skeleton + generated component registry". (1) New codegen emitter
+> `emit_web_data_layer` turns every `screens/*.yaml` `resolvers`/`actions` block into
+> `crates/web/src/generated/data_layer.rs`: `ResolverKey` (bound api.yaml query + the DSL-pinned
+> static args + a GENERATED GraphQL selection set) and `ActionKey` (`ActionKind`
+> client/mutation/auth/gap + bound api.yaml mutation) — a renderer-level SHARED allowlist unioned
+> across every surface (same rule as the component registry; a key bound differently by two surfaces
+> aborts the emitter), and `gap:` entries emitted UNBOUND so they fail closed at the dispatcher rather
+> than silently no-op. Selection sets are expanded from the bound query's `returns` type with a cycle
+> guard on the ref path + `SELECTION_MAX_DEPTH`; a truncated descent OMITS the field (a bare object
+> field is invalid GraphQL) and the rule bubbles up when a type is left with nothing selectable.
+> (2) Three hand-written runtime modules: `session.rs` (client-minted UUIDv7 `SessionId` persisted in
+> localStorage so it SURVIVES A RESTART — the anonymous cart and `operationStatus` ownership are keyed
+> on it; `X-SESSION-ID` a constant, mirrored with the server boundary), `graphql.rs` (object-safe
+> async `Transport` seam + reqwest `HttpTransport` on `/{role}/graphql`; `execute_resolver` refuses a
+> gap binding before any network call and merges the pinned DSL args under `$input`, caller winning),
+> `actions.rs` (the acceptance-first `dispatch`, #17 / ADR-20260720-015500: refuses every
+> non-`mutation` kind with its own error variant, mints the `messageId` into `metadata` — the whole
+> idempotency story — and resolves the verdict by READING `operationStatus` with bounded polling
+> `POLL_MAX_ATTEMPTS`/`POLL_INTERVAL`, keeping REJECTED — an anticipated errors.yaml business
+> rejection — distinct from technical FAILED). `make rust` green (0 errors, 26 known warnings, no
+> drift); `cargo build --workspace` green; codegen 27 tests, `web` 20 tests; the wasm32 `hydrate`
+> build verified. Honest residual: the operation INPUT type name is still convention-derived
+> (`<Pascal>QueryInput`), not read from the SDL. Deferred to later splits: Leptos wiring of the data
+> layer into live screens, checkout + Stripe element and order-tracking subscriptions (split 3),
+> per-component markup + restaurant/rider screen adoption (split 4).
+
+> 🚧 **2026-07-22 — The Captain Company umbrella + GitHub org rename (ADR-20260722-225945, product-owner directive).**
+> Establishing the parent-company layer above Captain.Food: brand = **Captain**, entity = **The Captain
+> Company** (`thecaptaincompany.com`, purchased), products keep the `Captain.X` pattern (Captain.Food →
+> Captain.Jobs/Captain.Voyage later). **Renaming the GitHub org `Captain-Food` → `TheCaptainCompany`** (the
+> org becomes the *company*; products are repos inside it). Repo/crate/product-domain names (`captain-food`,
+> `captain-food-*`, `captain.food`) are **unchanged** — only the owner segment moves. In-repo reference
+> updates (README badges, SECURITY, CODE_OF_CONDUCT, issue-template, BACKLOG, this file) + the **GHCR image
+> path** `ghcr.io/captain-food/captain-food` → `ghcr.io/thecaptaincompany/captain-food` (build-image.yml,
+> render.yaml, Dockerfile, README runbook) are staged in a **held PR**. ⏳ Blocked on the manual GitHub
+> rename + Render image-URL repoint + GHCR visibility check (see ADR Sequencing) — PR must NOT merge before
+> those. Reserved-not-built: Captain ID (`id.`) shared identity behind the ADR-0015 wrapper seam, Captain
+> Studio (`studio.`), and `captain-framework` extraction (deferred to product #2).
+
+> 📋 **2026-07-22 — Identity federation & consent-gated cross-tenant personalization (ADR-20260722-174500, PROPOSED).**
+> Records the identity/privacy framework for the two customer front offices: **one** Captain.Food identity
+> (Supabase Auth, global `Customer` keyed by phone/`authRef`, single-origin per ADR-0036) works across
+> `captain.food` + every `{slug}.captain.food` — **no per-restaurant account** (made an explicit invariant).
+> Sets the **data-controller boundary** (Captain.Food = controller of the identity + cross-restaurant
+> marketplace profile; each restaurant = controller of its own fulfilment data; no restaurant→restaurant
+> flow, isolation via the #22 nav-edge ACL). Splits two personal-data uses: a customer's **own** history
+> across restaurants (service basis, no new consent) vs. **cross-restaurant behavioural personalization**
+> (`RECOMMENDED`) which is **consent-gated, default OFF** — to be modelled as a first-class event-sourced
+> consent fact (`CustomerPersonalizationConsent…`), deferred to a follow-up issue. "Login with Captain.Food"
+> (OIDC) is post-V0 (single-origin already gives SSO within `*.captain.food`). **Legal basis is explicitly
+> pending DPO/CNIL** — the ADR fixes only the technical framework so either outcome is cheap. Doc-only; no
+> `specs/**` change. **Realized this session:** a dedicated **`captain-identity`** Supabase project
+> (Frankfurt, auth-only) split from the **`captain-food`** data project (clean because Supabase is wrapped
+> behind GraphQL + JWKS auth per ADR-0047, and `auth_ref` is a plain UUID, not a FK); company domain
+> **`thecaptaincompany.com`** (Dynadot; `thecaptain.company` → redirect) with intended issuer
+> **`id.thecaptaincompany.com`**; SMS via a **French/EU provider (OVHcloud SMS)** through the Send SMS hook
+> with a **per-product alphanumeric sender** (`CaptainFood`), dev = mock (no cost); **late identification** —
+> phone OTP at the cart→checkout boundary before payment (#12 anonymous cart), the verified phone shared with
+> restaurant/rider for **transactional** order-status only (number masking deferred). Follow-ups: (i) consent
+> gate (ADR-0032 completeness); (ii) privacy notice + DPIA + controller/processor contracts; (iii) OIDC
+> provider post-V0; (iv) repoint Food's `supabase-acl`/JWKS at `captain-identity` when its auth crate lands;
+> (v) `specs/integrations/supabase.md` two-project update (plan mode).
+
+> ✅ **2026-07-22 — Ref-KIND contract (ADR-20260722-152201).** The validator's §1 proved only that a
+> `$ref` *resolves*; what it resolved to was checked ad hoc per site. New **§1b** classifies every ref
+> target by KIND — finer than its file (PM state table vs projection/referential/journal/staging table;
+> enum vs plain scalar; query vs mutation vs subscription; aggregate vs process manager; a `commands.yaml`
+> entry is a *command* only if an actor receives it, else a shared *payload object*) — and matches it
+> against `REF_CONTRACT`, one declared table of `(file glob, ref-site glob, allowed kinds)`. **Fail-closed**:
+> a ref site with no contract entry is an error (`ref-site-undeclared`), so a new ref-carrying DSL field
+> cannot land undeclared. Caught the live case: `state_table` accepted any `database/tables/*` table.
+> Two widenings recorded in the ADR (service op input may be an event; the screens UI tree is i18n keys).
+> `make validate` 0 errors / 26 known warnings, no generated drift, 21 codegen tests green.
+
+> 🚧 **2026-07-22 — #75: marketplace content-split (ADR-20260722-160000, realizes ADR-20260722-091500/-101500).**
+> Extracted the Captain **marketplace** front office out of the storefront: new
+> `specs/screens/captain_frontoffice.yaml` (+ sidecar) holds `home`/`search` discovery + `partner_landing`
+> marketing (`live.captain.food` → bare `captain.food`); their strings (`home.*`/`search.*`/`partner.*`)
+> moved to `captain_frontoffice.translations.yaml`. `restaurant_frontoffice.yaml` keeps the single-restaurant
+> journey (catalog → cart → checkout → tracking) **plus** the customer account/order screens (decision:
+> account/orders stay in the storefront, reachable cross-host via routing — not duplicated). Shared chrome
+> (top bar / nav / cart FAB / location+auth sheets) is duplicated per surface; its `location.*`/`auth.*`
+> strings stay in the storefront sidecar and the marketplace cross-refs them (keys globally unique). Codegen:
+> the loader now **auto-discovers `screens/*.yaml`** and the **doc emitters (md + html) iterate all surfaces**
+> (one block per surface); the SDUI **component registry stays a single shared renderer allowlist** in
+> `restaurant_frontoffice.yaml`, so `crates/web/src/generated/registry.rs` is **byte-identical**.
+> `translations.generated.json` **byte-identical** (keys re-homed). `make rust` + `cargo build --workspace`
+> green (0 errors, no drift). Deferred: the marketplace's own account surface, a per-surface component
+> registry, and promoting shared chrome strings to `common.*`.
+
+> 🚧 **2026-07-22 — #73: per-surface translation sidecars (ADR-20260722-101500, refines ADR-0033).**
+> Shared strings (`common.*` + future backend text) stay in `specs/translations.yaml`; surface-specific
+> strings moved to a co-located sidecar `specs/screens/restaurant_frontoffice.translations.yaml`. Screens
+> `$ref` the file holding the key (globally unique; new `translation-duplicate-key` check). Codegen
+> merges `translations.yaml` + every `screens/*.translations.yaml` (`is_source_file` + `load_model` glob
+> + `translation_entries()`) across the validator, the JSON emitter, and the docs table.
+> **`translations.generated.json` byte-identical** (149 keys) — `leptos_i18n` unaffected. `errors.yaml`
+> untouched. `make rust` + `cargo build --workspace` green. Follow-up: move marketplace strings to
+> `captain_frontoffice.translations.yaml` with the content-split.
+
+> 🚧 **2026-07-22 — #71: SDUI screens taxonomy by audience (ADR-20260722-091500, refines ADR-0037).**
+> Renamed `specs/screens/customer_screens.yaml` → **`restaurant_frontoffice.yaml`** (the customer-facing
+> storefront at `{slug}.captain.food`, roles PUBLIC+CUSTOMER); files now named by **audience with no
+> `_screens` suffix** (folder conveys it). Two customer front offices split by host: the **Captain
+> marketplace** `captain_frontoffice.yaml` (cross-restaurant discovery @ `live.captain.food` → bare
+> `captain.food`, to be created — the `home`/`search` screens currently in `restaurant_frontoffice.yaml`
+> move there in a content-split follow-up) and the per-restaurant `restaurant_frontoffice.yaml`. Then
+> `restaurant_backoffice.yaml`/`rider.yaml`/`system.yaml` to follow. Codegen `SPEC_FILES` + doc/translation/registry emitters + generated docs and the
+> `crates/web` registry header updated (validator already generic over `screens/*.yaml`; no drift). ADR
+> relaxes ADR-0037 §4 to allow a future `system` screen set (impersonation still the "view as" path). No
+> API/behaviour change. `make rust` + `cargo build --workspace` green.
+
+> 🚧 **2026-07-21 — #21 frontend renderer STARTED, split 1/4 (#68, PR #69).** The Leptos/WASM SDUI
+> renderer (remaining-work item 5) is being built in the 4 sub-issues of #21 (ADR-20260720-143000).
+> **Split 1** stands up the runtime client seam: (1) a new codegen emitter (`emit_web_registry`) turns
+> `specs/screens/restaurant_frontoffice.yaml#/component_registry` into `crates/web/src/generated/registry.rs`
+> — a `ComponentKind` allowlist enum (`as_str`/`from_type`/`group`/`ALL`) the renderer dispatches on, so
+> the screens DSL stays the source of truth (codegen roadmap item 6); (2) `crates/web` now depends on
+> **Leptos 0.8** with an `ssr` (default, native) / `hydrate` (wasm32) feature split — the `renderer`
+> builds one static screen (a `home` chrome subset) from the registry and renders it **server-side to
+> HTML** (`render_home_html`), with a `hydrate()` wasm entry attaching to the `data-hydrate` root.
+> `make rust` green (0 errors, no drift); `cargo build --workspace` green. Architecture + sequence
+> diagrams in `docs/frontend/renderer-architecture.md`. Deferred to later splits: live resolver/action
+> wiring + session layer (#12) + two-step mutations (#17) → split 2; checkout/tracking → split 3.
+
+> ✅ **2026-07-21 — #61 (slice 1): delivery partner self-registration — EXTERNAL write-path + admin
+> approval (ADR-20260721-202504).** First slice of the L "likely split" #61, built on the #60 dispatch
+> foundation. New event-sourced aggregate **`DeliveryPartnerRegistration`** (id = client-generated
+> `registrationId`): a delivery partner self-registers availability to serve a city on a catalog channel
+> through the **EXTERNAL** GraphQL role (`registerDeliveryPartnerAvailability`, lands PENDING), an admin
+> reviews it (`approveDeliveryPartnerAvailability`, ADMIN-only → APPROVED), and the partner/admin may
+> revoke (`revokeDeliveryPartnerAvailability`). Invariants are self-contained (already-requested /
+> not-found / not-pending — 3 new errors); no referential FK check on channel/city in the domain yet
+> (deferred). New fold view **`View_DeliveryPartnerAvailability`** (status derived) backs the **first
+> EXTERNAL query** `deliveryPartnerAvailabilities` (partner tracks submissions; admin review queue).
+> New scalars `DeliveryPartnerRegistrationId` / `DeliveryPartnerName` / `CityAvailabilityStatus`
+> (PENDING/APPROVED/REVOKED); new `delivery_partner` (EXTERNAL) story persona + admin review activity;
+> 3 rules-linked behaviour tests. Codegen: `BT_AGGREGATES`, `wired_mutation_dispatch` (3 arms),
+> `wired_query_body` + `emit_server_types` `From<DeliveryPartnerAvailabilityRow>`. Migration
+> `20260721160000` (the view + `ref_city_availability_status`); `REQUIRED_SCHEMA_VERSION` bumped.
+> `make rust` green (build + 227+ tests + validate 0 errors + generate, no drift). **The APPROVED set
+> is the substrate the #60 `CityDeliveryRanking` walk will consume — that dispatch wiring (+ the
+> channel/city FK checks, per-owner query scoping, the onboarding-request & self-integrate shapes, and
+> a partner SDUI app) is the deferred follow-up.**
+
+> ✅ **2026-07-22 — #62: delivery-delay satisfaction survey + post-delivery tip/reward prompt
+> (ADR-20260722-181500 — realizes the #60 deferral).** After a delivered DELIVERY order the customer is
+> asked one timeliness question (*was the delivery on time?*) and, at the same moment, prompted to tip
+> the courier — the Uber Eats / Deliveroo pattern. Tipping already existed (`TipOrder`/`OrderTipped`,
+> ADR-012), so the tip is **reused** (recipient RIDER, or RESTAURANT for self-dispatch); the new work is
+> the survey signal + the restaurant-facing insight. New: scalar `DeliveryTimeliness`
+> `{ON_TIME, ACCEPTABLE_DELAY, TOO_LATE}` + `DeliveryDissatisfactionReason`; command
+> `RecordDeliverySatisfaction` → event `DeliverySatisfactionRecorded` on the Order aggregate (guards mirror
+> `RateOrder`: DELIVERED-only, record-once via `DeliverySatisfactionAlreadyRecorded`); the verdict folds
+> into `OrderTracking` (`Order.deliveryTimeliness`, null until answered → hides the prompt) **and** the new
+> single-event fold view `View_DeliverySatisfaction` behind the `restaurantDeliverySatisfaction` query
+> (RESTAURANT/RESTAURANT_ACCOUNT/ADMIN — the self-dispatch-vs-Captain signal). Completeness (ADR-0032): 2
+> rules, 3 behaviour tests, a customer + a restaurant story step, translations, the enriched post-delivery
+> `rating_sheet` (timeliness chips + `tip_amount_selector`). Migration `20260722000000`
+> (`ref_delivery_timeliness` + `ordertracking.delivery_timeliness` + the view; `REQUIRED_SCHEMA_VERSION`
+> bumped). Codegen: the Order `From<OrderTrackingRow>` template gained the field, and the
+> `restaurantDeliverySatisfaction` resolver + `From<DeliverySatisfactionRow>` are now emitted wired (not a
+> stub). The **read resolver is fully wired**: `application::queries::DeliverySatisfactionReadRepository`
+> + `infrastructure::PgDeliverySatisfactionRepository` (over `view_deliverysatisfaction`) + composition
+> root. `make validate` 0 errors, workspace green (222 application tests + full suite). End-to-end complete:
+> write path, both projections, the fold view, and the restaurant read query.
+
+> ✅ **2026-07-21 — Deployment build model changed & LIVE: CI builds the image, Render only pulls it
+> (ADR-20260721-175411, amends ADR-0042).** Render meters build-pipeline minutes at a $0 cap, so
+> compiling the Rust workspace on Render (`runtime: docker`) repeatedly failed deploys under the
+> high merge cadence (every merge → a full Render build, incl. spec/doc/tooling merges that don't
+> change the binary). New model: `.github/workflows/build-image.yml` builds the same cargo-chef
+> Dockerfile in **GitHub Actions** (free/unlimited on this PUBLIC repo — buildx `type=gha` layer
+> cache), pushes to **GHCR** (`ghcr.io/thecaptaincompany/captain-food:{sha-<short>,latest}`, package PUBLIC),
+> and triggers a **Render deploy hook** pinning the image **by immutable digest** (`@sha256:…`, never
+> `latest`) — gated on green `ci`/`main` exactly like db-migrate (ADR-0043). The service is `runtime:
+> image` + `autoDeploy: false`, so **Render spends zero build-pipeline minutes**; the running build
+> reports its **short git SHA** as the `X-VERSION` response header (all routes), the `/health` `version`,
+> and a startup log line. **Rollback** = re-hit the deploy hook with a prior `sha-<commit>`/digest (no
+> rebuild) — runbook in ADR-20260721-175411 / README. **Verified live end-to-end at `503a1a7`**
+> (`/health` `db:up`, `X-VERSION: 503a1a7`). The Render **Blueprint was retired** (deleted 2026-07-21 —
+> it kept "Failed sync" against the manually image-backed service); the service is now dashboard-configured
+> + CI-hook-deployed, and `render.yaml` is kept as documentation only (not applied). A narrower
+> `buildFilter`-only fallback (keep the Render build, skip spec/doc merges) is prototyped on branch
+> `claude/rust-build-pipeline-99uzow`.
+
+> ✅ **2026-07-21 — #57: Uber Direct delivery-partner adapter COMPLETE (ADR-20260721-172500).** A
+> `DeliveryProvider=PARTNER` adapter via the Uber **Direct** delivery API (not the Uber Eats
+> marketplace; distinct from the price-comparison ADRs 0022/0023/0024/0030), applying the Avelo37/
+> CoopCycle pattern and plugging into the #60 dispatch foundation as the `uber_direct` channel (the
+> Tours ranking seed already ranks it — no saga change). New crate `crates/adapters/uber_direct`:
+> `config.rs` (single-endpoint config + OAuth2 client-credentials, env-gated by `UBER_DIRECT_*`,
+> fail-closed; partial config ⇒ error), `outbound.rs` (`UberDirectDeliveryGateway` — OAuth2 token
+> manager + Create Delivery, `external_id` = our `deliveryJobId` read-back key), `acl.rs`
+> (`X-Uber-Signature` **raw-body HMAC** verify — no timestamp, the delta from the Stripe-style scheme;
+> Uber status → `DeliveryAcceptedByPartner`/`RejectedByPartner`/`StatusUpdated`; the two-layer-inbox
+> `UberDirectWebhookIngestor`), `raw.rs` (`PgRawUberDirectEvents`), `http.rs`
+> (`POST /adapters/uber-direct/webhooks`) + standalone `main.rs`. New staging table
+> `external_uber_direct_events` (integration_staging.yaml; migration `20260721150000` also extends
+> `sweep_retention()`; `REQUIRED_SCHEMA_VERSION` bumped). Spec surface: `services.yaml`
+> `delivery.implementations.uber_direct`, `c4-l3.yaml` `uber_direct-acl`, `uber_direct-webhook-ingestion`
+> observability contract, `specs/integrations/uber-direct.md`. No new events/commands/errors (reuses the
+> partner-generic facts), so ADR-0032 completeness holds. Composition root wires the channel + webhook
+> route. `make rust` green (build + tests + validate 0 errors + generate, no drift).
+
+> ✅ **2026-07-21 — #60: delivery dispatch strategy foundation COMPLETE (ADR-20260721-161939 —
+> supersedes ADR-20260720-004556).** Multi-partner routing built ONCE so #57 (Uber Direct) and #58
+> (CoopCycle) become an adapter crate + a catalog row + a `services.yaml` implementation, with no
+> further saga change. Two-layer model: the **channel CATALOG + spec defaults** live in the spec
+> (`DeliveryChannelCatalog`, `DeliveryChannelKey` slug — data-driven, not an enum), while **usage** is
+> runtime config — `CityDeliveryRanking` (per-city ordered walk list, `city_id IS NULL` = platform
+> default), `RestaurantDispatchConfig` (city + `RestaurantDispatchMode`), `City` a first-class entity.
+> `DeliveryDispatchProcess` is now **resolve → walk**: the birth leg resolves the plan (`RESTAURANT`
+> mode → `SELF_DISPATCHED`, Captain tracks but never offers; `CAPTAIN` → offer rank-1), and one shared
+> advance behaviour reached by three legs (`DeliveryRejectedByPartner` / `DeliveryOfferTimedOut` /
+> `DeliveryEscalationRequested`) offers the next-ranked channel or records the terminal
+> `DeliveryDispatchFailed` when the list is exhausted (list length is the bound, fail-closed —
+> `rules.yaml#/DispatchExhaustionFailsClosed` replaces `DispatchRetriesAreBounded`). New: `offer_job`
+> gains a `channel` target routed by a **composite `DeliveryService`** (channel→adapter registry;
+> unwired channels fall through via the offer timeout, so V0 Tours without Uber Direct is unchanged);
+> `DeliveryOfferTimeoutWorker` (env-gated, TTL = `min(global max, city override ?? channel default)`)
+> implements the ADR-004556 §5 deferred timeout; `EscalateDelivery` command (RESTAURANT/ADMIN) is the
+> manual escalate. Codegen gained a `{ from_hook: <name> }` PM value form (async, rowless,
+> orchestrator-resolved — the strategy/channel hook reads the config tables). Migration
+> `20260721140000` (City + 3 config tables + PM columns `current_rank`/`current_channel` + the
+> `(process_status, last_update_utc)` sweep index + V0 Tours seed); `REQUIRED_SCHEMA_VERSION` bumped.
+> `make rust` green (build + 220+ tests + validate 0 errors + generate, no drift). Follow-ups: #57/#58
+> adapters register their channels here; #61 partner self-registration writes the usage config; #62
+> delivery-delay satisfaction check; a synchronous-decline path for unconfigured channels.
+
+> ✅ **2026-07-21 — #28: Avelo37 delivery-partner adapter COMPLETE (ADR-20260721-104233 —
+> realizes the ADR-20260720-015400 "delivery adopts the inbox" follow-up, the outbound half of the
+> #26 `delivery` service, and ADR-20260720-004556's bounded re-offer).** The `DeliveryPartner`
+> capability is no longer a no-op: automated dispatch is end-to-end. (1) **New crate**
+> `crates/adapters/avelo37` (ADR-20260718-213352 pattern): `acl.rs` (Avelo37-Signature timestamped
+> HMAC verify, ±300s replay, fail-closed; partner→domain mapping `delivery.accepted/declined/
+> status_updated` → `DeliveryAcceptedByPartner`/`RejectedByPartner`/`StatusUpdated` + partner status
+> vocabulary → `DeliveryStatus`; the two-layer-inbox `Avelo37WebhookIngestor`), `raw.rs`
+> (`PgRawAvelo37Events`), `outbound.rs` (`Avelo37DeliveryGateway` — real `DeliveryService::offer_job`,
+> `from_env` gate on `AVELO37_API_KEY`, `job_reference` read-back key), `http.rs`
+> (`POST /adapters/avelo37/webhooks`) + standalone `main.rs`. (2) **Inbound two-layer inbox**: new
+> `external_avelo37_events` staging table (integration_staging.yaml v4, 90-day processed retention),
+> `inbound_events` source `'avelo37'`, migration `20260721130000` (+ `sweep_retention()` covers the
+> new mirror; `REQUIRED_SCHEMA_VERSION` bumped). (3) **Drain routing extended beyond Payment**:
+> `application::deliveries::record_inbound_delivery_event` (the payments.rs sibling) records the three
+> facts onto `DeliveryJob-<id>` — fold-based dedupe (acceptance by `partnerRef`, status by current
+> status), **lifecycle-guarded** append for the machine-bearing facts (an illegal report is kept
+> FAILED/inspectable, never appended), rejections always recorded (journal unique = their dedupe →
+> bounded re-offer counter advances), orphans recorded (saga guard flags them). (4) **Outbound
+> wiring**: composition root resolves the `delivery` binding to `Avelo37DeliveryGateway` when
+> `AVELO37_API_KEY` is set, else the logged `NoopDeliveryService` — unconfigured deployments (V0
+> Tours) unchanged. (5) **Completeness (ADR-0032)**: `avelo37-webhook-ingestion` observability
+> contract (mirrors Stripe), `TestDeliveryJobRecordsPartnerStatusReport` closes the new event message
+> gate. `make rust` green: workspace builds, tests pass (13 adapter + recorder + drain), validate
+> 0 errors, no drift. Follow-ups: real Avelo37 wire reconciliation on go-live; multi-partner ranking
+> (#57 Uber Direct, #58 CoopCycle) is the named extension point.
+
+> ✅ **2026-07-21 — #24: the behaviour-test suite is GENERATED from tests.yaml
+> (ADR-20260721-101552, codegen-roadmap item 2).** New `codegen-rs` emitter
+> (`emit_behaviour_tests`) → `application/src/generated/behaviour_tests.rs`: one `#[tokio::test]`
+> per Given/When/Then case (all 161) — GIVEN seeds fixtures onto their aggregate streams, WHEN
+> dispatches through the real write path (emitter-owned command/PM-leg/record dispatch tables),
+> THEN asserts payload-level equality of the appended facts across ALL streams (strict per-stream
+> diff; `then: []` = strict no-op; `thrown` = typed code + no side effects). Runs on the
+> hand-written `application::behaviour_support` runtime (mem store, read-model/service doubles,
+> PM-run seeding, UUIDv5 spec-id mapping). Executing the spec surfaced and fixed: a new
+> `test-invalid-enum-value` validator rule (caught `serviceType: "PICKUP"`), tests.yaml sample
+> corrections (missing birth facts / cross-aggregate givens, per-leg RefundOpened variants, the
+> V0 zero-fee money chain per pricing.rs, refund legs asserting the refund they open), and two
+> runtime fixes (RegisterRestaurant enforces `RestaurantAccountNotFound` by folding the account
+> stream; delivery-issue payloads no longer stamp wall-clock time — ADR-0041). The ten
+> hand-mirrored `crates/application/tests/*_behaviour.rs` files (118 cases) are DELETED; in-src PM
+> tests and `pm_state_mem.rs` stay. New tests.yaml cases now cost zero Rust. `make rust` green.
+
+> ✅ **2026-07-21 — #20: HubRise CONNECT FLOW — provisioning on OAuth connect + account-scoped
+> token store (ADR-20260721-100601; closes the ADR-20260718-145856 §0 "Open contract" / item 2a).**
+> Two new adapter routes: `GET /adapters/hubrise/connect` (302 → HubRise authorize, stateless
+> HMAC-signed anti-CSRF `state`) and `GET /adapters/hubrise/oauth/callback` (code → token exchange —
+> the response itself names the connection scope: `account_id`…). The flow pulls
+> `/account`+`/locations`+`/catalogs` and provisions via journaled WORKER sends of the EXISTING
+> commands with the enricher's derived UUIDv5 ids (`RegisterRestaurantAccount`, `RegisterRestaurant`
+> per location — `PASSIVE_PARTNER`, slug = `slugify(name)-slugify(location id)`, `CreateCatalog` +
+> initial `ImportCatalog` per catalog) — NO new domain messages, creations idempotent on the derived
+> ids, deterministic rejections warned-never-retried (SIRENE lesson). NEW DSL table category file
+> `specs/database/tables/integration_connections.yaml` (plan-mode approved): `hubrise_connections`
+> (token keyed by RestaurantAccount = UUIDv5(account), never event-sourced, never in api.yaml — no
+> GraphQL edge reaches it) + `hubrise_connection_locations` (callback location → token resolution);
+> migration `20260721120000`, `REQUIRED_SCHEMA_VERSION` bumped. **The global `HUBRISE_ACCESS_TOKEN`
+> is RETIRED**: `HubRiseApiClient` → token-per-call `HubRiseApi`, the enricher resolves each
+> callback's token from the connection (unconnected location = definitive skip), and enrichment now
+> needs only `DATABASE_URL`. New env (connect routes only, fail-closed): `HUBRISE_CLIENT_ID`,
+> `HUBRISE_CONNECT_REDIRECT_URL`, optional `HUBRISE_OAUTH_SCOPE` (default
+> `account[catalog.read,inventory.read]`); `HUBRISE_WEBHOOK_SECRET` doubles as the OAuth client
+> secret (it IS the app client secret). Tests: connect provisioning/reconnect-idempotency/no-scope/
+> catalog-listing-failure + enricher token-resolution suites (24 adapter tests) + Pg-gated
+> `connections_store.rs`. `make rust` green. Follow-ups in the ADR: restaurant-facing connect UI,
+> disconnect/revoke + token encryption at rest, confirm `GET /catalogs` & `opening_hours` shapes.
+
+> ✅ **2026-07-21 — #23: aggregate lifecycle state machines COMPLETE (ADR-20260721-093027,
+> codegen-roadmap item 1 closed — completes ADR-20260720-004419's first slice).** (1) **Dynamic
+> targets**: a lifecycle entry may declare `via: <payloadField>` — the event carries the target
+> state (one entry per `from × to`, determinism per event instance); new `lc-via` validator rule
+> (field exists, required, same scalar; static/dynamic mixing = `lc-ambiguous`), emitter emits
+> guarded arms + payload-read `target()`/`initial()`, mermaid labels dynamic edges `Event(field)`.
+> (2) **Full adoption**: Restaurant (static machine), Rider and DeliveryJob (dynamic) declared in
+> actors.yaml — 6 machines / 72 transitions, `lc-missing` warnings 3 → 0; the declared DeliveryJob
+> machine resolved a real hand-code drift (cancel-from-FAILED allowed by `cancel_delivery` but not
+> by `delivery_can_transition`) preserving both behaviours. (3) **Folds rewired**: Cart, Payment,
+> Restaurant, Rider, DeliveryJob status now moves ONLY through `lifecycle::initial`/`target`;
+> `rider::can_transition` and `delivery_can_transition` are deleted; the remaining hand delivery
+> handlers guard through `lifecycle::transition`. (4) **Generated handlers**: new emitter →
+> `application/src/generated/handlers.rs` — the 7 Order lifecycle commands + `ChangeRiderStatus` +
+> `UpdateDeliveryStatus`/`UpdateDeliveryPartnerStatus` are generated require+guard+append fns
+> (event built from same-named command fields; per-aggregate require/reject/stream seams stay
+> `pub(crate)` in commands.rs), re-exported so call sites are unchanged; the hand behaviour suite
+> is the parity gate until #24. `make rust` green: 57 test suites pass, validate 0 errors, no drift.
+
+> ✅ **2026-07-21 — #25: the PM orchestrator step pipelines are GENERATED
+> (ADR-20260721-053456, codegen-roadmap item 3, implements the deferral of ADR-20260719-193500).**
+> New `codegen-rs` emitter over `specs/processmanager.yaml` →
+> `application/src/generated/process_managers.rs`: one module per process manager, one generated
+> `async fn` per leg executing the DSL's ordered typed steps — `state.by/expect/set` over the #27
+> generated stores (missing-row policy typed from the spec: bare `guard throws` after `state.by` =
+> the orphan error; command legs reuse the first `that`-guard's error; otherwise benign skip),
+> structural guards, `call` through the #26 generated service ports, `deliver` with generated
+> stream addressing + `Repository::save` under the saga actor, `send` with the event-leg
+> rejection-logged-and-skipped semantics, and a pk-admission seam on opening legs. The
+> NON-STRUCTURAL seams are per-leg generated HOOK traits (`read_*` with sink-typed structs,
+> `build_*`, `input_*`, `should_deliver_*`, `admit`, `finalize`, `compute_*`, `branch`) —
+> the four hand orchestrators shrank to hook impls + thin wrappers with UNCHANGED call surfaces
+> (runner/server untouched). Two DSL-reading conventions carry the last nuances: self-referential
+> `from_state` = orchestrator-computed (the re-offer counter), a mid-leg bare `skip` guard = the
+> linear-branch marker (ADR-20260720-004556). The `PlaceOrder` command leg stays hand-written
+> (pricing non-goal). Behaviour suite = parity gate, all green (two skip-message substring
+> assertions re-worded; never spec'd). `make rust` green: workspace builds, tests pass, validate
+> 0 errors, no drift.
+
+> ✅ **2026-07-21 — #50: identity catalog completed + migrated to the generated `IdentityService`
+> (owner-approved spec change; closes the #26 deferral, ADR-20260721-043033).** services.yaml:
+> `identity.verify_email_token.output` now carries the proven `email` (+ declares
+> `VerificationCodeExpired`), and the `locale` inputs of `send_phone_otp`/`send_email_magic_link`
+> are `nullable: true`. The hand-written `AuthProviderGateway` (+ `PhoneOtpCheck`/`EmailTokenCheck`)
+> is MIGRATED AT PARITY and deleted: the Customer command handlers call the generated
+> `IdentityService`, invalid/expired verifications are the canonical typed rejections RAISED BY THE
+> ADAPTER (`canonical_phone` is `pub` so adapters build the `phone` context identically), the
+> fail-closed stand-in is renamed `FailClosedIdentityService`, and the composition root resolves
+> identity through the generated `identity_service` binding. Every service port of the catalog is
+> now generated — roadmap item 4's migration debt is fully paid. `make rust` green.
+
+> ✅ **2026-07-21 — auto-merge sequencing gap closed (ADR-20260721-044613, amends
+> ADR-20260721-042018).** A claim-time draft PR is a near-empty diff and passes CI trivially;
+> arming auto-merge at claim time (instead of at completion) would leave it armed for the whole
+> task and fire the instant the PR left draft, even before the work was done — closing the issue
+> via `Closes #NN` on unfinished work. Fix: auto-merge is armed **exactly once**, together with
+> marking the PR ready for review, as one indivisible completion step — never at claim time, never
+> separately. CLAUDE.md / BACKLOG.md updated to state this explicitly. Docs-only.
+
+> ✅ **2026-07-21 — #26: service-catalog emitters — the ports are GENERATED
+> (ADR-20260721-043033, implements ADR-20260719-214500, codegen-roadmap item 4).** Four new
+> emitters over `specs/services.yaml`: `application/src/generated/services.rs` (per-service
+> `<Base>Service` trait + typed `<Op>Input`/`Output` structs + the `ServiceCallMeta` ENVELOPE —
+> correlation_id + business `refs`, the ADR-0041 move applied to service calls),
+> `infrastructure/src/generated/service_clients.rs` (`Http<Base>Service` per service over the
+> derived `POST /services/<svc>/<op>` surface, lossless `DomainError` wire round-trip),
+> `infrastructure/src/generated/service_bindings.rs` (spec-owned `binding: local | http`
+> resolvers; http reads `SERVICE_<NAME>_URL`), and the expose-gated
+> `server/src/generated/services_routes.rs` (empty router in V0; http/expose branches covered by
+> codegen unit tests). Hand-written `PaymentGateway` → generated `PaymentService`
+> (placeOrder + refund PM + Stripe outbound adapter, whose intent `metadata` now copies
+> `meta.refs` verbatim) and `DeliveryPartner` → `DeliveryService` (dispatch PM + runner + noop)
+> are MIGRATED AT PARITY and deleted. ⏳ `identity` migration deferred on a CATALOG GAP needing a
+> product-owner spec change: `identity.verify_email_token.output` lacks the proven `email` the
+> handler records (never client input), and `locale` inputs should be `nullable: true` — see the
+> ADR. `make rust` green: workspace builds, all tests pass, validate 0 errors.
+
+> ✅ **2026-07-21 — issue workflow tightened: claim-time draft PR + supervised auto-merge
+> (ADR-20260721-042018, amends ADR-20260720-233000; product-owner directive).** Claiming an issue
+> now means label + claim comment + `NN-slug` branch + an immediate **draft PR** (`Closes #NN`) —
+> issue↔branch↔PR are linked before any code, the board flips to In progress at claim time, and
+> the reaper sees linked-PR activity. Completion = local gates green → PR **ready** → **enable
+> auto-merge** → **supervise checks until MERGED** (fix+push on failure; never end at "CI
+> pending"). The ADR also records the auto-merge threat model: repo-level "Allow auto-merge"
+> grants no merge authority (per-PR arming needs write access; fork PRs can't arm or merge — an
+> outsider's empty PR just sits open), the load-bearing config being the `main` ruleset's
+> **required `codegen` check** (⏳ product owner to confirm in Settings — not verifiable from the
+> repo). Docs-only change: CLAUDE.md non-negotiable + BACKLOG.md method + ADR.
+
+> ✅ **2026-07-21 — #27: PM state-table rows and Postgres stores are GENERATED
+> (ADR-20260721-031734, codegen-roadmap item 5).** Two new emitters in `tools/codegen-rs` over
+> `specs/database/tables/process_managers.yaml`: `crates/application/src/generated/pm_state.rs`
+> (row structs, `…StateStore` ports with derived `by_*` lookups = pk + UNIQUE columns + the
+> registered `paymentStatus(orderId)` read, and the `mem::…` doubles) and
+> `crates/infrastructure/src/generated/pm_state.rs` (Pg stores: enum ordinals, `.0` binds,
+> `ON CONFLICT (pk) DO UPDATE` upserts stamping `last_update_utc = now()` server-side). The
+> hand-written `application/src/pm_state.rs` + `infrastructure/persistence/pm_state.rs` are
+> deleted; call-site paths unchanged via re-exports (`application::pm_state`,
+> `persistence::Pg…State`); mem-double tests moved to `application/tests/pm_state_mem.rs`.
+> Lookup naming is now mechanical (`by_<column minus _id>` — `by_job` → `by_delivery_job`), so
+> processmanager.yaml `state.by` keys map 1:1 onto store methods for roadmap item 3. Journal
+> stores (`command_journal.rs`/`inbound_events.rs`) stay hand-written — follow-up slice.
+> `make rust` green: workspace builds, all tests pass, validate 0 errors, no drift.
+
+> ✅ **2026-07-21 — #16: `surface: graphql` binding kind + the generic `command-acceptance`
+> contract (ADR-20260721-031127).** Validator §8 now accepts `workflow.surface` as a binding kind
+> (rules `obs-surface-unknown`, `obs-surface-exclusive`; `obs-no-workflow-binding` amended) so a
+> contract can bind a whole dispatch surface instead of one command/saga/aggregate; doc emitters
+> render it (files under cross-cutting). New `command-acceptance` contract instruments the
+> acceptance-first write pipeline (ADR-20260720-015500): spans
+> `command.receive`/`command.journal`/`command.dispatch`, ids `message_id`/`correlation_id`/
+> `trace_id`/`command_type`/`channel`, metrics `commands_accepted_total{channel}`,
+> `command_duplicates_total{channel}`, `command_sync_conflicts_total{command_type}`,
+> `command_completion_ms{status}` (REJECTED/FAILED split — #19's decision data). Latency budget
+> binds the sync acceptance path only. Runtime emission stays contract-only until the OTel layer
+> exists; #15 landed in parallel, so `{channel}` already sees all channels. Validate 0 errors.
+
+> ✅ **2026-07-21 — #15: the WORKER channel journals (ADR-20260720-015300 follow-up).** The command
+> journal invariant — ALL command submissions converge on `command_journal`, whatever the channel —
+> is now true: the HubRise enricher (`ImportCatalog` + per-SKU `UpdateOfferStock`) and the SIRENE
+> sync worker (`RegisterRestaurant` / `MarkRestaurantClosed`) no longer call handlers directly but go
+> through the new reusable worker-side journaling dispatch `application::dispatch::dispatch_journaled`
+> (`channel: WORKER`, journal-before-handle, same REJECTED/FAILED discrimination as the generated
+> GraphQL dispatch; a FAILED duplicate is re-executed under the same id — for a worker, redelivery IS
+> the retry). Deterministic idempotency keys: HubRise `message_id` = UUIDv5(callback id, command
+> type[, offer id]), `cause_id` = UUIDv5(callback id) → `external_hubrise_callbacks →
+> command_journal → domain_events` is fully traceable, and a webhook redelivery dedupes instead of
+> double-applying; SIRENE `message_id` = UUIDv5(command type, SIRET, staged `last_seen_at`),
+> `cause_id` = UUIDv5(`row:<SIRET>`) — a re-drained staged version dedupes, an ingestion refresh
+> journals anew. Worker rejections finally leave a durable REJECTED trace. No spec change; unit tests
+> (dispatch + enricher dedup) + Pg-gated worker tests extended with journal/causality assertions;
+> workspace tests green, validate 0 errors. Unblocks #16 (`commands_accepted_total{channel}` now sees
+> all channels).
+
+> ✅ **2026-07-21 — #18: retention policy for write-path journals & adapter mirrors
+> (ADR-20260721-025159).** The unbounded-growth follow-ups of ADR-20260720-015300/-015400 are
+> closed: one SQL function **`sweep_retention()`** (source
+> `specs/database/functions/sweep_retention.sql`, in the generated schema + migration
+> `20260721025159`, `REQUIRED_SCHEMA_VERSION` bumped) owns the windows — `command_journal`
+> terminal rows 90 d from `completed_at`, `inbound_events` DELIVERED rows 30 d from
+> `delivered_at`, `external_stripe_events`/`external_hubrise_callbacks` processed rows 90 d from
+> `processed_at` (also the GDPR storage-limitation cap on verbatim webhook payloads). NEVER
+> swept: `domain_events`/`domain_stream` (the function does not reference the log), RECEIVED
+> journal rows (stale-RECEIVED sweep marks them FAILED first), FAILED inbound rows (kept until
+> resolved), unprocessed mirror rows, and the SIRENE mirror (detect-by-absence needs every row).
+> Scheduling: new in-process `RetentionSweepWorker` (first pass at boot, then 6 h;
+> `RUN_RETENTION_SWEEP` default on) — a `pg_cron` call of the same function is the documented
+> alternative. The table YAMLs carry documentary `retention:` blocks. New DB-gated test
+> `retention_sweep.rs` proves the delete-set AND the untouchables. `make validate` 0 errors,
+> workspace green.
+
+> ✅ **2026-07-20 — value made explicit per issue (product-owner directive, amends
+> ADR-20260720-143000 §1).** New org field **Value Size** (T-shirt XS–XL) = the value the issue
+> brings if completed, graded from its Impact section; issue **Type** `Foundation`
+> (non-functional) vs `Feature` (functional), matching the two value tiers. The `size/*` labels
+> are **renamed `impact/*`** — same T-shirt, same meaning (**Impact = the size of the change on
+> the code**), matching the board's Impact field (renamed from "Size"); Effort remains its coarse
+> projection. Within a Priority bucket no numeric value ordering — row order on the board.
+> Applied to all 15 open issues (+#12/#13/#31 for consistency); process recorded in
+> docs/BACKLOG.md.
+
+> ✅ **2026-07-20 — backlog re-ordered by VALUE, not effort (ADR-20260720-213024, product-owner
+> directive).** ADR-20260720-143000 §4's simplest-first queue is amended: tier 1 = foundations &
+> cross-functional/non-functional, tier 2 = features in value-stream order (customer ordering →
+> restaurant onboarding → delivery). New queue: #14 → #22 → #15 → #16 → #19 → #18 (contracts,
+> security, invariants, observability, retention) → #27 → #26 → #24 → #25 → #23 (codegen wave) →
+> #17 → #21 (customer stream) → #20 (restaurant onboarding) → #28 (delivery, post-V0). The
+> ranking is applied to the **GitHub Project "Prioritized backlog"** — the single place priorities are
+> defined: Priority field = value bucket (Urgent = tier-1 foundations, High = codegen wave,
+> Medium = V0 features by value stream, Low = post-V0), Effort field mirrors the size label; no
+> rank stamps in issue bodies. The repo records the **method**: `docs/BACKLOG.md` (process + value
+> definition) + a CLAUDE.md non-negotiable ("respect the prioritised backlog" — pick from the top
+> of the board; re-prioritising is a product-owner decision made in the project). Sizing &
+> pre-task-doc rules unchanged. Docs-only change — no specs, no code.
+
+> ✅ **2026-07-20 — #22: per-edge ACL on FK-derived nav fields (`navRoles`, ADR-20260720-230000).**
+> api.yaml types may declare `navRoles: { edge: [roles] }` (literal semantics; absent = open):
+> emitted as SDL `@auth` + the operations' guard/visible pair on the generated field; validator
+> rule `nav-roles-unknown-field`. Seeded: Restaurant.carts [ADMIN], Restaurant.orders
+> [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN], Restaurant/Order.deliveryJobs [+RIDER] — closing the
+> PUBLIC-schema PII edges before #21 freezes contracts. New ACL test; validate 0 errors.
+
+> ✅ **2026-07-20 — #14: `orderStatusChanged` keys on orderId + per-row ownership (ADR-20260720-220000).**
+> The last pre-acceptance-first convention is gone: the subscription takes `orderId` (what the
+> confirmation route holds) and matches exactly the `Order-<id>` stream. Ownership per resolved
+> row: ADMIN any; CUSTOMER path must BE the order's customer (auth_ref → Customer), strangers and
+> anonymous callers get silence; RESTAURANT/RESTAURANT_ACCOUNT paths stay trusted like `orders`
+> (RECORDED GAP: no caller↔restaurant binding exists yet — scoping is one coherent follow-up across
+> order/orders/orderStatusChanged); guests follow `paymentStatusChanged` (ADR-20260720-213000 §3).
+> Roles literal `[CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]`. New ownership test; 7
+> subscription tests green; validate 0 errors.
+
+> ✅ **2026-07-20 — #12: anonymous checkout survives restarts (ADR-20260720-213000).**
+> `place_order` now takes the dispatch-layer `X-SESSION-ID` as an ENVELOPE parameter (never command
+> payload, ADR-0041) and stamps it onto the `payment_process_manager` row — a guest resumes
+> `paymentStatus(orderId)` after force-closing the app with only the persisted session id
+> (`operationStatus`/cart were already session-keyed). Client rules recorded (web cookie
+> `SameSite=Lax` / app keychain; SAME id until a `customerId` exists — CartBindingProcess binds on
+> phone verify). Guest `order(id)` reads DEFERRED to phone verification (OrderTracking has no
+> session column; revisit with #14). Prod smoke upgraded: sends `X-SESSION-ID` on placeOrder and
+> reads the intent via the guest `paymentStatus` on `/public/graphql` — the Stripe-metadata
+> workaround is gone, so the daily smoke now proves the real anonymous read path. New behaviour
+> test `checkout_stamps_the_anonymous_session_onto_the_run_row`. Validate 0 errors, tests green.
+
+> ✅ **2026-07-20 — #31: LITERAL `roles:` lists (ADR-20260720-191500, product-owner directive).**
+> api.yaml `roles:` now means exactly what it says: **omitted** → open to every role path
+> (`@public`, no guard); **present** → only the listed paths, PUBLIC being just the anonymous
+> `/public/graphql` path. Validator `op-no-authz` retired; story authz + SDL/ACL emitters +
+> runtime `role_allows` aligned. Migration: 11 standalone `[PUBLIC]` ops drop the line
+> (behaviour-preserving); `paymentStatus`/`paymentStatusChanged` become the literal
+> `[PUBLIC, CUSTOMER, ADMIN]` (#13's original intent, now expressible); the pre-existing literal
+> lists (`verifyPhone`/`requestPhoneVerification` [PUBLIC, CUSTOMER], listing claims
+> [PUBLIC, RESTAURANT_ACCOUNT]) finally gain their intended restriction. ⚠️ Review rule: a missing
+> `roles:` line is a positive "open to everyone" claim. New ACL test
+> `literal_roles_lists_admit_only_listed_paths`. `make validate` 0 errors, workspace green.
+
+> ✅ **2026-07-20 — #13: `paymentStatus`/`paymentStatusChanged` are PUBLIC + ownership-scoped.**
+> api.yaml roles `[CUSTOMER]` → `[PUBLIC]` on both (the issue's recommended option, matching
+> `operationStatus`): the generated resolvers' ADMIN/session ownership branches — previously dead
+> behind the CUSTOMER guard — are now reachable; strangers resolve null / an empty stream (no
+> existence oracle). New `crates/server/tests/graphql_payment_status.rs` covers session-owner /
+> stranger / sessionless / ADMIN. The prod smoke keeps its Stripe-metadata stand-in until **#12**
+> stamps `session_id` onto the run row (comment updated to say exactly that). `make validate`
+> 0 errors, workspace tests green.
+
+> ✅ **2026-07-20 (13:00 UTC) — watchdog: `sirene-sync` 6-hour hang fixed** (ADR-20260720-130045).
+> The weekly SIRENE ingestion job ran the full 6h GitHub ceiling and was force-`cancelled` twice
+> (07-18 dispatch + 07-20 03:00 cron); build was fine (~40s), the hang was entirely the ingest step.
+> Root cause: `SireneClient` used a bare `reqwest::Client::new()` with **no request timeout**, so a
+> stalled INSEE read froze the sweep forever. Fix (code/CI only, no specs): per-request
+> `timeout(60s)`+`connect_timeout(15s)` on the client (`crates/sirene_ingest/src/client.rs`) plus a
+> belt-and-suspenders `timeout-minutes: 90` on the workflow. `cargo build`+`cargo test -p
+> sirene_ingest` green (4 tests). Next scheduled sweep (Mon 03:00 UTC) to confirm a clean exit.
+
+> ✅ **2026-07-20 (early) — post-merge wave, all landed directly on `main` (user-directed), each
+> workstream gated in an isolated worktree then re-gated integrated (final: 29x tests green,
+> validate 0 errors, drift clean):** ① **Production JWT bug fixed** — `jsonwebtoken` v10 had no
+> crypto backend selected → every authenticated GraphQL request panicked (502) in prod; fixed with
+> the `rust_crypto` feature. ② **Automated prod E2E smoke test (Stripe TEST mode)** —
+> `tools/smoke/prod-smoke.sh` (`make smoke-prod`, `.github/workflows/prod-smoke.yml`
+> workflow_dispatch + daily cron; needs repo secrets `STRIPE_SECRET_KEY`/`RENDER_API_KEY`, not yet
+> configured): layered ping/health → public GraphQL → idempotent `smoke-test` tenant fixture →
+> full checkout with `pm_card_visa` confirmed server-side → poll until captured. Stripe test
+> webhook endpoint created → `https://api.captain.food/adapters/stripe/webhooks`
+> (`payment_intent.succeeded`/`payment_intent.payment_failed`/`charge.refunded`), signature
+> verified live; `STRIPE_WEBHOOK_SECRET` set in Render. ③ **Server-side pricing, fail-closed**
+> (ADR-20260720-002217): `place_order` reprices every folded cart line from the live catalog
+> (`application::pricing::price_cart`) → PaymentIntent amount + frozen snapshot; optional
+> `PlaceOrder.expectedTotal` equality check; `PriceMismatch`/`PriceUnresolvable`; rule
+> `ServerPriceAuthority`. ④ **`pendingRefunds` read model** (ADR-20260720-003142): new
+> `RefundOpened` event on the Payment stream, `View_PendingRefunds` fold view + migration,
+> `pendingRefunds` query (RESTAURANT+ADMIN) + story steps, rule `PendingRefundVisibleUntilDecided`.
+> ⑤ **Bounded partner re-offer policy** (ADR-20260720-004556): decline → re-offer, cap 3
+> (`offer_attempts` in the run row), exhaustion → `DeliveryDispatchFailed` + run FAILED (status
+> `FAILED` replaces `REOFFER_REQUIRED`); offer timeouts deferred (no time-based sweep host yet).
+> ⑥ **Codegen roadmap item 1, first slice** (ADR-20260720-004419): `lifecycle:` DSL in actors.yaml
+> (event-keyed), 8 `lc-*` validator rules + coverage warning, generated
+> `domain/src/generated/lifecycles.rs` transition tables + mermaid state diagrams in the docs;
+> Order wired end-to-end. Remaining open: fee/split breakdown (ADR-0016/0017), offer timeouts,
+> Rider/DeliveryJob/Restaurant lifecycle adoption, worker `DeliveryJob-%` drain, roadmap items 2–7,
+> GitHub repo secrets for the smoke workflow.
+
+> ✅ **2026-07-20 (early, cont.) — PRODUCTION SMOKE GREEN (all 4 layers):** `make smoke-prod` passes
+> end-to-end against api.captain.food — cart → server-priced `placeOrder` → Stripe TEST confirm →
+> webhook → PlaceOrderProcess → order **PLACED / CAPTURED**. Getting there surfaced and fixed five
+> production defects: ① deployed schema drift — `Cart.session_id` and
+> `OrderTracking.payment_intent_id` never had catch-up migrations, so the projectors skipped every
+> Cart/Order event (migrations added + Order/Cart checkpoints refolded); ② the refold exposed a
+> panicking generated accessor (legacy `OrderPlaced` without `ref`) that froze the projection worker
+> at boot — the projector emitter now emits total folds (`unwrap_or_default`), string scalars derive
+> `Default`, and both worker loops panic-isolate every tick (a poison event can no longer kill
+> projection or sagas); ③ `payment_status` ordering hole — `PaymentCaptured` always precedes the
+> `OrderPlaced` row it should fold into, so the creation arm now seeds CAPTURED (the PlaceOrderProcess
+> invariant, recorded in the projection DSL lineage + DB-gated test); ④ smoke confirm needed a
+> `return_url` (account has redirect payment methods enabled); ⑤ **Sirene sync idempotency** — prod
+> listings predate the UUIDv5(SIRET) derivation, so every pass re-derived colliding ids and retried
+> 605 `SlugAlreadyTaken` rejections forever; the worker now adopts the aggregate id the projection
+> names via `external_identifiers` (register + close paths) and checkpoints deterministic rejections
+> instead of retrying (DB-gated tests: adoption, legacy close, no-churn).
+
+> ✅ **LANDED (2026-07-20): command sourcing + inbound-event sourcing + ACCEPTANCE-FIRST GraphQL**
+> (ADR-20260720-015300/-015400/-015500, branch `claude/clarification-needed-5si77x`). The two
+> pre-agreed constraints held: journals NEVER write `domain_events` (aggregates own the log) and the
+> event log stays the single source of truth. What shipped:
+> ① `specs/database/tables/journals.yaml` (fifth table category): **`command_journal`** (pk
+> `message_id`, envelope columns, business payload + hash, `RECEIVED→SUCCEEDED|REJECTED|FAILED`,
+> records rejections) + **`inbound_events`** (adapted BUSINESS events only, unique
+> `(source, external_id)`); adapter-owned raw mirrors `external_stripe_events` /
+> `external_hubrise_callbacks` join ADR-0045's staging category. ② **ALL ~70 mutations are
+> acceptance-first** (api.yaml v2, MAJOR): optional `metadata: MetadataInput`
+> (messageId/correlationId/causeId; `X-SESSION-ID` header = the anonymous session; `traceparent` →
+> traceId) → journal insert (idempotent replay `duplicate: true`; payload-mismatch = sync Conflict)
+> → spawned handler (events carry `cause_id = messageId`) → uniform `MutationAcceptance`. Outcomes:
+> PUBLIC ownership-scoped **`operationStatus(messageId)`** + **`operationStatusChanged`** (journal +
+> `OperationStatusBus`, snapshot-first; rejections = `Operation.errorCode`, amending
+> ADR-20260719-120000), and checkout's **`paymentStatus(orderId)`** + **`paymentStatusChanged`**
+> served from the payment PM row (now carrying `customer_id`/`session_id`/`client_secret`, NULLed on
+> resolve — the declared PM-privacy exception). ③ Stripe webhooks: verify → mirror verbatim → stage
+> `inbound_events` → ACK + nudge the **`InboundEventsDrainWorker`** (sirene-pattern; also sweeps
+> stale-RECEIVED journal rows); HubRise callbacks mirror + dedupe before enrichment. ④ Migration
+> `20260720030000_command_inbound_journals.sql` + `REQUIRED_SCHEMA_VERSION` bump; observability:
+> `place-order` gains `message_id`/`command.journal`, new `stripe-webhook-ingestion` contract.
+> `make validate` 0 errors, no drift, full workspace green incl. the Pg-gated acceptance-first e2e.
+> **Follow-ups**: `orderStatusChanged` still keys on correlationId (align with messageId later);
+> HubRise enricher command sends not yet journaled (`channel: WORKER`); a generic per-mutation
+> observability contract needs a §8 `surface: graphql` binding kind; clients/frontends must adopt
+> the two-step model (checkout: acceptance → `paymentStatus` poll/subscribe → Stripe element).
+>
+> 🧭 **Agreed direction (2026-07-19, late):** generalize the spec→codegen approach — ①
+> **service catalog with configurable binding** (ADR-20260719-214500, Proposed): `specs/services.yaml`
+> declares the abstract APIs, own spec apart from api.yaml (`/services/payment` `request`/`refund` → Stripe adapter, delivery,
+> identity, catalog_sync, …); binding + exposure DECIDED IN THE SPEC (local for all of V0; config carries only addresses); PM
+> `ports` will `$ref` the catalog. ② **Codegen roadmap** ([docs/codegen-roadmap.md](../codegen-roadmap.md)),
+> ranked: aggregate lifecycle state machines → generated behaviour-test harness from tests.yaml →
+> PM orchestrator scaffolding → the service catalog → PM state-store generation.
+> ① LANDED (2026-07-19): `specs/services.yaml` + validator §2d (`svc-*` rules) are in, PM `ports` now `$ref` the catalog (ADR Accepted); trait/client/route emitters still to come.
+>
+> ✅ **RUNTIME REIMPLEMENTED (2026-07-19 night) — the state-table PM runtime is live on this branch
+> (ADR-20260719-193500), 266 workspace tests green, `make validate` 0 errors, no drift.** Landed:
+> the `Payment` (stream `Payment-{intentId}`) + `Rider` aggregates and DeliveryJob partner/issue
+> folds; the 4 PM state tables (migration + `pm_state` ports + Pg stores); the full missing command
+> surface (Rider ×3, DeliveryJob ops ×7, `bindCartToCustomer`); `placeOrder` delivers
+> `PaymentIntentCreated` to the Payment stream and opens the run row (concurrent checkout →
+> Conflict); all four orchestrators execute their DSL legs (guards throw typed errors —
+> `PaymentEventOrphaned`, `DeliveryJobNotFound`; refund decisions by RESTAURANT/ADMIN via
+> `approve_refund`/`deny_refund` + fail-closed `request_refund`; cart binding really binds; close
+> order via `send MarkOrderDelivered`); the runner surfaces thrown guards on `/saga`; the Stripe ACL
+> is a stateless translator (no more `StripeEvent-%` streams, `CheckoutSnapshotSource` seam
+> retired). Since then, ALL THREE remaining runtime gaps closed tonight: ① the **refund decision
+> API surface** — `approveRefund`/`denyRefund` mutations (api.yaml, roles RESTAURANT+ADMIN, V0;
+> story steps in ManageOrders + admin ArbitrateRefunds), emitted resolvers calling the RefundProcess
+> orchestrator legs over the new `WriteDeps.refund_state` (`PgRefundProcessState`) + the
+> PaymentGateway. ② The **real outbound Stripe adapter** (`stripe::outbound::StripePaymentGateway`):
+> form-encoded create-intent (+ `metadata[orderId]`/`[restaurantId]`/`[cartId]`, which the webhook
+> ACL requires) and refunds; the port grew a typed `PaymentIntentRequest`; constructed when
+> `STRIPE_SECRET_KEY` is set, else the fail-closed stand-in (logged at startup). ③ The
+> **`OrderTracking.payment_status` cross-stream feed**: the projection worker's Order group slices
+> BOTH `Order-%` and `Payment-%` under its single 'Order' checkpoint (`stream_name LIKE ANY`), and
+> Payment-stream facts key the Order row from the payload's `orderId` (a capture without one is
+> log-skipped). Still open (see docs/sagas.md): partner re-offer policy, server-side pricing,
+> `pendingRefunds` read model/query.
+>
+> 📣 **Earlier on this branch (2026-07-19 evening):** ① Guard semantics hardened — **in case of error a
+> guard always `throws` a typed exception, on EVENT legs too** (run aborts + error surfaced — e.g.
+> `PaymentEventOrphaned` for an orphan Stripe capture/failure, `DeliveryJobNotFound` for partner
+> reports on an unknown dispatch run); `skip` is strictly for benign alternatives, and the validator
+> enforces exactly-one-outcome per guard. ② The **CI gate (workflow `ci`, ex `codegen-consistency`) now runs on every
+> branch push** (was main-only), so no branch escapes validate + test + drift. ③ The **per-PM
+> sequence diagrams are now embedded in the product documentation** — `documentation.generated.md`
+> (mermaid fences, renders on GitHub) **and** `documentation.generated.html` (in-page mermaid
+> renderer, offline-degrades to readable source) — generated from the typed steps, zero drift.
+>
+> 🚧 **Feature branch — Process-manager re-architecture: DSL layer DONE, runtime pending.** Process
+> managers are now **state-table orchestrators specified by a TYPED step DSL** (ADR-20260719-172821):
+> `specs/processmanager.yaml` legs are ordered `read`/`guard`/`call`/`deliver`/`send`/`state` steps —
+> every field a `$ref` or enum const, state in declared tables (`process_managers.yaml`), command-leg
+> guards `throws` / event legs `skip`, emits **derived** from steps, sequence diagrams **generated**
+> from steps (`c4.generated.md`). Validator §2b proves the wiring; the ADR-0032 gate applies to PMs
+> unexempted. `make validate` **58 → 0 errors** (behaviour tests added for Rider, DeliveryJob ops,
+> Payment records, admin-approved RefundProcess incl. `RefundNotPending`). `cargo test --workspace`
+> green. The PM **runtime is NOT reimplemented yet** (still the event-sourced runner): see
+> **[docs/process-manager-rearchitecture.md](../process-manager-rearchitecture.md)** for the phase plan.
+> Also on the branch (green): the write-side **`Repository`** refactor (ADR-20260719-031136) + the
+> **checkout snapshot** (ADR-20260719-014434) — the runtime rework will rebuild the saga side of these.

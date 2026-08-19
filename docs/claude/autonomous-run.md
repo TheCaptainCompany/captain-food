@@ -8,12 +8,22 @@ autonomously and ask my help if needed."*)
 ## Ground yourself first (read in order)
 
 1. `CLAUDE.md` — the operating model; every rule there is authoritative over this file.
-2. `docs/STATUS.md` — live state.
+2. `docs/STATUS.md` — live state, readable end to end since the 2026-08-19 split.
+   It opens with the durable sections (deployment, read/write side, authorization, architecture
+   decisions), and the running journal is indexed at the bottom: one line per entry for the current
+   and preceding ISO week, with the full entries in `docs/status/journal-<ISO-week>.md`. Read the
+   page; open a week file only when you need an entry in full. **Writing state**: append the entry
+   to the CURRENT week file and add its one-line row to *Recent changes* — not to the top of
+   `STATUS.md`, which is no longer a journal.
 3. `docs/proposals/DECISIONS.md` — header + §22: what is open, what was just decided.
 4. `docs/adr/ADR-20260808-212741-solida-studio-strategic-frame.md` — strategic frame, incl. §6
    (the maintainer is the AI; mission-first; sequence diagrams are the customer's review surface).
-5. `docs/claude/sessions.md` — operational traps (GitHub MCP output size, disk, DB recipe,
-   executor dispatch rules, the 5-hour stall lesson).
+5. `docs/claude/sessions.md` — the session-rules INDEX, one line per rule. Read the
+   index, then fetch only the `docs/claude/sessions/` topic file the work touches: `gates.md`
+   (which gate proves what, DB recipe, dev-tool install) · `environment.md` (disk, MCP output
+   caps, container restart) · `evidence.md` (green is not proof, "seen red", verification) ·
+   `workflow.md` (claim/PR/commit mechanics, the mob, asking the founder). Reading all four is
+   several times the index and is not the instruction.
 6. `docs/claude/loops.md` — the weekly time budget; this run operates under it (ADR-0014).
 
 Then derive the work plan: the prioritised backlog (GitHub Project "Prioritized backlog") from

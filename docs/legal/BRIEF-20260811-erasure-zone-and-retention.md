@@ -80,7 +80,7 @@ hold personal data":
 ## 2. Why this is not an incident — grade (a) on the facts, (b) on the conclusion
 
 The production event log is **empty by decision**: ADR-20260807-002705 D6 chose start-clean —
-*"the window is open only while the log is empty"* (`docs/STATUS.md:44`). With no data subject in
+*"the window is open only while the log is empty"* (`docs/status/journal-2026-W33.md`, entry 2026-08-10). With no data subject in
 `domain_events`, the elements of an Art. 17 infringement have no subject to attach to: there is no
 request that could have been refused and no personal data being retained beyond its purpose. What
 exists is an **unmet launch precondition**, and it is already filed — as
@@ -211,7 +211,7 @@ repository can and cannot establish:
 - **No local data fixture ships personal data.** There is no `docker-compose`, no `.env`, and the
   single `*seed*` artifact in the tree is `migrations/20260717180000_seed_referential_policies.sql`
   — referential policy rows, no subjects.
-- **No customer has ever transacted in production.** `docs/STATUS.md:784` records that the smoke
+- **No customer has ever transacted in production.** `docs/status/journal-2026-W32.md` (entry 2026-08-09) records that the smoke
   customer has no domain `Customer` at all (`verifyPhone` needs real SMS), so its own order read is
   refused by design.
 
@@ -223,9 +223,11 @@ repository can and cannot establish:
   documents the same secret as *"the Supabase Session-pooler string"*. The SIRENE population
   contains *entrepreneurs individuels* — personal data per *Manni*. Which database that secret
   points at today, and whether it still exists, **cannot be answered from the repository**.
-- **This was not hypothetical.** `docs/STATUS.md:2262,2276` record ~200k SIRENE-derived restaurant
-  listings and `:2230` ~200k `domain_events` tuples per sweep in the then-live database, and
-  `:2014` records 6,649 staging rows actually present. A `domain_events` containing real
+- **This was not hypothetical.** `docs/status/journal-2026-W33.md` (entry 2026-08-11) records ~200k SIRENE-derived restaurant
+  listings, ~200k `domain_events` tuples per sweep in the then-live database, and 6,649 staging rows
+  actually present. *(The original cited `docs/STATUS.md:2262,2276` and `:2230`/`:2014`; those line
+  numbers were already stale before the 2026-08-19 journal move and are not reconstructible — the
+  three figures are quoted from the entry itself, which is where they can be re-read.)* A `domain_events` containing real
   `Restaurant-*` streams **demonstrably existed** before the cutover decision. Start-clean
   (ADR-20260807-002705 D6) governs the **new** cluster; the disposition of the **old** store is an
   operational fact nobody has recorded.
