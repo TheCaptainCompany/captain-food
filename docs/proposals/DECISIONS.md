@@ -2634,6 +2634,43 @@ scalar, no metric. Under the round-1 premise it is a **convention** carrying thr
 
 ---
 
+## 48. Why agents ask already-answered questions — PROP-20260819-110442 (founder question, 2026-08-19)
+
+The founder asked: *"Is it possible that the agents do not have the context of the ADRs and ask me
+questions that are already answered? If yes, how could we resolve that issue?"* **Yes** — banked once
+already as coordinator defect 2 in
+[ADR-20260818-210000](../adr/ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md),
+where ask #3 asked him to re-decide something `ADR-20260808-203443` had settled ten days earlier.
+
+**The diagnosis is not the expected one.** There are ~668,000 words of standing decision record
+against a 3,612-word resident index, so the corpus genuinely cannot be read — but the record that was
+re-litigated is **891 words, single-topic, and named
+`tips-voluntary-contributions-funding-model.md`**. It was one `grep` away. **No index, no frontmatter,
+no topic taxonomy and no reduction in ADR count would have prevented it**; only making the lookup a
+precondition of asking would have. Full evidence and the option space:
+[PROP-20260819-110442](PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md) ·
+[#658 "The decision register cannot say what is still open…"](https://github.com/TheCaptainCompany/captain-food/issues/658).
+
+**This register is the artifact that fails**: 148 row-anchored keys, **126 unique** (22 ambiguous
+`D1`–`D7`), and **62 of 148 rows carry no status token at all** — open-vs-decided is free prose in the
+recommendation cell. The one question this page exists to answer is not mechanically answerable.
+
+| # | Decision | Options & the trade-off | Recommendation / status |
+|---|---|---|---|
+| **REG-1** 🟠 **OPEN — the load-bearing one** | **Does enforcement go on the ASK or on the ARCHIVE?** | **(a) The ask** — a decision-queue question must `$ref` a register row whose status is `open`; a question naming a `decided` row cannot be authored. Targets the only mechanism that actually failed; executes ADR-20260818-210000's own prescription (*"the form's question set has to be mechanically confronted with the register before it can be sent"*), which is prose today. **(b) The archive** — frontmatter + topics on 236 ADRs; would not have prevented any of the three incidents, and status is already 234/236 parseable. **(c) Neither** — foreclosed by ADR-20260818-210000's *"a rule that lives only in prose is a convention"* | ✅ **(a) recommended.** Not decided — needs approval |
+| **REG-2** 🟠 **OPEN** | **What shape does the register source take?** | **(a) `docs/decisions/<KEY>.yaml`, one file per row**, index region of this page GENERATED from them — append-only, never conflicts, the shape `.claude/loop-budget/` already uses *because* the mutable-counter form failed seven ways in one day (ADR-20260812-011057). **(b) One `decisions.yaml`** — every concurrent session conflicts on it. **(c) Stay markdown, add a status glyph + a table-parsing rule** — brittle cell-position parsing, and a row key stays a bare string with no walker, still violating ADR-20260811-014129 | ✅ **(a) recommended.** Not decided |
+| **REG-3** 🟠 **OPEN** | **Is the whole of this page generated, or only its index?** | **(a) Only the index/status table**; the prose reasoning stays authored — mirrors the `database.md` GENERATED-region pattern (`young`: the prose is not derivable and must not be flattened). **(b) The whole file** — would force 82,630 words of dense reasoning into YAML strings. **(c) Validate only, generate nothing** — leaves the `docs/adr/README.md` staleness mode intact here too | ✅ **(a) recommended.** Not decided |
+| **REG-4** 🟠 **OPEN** | **The status vocabulary, and the 22 ambiguous keys** | **(a)** Closed set `open · decided · deferred · superseded · withdrawn`, with `decided` requiring a resolvable `decided_by`; namespace `D1`–`D7` as `PROP-YYYYMMDD-HHMMSS/D1`. **(b)** Keep the eight glyphs — eight symbols, no defined semantics, 42% of rows using none. Migrating the 62 unmarked rows needs one human judgement each; that judgement is currently unmade | ✅ **(a) recommended.** Not decided |
+| **ADR-VOLUME** 🟢 **RULED BY THE ARCHITECT, no founder decision needed unless he disagrees** | **Should the team write fewer, larger ADRs?** 236 in 33 days = **5.73/day**; **91 in the last 14** | The brief asked for a ruling and it is: **no.** Volume did not cause the incidents, and folding an 891-word single-topic record into a 6,000-word answer sheet would have buried it. The batched answer-sheet ADRs are the **right** direction; their only defect is that a decision inside them is not addressable (`ADR-20260818-233000` holds ten behind one id). The error is using the **ADR as the decision index at all** — it names between 1 and 10 decisions and its status is a paragraph | ✅ **Do not write fewer ADRs; stop making them the index.** One new per-ADR discipline only: an ADR that closes a row **names the key** in its header |
+| **REG-SEQ** 🔴 **BLOCKED — and this proposal says so rather than routing around it** | **When?** | The founder deferred the sibling proposal **yesterday** ([#643 "DEFERRED — Graph engineering for the team workflow"](https://github.com/TheCaptainCompany/captain-food/issues/643) / PROP-20260818-013222, verbatim: *"we will not apply it yet we will finish what we have started first"*), and `holub` has twice held that nothing displaces [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556) until one order flows end to end. Against that: the cost is a recurring founder round-trip at ~6 ADRs/day and rising | 🔴 **Does NOT displace [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556).** Bucket `High` (`docs/BACKLOG.md:61`, operating-model foundations), **not** dispatchable — the proposal is `Proposed`, therefore RED. If any slice rides along with other work it is slices 1 and 3, the two cheapest |
+
+**Adjacent, not duplicate**: [#619 "Make the antecedent rule executable…"](https://github.com/TheCaptainCompany/captain-food/issues/619)
+makes coordinator-authored **numbers** traceable to antecedents; REG-1 makes coordinator-authored
+**questions** traceable to rows. Same failure class — *a coordinator assertion consumed by thirteen
+readers as established fact* — disjoint mechanisms.
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions

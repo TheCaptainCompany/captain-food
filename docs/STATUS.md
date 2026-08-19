@@ -2,6 +2,30 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 📄 **2026-08-19 — THE DECISION REGISTER IS THE UNIT OF DECISION: proposal filed, `Proposed`, NOT
+> dispatchable** ([PROP-20260819-110442](proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md),
+> [DECISIONS §48](proposals/DECISIONS.md), tracking
+> [#658 "The decision register cannot say what is still open…"](https://github.com/TheCaptainCompany/captain-food/issues/658)).
+> Answers the founder's *"do the agents ask questions the ADRs already answered?"* — **yes**, but not
+> because the corpus is unreadable: the record re-litigated on 2026-08-18 was one `grep` away and
+> nothing required the grep. Rows `REG-1`…`REG-4` (all OPEN), `ADR-VOLUME` (architect-ruled: **do not**
+> write fewer ADRs — stop making them the decision index) and `REG-SEQ` (🔴 does not displace
+> [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556)).
+> ⚠️ **The founder's 2026-08-18 deferral of
+> [PROP-20260818-013222](proposals/PROP-20260818-013222-graph-engineering-for-the-team-workflow.md)**
+> ([#643 "DEFERRED — Graph engineering for the team workflow"](https://github.com/TheCaptainCompany/captain-food/issues/643),
+> verbatim: *"we will not apply it yet we will finish what we have started first"*) **plausibly covers
+> this proposal too** — same class, one day apart. The architect flagged it rather than routing around
+> it; **it is the founder's to confirm**, and nothing here proceeds meanwhile.
+>
+> 🔧 Same change: **`docs/adr/README.md` was still 13 entries stale** after the `bfe6694` sweep, which
+> indexed the twelve ADRs dated 2026-08-18 and left thirteen dated 2026-08-11 → 2026-08-16 unindexed —
+> including [ADR-20260815-115220](adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)
+> and [ADR-20260816-134352](adr/ADR-20260816-134352-the-checkpoint-goes-to-declared-concerns-and-review-is-priced-by-reversibility.md),
+> **both cited by CLAUDE.md**. Now current: **189 date-time ADR files, 189 index rows**, sorted, no
+> duplicates, every link target verified to exist. That a competent, correctly-scoped staleness sweep
+> still left thirteen rows unindexed is `REG-3`'s own evidence: **prose discipline does not converge.**
+
 > ✅ **2026-08-19 — THE SIX QUEUE ANSWERS LANDED: four register rows close, two open**
 > ([ADR-20260819-103112](adr/ADR-20260819-103112-the-six-queue-answers-a-fiscal-host-in-the-money-path-and-a-refund-bearer-with-no-field.md),
 > thirteen lenses; [DECISIONS §47](proposals/DECISIONS.md)). **Q1** do nothing (the association→company
@@ -5703,8 +5727,9 @@
 > 🚧 **2026-07-24 — Captain ID: a shared auth SERVICE for all products (new repo
 > [TheCaptainCompany/captain-identity](https://github.com/TheCaptainCompany/captain-identity),
 > product-owner directive).** Auth is company-wide, not per-product — the "Captain ID" concept
-> reserved by ADR-20260722-225945 / ADR-20260722-174500 is now a real repo. Decision (its
-> ADR-20260724-172808 + AskUserQuestion): a **deployable auth service** at `id.thecaptaincompany.com`
+> reserved by ADR-20260722-225945 / ADR-20260722-174500 is now a real repo. Decision (its own
+> ADR-20260724-172808, recorded in the `captain-identity` repo and NOT resolvable in this one, +
+> AskUserQuestion): a **deployable auth service** at `id.thecaptaincompany.com`
 > owning identity (phone `authRef`), the Supabase wrapper (ADR-0015), OTP verify/send, httpOnly
 > session-cookie minting (the #112 design generalized), the Supabase→OVHcloud SMS hook, and the
 > JWKS/`captain_role` contract; products keep their own role paths + `@auth` ACL + domain data (the
