@@ -144,7 +144,10 @@ first"*).
   runs to 2026-08-19, and `## 📋 Remaining work` is captioned as a 2026-07-20 pre-migration snapshot.
   Carrying them verbatim was right for the extraction proof; a session now meets them on the first
   screen instead of behind 6 700 lines, so a stale section is read where it used to be unreachable.
-  **Refreshing them is out of this chunk's scope and is the first thing worth doing after it.**
+  **Refreshing them is out of this chunk's scope** and is tracked as
+  [#660 "STATUS.md's durable sections are stale and are now read first…"](https://github.com/TheCaptainCompany/captain-food/issues/660),
+  which needs an owner who can validate the CONTENT — "which ADRs matter enough to name here" is an
+  editorial judgement about the architecture, not a `max()` over filenames, so no validator can close it.
 - **A self-measuring document cannot be kept consistent by discipline.** The entry counts, the byte
   figures and the index-row count in this ADR and in the W34 journal entry all describe a corpus that
   those very texts are appended to, so each was stale the instant it was written — and each was wrong
@@ -154,7 +157,11 @@ first"*).
   *every entry sits in the ISO week its date belongs to* — roughly 120 lines in a new
   `tools/codegen-rs/src/validate/status.rs`, modelled on `validate/proposals.rs`, with the planted-defect
   template already at `tools/codegen-rs/src/tests.rs:6367`. **Not built here** — the founder scoped this
-  chunk to the existing gates. Until it exists, every count on that page is unverified input.
+  chunk to the existing gates. Filed as
+  [#659 "Gate the STATUS.md journal split: a validator that derives every count…"](https://github.com/TheCaptainCompany/captain-food/issues/659)
+  with five non-negotiable assertions, **NOT approved for implementation** and to be taken through the
+  normal issue/proposal path; the founder has placed it **ahead of any decision-register migration**.
+  Until it exists, every count on that page is unverified input.
 - **Three incompatible promotion counts were published.** Commit `e7486c3` says "four" in one line and
   "22" three lines later; the review packet says "22". The measured number of `###`→`##` promotions is
   **18**, all heading strings byte-identical, none carrying a `§N`, so no `§` citation broke. Sixteen of

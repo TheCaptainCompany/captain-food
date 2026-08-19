@@ -1,8 +1,35 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **21 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **22 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 📌 **2026-08-19 — THE TWO FOLLOW-UPS ARE FILED, AND NEITHER IS APPROVED TO BUILD**
+> ([#659](https://github.com/TheCaptainCompany/captain-food/issues/659),
+> [#660](https://github.com/TheCaptainCompany/captain-food/issues/660)). Founder instruction after the
+> independent review of the journal split: the review finding **reorders the follow-up priority — the
+> validator comes BEFORE any decision-register migration**.
+>
+> **[#659 "Gate the STATUS.md journal split: a validator that derives every count…"](https://github.com/TheCaptainCompany/captain-food/issues/659)**
+> carries five **non-negotiable** assertions: declared count == parsed entries == index rows; no entry
+> opener left in `STATUS.md`; every entry in the ISO week its own date derives; **every rendered index
+> headline byte-verbatim against its source** including code spans, backticks, underscores and nested
+> emphasis; and **the validator derives all counts and sizes itself — no hand-maintained corpus count
+> may ever be treated as an invariant**. Filed **NOT approved for implementation**: it is dispatchable
+> only through the normal issue/proposal path, and this record is not that approval.
+>
+> **[#660 "STATUS.md's durable sections are stale and are now read first…"](https://github.com/TheCaptainCompany/captain-food/issues/660)**
+> is deliberately separate and deliberately **not** fixed here. `## 🧭 Architecture decisions` still
+> names `20260802-200416` as the latest while `docs/adr/` runs to `20260819-174300` — 17 days behind.
+> The staleness is pre-existing; what the split changed is that these sections moved from lines
+> 6 741–6 895 of 6 895, where no session ever reached them, to the **first screen**. **A stale fact that
+> was invisible is now load-bearing.** The founder ruled it must be corrected by an owner with authority
+> to validate the content, never opportunistically inside a refactor — "which ADRs matter enough to
+> name here" is an editorial judgement, not a `max()` over filenames, which is also why #659's
+> assertion 5 cannot close it.
+>
+> ⚠️ The scope fence stands: no `DECISIONS.md` change, no YAML decision records, no decision index, no
+> QMD/GraphRAG, no librarian enforcement, pending the D1–D5 ruling on PROP-20260819-110442.
+
 > 🗃️ **2026-08-19 — STATUS.md IS CURRENT STATE: the journal moves to ISO-week files, 628 654 B →
 > ~33 KB** ([ADR-20260819-174300](../adr/ADR-20260819-174300-status-md-is-current-state-the-journal-moves-to-iso-week-files.md)). Founder-decided from a presented option
 > space (D1 index of the current + preceding week, D2 ISO weeks, D3 execute now under a strict timebox
