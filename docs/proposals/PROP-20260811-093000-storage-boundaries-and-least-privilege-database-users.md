@@ -828,7 +828,7 @@ arithmetic is one line and nobody ever does it in advance.
 
 ## 10. D8 — The empty-log window: what is cheap only today
 
-`docs/STATUS.md:833` — *"Start-clean makes the storage split FREE at cutover — the window that does not
+`docs/status/journal-2026-W32.md` (entry 2026-08-07) — *"Start-clean makes the storage split FREE at cutover — the window that does not
 recur."* True, and narrower than it sounds. Split honestly:
 
 | Item | Cheap only today? | Why |

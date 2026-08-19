@@ -8,7 +8,13 @@ autonomously and ask my help if needed."*)
 ## Ground yourself first (read in order)
 
 1. `CLAUDE.md` — the operating model; every rule there is authoritative over this file.
-2. `docs/STATUS.md` — live state.
+2. `docs/STATUS.md` — live state, ~33 KB and readable end to end since the 2026-08-19 split.
+   It opens with the durable sections (deployment, read/write side, authorization, architecture
+   decisions), and the running journal is indexed at the bottom: one line per entry for the current
+   and preceding ISO week, with the full entries in `docs/status/journal-<ISO-week>.md`. Read the
+   page; open a week file only when you need an entry in full. **Writing state**: append the entry
+   to the CURRENT week file and add its one-line row to *Recent changes* — not to the top of
+   `STATUS.md`, which is no longer a journal.
 3. `docs/proposals/DECISIONS.md` — header + §22: what is open, what was just decided.
 4. `docs/adr/ADR-20260808-212741-solida-studio-strategic-frame.md` — strategic frame, incl. §6
    (the maintainer is the AI; mission-first; sequence diagrams are the customer's review surface).
