@@ -1,8 +1,42 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **22 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **23 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> ⚖️ **2026-08-19 — THE REGISTER RULING: PROP-20260819-110442 IS APPROVED, AND THE RULING CARRIES FOUR
+> DEFECTS OF ITS OWN** ([ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md)). Six decisions ruled, recorded under keys that
+> name the QUESTION rather than a position — `DECISION-UNIT` · `REGISTER-STORAGE` · `STATUS-VOCABULARY` ·
+> `REGISTER-MIGRATION` · `ASK-ENFORCEMENT` · `BOOT-INDEX-BOUND`. `REG-1`…`REG-4` close; `REG-SEQ` is
+> **sequenced, not scheduled**. **Nothing is dispatchable**: four slices behind #659, and #659 itself
+> still needs normal approval.
+>
+> **The ruling's own numbering was the first defect.** It arrived as `D1`–`D6` while the proposal already
+> had a `D1`–`D5` meaning different things — so `D3` had three referents — and its own first clause
+> forbids positional keys. `evans` **rejected the coordinator's first fix** (namespacing as
+> `RULING-.../…`): any document-scoped namespace still ratifies outline position as identity. A bare `D1`
+> is already the key cell of four unrelated rows in the register, `D5` of six. Keys now name the question
+> (`CAPTURE-TIMING`, not `CAPTURE-ON-ACCEPTANCE`) so an identity outlives its own answer; `D1`–`D7`
+> survive as *citation anchors* inside `decided_by`, never as keys.
+>
+> **Three more, found at briefing where they are free.** (1) `young`: Stage B tells the agent to query
+> the **capped 8 KB index** — a write-side gate reading a deliberately lossy projection, so a `resident:`
+> curation change would silently alter what an agent is *permitted to do*. Both stages must read the
+> declared records. (2) `beck` **and** `young`, independently: `realized` as an authored token is a status
+> **no gate can contradict** — the failure is already in the wild, this very register asserting
+> `✅ IMPLEMENTED: the retention sweep is live` with nothing re-deriving it. It needs resolvable evidence
+> or, per `beck`, should be dropped. (3) The **8 KB cap is tighter than it reads**: re-derived against the
+> ruling's own field list, sample rows measure **136 B mean, not 120** — 41 open + 20 resident already
+> **breaches**, and **75 of 154 rows carry no status token today**, so the migration decides feasibility.
+> The founder's *"re-derive the census immediately before implementation"* is load-bearing, not procedural.
+>
+> **`holub` dissents from the sequence and it is recorded, not argued past**: the ruling's own
+> `ASK-ENFORCEMENT` forbids claiming the value until Stage B, so the outcome the programme exists for
+> lands at **slice 4** — *"one batch of four wearing slice vocabulary"*. His antecedents: zero orders ever
+> end to end, last green smoke **2026-07-29**, the #556 walk card dated 2026-08-17 with **no branch and no
+> commit**, **36** `docs/` commits since 2026-08-17 against **5** touching `crates/`. Asked for the
+> smallest subset that could ride alongside #556: **none of the four**. No priority was changed by this
+> record.
+
 > 📌 **2026-08-19 — THE TWO FOLLOW-UPS ARE FILED, AND NEITHER IS APPROVED TO BUILD**
 > ([#659](https://github.com/TheCaptainCompany/captain-food/issues/659),
 > [#660](https://github.com/TheCaptainCompany/captain-food/issues/660)). Founder instruction after the

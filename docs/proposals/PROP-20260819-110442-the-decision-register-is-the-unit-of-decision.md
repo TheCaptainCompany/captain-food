@@ -1,6 +1,10 @@
 # PROP-20260819-110442 — The decision register is the unit of decision, and it has no machine identity
 
-- **Status**: Proposed
+- **Status**: **Approved** — the founder ruled 2026-08-19; the ruling and its three defects are
+  recorded in [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md).
+  **Approval is not a dispatch**: the work is sequenced into four slices behind #659, and whether this
+  ruling *schedules* the slices or only approves their *design* is explicitly unsettled (that ADR,
+  Consequences).
 - **Date**: 2026-08-19
 - **Tracking issue**: [#658 "The decision register cannot say what is still open: 62 of 148 rows carry no status token, 22 keys are ambiguous, and nothing confronts a question with the register before it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658)
 - **Realized by**: _(filled at completion)_
@@ -190,7 +194,28 @@ and it is what turns "remember to check" into "the reference does not resolve."
 
 ---
 
-## 3. Decisions surfaced
+## 3. Decisions surfaced — RULED 2026-08-19
+
+> **All five were ruled, and the ruling re-cut them.** The founder's answer did not map 1:1 onto the
+> `D1`–`D5` below: his reply covered `D2`+`D3` in one clause, expanded `D4`'s five-value vocabulary to
+> **nine**, split enforcement into two stages, and added a sixth decision (the boot index) that did not
+> exist here. The ruled design, its namespaced keys — `DECISION-UNIT` · `REGISTER-STORAGE` ·
+> `STATUS-VOCABULARY` · `REGISTER-MIGRATION` · `ASK-ENFORCEMENT` · `BOOT-INDEX-BOUND` — and the three
+> defects the ruling's own text carries are in [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md).
+>
+> **The `D1`–`D5` headings below are kept as written**, because records and dispatch cards already cite
+> them and `evans` ruled that they stay legal as *citation anchors* — just never as keys. Read them as
+> the option space that was put to the founder, not as the current design.
+
+| This proposal asked | The founder ruled | Ruled key |
+|---|---|---|
+| `D1` enforcement: archive or ask | **the ask**, in two stages (A: queue question cites an `open` key; B: `Decision Context` before a decision-sensitive plan) | `ASK-ENFORCEMENT` |
+| `D2` register source shape | **`docs/decisions/**` YAML, one record per key** | `REGISTER-STORAGE` |
+| `D3` whole file generated, or only the index | **`DECISIONS.md` becomes a generated view outright**, never a maintained authority — stronger than this proposal recommended | `REGISTER-STORAGE` |
+| `D4` status vocabulary | **nine values, not five**, splitting `decided` (binding policy) from `realized` (implementation evidence) | `STATUS-VOCABULARY` |
+| `D5` the 22 ambiguous keys | **namespace them in the first migration**, and no source row may silently disappear | `DECISION-UNIT` + `REGISTER-MIGRATION` |
+| _(not asked here)_ | **the boot index is discovery-only and hard-capped at 8 KB**, carrying open/proposed/blocked plus a schema-backed `resident:` subset | `BOOT-INDEX-BOUND` |
+
 
 ### D1 — Where does enforcement go: the archive, or the ask?
 
