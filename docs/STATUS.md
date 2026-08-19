@@ -2,6 +2,32 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> ✅ **2026-08-19 — THE SIX QUEUE ANSWERS LANDED: four register rows close, two open**
+> ([ADR-20260819-103112](adr/ADR-20260819-103112-the-six-queue-answers-a-fiscal-host-in-the-money-path-and-a-refund-bearer-with-no-field.md),
+> thirteen lenses; [DECISIONS §47](proposals/DECISIONS.md)). **Q1** do nothing (the association→company
+> boundary will not be reconstructible — a dated knowing acceptance) · **Q2** Open Collective, *"but not
+> yet configured"* · **Q3** ship the pre-filled contribution · **Q4** restaurant bears by default, admin
+> refunds on platform issue · **Q5** a **free-delivery threshold** replaces the margin mechanism outright
+> · **Q6** the team answers the money-line question itself. Closed: `CONTROLLER-HANDOVER`,
+> `CONTRIB-DEFAULT`, `REFUND-BEARER`, `MARGIN-MECHANISM`. Opened: `DELIV-THRESHOLD`, `OC-LEDGER`,
+> `CONFLICTS-20260819`. ⚠️ **Q3 × Q2 collide** — Open Collective's ToS (FETCHED 2026-08-19) makes the
+> **Host** solely responsible for refunds, so a fiscal host leaves Captain owing an Art. 22 remedy it
+> cannot execute
+> ([BRIEF-20260819](legal/BRIEF-20260819-open-collective-and-the-self-answered-position.md)).
+>
+> **The walk still stands as next** — none of the six beats it; Q3 and Q5 are slice **content** for the
+> walk, not chunks queued behind it (`holub`). **`CAPTAINNET-ZERO` is now the highest-leverage blocked
+> row** (it absorbed `REFUND-BEARER`'s residue and gained Q5's subsidy term) — **founder-owned, RED, and
+> ranking it first does not make it dispatchable.**
+>
+> ⚠️ **Two live defects a concurrent session must know about**: **both refund paths debit the platform
+> silently** — the approval leg calls `payment.refund(intent, amount)` with **no transfer reversal**
+> (`crates/application/src/process_managers/refund.rs:122-141`), so with `captainNet` zero the balance
+> drawn down is other orders' unsettled restaurant and rider money, and the first symptom is a negative
+> platform balance on a Friday night, not an error. And **a zeroed contribution is unrepresentable** —
+> `specs/ordering/events.yaml:388` sets `tips: minItems: 1`, so a customer who zeroes the pre-fill emits
+> **no event at all**, which is exactly the observation that would exonerate the mechanic.
+
 > 🗓️ **2026-08-19 — COST-OF-DELAY ORDER REVERSED: the Stripe answer moves two windows**
 > ([DECISIONS §47](proposals/DECISIONS.md)). The founder clarified that the association holds a
 > **test-mode** Stripe account and the company will open a **separate new** one, so **no real money ever
