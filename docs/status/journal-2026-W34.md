@@ -1,14 +1,14 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **20 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **21 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
-> 🗃️ **2026-08-19 — STATUS.md IS CURRENT STATE: the journal moves to ISO-week files, 631 566 B →
-> 32 952 B** ([ADR-20260819-174300](../adr/ADR-20260819-174300-status-md-is-current-state-the-journal-moves-to-iso-week-files.md)). Founder-decided from a presented option
+> 🗃️ **2026-08-19 — STATUS.md IS CURRENT STATE: the journal moves to ISO-week files, 628 654 B →
+> ~33 KB** ([ADR-20260819-174300](../adr/ADR-20260819-174300-status-md-is-current-state-the-journal-moves-to-iso-week-files.md)). Founder-decided from a presented option
 > space (D1 index of the current + preceding week, D2 ISO weeks, D3 execute now under a strict timebox
-> and no scope expansion). The running journal — **219 entries, 2026-07-20 → 2026-08-19** — now lives in
+> and no scope expansion). The running journal — **220 entries, 2026-07-20 → 2026-08-19** — now lives in
 > this directory, one file per ISO week: `2026-W30` 60 entries/112 459 B · `W31` 27/72 394 ·
-> `W32` 35/84 455 · `W33` 77/271 611 · `W34` 20/72 102. `STATUS.md` opens with the eleven durable
+> `W32` 35/84 455 · `W33` 77/271 611 · `W34` 21/74 689. `STATUS.md` opens with the ten durable
 > sections and keeps a one-line index for the current and preceding week only.
 >
 > **Proved, not asserted** — four machine checks, all green: extraction is byte-identical (**6 536**
@@ -19,7 +19,7 @@ Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, 
 >
 > **Why it was worth a chunk**: the six-file boot order in `docs/claude/autonomous-run.md` was
 > **1 441 655 B** (~272k tokens at 1.4 tokens/word) — larger than the context window, so **no session
-> had ever completed steps 2 and 3**, and every one reported grounding itself. It is now **713 976 B**.
+> had ever completed steps 2 and 3**, and every one reported grounding itself. It is now **722 124 B**.
 > ⚠️ **`DECISIONS.md` is now 88% of what remains** and was deliberately NOT touched: it is the subject
 > of [PROP-20260819-110442](../proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md),
 > `Proposed` with D1–D5 open. No retrieval architecture was built either, per the 2026-08-18 #643

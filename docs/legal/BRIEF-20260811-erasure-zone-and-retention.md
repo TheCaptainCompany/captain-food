@@ -224,8 +224,10 @@ repository can and cannot establish:
   contains *entrepreneurs individuels* — personal data per *Manni*. Which database that secret
   points at today, and whether it still exists, **cannot be answered from the repository**.
 - **This was not hypothetical.** `docs/status/journal-2026-W33.md` (entry 2026-08-11) records ~200k SIRENE-derived restaurant
-  listings and `:2230` ~200k `domain_events` tuples per sweep in the then-live database, and
-  `:2014` records 6,649 staging rows actually present. A `domain_events` containing real
+  listings, ~200k `domain_events` tuples per sweep in the then-live database, and 6,649 staging rows
+  actually present. *(The original cited `docs/STATUS.md:2262,2276` and `:2230`/`:2014`; those line
+  numbers were already stale before the 2026-08-19 journal move and are not reconstructible — the
+  three figures are quoted from the entry itself, which is where they can be re-read.)* A `domain_events` containing real
   `Restaurant-*` streams **demonstrably existed** before the cutover decision. Start-clean
   (ADR-20260807-002705 D6) governs the **new** cluster; the disposition of the **old** store is an
   operational fact nobody has recorded.
