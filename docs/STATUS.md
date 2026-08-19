@@ -2,6 +2,19 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🗓️ **2026-08-19 — COST-OF-DELAY ORDER REVERSED: the Stripe answer moves two windows**
+> ([DECISIONS §47](proposals/DECISIONS.md)). The founder clarified that the association holds a
+> **test-mode** Stripe account and the company will open a **separate new** one, so **no real money ever
+> passes through the association**. Consequence for the register: the first real order is gated behind
+> the company's live account, so **BREAKDOWN-ZERO**'s window is **later** than previously recorded, and
+> **CONTROLLER-HANDOVER**'s — the incorporation date — is **earlier and outside the team's control**.
+> That reverses the stated order of the two. §47 files the rows the ten answers owe; **none is
+> decided**.
+>
+> ⚠️ [PROP-20260819-021500](proposals/PROP-20260819-021500-checkout-stops-as-a-published-fact-and-an-appended-refusal.md)
+> (Q3, checkout stops as a published fact and an appended refusal) is **`Proposed`, not Approved** —
+> nothing may be implemented from it yet.
+
 > 💶 **2026-08-18 (evening) — THE TEN ANSWERS LANDED: per head, monthly invoice, stop checkout**
 > ([ADR-20260818-233000](adr/ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md),
 > thirteen lenses). **Settled**: processes are the point (Q2, costs accepted); the fallback never
