@@ -511,8 +511,16 @@ Re-ordering around fresh decisions would silently slip both.
 3. **Correction of a correction** — the relay told the founder "flat subscription" was its invention
    with no repo antecedent, and `architect` confirmed it. `evans` found it shipping to customers at
    `specs/screens/captain_frontoffice.translations.yaml:47-48`. Both were wrong; the phrase is real.
+4. **Card defect** — the card asserted that named material (counsel questions **G8–G11**) was
+   present **verbatim** in the source it pointed at. It was not: G8–G11 existed in the `legal` lens's
+   return but never reached the aggregation. The executor discovered the absence only on reaching
+   that section, after the surrounding document was already composed, and correctly refused to
+   compose the questions rather than invent them. The material was later supplied from the lens's
+   return and transcribed. **Rule earned, and accepted by the coordinator**: an executor verifies each
+   named verbatim item is present in the source **before it starts writing**, not when it reaches
+   that section — recorded in [docs/claude/sessions.md](../claude/sessions.md).
 
-All three are **card defects**, none roster width, so **none reverts a review class**
+All four are **card defects**, none roster width, so **none reverts a review class**
 (ADR-20260816-134352 as amended by ADR-20260817-105845).
 
 ## Alternatives considered
@@ -566,9 +574,11 @@ All three are **card defects**, none roster width, so **none reverts a review cl
   opened, the ten conflicts filed.
 - Legal transcription:
   [BRIEF-20260819-open-collective-and-the-self-answered-position](../legal/BRIEF-20260819-open-collective-and-the-self-answered-position.md),
-  same change. ⚠️ Its counsel-question slot **G8–G11 is empty** — the dispatch named those questions
-  but the aggregation did not carry them, and they are **not** composed by the executor (the same
-  defect class banked in ADR-20260818-233000 §10). They are owed from the `legal` lens directly.
+  same change. Its counsel-question slot **G8–G11 stood empty in revision 1** — the dispatch named
+  those questions as carried verbatim in the aggregation, the aggregation did not carry them, and the
+  executor declined to compose them (the defect class banked in ADR-20260818-233000 §10). The gap was
+  **filled from the `legal` lens's own return**, where the four questions did exist; §5 now carries
+  them verbatim, and the temporary prohibition on citing any G-number above G7 is retired with it.
 - Conflict 2 (`ADR-20260808-203443:64`) must be amended **in the same change as** whichever card
   ships the pre-fill — not before, not after.
 - The nine candidate cards in §13 go to the architect to rank against the walk; none is dispatched by

@@ -766,6 +766,17 @@ corrected in revision 2; cost: one full re-authoring of a legal brief). A card c
 never a summary of one, and the executor treats "carry X's return" over an unretrievable source as a
 **card defect** to flag rather than a writing task to complete.
 
+**The executor's half is a PRE-FLIGHT, not a discovery at the section that needs it.** Before writing
+the first line of a document that transcribes, resolve every item the card names as verbatim against
+its stated source and confirm each is actually present — one grep per named item, on structural
+anchors (`G8`, a heading, a table row), not a skim. On 2026-08-19 a card asserted counsel questions
+**G8–G11** were carried verbatim in a round-4 aggregation; they existed only in the lens's own return
+and never reached the aggregation, and the executor found the absence on **reaching §5**, with the
+other five sections already composed. Refusing to compose them was correct — but the same refusal an
+hour earlier costs one grep instead of a composed document, a follow-up dispatch and a second review.
+An item the card names and the source does not contain is a **card defect reported before work
+starts**; the document is then written once, around a known gap or not at all.
+
 ## 11. Installing a dev tool: crates.io works, GitHub release downloads do not
 
 The session proxy scopes GitHub — the REST API **and** release-asset downloads — to the
@@ -1143,6 +1154,15 @@ that saves its report for the final message loses the whole run when the contain
 **Corollary**: after any unexplained gap, verify agent liveness before assuming a dispatch is still
 running. A silent agent and a dead agent are identical from inside the session, and the difference
 is one `ListAgents` call.
+
+### A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`
+
+Roster returns and their aggregations are consistently **300+ lines**; `cat`-ing one truncates, and a
+truncated read of a lens's return is exactly the failure the verbatim rules above exist to prevent —
+you cannot tell a missing G8 from a clipped one. Read them with `sed -n '1,120p'` / `'120,240p'`, in
+~120-line slices, and `wc -l` first so you know how many slices there are. Same for any mob artifact
+in the scratchpad. Cost that earned it: a return read as "complete" that had been cut mid-section,
+and the re-read that followed.
 
 ### The disk cost of a parallel mob review, and what to reclaim first
 
@@ -1588,7 +1608,7 @@ message states **what has not been proven** — then push. `807e472` preserved a
 rule that had never been seen red; without that sentence the next executor would have reviewed
 unverified work as finished, which is the same defect the "seen red" rule above exists to prevent.
 
-### Do not push a feature branch while its executor is still working
+### The stop hook cannot see in-flight work — its prompt is not a signal that anything is finished
 
 A stop-hook prompt reported an unpushed commit; the coordinator pushed it, the executor then
 amended that same commit (adding `.claude/loop-budget.json`), and local and remote diverged —
@@ -1596,6 +1616,14 @@ identical content, different SHAs — needing a `--force-with-lease` to realign.
 unpushed-commit prompt is not a signal that the work is finished.** The coordinator pushes only
 after the executor reports the phase complete and the tree is clean; the executor says explicitly
 whether it intends to amend before handing back.
+
+**The general form: the hook cannot distinguish an agent's in-flight files from abandoned uncommitted
+work** — both look like a dirty tree. A coordinator that obeys the prompt reflexively while a
+background write is running commits a half-written artifact under a message claiming it is done, and
+the next reader has no way to tell. So while any agent is writing, the dirty tree is EXPECTED state:
+answer the prompt with what is in flight and who is writing it, and commit only once that agent has
+reported back. Where a session genuinely is dying mid-change, the `wip:` rule above is the correct
+answer — an explicit commit that says what was NOT verified — never a silent one.
 
 ### A denied tool call is a DECISION — never re-issue it through a different tool
 

@@ -14,19 +14,17 @@ proceed"* ·
 > choosing a fiscal host, or shipping the pre-filled contribution.**
 
 > **Attribution notice.** Everything in §1, §2 and §4 below is **transcribed** from the lens's return
-> in the round-4 aggregation (`MOB-RETURNS-4-queue`), not composed by the executor. Blockquotes and
-> the enumerated lists in those sections are the lens's own words. Prose outside them is the
-> executor's framing and is not attributed to the lens.
+> in the round-4 aggregation (`MOB-RETURNS-4-queue`), and everything in §5 is **transcribed** from
+> the same lens's RELAY-4 return — neither is composed by the executor. Blockquotes and the
+> enumerated lists in those sections are the lens's own words. Prose outside them is the executor's
+> framing and is not attributed to the lens.
 >
-> ⚠️ **§5 is deliberately empty.** The dispatch that commissioned this brief named counsel questions
-> **G8–G11** as carried verbatim in the aggregation. **They are not in it.** They are therefore
-> **not written here**, because the executor composing counsel questions from a summary is exactly
-> the correctness defect banked in
+> **§5 was empty in revision 1**, and is now filled. The dispatch that commissioned this brief named
+> counsel questions **G8–G11** as carried verbatim in the round-4 aggregation; they were not in it, so
+> they were not written — composing counsel questions from a summary is the correctness defect banked in
 > [ADR-20260818-233000](../adr/ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md)
-> §10 and corrected in revision 2 of
-> [BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md).
-> In a document whose purpose is to be handed to an avocat, an invented question is worse than a
-> missing one.
+> §10, and in a document meant for an avocat an invented question is worse than a missing one. The
+> questions were subsequently retrieved from the `legal` lens's own return and transcribed unaltered.
 
 Companion briefs: the G1–G7 packet and the CRD Art. 22 analysis live in
 [BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md);
@@ -241,20 +239,32 @@ enforce. Filed as a candidate card, class REVERSIBLE INTERNAL
 
 ---
 
-## 5. Counsel questions G8–G11 — NOT TRANSCRIBABLE, and deliberately not composed
+## 5. Counsel questions G8–G11 — the `legal` lens's own words
 
-**Empty.** See the attribution notice at the head of this file.
+The four questions were in the `legal` lens's RELAY-4 return, section *"Counsel packet — additions
+from this round"*; they never reached the round-4 aggregation the dispatch pointed at, which is why
+this section stood empty in revision 1. They are reproduced below **verbatim from the lens's return**,
+parentheticals and emphasis included — the parentheticals carry why each is cheap to answer, which is
+what makes the packet usable by an avocat on the clock.
 
-The dispatch commissioning this brief listed counsel questions **G8–G11** as carried verbatim in the
-round-4 aggregation. The aggregation contains **no G8, G9, G10 or G11** — the only mentions of
-counsel questions in it are generic (*"close a counsel question"*, *"the counsel questions it does NOT
-close"*), inside the §4 labelling spec. Nothing was transcribable, and nothing was invented.
+The lens's framing line, which precedes them:
 
-**What is owed**, so the gap is actionable rather than merely noted: the four questions must come from
-the `legal` lens directly, in its own words, numbered to continue the **G1–G7** packet in
-[BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md)
-§6. Until they exist, **no G-number above G7 may be cited anywhere in this repo** — a cited number
-with no question behind it is the failure mode this section is preventing.
+> Numbered continuing from G1–G7 in `/home/user/captain-food/docs/legal/BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md`. Standing **Q10 (funds posture)** remains ahead of all of them.
+
+(That path is [BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md)
+§6 in repo-relative form; the line is quoted as the lens wrote it.)
+
+- **G8** — If contributions are received by an **Open Collective fiscal host** (a foreign legal person that *"receives and holds funds… on behalf of"* the Collective, ToS §1(a)/§4(b), FETCHED 2026-08-19): who is the **payee** toward the French consumer, who owes any **reimbursement** under the Art. 22 remedy given ToS §4(e) *"all contributions are final, and there are no refunds"*, and does the arrangement change Captain's own **PSD2/ACPR posture** in either direction?
+
+- **G9** — Can funds raised on a Collective page **before incorporation**, under a stated non-profit-flavoured mission, be lawfully transferred to a later **commercial** entity (SASU/SCIC), and does the host's own agreement permit it? *(Two documents to read: the host agreement and the host's eligibility criteria — attach both.)*
+
+- **G10** — For a **pre-filled** contribution: what **retention period** applies to the consent artifact (presented default, affirmative act, copy version), and on which **Art. 17(3)** limb does it survive a customer erasure request? *(Answer sizes a field in a stored event shape that is cheap today and a migration later.)*
+
+- **G11** — Does the **public contributor ledger** (names/logos published by default, ToS §4(f)) require consent or another basis, and is it compatible with an erasure request, given the operator is a **US** company?
+
+The lens's closing line for the section:
+
+> **Standing, unretired**: the funds posture is still the first euro of any legal budget. Q2 did not narrow it — it added a second possible holder of other people's money.
 
 ---
 
