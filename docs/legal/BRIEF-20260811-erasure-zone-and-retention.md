@@ -225,7 +225,8 @@ repository can and cannot establish:
   points at today, and whether it still exists, **cannot be answered from the repository**.
 - **This was not hypothetical.** `docs/STATUS.md:2262,2276` record ~200k SIRENE-derived restaurant
   listings and `:2230` ~200k `domain_events` tuples per sweep in the then-live database, and
-  `:2014` records 6,649 staging rows actually present. A `domain_events` containing real
+  `ADR-20260728-224500:11`, `ADR-20260729-010500:19` and `ADR-20260729-020000:21` record 6,649
+  staging rows actually present. A `domain_events` containing real
   `Restaurant-*` streams **demonstrably existed** before the cutover decision. Start-clean
   (ADR-20260807-002705 D6) governs the **new** cluster; the disposition of the **old** store is an
   operational fact nobody has recorded.
