@@ -171,7 +171,11 @@ Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, 
 > `ASK-ENFORCEMENT` forbids claiming the value until Stage B, so the outcome the programme exists for
 > lands at **slice 4** — *"one batch of four wearing slice vocabulary"*. His antecedents: zero orders ever
 > end to end, last green smoke **2026-07-29**, the #556 walk card dated 2026-08-17 with **no branch and no
-> commit**, **36** `docs/` commits since 2026-08-17 against **5** touching `crates/`. Asked for the
+> commit** ⚠️ (**FALSE** — branch and draft PR #621 existed; that claim was true only of a stale local
+> clone and was relayed without checking GitHub), and a `docs/`-to-`crates/` commit ratio strongly
+> favouring `docs/` ⚠️ (`UNVERIFIED` — recorded as 36:5, but three derivations at `df082e6` gave
+> 36:5, 45:5 and 33:4 because no scope was stated; **not used as a decision premise**, the direction
+> is what carries the argument). Asked for the
 > smallest subset that could ride alongside #556: **none of the four**. No priority was changed by this
 > record.
 

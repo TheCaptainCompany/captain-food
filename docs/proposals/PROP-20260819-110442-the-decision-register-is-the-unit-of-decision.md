@@ -1,10 +1,14 @@
 # PROP-20260819-110442 — The decision register is the unit of decision, and it has no machine identity
 
-- **Status**: **Approved** — the founder ruled 2026-08-19; the ruling and its three defects are
-  recorded in [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md).
-  **Approval is not a dispatch**: the work is sequenced into four slices behind #659, and whether this
-  ruling *schedules* the slices or only approves their *design* is explicitly unsettled (that ADR,
-  Consequences).
+- **Status**: **Approved — DESIGN ONLY, and the design phase is CLOSED.** The founder ruled
+  2026-08-19; the ruling and the **four defects its own text carries** are recorded in
+  [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md) as amended,
+  and reversal semantics are closed by [ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md).
+  **Approval is not a dispatch, and it is not a schedule.** No `REG` slice may be claimed, started or
+  implemented before the [#556](https://github.com/TheCaptainCompany/captain-food/issues/556)
+  milestone completes **and** the founder explicitly schedules it; the #643 deferral stands.
+  [#659](https://github.com/TheCaptainCompany/captain-food/issues/659) **neither authorises nor
+  blocks** this work.
 - **Date**: 2026-08-19
 - **Tracking issue**: [#658 "The decision register cannot say what is still open: 62 of 148 rows carry no status token, 22 keys are ambiguous, and nothing confronts a question with the register before it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658)
 - **Realized by**: _(filled at completion)_
@@ -630,11 +634,21 @@ green; `make validate` 0 errors; `check-drift` clean.
 
 ---
 
-## 14. Decision request — TWO questions, and nothing else
+## 14. Decision request — BOTH QUESTIONS ARE NOW RULED
 
-Everything else in this proposal is decided. These two are open, and both are the founder's.
+> ✅ **CLOSED 2026-08-19. Nothing in this section is open.** It is retained as the record of what was
+> put to the founder and what he decided — the option space, the lenses' returns and the reasoning are
+> not derivable from the rulings alone. **Read the verdicts, not the recommendations**: the
+> recommendations below were written before the ruling and are preserved as authored.
+>
+> - **OQ-1 — reversal semantics** → **RULED: record-as-aggregate**, the option the lenses recommended.
+>   Seven clauses, plus the requirement that one reversal, one split, one merge and one
+>   concurrent-append-after-supersession rejection exist as **executable fixtures before any schema is
+>   hard-coded** — and a fifth fixture for the two-clock model. [ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md).
+> - **OQ-2 — execution priority** → **RULED: NOT SCHEDULED.** The #643 deferral stands; no `REG` slice
+>   is claimable before the #556 milestone completes and the founder explicitly schedules it.
 
-### OQ-1 — Reversal semantics. **Gates all schema implementation.**
+### OQ-1 — Reversal semantics. **RULED — record-as-aggregate.** *(Gated all schema implementation.)*
 
 *Does a changed answer create a successor record, or does one record retain identity while its
 answer/version changes?*
@@ -702,7 +716,7 @@ in the completion transaction rather than in a lock.
 > If A is chosen, slice 1's schema must carry `answers[]` with per-answer `decided_by`, and the
 > split/merge shape (c) must be in the schema from the start rather than retrofitted in slice 2.
 
-### OQ-2 — Execution priority after #556
+### OQ-2 — Execution priority after #556. **RULED — NOT SCHEDULED.**
 
 *When, relative to the local acceptance harness reaching its stated milestone, is the register work
 scheduled?*
@@ -717,5 +731,7 @@ work together; and the fact that **no `REG-*` slice is claimable until this is a
 
 ---
 
-**Nothing else is asked.** Recording a decision on OQ-1 unblocks schema design only — not
-implementation, which still waits on OQ-2.
+**Nothing is asked — both are ruled.** OQ-1 unblocked schema *design* only; OQ-2 ruled that
+implementation is **not scheduled**, so nothing is claimable. The four measurements owed at the #556
+milestone (boot context · decision status distribution · repeated-question incidents **with source
+evidence** · bounded-index feasibility) must be re-derived before scheduling may even be requested.

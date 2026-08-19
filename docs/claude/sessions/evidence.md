@@ -250,6 +250,43 @@ lenses, and close the loop in the same session. Reference run: BRIEF-20260808-cu
 issues only if the customer wants an async back-and-forth channel too (issue comments do NOT wake
 a session — that channel needs a Routine or an explicit "check the threads").
 
+## A review that reports a different number has not done its job — it must REJECT a number with no antecedent
+
+**Founder instruction, 2026-08-19**, after a review pass that was itself correct but incomplete. Three
+requirements, and they bind the reviewer as much as the author.
+
+**1. Parse the structure; never assume the delimiters it is supposed to have.**
+Two checkers written in one session were both wrong in the same way, and both passed the thing they
+were meant to catch:
+
+- a markdown-table cell count of `len(line.split('|')) - 2`, which **assumes a trailing `|`** — so a
+  row whose closing delimiter is missing counts as well-formed, and the surplus cell GFM silently
+  drops never gets flagged. The row that broke had text sitting *after* the last pipe; an entire
+  `DESIGN APPROVAL ONLY` correction did not render, and the check said 2 cells, fine.
+- an anchor slugger doing `re.sub(r'\s+', '-', …)`, which **collapses whitespace runs**. GitHub does
+  not: it strips the em-dash in `A — B` and replaces *each* surviving space, emitting `a--b`. The
+  checker reported 45 links, 0 broken; **11 were broken.**
+
+A checker that presumes the well-formedness it is testing for is not a checker. Assert the shape
+first — starts with `|`, ends with `|`, cell count matches the header — then compare.
+
+**2. Every derived count emits its command, ref, inclusion rules and raw result.**
+Not "36 commits" — `git log --since=2026-08-17 --oneline df082e6 -- docs/ | wc -l` → `33`, committer
+date, merge commits included, at that ref. Same number, three parties, three answers is the normal
+outcome when scope is unstated: a `docs/` commit count came back 36, 45 and 33 from three independent
+derivations of the *same* claim, and the disagreement was entirely `--since` semantics and ref choice.
+
+**3. A number with no antecedent is REJECTED, not re-derived and reported differently.**
+This is the sharp one. Reporting "the record says 36, I get 45" leaves the reader to arbitrate two
+unsourced figures and implies the reviewer's is authoritative. It is not. The correct finding is
+*"this number names no command, no ref and no scope, so it cannot be checked — supply one or mark it
+`UNVERIFIED`."* Under ADR-20260817-105845 the defect is the missing antecedent, and a second bare
+number does not cure it.
+
+**The failure mode all three share** is that the check *ran* and produced output, so it read as
+diligence. Cf. §14 ("a green review job does not mean a review happened") and §1b in
+[gates.md](gates.md) — same family, and this is its reviewer-facing member.
+
 ## 15. Read what a gate EXCLUDES before treating it as evidence
 
 Third in the family with §7 and §14, and the most expensive so far. For weeks `main` was green and

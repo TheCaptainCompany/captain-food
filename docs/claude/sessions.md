@@ -25,7 +25,7 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 Which gate to run, what it compiles, what it silently omits.
 
 - [1. Pick the cheapest gate that proves the change](sessions/gates.md#1-pick-the-cheapest-gate-that-proves-the-change)
-- [1b. Run the gate DIRECTLY — never capture its output and read a later `echo` as its result](sessions/gates.md#1b-run-the-gate-directly-never-capture-its-output-and-read-a-later-echo-as-its-result)
+- [1b. Run the gate DIRECTLY — never capture its output and read a later `echo` as its result](sessions/gates.md#1b-run-the-gate-directly--never-capture-its-output-and-read-a-later-echo-as-its-result)
 - [8. Generated code can enforce something the spec does not say](sessions/gates.md#8-generated-code-can-enforce-something-the-spec-does-not-say)
 - [8b. A guard over Rust STRUCTURE must parse the AST, not the text](sessions/gates.md#8b-a-guard-over-rust-structure-must-parse-the-ast-not-the-text)
 - [11. Installing a dev tool: crates.io works, GitHub release downloads do not](sessions/gates.md#11-installing-a-dev-tool-cratesio-works-github-release-downloads-do-not)
@@ -39,10 +39,10 @@ Which gate to run, what it compiles, what it silently omits.
 Hard limits of the execution environment.
 
 - [2. Disk is a fixed per-session allowance, and `df` lies about it](sessions/environment.md#2-disk-is-a-fixed-per-session-allowance-and-df-lies-about-it)
-- [3. Keep MCP output small — it is the biggest context cost available](sessions/environment.md#3-keep-mcp-output-small-it-is-the-biggest-context-cost-available)
+- [3. Keep MCP output small — it is the biggest context cost available](sessions/environment.md#3-keep-mcp-output-small--it-is-the-biggest-context-cost-available)
 - [4. This container cannot read PDFs](sessions/environment.md#4-this-container-cannot-read-pdfs)
-- [17. The container can restart mid-dispatch — put the handoff in the PR, not in the session](sessions/environment.md#17-the-container-can-restart-mid-dispatch-put-the-handoff-in-the-pr-not-in-the-session)
-- [A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`](sessions/environment.md#a-mob-aggregation-exceeds-the-bash-output-cap-read-it-in-slices-never-cat)
+- [17. The container can restart mid-dispatch — put the handoff in the PR, not in the session](sessions/environment.md#17-the-container-can-restart-mid-dispatch--put-the-handoff-in-the-pr-not-in-the-session)
+- [A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`](sessions/environment.md#a-mob-aggregation-exceeds-the-bash-output-cap--read-it-in-slices-never-cat)
 - [The disk cost of a parallel mob review, and what to reclaim first](sessions/environment.md#the-disk-cost-of-a-parallel-mob-review-and-what-to-reclaim-first)
 
 ### [Evidence — what counts as proof, and what only looks like it](sessions/evidence.md) · 35 KB
@@ -55,6 +55,7 @@ Green is not proof; a claim you cannot re-run is not evidence.
 - ["Verbatim" is a mechanical check, not a careful read](sessions/evidence.md#verbatim-is-a-mechanical-check-not-a-careful-read)
 - [A card that says "carry lens X's return" must point AT the lens's own return](sessions/evidence.md#a-card-that-says-carry-lens-xs-return-must-point-at-the-lenss-own-return)
 - [14. A green review job does not mean a review happened](sessions/evidence.md#14-a-green-review-job-does-not-mean-a-review-happened)
+- [A review that reports a different number has not done its job — it must REJECT a number with no antecedent](sessions/evidence.md#a-review-that-reports-a-different-number-has-not-done-its-job--it-must-reject-a-number-with-no-antecedent)
 - [15. Read what a gate EXCLUDES before treating it as evidence](sessions/evidence.md#15-read-what-a-gate-excludes-before-treating-it-as-evidence)
 - [Grepping for a type name does not find where that type is INJECTED](sessions/evidence.md#grepping-for-a-type-name-does-not-find-where-that-type-is-injected)
 - [A handoff's "remaining work" list is a claim, not an inventory](sessions/evidence.md#a-handoffs-remaining-work-list-is-a-claim-not-an-inventory)
@@ -66,17 +67,17 @@ Green is not proof; a claim you cannot re-run is not evidence.
 Claim/PR/commit mechanics and surviving a session that ends mid-flight.
 
 - [10. Commit the durable artifact, not the conversation](sessions/workflow.md#10-commit-the-durable-artifact-not-the-conversation)
-- [16. A lens invited late still pays — and the ones you skip are the ones that disagree](sessions/workflow.md#16-a-lens-invited-late-still-pays-and-the-ones-you-skip-are-the-ones-that-disagree)
+- [16. A lens invited late still pays — and the ones you skip are the ones that disagree](sessions/workflow.md#16-a-lens-invited-late-still-pays--and-the-ones-you-skip-are-the-ones-that-disagree)
 - [A red CI job that never ran your code: `429` from `codeload.github.com`, and why re-pushing makes it worse](sessions/workflow.md#a-red-ci-job-that-never-ran-your-code-429-from-codeloadgithubcom-and-why-re-pushing-makes-it-worse)
-- [An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff](sessions/workflow.md#an-executor-session-cannot-mark-a-pr-ready-for-review-or-arm-auto-merge-plan-the-handoff)
-- [The worktree is SHARED — "already on `main`" has a shelf life of one tool call](sessions/workflow.md#the-worktree-is-shared-already-on-main-has-a-shelf-life-of-one-tool-call)
+- [An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff](sessions/workflow.md#an-executor-session-cannot-mark-a-pr-ready-for-review-or-arm-auto-merge--plan-the-handoff)
+- [The worktree is SHARED — "already on `main`" has a shelf life of one tool call](sessions/workflow.md#the-worktree-is-shared--already-on-main-has-a-shelf-life-of-one-tool-call)
 - [Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified](sessions/workflow.md#rescue-an-agent-killed-mid-edit-with-a-wip-commit-that-says-what-was-not-verified)
-- [The stop hook cannot see in-flight work — its prompt is not a signal that anything is finished](sessions/workflow.md#the-stop-hook-cannot-see-in-flight-work-its-prompt-is-not-a-signal-that-anything-is-finished)
-- [A denied tool call is a DECISION — never re-issue it through a different tool](sessions/workflow.md#a-denied-tool-call-is-a-decision-never-re-issue-it-through-a-different-tool)
-- [The claim-time draft PR needs an empty commit first — the REST API refuses a zero-commit branch](sessions/workflow.md#the-claim-time-draft-pr-needs-an-empty-commit-first-the-rest-api-refuses-a-zero-commit-branch)
+- [The stop hook cannot see in-flight work — its prompt is not a signal that anything is finished](sessions/workflow.md#the-stop-hook-cannot-see-in-flight-work--its-prompt-is-not-a-signal-that-anything-is-finished)
+- [A denied tool call is a DECISION — never re-issue it through a different tool](sessions/workflow.md#a-denied-tool-call-is-a-decision--never-re-issue-it-through-a-different-tool)
+- [The claim-time draft PR needs an empty commit first — the REST API refuses a zero-commit branch](sessions/workflow.md#the-claim-time-draft-pr-needs-an-empty-commit-first--the-rest-api-refuses-a-zero-commit-branch)
 - [A commit touching `CLAUDE.md` or `.claude/agents/*.md` needs in-conversation user approval](sessions/workflow.md#a-commit-touching-claudemd-or-claudeagentsmd-needs-in-conversation-user-approval)
 - [One more shell trap in commit messages](sessions/workflow.md#one-more-shell-trap-in-commit-messages)
-- [Asking the founder a decision — use the form template](sessions/workflow.md#asking-the-founder-a-decision-use-the-form-template)
+- [Asking the founder a decision — use the form template](sessions/workflow.md#asking-the-founder-a-decision--use-the-form-template)
 
 ## 9. This file is your obligation, not just your reference
 

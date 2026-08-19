@@ -837,11 +837,6 @@ future row on "it needs a spec edit". That is no longer a reason. (Row ids are `
 adjudication that produced them numbered the same three E1/E3/E2 respectively — the ids here are
 the stable ones.)
 
-**RULED 2026-08-19.** All four `REG-*` rows are closed and `REG-SEQ` is sequenced; the ruling, its
-namespaced keys and the **three defects its own text carries** are in [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md).
-⚠️ **This page is now scheduled to become a GENERATED VIEW** (`REGISTER-STORAGE`) — it is still the
-authority until slice 1 lands, and after that it must never be hand-edited again.
-
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|
 | **451-A** | **The cart screen's summary bindings** — `specs/screens/restaurant_frontoffice.yaml:367-371` binds `cart.subtotal`, `cart.deliveryFee`, `cart.serviceFee`, `cart.discount`, `cart.total`, `cart.minimumOrderMet`; the `Cart` API type has `totalAmount` + `breakdown.{articles,delivery,serviceFee,total}` (`specs/ordering/api.yaml:25-26`) and **not one of those six names exists**. So #451 computes the price correctly and the customer cannot see it. Tracked by [#468 "The cart screen cannot render a price"](https://github.com/TheCaptainCompany/captain-food/issues/468) | **(a) Merge #451 as scoped, file the frontend slice.** The seam, the money-free fold, the migration and the `cart-price` contract are real, tested, load-bearing artifacts the frontend slice depends on; the cost is that the delivered value stays invisible until the next slice. **(b) Grow #451 to include rendering.** Not autonomously dispatchable — the binding fix is a `specs/**` edit needing plan mode + approval — and it doubles a diff that already carries a schema migration. Neither option is cheap-and-dirty; (b) is *slower*, not more final-vision, because the final shape of the binding fix is a spec change either way | ✅ **CLOSED 2026-08-10 by the [#460](https://github.com/TheCaptainCompany/captain-food/pull/460) merge.** Standing position **(a)** held, as recommended by the architect and adopted by the coordinator, **with a hard condition**: PR #460's body must state plainly that the price is computed correctly and **cannot yet be displayed**. The reversibility window has now closed: **(b) is off the table** and [#468](https://github.com/TheCaptainCompany/captain-food/issues/468) is simply the next slice |
@@ -2659,6 +2654,17 @@ precondition of asking would have. Full evidence and the option space:
 **This register is the artifact that fails**: 148 row-anchored keys, **126 unique** (22 ambiguous
 `D1`–`D7`), and **62 of 148 rows carry no status token at all** — open-vs-decided is free prose in the
 recommendation cell. The one question this page exists to answer is not mechanically answerable.
+
+> **RULED 2026-08-19, AND THE DESIGN PHASE IS CLOSED.** All four `REG-*` rows below are closed;
+> `REG-SEQ` is **closed and superseded by `REG-WHEN`**, which is **NOT SCHEDULED**. The ruling, its
+> namespaced keys and the **four defects its own text carries** are in
+> [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md) as amended;
+> reversal semantics are closed by [ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md).
+>
+> ⚠️ **DESIGN APPROVAL ONLY — no `REG` work is scheduled.** This page is *designed* to become a
+> generated view under `REGISTER-STORAGE`, but **that is not scheduled and no slice is claimable**:
+> the #643 deferral stands, and nothing may start before the #556 milestone completes and the founder
+> explicitly schedules it. Until then this page remains the hand-maintained authority.
 
 | # | Decision | Options & the trade-off | Recommendation / status |
 |---|---|---|---|

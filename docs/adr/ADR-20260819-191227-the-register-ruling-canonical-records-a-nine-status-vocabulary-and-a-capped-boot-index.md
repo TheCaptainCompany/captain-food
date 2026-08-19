@@ -173,9 +173,17 @@ chose against the proposal's own recommendation:
   of four wearing slice vocabulary"*, and slice 1's generated view is a view over records that do not
   exist yet. Antecedents he named: zero orders have ever flowed end to end; the last green nightly smoke
   was **2026-07-29** (21 days); the [#556](https://github.com/TheCaptainCompany/captain-food/issues/556)
-  walk card landed **2026-08-17** and has **no branch and no commit** two days later; **36** commits
-  landed under `docs/` since 2026-08-17 against **5** touching `crates/` since 2026-08-16; **107 ADRs**
-  in August. His conclusion: *"a register is an index over inventory; 107 ADRs in fourteen days IS the
+  walk card landed **2026-08-17**; `docs/` commit volume has far outrun `crates/` commit volume over
+  the same window; **107 ADRs** in August.
+  ⚠️ **Two figures struck as `UNVERIFIED`, and one claim withdrawn as false.** The lens's *"36 `docs/`
+  commits vs 5 `crates/`"* pair does not reproduce: three independent derivations at `df082e6` gave
+  36 (as recorded), 45, and 33 for the first, and 5, 5 and 4 for the second, because no scope was ever
+  stated — `--since` boundary, ref, and whether merge commits count all move it. **The figures are not
+  used as a decision premise**: the ratio's direction is not in dispute at any of those values, and
+  `holub`'s argument rests on the direction. The separate claim that the walk card had *"no branch and
+  no commit"* is **FALSE** — branch `556-local-walk-harness` and draft PR #621 existed with four
+  commits; the claim was true only of a stale local clone and was relayed without re-verifying against
+  GitHub. His conclusion: *"a register is an index over inventory; 107 ADRs in fourteen days IS the
   inventory, and industrialising the index does not shorten the loop that produced it."* Asked for the
   smallest honest subset that could ride alongside #556, he answered **none of the four** — and named a
   different candidate instead (below). **This does not overturn the ruling and no priority was changed
@@ -237,7 +245,7 @@ Founder directive, so the roster was invited before this record landed (ADR-2026
   one-row-dropped fixture, so slice 2 inherits a gate already seen red.
 - **`evans`** — ruled on the key scheme and **rejected the coordinator's first answer**: any
   document-scoped namespace (`ADR-…/D1`) ratifies outline position as identity, which the ruling forbids
-  in substance. The right unit already exists — the mnemonic register key, 115 of them, already globally
+  in substance. The right unit already exists — the mnemonic register key, already globally
   unique — and the rule is that **a key names the QUESTION, never the answer and never a position**,
   because a decision identity must outlive its own answer. `D1`–`D7` stay legal as a *citation anchor*
   inside `decided_by`, never as a key; uniqueness comes free from one file per key; prefixes come from a
