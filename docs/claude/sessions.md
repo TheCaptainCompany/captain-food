@@ -620,7 +620,12 @@ refusal, and then **exits 0**. It is a REPORT. The three codes are the whole con
 `2` genuinely exhausted (only possible with the cap armed), `3` INTEGRITY — a timer already open or
 stale, which is a concurrency event to resolve with `stop`/`stop --elapsed-seconds`/`reset` and must never
 be reported as budget. Cost of reading the banner instead: a whole dispatch stood down against an
-open gate, twice now.
+open gate, twice now. **The banner lies in BOTH directions**: a healthy `start` also appends
+`Timer open (untracked: …/.git/loop-budget-timer.json)` to its `✓ loop budget OK` line — that is
+the guard reporting where it just opened the run's own timer (ADR-20260812-011057 keeps it inside
+`.git/` so it can never be committed), *not* the "a run timer is already open" condition the exit-3
+contract describes in the same words. Same discipline, same reason: only the exit code distinguishes
+them.
 
 **`loop-budget.sh stop` takes a FLAG, not a positional** — `stop --note "what ran"` (and
 `stop --elapsed-seconds <n>` when the timer was never opened or went stale). A bare
@@ -726,6 +731,41 @@ No `ALTER USER` is needed on this image. `DB_TESTS_REQUIRED=1` must be in the tr
 whose evidence you intend to claim: a skipped DB suite reports `ok`, so "tests pass" without it
 proves nothing.
 
+### "Verbatim" is a mechanical check, not a careful read
+
+A record that claims to quote — a founder directive, a lens's return, a fetched legal instrument —
+states a property a script can decide, so decide it with a script. A careful re-read does not catch
+a dropped clause in a long quote; two sessions proved that.
+
+- **Assert substring containment per FRAGMENT, on whitespace-normalised text** (collapse runs of
+  whitespace in both haystack and needle before comparing). Markdown re-wrapping changes line breaks
+  inside a quote that is otherwise perfect, so a line-based diff reports noise and a naive equality
+  check fails on a correct quote.
+- **Anchor the extractor on STRUCTURAL markers — list items, table rows, headings — never on quote
+  characters.** Nested quotation (a quote inside a quoted passage, or an apostrophe in French prose)
+  breaks any extractor that pairs `"` or `«`, and it breaks it silently: it returns a shorter
+  fragment that still passes containment.
+- **When the record quotes a FETCHED instrument, re-extract from the fetch artifact if it is still on
+  disk** — the scratchpad copy of the fetched page, not an aggregation of it that some earlier turn
+  wrote. That is what recovered the first sentence of CRD 2011/83 Art. 22 after a summary had
+  quietly dropped it; the summary read fine and was wrong.
+
+The general form, which is the expensive half: **an aggregation of a source is not the source** —
+which is also the card-authoring rule below.
+
+### A card that says "carry lens X's return" must point AT the lens's own return
+
+Otherwise it must say plainly that the executor is composing. The two are different deliverables and
+only one of them may be attributed to the lens. When a card names an **aggregation** — the
+coordinator's summary of a lens's return — as the source for material it describes as
+**transcription**, the executor authors content and ships it under the lens's name: on 2026-08-18
+that produced a legal artifact whose counsel questions and obligation map were the executor's, not
+`legal-specialist`'s, with a numbering that diverged from the lens's own (caught before merge,
+corrected in revision 2; cost: one full re-authoring of a legal brief). A card carrying a
+`verbatim` claim therefore names a retrievable artifact — a file path, a message, a fetch artifact —
+never a summary of one, and the executor treats "carry X's return" over an unretrievable source as a
+**card defect** to flag rather than a writing task to complete.
+
 ## 11. Installing a dev tool: crates.io works, GitHub release downloads do not
 
 The session proxy scopes GitHub — the REST API **and** release-asset downloads — to the
@@ -787,6 +827,14 @@ delete). **A branch created in-session cannot be cleaned up from in-session**: s
 to the founder rather than burning turns on syntax variants (cost: four retries plus a tool
 search, 2026-08-05). The practical consequence: for a docs-only change that belongs on `main`, push
 straight to `main` and never create the branch in the first place.
+
+**On that route, `remote: Bypassed rule violations for refs/heads/main:` followed by a list of
+required checks is the EXPECTED output, not a failure.** The docs-straight-to-main directive means
+the session's credential holds a bypass on `main`'s ruleset, so every such push prints the rule it
+bypassed and the checks that did not run — on a push that fully succeeded (`git push` exits 0 and
+the ref moves). Read the exit code and the ref update, not the `remote:` block. Cost: two sessions
+spent attention deciding whether it was an error, and the next step after a "failed" push is a
+retry loop that pushes nothing.
 
 **Run `make rust` only on a COMMITTED tree, and read it ONLY by its exit code plus a post-gate
 `git status --short` — never by its output.** `check-drift` regenerates and then diffs the WHOLE

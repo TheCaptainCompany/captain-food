@@ -1,0 +1,7 @@
+{
+  "week": "2026-W34",
+  "seconds": 342,
+  "recordedAt": "2026-08-19T00:17:00.569Z",
+  "branch": "main",
+  "note": "docs: correct round-1 defect count to a section cross-reference; ADR index catch-up; operational learnings"
+}

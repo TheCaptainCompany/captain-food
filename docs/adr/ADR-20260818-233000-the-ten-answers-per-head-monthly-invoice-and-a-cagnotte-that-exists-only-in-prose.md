@@ -396,8 +396,11 @@ reopened, and the chosen NOLOGIN design costs zero extra connections. Caught by 
 Because the attribution is a card defect, this does not go to the founder: only a miss attributed to
 **roster width** would, and under
 [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
-a MISS no longer reverts a class automatically. Round 1's two card defects are recorded in
-ADR-20260818-210000 and are not re-banked here.
+a MISS no longer reverts a class automatically. Round 1's defects are banked in
+[ADR-20260818-210000 §*Coordinator defects banked*](ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md#coordinator-defects-banked)
+— every one of them attributed to the **card-defect class**, none to roster width, and the last of
+them **self-reported by the `ux-designer` lens** rather than found by the coordinator. That section is
+the list; it is deliberately not restated as a count here, and none of it is re-banked here.
 
 **Second defect this round, attribution `card defect`.** The card that commissioned
 [BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](../legal/BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md)

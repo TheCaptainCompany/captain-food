@@ -102,6 +102,14 @@ Concretely, on the card:
   marking is the whole mechanism: it converts *"the coordinator says 50 s"* into *"someone must
   check 50 s"*, which is a question a briefed lens can answer cheaply and will not think to ask of
   an unmarked figure.
+- **A COUNT or an ORDINAL is a derived number** (clarified 2026-08-19, after the rule was read
+  past). *"Round 1's **two** card defects are recorded in ADR-20260818-210000"* — which records
+  **four**, one of them a lens's self-report rather than a coordinator defect — is exactly the
+  failure this rule names, but it reads as bookkeeping rather than as arithmetic, so neither the
+  card's author nor its readers applied the rule to it. "How many X" and "which round/version/
+  attempt" are derived from a source the card is not showing, and they drift the moment that source
+  grows. The remedy is stronger than an antecedent: **cite the section and state no count at all**,
+  because a cross-reference stays true while a transcribed number needs maintaining.
 - The rule binds the **card**, so it applies at the briefing — before the executor has built
   anything against the number.
 
