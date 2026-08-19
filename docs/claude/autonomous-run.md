@@ -12,8 +12,12 @@ autonomously and ask my help if needed."*)
 3. `docs/proposals/DECISIONS.md` — header + §22: what is open, what was just decided.
 4. `docs/adr/ADR-20260808-212741-solida-studio-strategic-frame.md` — strategic frame, incl. §6
    (the maintainer is the AI; mission-first; sequence diagrams are the customer's review surface).
-5. `docs/claude/sessions.md` — operational traps (GitHub MCP output size, disk, DB recipe,
-   executor dispatch rules, the 5-hour stall lesson).
+5. `docs/claude/sessions.md` — the session-rules INDEX (one line per rule, ~10 KB). Read the
+   index, then fetch only the `docs/claude/sessions/` topic file the work touches: `gates.md`
+   (which gate proves what, DB recipe, dev-tool install) · `environment.md` (disk, MCP output
+   caps, container restart) · `evidence.md` (green is not proof, "seen red", verification) ·
+   `workflow.md` (claim/PR/commit mechanics, the mob, asking the founder). Reading all four is
+   134 KB and is not the instruction.
 6. `docs/claude/loops.md` — the weekly time budget; this run operates under it (ADR-0014).
 
 Then derive the work plan: the prioritised backlog (GitHub Project "Prioritized backlog") from

@@ -2,6 +2,38 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 🧹 **2026-08-19 — `sessions.md` SPLIT: 134 KB → a 10 KB index + four topic files, no rule
+> removed.** Founder instruction (*"we have a sessions.md too big. You can clean it because there is
+> no other session in progress"*). `docs/claude/sessions.md` stays at its path — all 53 in-repo
+> citations still resolve — and is now an INDEX: one line per rule, linking into
+> [`docs/claude/sessions/`](claude/sessions/) · `gates.md` (46 KB) · `evidence.md` (35 KB) ·
+> `workflow.md` (31 KB) · `environment.md` (19 KB). Every section is byte-identical in its topic
+> file and `§N` numbering is unchanged, so `§2` / `§8b` / `§18` citations keep their meaning;
+> the only edits are the four orphaned `###` sections promoted to `##` (they had drifted under
+> §17 "the container can restart mid-dispatch", which is not their subject) and a heading added for
+> **"libtest captures a passing test's stderr"**, which `crates/adapters/stripe/tests/journal_leak_canary.rs:32`
+> has been citing as a `§` that did not exist. Three stale citations repointed:
+> that canary, `crates/db_test_gate/src/lib.rs:113` (the initdb recipe), and this file's own
+> `sessions.md:1638` line-number citation → the rule's title.
+>
+> 🔍 **The finding that made the split worth more than tidiness — the mandated boot reading order
+> cannot be executed, and one of its files is ordered against the reader.**
+> `docs/claude/autonomous-run.md` §"Ground yourself first" names six files to read in order. Measured
+> at `a981c50`: `docs/STATUS.md` **628,654 B** (step 2) + `docs/proposals/DECISIONS.md` **631,346 B**
+> (step 3) + `sessions.md` **133,802 B** (step 5) = **~1.4 MB, ~350k tokens** — larger than the
+> context window, so **no session has ever completed step 2 or step 3**, and every one of them
+> reported grounding itself. Worse, this file is a reverse-chronological journal whose **durable**
+> sections — 🌐 Deployment, 📖 Read side, ✍️ Write side, 🔐 Authorization, 🧭 Architecture
+> decisions — sit at **lines 6709–6862 of 6862**, behind ~6,700 lines of journal. A top-down read
+> that truncates never reaches the sections that say what the system IS. Antecedents:
+> `stat -c%s` on each file; `grep -n '^#\{1,2\} ' docs/STATUS.md`; first date per 1000-line block
+> descends 2026-08-19 → 2026-07-23. **This is a second mechanism alongside
+> [PROP-20260819-110442](proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md) §1.5**
+> (which showed the re-litigated ADR was one `grep` away and volume was not its cause) — it does not
+> contradict that finding, it adds to it: for STATUS and the register, the record genuinely is
+> unreadable, and the fix is the same move just made on `sessions.md`. **Not done here** — STATUS.md
+> is written by every session and the reorder is the founder's call, queued in the report.
+
 > 📄 **2026-08-19 — THE DECISION REGISTER IS THE UNIT OF DECISION: proposal filed, `Proposed`, NOT
 > dispatchable** ([PROP-20260819-110442](proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md),
 > [DECISIONS §48](proposals/DECISIONS.md), tracking
@@ -332,7 +364,7 @@
 > already-blocking `make validate`, **no new runtime dependency** · a dead-man's-switch workflow
 > shaped like `stale-claim-reaper.yml`, firing on **absence** · an executor preflight line
 > (**proposed only** — `.claude/agents/*.md` commits need in-conversation approval,
-> `docs/claude/sessions.md:1638`) · `docs/claude/team-graph.md` as the derivation, held to three
+> `docs/claude/sessions/workflow.md` §"A denied tool call is a DECISION") · `docs/claude/team-graph.md` as the derivation, held to three
 > constraints so it is not a fifth authority. **State model: 13 collapse to 8** —
 > `intake → briefing/dispatch → execution-checkpoint* → independent-review → ci-gate → merged`, plus
 > `blocked`, `founder-decision-required` (renamed: in this codebase a *customer* orders food),

@@ -29,7 +29,7 @@
 //! - **not a database** — it asserts on `verdict_of_error`'s output, which `completion.rs` binds
 //!   directly to the `error` column (`SET status = $2, error = $3` with `verdict.error()`). A
 //!   DB-gated canary can SKIP, and a skipped canary on a secrets path is worse than no canary
-//!   (`docs/claude/sessions.md` §"libtest captures a passing test's stderr").
+//!   (`docs/claude/sessions/gates.md` §"libtest captures a passing test's stderr").
 //!
 //! ## Honesty about the marker
 //!
