@@ -1,8 +1,18 @@
 # ADR-20260819-191227 — The register ruling: canonical records, a nine-status vocabulary, and a capped boot index
 
+> **AMENDED 2026-08-19 (same day, founder), and the amendment is load-bearing.** The ruling is
+> **DESIGN APPROVAL ONLY — not a schedule and not dispatch authorisation.** It does **not** revoke the
+> [#643](https://github.com/TheCaptainCompany/captain-food/issues/643) deferral and does **not** displace
+> [#556](https://github.com/TheCaptainCompany/captain-food/issues/556). **No `REG-*` slice may be claimed,
+> started or implemented until the founder explicitly schedules it, after the local acceptance harness
+> has reached its stated milestone.** Six corrections apply to the approved design — see
+> [§ Amendment](#amendment-2026-08-19--six-corrections-the-scheduling-constraint-and-two-open-questions).
+> All four defects this ADR recorded are **resolved by those corrections**; two questions are now open
+> and carry a founder decision request. The six keys are approved **as named**.
+
 ## Status
 
-Accepted
+Accepted — **design approval only**, amended 2026-08-19 (see banner)
 
 ## Enforced by
 
@@ -17,9 +27,10 @@ already answered?"* — with an approved design rather than a further option spa
 from `Proposed` to `Approved`; register rows `REG-1`…`REG-4` close and `REG-SEQ` unblocks
 ([DECISIONS §48](../proposals/DECISIONS.md)).
 
-This record captures the ruling **verbatim**, states the three defects the ruling's own text carries,
-and stops. **No implementation is authorised by this ADR**: the founder sequenced the work into four
-slices behind a separate approval, and `#659` sits ahead of all of them.
+This record captures the ruling **verbatim**, states the **four** defects the ruling's own text carries,
+and stops. **No implementation is authorised by this ADR.** The founder amended the ruling the same day
+to make that explicit and to correct all four defects — read the banner and § Amendment before acting
+on anything in the Decision section below, which is preserved as ruled, not as corrected.
 
 ## Decision
 
@@ -62,14 +73,14 @@ readable as a *citation syntax* without promoting document position to an identi
 Fenced throughout, restated by the founder: **GraphRAG, QMD and external memory systems are not
 prerequisites and never become decision authority.**
 
-### Three defects in the ruling, recorded now rather than discovered in slice 3
+### Four defects in the ruling, recorded now rather than discovered in slice 3
 
 The ruling is approved and is being executed as written. These are the places where executing it as
 written will not produce what it intends, surfaced at briefing where they are free.
 
 **1. Stage B points the write side at a lossy read model — `young`.**
-`RULING-20260819/ENFORCEMENT-STAGES` Stage B says the agent must query *the decision index*.
-`RULING-20260819/BOOT-INDEX` defines that index as a deliberately lossy 8 KB fold. **A gate that
+`ASK-ENFORCEMENT` Stage B says the agent must query *the decision index*.
+`BOOT-INDEX-BOUND` defines that index as a deliberately lossy 8 KB fold. **A gate that
 decides whether work may proceed, reading a truncated projection, is a first-order write/read
 violation** (ADR-20260815-030206), and it has a governance consequence: a curation change to
 `resident:` would silently change what an agent is *permitted to do*, making a regeneration a
@@ -189,7 +200,7 @@ chose against the proposal's own recommendation:
   behavioural claims**; (4) slice 2 = migrate the active set, resolve duplicate namespaces; (5) slice 3
   = queue-question gate; (6) slice 4 = plan/execute decision context + regression tests against the
   known re-litigation cases.
-- **The three defects above are inputs to slice 1's design**, not separate work. Defect 1 changes what
+- **The four defects above are inputs to slice 1's design** — all four are corrected by the amendment, not separate work. Defect 1 changes what
   Stage A/B read; defect 2 changes the schema's `realized`; defect 3 changes nothing structurally but
   makes the pre-implementation census a gate on feasibility.
 - **`beck`'s eight planted defects** are named in Consulted and should be the slice-1 PR body's checklist.
@@ -249,11 +260,130 @@ Founder directive, so the roster was invited before this record landed (ADR-2026
   correct first response to accreting inventory is to stop producing it, not to build a faster index over
   it."* He marked one figure he did **not** re-derive — the 2.4:1 process-to-code ratio — as
   `UNVERIFIED input` and did not lean on it, which is ADR-20260817-105845 working as intended.
-- **`vernon` · `dba` · `graphql-architect` · `ux-designer` · `business-specialist` · `legal-specialist` ·
+- **`vernon`** — dispatched separately on reversal semantics under amendment C4; full analysis carried in
+  the proposal's §14 decision request. **Agrees with `evans` and reaches it from the other side**: the
+  record is the aggregate, its identity is the question, its answers are the events in its own stream —
+  *"a changed answer is a state transition inside one boundary; supersession is a change of identity."*
+  He **sharpens `evans` on one point that changes the schema**: there are three shapes, not two — reversal
+  (one record), question replacement (two), and **split/merge (N)**, the last being *"the real
+  multi-record operation in this register, more common than (b)"*, evidenced by `REFUND-BEARER` merging
+  into `CAPTAINNET-ZERO` while `BREAKDOWN-ZERO` split, in one batch, on 2026-08-19. Two checkable
+  consequences: `decided_by` moves onto the **answer**, and **git alone cannot carry auditability**
+  because `REGISTER-MIGRATION` destroys the blame surface — a cost that lands in slice 2 unless the
+  schema carries history in slice 1. Found one new silent corruption and its rule: one session
+  superseding `X` while another appends an answer to `X` **merges cleanly**, so *a `superseded` record
+  may not carry an answer appended after its `superseded_on`*. On the two-record edge: there is no
+  transaction and must not be — *"the commit IS the write transaction; CI is the fence"*. **Independently
+  reached the founder's C3**: `resident: true` is a **set** invariant expressed as a per-record field, so
+  a record author cannot know whether their own flag is legal and the corpus rule *"will reject whichever
+  record lands last, not the least important one"* — derive residency instead.
+- **`dba` · `graphql-architect` · `ux-designer` · `business-specialist` · `legal-specialist` ·
   `observability-agent` · `farley`** — invited via
   [the briefing](../dispatch/BRIEF-20260819-the-register-ruling.md); not separately dispatched for this
   records-only chunk. **A lens never asked is indistinguishable from a lens with nothing to say**, so
-  this is stated as a gap rather than as silence: the `resident: true` high-risk subset (money,
-  legal/compliance, security, irreversible data, production operations) touches `legal-specialist`,
-  `business-specialist` and `dba` directly, and **their input is owed before slice 2 curates that
-  subset**, not before this record lands.
+  this is stated as a gap rather than as silence. Amendment **C5 converts it into a precondition**:
+  `legal-specialist`, `business-specialist` and `dba` must define the **controlled fields and
+  classifications** that determine boot residency and implementation gates **before slice 2** — and,
+  under C3, those classifications are what residency is *derived from*, so they are now load-bearing
+  rather than advisory. Deliberately **not dispatched in this records-only chunk**.
+
+---
+
+## Amendment 2026-08-19 — six corrections, the scheduling constraint, and two open questions
+
+The founder amended the ruling the same day, on reading this record. **The amendment is not a
+refinement of emphasis: it changes one key's mechanism outright and puts the whole programme behind an
+explicit scheduling gate.**
+
+### The scheduling constraint, stated first because it governs everything below
+
+> *"This is design approval only, not a schedule and not dispatch authorization. It does not revoke the
+> #643 deferral or displace #556. No `REG-*` slice may be claimed, started, or implemented until I
+> explicitly schedule it after the local acceptance harness has reached its stated milestone."*
+
+This answers the question this ADR left open in Consequences — *whether the ruling schedules the slices
+or only approves their design*. **It approves the design only.** The keys `DECISION-UNIT`,
+`REGISTER-STORAGE`, `STATUS-VOCABULARY`, `REGISTER-MIGRATION`, `ASK-ENFORCEMENT` and
+`BOOT-INDEX-BOUND` are approved **as named**; positional labels `D1`–`D7` remain **citation anchors
+only and are never decision identities**.
+
+### The six corrections
+
+**C1 — Canonical reads, not index reads.** `ASK-ENFORCEMENT` must resolve and read the **canonical
+declared decision records**. The boot index is discovery/navigation only, **may return candidate keys,
+is not authoritative, and must not determine permission to ask or implement**: *"a lossy projection
+cannot be a write-side gate."* → **Resolves defect 1** (`young`) exactly as he framed it, and settles
+that both Stage A and Stage B read `docs/decisions/**`.
+
+**C2 — `realized` requires verifiable evidence, or it does not ship.** Retain `realized` **only** with
+a mandatory, resolvable evidence reference and a defined validator — an implementation issue/PR/commit
+plus an applicable verification artifact. *"If such an invariant cannot be implemented without
+subjective interpretation, remove `realized` from the first status vocabulary and represent
+implementation separately until evidence semantics are designed."* → **Resolves defect 2**, and adopts
+`beck`'s fallback as a first-class branch rather than a fallback: the vocabulary ships at eight values
+if the invariant cannot be made objective. **The nine-value list in this ADR's `STATUS-VOCABULARY` row
+is therefore conditional on that test.**
+
+**C3 — The 8 KB cap is a design target, not an unconditional invariant, and residency is DERIVED.**
+Two changes, and the second is the larger:
+- `resident: true` **must not be a required manual decision on every new high-risk record** — *"that
+  creates governance WIP and a second decision queue."* Residency is **derived from stable schema
+  fields** (status, domain, applicability, explicit severity/classification), with an **exceptional
+  override only, and only with a recorded reason.**
+- Before implementation: **re-derive the actual census and model the maximum feasible index size.** If
+  all `open`/`proposed`/`blocked` records cannot fit, the index carries **a compact summary plus
+  deterministic pointers** while the canonical records remain queryable. **The cap is never raised
+  silently.**
+
+→ **Resolves defect 3 and defect 4 together.** Defect 3 (the cap is breached at 41 open + 20 resident
+on measured 136 B rows) stops being a blocker because the index degrades to summary-plus-pointers
+rather than failing or growing. Defect 4 — `holub`'s *"permanent WIP … a recurring review queue with no
+end date"* — is removed at the root: derived residency has no per-record queue. **This is the correction
+that most changes the approved design**, and `BOOT-INDEX-BOUND` as recorded above should be read through
+it.
+
+**C4 — Reversal semantics are resolved before any schema implementation.** `vernon` is dispatched
+specifically on it, answering `evans`' divergence recorded in Consulted. The output must distinguish
+**stable question identity · answer versions · supersession · historical auditability · how agents
+resolve "what applies now."** **No schema implementation until this is decided** — and it is decided by
+the founder, not by the lens. See Open question **OQ-1**.
+
+**C5 — No high-risk curation without the relevant lenses.** Before slice 2, `legal-specialist`,
+`business-specialist` and `dba` must review the **domains and classifications** that determine boot
+residency and implementation gates. Explicitly *"not an invitation to add their prose to the boot
+index; it is input to define the controlled fields and classifications."* → Converts this ADR's stated
+gap ("their input is owed before slice 2") from an observation into a **precondition**, and pairs with
+C3: derived residency needs a controlled classification vocabulary, and those three lenses own it.
+**Not dispatched now** — that work belongs to the slice-2 precondition, not to this records-only chunk.
+
+**C6 — `holub`'s dissent is preserved as an EXECUTION CONSTRAINT, not merely as a recorded position.**
+> *"Do not fragment this into nominal slices and claim early value. The intended user outcome — an agent
+> checks resolved decisions before asking the founder — only exists when canonical records, migration,
+> and Stage B enforcement all work together. Until then, do not claim that repeated questions are
+> prevented."*
+
+This is the strongest form of what `holub` argued (*"one batch of four wearing slice vocabulary"*) and
+it now **binds execution**: slices remain independently *reviewable*, but no slice may be reported as
+delivering the user-facing outcome. It also hardens `ASK-ENFORCEMENT`'s own no-claim clause into a
+standing prohibition rather than a caveat.
+
+### #659 and the ADR-citation slice
+
+`#659` remains **independently eligible only through normal approval**, and it **neither authorises nor
+blocks** `REG` work — the sequencing statement in this ADR's Follow-up ("`#659` first") is amended to
+that. Separately, the proposal's ADR-citation-integrity slice **may be evaluated as a narrow
+repository-integrity task in its own right** — which is the candidate `holub` named unprompted — but it
+**must not become a backdoor into register migration**.
+
+### Open questions — the only two things the founder is asked to decide
+
+- **OQ-1 — Reversal semantics.** Does a changed answer create a **successor record**, or does **one
+  record retain identity while its answer/version changes**? `vernon`'s analysis is carried in the
+  proposal's decision request; `evans`' position (a reversal is a new answer on the same record;
+  supersession applies only when the *question* is replaced) is on the record and unanswered until this
+  closes. **Gates all schema work.**
+- **OQ-2 — Execution priority after #556.** When, relative to the local acceptance harness reaching its
+  stated milestone, is the register work scheduled? **No slice is claimable until this is answered**,
+  and answering it is the founder's alone.
+
+**Nothing else in the programme is a live question.** Everything else above is decided.

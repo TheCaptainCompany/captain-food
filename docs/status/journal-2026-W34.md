@@ -1,8 +1,50 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **23 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **24 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 🛑 **2026-08-19 — DESIGN APPROVAL ONLY: the register ruling is AMENDED, all four defects are
+> CORRECTED, and NOTHING IS CLAIMABLE** ([ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md) amended;
+> [PROP-20260819-110442](../proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md)
+> §2 and §7 rewritten, §14 added). The founder settled the question this ADR left open: the ruling
+> **approves a design, not a schedule**. It does **not** revoke the #643 deferral and does **not**
+> displace #556. **No `REG-*` slice may be claimed, started or implemented until he explicitly schedules
+> it, after the local acceptance harness reaches its stated milestone.** The six keys are approved as
+> named; `D1`–`D7` are **citation anchors only, never decision identities**.
+>
+> **Six corrections, and they close all four defects the mob found.** C1 — `ASK-ENFORCEMENT` reads
+> **canonical records**; the boot index may return candidate keys but is **not authoritative and must
+> never determine permission** (*"a lossy projection cannot be a write-side gate"* — closes `young`'s).
+> C2 — `realized` ships **only** with a mandatory resolvable evidence reference and a defined validator,
+> **otherwise it is removed** from the first vocabulary and implementation is represented separately
+> (closes `beck`+`young`'s; the vocabulary may ship at **eight** values). C3 — 8 KB becomes a **design
+> target**, residency is **DERIVED** from schema fields rather than a per-record `resident: true` flag,
+> and if the open set cannot fit, the index carries **summary + deterministic pointers** while canonical
+> records stay queryable (closes the measured-cap defect **and** `holub`'s permanent-WIP defect at the
+> root). C4 — reversal semantics decided before any schema. C5 — `legal-specialist`,
+> `business-specialist` and `dba` define the controlled classifications **before slice 2**; that gap
+> becomes a precondition. C6 — **`holub`'s dissent becomes an execution constraint**: no slice may be
+> reported as delivering the user-facing outcome, which exists only when canonical records, migration
+> and Stage B work together.
+>
+> **`vernon` was dispatched on reversal semantics and sharpened `evans` rather than contradicting him.**
+> The record is the aggregate, its identity is the question, its answers are events in its own stream.
+> He found a **third shape neither option space had — split/merge (N records)** — and it is not
+> hypothetical: this register performed both *in one batch on 2026-08-19* (`REFUND-BEARER` merged into
+> `CAPTAINNET-ZERO`; `BREAKDOWN-ZERO` split). Two checkable consequences: **`decided_by` moves onto the
+> answer**, and **git alone cannot carry auditability** because `REGISTER-MIGRATION` destroys the blame
+> surface — a slice-2 cost unless slice 1's schema carries history. One new silent corruption, with its
+> rule: superseding `X` while another session appends an answer to `X` **merges cleanly**, so *a
+> `superseded` record may not carry an answer appended after its `superseded_on`*. He also reached the
+> founder's C3 independently — `resident:` is a **set** invariant expressed as a per-record field, so the
+> gate *"rejects whichever record lands last, not the least important one"*.
+>
+> **Two rows open, and only two**: **`REG-REVERSAL`** (🟠 gates all schema work; both lenses recommend
+> record-as-aggregate) and **`REG-WHEN`** (🔴 founder-only, no recommendation offered — no slice is
+> claimable until it is answered). `REG-SEQ` closes into them. **#659 neither authorises nor blocks REG
+> work**, and the ADR-citation ratchet may be evaluated as a **narrow repository-integrity task** that
+> must not become a backdoor into migration. GraphRAG/QMD/external memory remain fenced.
+
 > ⚖️ **2026-08-19 — THE REGISTER RULING: PROP-20260819-110442 IS APPROVED, AND THE RULING CARRIES FOUR
 > DEFECTS OF ITS OWN** ([ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md)). Six decisions ruled, recorded under keys that
 > name the QUESTION rather than a position — `DECISION-UNIT` · `REGISTER-STORAGE` · `STATUS-VOCABULARY` ·

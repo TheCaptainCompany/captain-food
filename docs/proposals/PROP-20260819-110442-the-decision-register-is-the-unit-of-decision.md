@@ -168,27 +168,74 @@ and nothing ever went red.
 
 ---
 
-## 2. Recommended approach
+## 2. The approved design, as corrected — RULED AND AMENDED 2026-08-19
 
-**Make the ask, not the archive, the enforced surface.** In order, and the order is the argument:
+> **This section holds the CURRENT design.** It was rewritten when the founder ruled and then amended
+> the same day; the option space that produced it is §3 and §6, kept as history. Authority:
+> [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md).
+>
+> ⛔ **DESIGN APPROVAL ONLY — not a schedule, not dispatch authorisation.** It does **not** revoke the
+> [#643](https://github.com/TheCaptainCompany/captain-food/issues/643) deferral and does **not** displace
+> [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556).
+> **No `REG-*` slice may be claimed, started or implemented until the founder explicitly schedules it,
+> after the local acceptance harness has reached its stated milestone.**
 
-1. **Give the register row a declaration site.** `docs/decisions/*.yaml` — one declared row per
-   decision, with a `status` from a **closed set**, a globally unique key, and `decided_by` as a
-   resolvable reference. This is the *only* new authored artifact.
-2. **Generate `DECISIONS.md`'s index from it**, so the human page cannot disagree with the data, and
-   generate `docs/adr/README.md`'s index from the filesystem, so it cannot be 13 stale again.
-3. **Make an unregistered ask unspellable.** A decision-queue question must `$ref` a row whose
-   `status` is `open`. A question naming a `decided` row **cannot be authored** — the gate refuses
-   it and prints the answer and the ADR that gave it. This is the executable form of
-   ADR-20260818-210000's own prescription, which is prose today.
-4. **Close the ratchet on citations.** An ADR citation anywhere in the repo that resolves to no file
-   is an error, with a declared exemption list for the three held ids.
+### 2.1 The six approved decisions
+
+Keys approved **as named**. Each names the QUESTION, never the answer and never a position, so an
+identity outlives its own answer. `D1`–`D7` remain **citation anchors only, never decision identities**.
+
+| Key | The approved design |
+|---|---|
+| **`DECISION-UNIT`** | One declared record = one decision identity, globally unique and immutable. An ADR is **evidence/rationale** and may carry several decision records. |
+| **`REGISTER-STORAGE`** | Canonical records in YAML under `docs/decisions/<KEY>.yaml` — the key IS the filename, so the filesystem arbitrates uniqueness. `DECISIONS.md` becomes a **generated view**, never a separately maintained authority; generator and validator deterministic; `check-drift` fails on stale output. |
+| **`STATUS-VOCABULARY`** | Closed vocabulary with explicit transitions. `decided` = binding policy exists; `realized` = implementation evidence exists; **never conflated**. `open`, `proposed`, `blocked` **do not authorise implementation**. ⚠️ **`realized` ships only if C2's evidence invariant is objectively implementable — otherwise the first vocabulary has eight values.** |
+| **`REGISTER-MIGRATION`** | Staged: open/blocked/proposed/recently-decided first, namespacing the ambiguous keys in that pass. **No source row may silently disappear** — each maps to one record, an explicitly merged successor, or a declared archive/exemption. **Re-derive the census immediately before implementation.** |
+| **`ASK-ENFORCEMENT`** | Stage A: a decision-queue question is invalid unless it cites an existing `open` decision key. Stage B: before a decision-sensitive plan or implementation, the agent emits a compact `Decision Context`; it may ask the founder only when no record matches or the match is `open`/`blocked`. **Both stages resolve against CANONICAL RECORDS** (C1). |
+| **`BOOT-INDEX-BOUND`** | Discovery/navigation only. **Not authoritative; may return candidate keys; must never determine permission to ask or implement.** 8 KB is a **design target**, not an unconditional invariant. **Residency is DERIVED** from stable schema fields — status, domain, applicability, explicit severity/classification — with an exceptional override only, and only with a recorded reason. If the open set cannot fit, the index carries **a compact summary plus deterministic pointers** while canonical records stay queryable. **The cap is never raised silently.** |
+
+### 2.2 The four defects this design already survived
+
+Found at mob briefing before any code, and **all four are corrected by the founder's amendment**:
+
+| # | Defect | Correction |
+|---|---|---|
+| 1 | Stage B pointed a write-side gate at the lossy 8 KB index (`young`) | **C1** — canonical reads only; *"a lossy projection cannot be a write-side gate"* |
+| 2 | `realized` as an authored token is a status no gate can contradict (`beck`, `young`, independently) | **C2** — mandatory resolvable evidence with a defined validator, **or the status is removed** from the first vocabulary |
+| 3 | The 8 KB cap is breached at 41 open + 20 resident on measured 136 B rows; 75 of 154 rows have no derivable status | **C3** — cap becomes a design target; index degrades to summary + pointers; census re-derived before implementation |
+| 4 | `resident: true` as a per-record manual flag creates permanent governance WIP (`holub`) | **C3** — residency is **derived from schema fields**, not curated per record |
+
+### 2.3 The execution constraint — `holub`'s dissent, now binding
+
+> *"Do not fragment this into nominal slices and claim early value. The intended user outcome — an agent
+> checks resolved decisions before asking the founder — only exists when canonical records, migration,
+> and Stage B enforcement all work together. Until then, do not claim that repeated questions are
+> prevented."* — the founder, adopting `holub`'s position as a constraint on execution.
+
+Slices stay independently **reviewable**; no slice may be **reported as delivering the user-facing
+outcome**. `holub`'s underlying argument is preserved verbatim in the ADR's Consequences and is not
+argued past: zero orders have ever flowed end to end, the last green nightly smoke was **2026-07-29**,
+and the #556 walk card has no branch and no commit. His answer to *"what is the smallest subset that
+could ride alongside #556"* was **none of the four**.
+
+### 2.4 What is NOT authorised
+
+- **No `REG-*` slice** may be claimed, started or implemented before the founder schedules it (OQ-2).
+- **No schema implementation at all** until reversal semantics are decided (OQ-1, C4).
+- **No slice-2 residency curation** before `legal-specialist`, `business-specialist` and `dba` have
+  defined the controlled fields and classifications (C5) — *"not an invitation to add their prose to the
+  boot index."*
+- **[#659](https://github.com/TheCaptainCompany/captain-food/issues/659)** is independently eligible
+  **only through normal approval**, and it **neither authorises nor blocks** `REG` work.
+- The **ADR-citation-integrity slice** (§7 slice 1) may be evaluated as a **narrow repository-integrity
+  task in its own right** — it **must not become a backdoor into register migration**.
+- **GraphRAG, QMD and external memory remain fenced**: not prerequisites, never decision authority.
 
 **Compiler-first placement, stated honestly** ([ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md),
 whose level 4 is the floor). The type system **cannot reach markdown**, so no `struct` makes a stale
 citation unspellable in `docs/**`. Level 4 — a validator gate over a declared artifact — is both the
 floor and the ceiling here, and this proposal says so plainly rather than dressing a check as a type.
-What *is* recovered from the compiler-first spirit is the **declaration/reference split**: a row key
+What *is* recovered from the compiler-first spirit is the **declaration/reference split**: a record key
 becomes a declared name with a walker, which is the same move ADR-20260811-014129 made for the DSL,
 and it is what turns "remember to check" into "the reference does not resolve."
 
@@ -447,24 +494,41 @@ recommendation honestly: **it should not displace [#556 "Local acceptance harnes
 
 ---
 
-## 7. Sequencing — five slices, each a thin slice of the final shape
+## 7. Sequencing — the RULED four slices, none of them claimable
 
-Scope staging, not shape staging: every slice writes the **final** artifact for a subset of rows,
+Scope staging, not shape staging: every slice writes the **final** artifact for a subset of records,
 none builds an interim shape that is later thrown away
 ([ADR-20260808-235113](../adr/ADR-20260808-235113-final-vision-first-no-intermediate-steps.md)).
 **Reversibility class: `REVERSIBLE INTERNAL`** throughout — no stored event shape, no money path, no
 legal surface, nothing Tours-facing.
 
-| # | Deliverable | Abandonable after? |
-|---|---|---|
-| 1 | `tools/codegen-rs/src/validate/decisions.rs` with `adr-citation-unresolved` + the `_exempt.yaml` declaration; fix `docs/STATUS.md:5707`. Modelled on `proposals.rs`. | Yes — a standing ratchet, complete in itself. |
-| 2 | The `docs/decisions/<KEY>.yaml` schema + the ~41 rows that are **open today**. Open rows only: they are what an ask can collide with. | Yes — the ask gate can run on the open set alone. |
-| 3 | `decision-ask-unregistered` + `decision-ask-answered`, each with a planted-defect test proving RED. **This is the slice that answers the founder's question.** | Yes. |
-| 4 | Generate the `DECISIONS.md` index region **and** `docs/adr/README.md` from source. | Yes. |
-| 5 | Migrate the remaining ~85 decided/deferred rows; namespace the 22 `D1`–`D7` keys. | Terminal. |
+> ⛔ **None of these is claimable.** The founder's sequence is approved as a *design*; scheduling is a
+> separate decision he has reserved (**OQ-2**), and it comes after #556 reaches its stated milestone.
+> **Slice 1 additionally cannot start until reversal semantics are decided (OQ-1).**
 
-**Slices 1 and 3 carry essentially all the value.** If the walk needs the time, 4 and 5 drop with
-nothing stranded.
+| # | Deliverable | Blocked on |
+|---|---|---|
+| 1 | Schema, parser, validator, generated view, planted-defect tests. **No broad migration, no agent behavioural claims.** | OQ-1 **and** OQ-2 |
+| 2 | Migrate the active set — open/proposed/blocked/recently-decided — and resolve the duplicate namespaces. | slice 1 + **C5** (`legal-specialist`, `business-specialist`, `dba` define the controlled classifications first) |
+| 3 | The queue-question gate (`ASK-ENFORCEMENT` Stage A), resolving against canonical records. | slice 2 |
+| 4 | Plan/execute decision context (Stage B) + **regression tests against the known re-litigation cases**. | slice 3 |
+
+**The user-facing outcome exists only at slice 4**, and per §2.3 no earlier slice may be reported as
+delivering it. That is `holub`'s argument adopted as a constraint, and it is the honest reading of the
+founder's own no-claim clause in `ASK-ENFORCEMENT`.
+
+**Evaluated separately, not part of this sequence**: the ADR-citation-integrity ratchet
+(`adr-citation-unresolved` + `_exempt.yaml`, and the one genuine dangling citation at
+`docs/STATUS.md`). It is a **narrow repository-integrity task**, complete in itself, needing no schema,
+no migration and no records — the candidate `holub` named unprompted as the only thing that *"would
+still be correct if all four ruled slices were cancelled tomorrow."* It **must not become a backdoor
+into register migration**.
+
+**`beck` named eight planted defects for slice 1 before any code exists**; they are carried in
+[ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md)
+§ Consulted and should be that slice's PR-body checklist. He also flagged the trap that would make
+slice 1 lie: with `docs/decisions/**` empty until slice 2, **every corpus-wide assertion is vacuously
+true** — each needs a non-empty precondition or the slice ships green having proved nothing.
 
 ---
 
@@ -563,3 +627,95 @@ green; `make validate` 0 errors; `check-drift` clean.
 - **`young`** — the register is a **read model over a decision log**, and it is currently maintained by hand-editing the read model. Slice 4 makes the index a **fold** over declared rows, which is the only form a rebuild can replay. He notes the corollary: `DECISIONS.md`'s prose sections are *not* derivable and must stay authored — which is why D3 rejects full generation.
 - **`vernon`** — one row, one writer: file-per-row (D2) is the mailbox discipline applied to a document. The single-file alternative is a shared mutable aggregate with concurrent writers and no lease.
 - **`holub`** (position recorded, not overridden) — nothing should displace [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556) until one order flows end to end. Reflected in §6 Option E and §8, and not argued past.
+
+---
+
+## 14. Decision request — TWO questions, and nothing else
+
+Everything else in this proposal is decided. These two are open, and both are the founder's.
+
+### OQ-1 — Reversal semantics. **Gates all schema implementation.**
+
+*Does a changed answer create a successor record, or does one record retain identity while its
+answer/version changes?*
+
+`vernon` was dispatched specifically on this and **agrees with `evans`, reaching it from the other
+side**: *"A changed answer is a state transition inside one boundary; supersession is a change of
+identity. Under a key that names the question, those are different operations and the schema must not
+spell them the same way."*
+
+| Option | Mechanism | Cost |
+|---|---|---|
+| **A — record-as-aggregate** ✅ **both lenses recommend** | The record **is** the question; answers append inside it, immutable, last one current. Supersession reserved for a genuine identity change. | Per-record history must be in the schema at slice 1; the multi-record edge needs a corpus validator rule. |
+| B — answer-as-record | Every changed answer is a new file; the predecessor is superseded. | The key must carry a version (`CAPTURE-TIMING@2`) — **position-as-identity returns through the back door**, which `DECISION-UNIT` exists to forbid. *"What applies now"* becomes a **scan** for the record nothing supersedes. The **common** operation pays a two-file concurrency cost. The boot index must dedupe — acquiring resolution logic, contradicting "discovery-only". |
+| C — current answer only, history in git | Smallest schema. | Fails all three auditability points below; `what_applied_on(date)` becomes unanswerable by any gate. |
+
+**`vernon` sharpens `evans` on one point that matters for the schema: there are three shapes, not two.**
+
+- **(a) Reversal / re-answer** — same question, new answer → **ONE record**. The worked case is already
+  in the tree: `ADR-20260811-014129` says `ADR-20260810-234225` is *"superseded, not rewritten"* — but
+  what was superseded was the **evidence**. The decision *"how is a business metric maintained?"* kept
+  its identity and changed its answer. **ADRs supersede; decisions re-answer**, and the schema must not
+  re-import ADR supersession vocabulary onto records.
+- **(b) Question replacement** — a differently-scoped question replaces it → **TWO records**,
+  bidirectional edge. `evans`' narrow case.
+- **(c) Split and merge** — one question was really two, or two were really one → **N records**. **Not
+  hypothetical**: this register performed both in a single batch on 2026-08-19 — `REFUND-BEARER`
+  residue **merged into** `CAPTAINNET-ZERO` while `BREAKDOWN-ZERO` **split**. `vernon`: split/merge is
+  the real multi-record operation here, **more common than (b)**, and the one a schema will otherwise
+  meet unprepared.
+
+**Two schema consequences the founder should see, because they are checkable differences between the
+options, not preferences:**
+
+1. **`decided_by` moves from the record onto the answer.** The evidence for answer 1 is a different ADR
+   from the evidence for answer 2. Under B it would sit on the record; under A it cannot.
+2. **Git alone is not sufficient for auditability**, for one dated and concrete reason above the
+   principled ones: **`REGISTER-MIGRATION` destroys the blame surface.** Rewriting ~154 rows into new
+   files in one or two commits makes git report that every record was born that day, with the whole
+   decision lineage behind a rename. **That cost lands in slice 2 unless the schema carries history in
+   slice 1.** Secondarily: `decided_on` ≠ commit date systematically (rows already read *"CLOSED
+   2026-08-12 (raised 2026-08-11)"*), so the decision date is business data; and *"what was believed on
+   date D"* must be a **query** — as a field it is a fold over one file that a validator can run, as git
+   archaeology across renames it is a thing nobody runs. The repo already learned this once:
+   `docs/adr/HISTORY.md` is the hand-built retrospective version of exactly this field.
+
+**The read path under A** (`vernon`, answering the founder's fifth sub-question): open
+`docs/decisions/<KEY>.yaml`; the current answer is the last `answers` entry, gated by `status`; if
+`superseded`, follow `superseded_by` **transitively with a depth/cycle guard**. And name the failure
+explicitly — **"no matching record" is a modelled outcome that permits asking**, never an empty read
+that silently reads as "no constraint".
+
+**One new hazard `vernon` found, with its rule.** Two sessions superseding the same predecessor conflict
+loudly on the same YAML line — fine. But one session superseding `X` while another appends an answer to
+`X` **merges cleanly**, yielding a record that is both `superseded` and freshly re-answered. That is the
+one silent corruption, and the rule is cheap: **a `superseded` record may not carry an answer appended
+after its `superseded_on`.** It should join `beck`'s eight planted defects.
+
+**On the two-record transaction**: there isn't one, and there must not be. Both directions of a
+supersession edge are checked **at commit** by a corpus rule — *"the commit IS the write transaction; CI
+is the fence"* — the same shape the actor runtime already uses in `completion.rs`, where fencing lives
+in the completion transaction rather than in a lock.
+
+> **Recommendation: Option A.** It is the only one in which the register's own vocabulary stays true —
+> the key names the question, the record *is* the question, and a decision identity outlives its answer.
+> If A is chosen, slice 1's schema must carry `answers[]` with per-answer `decided_by`, and the
+> split/merge shape (c) must be in the schema from the start rather than retrofitted in slice 2.
+
+### OQ-2 — Execution priority after #556
+
+*When, relative to the local acceptance harness reaching its stated milestone, is the register work
+scheduled?*
+
+This is reserved to the founder and no lens is asked to answer it. What the record already holds:
+`holub`'s position that **none of the four slices** should ride alongside #556; the founder's own
+constraint that the user-facing outcome exists only when canonical records, migration and Stage B all
+work together; and the fact that **no `REG-*` slice is claimable until this is answered**.
+
+> **No recommendation offered.** The team has nothing to add that the dissent and the constraint do not
+> already say.
+
+---
+
+**Nothing else is asked.** Recording a decision on OQ-1 unblocks schema design only — not
+implementation, which still waits on OQ-2.
