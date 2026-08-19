@@ -2,6 +2,28 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
+> 💶 **2026-08-18 (evening) — THE TEN ANSWERS LANDED: per head, monthly invoice, stop checkout**
+> ([ADR-20260818-233000](adr/ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md),
+> thirteen lenses). **Settled**: processes are the point (Q2, costs accepted); the fallback never
+> touches the customer (Q5); **per head**, deleting the margin-proportional fee outright (Q6); a
+> **monthly** shortfall invoice, never per order (Q7); the cagnotte bears refunds (Q8) and is judged
+> monthly against four months of covered costs (Q10). This **answers** the three money-model conflicts
+> flagged in the round-1 entry below — they now owe **register rows**, not analysis.
+>
+> **Do not build on any of these yet.** (1) **Q3's GOAL is accepted, its MECHANISM is not**: he decided
+> STOP CHECKOUT, and six lenses reject the four-hop synchronous availability chain on six independent
+> grounds — readiness is a **published fact** (`crates/server/src/lib.rs:259` is already push-shaped),
+> the refusal must be an **appended fact**, a closed gate is invisible to the observability contract,
+> probes make **slow read as down**, four hops manufacture a 99.6 % ceiling, and the endpoint they would
+> read is a boot-time constant. (2) **Ten register rows are owed and none is decided** — Q9 reverses
+> the `"Aucun"` default (ADR-20260808-203443) and Q8 contradicts ADR-20260818-150000 *the same day*.
+> (3) **CRD 2011/83 Art. 22 is open on the pre-filled contribution**: the prohibited shape is the
+> **default**, and the remedy is **reimbursement of every contribution ever collected** — grade (b),
+> leaning inside, with the French transposition number NOT statable today
+> ([BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](legal/BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md),
+> G1–G7). (4) **`cagnotte` has zero hits outside `docs/`** — three of the ten answers rest on a
+> concept the system does not model.
+
 > 🧭 **2026-08-18 — THE TEAM ASKED, THE FOUNDER ANSWERED: no human maintains this Rust**
 > ([ADR-20260818-210000](adr/ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md)).
 > He invited the asks himself, disagreed with six of seven **and gave reasons**; the reasons went back
