@@ -33,6 +33,10 @@ jobs:
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
+          show_full_output: true
+          display_report: true
+
+
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The `code-review` PLUGIN was tried first and removed. Even with `--comment`, correct
           # write permissions and zero permission denials, it posted nothing on three consecutive
