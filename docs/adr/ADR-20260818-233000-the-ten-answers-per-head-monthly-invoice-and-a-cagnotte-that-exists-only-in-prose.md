@@ -386,9 +386,9 @@ ADR decides none of them.** Several are `HOLD: human`; Q9 also touches a regulat
     — transaction-local. Had that flag been `false`, a transaction pooler would leak one caller's
     identity to the next transaction on the same server connection, silently.
 
-## 10. Coordinator defect banked (ADR-20260816-134352)
+## 10. Coordinator defects banked (ADR-20260816-134352)
 
-**One defect, attribution `card defect` — not roster width.** The relay card asserted that per-persona
+**First defect, attribution `card defect` — not roster width.** The relay card asserted that per-persona
 LOGIN roles worsen the connection budget, carrying a round-1 remark forward as though the roles were on
 the table. They are a **recorded rejection** (PROP-20260818-010343 §13 D-A) that no founder answer
 reopened, and the chosen NOLOGIN design costs zero extra connections. Caught by `dba`.
@@ -396,8 +396,18 @@ reopened, and the chosen NOLOGIN design costs zero extra connections. Caught by 
 Because the attribution is a card defect, this does not go to the founder: only a miss attributed to
 **roster width** would, and under
 [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
-a MISS no longer reverts a class automatically. **No other defect surfaced this round**; round 1's two
-card defects are recorded in ADR-20260818-210000 and are not re-banked here.
+a MISS no longer reverts a class automatically. Round 1's two card defects are recorded in
+ADR-20260818-210000 and are not re-banked here.
+
+**Second defect this round, attribution `card defect`.** The card that commissioned
+[BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice](../legal/BRIEF-20260818-pre-filled-contribution-and-the-monthly-invoice.md)
+named an **aggregation** (the coordinator's summary of `legal-specialist`'s return) as the source for
+material it described as **transcription**, so the executor **authored** a legal artifact's counsel
+questions and obligation map and attributed them to the lens. Caught by the executor, who flagged it
+rather than shipping it silently; corrected in revision 2 of that brief, which now carries the lens's
+own words. Executable fix the executor proposed: **a card that says "carry lens X's return" must point
+at the lens's own return, or say plainly that the executor is composing** — the two are different
+deliverables, and only one of them may be attributed.
 
 ## 11. The roster's proposed cards — candidates for the architect to rank
 
