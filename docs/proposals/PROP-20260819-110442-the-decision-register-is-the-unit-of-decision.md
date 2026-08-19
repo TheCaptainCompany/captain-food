@@ -110,7 +110,7 @@ hours after it was written (§1.5).
 One name, two concepts — the `evans` diagnosis exactly. "ADR" means both *one decision* and *a
 sitting's ten answers*. A citation of `ADR-20260818-233000` cites ten decisions at once; closing one
 of them requires prose. Meanwhile the **register row key** (`MARGIN-MECHANISM`, `CAPTAINNET-ZERO`,
-`STO-9`) *is* the real unit of decision — 115 of them already exist and are already used as stable
+`STO-9`) *is* the real unit of decision — they already exist and are already used as stable
 handles across ADRs, STATUS and proposals — and it is **the one thing in this repo with no machine
 identity, no declaration site, and no ref-walker**.
 
@@ -218,9 +218,10 @@ Found at mob briefing before any code, and **all four are corrected by the found
 
 Slices stay independently **reviewable**; no slice may be **reported as delivering the user-facing
 outcome**. `holub`'s underlying argument is preserved verbatim in the ADR's Consequences and is not
-argued past: zero orders have ever flowed end to end, the last green nightly smoke was **2026-07-29**,
-and the #556 walk card has no branch and no commit. His answer to *"what is the smallest subset that
-could ride alongside #556"* was **none of the four**.
+argued past: zero orders have ever flowed end to end, and the last green nightly smoke was
+**2026-07-29**. ⚠️ His third antecedent — that the #556 walk card had no branch and no commit — is
+**withdrawn as false**. A prior local-clone observation did not contain the remote branch. GitHub evidence now confirms draft PR #621 on branch `556-local-walk-harness` at `d13c531`; its current-base validity remains unverified and it is not to be resumed without an approved recovery path. His answer to *"what is the smallest subset that could ride
+alongside #556"* was **none of the four**.
 
 ### 2.4 What is NOT authorised
 

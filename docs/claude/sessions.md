@@ -8,10 +8,13 @@ Related: [codegen.md](codegen.md) (what each gate does) · [loops.md](loops.md) 
 runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 
 > **This file is an INDEX; the rules live in [`sessions/`](sessions/).** Split 2026-08-19 on a
-> founder instruction — at 134 KB it was larger than any session would read, so the boot step that
+> founder instruction — at 133 802 B (`git cat-file -s a981c50:docs/claude/sessions.md`) it was
+> larger than any session would read, so the boot step that
 > named it was satisfied by a truncated read (see below). **No rule was removed**: every section is
 > byte-identical in its topic file, `§N` numbering is unchanged, and the four files are listed here
 > one line per rule. Read this page; fetch the topic file the work actually touches.
+> **No file size is quoted here**: a self-measured corpus figure in prose is stale the moment the
+> file it measures changes, which is the defect this very split was corrected for.
 >
 > **Why the split is the fix and not a tidy-up**: the rules below are individually cheap and
 > collectively unreadable. An agent told to "read sessions.md" read the first sections and stopped,
@@ -20,7 +23,7 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 
 ## The rules, by topic
 
-### [Gates, builds and what each one actually proves](sessions/gates.md) · 46 KB
+### [Gates, builds and what each one actually proves](sessions/gates.md)
 
 Which gate to run, what it compiles, what it silently omits.
 
@@ -34,7 +37,7 @@ Which gate to run, what it compiles, what it silently omits.
 - [`make rust` does not compile the application](sessions/gates.md#make-rust-does-not-compile-the-application)
 - [18. A CI-workflow change: does it fit the job's timeout, and does it regress the rollback path?](sessions/gates.md#18-a-ci-workflow-change-does-it-fit-the-jobs-timeout-and-does-it-regress-the-rollback-path)
 
-### [The container: disk, output caps, and what it cannot do](sessions/environment.md) · 19 KB
+### [The container: disk, output caps, and what it cannot do](sessions/environment.md)
 
 Hard limits of the execution environment.
 
@@ -45,7 +48,7 @@ Hard limits of the execution environment.
 - [A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`](sessions/environment.md#a-mob-aggregation-exceeds-the-bash-output-cap--read-it-in-slices-never-cat)
 - [The disk cost of a parallel mob review, and what to reclaim first](sessions/environment.md#the-disk-cost-of-a-parallel-mob-review-and-what-to-reclaim-first)
 
-### [Evidence — what counts as proof, and what only looks like it](sessions/evidence.md) · 35 KB
+### [Evidence — what counts as proof, and what only looks like it](sessions/evidence.md)
 
 Green is not proof; a claim you cannot re-run is not evidence.
 
@@ -62,7 +65,7 @@ Green is not proof; a claim you cannot re-run is not evidence.
 - [A "seen red" claim must name HOW the test was made to fail](sessions/evidence.md#a-seen-red-claim-must-name-how-the-test-was-made-to-fail)
 - [Running a mutation by hand: `git checkout <file>` reverts to HEAD, not to your work](sessions/evidence.md#running-a-mutation-by-hand-git-checkout-file-reverts-to-head-not-to-your-work)
 
-### [Workflow — git, GitHub, claims, commits and the mob](sessions/workflow.md) · 30 KB
+### [Workflow — git, GitHub, claims, commits and the mob](sessions/workflow.md)
 
 Claim/PR/commit mechanics and surviving a session that ends mid-flight.
 

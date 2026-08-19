@@ -174,8 +174,12 @@ chose against the proposal's own recommendation:
   exist yet. Antecedents he named: zero orders have ever flowed end to end; the last green nightly smoke
   was **2026-07-29** (21 days); the [#556](https://github.com/TheCaptainCompany/captain-food/issues/556)
   walk card landed **2026-08-17**; `docs/` commit volume has far outrun `crates/` commit volume over
-  the same window; **107 ADRs** in August.
-  ⚠️ **Two figures struck as `UNVERIFIED`, and one claim withdrawn as false.** The lens's *"36 `docs/`
+  the same window; and a high ADR production rate in August (his figure for it is quoted below and
+  carries no antecedent — see the strike note).
+  ⚠️ **Three figures struck as `UNVERIFIED`, and one claim withdrawn as false.** The **107 ADRs**
+  figure quoted below names no command, ref or scope, and the record's own prose said *in August* while
+  the quote says *in fourteen days* — two denominators for one number. The quote stays verbatim as his
+  words; the figure is not relied on here. The lens's *"36 `docs/`
   commits vs 5 `crates/`"* pair does not reproduce: three independent derivations at `df082e6` gave
   36 (as recorded), 45, and 33 for the first, and 5, 5 and 4 for the second, because no scope was ever
   stated — `--since` boundary, ref, and whether merge commits count all move it. **The figures are not

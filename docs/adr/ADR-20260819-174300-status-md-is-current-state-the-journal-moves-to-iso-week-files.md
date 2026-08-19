@@ -62,7 +62,7 @@ end.
    header, where a writer sees it, and in `autonomous-run.md` boot step 2.
 
 **Two fences held, and they are part of the decision.** `docs/proposals/DECISIONS.md` (631 346 B,
-88% of the remaining boot cost) was **not touched**: it is the subject of PROP-20260819-110442, which
+approximately **87%** at `3a207eb` (631 346 B of 722 124 B, the six files named in `docs/claude/autonomous-run.md` §"Ground yourself first", `git cat-file -s` on each) of the remaining boot cost) was **not touched**: it is the subject of PROP-20260819-110442, which
 is `Proposed` with D1–D5 open, and splitting it would pre-empt a decision the founder has not made.
 No retrieval architecture was built — no QMD, no librarian agent, no ADR frontmatter — per the
 founder's 2026-08-18 deferral of #643 (*"we will not apply it yet we will finish what we have started
@@ -98,7 +98,7 @@ first"*).
   resolve.
 
 ### Negative
-- **`DECISIONS.md` is now 88% of the remaining boot cost.** This change makes the register the single
+- **`DECISIONS.md` is now approximately **87%** at `3a207eb` (631 346 B of 722 124 B, the six files named in `docs/claude/autonomous-run.md` §"Ground yourself first", `git cat-file -s` on each) of the remaining boot cost.** This change makes the register the single
   dominant unread file rather than one of two, and it is fenced until D1–D5 are answered.
 - Reading a full journal entry now costs a second file open.
 - `2026-W33` is 271 611 B — an archive file no one can read end to end. Acceptable because it is

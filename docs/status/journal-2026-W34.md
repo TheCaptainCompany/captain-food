@@ -1,8 +1,55 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **27 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **28 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 🧮 **2026-08-19 — SECOND CORRECTION PASS: six review findings, and a claim of my own withdrawn**
+> (PR [#661](https://github.com/TheCaptainCompany/captain-food/pull/661)). A fresh independent review
+> of the first correction returned **FAIL** on six blocking findings. All six corrected; nothing merged.
+>
+> **F1 — a claim my own commit had declared FALSE survived, live, in the two files a session actually
+> boots from.** `PROP-20260819-110442` and the newest entry of this journal still said #556 *"has no
+> branch and no commit"*. Both now carry the precise, time-bound statement instead: **a prior
+> local-clone observation did not contain the remote branch; GitHub evidence confirms draft PR #621 on
+> `556-local-walk-harness` at `d13c531`; its current-base validity remains unverified and it is not to
+> be resumed without an approved recovery path.** The consequence of leaving it was concrete — a session
+> grounding on STATUS/journal would have concluded #556 was unstarted and redone four commits.
+>
+> **F2/F3 — two unsourced exact counts removed rather than restated.** *"115 mnemonic keys"* is gone
+> from the proposal (it survived there after being struck from the ADR), and the bare *"107 ADRs in
+> August"* is gone from the ADR's authored line; the figure remains only inside `holub`'s verbatim quote,
+> now marked as carrying no antecedent and not relied on. **A second unsourced number is not a cure for
+> the first.**
+>
+> **F4 — 88% was wrong; it is ~87%, and it now names its measurement.** Four documents published two
+> values for one ratio. All four now read *approximately 87% at `3a207eb` (631 346 B of 722 124 B)*,
+> over the six files named in `autonomous-run.md` §"Ground yourself first", `git cat-file -s` on each.
+>
+> **F5 — the `REG-*` rows said `CLOSED` in the key cell and `Not decided` in the status cell.** That is
+> exactly the defect the proposal was written to abolish, reproduced by the change that rules on it.
+> All seven rebuilt: **the key cell is the stable concern identity alone**, and lifecycle state appears
+> **once**, in the controlled status field — `Decided` · `Superseded` · `Not scheduled`. `Closed` is no
+> longer used as a substitute for either.
+>
+> **F6 — hand-maintained size figures removed, not re-derived into prose.** The first correction added
+> 37 lines to `evidence.md` and left the index saying `35 KB`. All four per-file sizes are gone from the
+> index, and `autonomous-run.md`'s two self-measured figures with them; the one historical figure that
+> remains is anchored to a ref (`git cat-file -s a981c50:docs/claude/sessions.md`).
+>
+> ⚠️ **A claim of mine is withdrawn.** I reported *"four malformed rows in `docs/adr/README.md`,
+> pre-existing"*. **Only `:109` is malformed** — an unescaped `|` in an ADR title. `:76`, `:114` and
+> `:115` use `\|` inside code spans and are well-formed. My checker handled neither escaped pipes nor
+> code spans, and I reported its output as fact. **That was the fourth checker of this session to be
+> wrong in the same way** — after a negative lookahead, a variation selector, a trailing-delimiter
+> assumption and a whitespace-collapsing slugger. **No checker used in this pass is authoritative for
+> Markdown tables or anchors**; the corrections were verified with ad-hoc scripts and by an independent
+> reviewer, not by a gate.
+>
+> **The finding underneath all of it, recorded and NOT acted on**: every defect across six review passes
+> on this branch was found by a person or a reviewer, never by a gate — and `STATUS.md` says so out loud.
+> The executable answer is fenced: `REG-WHEN` is **not scheduled** and
+> [#659](https://github.com/TheCaptainCompany/captain-food/issues/659) is **not approved**.
+
 > 🏁 **2026-08-19 — WORKSTREAM CLOSED OPERATIONALLY; the priority is #556**
 > ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md)). Three precisions land with the founder's close-out and nothing
 > else does. **(1)** The fifth fixture is now stated as a condition rather than a direction: an answer
@@ -21,7 +68,9 @@ Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, 
 > ⛔ **No further decision-register work in this branch or session.** No new task started here. A fresh
 > session, on the appropriate branch, resumes the already-authorized
 > [#556](https://github.com/TheCaptainCompany/captain-food/issues/556) local acceptance-harness dispatch
-> card (`docs/dispatch/556-local-walk-harness.md`), which still has no branch and no commit.
+> card (`docs/dispatch/556-local-walk-harness.md`).
+> ⚠️ **#556 is NOT unstarted.** A prior local-clone observation did not contain the remote branch.
+> GitHub evidence now confirms draft PR #621 on branch `556-local-walk-harness` at `d13c531`; its current-base validity remains unverified and it is not to be resumed without an approved recovery path.
 
 > 🔒 **2026-08-19 — DESIGN PHASE CLOSED: the two-clock model is ruled, and the register programme
 > stops here** ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md) amended). The last open gap this team flagged —
@@ -223,7 +272,7 @@ Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, 
 > **Why it was worth a chunk**: the six-file boot order in `docs/claude/autonomous-run.md` was
 > **1 441 655 B** (~272k tokens at 1.4 tokens/word) — larger than the context window, so **no session
 > had ever completed steps 2 and 3**, and every one reported grounding itself. It is now **722 124 B**.
-> ⚠️ **`DECISIONS.md` is now 88% of what remains** and was deliberately NOT touched: it is the subject
+> ⚠️ **`DECISIONS.md` is now ~87% of what remains** (631 346 B of 722 124 B at `3a207eb`) and was deliberately NOT touched: it is the subject
 > of [PROP-20260819-110442](../proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md),
 > `Proposed` with D1–D5 open. No retrieval architecture was built either, per the 2026-08-18 #643
 > deferral. **This does not answer the founder's original question** — the failure there was that

@@ -2,7 +2,7 @@
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 
-> **This file is CURRENT STATE.** The running journal — 226 entries, 2026-07-20 → 2026-08-19 — moved
+> **This file is CURRENT STATE.** The running journal — 227 entries, 2026-07-20 → 2026-08-19 — moved
 > to [`docs/status/`](status/) on 2026-08-19, one file per ISO week, entries byte-identical. This page
 > now opens with what the system IS; the last two weeks are indexed at the bottom, and the archive is
 > linked from there. Rationale and the measurement that forced it:
@@ -174,8 +174,9 @@ One line per entry for the current and preceding ISO week. Full entries — and 
 are in the week files linked under each heading. **These counts are hand-maintained**: nothing yet
 gates that an appended entry also gets its row (see the ADR's follow-up).
 
-### [2026-W34](status/journal-2026-W34.md) — 2026-08-17 → 2026-08-19 · 27 entries · current week
+### [2026-W34](status/journal-2026-W34.md) — 2026-08-17 → 2026-08-19 · 28 entries · current week
 
+- `2026-08-19` 🧮 SECOND CORRECTION PASS: six review findings, and a claim of my own withdrawn
 - `2026-08-19` 🏁 WORKSTREAM CLOSED OPERATIONALLY; the priority is #556
 - `2026-08-19` 🔒 DESIGN PHASE CLOSED: the two-clock model is ruled, and the register programme stops here
 - `2026-08-19` 🗿 REG-REVERSAL DECIDED (record-as-aggregate), REG-WHEN RULED NOT SCHEDULED, and the gate-execution…
@@ -288,11 +289,11 @@ gates that an appended entry also gets its row (see the ADR's follow-up).
 
 | Week | Dates | Entries | File |
 |---|---|---:|---|
-| 2026-W34 | 2026-08-17 → 2026-08-19 | 27 | [`journal-2026-W34.md`](status/journal-2026-W34.md) |
+| 2026-W34 | 2026-08-17 → 2026-08-19 | 28 | [`journal-2026-W34.md`](status/journal-2026-W34.md) |
 | 2026-W33 | 2026-08-10 → 2026-08-16 | 77 | [`journal-2026-W33.md`](status/journal-2026-W33.md) |
 | 2026-W32 | 2026-08-03 → 2026-08-09 | 35 | [`journal-2026-W32.md`](status/journal-2026-W32.md) |
 | 2026-W31 | 2026-07-27 → 2026-08-02 | 27 | [`journal-2026-W31.md`](status/journal-2026-W31.md) |
 | 2026-W30 | 2026-07-20 → 2026-07-26 | 60 | [`journal-2026-W30.md`](status/journal-2026-W30.md) |
 
-**226 entries** across five week files (632,890 B, measured at the commit that lands this).
+**227 entries** across five week files (637,295 B, measured at the commit that lands this).
 This page is what a session reads at boot; the archive is fetched on purpose.
