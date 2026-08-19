@@ -1,8 +1,47 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **25 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **26 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 🔒 **2026-08-19 — DESIGN PHASE CLOSED: the two-clock model is ruled, and the register programme
+> stops here** ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md) amended). The last open gap this team flagged —
+> clause 7's undefined time source — is **closed by the founder rather than deferred into the schema**:
+>
+> ```yaml
+> recorded_at:   # immutable, repository-controlled ordering
+> effective_at:  # optional policy/domain applicability date
+> ```
+>
+> **Lifecycle and supersession validation use `recorded_at`** (or an equally monotonic
+> repository-controlled sequence), and **`effective_at` must not let a later edit bypass supersession or
+> reopen a record implicitly.** Why the cut matters: with one date, clause 7's `t` would have been
+> **author-supplied** — not monotonic, not adversarially safe — and setting `effective_at` earlier than
+> the supersession would have reopened, through the back door, exactly the hole *"do not infer silent
+> reopening from a merge conflict"* was written to shut. It is the same distinction the repo already
+> draws between an envelope `occurredAt` and business dates inside a payload. **A fifth fixture is now
+> implied**: an answer whose `effective_at` predates the supersession must still be rejected on
+> `recorded_at` grounds — the test that proves the two clocks do not collapse under pressure.
+>
+> ⛔ **Not authorised**: REG implementation, schema, YAML records, generated index, migration, librarian
+> enforcement, GraphRAG/QMD work, C5-lens dispatch. **The active priority returns to #556.** #659 may be
+> considered later as a separately approved, narrowly scoped integrity task; it neither authorises nor
+> blocks REG work.
+>
+> 📏 **Before scheduling may even be ASKED for**, the #556 milestone owes a fresh measurement of four
+> things: **boot context**, **decision status distribution**, **repeated-question incidents**, and
+> **bounded-index feasibility**. The third is the only one that measures the *problem* rather than the
+> *artifact*, and the programme's entire justification rests on it. Today's figures — 722 124 B boot
+> order, 75 of 154 rows unstatused, 136 B/row index model — are dated observations and **explicitly not
+> durable inputs** to that request.
+>
+> 🔧 The gate-command rule is accepted as a **documented interim control**, with one bounded
+> escalation recorded inside it ([sessions/gates.md §1b](../claude/sessions/gates.md)): *when hook or
+> dispatch wiring is explicitly scheduled*, gate commands **fail closed on their direct exit status**,
+> **preserve output**, and carry a **negative test proving a trailing successful command cannot mask a
+> failed validation**. Three clauses, not implemented now, **not to be broadened into hook-platform
+> work**. The negative test is the load-bearing clause — without it the hardening would itself be the
+> unverified claim this rule exists to name.
+
 > 🗿 **2026-08-19 — REG-REVERSAL DECIDED (record-as-aggregate), REG-WHEN RULED NOT SCHEDULED, and
 > the gate-execution defect becomes a rule** ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md);
 > [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md)

@@ -287,6 +287,17 @@ scripts sit unwired in `.claude/hooks/` and `.claude/settings.json` still declar
 is a known, recorded gap and is not this rule's business. Until it is, the executable form of this rule
 is the shell itself: `set -euo pipefail`, or let the gate be the command whose exit code you use.
 
+**This rule is an accepted INTERIM CONTROL, and its escalation is already recorded.** If you are reading
+it because you are wiring hooks or dispatch, this bounded item is yours and nothing wider is:
+
+> **When hook/dispatch wiring is explicitly scheduled** — and only then — make required gate commands
+> **fail closed on their direct exit status**, **preserve their output**, and add a **negative test
+> proving that a trailing successful command cannot mask a failed validation command.**
+
+Three clauses, no more. **Do not broaden it into hook-platform work** (founder, 2026-08-19,
+ADR-20260819-201218). The negative test is the load-bearing clause: without it the hardening is itself an
+unverified claim, which is the defect this whole rule exists to name.
+
 ## 8. Generated code can enforce something the spec does not say
 
 `make validate` compiles patterns from the DECODED spec and is happy; the emitted Rust is a separate
