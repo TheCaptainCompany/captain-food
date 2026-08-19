@@ -1,8 +1,28 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **26 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **27 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 🏁 **2026-08-19 — WORKSTREAM CLOSED OPERATIONALLY; the priority is #556**
+> ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md)). Three precisions land with the founder's close-out and nothing
+> else does. **(1)** The fifth fixture is now stated as a condition rather than a direction: an answer
+> whose `effective_at` precedes a supersession must still be **rejected if its repository-controlled
+> `recorded_at` is later than that supersession** — lifecycle validity and ordering are **exclusively**
+> on `recorded_at`, and `effective_at` carries **no lifecycle authority whatsoever**. **(2)** The owed
+> measurement of repeated-question incidents requires **source evidence** per incident, citing the
+> exchange and the record that already answered it: **an asserted count is not a measurement**, which is
+> this session's own lesson applied to the only figure that measures the problem rather than the
+> artifact. **(3)** The conditional hook hardening stays in
+> [sessions/gates.md §1b](../claude/sessions/gates.md) with **no standalone issue** — it has no
+> executable schedule and a stale tracker item is noise — and **when hook wiring is explicitly
+> scheduled it is promoted into that implementation issue with the negative masking test as an
+> acceptance condition**.
+>
+> ⛔ **No further decision-register work in this branch or session.** No new task started here. A fresh
+> session, on the appropriate branch, resumes the already-authorized
+> [#556](https://github.com/TheCaptainCompany/captain-food/issues/556) local acceptance-harness dispatch
+> card (`docs/dispatch/556-local-walk-harness.md`), which still has no branch and no commit.
+
 > 🔒 **2026-08-19 — DESIGN PHASE CLOSED: the two-clock model is ruled, and the register programme
 > stops here** ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md) amended). The last open gap this team flagged —
 > clause 7's undefined time source — is **closed by the founder rather than deferred into the schema**:

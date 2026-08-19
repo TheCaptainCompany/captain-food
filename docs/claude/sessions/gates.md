@@ -294,9 +294,12 @@ it because you are wiring hooks or dispatch, this bounded item is yours and noth
 > **fail closed on their direct exit status**, **preserve their output**, and add a **negative test
 > proving that a trailing successful command cannot mask a failed validation command.**
 
-Three clauses, no more. **Do not broaden it into hook-platform work** (founder, 2026-08-19,
-ADR-20260819-201218). The negative test is the load-bearing clause: without it the hardening is itself an
-unverified claim, which is the defect this whole rule exists to name.
+Three clauses, no more. **Do not broaden it into hook-platform work**, and **do not file a standalone
+issue for it** — it has no executable schedule and a stale tracker item is noise (founder, 2026-08-19,
+ADR-20260819-201218). **When hook wiring is explicitly scheduled, promote this requirement into that
+implementation issue and require the negative masking test as an acceptance condition.** The negative
+test is the load-bearing clause: without it the hardening is itself an unverified claim, which is the
+defect this whole rule exists to name.
 
 ## 8. Generated code can enforce something the spec does not say
 

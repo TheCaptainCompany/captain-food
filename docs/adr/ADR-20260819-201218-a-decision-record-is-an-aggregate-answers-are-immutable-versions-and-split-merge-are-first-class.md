@@ -197,9 +197,11 @@ distinction the repo already draws between an event's `occurredAt` envelope fiel
 inside a payload.
 
 **Consequence for the four required demonstrations**: the concurrent-append-after-supersession fixture
-must be written against `recorded_at`, and a fifth shape is now implied and worth including — *an answer
-whose `effective_at` predates the supersession must still be rejected on `recorded_at` grounds*. That is
-the fixture that proves the two clocks do not collapse into one under pressure.
+must be written against `recorded_at`, and a **fifth fixture is required** — *an answer whose
+`effective_at` precedes a supersession must still be **rejected if its repository-controlled
+`recorded_at` is later than that supersession***. **Lifecycle validity and ordering remain exclusively on
+`recorded_at`; `effective_at` is domain-applicability data only** and carries no lifecycle authority
+whatsoever. That fifth fixture is what proves the two clocks do not collapse into one under pressure.
 
 ### The design phase is closed
 
@@ -221,9 +223,10 @@ may be *asked for*, not assumed:
 1. **Boot context** — the six-file reading order, re-measured.
 2. **Decision status distribution** — the census. Today's *"75 of 154 rows carry no status token"* is a
    dated observation, not a durable fact.
-3. **Repeated-question incidents** — how often a settled decision was actually re-litigated in the
-   interval. This is the only one of the four that measures the *problem* rather than the *artifact*,
-   and the programme's whole justification rests on it.
+3. **Actual repeated-question incidents, with source evidence** — how often a settled decision was
+   genuinely re-litigated in the interval, each incident citing the exchange and the record that already
+   answered it. This is the only one of the four that measures the *problem* rather than the *artifact*,
+   the programme's whole justification rests on it, and **an asserted count is not a measurement**.
 4. **Feasibility of the bounded index** — modelled against the then-current open set, not against the
    136 B/row estimate recorded here.
 
@@ -236,5 +239,8 @@ The gate-command rule ([sessions/gates.md §1b](../claude/sessions/gates.md)) is
 > **fail closed on their direct exit status**, **preserve their output**, and add a **negative test
 > proving that a trailing successful command cannot mask a failed validation command.**
 
-**Not to be implemented now, and not to be broadened into hook-platform work.** It is written into the
-rule itself so that whoever wires hooks meets it there rather than rediscovering the defect.
+**Not to be implemented now, and not to be broadened into hook-platform work. No standalone issue is to
+be filed for it** — it has no executable schedule, and a stale tracker item would add noise (founder,
+2026-08-19). It is written into the rule itself so whoever wires hooks meets it there rather than
+rediscovering the defect. **When hook wiring is explicitly scheduled, promote this recorded requirement
+into that implementation issue and require the negative masking test as an acceptance condition.**
