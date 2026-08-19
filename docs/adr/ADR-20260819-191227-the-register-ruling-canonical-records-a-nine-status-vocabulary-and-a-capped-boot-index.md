@@ -7,8 +7,10 @@
 > started or implemented until the founder explicitly schedules it, after the local acceptance harness
 > has reached its stated milestone.** Six corrections apply to the approved design — see
 > [§ Amendment](#amendment-2026-08-19--six-corrections-the-scheduling-constraint-and-two-open-questions).
-> All four defects this ADR recorded are **resolved by those corrections**; two questions are now open
-> and carry a founder decision request. The six keys are approved **as named**.
+> All four defects this ADR recorded are **resolved by those corrections**. Both open questions have
+> since been ruled: **OQ-1 closed** (record-as-aggregate,
+> [ADR-20260819-201218](ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md))
+> and **OQ-2 ruled NOT SCHEDULED**. The six keys are approved **as named**.
 
 ## Status
 
@@ -377,13 +379,22 @@ repository-integrity task in its own right** — which is the candidate `holub` 
 
 ### Open questions — the only two things the founder is asked to decide
 
-- **OQ-1 — Reversal semantics.** Does a changed answer create a **successor record**, or does **one
-  record retain identity while its answer/version changes**? `vernon`'s analysis is carried in the
-  proposal's decision request; `evans`' position (a reversal is a new answer on the same record;
-  supersession applies only when the *question* is replaced) is on the record and unanswered until this
-  closes. **Gates all schema work.**
-- **OQ-2 — Execution priority after #556.** When, relative to the local acceptance harness reaching its
-  stated milestone, is the register work scheduled? **No slice is claimable until this is answered**,
-  and answering it is the founder's alone.
+- **OQ-1 — Reversal semantics. ✅ CLOSED 2026-08-19 — record-as-aggregate.** The key identifies the
+  **concern**; answers are **immutable versions**; `decided_by`, authority, evidence and effective dates
+  live on the **answer**; the current answer is a **deterministic projection**, never an overwritten
+  scalar; **split and merge are first-class** with explicit provenance and no rewritten history; a record
+  superseded at `t` **rejects** a later answer, and **silent reopening is never inferred from a merge
+  conflict**. The first schema proposal must demonstrate **one reversal, one split, one merge and one
+  concurrent-append-after-supersession rejection as executable fixtures BEFORE any schema is
+  hard-coded**. → [ADR-20260819-201218](ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md).
+  `evans`' divergence with `vernon`, filed unanswered above, is **answered and closed**: `vernon` agreed
+  with him and added the split/merge shape he had not enumerated.
+- **OQ-2 — Execution priority after #556. 🔴 RULED 2026-08-19: NOT SCHEDULED.** The #643 deferral remains
+  in force. **No `REG` implementation slice is authorised** before the #556 local acceptance-harness
+  milestone completes **and** the founder explicitly schedules the work. One carve-out: a separately
+  approved **repository-integrity task**, complete and valuable even if all `REG` work is cancelled,
+  which must **not** create `docs/decisions/**`, a decision schema, a generated decision index, or agent
+  enforcement.
 
-**Nothing else in the programme is a live question.** Everything else above is decided.
+**Nothing in the programme is a live question, and nothing in it is dispatchable.** Both open questions
+are now closed; what remains is a schedule the founder has reserved.

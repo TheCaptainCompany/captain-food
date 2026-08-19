@@ -1,8 +1,45 @@
 # Status journal — 2026-W34
 
-Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **24 entries**, newest first, in the order they were written.
+Journal entries dated **2026-08-17 → 2026-08-19** (ISO week 2026-W34, 2026-08-17 to 2026-08-23). **25 entries**, newest first, in the order they were written.
 
 Split out of `docs/STATUS.md` on 2026-08-19 — the entries are byte-identical, only their relative links gained a `../`. Current state, and the index of recent entries, live in [`../STATUS.md`](../STATUS.md).
+> 🗿 **2026-08-19 — REG-REVERSAL DECIDED (record-as-aggregate), REG-WHEN RULED NOT SCHEDULED, and
+> the gate-execution defect becomes a rule** ([ADR-20260819-201218](../adr/ADR-20260819-201218-a-decision-record-is-an-aggregate-answers-are-immutable-versions-and-split-merge-are-first-class.md);
+> [ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md)
+> OQ-1/OQ-2 closed). Both open questions are answered; **nothing became dispatchable.**
+>
+> **`REG-REVERSAL` — record-as-aggregate.** The key identifies the **concern**, never a position and
+> never an answer. Answers are **immutable versions**; `decided_by`, authority, evidence and effective
+> dates live on the **answer**, not the record. The current answer is a **deterministic projection over
+> the answer history, never a manually overwritten scalar** — which makes the failure that started this
+> whole thread (a hand-maintained derived value nothing re-derives) unspellable rather than discouraged.
+> **Split and merge are FIRST-CLASS**: successors carry explicit provenance, old records keep their
+> history and point forward, and **no history is rewritten to make the new topology look original**.
+> A record superseded at `t` **rejects** any later answer, and **silent reopening is never inferred from
+> a merge conflict** — the founder closing the tempting repair that would have turned a detected
+> corruption into an invented state transition. **The first schema proposal must demonstrate one
+> reversal, one split, one merge and one concurrent-append rejection as EXECUTABLE FIXTURES before any
+> schema is hard-coded** — the four scenarios are the specification, and it is `beck`'s
+> name-the-failing-test-first applied to a design rather than a rule.
+>
+> **`REG-WHEN` — not scheduled.** The #643 deferral stands. **No `REG` implementation slice is authorised**
+> before #556's local acceptance-harness milestone completes **and** the founder explicitly schedules it.
+> One carve-out: a separately approved **repository-integrity task**, valuable even if all `REG` work is
+> cancelled, which must **not** create `docs/decisions/**`, a decision schema, a generated decision index,
+> or agent enforcement.
+>
+> ⚠️ **Gate-execution rule — earned by a defect in this session and now recorded**
+> ([sessions/gates.md §1b](../claude/sessions/gates.md)). A commit reached `origin` on a tree with three
+> validator errors because the gate was run as
+> `make validate >/dev/null 2>&1; echo "exit=$?" && git commit`: the **`echo` succeeded**, so `&&`
+> continued, and `make validate`'s exit of **2** blocked nothing. **Run the gate directly so its exit
+> code IS the command's, or run under `set -euo pipefail`; the commit gate must consume the validator's
+> direct exit code — never a variable, never a captured string, never a later command's success.**
+> `>/dev/null` on a gate you are about to act on is the smell. It belongs with §14 and §15 and is the
+> family's cheapest member, because **the gate did fire and the operator threw the answer away**. Not
+> fixed by a hook: the founder excluded a hook refactor, and the four scripts in `.claude/hooks/` remain
+> unwired with no `hooks` key in `.claude/settings.json` — a known gap, not this rule's business.
+
 > 🛑 **2026-08-19 — DESIGN APPROVAL ONLY: the register ruling is AMENDED, all four defects are
 > CORRECTED, and NOTHING IS CLAIMABLE** ([ADR-20260819-191227](../adr/ADR-20260819-191227-the-register-ruling-canonical-records-a-nine-status-vocabulary-and-a-capped-boot-index.md) amended;
 > [PROP-20260819-110442](../proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md)

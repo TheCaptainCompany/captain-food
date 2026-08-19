@@ -241,6 +241,52 @@ verify `git branch --show-current` immediately before EVERY commit on `main` —
 switch put a `main` commit on a feature branch, and `git push origin main` then reported
 "Everything up-to-date" because local `main` genuinely matched origin while HEAD sat elsewhere.
 
+## 1b. Run the gate DIRECTLY — never capture its output and read a later `echo` as its result
+
+**Founder directive, 2026-08-19, after this rule was earned in the same session it was written.**
+
+A validation command's exit code is evidence only if something actually consumes it. This is what NOT
+to do, and it is a real commit that reached `origin`:
+
+```sh
+# WRONG -- this committed a tree with three validator errors in it
+timeout 1500 make validate >/dev/null 2>&1; echo "exit=$?" && git commit ...
+```
+
+The `echo` succeeded. `&&` therefore continued. `make validate` had exited **2**, the output was in
+`/dev/null`, and the failing gate blocked nothing. Cost: one bad commit pushed, one follow-up commit to
+repair it, and a founder round-trip to rule on the process — for a defect the gate had already found.
+
+**The rule, and it is not stylistic:**
+
+- **Run the gate directly** so its exit code is the command's exit code:
+  ```sh
+  make validate                     # its exit code IS the result
+  make validate && git commit ...   # the gate gates the commit
+  ```
+- **Or run under `set -euo pipefail`**, so a non-zero exit aborts instead of being stepped over:
+  ```sh
+  set -euo pipefail
+  make validate
+  git commit ...
+  ```
+- **The commit/dispatch gate must consume the validator's direct exit code.** Never a variable, never a
+  captured string, never a later command's success.
+- **`>/dev/null` on a gate you are about to act on is the smell.** Filtering output for readability is
+  fine (`make test-quiet`, `make rust-quiet`, `| grep -E '\[error'`) — *discarding* it and then
+  asserting the result from something else is not.
+
+**Why it is worth its own rule rather than a line in §1**: the mistake does not look like a mistake. The
+transcript shows a gate being run, an exit code being printed, and a commit following — it reads as
+diligence. §14 ("a green review job does not mean a review happened") and §15 ("read what a gate
+EXCLUDES") are the same family; this is that family's cheapest and most embarrassing member, because the
+gate *did* fire and the operator threw the answer away.
+
+**Not fixed by a hook** (founder: *"do not start a broad hook refactor under this instruction"*). Four
+scripts sit unwired in `.claude/hooks/` and `.claude/settings.json` still declares no `hooks` key — that
+is a known, recorded gap and is not this rule's business. Until it is, the executable form of this rule
+is the shell itself: `set -euo pipefail`, or let the gate be the command whose exit code you use.
+
 ## 8. Generated code can enforce something the spec does not say
 
 `make validate` compiles patterns from the DECODED spec and is happy; the emitted Rust is a separate

@@ -25,6 +25,7 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 Which gate to run, what it compiles, what it silently omits.
 
 - [1. Pick the cheapest gate that proves the change](sessions/gates.md#1-pick-the-cheapest-gate-that-proves-the-change)
+- [1b. Run the gate DIRECTLY — never capture its output and read a later `echo` as its result](sessions/gates.md#1b-run-the-gate-directly-never-capture-its-output-and-read-a-later-echo-as-its-result)
 - [8. Generated code can enforce something the spec does not say](sessions/gates.md#8-generated-code-can-enforce-something-the-spec-does-not-say)
 - [8b. A guard over Rust STRUCTURE must parse the AST, not the text](sessions/gates.md#8b-a-guard-over-rust-structure-must-parse-the-ast-not-the-text)
 - [11. Installing a dev tool: crates.io works, GitHub release downloads do not](sessions/gates.md#11-installing-a-dev-tool-cratesio-works-github-release-downloads-do-not)
