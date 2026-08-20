@@ -333,7 +333,8 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > already-blocking `make validate`, **no new runtime dependency** · a dead-man's-switch workflow
 > shaped like `stale-claim-reaper.yml`, firing on **absence** · an executor preflight line
 > (**proposed only** — `.claude/agents/*.md` commits need in-conversation approval,
-> `docs/claude/sessions/workflow.md` §"A denied tool call is a DECISION") ·
+> `docs/claude/sessions/workflow.md` §"A commit touching `CLAUDE.md` or `.claude/agents/*.md` needs
+> in-conversation user approval") ·
 > `docs/claude/team-graph.md` as the derivation, held to three
 > constraints so it is not a fifth authority. **State model: 13 collapse to 8** —
 > `intake → briefing/dispatch → execution-checkpoint* → independent-review → ci-gate → merged`, plus

@@ -184,7 +184,8 @@ is one `ListAgents` call.
 ### A mob aggregation exceeds the Bash output cap — read it in slices, never `cat`
 
 Roster returns and their aggregations are consistently **300+ lines**; `cat`-ing one truncates, and a
-truncated read of a lens's return is exactly the failure the verbatim rules above exist to prevent —
+truncated read of a lens's return is exactly the failure the
+[verbatim rules](evidence.md#verbatim-is-a-mechanical-check-not-a-careful-read) exist to prevent —
 you cannot tell a missing G8 from a clipped one. Read them with `sed -n '1,120p'` / `'120,240p'`, in
 ~120-line slices, and `wc -l` first so you know how many slices there are. Same for any mob artifact
 in the scratchpad. Cost that earned it: a return read as "complete" that had been cut mid-section,

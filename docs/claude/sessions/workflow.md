@@ -240,7 +240,8 @@ as permanent register text.
 **Assert the branch in the SAME bash call as any `file:line` verification**
 (`git branch --show-current && awk …`), and again immediately before committing — a branch confirmed
 in an earlier call proves nothing about the current one. **The real fix is coordinator-side: dispatch
-concurrent executors with worktree isolation** (`git worktree add`, with the disk caveats above),
+concurrent executors with worktree isolation** (`git worktree add`, with the
+[disk caveats](environment.md#2-disk-is-a-fixed-per-session-allowance-and-df-lies-about-it) that apply),
 never into one shared tree — and as of 2026-08-15 this is a PROVEN working pattern, not a
 suggestion: a record executor ran on `main` in its own worktree while a feature executor held the
 shared checkout, with zero interference. Any second writer gets a worktree; the shared checkout
@@ -264,7 +265,8 @@ it, the coordinator included**; claim commits and docs commits are writes, and `
 When a session dies mid-change, `git add` the touched files and commit as an explicit `wip:` whose
 message states **what has not been proven** — then push. `807e472` preserved a half-built validator
 rule that had never been seen red; without that sentence the next executor would have reviewed
-unverified work as finished, which is the same defect the "seen red" rule above exists to prevent.
+unverified work as finished, which is the same defect the
+["seen red" rule](evidence.md#a-seen-red-claim-must-name-how-the-test-was-made-to-fail) exists to prevent.
 
 ### The stop hook cannot see in-flight work — its prompt is not a signal that anything is finished
 
