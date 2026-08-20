@@ -90,6 +90,16 @@ It now has to be written down or it does not exist:
   ([ADR-20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)) — any lens
   may say "this is not next" and be heard.
 
+> **Amendment — superseded operational detail (2026-08-20).** The bullet above says the reversing
+> re-ranking's line goes in `docs/STATUS.md`. That was correct when this ADR was accepted, because
+> `docs/STATUS.md` *was* the running journal. After the journal split
+> ([#665 "docs: split sessions.md and STATUS.md into bounded, retrievable files"](https://github.com/TheCaptainCompany/captain-food/pull/665),
+> recorded in the status entry
+> **"2026-08-20 — THE JOURNAL WRITE PATH SWITCHES"**), that record goes at the **top** of the
+> applicable `docs/status/journal-YYYY-Www.md`; `docs/STATUS.md` changes only when durable state
+> changes. **The obligation is unchanged** — a reversing re-ranking is still written down or it does
+> not exist; only its destination moved.
+
 ## Alternatives considered
 
 - **Option A — record the delegation as an ADR, make the method binding, forbid self-serving
