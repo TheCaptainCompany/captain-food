@@ -10,8 +10,11 @@ autonomously and ask my help if needed."*)
 1. `CLAUDE.md` — the operating model; every rule there is authoritative over this file.
 2. `docs/STATUS.md` — live state. It carries the durable sections (deployment, read/write
    side, authorization, architecture decisions); historical journal entries are organised by
-   ISO week under `docs/status/`, linked from the bottom of the page. **Writing state**:
-   append the entry to the current week file, `docs/status/journal-<ISO-week>.md`.
+   ISO week under `docs/status/`, linked from the bottom of the page. **Writing state**: durable
+   state that changed goes in `docs/STATUS.md`; the dated entry goes at the **TOP** of the current
+   week file, `docs/status/journal-YYYY-Www.md` — the journal is newest-first, never append at the
+   end. If the week has no file yet, create it from the header the existing week files carry, then
+   add it to the index at the bottom of `docs/STATUS.md`.
 3. `docs/proposals/DECISIONS.md` — header + §22: what is open, what was just decided.
 4. `docs/adr/ADR-20260808-212741-solida-studio-strategic-frame.md` — strategic frame, incl. §6
    (the maintainer is the AI; mission-first; sequence diagrams are the customer's review surface).
@@ -23,20 +26,24 @@ autonomously and ask my help if needed."*)
 6. `docs/claude/loops.md` — the weekly time budget; this run operates under it (ADR-0014).
 
 Then derive the work plan: the prioritised backlog (GitHub Project "Prioritized backlog") from
-the top, informed by the latest architect NEXT-list in the register/STATUS. Do not re-derive
-decisions already recorded — execute them.
+the top, informed by the latest architect NEXT-list. `docs/STATUS.md` carries current durable
+state; dated decision history — including the most recent NEXT-list — lives in the register
+([`docs/proposals/DECISIONS.md`](../proposals/DECISIONS.md)) and in the recent weekly journal files
+under [`docs/status/`](../status/). Take the newest un-superseded statement, not the most specific
+one. Do not re-derive decisions already recorded — execute them.
 
 **Current standing objective (until STATUS says otherwise)**: the **six-clause acceptance
 criterion** — ONE walk through the LOCALLY deployed stack proving customer created → payment
 authorised → order created → accepted → delivered → payment captured
 ([ADR-20260813-191111](../adr/ADR-20260813-191111-the-acceptance-criterion-six-clauses-walked-with-the-front-door-unlocked-from-inside.md),
 amended 2026-08-14: full enforcement and the full physical database split are IN scope, so the
-harness targets the split stack rather than a single-DB intermediate). Its ordered tail — the
-physical split band, the cross-tenant write-auth fix, hardening the `inbound_messages` write path,
-the local acceptance harness on the SPLIT stack, smoke L5, browser walls, then the walk — is
-maintained in **`docs/STATUS.md`** (2026-08-14 entry); read the tail there, do not re-pin it here.
-The previous objective was pinned in this file and within a week was naming issues the cutover had
-already passed.
+harness targets the split stack rather than a single-DB intermediate). Its ordered tail is **not
+pinned here and not pinned to any one entry**: read [`docs/STATUS.md`](../STATUS.md) for current
+durable state, then the relevant recent `docs/status/journal-YYYY-Www.md` entries and the
+applicable ADRs for dated decision history. **A supersession marker on an entry or an ADR is
+authoritative** — a re-marked sequence no longer runs, however specific and however recent it
+reads. The previous objective was pinned in this file and within a week was naming issues the
+cutover had already passed.
 
 ## The team
 
