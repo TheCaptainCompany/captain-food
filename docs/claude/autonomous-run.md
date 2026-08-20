@@ -8,12 +8,18 @@ autonomously and ask my help if needed."*)
 ## Ground yourself first (read in order)
 
 1. `CLAUDE.md` — the operating model; every rule there is authoritative over this file.
-2. `docs/STATUS.md` — live state.
+2. `docs/STATUS.md` — live state. It carries the durable sections (deployment, read/write
+   side, authorization, architecture decisions); historical journal entries are organised by
+   ISO week under `docs/status/`, linked from the bottom of the page. **Writing state**:
+   append the entry to the current week file, `docs/status/journal-<ISO-week>.md`.
 3. `docs/proposals/DECISIONS.md` — header + §22: what is open, what was just decided.
 4. `docs/adr/ADR-20260808-212741-solida-studio-strategic-frame.md` — strategic frame, incl. §6
    (the maintainer is the AI; mission-first; sequence diagrams are the customer's review surface).
-5. `docs/claude/sessions.md` — operational traps (GitHub MCP output size, disk, DB recipe,
-   executor dispatch rules, the 5-hour stall lesson).
+5. `docs/claude/sessions.md` — the session-rules INDEX, one line per rule. Read the index,
+   then fetch only the `docs/claude/sessions/` topic file the work touches: `gates.md`
+   (which gate proves what, DB recipe, dev-tool install) · `environment.md` (disk, MCP
+   output size, container restart) · `evidence.md` (what counts as proof) · `workflow.md`
+   (claim/PR/commit mechanics, the mob, asking the founder).
 6. `docs/claude/loops.md` — the weekly time budget; this run operates under it (ADR-0014).
 
 Then derive the work plan: the prioritised backlog (GitHub Project "Prioritized backlog") from
@@ -102,7 +108,7 @@ FEWER, BIGGER dispatches — never a quietly smaller mob.
   spec change that reverses one — console/DNS/external steps): use `AskUserQuestion` with enough
   context to answer cold, and BATCH questions — the customer checks in periodically; one visit
   should clear the whole queue. For a batch of 3+ decisions, use the interactive decision form
-  (DECISIONS.md "How to decide" way #4; recipe in sessions.md).
+  (DECISIONS.md "How to decide" way #4; recipe in `sessions/workflow.md`).
 - **Status discipline** (customer directive, 2026-08-09: *"Every hour don't need more often"* —
   ADR-20260809-020859, superseding the 5-minute cadence of 2026-08-08): post a status at
   **every meaningful transition** (dispatched · PR opened · merged · blocked · question queued ·
