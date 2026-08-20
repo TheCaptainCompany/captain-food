@@ -3,6 +3,24 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🗂️ **2026-08-20 — THE JOURNAL WRITE PATH SWITCHES: `STATUS.md` is durable state plus an index,
+> dated entries go to the ISO-week file** ([#665](https://github.com/TheCaptainCompany/captain-food/pull/665)).
+> `docs/STATUS.md` is now **durable state and the journal index** — deployment, read/write side,
+> authorization, architecture decisions, and links to the week files. It is **not** where a dated
+> entry goes. **Write a dated entry at the TOP of the applicable `docs/status/journal-YYYY-Www.md`**:
+> the journal is newest-first, so appending at the end makes the file's own header false on the first
+> write. **If the week has no file yet**, create it from the header the existing week files carry —
+> `# Status journal — YYYY-Www`, the newest-first sentence, and the `../STATUS.md` back-link — then
+> add it to the index at the bottom of `STATUS.md` and place the entry at the top of the new file.
+> **The active writer instructions were aligned in this branch**, so no standing path still points a
+> dated entry at `STATUS.md`: `.claude/agents/executor.md`, `.claude/agents/architect.md`,
+> `.claude/skills/architecture-review/SKILL.md`, `.github/workflows/dev-loop.yml`,
+> `docs/claude/autonomous-run.md`, `docs/BACKLOG.md` and the PR template.
+> **Still owed, approval-gated**: `CLAUDE.md` carries three analogous `STATUS.md` instructions and is
+> deliberately untouched here — `:309` still says a reversing re-ranking gets a `STATUS.md` line,
+> which this branch now contradicts. That reconciliation is a separate approved change, not a silent
+> edit around it.
+
 > 📄 **2026-08-19 — THE DECISION REGISTER IS THE UNIT OF DECISION: proposal filed, `Proposed`, NOT
 > dispatchable** ([PROP-20260819-110442](../proposals/PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md),
 > [DECISIONS §48](../proposals/DECISIONS.md), tracking
