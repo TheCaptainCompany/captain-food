@@ -35,9 +35,10 @@ blocked, the answer is "blocked" — never a re-rank. A re-rank is justified by 
 a dependency that was wrong; never by what the ranker wants to work on next. Because the rationale no
 longer lives in the founder's head, it has to be written down or it does not exist: every
 bucket change or material row move is stated in the architect's run report with the method clause
-that justifies it, and a re-ranking that reverses a previously stated order also gets a line in
-[STATUS.md](STATUS.md). Any mob lens may contest a ranking at briefing time exactly as it contests a
-design.
+that justifies it, and a re-ranking that reverses a previously stated order also gets a dated line
+at the top of the current `docs/status/journal-YYYY-Www.md` — [STATUS.md](STATUS.md) changes only
+when durable state does. Any mob lens may contest a ranking at briefing time exactly as it contests
+a design.
 
 ## How value is defined (the ordering method)
 
