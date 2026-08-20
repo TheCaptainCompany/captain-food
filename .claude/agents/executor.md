@@ -59,8 +59,11 @@ agents collide.
    errors, `check-drift` clean. Fix and re-run until they pass; never weaken a gate to get green.
 5. **Completeness (ADR-0032)**: a change that adds behaviour also needs its test. If the item needed a
    rule or story, it was AMBER and should not have reached you.
-6. **Update `docs/STATUS.md`** in the same change when the change is substantive, and land any
-   cross-cutting decision as an ADR in the same change.
+6. **Record it in the same change** when the change is substantive: durable state that changed goes
+   in `docs/STATUS.md`; the dated journal entry goes at the **TOP** of the applicable
+   `docs/status/journal-YYYY-Www.md` — newest first, never appended at the end — creating that week
+   file from the established header if it does not exist yet. Land any cross-cutting decision as an
+   ADR in the same change.
 7. **Mark the PR ready for review and enable auto-merge together, as one indivisible step** — this
    is the default (ADR-20260815-115220) — then **supervise the checks until MERGED**: fix and push
    on failure, never end at "pushed, CI pending".

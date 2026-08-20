@@ -63,9 +63,13 @@ The rules live in [`sessions/`](sessions/); this page is the index.
 **Every session records what it learned** (ADR-20260730-034635), in the same change as the work. That
 is why this file exists, and it is how it stays worth reading.
 
-- **Where it goes**: operational findings (environment limits, tool behaviour, gate costs, workflow
-  traps) → here, or the relevant `docs/claude/` topic file. Decisions → an ADR. Option spaces →
-  a proposal + tracking issue. State → `STATUS.md`.
+- **Where it goes**: operational findings → the `docs/claude/sessions/` topic file that owns them —
+  environment limits and tool behaviour → [`environment.md`](sessions/environment.md); gate costs and
+  what a gate proves → [`gates.md`](sessions/gates.md); verification and "seen red" →
+  [`evidence.md`](sessions/evidence.md); workflow traps → [`workflow.md`](sessions/workflow.md) — or
+  the relevant other `docs/claude/` topic file. Decisions → an ADR. Option spaces → a proposal +
+  tracking issue. State → durable state in [`STATUS.md`](../STATUS.md); dated status history at the
+  top of the applicable [`docs/status/journal-YYYY-Www.md`](../status/).
 - **Prefer executable over prose.** If the lesson can be a validator rule, a behaviour test or a hook,
   write *that* — prose can be ignored, a gate cannot. `makefile_recipe_lines_are_ascii` turned a
   one-off Makefile breakage into a codegen test so it could not silently return; that is the bar.

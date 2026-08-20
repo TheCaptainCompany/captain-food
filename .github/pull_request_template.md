@@ -9,5 +9,5 @@
 - [ ] No hand edits under `specs/generated/**` (spec/emitter changed instead)
 - [ ] Completeness (ADR-0032): new commands/events/errors have behaviour tests (+ `rules:` links); new mutations/queries have story-map steps
 - [ ] Cross-cutting decisions recorded as an ADR (`ADR-YYYYMMDD-HHMMSS`) in this same change
-- [ ] `docs/STATUS.md` updated if the change is substantive
+- [ ] Substantive change recorded — `docs/STATUS.md` for durable state, and the dated entry at the top of the applicable `docs/status/journal-YYYY-Www.md`
 - [ ] All content in English

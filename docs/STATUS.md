@@ -159,7 +159,18 @@ See [`docs/adr/`](adr/) — latest: **20260802-200416 (drain loops woken by Post
 
 ## Journal
 
-Historical journal entries are organised by ISO week under `docs/status/`.
+**This page is durable state and a journal index. Dated status-journal entries do not go here.**
+
+Write a new dated entry at the **TOP** of the applicable weekly file under `docs/status/` — the
+journal is newest-first, so never append at the end of a week file. If the entry falls in an ISO
+week that has no file yet, create `docs/status/journal-YYYY-Www.md` with the established header:
+
+    # Status journal — YYYY-Www
+
+    Journal entries for ISO week YYYY-Www, newest first, in the order they were written.
+    Current state: [`../STATUS.md`](../STATUS.md).
+
+then add it to the list below and place the entry at the top of the new file.
 
 - [`journal-2026-W30.md`](status/journal-2026-W30.md)
 - [`journal-2026-W31.md`](status/journal-2026-W31.md)
