@@ -286,13 +286,16 @@ re-enables it**. Auth, keys, query discipline:
 - **Every session records what it learned** (ADR-20260730-034635), in the SAME change as the work —
   not just failures, not only on the second occurrence. Operational findings →
   [docs/claude/sessions.md](docs/claude/sessions.md) or the topic file; decisions → an ADR; option
-  spaces → a proposal; state → `STATUS.md`. **Prefer executable over prose** — a validator rule, test
+  spaces → a proposal; durable state → `STATUS.md`; dated status history → the top of the current
+  `docs/status/journal-YYYY-Www.md`. **Prefer executable over prose** — a validator rule, test
   or hook beats a bullet, because prose can be ignored and a gate cannot. Record only what is **not
   derivable from the code** and would **cost the next session time**, with the cost that earned it;
   sharpen an existing rule rather than appending a near-duplicate. **Writing nothing is a valid
   outcome.** Every recurring agent/loop failure becomes a rule, test or ADR.
-- **Keep [docs/STATUS.md](docs/STATUS.md) current with every substantive change**, and land
-  cross-cutting **decisions as ADRs in the same change** — so concurrent sessions never diverge.
+- **Record every substantive change in the same change** — durable state in
+  [docs/STATUS.md](docs/STATUS.md), the dated entry at the top of the current
+  `docs/status/journal-YYYY-Www.md` — and land cross-cutting **decisions as ADRs in the same
+  change** — so concurrent sessions never diverge.
 - **Respect the prioritised backlog — and the team now sets it** (founder directive 2026-08-10,
   [ADR-20260810-215503](docs/adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md)):
   priorities live in the GitHub Project "Prioritized backlog" (Priority field + row order) — pick
@@ -306,7 +309,8 @@ re-enables it**. Auth, keys, query discipline:
   position to make an item dispatchable, or its own recommendation legitimate**: a blocked top item
   is reported blocked, never re-ranked. Every bucket change or material row move is stated in the
   architect's run report with the method clause justifying it; a re-ranking that reverses a
-  previously stated order also gets a `STATUS.md` line.
+  previously stated order also gets a dated line at the top of the current
+  `docs/status/journal-YYYY-Www.md` — `STATUS.md` changes only when durable state does.
 - **Spec- and docs-only changes go straight to `main`** (founder directive): commit and push directly
   — no branch, no PR, no claim ceremony — for changes confined to `specs/**`, `docs/**`, ADRs,
   `CLAUDE.md`, `STATUS.md` and the artifacts they regenerate. **Keep `main` green**: run `make rust`
