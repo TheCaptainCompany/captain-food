@@ -110,7 +110,7 @@ pub fn database_url(suite: &str) -> Option<String> {
              since #474 a missing database FAILS instead of skipping silently.\n\
              \n\
              Run it for real:   DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres make test-crates\n\
-             (docs/claude/sessions.md carries the ~40s initdb recipe for this container.)\n\
+             (docs/claude/sessions/gates.md carries the ~40s initdb recipe for this container.)\n\
              \n\
              If you genuinely have no database, opt out EXPLICITLY and accept the receipt:\n\
              Opt out:           DB_TESTS_REQUIRED=0 make test-crates\n\

@@ -37,7 +37,9 @@ is only a tracking point that disappears when the work is done.
 git checkout main && git pull origin main
 ```
 
-Read the top of `docs/STATUS.md` and `git log --oneline -20` — what shipped since the last review?
+Read the current `docs/status/journal-YYYY-Www.md` week file (and the preceding one if the review
+spans a rollover) and `git log --oneline -20` — what shipped since the last review? `docs/STATUS.md`
+carries durable state and the journal index, not the record of what shipped.
 
 ### 2. Dedup (do this BEFORE looking for anything)
 
@@ -138,7 +140,11 @@ header. Commit proposals to `main`.
 
 ### 6. Keep STATUS current
 
-Add a dated entry to `docs/STATUS.md` for any substantive finding, in the same change.
+Add a dated entry at the **TOP** of the applicable `docs/status/journal-YYYY-Www.md` for any
+substantive finding, in the same change — newest first, never appended at the end; create the week
+file from the established header if it does not exist. `docs/STATUS.md` is durable state and the
+journal index, not the destination for dated entries — update it only where the current state it
+describes actually changed.
 
 ## Judgement notes
 

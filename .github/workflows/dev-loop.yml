@@ -82,7 +82,7 @@ jobs:
             unanswered decision, then STOP — do not invent work.
 
             STEP 2 — EXECUTOR.
-            ${{ inputs.dry_run && 'SKIPPED this run (dry_run = true). Output the dispatch and stop.' || 'Read `.claude/agents/executor.md` and act as it. Deliver the dispatched item end to end under the documented claim protocol: claim (label + comment), branch, DRAFT PR with `Closes #NN`, implement, `make rust` green, update docs/STATUS.md if substantive, then mark the PR ready for review and STOP.' }}
+            ${{ inputs.dry_run && 'SKIPPED this run (dry_run = true). Output the dispatch and stop.' || 'Read `.claude/agents/executor.md` and act as it. Deliver the dispatched item end to end under the documented claim protocol: claim (label + comment), branch, DRAFT PR with `Closes #NN`, implement, `make rust` green, record it if substantive (durable state in docs/STATUS.md; the dated entry at the TOP of the current docs/status/journal-YYYY-Www.md, newest first, creating that week file if it does not exist), then mark the PR ready for review and STOP.' }}
 
             NON-NEGOTIABLE for this unattended run:
               - NEVER edit anything under `specs/**`. If the work needs a DSL change it is AMBER:

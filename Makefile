@@ -118,7 +118,7 @@ test-crates:
 	  if [ -s $(DB_TEST_RECEIPT) ]; then \
 	    echo "test-crates: DB-GATED SUITES SKIPPED -- this run exercised NO database behaviour."; \
 	    echo "test-crates: skipped $$(cut -f1 $(DB_TEST_RECEIPT) | sort -u | wc -l) suite(s): $$(cut -f1 $(DB_TEST_RECEIPT) | sort -u | tr '\n' ' ')"; \
-	    echo "test-crates: re-run with DATABASE_URL set to exercise them (see docs/claude/sessions.md)."; \
+	    echo "test-crates: re-run with DATABASE_URL set to exercise them (see docs/claude/sessions/gates.md)."; \
 	  fi; \
 	  exit $$status
 

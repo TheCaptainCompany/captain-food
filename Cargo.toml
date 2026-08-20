@@ -128,7 +128,8 @@ strip = true          # drop symbols — smaller binary, faster load, no runtime
 # Measured on the default (`debug = true`) profile: `target/debug` reached 17G, of which `deps/` was
 # 13G, and 85% of the largest artifact (`server`, 506M) was `.debug_*` DWARF sections. Sessions run in
 # a container with a fixed disk allowance, and exhausting it fails builds in ways that look like
-# toolchain corruption rather than a full disk (see docs/claude/sessions.md §2 and §11).
+# toolchain corruption rather than a full disk (see docs/claude/sessions/environment.md §2 and
+# docs/claude/sessions/gates.md §11).
 #
 # `line-tables-only` keeps exactly the debug info anyone here actually consumes — file:line in panic
 # messages and test backtraces — and drops the variable/type DWARF that nothing but an interactive

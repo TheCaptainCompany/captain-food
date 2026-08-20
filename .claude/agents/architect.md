@@ -198,7 +198,9 @@ after.
 
 ## Procedure
 
-1. `git pull origin main`; read `docs/STATUS.md` head and recent commits.
+1. `git pull origin main`; read `docs/STATUS.md` for current durable state, the recent
+   `docs/status/journal-YYYY-Www.md` files for what shipped and for dated decision history, and
+   recent commits.
 2. List open issues; drop anything with `status/in-progress` or a live PR.
 3. In `Priority` order, then row order: classify the lane, verify each named dependency is *still*
    open, and check whether the proposal's questions are answered (an ADR or a PO comment counts).
@@ -274,7 +276,8 @@ theirs — that experience did not move, and no lens above owns it.
   change a bucket or a row position in order to make an item dispatchable, or to make your own
   recommendation legitimate**. A blocked top item is reported **blocked**, never re-ranked. State
   every bucket change or material row move in your run report with the method clause that justifies
-  it; a re-ranking that reverses a previously stated order also gets a line in `docs/STATUS.md`.
+  it; a re-ranking that reverses a previously stated order also gets a dated line at the TOP of the
+  current `docs/status/journal-YYYY-Www.md` — `docs/STATUS.md` changes only when durable state does.
   A `Priority` is not an approval: ranking an AMBER item `Urgent` does not move it out of AMBER.
 - **Never invent work.** "Nothing ready" is a valid and useful answer.
 - **Never report a finding you have not verified in code.** If you cannot cite it, do not file it.
