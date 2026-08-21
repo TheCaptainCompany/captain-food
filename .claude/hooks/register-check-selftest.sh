@@ -1,26 +1,60 @@
 #!/usr/bin/env bash
 # Guard tests for .claude/hooks/register-check.sh, plus the wiring- and drift-checks that keep the
-# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell, ~100ms).
+# register-check discipline alive (run from stop-gate.sh on every turn -- pure shell, ~200ms).
 #
 # WHY THIS EXISTS. "A gate never seen to fire is an unverified claim" (#292, beck): each case below
-# shows the hook red or green against the REAL script before any session trusts it. And the hook is
+# shows the hook red or green against the REAL script before any session trusts it. The hook is
 # exactly the silent-when-broken shape ADR-20260810-231300 warns about -- a matcher typo or a
-# removed settings entry disarms it with no signal -- so case W asserts the wiring exists, and case
-# D asserts every standing agent still carries its citation block (16 hand-pasted blocks are copy
-# drift waiting to happen; this is the executable fence for "cite, never fork").
+# removed settings entry disarms it with no signal -- so case W asserts the wiring exists, case D
+# asserts every standing agent still carries its citation block, and the R cases assert the
+# REG-2/REG-4 row gate (ADR-20260821-095957) actually loads and reads decision rows: the BLOCK
+# case is the load-proof, because with the legacy lane a hook that parsed nothing would pass
+# every ALLOW case indistinguishably (beck, 2026-08-21 briefing).
 #
-# Hermetic: fixtures are inline strings piped to the script; nothing here reads or writes state
-# beyond the hook's own append-only log.
+# Hermetic: payload cases run against FIXTURE rows in a throwaway dir via REGISTER_CHECK_DECISIONS
+# (never the live corpus, whose statuses change) with the log at /dev/null; the L cases then prove
+# the LIVE corpus wiring on two anchors that cannot legitimately change (REG-2 is decided forever
+# -- a reversal opens a NEW row, never reopens the file).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/.claude/hooks/register-check.sh"
 [ -f "$HOOK" ] || { echo "register-check selftest: cannot find $HOOK" >&2; exit 2; }
 
+FIX="$(mktemp -d "${TMPDIR:-/tmp}/register-check-selftest.XXXXXX")"
+trap 'rm -rf "$FIX"' EXIT
+cat > "$FIX/OPEN-ROW.yaml" <<'EOF'
+key: "OPEN-ROW"
+status: "open"
+owner: "founder"
+EOF
+cat > "$FIX/GONE-ROW.yaml" <<'EOF'
+key: "GONE-ROW"
+status: "decided"
+owner: "founder"
+decided: "2026-08-19"
+decided_by: "ADR-20260819-103112"
+EOF
+cat > "$FIX/DEFER-ROW.yaml" <<'EOF'
+key: "DEFER-ROW"
+status: "deferred"
+owner: "team"
+until: "after one order flows end to end (#556)"
+EOF
+cat > "$FIX/LAW-ROW.yaml" <<'EOF'
+key: "LAW-ROW"
+status: "open"
+owner: "counsel"
+EOF
+cat > "$FIX/_legacy.yaml" <<'EOF'
+legacy:
+  - OLD-ROW
+EOF
+
 fail=0
-expect() { # expect <case> <want-exit> <payload>
-  local case="$1" want="$2" payload="$3" got
-  printf '%s' "$payload" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+expect() { # expect <case> <want-exit> <decisions-dir> <payload>
+  local case="$1" want="$2" dir="$3" payload="$4" got
+  printf '%s' "$payload" | REGISTER_CHECK_LOG=/dev/null REGISTER_CHECK_DECISIONS="$dir" bash "$HOOK" >/dev/null 2>&1
   got=$?
   if [ "$got" -ne "$want" ]; then
     echo "register-check selftest: case $case FAILED (want exit $want, got $got)" >&2
@@ -28,20 +62,56 @@ expect() { # expect <case> <want-exit> <payload>
   fi
 }
 
+TRAIL='Register check: no controlling record -- terms: fixture; nearest: none'
+
+# ── The trail check (ADR-20260821-010543) ───────────────────────────────────────────────────────
 # 1 BLOCK: no trail at all -- the incident shape (ADR-20260818-210000 defect 2).
-expect 1-no-trail 2 '{"questions":[{"question":"Which funding model applies to tips?"}]}'
+expect 1-no-trail 2 "$FIX" '{"questions":[{"question":"Which funding model applies to tips?"}]}'
 # 2 BLOCK: bare marker token without a record id or the explicit negative -- the cargo-cult trail.
-expect 2-hollow-trail 2 '{"questions":[{"question":"Which funding model? Register check: done"}]}'
+expect 2-hollow-trail 2 "$FIX" '{"questions":[{"question":"Which funding model? Register check: done"}]}'
 # 3 ALLOW: trail citing a controlling record id.
-expect 3-record-id 0 '{"questions":[{"question":"Confirm scope. Register check: ADR-20260819-103112 (2026-08-19, decided) -- covers refunds, silent on thresholds"}]}'
+expect 3-record-id 0 "$FIX" '{"questions":[{"question":"Confirm scope. Register check: ADR-20260819-103112 (2026-08-19, decided) -- covers refunds, silent on thresholds"}]}'
 # 4 ALLOW: legacy ADR id form.
-expect 4-legacy-id 0 '{"questions":[{"question":"... Register check: ADR-0032 (completeness) covers this"}]}'
+expect 4-legacy-id 0 "$FIX" '{"questions":[{"question":"... Register check: ADR-0032 (completeness) covers this"}]}'
 # 5 ALLOW: explicit negative with terms -- a genuinely new question is the system working.
-expect 5-no-record 0 '{"questions":[{"question":"New option space. Register check: no controlling record -- terms: payout, settlement, virement; nearest: none"}]}'
+expect 5-no-record 0 "$FIX" '{"questions":[{"question":"New option space. Register check: no controlling record -- terms: payout, settlement, virement; nearest: none"}]}'
 # 6 ALLOW: DECISIONS register section citation.
-expect 6-register-row 0 '{"questions":[{"question":"... Register check: DECISIONS.md section 48 REG-1 (open)"}]}'
+expect 6-register-row 0 "$FIX" '{"questions":[{"question":"... Register check: DECISIONS.md section 48 (open)"}]}'
 # 7 BLOCK: empty stdin -- fail closed, never fail open (ADR-20260810-231300).
-expect 7-empty-input 2 ''
+expect 7-empty-input 2 "$FIX" ''
+
+# ── The row gate (REG-2/REG-4, ADR-20260821-095957) ─────────────────────────────────────────────
+# R1 BLOCK: a well-trailed question referencing a DECIDED row -- the founder's own rule, and the
+#    load-proof that the fixture rows were actually parsed.
+expect R1-decided-key 2 "$FIX" "{\"questions\":[{\"question\":\"Should we revisit GONE-ROW? $TRAIL\"}]}"
+# R2 ALLOW: a question referencing an OPEN row is exactly what the queue is for.
+expect R2-open-key 0 "$FIX" "{\"questions\":[{\"question\":\"OPEN-ROW options A/B? $TRAIL\"}]}"
+# R3 ALLOW: a legacy-allowlisted key passes (no backfill; migrate at next touch), logged.
+expect R3-legacy-key 0 "$FIX" "{\"questions\":[{\"question\":\"About OLD-ROW: which change carries it? $TRAIL\"}]}"
+# R4 BLOCK: a DEFERRED row is un-askable until its wake condition; the refusal cites `until`.
+expect R4-deferred-key 2 "$FIX" "{\"questions\":[{\"question\":\"Can we do DEFER-ROW now? $TRAIL\"}]}"
+# R5 BLOCK: an open but counsel-owned row -- a founder question may only ask for the external action.
+expect R5-counsel-key 2 "$FIX" "{\"questions\":[{\"question\":\"What is the answer to LAW-ROW? $TRAIL\"}]}"
+# R6 ALLOW: the documented escape -- the question is about the external action itself.
+expect R6-counsel-action 0 "$FIX" "{\"questions\":[{\"question\":\"External action on LAW-ROW: engage counsel this week? $TRAIL\"}]}"
+# R7 ALLOW: key-shaped tokens that are declared nowhere are not register references (typo bound
+#    recorded in the hook header; closed by decision-ask-unregistered after full migration).
+expect R7-unknown-key 0 "$FIX" "{\"questions\":[{\"question\":\"NOT-A-ROW and GONE-ROWBOAT are not references. $TRAIL\"}]}"
+# R8 BLOCK: a broken REGISTER_CHECK_DECISIONS override fails closed, never silently skips.
+expect R8-override-broken 2 "$FIX/absent" "{\"questions\":[{\"question\":\"Anything. $TRAIL\"}]}"
+
+# ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
+# L1: the live dir parses and gates -- REG-2 is decided forever (a reversal opens a NEW row).
+printf '%s' "{\"questions\":[{\"question\":\"Reopen REG-2? $TRAIL\"}]}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 2 ]; then
+  echo "register-check selftest: case L1 FAILED -- the LIVE docs/decisions corpus did not gate a question referencing decided row REG-2" >&2
+  fail=1
+fi
+# L2: the live legacy allowlist exists and is non-empty (legacy is a declaration, not a default).
+if ! sed -n 's/^  - \([A-Z][A-Z0-9-]*\)$/\1/p' "$ROOT/docs/decisions/_legacy.yaml" 2>/dev/null | grep -q .; then
+  echo "register-check selftest: case L2 FAILED -- docs/decisions/_legacy.yaml missing or lists no legacy keys" >&2
+  fail=1
+fi
 
 # W WIRING: the settings entry that arms the hook exists and points at the real script.
 if ! grep -q 'AskUserQuestion' "$ROOT/.claude/settings.json" || \

@@ -80,6 +80,21 @@ fn main() {
     // the same gate. GFM pads a short row and drops the excess of a long one without a murmur, so
     // one stray `|` silently reshapes a register row.
     issues.extend(validate_markdown_tables(&load_decision_table_files(&repo_root(&specs))));
+    // ─── §22 — the decision register rows (docs/decisions/*.yaml, REG-2/REG-4, #658): the closed
+    // status vocabulary, resolvable decided_by/superseded_by, the status↔field coupling table and
+    // the supersession DAG. Same posture as §13: repo text, same issue list, same gate. The ask
+    // gate (the register-check hook) reads these FILES at the point of need, never the generated
+    // index — a stale projection must not gate a live decision.
+    {
+        let root = repo_root(&specs);
+        let mut dec_issues = Vec::new();
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut dec_issues);
+        let record_files = load_record_filenames(&root);
+        dec_issues.extend(validate_decision_rows(&dec_rows, &load_legacy_keys(&root), &|id| {
+            record_resolves(id, &record_files)
+        }));
+        issues.extend(dec_issues);
+    }
     // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
     // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
     // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads
@@ -164,6 +179,11 @@ fn main() {
     eprintln!(
         "    - metrics: {} declared observability metrics — each has a name constant and an instrument in crates/telemetry (§20)",
         declared_metrics(&model).len()
+    );
+    eprintln!(
+        "    - decisions: {} docs/decisions/*.yaml rows — closed status vocabulary, decided_by resolves, supersession DAG, {} legacy keys allowlisted (§22)",
+        load_decision_files(&repo_root(&specs)).len(),
+        load_legacy_keys(&repo_root(&specs)).len()
     );
     eprintln!(
         "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",
@@ -292,6 +312,45 @@ fn main() {
         Err(e) => {
             eprintln!("✗ {}", e);
             std::process::exit(1);
+        }
+    }
+    // DECISIONS.md: inject the decision-register index between the GENERATED:decisions markers
+    // (§22, REG-3(a): only the index is generated; the prose stays authored). Unlike database.md's
+    // benign skip, MISSING MARKERS ARE AN ERROR: the §22 ask discipline depends on the register
+    // page being current, so a silently skipped region is a stale founder surface, not a no-op.
+    // The emitted body is checked as a GFM table BEFORE it lands (DECISIONS.md is in the §13b
+    // corpus, so a bad emit would otherwise pass THIS run and redden the next), and may not carry
+    // a marker substring (it would corrupt the next splice).
+    {
+        let root = repo_root(&specs);
+        let mut dec_parse_issues = Vec::new();
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut dec_parse_issues);
+        let body = emit_decisions_index(&dec_rows, load_legacy_keys(&root).len());
+        if body.contains("<!-- GENERATED:") {
+            eprintln!("✗ decisions index: emitted body contains a GENERATED marker substring — refusing to splice.");
+            std::process::exit(1);
+        }
+        let table_issues = validate_markdown_tables(&[("(emitted decisions index)".to_string(), body.clone())]);
+        if !table_issues.is_empty() {
+            for i in &table_issues {
+                eprintln!("✗ decisions index: {} {} — {}", i.rule, i.location, i.message);
+            }
+            std::process::exit(1);
+        }
+        let reg_md = root.join("docs/proposals/DECISIONS.md");
+        match inject_generated(&reg_md, "decisions", &body) {
+            Ok(true) => eprintln!("✓ injected decision index into {}", reg_md.display()),
+            Ok(false) => {
+                eprintln!(
+                    "✗ {}: no GENERATED:decisions markers — the register index cannot be silently skipped (§22); restore the marker pair.",
+                    reg_md.display()
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("✗ {}", e);
+                std::process::exit(1);
+            }
         }
     }
     // crates/domains/{scope}/: PER-SCOPE GENERATED domain crates + the kernel (#373,

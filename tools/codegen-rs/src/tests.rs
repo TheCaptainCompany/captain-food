@@ -9520,3 +9520,166 @@ mod security_ddl_fence {
         // day it converts is the day it starts asserting something strictly stronger.
     }
 }
+
+// ─── §22 — the decision register rows (docs/decisions/*.yaml, REG-2/REG-4, #658) ────────────────
+//
+// Every rejection rule is shown RED on a planted defect before anything trusts it (the PROP-
+// 20260819-110442 §12 acceptance clause; "a gate never seen to fire is an unverified claim").
+mod decisions_register {
+    use crate::*;
+
+    fn parse(files: &[(&str, &str)]) -> (Vec<DecisionRow>, Vec<Issue>) {
+        let owned: Vec<(String, String)> =
+            files.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect();
+        let mut issues = Vec::new();
+        let rows = parse_decision_rows(&owned, &mut issues);
+        (rows, issues)
+    }
+
+    /// Validate fixtures against a fixture record corpus (the resolver is injected, so no disk).
+    fn check(files: &[(&str, &str)], legacy: &[&str]) -> Vec<String> {
+        let (rows, mut issues) = parse(files);
+        let legacy: Vec<String> = legacy.iter().map(|s| s.to_string()).collect();
+        let records = vec![
+            "ADR-20260819-103112-the-six-queue-answers.md".to_string(),
+            "0032-completeness.md".to_string(),
+            "PROP-20260819-110442-the-decision-register-is-the-unit-of-decision.md".to_string(),
+        ];
+        issues.extend(validate_decision_rows(&rows, &legacy, &|id| record_resolves(id, &records)));
+        let mut rules: Vec<String> = issues.iter().map(|i| i.rule.to_string()).collect();
+        rules.sort();
+        rules.dedup();
+        rules
+    }
+
+    const OPEN_OK: &str = "key: \"ROW-A\"\nstatus: \"open\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+
+    #[test]
+    fn a_fully_valid_corpus_is_green() {
+        let decided = "key: \"ROW-B\"\nstatus: \"decided\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\ncapacity: \"founder\"\n";
+        let deferred = "key: \"ROW-C\"\nstatus: \"deferred\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-18\"\nuntil: \"after #556\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let superseded = "key: \"ROW-D\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"PROP-20260819-110442\"\nsuperseded_by: \"ROW-A\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let withdrawn = "key: \"ROW-E\"\nstatus: \"withdrawn\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-18\"\nnote: \"question dissolved; finding went to #636\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let rules = check(
+            &[
+                ("docs/decisions/ROW-A.yaml", OPEN_OK),
+                ("docs/decisions/ROW-B.yaml", decided),
+                ("docs/decisions/ROW-C.yaml", deferred),
+                ("docs/decisions/ROW-D.yaml", superseded),
+                ("docs/decisions/ROW-E.yaml", withdrawn),
+            ],
+            &["OLD-ROW"],
+        );
+        assert!(rules.is_empty(), "expected green, got: {:?}", rules);
+    }
+
+    #[test]
+    fn each_rejection_rule_fires_red_on_its_planted_defect() {
+        // Unknown field (a typo'd optional field must not silently pass).
+        let unknown = format!("{}decided_By: \"ADR-20260819-103112\"\n", OPEN_OK);
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &unknown)], &[]).contains(&"decision-field-unknown".to_string()));
+        // Status outside the closed vocabulary.
+        let bad_status = OPEN_OK.replace("\"open\"", "\"OPEN\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &bad_status)], &[]).contains(&"decision-status-invalid".to_string()));
+        // An open row carrying its closing record (PROP §5.2: decided_by absent on open).
+        let open_closed = format!("{}decided_by: \"ADR-20260819-103112\"\n", OPEN_OK);
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &open_closed)], &[]).contains(&"decision-status-field-conflict".to_string()));
+        // Decided without a resolvable record — "a decision with no record is a memory".
+        let no_record = OPEN_OK.replace("\"open\"", "\"decided\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &no_record)], &[]).contains(&"decision-decided-without-record".to_string()));
+        let dangling_record = format!("{}decided: \"2026-08-19\"\ndecided_by: \"ADR-20990101-000000\"\n", OPEN_OK.replace("\"open\"", "\"decided\""));
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &dangling_record)], &[]).contains(&"decision-decided-without-record".to_string()));
+        // Deferred without a wake condition is `open` wearing a euphemism.
+        let no_wake = OPEN_OK.replace("\"open\"", "\"deferred\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &no_wake)], &[]).contains(&"decision-deferred-without-wake".to_string()));
+        // Withdrawn without saying why.
+        let no_note = OPEN_OK.replace("\"open\"", "\"withdrawn\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &no_note)], &[]).contains(&"decision-withdrawn-without-note".to_string()));
+        // superseded_by on a non-superseded row (biconditional coupling).
+        let stray_succ = format!("{}superseded_by: \"ROW-B\"\n", OPEN_OK);
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &stray_succ)], &[]).contains(&"decision-status-field-conflict".to_string()));
+        // Key/filename mismatch.
+        assert!(check(&[("docs/decisions/ROW-Z.yaml", OPEN_OK)], &[]).contains(&"decision-key-file-mismatch".to_string()));
+        // The v1 key grammar reserves `--` for the future D1–D7 namespacing.
+        let ns = OPEN_OK.replace("ROW-A", "ROW--A");
+        assert!(check(&[("docs/decisions/ROW--A.yaml", &ns)], &[]).contains(&"decision-key-grammar".to_string()));
+        // A migrated key still on the legacy allowlist = two authorities for one fact.
+        assert!(check(&[("docs/decisions/ROW-A.yaml", OPEN_OK)], &["ROW-A"]).contains(&"decision-key-duplicate".to_string()));
+        // Owner outside the closed set.
+        let bad_owner = OPEN_OK.replace("\"founder\"", "\"the-team\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &bad_owner)], &[]).contains(&"decision-owner-invalid".to_string()));
+        // A multi-line question is a topic essay, not the index's answerable question.
+        let multiline = OPEN_OK.replace("question: \"Q?\"", "question: \"Q\\nand more\"");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &multiline)], &[]).contains(&"decision-question-missing".to_string()));
+    }
+
+    #[test]
+    fn supersession_is_a_dag_walked_by_identity() {
+        let base = |key: &str, succ: &str| {
+            format!("key: \"{key}\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"{succ}\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n")
+        };
+        // Self-supersession.
+        let self_ref = base("ROW-A", "ROW-A");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &self_ref)], &[]).contains(&"decision-superseded-shape".to_string()));
+        // Dangling successor — a successor is migrated before it is pointed at.
+        let dangling = base("ROW-A", "ROW-GHOST");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &dangling)], &[]).contains(&"decision-superseded-shape".to_string()));
+        // A → B → A cycle: the chain never reaches a live row.
+        let a = base("ROW-A", "ROW-B");
+        let b = base("ROW-B", "ROW-A");
+        assert!(check(&[("docs/decisions/ROW-A.yaml", &a), ("docs/decisions/ROW-B.yaml", &b)], &[])
+            .contains(&"decision-superseded-shape".to_string()));
+        // A → B (open) terminates: green.
+        let ok_chain = check(&[("docs/decisions/ROW-A.yaml", &base("ROW-A", "ROW-B")), ("docs/decisions/ROW-B.yaml", &OPEN_OK.replace("ROW-A", "ROW-B"))], &[]);
+        assert!(ok_chain.is_empty(), "a chain terminating in a live row is legal, got: {:?}", ok_chain);
+    }
+
+    #[test]
+    fn the_emitted_index_is_deterministic_escaped_and_a_valid_gfm_table() {
+        let older_open = "key: \"ROW-B\"\nstatus: \"open\"\nquestion: \"Has a | pipe?\"\nowner: \"team\"\nopened: \"2026-08-01\"\nregister: \"DECISIONS.md\"\nevidence: \"q\"\n";
+        let decided = "key: \"ROW-C\"\nstatus: \"decided\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-02\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nregister: \"DECISIONS.md\"\nevidence: \"q\"\n";
+        // Deliberately fed in non-sorted order: determinism comes from the emitter, not the input.
+        let (rows, issues) = parse(&[
+            ("docs/decisions/ROW-C.yaml", decided),
+            ("docs/decisions/ROW-A.yaml", OPEN_OK),
+            ("docs/decisions/ROW-B.yaml", older_open),
+        ]);
+        assert!(issues.is_empty());
+        let body = emit_decisions_index(&rows, 103);
+        // Open rows first, oldest first; the decided row after them, carrying its closing record.
+        let ib = body.find("`ROW-B`").unwrap();
+        let ia = body.find("`ROW-A`").unwrap();
+        let ic = body.find("`ROW-C`").unwrap();
+        assert!(ib < ia && ia < ic, "expected open-oldest-first then decided:\n{}", body);
+        assert!(body.contains("Has a \\| pipe?"), "cell pipes must be escaped:\n{}", body);
+        assert!(body.contains("-> ADR-20260819-103112"), "a closed row's index line carries its record");
+        assert!(body.contains("2 open") && body.contains("1 decided"), "counts line:\n{}", body);
+        assert!(body.contains("Oldest open row: `ROW-B` since 2026-08-01"));
+        assert!(body.contains("103 legacy keys"), "the index states its own incompleteness");
+        assert!(!body.contains("<!-- GENERATED:"), "the body may never carry a marker substring");
+        // The emitted body must itself pass §13b — DECISIONS.md is in that corpus.
+        let table_issues = validate_markdown_tables(&[("(emitted)".to_string(), body.clone())]);
+        assert!(table_issues.is_empty(), "emitted index must be a valid GFM table");
+        // Byte-determinism: same rows, same bytes (the regenerate-never-hand-merge licence).
+        assert_eq!(body, emit_decisions_index(&rows, 103));
+    }
+
+    #[test]
+    fn the_committed_decision_corpus_is_green_and_disjoint_from_legacy() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_decision_files(&root);
+        assert!(!files.is_empty(), "expected the committed docs/decisions/*.yaml corpus");
+        let mut issues = Vec::new();
+        let rows = parse_decision_rows(&files, &mut issues);
+        let records = load_record_filenames(&root);
+        let legacy = load_legacy_keys(&root);
+        assert!(!legacy.is_empty(), "the legacy allowlist is a declaration, not a default");
+        issues.extend(validate_decision_rows(&rows, &legacy, &|id| record_resolves(id, &records)));
+        let errors: Vec<String> = issues
+            .iter()
+            .filter(|i| i.level == Level::Error)
+            .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
+            .collect();
+        assert!(errors.is_empty(), "decision rows must be 0-error on the committed corpus:\n{}", errors.join("\n"));
+    }
+}
