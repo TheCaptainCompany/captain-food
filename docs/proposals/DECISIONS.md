@@ -33,9 +33,11 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REG-SEQ` | decided | 2026-08-21 | When does the register machinery land, relative to #556 Local acceptance harness? -> ADR-20260821-095957 | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**19 migrated rows: 8 open · 10 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 19 — 8 open · 10 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
-For every key above, `docs/decisions/<KEY>.yaml` is **authoritative for CURRENT status**; the prose sections below are its history and their glyphs are not current status. **This index is NOT exhaustive of open decisions**: 103 legacy keys remain prose-only (`docs/decisions/_legacy.yaml`, the closed allowlist) — each gets its file when next touched, in the same change.
+**Legacy rows remaining: 103** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
+
+For every key above, `docs/decisions/<KEY>.yaml` is **authoritative for CURRENT status**; the prose sections below are its history and their glyphs are not current status.
 
 <!-- GENERATED:decisions END -->
 

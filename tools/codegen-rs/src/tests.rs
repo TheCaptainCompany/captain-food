@@ -9657,7 +9657,7 @@ mod decisions_register {
         assert!(body.contains("-> ADR-20260819-103112"), "a closed row's index line carries its record");
         assert!(body.contains("2 open") && body.contains("1 decided"), "counts line:\n{}", body);
         assert!(body.contains("Oldest open row: `ROW-B` since 2026-08-01"));
-        assert!(body.contains("103 legacy keys"), "the index states its own incompleteness");
+        assert!(body.contains("**Legacy rows remaining: 103**"), "the index states its own incompleteness");
         assert!(!body.contains("<!-- GENERATED:"), "the body may never carry a marker substring");
         // The emitted body must itself pass §13b — DECISIONS.md is in that corpus.
         let table_issues = validate_markdown_tables(&[("(emitted)".to_string(), body.clone())]);
@@ -9908,5 +9908,66 @@ mod dispatch_card_rows {
         assert_eq!(check("Decision row: ??\n").len(), 1);
         // Fenced examples are quoted output, never scanned.
         assert!(check("```\nDecision row: NO-SUCH-ROW\n```\n").is_empty());
+    }
+}
+
+// ─── Slice 4 (verification & visibility) — the docs-only CI path and the legacy tail ────────────
+mod docs_only_ci_and_legacy_visibility {
+    use crate::*;
+
+    /// The docs-only CI bypass, PINNED (2026-08-21 verification slice): ci.yml skipped every gate
+    /// job on docs-only pushes while the aggregator accepts `skipped`, so the canonical validator
+    /// (§22 register + index-sync, §23 citation ratchet) never ran on exactly the surface it
+    /// governs. This shape test fails if the closing `docs-validate` job is removed, de-gated,
+    /// re-pointed at a non-canonical command, or dropped from the aggregator — the settings.json
+    /// wiring case of the hook selftest, transposed to CI.
+    #[test]
+    fn the_docs_only_ci_path_runs_the_canonical_validator() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        assert!(ci.contains("docs-validate:"), "ci.yml must carry the docs-validate job — docs-only pushes otherwise skip §22/§23 entirely");
+        assert!(
+            ci.contains("if: needs.changes.outputs.docs_only == 'true'"),
+            "docs-validate must run on exactly the docs-only complement"
+        );
+        // The CANONICAL command, verbatim — never a parallel implementation of the rules.
+        let canonical = "cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs";
+        assert!(
+            ci.matches(canonical).count() >= 2,
+            "docs-validate must execute the same canonical validator command as the specs job"
+        );
+        assert!(
+            ci.contains("needs: [changes, lint, specs, build-test, db-test, docs-validate]"),
+            "the codegen aggregator must depend on docs-validate"
+        );
+        // The aggregator's generic skipped-acceptance must NOT be the only guard: a mis-gated
+        // docs-validate that skips on a docs-only run would slide through it.
+        assert!(
+            ci.contains("DOCS_VALIDATE") && ci.contains("docs-validate reported"),
+            "the aggregator must explicitly assert docs_only=='true' => docs-validate succeeded"
+        );
+    }
+
+    #[test]
+    fn the_index_tail_states_the_legacy_boundary_and_triggers() {
+        let owned = vec![("docs/decisions/ROW-A.yaml".to_string(),
+            "key: \"ROW-A\"\nstatus: \"open\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\nregister: \"D\"\nevidence: \"q\"\n".to_string())];
+        let mut issues = Vec::new();
+        let rows = parse_decision_rows(&owned, &mut issues);
+        let body = emit_decisions_index(&rows, 103);
+        assert!(body.contains("**Legacy rows remaining: 103**"), "the boundary count must be explicit:\n{}", body);
+        assert!(body.contains("Migrated rows: 1"), "the migrated total must be explicit");
+        for trigger in ["decision-question reference", "amendment", "reopening/challenge", "explicit dispatch"] {
+            assert!(body.contains(trigger), "migration trigger `{}` must be printed on the page", trigger);
+        }
+        assert!(
+            body.contains("never an authority") && body.contains("never a founder-question bypass"),
+            "the boundary sentence keeps _legacy.yaml's semantics visible"
+        );
+        // Deliberately NOT emitted: "migrated in the current change" — not derivable from HEAD
+        // state; the diff of this very tail is the per-change migration record.
+        assert!(!body.contains("current change"));
+        // Still deterministic: no clock anywhere.
+        assert_eq!(body, emit_decisions_index(&rows, 103));
     }
 }

@@ -3,6 +3,26 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔍 **2026-08-21 — THE DOCS-ONLY CI BYPASS WAS REAL, AND IS CLOSED** (founder-ordered
+> verification slice; [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)
+> amended in place; narrow roster farley/beck/generator, REVERSIBLE INTERNAL). Verified: `ci.yml`
+> skipped every gate job on docs-only pushes (docs/** + README.md + CLAUDE.md + LICENSE) and the
+> `codegen` aggregator accepts `skipped` — so the surface §22/§23 govern reached `main` with a
+> **green required check and zero validation**; the previous ADR's "CI reports it asynchronously"
+> claim was FALSE and is corrected in its amendment. Closed minimally: a `docs-validate` job on
+> exactly the docs-only complement running the `specs` job's canonical commands VERBATIM
+> (validator `--check` + regenerate/drift; tools/codegen-rs build only — the 2026-07-28 cost
+> bound kept, its "nothing to validate" premise retired), plus a **named** aggregator assertion
+> (`docs_only ⇒ docs-validate==success` — the generic skipped-acceptance was the hole). Pinned by
+> a red-first shape test; proven red/green locally with a planted dangling citation
+> (docs_only=true through the detector logic; canonical command exit 1 → removed → exit 0).
+> **Found-and-fixed**: `decision-index-stale` deadlocked `make generate` against the staleness
+> generation repairs — now `--check`-only. **Legacy visibility**: the generated index tail states
+> `Legacy rows remaining: 103` · `Migrated rows: 19` · the four migration triggers · the boundary
+> sentence (never an authority, never a founder-question bypass); per-change migration counts are
+> deliberately NOT manufactured — the tail's diff is the record. On-GitHub red/green exercise of
+> `docs-validate` deferred to post-approval (this slice stops at the verification report).
+
 > 📮 **2026-08-21 — DECISION-ASK-UNREGISTERED + THE CITATION RATCHET: every decision question
 > names its open row, every citation resolves**
 > ([ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md),

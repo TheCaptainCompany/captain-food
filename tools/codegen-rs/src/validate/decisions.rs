@@ -703,15 +703,24 @@ pub(crate) fn emit_decisions_index(rows: &[DecisionRow], legacy_count: usize) ->
             )
         })
         .unwrap_or_default();
-    lines.push(format!("**{} migrated rows: {}.**{}", sorted.len(), count_str, oldest));
+    lines.push(format!("**Migrated rows: {} — {}.**{}", sorted.len(), count_str, oldest));
     lines.push(String::new());
-    lines.push(format!(
+    // ONE canonical boundary text (2026-08-21 verification slice): the emitter test, §22b
+    // index-sync and check-drift all compare this single string — never an assembled paraphrase.
+    // Deliberately fold-over-HEAD only: "migrated in the current change" is NOT derivable from
+    // committed state, and the diff of these lines IS the per-change migration record.
+    const LEGACY_TAIL: &str = "(`docs/decisions/_legacy.yaml`, the closed allowlist — a declared \
+migration boundary, never an authority and never a founder-question bypass). **This index is NOT \
+exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: \
+decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. \
+The diff of these lines is the per-change migration record.";
+    lines.push(format!("**Legacy rows remaining: {}** {}", legacy_count, LEGACY_TAIL));
+    lines.push(String::new());
+    lines.push(
         "For every key above, `docs/decisions/<KEY>.yaml` is **authoritative for CURRENT status**; the \
-prose sections below are its history and their glyphs are not current status. **This index is NOT \
-exhaustive of open decisions**: {} legacy keys remain prose-only (`docs/decisions/_legacy.yaml`, the \
-closed allowlist) — each gets its file when next touched, in the same change.",
-        legacy_count
-    ));
+prose sections below are its history and their glyphs are not current status."
+            .to_string(),
+    );
     lines.join("\n")
 }
 

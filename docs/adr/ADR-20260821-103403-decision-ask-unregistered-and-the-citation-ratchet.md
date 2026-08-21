@@ -4,6 +4,25 @@
 
 Accepted
 
+> **Amended 2026-08-21 (the founder-ordered verification slice, same day).** The "accepted
+> residual" claim below — *"a docs-only push that skips local gates can land a dangling citation
+> that only CI reports"* — **overstated the backstop: no asynchronous CI red existed.** Verified:
+> `ci.yml`'s docs-only detector skipped `lint`/`specs`/`build-test`/`db-test` entirely and the
+> `codegen` aggregator accepts `skipped`, so a docs-only push (proposals, ADRs, CLAUDE.md — the
+> exact surface §22/§23 govern) reached `main` with a **green** required check and **zero**
+> validation. Closed by the `docs-validate` job (runs on exactly the docs-only complement,
+> executing the `specs` job's canonical commands verbatim — never a parallel implementation) plus
+> a **named** aggregator assertion (`docs_only=='true' ⇒ docs-validate=='success'`), both pinned
+> by a red-first shape test in `tools/codegen-rs`. Also found and fixed by the same slice:
+> `decision-index-stale` was fatal in generate mode, deadlocking `make generate` against the very
+> staleness generation repairs — the rule now fires in `--check` only (the gate must never lock
+> its own key in the room). The generated index tail now states the legacy boundary explicitly
+> (`Legacy rows remaining: N` · `Migrated rows: N` · the four migration triggers); "migrated in
+> the current change" is deliberately NOT emitted — it is not derivable from committed state, and
+> the diff of the tail lines is the per-change migration record. `_legacy.yaml` semantics
+> unchanged; KEY-NAMESPACE untouched. Narrow briefing roster (farley, beck, generator) under
+> ADR-20260816-134352, class REVERSIBLE INTERNAL.
+
 ## Closes
 
 Nothing new — this executes the enforcement half that `REG-1` (decided, ADR-20260821-010543)

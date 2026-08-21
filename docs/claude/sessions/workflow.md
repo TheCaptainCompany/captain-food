@@ -488,8 +488,10 @@ choice; trails written BEFORE 2026-08-21 were authored under the earlier grammar
 classification claim. On dispatch cards, a `Decision row:` line must name a declared, non-legacy
 key (`make validate`, §22d); the same `row:` anchor is required per question on the decision-form
 template. A docs push touching any citation-governed surface (all of `docs/**` + `CLAUDE.md`,
-§23) runs `make validate` first — the docs-only carve-out predates the ratchet; skipping it
-leaves a dangling citation for CI to report asynchronously.
+§23) runs `make validate` first — the docs-only carve-out predates the ratchet. Skipping it is
+now caught by CI's `docs-validate` job (before the 2026-08-21 verification slice this sentence
+claimed an asynchronous CI backstop that DID NOT EXIST — docs-only pushes skipped every gate job
+and the required check reported green; ADR-20260821-103403 as amended).
 
 What the format encodes, each clause earned by a lens at the 2026-08-21 briefing:
 

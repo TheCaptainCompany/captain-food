@@ -96,9 +96,15 @@ fn main() {
         }));
         // §22b — the committed index region must equal the fold over the source rows (founder
         // requirement 12): caught at VALIDATE time with the clearer message; check-drift stays
-        // the outer net and compares the same bytes via the same emit function.
-        let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
-        dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
+        // the outer net and compares the same bytes via the same emit function. CHECK MODE ONLY,
+        // deliberately (found by the 2026-08-21 verification slice): generation IS the repair for
+        // a stale region, and a fatal staleness error in generate mode deadlocks `make generate`
+        // against the very staleness it exists to fix — the gate must never lock its own key in
+        // the room.
+        if check {
+            let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
+            dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
+        }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published
         // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).
         if let Ok(tpl) = fs::read_to_string(root.join("docs/templates/decision-form.html")) {
