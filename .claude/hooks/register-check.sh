@@ -9,8 +9,9 @@
 # defect 2; DECISIONS.md §48 / PROP-20260819-110442).
 #
 # THE LANES, in order:
-#   1. ENVELOPE — a decision question carries one `Decision row: <KEY>` line. Exactly one line,
-#      one key; the key must be DECLARED (docs/decisions/<KEY>.yaml) and OPEN. A non-open row is
+#   1. ENVELOPE — a decision question carries one `Decision row: <KEY>` line. Exactly one token,
+#      one key, whatever the line layout; the key must be DECLARED (docs/decisions/<KEY>.yaml)
+#      and OPEN. A non-open row is
 #      refused with the controlling record and the correct next action (`reconsiders:` for a
 #      reversal); a LEGACY key (on _legacy.yaml) is refused with migrate-first — a founder-facing
 #      question IS a migration trigger, and migrating in the same change unblocks the same
@@ -95,13 +96,16 @@ if [ -n "${REGISTER_CHECK_DECISIONS:-}" ] && { [ ! -d "$DECISIONS_DIR" ] || ! ls
 fi
 
 # ── Lane 1: the envelope ────────────────────────────────────────────────────────────────────────
+# env_count counts TOKEN occurrences, not extracted lines: two `Decision row:` tokens on ONE line
+# collapse into a single greedy match, which under a line count reached the single-envelope path
+# with a two-key string and garbled the block message (PR #669 review, F2). Any payload carrying
+# more than one token is envelope-multiple, whatever the line layout.
 env_key=""
 env_lines="$(printf '%s' "$payload" | grep -oE "Decision row:[^\"\\\\]*" | sed 's/[[:space:]]*$//')"
-env_count=0
-[ -n "$env_lines" ] && env_count=$(printf '%s\n' "$env_lines" | wc -l)
+env_count="$(printf '%s' "$payload" | grep -oF "$ENVELOPE" | wc -l)"
 if [ "$env_count" -gt 1 ]; then
   extra="$(printf '%s' "$env_lines" | tr '\n' '|')"
-  block "envelope-multiple" "register-check: $env_count \`Decision row:\` lines found ($extra) — a decision question references EXACTLY ONE declared row. Split into one question per row, or drop the extra line."
+  block "envelope-multiple" "register-check: $env_count \`Decision row:\` tokens found ($extra) — a decision question references EXACTLY ONE declared row. Split into one question per row, or drop the extra token."
 elif [ "$env_count" -eq 1 ]; then
   env_key="$(printf '%s' "$env_lines" | grep -oE "Decision row:[[:space:]]*$KEY_GRAMMAR" | sed 's/Decision row:[[:space:]]*//')"
   rest_ok=true

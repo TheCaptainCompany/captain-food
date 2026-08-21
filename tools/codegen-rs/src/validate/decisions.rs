@@ -132,7 +132,11 @@ fn is_stamp(s: &str) -> bool {
 pub(crate) fn record_resolves(id: &str, corpus: &RecordCorpus) -> bool {
     if let Some(rest) = id.strip_prefix("ADR-") {
         if rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit()) {
-            return corpus.adr_files.iter().any(|f| f.starts_with(rest));
+            // The hyphen is part of the match: every legacy file is `NNNN-…`, and a bare digit
+            // prefix would let a truncated stamp (`ADR-2026`) resolve against the 54 prefixless
+            // middle-era filenames that all start `2026…` (PR #669 review, F3).
+            let want = format!("{}-", rest);
+            return corpus.adr_files.iter().any(|f| f.starts_with(&want));
         }
         if is_stamp(rest) {
             return corpus.adr_files.iter().any(|f| f.starts_with(id) || f.starts_with(rest));

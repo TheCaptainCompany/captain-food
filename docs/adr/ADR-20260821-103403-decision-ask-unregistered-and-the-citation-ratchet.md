@@ -33,7 +33,11 @@ untouched (the founder's own bound: no D1–D7 normalization in this slice).
 
 n/a — no behavioral guarantee in `rules.yaml` (operating-model surface). The executable
 enforcement: the register-check hook's ENVELOPE lane (`.claude/hooks/register-check.sh` + its
-selftest, 26 cases, run by the stop gate every turn), validator **§22** additions (`reconsiders`
+selftest — one red-or-green case per lane verdict plus the live-corpus and wiring anchors, run by
+the stop gate every turn; block cases assert the logged REASON, not only the exit code, since the
+2026-08-21 independent review of
+[#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669)),
+validator **§22** additions (`reconsiders`
 shape + closure coupling, `decision-index-stale`, `decision-form-template-row`) and **§23**
 (`record-citation-unresolved`, `citation-exemption-shape`/`-unused`, `record-stamp-collision`) on
 `make validate`'s single gate, all with planted-defect tests proven red first.

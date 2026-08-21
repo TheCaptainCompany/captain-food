@@ -3,6 +3,30 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔬 **2026-08-21 — INDEPENDENT REVIEW OF [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669): PASS WITH FINDINGS; F2+F3 FIXED, F4–F8 DEFERRED**
+> (founder-ordered independent pass, `reviewer` + `beck` lenses, eyes that did not write the diff).
+> **Fixed in the follow-up commit** (founder-approved, narrow): **F2** — selftest case E5 never
+> exercised the `envelope-multiple` lane it named (its two tokens on one JSON line collapsed into
+> ONE greedy grep match; the red was carried by `key-unknown`, and deleting the lane kept all
+> cases green while a two-line envelope naming two OPEN rows would have failed OPEN). The hook now
+> counts envelope TOKENS, not extracted lines — same-line and multi-line double envelopes both
+> block as `envelope-multiple` deliberately (the same-line shape previously died in `sed` noise
+> with a garbled message; exit was still 2, fail-closed) — and the selftest helper asserts the
+> logged REASON on block cases, proven mutation-sensitive (branch disabled → E5/E5b fail-open red,
+> restored → green). **F3** — `record_resolves`'s legacy `ADR-00NN` arm matched a bare 4-digit
+> filename prefix, so a truncated-stamp typo (the ADR prefix plus only the first four stamp
+> digits) resolved silently against the 54 prefixless middle-era `2026…` filenames; the arm now
+> requires the `NNNN-` shape (red-first test;
+> zero such truncations exist in governed docs, so the ratchet surface is unchanged). **Reviewed
+> and DEFERRED, explicitly NOT fixed**: F1 (approval-to-land + tip-commit wording precede any
+> merge — founder's call), F4 (open envelope does not shield a passive decided-key context
+> mention — loud block, rewording path exists), F5 (main.rs §22/§23 wiring has no end-to-end
+> binary test), F6 (ci.yml shape test is structural — cannot catch an inverted aggregator
+> condition or mis-wired env), F7 (bare exemption-count pin; legacy-empty asserts redden when the
+> burn-down COMPLETES), F8 (card-scanner prose friction, hook `_legacy.yaml` format coupling,
+> unclosed-fence under-scanning duplicated in two files, `reconsiders` mutual-cycle shape passes,
+> unparseable `_legacy.yaml` loads empty).
+
 > 🔍 **2026-08-21 — THE DOCS-ONLY CI BYPASS WAS REAL, AND IS CLOSED** (founder-ordered
 > verification slice; [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)
 > amended in place; narrow roster farley/beck/generator, REVERSIBLE INTERNAL). Verified: `ci.yml`

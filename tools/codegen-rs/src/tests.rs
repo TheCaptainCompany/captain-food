@@ -9712,6 +9712,27 @@ mod record_resolution {
         assert!(!record_resolves("ADR-20990101-000000", &corpus));
         assert!(!record_resolves("not-an-id", &corpus));
     }
+
+    #[test]
+    fn truncated_stamp_ids_do_not_resolve_against_prefixless_filenames() {
+        // `ADR-2026` — a truncated-stamp typo — is extracted by the legacy `ADR-00NN` arm, and
+        // every middle-era filename starts with `2026…`, so a bare digit-prefix match resolved it
+        // silently (PR #669 independent review, finding F3). The legacy arm requires the real
+        // legacy filename shape `NNNN-…`: the hyphen is part of the match.
+        let corpus = RecordCorpus {
+            adr_files: vec![
+                "20260720-233000-claim-protocol-stale-reaper.md".to_string(),
+                "0032-completeness.md".to_string(),
+            ],
+            proposal_files: Vec::new(),
+        };
+        assert!(!record_resolves("ADR-2026", &corpus), "a truncated stamp must not resolve via a prefixless middle-era filename");
+        assert!(record_resolves("ADR-0032", &corpus), "the real legacy id keeps resolving against 0032-….md");
+        // End to end through the ratchet: the truncated citation in a governed doc is reported.
+        let files = vec![("docs/x.md".to_string(), "see ADR-2026 for details".to_string())];
+        let rules: Vec<String> = validate_citations(&files, &corpus, &[]).iter().map(|i| i.rule.to_string()).collect();
+        assert_eq!(rules, vec!["record-citation-unresolved".to_string()]);
+    }
 }
 
 // ─── §22b/c + reconsiders + §23 — slice 3 (ADR-20260821-103403) planted-defect tests ────────────
