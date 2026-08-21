@@ -3,6 +3,45 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🛡️ **2026-08-21 — ASK-GATE HARDENING: the selftest gates CI on every path, the wiring check is
+> semantic, and STATUS carries the register as durable state** (founder-directed follow-up to the
+> [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669)
+> review). **(A)** `.claude/hooks/register-check-selftest.sh` now runs in `ci.yml`'s `changes` job —
+> the ONE always-run job with a checkout (no `if:`, every push/PR, docs-only included; `lint` was
+> considered first per the dispatch but is gated `docs_only != 'true'`, failing the both-paths
+> requirement) — so a disarmed hook fails the required `codegen` aggregator via the `changes` result
+> on every path; pinned by the red-first `the_hook_selftest_runs_in_the_always_run_changes_job`
+> shape test (mutation-proven: deleting the step line turns it red). **(B)** selftest case W is
+> structural, not substring: `check_wiring` (python3 stdlib json, fail-closed if python3 is absent)
+> proves a `hooks.PreToolUse` entry with matcher EXACTLY `AskUserQuestion` runs the real hook
+> script; three planted disarming mutants derived from the committed file (W1 fuzzed matcher, W2
+> entry under PostToolUse, W3 command re-pointed) must each be refused — the OLD greps passed W1
+> and W2 outright. **(C)** `docs/STATUS.md` gains the durable-state section for the register
+> authority, ask gate and CI enforcement — the PR body's "recorded in STATUS.md" claim was ahead of
+> the file; policy ("keep this file current with every substantive change") says the entry belongs,
+> so the file was corrected, not the claim weakened.
+> **Reviewed and DEFERRED in this slice, each with its trigger** (no claim of fix):
+> **(D1) docs-only drift untracked-files parity** — failure mode: `docs-validate`'s drift step
+> checks modified tracked files but not brand-new uncommitted generated files (the `specs` job
+> does both); mitigation: today no emitter creates NEW files from a docs-only edit — the decisions
+> index regenerates an existing region; deferred because the failing shape is currently
+> unspellable; trigger: the first emitter that writes per-row/new generated files under `docs/**`
+> copies the `specs` job's untracked check into `docs-validate` in the same change.
+> **(D2) legacy-YAML indentation coupling** — failure mode: re-indenting/quoting `_legacy.yaml`
+> silently empties the HOOK's legacy set (a legacy envelope ask then blocks as `key-unknown`
+> instead of `key-legacy-ask`, and `key-legacy` burn-down logging goes quiet); mitigation:
+> fail-closed direction preserved, §22 parses legacy properly, and selftest L2 sed-parses the live
+> file every turn so a wholesale format break screams; deferred because the format is exercised
+> live today (all 103 lines conform) and the fix is a format-pinning case, not urgent; trigger:
+> any change that reformats `_legacy.yaml` or touches either parser adds the format-pin selftest
+> case in the same change.
+> **(D3) non-UTF-8 governed-file handling** — failure mode: `load_governed_doc_files`
+> (`citations.rs`) skips a file whose `read_to_string` fails, so a non-UTF-8 governed doc escapes
+> the §23 ratchet silently; mitigation: zero such files exist and agent/editor output is UTF-8;
+> deferred because a lossy-read or hard-error policy deserves its own small decision rather than a
+> rider; trigger: the first non-UTF-8 file under `docs/**`, or the next §23 walker change,
+> whichever first — that change makes the skip loud (error or lossy-scan).
+
 > 🔬 **2026-08-21 — INDEPENDENT REVIEW OF [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669): PASS WITH FINDINGS; F2+F3 FIXED, F4–F8 DEFERRED**
 > (founder-ordered independent pass, `reviewer` + `beck` lenses, eyes that did not write the diff).
 > **Fixed in the follow-up commit** (founder-approved, narrow): **F2** — selftest case E5 never

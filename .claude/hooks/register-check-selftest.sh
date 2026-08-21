@@ -5,7 +5,8 @@
 # WHY THIS EXISTS. "A gate never seen to fire is an unverified claim" (#292, beck): each case below
 # shows the hook red or green against the REAL script before any session trusts it. The hook is
 # exactly the silent-when-broken shape ADR-20260810-231300 warns about -- a matcher typo or a
-# removed settings entry disarms it with no signal -- so case W asserts the wiring exists, case D
+# removed settings entry disarms it with no signal -- so cases W/W1-W3 assert the wiring
+# SEMANTICALLY (event + exact matcher + command, with planted disarming mutants), case D
 # asserts every standing agent still carries its citation block, and the R cases assert the
 # REG-2/REG-4 row gate (ADR-20260821-095957) actually loads and reads decision rows: the BLOCK
 # case is the load-proof, because with the legacy lane a hook that parsed nothing would pass
@@ -160,11 +161,54 @@ if ! sed -n 's/^  - \([A-Z][A-Z0-9-]*\)$/\1/p' "$ROOT/docs/decisions/_legacy.yam
   fail=1
 fi
 
-# W WIRING: the settings entry that arms the hook exists and points at the real script.
-if ! grep -q 'AskUserQuestion' "$ROOT/.claude/settings.json" || \
-   ! grep -q 'register-check\.sh' "$ROOT/.claude/settings.json"; then
-  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to AskUserQuestion (the gate is disarmed)" >&2
+# W WIRING (SEMANTIC since the 2026-08-21 hardening slice): the arming declaration is checked
+# structurally, not by substring -- the old greps stayed green with the matcher fuzzed
+# (AskUserQuestionX) or the whole entry moved to PostToolUse, both of which disarm the gate.
+# check_wiring proves .claude/settings.json carries a hooks.PreToolUse entry whose matcher is
+# EXACTLY AskUserQuestion and whose command runs the real script. python3 (stdlib json only, no
+# added toolchain) is required; its absence FAILS the case -- fail closed, never a silent skip.
+check_wiring() { # check_wiring <settings.json> -> 0 armed / nonzero not
+  command -v python3 >/dev/null 2>&1 || return 3
+  python3 - "$1" <<'PYEOF'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+for entry in d.get("hooks", {}).get("PreToolUse", []):
+    if entry.get("matcher") != "AskUserQuestion":
+        continue
+    for h in entry.get("hooks", []):
+        if h.get("type") == "command" and h.get("command", "").endswith("/.claude/hooks/register-check.sh"):
+            sys.exit(0)
+sys.exit(1)
+PYEOF
+}
+# The three disarming shapes, planted as mutant fixtures derived from the REAL committed file, so
+# each red case proves the checker sees through exactly one disarming move.
+if ! python3 - "$ROOT/.claude/settings.json" "$FIX" <<'PYEOF'
+import copy, json, sys
+src, out = sys.argv[1], sys.argv[2]
+d = json.load(open(src))
+entry = d["hooks"]["PreToolUse"][0]
+assert "register-check.sh" in entry["hooks"][0]["command"], "settings.json PreToolUse[0] is no longer the register-check entry -- update the mutant builder"
+m1 = copy.deepcopy(d); m1["hooks"]["PreToolUse"][0]["matcher"] = "AskUserQuestionX"
+m2 = copy.deepcopy(d); m2["hooks"]["PostToolUse"] = m2["hooks"].pop("PreToolUse")
+m3 = copy.deepcopy(d); m3["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/some-other-hook.sh"
+for name, m in [("settings-mutant-matcher.json", m1), ("settings-mutant-event.json", m2), ("settings-mutant-command.json", m3)]:
+    json.dump(m, open(f"{out}/{name}", "w"), indent=1)
+PYEOF
+then
+  echo "register-check selftest: case W FAILED -- python3 missing or the settings mutant builder broke (fail closed)" >&2
   fail=1
+elif ! check_wiring "$ROOT/.claude/settings.json"; then
+  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/AskUserQuestion declaration (the gate is disarmed)" >&2
+  fail=1
+else
+  # W1 fuzzed matcher / W2 wrong event / W3 wrong command: the checker must refuse each.
+  check_wiring "$FIX/settings-mutant-matcher.json" && { echo "register-check selftest: case W1 FAILED -- checker accepted matcher AskUserQuestionX" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-event.json"   && { echo "register-check selftest: case W2 FAILED -- checker accepted the entry under PostToolUse" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-command.json" && { echo "register-check selftest: case W3 FAILED -- checker accepted a command pointing at another script" >&2; fail=1; }
 fi
 
 # D DRIFT: every standing agent carries the citation block (marker + pointer to the canonical rule).

@@ -82,6 +82,12 @@ jobs:
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only (base=$BASE_SHA head=$HEAD_SHA event=$EVENT_NAME)"
+      # The ask-gate's own guard, on EVERY change — docs-only included. This job is the one
+      # always-run job with a checkout (no `if:`), so a broken register-check hook cannot ship
+      # silently on the paths that skip the Rust suites; pure shell, ~200ms. Pinned by the
+      # `the_hook_selftest_runs_in_the_always_run_changes_job` codegen test (2026-08-21 hardening).
+      - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
+        run: bash .claude/hooks/register-check-selftest.sh
 
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability

@@ -9969,6 +9969,30 @@ mod docs_only_ci_and_legacy_visibility {
         );
     }
 
+    /// The ask-gate's own guard must run in CI on EVERY change — docs-only included — or a broken
+    /// hook ships silently on exactly the paths that skip the Rust suites. The `changes` detector
+    /// is the one always-run job with a checkout (no `if:` gate, every push/PR), so the selftest
+    /// lives there; this pin fails if the step is deleted, renamed, moved out of `changes`, or the
+    /// job itself gains a gate (2026-08-21 hardening slice, founder-directed).
+    #[test]
+    fn the_hook_selftest_runs_in_the_always_run_changes_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let cmd = "bash .claude/hooks/register-check-selftest.sh";
+        let cmd_at = ci.find(cmd).expect("ci.yml must run the register-check hook selftest — the ask-gate is otherwise unverified on every push");
+        let changes_at = ci.find("\n  changes:").expect("changes job");
+        let lint_at = ci.find("\n  lint:").expect("lint job");
+        assert!(
+            changes_at < cmd_at && cmd_at < lint_at,
+            "the selftest step must live INSIDE the always-run `changes` job (found outside the changes..lint span)"
+        );
+        let changes_job = &ci[changes_at..lint_at];
+        assert!(
+            !changes_job.contains("\n    if:"),
+            "the `changes` job must stay ungated — a job-level `if:` would let the selftest skip on some path"
+        );
+    }
+
     #[test]
     fn the_index_tail_states_the_legacy_boundary_and_triggers() {
         let owned = vec![("docs/decisions/ROW-A.yaml".to_string(),
