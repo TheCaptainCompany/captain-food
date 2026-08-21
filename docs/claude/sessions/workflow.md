@@ -414,13 +414,43 @@ option and always leave a comment box**. The first use proved why: the invoice-c
 answered *"neither exactly"*, and the comment supplied a third shape (**rider invoices the
 restaurant**) that neither drafted option contained and that no lens had proposed.
 
-**The rule that cost the most to learn, on that same first use**: *check the register before you ask.*
-One of the six questions asked which funding model applied, and
+**The rule that cost the most to learn, on that same first use**: *check the register before you ask —
+and before you assert.* One of the six questions asked which funding model applied, and
 [ADR-20260808-203443](../../adr/ADR-20260808-203443-tips-voluntary-contributions-funding-model.md) had
-decided it ten days earlier. His answer began *"We already discussed about that."* A question about a
-settled decision spends his attention and reads as the team not knowing its own records — grep
-`docs/adr/`, `docs/proposals/DECISIONS.md` and `docs/STATUS.md` for the subject of every question
-before the form is published.
+decided it ten days earlier. His answer began *"We already discussed about that."* The record was 891
+words and one grep away; nobody grepped, because nothing required it. The mirror failure is answering
+from memory: the resident index is a projection of the records, and an answer recited from it is only
+correct while the index is current. So before publishing a founder question, and before asserting
+that something is already decided:
+
+1. **Search the decision sources with the question's own vocabulary** — `docs/adr/`,
+   `docs/proposals/DECISIONS.md`, the recent `docs/status/journal-YYYY-Www.md` files, and
+   `docs/legal/` when the subject is legal — including the repo's aliases for the subject
+   (`contribution` finds what `tip` misses).
+2. **Read the surrounding record, not the matching line.** A grep hit inside a rejected
+   alternative, a quoted question, or a struck clause reads as an answer out of context.
+3. **Check for a later word**: an `Amendment`/`Superseded` banner, a strike, a register row that
+   points to a later decision or reveals that the question remains open or founder-owned, or a
+   later record that changes it. Follow explicit amendments, supersession, reversal, and strike
+   references first. If two governing decision records genuinely conflict with no such
+   relationship, do not infer a resolution from recency alone: escalate with both records cited.
+   A disagreement between a projection and its underlying record is stale derived state, not a
+   governing conflict.
+4. **Answer with the controlling current record cited** — path plus section or id. Historical
+   evidence (an older ADR, a journal entry, a transcript of what someone said) supports the story;
+   it does not control over a later ruling, and a founder sentence transcribed inside a record is
+   not a build instruction unless the record's own status makes it one.
+5. **Escalate instead of answering** only when the search finds no authoritative answer, when
+   authoritative records genuinely conflict, when the question is a real option space or
+   founder-owned or counsel-gated, or when the intended action is irreversible. Two things are
+   never the answer: a `Proposed` proposal (an argument, not a decision) and a legal-lens brief
+   (never advice or clearance). And a disagreement between the resident index or a projection and
+   the underlying records is a **staleness report**, not a founder question — say what disagrees
+   and point at the newer record.
+
+Scale the search to the question — one well-aimed grep plus reading its record is the floor, not a
+sweep of every surface. This is cheap insurance against answering from a stale context or missing a
+supersession, not a guarantee that a repeated question can never recur.
 
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
