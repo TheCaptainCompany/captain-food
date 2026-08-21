@@ -165,7 +165,13 @@ historical record: never rewrite it to match what was built.
 
 **Reconcile [`docs/proposals/DECISIONS.md`](../../docs/proposals/DECISIONS.md) on every run.** Add a row
 for each decision a new proposal surfaces; move answered ones to §5 with the date and what recorded
-them; and **flag any decision that has been open for several runs, with its age**, in your report. Rank
+them; and **flag any decision that has been open for several runs, with its age**, in your report.
+**Since REG-2/REG-4 (ADR-20260821-095957) reconciliation means authoring row FILES**: a new row is
+a `docs/decisions/<KEY>.yaml` (schema: `docs/decisions/README.md`), a closed one edits its file
+(status + `decided` + `decided_by`) — plus `make generate` in the same change, because the register
+index is a GENERATED region and `check-drift` is red otherwise. A legacy prose row (on
+`_legacy.yaml`) migrates when a dispatch explicitly includes it; new rows land as prose NOWHERE —
+the file is the declaration. Rank
 new entries by leverage — how much of the backlog the answer unblocks — not by the order you found
 them. The product owner works from this page, so its ordering is a real deliverable, not bookkeeping.
 

@@ -3,6 +3,27 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🗝️ **2026-08-21 — THE REGISTER ROW GETS MACHINE IDENTITY: REG-2/REG-4 land, the index is
+> generated, and the ask gate reads the rows**
+> ([ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md),
+> deciding [DECISIONS §48](../proposals/DECISIONS.md) REG-2 + REG-4 (vocabulary half) + REG-3's
+> index + REG-SEQ per founder directive, verbatim in the ADR; whole roster consulted, one line per
+> lens). `docs/decisions/<KEY>.yaml` — **19 rows migrated** (the 2026-08-19 live set, the §48
+> family, the sitting's closed money rows), each carrying its `register` anchor and verbatim
+> `evidence`; closed vocabulary `open·decided·deferred·superseded·withdrawn` with **biconditional**
+> status↔field couplings, resolvable `decided_by`, a supersession **DAG**, `until` on deferred,
+> `note` on withdrawn — validator **§22** (`validate/decisions.rs`), every rejection rule proven
+> red on a planted defect. The DECISIONS.md index is now a **GENERATED region** (deterministic,
+> `opened`-date not computed age, pipes escaped, §13b-checked before splicing, missing markers a
+> hard error); **any `docs/decisions/**` edit is a generating edit — `make generate` in the same
+> commit, straight-to-main path included**. The register-check hook now reads the row FILES at the
+> point of need (never the index): a question referencing a non-open key is refused with the
+> status-specific citation; open counsel-owned rows take only the external-action question; the
+> firing log carries a closed reason taxonomy. **Legacy is a declaration**: the 103 unmigrated
+> keys are enumerated in `_legacy.yaml` (pass, logged); next-touch migration, decided at dispatch
+> time. New open row `KEY-NAMESPACE` carries REG-4's namespacing residue (split-at-close).
+> `holub`'s #556 position recorded; the founder's directive is the sequencing override.
+
 > 🔒 **2026-08-21 — AGENTS NEVER ASK AN ANSWERED QUESTION: the register check binds every agent and
 > the ask surface is gated**
 > ([ADR-20260821-010543](../adr/ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md),

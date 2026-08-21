@@ -498,15 +498,27 @@ term" sweep already produces exactly these pairs — land them here instead of d
 | founder | product owner, customer (all three eras coexist in the record) |
 | register | decision queue, DECISIONS.md, answer sheet |
 
+**Check `docs/decisions/` FIRST** (REG-2/REG-4, ADR-20260821-095957): every migrated register row
+key has a `docs/decisions/<KEY>.yaml` that is **authoritative for its CURRENT status** — one
+`grep -l` there beats any prose search, and a question referencing a key whose row is not `open`
+is refused mechanically with the citation that answers it (a `decided` row is not a question — a
+changed premise opens a NEW row citing the old one; an open `counsel`-owned row takes only the
+external-action question). Keys on `docs/decisions/_legacy.yaml` are still prose-only; the sources
+above stay the search surface for them.
+
 **Enforcement — what is mechanical and what is not** (state it honestly, believe no more): the
-`AskUserQuestion` tool path is gated by `.claude/hooks/register-check.sh` (PreToolUse, fail-closed,
-one greppable log line per firing in `.claude/register-check.log` for spot-checking hollow trails);
-questions travelling as PROSE — run reports, decision-queue sections, PR/issue comments, register
-rows, decision forms — are bound by the citation block every `.claude/agents/*.md` carries, whose
-presence (with this section's existence and the settings wiring) is asserted by
+`AskUserQuestion` tool path is gated by `.claude/hooks/register-check.sh` (PreToolUse, fail-closed:
+the trail's presence and shape, plus the row gate above, reading the row FILES at the point of
+need — never the generated index; one log line per firing in `.claude/register-check.log` with a
+closed reason taxonomy — `trail-missing`, `trail-hollow`, `key-decided`, `key-superseded`,
+`key-deferred`, `key-withdrawn`, `key-counsel-owned`, `key-legacy` — plus the keys hit, so hollow
+trails and stale-decision citations stay decomposable defects); questions travelling as PROSE —
+run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound
+by the citation block every `.claude/agents/*.md` carries, whose presence (with this section's
+existence, the settings wiring, and the live row gate) is asserted by
 `.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
-proves the trail's **presence and shape**, never that the search happened — honesty stays with the
-mob briefing and the independent review, which is why the trail must name its artifact.
+proves presence, shape and row status, never that a search happened — honesty stays with the mob
+briefing and the independent review, which is why the trail must name its artifact.
 
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
